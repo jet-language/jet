@@ -329,6 +329,24 @@ pub fn is_alnum(text: String) -> Bool Never! {
     true
 }
 
+// Rust Text.rs:1626-1636: nonempty; the first scalar is `_` or Alphabetic and
+// every later scalar is `_`, Alphabetic, or Numeric (char::is_alphanumeric).
+pub fn is_identifier(text: String) -> Bool Never! {
+    alphabetic :: text_unicode_alphabetic.UNICODE_ALPHABETIC
+    numeric :: text_unicode_numeric.UNICODE_NUMERIC
+    raw :: utf8_bytes(text)
+    if raw.len() == 0 -> return false
+    at := 0
+    loop at < raw.len() {
+        cp :: scalar_at(raw, at)
+        if cp != 95 && !text_asset.asset_contains(alphabetic, cp) {
+            if at == 0 || !text_asset.asset_contains(numeric, cp) -> return false
+        }
+        at = at + utf8_width_at(raw, at)
+    }
+    true
+}
+
 // Rust Text.rs:1669-1671: empty is printable; only General_Category Cc fails.
 // Format, separators, unassigned scalars and non-ASCII letters remain printable.
 pub fn isprintable(text: String) -> Bool Never! {

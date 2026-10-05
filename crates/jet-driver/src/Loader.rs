@@ -2680,18 +2680,20 @@ fn load_entry_with_overlays_mode_on_stack(
         .map(|source_module| source_module.module)
         .collect::<HashSet<_>>();
     // `Core/text/string.jet` is a compiler-private source part of `core.text`.
-    // Schedule it beside its public owner without adding a public module row or
-    // teaching ordinary Core import resolution about the reserved identity.
+    // Schedule it beside its public owner, or for any module that calls one of
+    // its String methods, without adding a public module row or teaching
+    // ordinary Core import resolution about the reserved identity.
     if scheduled_core_source_modules
         .contains(jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER)
+        || bundle
+            .modules
+            .iter()
+            .any(|module| source_calls_string_source_method(&module.source))
     {
-        if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
-            jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
-        ) {
-            if scheduled_core_source_modules.insert(part.source.module) {
-                core_source_modules.push(part.source);
-            }
-        }
+        schedule_core_text_string_part(
+            &mut core_source_modules,
+            &mut scheduled_core_source_modules,
+        );
     }
     // Queue position `i` becomes module `core_module_base + i`: each queued
     // Core source pushes exactly one loaded module, in queue order.
@@ -2768,17 +2770,21 @@ fn load_entry_with_overlays_mode_on_stack(
                 }
             }
             // A source package importing `core.text` also schedules the
-            // compiler-private String receiver part. It remains keyed by its
-            // reserved internal module identity, not by `core.text.string`.
+            // compiler-private String receiver part.
             if dependency == jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER {
-                if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
-                    jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
-                ) {
-                    if scheduled_core_source_modules.insert(part.source.module) {
-                        core_source_modules.push(part.source);
-                    }
-                }
+                schedule_core_text_string_part(
+                    &mut core_source_modules,
+                    &mut scheduled_core_source_modules,
+                );
             }
+        }
+        // So does a Core source (or runtime unit) that calls a String method
+        // the part owns: Core code reaches the same Jet body as user code.
+        if source_calls_string_source_method(&source) {
+            schedule_core_text_string_part(
+                &mut core_source_modules,
+                &mut scheduled_core_source_modules,
+            );
         }
         // A runtime unit a Core source names joins the closure here, lazily,
         // and its import becomes an ordinary module edge to that unit.
@@ -5043,6 +5049,65 @@ fn source_names_identifier(source: &str, name: &str) -> bool {
         (start == 0 || !is_ident(bytes[start - 1]))
             && bytes.get(end).map_or(true, |byte| !is_ident(*byte))
     })
+}
+
+/// Schedule the compiler-private String receiver part `Core/text/string.jet`.
+/// It keeps its reserved internal module identity, never `core.text.string`.
+fn schedule_core_text_string_part(
+    core_source_modules: &mut Vec<jet_foundation::CoreModuleExports::CoreSourceModule>,
+    scheduled_core_source_modules: &mut HashSet<&'static str>,
+) {
+    if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
+        jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
+    ) {
+        if scheduled_core_source_modules.insert(part.source.module) {
+            core_source_modules.push(part.source);
+        }
+    }
+}
+
+/// The String receiver methods `Core/text/string.jet` owns, except `len`: a
+/// `.len()` call is usually a list's, so it never loads the Unicode kernels on
+/// its own and keeps scheduling with `core.text`.
+fn string_source_methods() -> &'static [String] {
+    static METHODS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    METHODS.get_or_init(|| {
+        jet_sema::CoreSources::core_source_text(
+            jet_foundation::CoreSourceParts::CORE_TEXT_STRING_MODULE,
+        )
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| {
+            let (name, _) = line.strip_prefix("fn ")?.split_once("(receiver: String")?;
+            (name != "len").then(|| name.to_string())
+        })
+        .collect()
+    })
+}
+
+/// True when `source` spells a call `.name(` of a String method that
+/// `Core/text/string.jet` owns. Every String method call then lowers to that
+/// one Jet body; a hit on another receiver only schedules the part once more.
+fn source_calls_string_source_method(source: &str) -> bool {
+    let methods = string_source_methods();
+    let is_ident = |byte: u8| byte == b'_' || byte.is_ascii_alphanumeric();
+    let bytes = source.as_bytes();
+    let mut at = 0;
+    while let Some(offset) = source[at..].find('.') {
+        let start = at + offset + 1;
+        let mut end = start;
+        while end < bytes.len() && is_ident(bytes[end]) {
+            end += 1;
+        }
+        if end > start
+            && bytes.get(end) == Some(&b'(')
+            && methods.iter().any(|method| method.as_str() == &source[start..end])
+        {
+            return true;
+        }
+        at = start;
+    }
+    false
 }
 
 /// Resolve Core source package imports, including selective `use core.x.[T]`
