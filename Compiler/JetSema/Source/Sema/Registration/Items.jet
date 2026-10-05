@@ -56,6 +56,8 @@ use jet_foundation.[
     UnitScaleProvenance,
     Variant,
     VariantPayload,
+    core_enum_payload_variants,
+    core_enum_variant_payload,
     core_module_export,
     expr_span,
     sema_reserved_type_name,
@@ -1339,16 +1341,40 @@ pub fn sema_registration_is_compiler_owned(nominal: SemaRegistrationNominal) -> 
 }
 
 // Rust `builtin_type_registry` (Bundle.rs) and the compiler-owned MIR enum rows
-// (`COMPILER_OWNED_ENUMS`): `Ordering` and `RemoveBy` are runtime enums every
-// module sees without a declaration. They keep the bare shared spelling as
-// their canonical type key, so every module's values name one type.
+// (`COMPILER_OWNED_ENUMS`): `Ordering`, `RemoveBy`, and the task rail's
+// `TaskFailure` are runtime enums every module sees without a declaration.
+// They keep the bare shared spelling as their canonical type key, so every
+// module's values name one type.
 pub fn sema_registration_is_compiler_owned_enum(nominal: SemaRegistrationNominal) -> Bool Never! {
     nominal.compiler_owned && nominal.generated_provenance == (Val(sema_registration_compiler_owned_enum_provenance()))
 }
 
-fn sema_registration_compiler_owned_enum(module_identity: String, name: String, variant_names: [String]) -> SemaRegistrationNominal {
+// The declared variant rows of a compiler-owned runtime enum: the unit menus
+// of `Ordering`/`RemoveBy`, and D-CONC-FAIL1=A's `TaskFailure` from the Core
+// enum payload rows (Rust TIR registers the same variants and payloads).
+fn sema_registration_compiler_owned_enum_variants(name: String) -> [Variant]? {
     span :: Span{start: 0, end: 0}
-    variants :: loop variant_name in variant_names -> Variant{name: variant_name, name_span: span, payload: VariantPayload.Unit, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}}
+    names := sema_compiler_enum_variants(name) ?? [String]{}
+    unit_menu :: names.len() > 0
+    if !unit_menu {
+        if name != "TaskFailure" -> return None
+        names = core_enum_payload_variants(name) ?? return None
+    }
+    variants := [Variant]{}
+    loop variant_name in names {
+        payload := VariantPayload.Unit
+        if !unit_menu {
+            payload_types :: core_enum_variant_payload(name, variant_name) ?? return None
+            if payload_types.len() > 1 -> return None
+            if payload_types.len() == 1 -> payload = VariantPayload.Single{ty: payload_types[0], span: span}
+        }
+        &variants.push(Variant{name: variant_name, name_span: span, payload: payload, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
+    }
+    Val(variants)
+}
+
+fn sema_registration_compiler_owned_enum(module_identity: String, name: String, variants: [Variant]) -> SemaRegistrationNominal {
+    span :: Span{start: 0, end: 0}
     definition :: EnumDef{
         span: span,
         is_pub: true,
@@ -2174,9 +2200,9 @@ fn sema_registration_inject_compiler_builtins(graph: &SemaRegistrationGraph) {
         sema_registration_index_nominal_rows(&graph, module_index, first_nominal)
         graph.compiler_builtin_rows["Err"] = SemaRegistrationRowRef{module_index: module_index, row: first_nominal}
     }
-    runtime_enums :: [String]{"Ordering", "RemoveBy"}
+    runtime_enums :: [String]{"Ordering", "RemoveBy", "TaskFailure"}
     loop name in runtime_enums {
-        variants :: sema_compiler_enum_variants(name) ?? panic("compiler-owned enum has no variant menu")
+        variants :: sema_registration_compiler_owned_enum_variants(name) ?? panic("compiler-owned enum has no variant menu")
         module_index :: sema_registration_compiler_builtin_module(graph, name) ?? next
         module_identity := graph.modules[module_index].module_identity
         first_nominal :: graph.modules[module_index].nominals.len()

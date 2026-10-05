@@ -256,7 +256,11 @@ fn sema_pattern_payload(subject_ty: Type, variant: String, env: SemaScopeEnviron
         &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` cannot be resolved", "pattern validation needs the completed declaration graph", "resolve the subject's declaration before matching it"))
         return result
     }
-    nominal_row :: sema_pattern_nominal_row(graph, env.module_identity, normalized) ?? {
+    // A compiler-owned runtime enum (`TaskFailure`) is registered once and
+    // seen from every module, as its canonical owner.
+    found_row := sema_pattern_nominal_row(graph, env.module_identity, normalized)
+    if found_row == None -> found_row = sema_registration_compiler_builtin_row(graph, owner_name)
+    nominal_row :: found_row ?? {
         return sema_pattern_core_enum_payload(owner_name, variant, span, &diagnostics)
     }
     nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
