@@ -5917,10 +5917,12 @@ fn jet_jit_map_from_keys(keys: i64, default: i64) -> i64 {
     alloc_map_pairs(&pairs)
 }
 fn jet_jit_map_from_keys_int(keys: i64, default: i64) -> i64 {
-    let keys = clone_list_ints(keys);
+    let raw_keys = clone_list_ints(keys);
     Concurrency::with_runtime_mut(|rt| {
         let map = rt.heap.alloc_empty_map();
-        for key in keys {
+        // A U64/I64 key list makes a word-keyed map (#4576).
+        rt.heap.copy_map_cells(keys, map);
+        for key in raw_keys {
             rt.heap
                 .map_insert_int(map, key, default)
                 .expect("jit Int map from_keys: insert");
@@ -6109,6 +6111,7 @@ fn jet_jit_map_merge(left: i64, right: i64) -> i64 {
                 .map_len(left)
                 .expect("jit map merge: bad left handle");
             let out = rt.heap.alloc_empty_map();
+            rt.heap.copy_map_cells(left, out);
             for i in 0..len {
                 let key = rt
                     .heap
@@ -6154,6 +6157,7 @@ fn jet_jit_map_merge_int(left: i64, right: i64) -> i64 {
                 .map_len(left)
                 .expect("jit Int map merge: bad left handle");
             let out = rt.heap.alloc_empty_map();
+            rt.heap.copy_map_cells(left, out);
             for i in 0..len {
                 let key = rt
                     .heap
@@ -6231,6 +6235,19 @@ fn jet_jit_map_update_int(left: i64, right: i64) {
                 .expect("jit Int map update: bad left handle");
         }
     });
+}
+
+/// Key `map` by fixed-width 64-bit words (`unsigned` is 1 for `U64`) before
+/// an Int-family route touches its keys: raw words are never decoded or
+/// retained as exact-integer pointers (#4576).
+fn jet_jit_map_word_keys(map: i64, unsigned: i64) {
+    Concurrency::with_runtime_mut(|rt| rt.heap.set_map_word_keys(map, unsigned != 0));
+}
+
+/// Store `map`'s values as fixed-width 64-bit words, never retained as
+/// exact-integer pointers (#4576).
+fn jet_jit_map_word_values(map: i64) {
+    Concurrency::with_runtime_mut(|rt| rt.heap.set_map_word_values(map));
 }
 
 fn jet_jit_map_update_composite(left: i64, right: i64) {
@@ -11617,6 +11634,8 @@ host_fns! {
     map_merge_int: "jet_jit_map_merge_int" => jet_jit_map_merge_int: sig_get_opt;
     map_update: "jet_jit_map_update" => jet_jit_map_update: sig_push;
     map_update_int: "jet_jit_map_update_int" => jet_jit_map_update_int: sig_push;
+    map_word_keys: "jet_jit_map_word_keys" => jet_jit_map_word_keys: sig_push;
+    map_word_values: "jet_jit_map_word_values" => jet_jit_map_word_values: sig_sort;
     map_update_composite: "jet_jit_map_update_composite" => jet_jit_map_update_composite: sig_push;
     map_merge_with: "jet_jit_map_merge_with" => jet_jit_map_merge_with: sig_closure_fold;
     checked_map_merge_with: "jet_map_merge_with" => jet_jit_map_merge_with: sig_closure_fold;

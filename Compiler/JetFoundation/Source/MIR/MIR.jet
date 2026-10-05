@@ -1870,7 +1870,7 @@ pub struct MIRFieldValue { pub field: MIRFieldID, pub value: MIRValueID }
 
 pub struct MIRCaptureFacts { pub escapes: Bool, pub needs_fn_mut: Bool, pub mutable: [String], pub cloned: [String], pub frozen: [String], pub materialized: [String], pub moved: [String] }
 
-pub enum MIRTestScopeMember { ExpectFail(expected_code: String?) Timeout(duration: MIRValueID) Skip(whole_test: Bool) Measure }
+pub enum MIRTestScopeMember { ExpectFail(expected_code: String?, expected_message: String?) Timeout(duration: MIRValueID) Skip(whole_test: Bool) Measure }
 
 pub enum MIRDataPlanOperation { Scan Filter SortBy InnerJoin LeftJoin Group Window Project Collect }
 
@@ -3611,6 +3611,7 @@ pub struct MIRCoreCall {
     pub aot_direct: Bool
     pub jit_direct: Bool
     pub jit_symbol: String?
+    pub native_int_result: Bool
     pub marker: CoreMarkerApplication?
 }
 

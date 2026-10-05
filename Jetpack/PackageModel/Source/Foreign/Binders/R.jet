@@ -52,7 +52,7 @@ fn pkg_r_parse_function_names(bytes: [U8]) -> [String] ForeignBindError! {
         if !pkg_binder_is_ident(name) -> return Err(ForeignBindError.Source("R function `{name}` cannot be projected as a Jet identifier"))
         if pkg_r_reserved(name) -> return Err(ForeignBindError.Source("R function `{name}` uses a reserved generated binding name"))
         loop existing in out {
-            if existing == name || existing == "{name}_table" || existing == "{name}_plot" -> return Err(ForeignBindError.Source("R function `{name}` collides with a generated binding name"))
+            if existing == name || existing == ("{name}_table") || existing == ("{name}_plot") -> return Err(ForeignBindError.Source("R function `{name}` collides with a generated binding name"))
         }
         loop existing in out {
             if "{existing}_table" == name -> return Err(ForeignBindError.Source("R function `{name}` collides with a generated table binding"))

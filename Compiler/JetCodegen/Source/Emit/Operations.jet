@@ -3375,6 +3375,15 @@ fn jet_rust_emit_field_read(ctx: &JetRustEmitContext, function: MIRFunction, bas
         }
     }
     field_name :: jet_rust_emit_field_name(&ctx, field)
+    // Err's cause is boxed only inside the runtime; its checked field is ?Err.
+    // Use the shared accessor so ordinary reads expose the semantic carrier.
+    if jet_rust_emit_default_err_cause_field(&ctx, field) {
+        source := jet_rust_emit_value_reference(ctx, base, false)
+        if jet_rust_emit_shared_guard_projection_only(&ctx, function, base) {
+            if jet_rust_emit_shared_guard_borrow_place(&ctx, function, base, MIRAccess.Read) == .Val(place) -> source = "&({place})"
+        }
+        return "{root}jet_err_cause({source})"
+    }
     unbox :: if boxed -> ".as_ref()" else -> ""
     // Borrow the base slot and copy only the projected field; never clone the
     // whole aggregate to read one of its fields.
@@ -3918,9 +3927,10 @@ fn jet_rust_emit_scope_enter(ctx: &JetRustEmitContext, function: MIRFunction, id
     }
     if member == .Val(member_value) {
         if member_value == {
-            .ExpectFail(expected) -> {
+            .ExpectFail(expected, message) -> {
                 expected_text :: if expected == .Val(expected_code) -> "Some({jet_rust_emit_quote(expected_code)})" else -> "None"
-                return "{ctx.config.root_prefix}jet_test_expect_fail_enter_scope({id.value}, {expected_text})"
+                message_text :: if message == .Val(text) -> "Some({jet_rust_emit_quote(text)})" else -> "None"
+                return "{ctx.config.root_prefix}jet_test_expect_fail_enter_scope({id.value}, {expected_text}, {message_text})"
             }
             .Timeout(duration) -> return "{ctx.config.root_prefix}jet_test_timeout_enter({id.value}, ({jet_rust_emit_value_owned(ctx, function, duration)}).ns)"
             else -> {}
@@ -3983,9 +3993,10 @@ fn jet_rust_emit_scope_exit(ctx: &JetRustEmitContext, function: MIRFunction, id:
     member :: jet_rust_emit_scope_member(ctx, function, id)
     if member == .Val(member_value) {
         if member_value == {
-            .ExpectFail(expected) -> {
+            .ExpectFail(expected, message) -> {
                 expected_text :: if expected == .Val(expected_code) -> "Some({jet_rust_emit_quote(expected_code)})" else -> "None"
-                return "if {ctx.config.root_prefix}jet_test_expect_fail_leave_scope({id.value}).is_none() {{ {ctx.config.root_prefix}jet_test_expect_fail_unmet({expected_text}); }}"
+                message_text :: if message == .Val(text) -> "Some({jet_rust_emit_quote(text)})" else -> "None"
+                return "if {ctx.config.root_prefix}jet_test_expect_fail_leave_scope({id.value}).is_none() {{ {ctx.config.root_prefix}jet_test_expect_fail_unmet({expected_text}, {message_text}); }}"
             }
             .Timeout(_) -> return "if let Some((__jet_elapsed, __jet_limit)) = {ctx.config.root_prefix}jet_test_timeout_leave({id.value}) {{ if __jet_elapsed > __jet_limit {{ {ctx.config.root_prefix}jet_test_timeout_failure(__jet_elapsed, __jet_limit); }} }}"
             .Skip(whole_test) -> return "{ctx.config.root_prefix}jet_test_skip_scope({whole_test})"
@@ -5157,11 +5168,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                     return emitted
                 }
                 .HostBorrowCallback(callable, params) -> return jet_rust_emit_host_callback(&ctx, function, callable, params, true, false)
-                .PluginInvoke(call, handle, _, _, args) -> {
-                    values := [MIRValueID]{handle}
-                    loop arg in args -> &values.push(arg)
-                    return jet_rust_emit_semantic_values(&ctx, function, call, values)
-                }
+                .PluginInvoke(call, handle, export_name, signature, args) -> return jet_rust_emit_plugin_invoke(&ctx, function, call, handle, export_name, signature, args, result)
                 .HTTPRouterRegister(call, receiver, path, handler, method, handler_param_names, contract, http_location) -> return jet_rust_emit_http_router_register(&ctx, function, call, receiver, path, handler, method, handler_param_names, contract, http_location)
                 .TextPatternMatch(call, subject, parts) -> return jet_rust_emit_text_pattern_match(&ctx, function, call, subject, parts, result)
                 .BinaryPatternMatch(call, subject, parts) -> return jet_rust_emit_binary_pattern_match(&ctx, function, call, subject, parts, result)

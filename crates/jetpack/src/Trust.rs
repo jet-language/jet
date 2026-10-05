@@ -677,34 +677,44 @@ fn component_prefix_matches(prefix: &str, subject: &str) -> bool {
 
 /// Persist a hash grant (the interactive prompt's "yes"). Returns `true` when
 /// the grant is new and `false` when the store already contains it.
-pub fn grant_hash(store: &Path, hash: &str) -> bool {
+pub fn grant_hash(store: &Path, project_dir: &Path, hash: &str) -> Result<bool, Vec<crate::Diagnostics::Diagnostic>> {
+    jet_driver::Loader::check_project_gate(project_dir, jet_foundation::Policy::PolicyKey::TrustGrant, &format!("hash:{hash} -> {}", store.display()))?;
     let line = format!("{HASH_PREFIX}{hash}");
     if read_lines(store).iter().any(|l| *l == line) {
-        return false;
+        return Ok(false);
     }
     append_line(store, &line);
-    true
+    Ok(true)
 }
 
 /// `jetpack config trust add <pattern>`. Returns `false` if already present.
-pub fn add_pattern(store: &Path, pattern: &str) -> bool {
+pub fn add_pattern(store: &Path, project_dir: &Path, pattern: &str) -> Result<bool, Vec<crate::Diagnostics::Diagnostic>> {
+    jet_driver::Loader::check_project_gate(project_dir, jet_foundation::Policy::PolicyKey::TrustGrant, &format!("pattern:{pattern} -> {}", store.display()))?;
     let line = format!("{PATTERN_PREFIX}{pattern}");
     if read_lines(store).iter().any(|l| *l == line) {
-        return false;
+        return Ok(false);
     }
     append_line(store, &line);
-    true
+    Ok(true)
 }
 
 /// `jet trust grant <selector> [--scope user|repo]`. Returns `false` if the
 /// exact grant already exists.
-pub fn add_grant(store: &Path, grant: &TrustGrant) -> bool {
+pub fn add_grant(store: &Path, project_dir: &Path, grant: &TrustGrant) -> Result<bool, Vec<crate::Diagnostics::Diagnostic>> {
+    jet_driver::Loader::check_project_gate(project_dir, jet_foundation::Policy::PolicyKey::TrustGrant, &format!("{} -> {}", grant.key(), store.display()))?;
     let line = grant.line();
     if read_lines(store).iter().any(|l| *l == line) {
-        return false;
+        return Ok(false);
     }
     append_line(store, &line);
-    true
+    Ok(true)
+}
+
+pub fn report_gate_failure(theme: &Theme, diagnostics: Vec<crate::Diagnostics::Diagnostic>) -> i32 {
+    for diagnostic in diagnostics {
+        theme.error_coded(&diagnostic.code, &diagnostic.what, &diagnostic.why, &diagnostic.fix);
+    }
+    2
 }
 
 /// `jetpack config trust list` — every raw stored line (hash + pattern).
@@ -931,9 +941,14 @@ pub fn gate_with_environment_and_snapshot(
 pub fn gate_build_identity(
     theme: &Theme,
     store: &Path,
+    project_dir: &Path,
     identity: &str,
     bypass: bool,
 ) -> Result<(), i32> {
+    if bypass {
+        jet_driver::Loader::check_project_gate(project_dir, jet_foundation::Policy::PolicyKey::SessionFlag, "--trust")
+            .map_err(|diagnostics| report_gate_failure(theme, diagnostics))?;
+    }
     let ci = std::env::var_os("CI").is_some();
     if ci && bypass {
         theme.error_coded(
@@ -996,12 +1011,13 @@ pub fn gate_build_identity(
     if matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
         add_grant(
             store,
+            project_dir,
             &TrustGrant {
                 authority: AUTH_BUILD.to_string(),
                 subject: identity.to_string(),
                 scope: Syntax::TRUST_SCOPE_USER.to_string(),
             },
-        );
+        ).map_err(|diagnostics| report_gate_failure(theme, diagnostics))?;
         Ok(())
     } else {
         theme.status("not trusted — exiting.");
@@ -1020,6 +1036,10 @@ fn gate_with_hash(
     typed: bool,
     lifecycle_hooks: bool,
 ) -> Result<(), i32> {
+    if bypass {
+        jet_driver::Loader::check_project_gate(project_dir, jet_foundation::Policy::PolicyKey::SessionFlag, "--trust")
+            .map_err(|diagnostics| report_gate_failure(theme, diagnostics))?;
+    }
     if !typed && !is_trust_sensitive_ext(refs, !secrets.is_empty()) && !lifecycle_hooks {
         return Ok(());
     }
@@ -1111,7 +1131,7 @@ fn gate_with_hash(
         return Err(2);
     }
     if matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
-        grant_hash(store, &hash);
+        grant_hash(store, project_dir, &hash).map_err(|diagnostics| report_gate_failure(theme, diagnostics))?;
         Ok(())
     } else {
         theme.status("not trusted — exiting.");
@@ -1151,6 +1171,10 @@ pub fn gate_flake(
     flake_path: &Path,
     bypass: bool,
 ) -> Result<(), i32> {
+    if bypass {
+        jet_driver::Loader::check_project_gate(project_dir, jet_foundation::Policy::PolicyKey::SessionFlag, "--trust")
+            .map_err(|diagnostics| report_gate_failure(theme, diagnostics))?;
+    }
     let content = std::fs::read_to_string(flake_path).unwrap_or_default();
     let hash = flake_definition_hash(&content);
     if bypass || is_trusted(store, project_dir, &hash) {
@@ -1184,7 +1208,7 @@ pub fn gate_flake(
         return Err(2);
     }
     if matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
-        grant_hash(store, &hash);
+        grant_hash(store, project_dir, &hash).map_err(|diagnostics| report_gate_failure(theme, diagnostics))?;
         Ok(())
     } else {
         theme.status("not trusted — exiting.");
@@ -1283,7 +1307,7 @@ mod tests {
         let refs = [ref_spec("fastfetch@nixpkgs")];
         let hash = env_definition_hash(&refs, &table, &[]);
         assert!(!is_trusted(&store, &dir, &hash));
-        grant_hash(&store, &hash);
+        grant_hash(&store, &dir, &hash).unwrap();
         assert!(is_trusted(&store, &dir, &hash));
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1298,12 +1322,13 @@ mod tests {
 
         add_grant(
             &store,
+            &dir,
             &TrustGrant {
                 authority: AUTH_PACKAGE.to_string(),
                 subject: "fastfetch".to_string(),
                 scope: Syntax::TRUST_SCOPE_USER.to_string(),
             },
-        );
+        ).unwrap();
         assert!(is_env_trusted(&store, &dir, &hash, &refs, &[]));
         assert!(!is_env_trusted(
             &store,
@@ -1316,12 +1341,13 @@ mod tests {
         let store = dir.join("trust-build");
         add_grant(
             &store,
+            &dir,
             &TrustGrant {
                 authority: AUTH_BUILD.to_string(),
                 subject: hash.clone(),
                 scope: Syntax::TRUST_SCOPE_USER.to_string(),
             },
-        );
+        ).unwrap();
         assert!(is_env_trusted(
             &store,
             &dir,
@@ -1333,12 +1359,13 @@ mod tests {
         let store = dir.join("trust-env");
         add_grant(
             &store,
+            &dir,
             &TrustGrant {
                 authority: AUTH_ENV.to_string(),
                 subject: format!("{}*", dir.display()),
                 scope: Syntax::TRUST_SCOPE_REPO.to_string(),
             },
-        );
+        ).unwrap();
         assert!(is_env_trusted(
             &store,
             &dir,
@@ -1405,8 +1432,8 @@ mod tests {
     fn pattern_add_list_remove() {
         let dir = scratch("pattern");
         let store = dir.join("trust");
-        assert!(add_pattern(&store, "/home/dev/*"));
-        assert!(!add_pattern(&store, "/home/dev/*"), "idempotent");
+        assert!(add_pattern(&store, &dir, "/home/dev/*").unwrap());
+        assert!(!add_pattern(&store, &dir, "/home/dev/*").unwrap(), "idempotent");
         assert_eq!(list_entries(&store), vec!["pattern:/home/dev/*"]);
         let project = Path::new("/home/dev/myproj");
         assert!(is_trusted(&store, project, "irrelevant-hash"));
@@ -1419,7 +1446,7 @@ mod tests {
     fn prefix_pattern_without_wildcard_matches_prefix() {
         let dir = scratch("prefix");
         let store = dir.join("trust");
-        add_pattern(&store, "/home/dev/");
+        add_pattern(&store, &dir, "/home/dev/").unwrap();
         assert!(is_trusted(&store, Path::new("/home/dev/anything"), "h"));
         assert!(!is_trusted(&store, Path::new("/home/other"), "h"));
         std::fs::remove_dir_all(&dir).ok();
@@ -1429,7 +1456,7 @@ mod tests {
     fn prefix_pattern_does_not_match_sibling_name() {
         let dir = scratch("prefix_sibling");
         let store = dir.join("trust");
-        add_pattern(&store, "/home/dev/app");
+        add_pattern(&store, &dir, "/home/dev/app").unwrap();
         assert!(is_trusted(&store, Path::new("/home/dev/app/src"), "h"));
         assert!(!is_trusted(&store, Path::new("/home/dev/application"), "h"));
         std::fs::remove_dir_all(&dir).ok();
@@ -1440,7 +1467,7 @@ mod tests {
         let dir = scratch("canonical_alias");
         let store = dir.join("trust");
         let lexical = dir.to_string_lossy().to_string();
-        add_pattern(&store, &format!("{lexical}*"));
+        add_pattern(&store, &dir, &format!("{lexical}*")).unwrap();
         let canonical = dir.canonicalize().unwrap();
         assert!(is_trusted(&store, &canonical, "h"));
         std::fs::remove_dir_all(&dir).ok();
@@ -1477,7 +1504,7 @@ mod tests {
         let content = "{ devShells.default = {}; }";
         let hash = flake_definition_hash(content);
         assert!(!is_trusted(&store, &dir, &hash));
-        grant_hash(&store, &hash);
+        grant_hash(&store, &dir, &hash).unwrap();
         assert!(is_trusted(&store, &dir, &hash));
         std::fs::remove_dir_all(&dir).ok();
     }

@@ -1700,6 +1700,7 @@ JET_RUST_EMIT_COMPILER_OWNED_ENUMS :: prep { [String]{
     "GlyphShaper", "WebFormValueType", "WebFormControl", "DataLoaderKind", "DataErrorKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "DataTree", "DataEvent",
     "XMLCanonicalMode", "EmailError", "SMTPSecurity", "RecipientPolicy", "SMTPAuth", "TLSTrust", "TLSVersion", "TLSClientTrust", "NetDnsError", "NetError",
     "NetShutdown", "WatchDomain", "WatchKind", "NetReadyInterest", "WsError",
+    "PluginLimit", "PluginError",
 } }
 JET_RUST_EMIT_COMPILER_OWNED_RECORDS :: prep { [String]{
     "IOContext", "NetErrorDetail", "AsyncPolicy", "CSVRow", "DataLineOptions", "DataLimits", "DataSourceIdentity", "DataAuthority", "DataError", "EncodingCause",
@@ -1719,6 +1720,7 @@ JET_RUST_EMIT_COMPILER_OWNED_RECORDS :: prep { [String]{
     "CameraDelta", "DeviceDelta", "Ray2", "Transform", "Transform2",
     "Measurement", "Err", "VJPRun", "Group", "DataJoin", "DataSnapshot", "DataPivotCell", "DataSummary", "FieldError", "AllocError",
     "KeyRef", "MutationPlan", "VaultWrite", "Rotation", "Range",
+    "PluginFrame", "PluginFault",
 } }
 
 // tir_to_mir_types is_compiler_owned_type: a registered compiler-owned enum or
@@ -2452,6 +2454,7 @@ fn jet_rust_emit_core_rust_type_name(raw: String) -> String? {
     coords :: [String]{"Point2", "Delta2", "ScreenPoint", "WorldPoint", "ViewPoint", "CameraPoint", "DevicePoint", "ScreenDelta", "WorldDelta", "ViewDelta", "CameraDelta", "DeviceDelta"}
     if coords.contains(name) -> return Val("JetCoord2")
     // Carriers whose Rust name equals the Jet name.
+    if name == "PluginFrame" || name == "PluginFault" || name == "PluginLimit" || name == "PluginError" -> return Val(~name)
     same :: [String]{"IOError", "IOContext", "IOOperation", "ProcessResourceLimit", "EnvError", "UTF8Error", "ProcessPlan", "ProcessSpec", "ProcessChild", "ProcessStreamMode", "TerminalPolicy", "TerminalSize", "TerminalMode", "TerminalSession", "TextWidth", "TextWidthAmbiguous", "TextWidthControls", "TextError", "DataGroupedQuery", "DataJoin", "TestSuite", "Clock", "RNG", "Fake", "Solver", "Duration", "DurationUnit", "RangeError", "DataLoaderKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "DataAuthority", "DataSourceIdentity", "DataProvenance", "DataSnapshotIdentity", "DataLoaderStatus", "DataLoader", "DataSnapshot", "RegexFlags", "Closed", "DirEntry", "Stat", "WalkEntry", "WatchEvent", "WatchDomain", "WatchKind", "WatchHandle", "WatchSet", "TempDir", "TempFile", "FileLock", "DataLineOptions", "DataColumn", "DataStatus", "DataSummary", "DataLimits", "DataError", "DataErrorKind", "DataPivotCell", "DataStream", "DataTracked", "DataWatch", "DataWatchStatus", "LogField", "LogSpan", "EncodingLimits", "EncodingError", "EncodingCause", "EncodingFormat", "EncodingErrorKind", "FieldError", "CBOROptions", "CBORError", "CBORErrorKind", "XMLLimits", "XMLParseOptions", "XMLRenderOptions", "XMLEncoding", "XMLLexicalPolicy", "XMLCanonical", "XMLCanonicalMode", "XMLError", "XMLReason", "XMLEntityPolicy", "DataEvent", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "CSVRow", "XMLReader", "XMLWriter", "DBValue", "DBError", "RaylibWindow", "RaylibColor", "RaylibSound", "RaylibTextureAtlas", "SQL", "HTML", "Sh"}
     if same.contains(name) -> return Val(~name)
     if name == {

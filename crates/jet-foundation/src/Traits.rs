@@ -2665,6 +2665,7 @@ impl TraitRegistry {
             "TempDir",
             "TempFile",
             "TextError",
+            "PluginError",
             "TLSStream",
             "TLSVersion",
             "UDPPacket",
@@ -2752,6 +2753,9 @@ impl TraitRegistry {
         // projection law; Format/Kind/Cause/Error compare by value.
         self.trait_impls
             .insert(("EncodingError".to_string(), DISPLAY.to_string()));
+        self.trait_impls.insert(("PluginError".to_string(), DISPLAY.to_string()));
+        self.auto_debug.insert("PluginError".to_string());
+        self.auto_equatable.insert("PluginLimit".to_string());
         // D-DATAFLOW1=A: DataError Display is the typed analytics/stream error law.
         self.trait_impls
             .insert(("DataError".to_string(), DISPLAY.to_string()));

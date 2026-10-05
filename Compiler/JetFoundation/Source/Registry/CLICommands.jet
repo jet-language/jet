@@ -1,12 +1,7 @@
-// The one `jet` command table (D-JETCLI-HOST1=A): every top-level command,
-// nested group action, dispatcher seam, and flag that argv parsing, help, man,
-// and completions read. Order is the man-page and completion order; `jet help`
-// lists commands by `frequency_rank` (1 = most used), which
-// `node Tools/cli-census/census.mjs` measures and writes here.
-//
-// The Rust host keeps a frozen copy in crates/jet-cli/src/CLI.rs until the Jet
-// CLI replaces it; `node Compiler/Bootstrap/check-command-table.mjs` fails when
-// the two differ.
+// D-JET-VERBS1=A: the shared command registry owns help, completion and
+// semantic job-name reservation. Rust keeps its copy in foundation
+// (commands) and jet-cli (flags); check-command-table.mjs compares both.
+pub JET_CLI_JOB_INVOCATION_HELP :: "\nRun a project job: jet [jet flags] <name> [job args...]\nJet flags go before the job name; every word after it belongs to the job.\n"
 
 // One flag. A `With <cmd>[/<cmd>…]: ` help prefix scopes it to those commands;
 // `--json`, `--quiet`, and `--color` apply to every command.
@@ -241,11 +236,11 @@ pub JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
     },
     JetCLICommandSpec{
         name: "jobs",
-        summary: "List, inspect, watch, or run named project jobs",
+        summary: "List, inspect, or watch named project jobs",
         headline: false,
         frequency_rank: 25,
         exhaustive: false,
-        usage: Val("jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name> [<job args>...]]"),
+        usage: Val("jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name>]"),
         actions: [JetCLIActionSpec]{},
     },
     // D-DX-GENERATE1=A: generation is source-ordered, explicit, and receipt-backed;
@@ -981,6 +976,8 @@ pub JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     JetCLIFlagSpec{long: "--profile", help: "With build/run/dev/jobs/package/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle"},
     // D-CONF-KEY1=A: command-line contribution to one typed package setting.
     JetCLIFlagSpec{long: "--set", help: "With build/run/dev/jobs/test: Set one declared package setting as key=value"},
+    // D-JOBS1=A: the compiler's thread cap; never the program's own threads.
+    JetCLIFlagSpec{long: "--threads", help: "With build/run/check/test/dev/inspect: Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads"},
     JetCLIFlagSpec{long: "--builder", help: "With build/jobs: Select a previously bound remote builder"},
     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
     JetCLIFlagSpec{long: "--a11y", help: "With lint: Check roles, labels, and other accessibility basics"},

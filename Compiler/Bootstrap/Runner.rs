@@ -611,8 +611,9 @@ fn append_embedded_compiler_image(
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
     // Callers that only select the compiler artifact or compare source
-    // authority read the envelope prefix; the MIR program is decoded (and the
-    // whole archive verified) once, on first use by a reader of the program.
+    // authority read the envelope prefix; the program's rows and signatures
+    // are decoded once, on first use by a reader of the program, and its
+    // function bodies never are.
     source.push_str(
         "#[doc(hidden)]\n\
          fn __jet_bootstrap_compiler_image_envelope() -> Result<crate::compiler_bootstrap_compiler_image::CompilerImageEnvelope, String> {\n\

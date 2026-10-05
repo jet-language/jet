@@ -514,7 +514,7 @@ fn run() { top() }
 fn fixed_list_refinement_discharges_panic_denial() {
     let src = r#"
 Die :: distinct Int(1..6)
-fn pick(faces: [String#6], roll: Die) -[!Panic]> String -> ~faces[roll.raw() - 1]
+fn pick(faces: [String#6], roll: Die) -[!Panic]> String { ~faces[roll.raw() - 1] }
 fn run() {}
 "#;
     assert!(

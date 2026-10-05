@@ -286,6 +286,53 @@ mod jet_c_abi {
         guard(move || -> () { super::jet_panic("<core.prelude>", 0, &message) })
     }
 
+    /// `#require_eq` String operand: Rust Debug quoting (`JetDebug for str`).
+    #[no_mangle]
+    pub extern "C" fn jet_rt_require_debug_string(value: JetCString) -> JetCString {
+        guard(|| handle(super::JetDebug::jet_debug(view(value))))
+    }
+
+    /// `#require` / `#require_eq` / `#panic` stop (kind 0/1/2) over the Prelude
+    /// functions generated Rust calls. `descriptor` is eleven read-only words:
+    /// file ptr/len, line, function ptr/len, source line ptr/len, column,
+    /// caret, then the pre-rendered context ptr/len that only the freestanding
+    /// image reads. Kind 0 and 2 read `message`, kind 1 reads `left` and
+    /// `right` (Debug text); `locals` may be null.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_require_stop(
+        kind: i64,
+        descriptor: *const usize,
+        message: JetCString,
+        left: JetCString,
+        right: JetCString,
+        locals: JetCString,
+    ) {
+        guard(|| {
+            // SAFETY: the caller passes eleven initialized read-only words that
+            // outlive this call (static data emitted by the backend).
+            let d = unsafe { std::slice::from_raw_parts(descriptor, 11) };
+            let file = text(d[0] as *const u8, d[1]);
+            let line = line_of(d[2] as i64);
+            let function = text(d[3] as *const u8, d[4]);
+            let source = text(d[5] as *const u8, d[6]);
+            let column = line_of(d[7] as i64);
+            let caret = line_of(d[8] as i64);
+            let locals = if locals.is_null() { "" } else { view(locals) };
+            match kind {
+                0 => super::jet_require(false, view(message), &file, line, &function, &source, column, caret, locals),
+                1 => super::jet_require_eq(false, view(left), view(right), &file, line, &function, &source, column, caret, locals),
+                _ => super::jet_panic_rich(&file, line, &function, &source, column, caret, view(message), locals),
+            }
+        })
+    }
+
+    /// A fixed-width arithmetic stop (E3010) that generated code checks inline,
+    /// at its Jet source location.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_numeric_stop(file_ptr: *const u8, file_len: usize, line: i64, message_ptr: *const u8, message_len: usize) {
+        guard(|| super::jet_arithmetic_stop(&text(file_ptr, file_len), line_of(line), &text(message_ptr, message_len)))
+    }
+
     // Prelude routes: the C name is the last `::` segment of the MIR symbol.
 
     macro_rules! exact_int_binary {
@@ -307,7 +354,7 @@ mod jet_c_abi {
     }
 
     exact_int_binary!(jet_int_add, jet_int_sub, jet_int_mul, jet_int_bit_and, jet_int_bit_or, jet_int_bit_xor, jet_int_compare);
-    exact_int_located!(jet_int_div, jet_int_rem, jet_int_floor_div, jet_int_mod, jet_int_pow, jet_int_shl, jet_int_shr);
+    exact_int_located!(jet_int_div, jet_int_rem, jet_int_floor_div, jet_int_mod, jet_int_pow, jet_int_shl, jet_int_shr, jet_int_div_euclid, jet_int_rem_euclid);
 
     #[no_mangle]
     pub extern "C" fn jet_int_owned_from_i64(value: i64) -> i64 {

@@ -52,8 +52,6 @@ impl<'a> Parser<'a> {
             let lambda = crate::AST::Lambda {
                 take_names: Vec::new(),
                 params: Vec::new(),
-                result_type: None,
-                error_type: None,
                 effects: None,
                 body: crate::AST::LambdaBody::Block(vec![Stmt::Loop {
                     body,
@@ -297,8 +295,6 @@ impl<'a> Parser<'a> {
             let lambda = crate::AST::Lambda {
                 take_names: Vec::new(),
                 params: Vec::new(),
-                result_type: None,
-                error_type: None,
                 effects: None,
                 body: crate::AST::LambdaBody::Block(vec![Stmt::Loop {
                     body: vec![loop_stmt],
@@ -412,8 +408,6 @@ impl<'a> Parser<'a> {
         let lambda = crate::AST::Lambda {
             take_names: Vec::new(),
             params: Vec::new(),
-            result_type: None,
-            error_type: None,
             effects: None,
             body: crate::AST::LambdaBody::Block(vec![loop_stmt]),
             span: Span::new(start.start, end),
@@ -433,6 +427,19 @@ impl<'a> Parser<'a> {
         matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_META)
             && matches!(self.peek3().kind, TokKind::LParen)
+    }
+
+    /// An active marker the registry allows only as an expression (`#Todo`)
+    /// starts an ordinary expression statement, not a statement marker.
+    fn at_expression_only_marker(&self) -> bool {
+        let TokKind::Ident(name) = &self.peek2().kind else {
+            return false;
+        };
+        crate::Policy::applied_rule(name).is_some_and(|rule| {
+            matches!(rule.status, crate::Policy::RuleStatus::Active)
+                && rule.sites.contains(&crate::Policy::RuleSite::Expression)
+                && !rule.sites.contains(&crate::Policy::RuleSite::Statement)
+        })
     }
 
     /// D-META-DSL1=A: recognize one library-declared block shape. The parser
@@ -2795,9 +2802,17 @@ impl<'a> Parser<'a> {
             // leading-dot enum value (D-ENUMDOT1). Parsed context-free wherever
             // the shape appears; sema resolves it against the enclosing marker's
             // vocabulary (E0614) or rejects it outside a marker block (E0615).
+            // `.Ok(1)` with no block after its parentheses is a leading-dot
+            // enum value, so a braced body may end in one.
             TokKind::Dot
                 if matches!(&self.peek2().kind, TokKind::Ident(_))
-                    && matches!(self.peek3().kind, TokKind::LBrace | TokKind::LParen) =>
+                    && match self.peek3().kind {
+                        TokKind::LBrace => true,
+                        TokKind::LParen => Self::skip_balanced_parens(self.toks, self.pos + 2)
+                            .and_then(|after| self.toks.get(after))
+                            .is_some_and(|token| matches!(token.kind, TokKind::LBrace)),
+                        _ => false,
+                    } =>
             {
                 return self.scope_member_stmt();
             }
@@ -2939,7 +2954,10 @@ impl<'a> Parser<'a> {
             // expression statement. This covers unknown markers and active
             // rows whose site is not Statement with the shared E0927/E0355
             // families; `#allow` is the current generic statement marker.
-            TokKind::Hash if self.at_marker_head() => {
+            // An expression-only marker such as `#Todo` is that ordinary
+            // expression statement, so `fn f() -> Int { #Todo }` reads as the
+            // braced form of a one-expression body (card #4512).
+            TokKind::Hash if self.at_marker_head() && !self.at_expression_only_marker() => {
                 let marker =
                     self.parse_registered_marker_at_site(crate::Policy::RuleSite::Statement)?;
                 let statement = self.stmt()?;

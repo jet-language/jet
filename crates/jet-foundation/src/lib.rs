@@ -3,12 +3,14 @@
 pub mod AST;
 pub mod Authority;
 mod BuildEffects;
+pub mod CLICommands;
 pub mod CLISchema;
 /// #2517 S1b: the one audited reader for check-time file and environment reads.
 pub mod CheckReads;
 pub mod CanonicalAST;
 pub mod Collections;
 pub mod CompilerStack;
+pub mod CompilerThreads;
 pub mod CoreModuleExports;
 pub mod CoreSourceParts;
 pub mod Evidence;

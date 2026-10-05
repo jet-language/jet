@@ -217,6 +217,11 @@ user-defined types described below. Local inference keeps the type on a value
 head when needed; a headed literal whose fields or elements do not match its
 head is an ordinary type error.
 
+An expected tuple type flows to its fields by position or by field name.
+For example, a declared `(lines: [String], at: Int, message: String)` return
+type gives an empty `lines: []` field the element type `String`; it does not
+default that field to `[Int]`. The same contextual rule applies at call arguments.
+
 An executable entry is `fn run`. An executable `run` has no parameters, or has
 one parameter whose type is a CLI-derived program struct; it returns `()` or a
 unit-fallible result. `run` is not `pub`. The checker gives an omitted entry
@@ -246,6 +251,11 @@ are unique (E0105). A name that would shadow a built-in is rejected with E0106,
 including a type named after a built-in type such as `Unit`, `Queue`, or `Set`;
 unknown names and types are E0102/E0107 and E0119, with suggestions where the
 checker has a useful candidate.
+Text and byte pattern holes follow the same rule in every expression position:
+`symbol == "{root}jet"` is refused if `root` already names a local, parameter,
+or module constant. Use `symbol == ("{root}jet")` for interpolated equality,
+or a new hole name to capture text (D-PATTERN-HOLE-NAME1=A). A reused Optional
+name is not a flow refinement.
 
 A statement fence expands one complete binding or expression statement per
 entry. Multiple fences advance in lock-step. An ascending numbered range such
@@ -681,11 +691,12 @@ increment :: (n: Int) -> {
 }
 ```
 
-`->` is the callable and control arrow. A named callable has `->` before a
-braced non-unit result; a unit or unit-fallible callable keeps a bare braced
-body. An effect ceiling has its own arrow, `-[Effect]>` or `-[]>`. An
-arrowless braced value body reports **E0080**; `jet fmt` inserts the canonical
-arrow (D-CALLABLE-ONE1=A).
+`->` is the callable and control arrow. A named function or method has exactly
+one arrow after its inputs, `->` or an effect ceiling `-[Effect]>` / `-[]>`,
+followed by its optional result type and then a braced body:
+`fn f() -> T { expr }`. A unit or unit-fallible callable keeps a bare braced
+body. A second body arrow (`fn f() -> T -> expr`) or an unbraced body after the
+arrow reports **E0080**; `jet fmt` rewrites it to `{ expr }` (D-SIG-AFTER1=A).
 
 Function values use a function type with parameter types and a result:
 `fn(T1, T2) -> R`. A result may be omitted for a unit callback. A pure
@@ -890,6 +901,10 @@ exactly representable by the destination. Imported `Quantity<Dimension, Kind>`
 retains its concrete unit through checking, API freeze, semantic inspection,
 Codable, AOT, and JIT lowering (D-QUAL3, D-QUANTITY-DECL1).
 
+Dimension identities retain raw UTF-8 axis names. Their percent escapes protect
+only the separators `%`, `;`, and `:`; decoding does not reinterpret non-ASCII
+UTF-8 bytes as separate characters.
+
 ## Ownership and borrowing
 
 Jet has one explicit ownership contract. A parameter without an access marker is
@@ -910,6 +925,17 @@ value entering an owning destination is materialized automatically. A bare
 `::` binding of a place remains a read window; non-cloneable values and
 `#Policy(copies: .Explicit)` require an explicit `~` copy or an owning `^`
 contract (D-MEM1, D-MEM-COPYSEM1).
+
+Public Jet APIs return newly computed answers (D-OUTPUT-RETURNS1=A). Use one
+value, tuple, or named struct for multiple results, including trait requirements
+and callback contracts. Do not make callers initialize a dummy `&T` merely to
+receive an answer. This is an API-review rule, not a syntax prohibition.
+Keep `&` for genuine edits, stateful handles, accumulation, reusable capacity,
+checked byte readers and fixed storage, streams/writers, and raw foreign
+signatures. A buffer's capacity can be an input even when its prior bytes are
+not. Private helpers and compiler-generated machine destinations remain internal
+choices; source returns do not guarantee copy elision or allocation avoidance.
+Those performance claims require exercised proof.
 
 ```jet
 fn bump(n: &Int) { n += 1 }
@@ -1097,7 +1123,9 @@ print("padded still readable: {padded}")
 
 A local view may chain another string-view operation, be interpolated, be placed
 in a view-typed aggregate, or be copied with `~`. An owning destination copies it
-by default. At a named boundary, `View<str>` states the owner-tied contract;
+by default; returning that owned copy does not move the original owner. A
+returned window likewise retains its owner's provenance rather than consuming
+the owner's storage. At a named boundary, `View<str>` states the owner-tied contract;
 E2307 rejects a temporary or unstable owner, or an explicit-copy policy that was
 not satisfied. See
 [`string_view.jet`](../../Examples/features/memory/string_view.jet) and
@@ -1617,6 +1645,35 @@ operation, discharge state, and effective policy. Assertions erase in sema
 before the shared AOT
 or development TIR boundary. See
 [`Examples/features/lowlevel/unsafe_obligations.jet`](../../Examples/features/lowlevel/unsafe_obligations.jet). (D-UNSAFE-OBLIG1)
+
+### One audited-gate law
+
+Every deliberate gate uses the same organization → package → module →
+function → block tightening ladder. The policy keys are `unsafe`, `impure`,
+`nondeterministic`, `dependency_grant`, `build_flag`, `session_flag`,
+`trust_grant`, `force_pin`, `taint_scrub`, `duty_drop`, `state_transition`,
+`precision_demotion`, `structure`, and `lint_allow`. The first three retain
+their existing modes; every added key accepts `.GateOnly` (the default) or
+`.Forbid`. An organization's `.Forbid` cannot be widened by a package
+`.GateOnly` or a command-line allowance. Refusal reports the gate kind, its
+use site, and the owning policy file.
+
+These keys are package/organization settings, not source settings:
+`#Policy(lint_allow)` is E0355. Source writes the concrete gate instead. A
+lint exemption is `#allow(lint_name, "why this lint does not apply")`; its
+reason slot is optional, but omission emits `allow_reason` (L3103).
+`#allow(allow_reason)` cannot suppress that audit and is E0355. Reviewed
+corpus exemptions keep reasons at these source sites, not in manifest rows.
+
+`jet inspect gates` reports every kind, including lint allowances and their
+written reasons. Structure gates record deliberate suppressions such as
+`_name`, not ordinary unused names for which `_name` is merely a suggested
+fix. Durable trust grants, dependency grants and `.Force` pins are checked
+before their writer publishes state; invocation choices are checked before
+dispatch. An ordinary deliberate `jet update jet` is not a forced pin.
+See [`Examples/features/effects/lint_gate_reason.jet`](../../Examples/features/effects/lint_gate_reason.jet).
+(D-GATE-LAW1=A)
+
 
 ### Explicit pointer casts
 
@@ -3211,10 +3268,16 @@ but only `jet test` executes them. (D-DOTSCOPE1)
 
 - `.setup { ... }` is first, runs inline, and leaves its bindings visible to
   the rest of the test. It does not create a separate scope.
-- `.expect_fail { ... }` requires a runtime stop. It may name one E30xx stop
-  code, as in `.expect_fail(E3010) { ... }`; a different stop or a clean return
-  fails the claim. A matched failure is consumed and execution continues after
-  the region.
+- `.expect_fail { ... }` requires a runtime stop. It may name one registered
+  E30xx code and a non-empty string literal message, as in
+  `.expect_fail(E3001, message: "fingerprint collision") { ... }` or
+  `.expect_fail(message: "fingerprint collision") { ... }`. The message is a
+  plain, case-sensitive substring of the raw stop text, not a pattern or a
+  match on the rendered frame or `panic:` prefix (D-TEST-STOPMSG1=A). A wrong
+  code, wrong message, or clean return fails the claim; a mismatch reports
+  the expected text and actual code and message. Empty or non-literal text is
+  E0617. A matched stop is consumed and execution continues after the region.
+  This does not change the whole-test `expected_fail` known-bug mark.
 - `.timeout(duration) { ... }` takes one canonical duration value. Version 1
   compares elapsed time after the region completes; it does not interrupt a
   hung body.
@@ -4009,6 +4072,9 @@ parameter and result contracts before code generation. There is no dynamic
 export lookup or missing-export fallback. Exported functions use a homogeneous
 `Int`, `Float`, `Bool`, or `Text` shape, or a recursively closed Component
 Model shape (E1260).
+The `packages/sandbox_mathkit` golden exercises `Bool` results and UTF-8 text
+round trips, including a non-ASCII name; its checked-in interface snapshot
+lists every named export used by the host.
 
 The loader reads the component under explicit resource-scoped `FS.Read`
 authority and preflights every declared WIT import. The guest's
@@ -4019,6 +4085,13 @@ empty capability set, never an ambient fallback. Registered imports re-check
 the same typed decision at the call edge and retain resource scope. Failure is a
 clean `Err`, not a host crash. Guest-local `Mem` effects support Component text
 ABI values but do not grant host capabilities.
+Each export call returns `T PluginError!` (D-PLUGIN-FAILURE1=A). Match `Guest`,
+`Denied`, `Budget(limit, fault)`, or `Defect` rather than reading the display text.
+The `PluginFault` retains the export, message, and bounded guest frames, each a
+`PluginFrame { function, component, offset }`; a propagated failure retains the
+host call line through the ordinary failure journey. Loading a
+malformed Component does not stop the host: its first call reports `Guest` with
+export `load` and no frames.
 
 The manifest `export:` target names the interface and defaults to the package
 name. The frozen public interface is keyed as `plugin__<export>` in

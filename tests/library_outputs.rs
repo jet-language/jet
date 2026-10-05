@@ -676,7 +676,7 @@ fn library_rejects_colliding_c_symbols_before_codegen() {
     copy_tree(&fixture, &scratch.path);
     fs::write(
         scratch.path.join("library.jet"),
-        "#Export(c) pub fn café() -> Int -> 1\n#Export(c) pub fn cafö() -> Int -> 2\n#Export(c) pub fn jet_text_free() -> String -> \"bad\"\n",
+        "#Export(c) pub fn café() -> Int { 1 }\n#Export(c) pub fn cafö() -> Int { 2 }\n#Export(c) pub fn jet_text_free() -> String { \"bad\" }\n",
     )
     .unwrap();
 
@@ -707,7 +707,7 @@ fn guest_import_rejects_invalid_signature_and_duplicate_native_symbol() {
 
     fs::write(
         &source,
-        "#Import(c) fn bad(values: [Int]) -> Int = \"guest_bad\"\n#Export(c) pub fn call_host(value: Int) -> Int -> value\n",
+        "#Import(c) fn bad(values: [Int]) -> Int = \"guest_bad\"\n#Export(c) pub fn call_host(value: Int) -> Int { value }\n",
     )
     .unwrap();
     let source_text = source.to_string_lossy();
@@ -720,7 +720,7 @@ fn guest_import_rejects_invalid_signature_and_duplicate_native_symbol() {
 
     fs::write(
         &source,
-        "#Import(c) fn mutate(value: &Int) -> Int = \"guest_mutate\"\n#Export(c) pub fn call_host(value: Int) -> Int -> value\n",
+        "#Import(c) fn mutate(value: &Int) -> Int = \"guest_mutate\"\n#Export(c) pub fn call_host(value: Int) -> Int { value }\n",
     )
     .unwrap();
     let capability = jet::compile_library(&source_text, None)
@@ -734,7 +734,7 @@ fn guest_import_rejects_invalid_signature_and_duplicate_native_symbol() {
 
     fs::write(
         &source,
-        "#Layout(c)\nstruct Pair {\n    value: Int\n}\n#Import(c) fn use_pair(value: Pair) -> Int = \"guest_pair\"\n#Export(c) pub fn call_host(value: Int) -> Int -> value\n",
+        "#Layout(c)\nstruct Pair {\n    value: Int\n}\n#Import(c) fn use_pair(value: Pair) -> Int = \"guest_pair\"\n#Export(c) pub fn call_host(value: Int) -> Int { value }\n",
     )
     .unwrap();
     let layout = jet::compile_library(&source_text, None)
@@ -748,7 +748,7 @@ fn guest_import_rejects_invalid_signature_and_duplicate_native_symbol() {
 
     fs::write(
         &source,
-        "#Import(c) fn first(value: Int) -> Int = \"call_host\"\n#Export(c) pub fn call_host(value: Int) -> Int -> value\n",
+        "#Import(c) fn first(value: Int) -> Int = \"call_host\"\n#Export(c) pub fn call_host(value: Int) -> Int { value }\n",
     )
     .unwrap();
     let duplicate = jet::compile_library(&source_text, None)
@@ -765,7 +765,7 @@ fn guest_import_rejects_invalid_signature_and_duplicate_native_symbol() {
 
     fs::write(
         &source,
-        "#Import module c.fake {\n    fn module_host(value: Int) -> Int = \"call_host\"\n}\n#Import(c) fn first(value: Int) -> Int = \"call_host\"\n#Export(c) pub fn call_host(value: Int) -> Int -> value\n",
+        "#Import module c.fake {\n    fn module_host(value: Int) -> Int = \"call_host\"\n}\n#Import(c) fn first(value: Int) -> Int = \"call_host\"\n#Export(c) pub fn call_host(value: Int) -> Int { value }\n",
     )
     .unwrap();
     let c_module = jet::compile_library(&source_text, None)
@@ -790,7 +790,7 @@ fn library_output_selection_is_named_and_fail_closed() {
     .unwrap();
     fs::write(
         scratch.path.join("library.jet"),
-        "#Export(c) pub fn on_tick(dt: Int) -> Int -> dt + 1\nfn run() {}\n",
+        "#Export(c) pub fn on_tick(dt: Int) -> Int { dt + 1 }\nfn run() {}\n",
     )
     .unwrap();
     let source = scratch.path.join("library.jet");
@@ -841,7 +841,7 @@ fn locked_library_compile_requires_the_lock_stamp() {
     .unwrap();
     fs::write(
         scratch.path.join("library.jet"),
-        "#Export(c) pub fn on_tick(dt: Int) -> Int -> dt + 1\n",
+        "#Export(c) pub fn on_tick(dt: Int) -> Int { dt + 1 }\n",
     )
     .unwrap();
     let source = scratch.path.join("library.jet");

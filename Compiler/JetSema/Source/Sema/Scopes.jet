@@ -91,6 +91,10 @@ pub struct SemaCallSiteFact {
     // The statement drops this call's result. The solved effect phase reports
     // it when the callee's row is empty (E0433).
     pub discarded: Bool
+    // The statement drops this call's result, but the callee's checked
+    // carrier can still fail. The bundle failure solve sets `discarded` when
+    // it projects the callee onto `T Never!` (#3708, D-DISCARD1=A).
+    pub discarded_if_infallible: Bool{false}
 }
 
 pub struct SemaCallReturnViewFact {
@@ -361,6 +365,35 @@ pub struct SemaScopeEnvironment {
     // The enclosing named callable being checked; panic and propagation
     // locations name it (Rust `capture_panic_loc` `fn_name`).
     pub function_name: String{""}
+}
+
+// The declaration scope of one module for compile-time probes (dependency
+// probes, item checks, function checks): sema_registration_apply_graph_module
+// runs once into `table` instead of once per probe, and each probe checks
+// inside a mark and rolls back (sema_comptime_probe_prepare). The probing
+// environment's graph changes only by staged values
+// (sema_comptime_graph_apply_values), which type waiting constants and nothing
+// else, so `constants` names the only bindings a rebuilt table could differ
+// in, and where their graph rows live.
+pub struct SemaScopeProbe {
+    pub module_identity: String
+    pub table: SemaScopeTable
+    // sema_registration_apply_graph_module's result and its diagnostics.
+    pub applied: Bool
+    pub diagnostics: [Diagnostic]
+    pub constants: [SemaScopeProbeConstant]
+}
+
+// A module-scope binding whose symbol is a constant still waiting for its
+// known-time type (sema_comptime_symbol_waits), and its graph row.
+pub struct SemaScopeProbeConstant {
+    pub binding: Int
+    pub source: SemaScopeProbeSource
+}
+
+pub enum SemaScopeProbeSource {
+    Symbol(position: Int)
+    Import(import_index: Int, binding: Int)
 }
  
 pub struct SemaCheckContext {

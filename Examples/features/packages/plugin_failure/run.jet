@@ -1,0 +1,53 @@
+// D-PLUGIN-FAILURE1=A: the host accepts this Component text fixture directly.
+// Copy fixture-state/cache/api to .jet/cache/api before the first host build.
+// Run this host unchanged with jet run, jet build, and jet run --interpret.
+use core.plugin as plugin
+
+fn run() {
+    policy :: Authority.from_rights(["FS.Read:Examples/features/packages/plugin_failure"])
+    guest :: plugin.load("Examples/features/packages/plugin_failure/failure_guest.wat", policy)
+    if guest.trap() == {
+        .Err(.Guest(fault)) -> {
+            assert(fault.export == "trap")
+            assert(fault.frames.len() > 0 && fault.frames.len() <= 32)
+            frame :: fault.frames[0]
+            assert(frame.function == "trap")
+            assert(frame.component == "failure_guest")
+            assert(frame.offset > 0)
+            print("trap:Guest export={fault.export} function={frame.function} component={frame.component} located={frame.offset > 0}")
+        }
+        else -> assert(false)
+    }
+    reader :: plugin.load("Examples/features/packages/plugin_failure/failure_guest.wat", policy)
+    if reader.read() == {
+        .Err(.Denied(fault)) -> {
+            assert(fault.export == "read")
+            assert(fault.frames.len() == 0)
+            print("read:Denied export={fault.export} frames={fault.frames.len()}")
+        }
+        else -> assert(false)
+    }
+    spinner :: plugin.load("Examples/features/packages/plugin_failure/failure_guest.wat", policy)
+    if spinner.spin() == {
+        .Err(.Budget(.Fuel, fault)) -> {
+            assert(fault.export == "spin")
+            assert(fault.frames.len() > 0 && fault.frames.len() <= 32)
+            print("spin:Budget Fuel export={fault.export}")
+        }
+        else -> assert(false)
+    }
+    normal :: plugin.load("Examples/features/packages/plugin_failure/failure_guest.wat", policy)
+    value :: normal.normal()
+    assert(value == 42)
+    print("normal:Ok {value}")
+    malformed :: plugin.load("Examples/features/packages/plugin_failure/malformed_guest.wasm", policy)
+    if malformed.normal() == {
+        .Err(.Guest(fault)) -> {
+            assert(fault.export == "load")
+            assert(fault.frames.len() == 0)
+            print("malformed:Guest export={fault.export} frames={fault.frames.len()}")
+        }
+        else -> assert(false)
+    }
+    print("host:still-running")
+}

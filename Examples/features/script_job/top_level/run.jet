@@ -1,0 +1,15 @@
+// D-JET-VERBS1=A: in this directory, run `jet deploy --region eu` or
+// `jet --interpret deploy --region eu`. `jet jobs` lists the visible job.
+// A built executable accepts the same `deploy --region eu` argv.
+package {
+    name: "top_level_jobs"
+    version: "0.1.0"
+    authority: { holds: { allow: [IO, Mem.Alloc] } }
+}
+
+#[Job(.Ship), Doc("Deploy to a named region")]
+fn deploy(region: String) {
+    print("deploy region={region}")
+}
+
+fn run() { deploy("eu") }

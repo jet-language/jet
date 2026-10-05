@@ -1,5 +1,6 @@
 // Source, module, and package identities remain separate at the driver boundary.
 use jet_foundation.[
+    CompilerThreads,
     CompilerTraceSink,
     Diagnostic,
     JetReleaseDevtoolsPolicy,
@@ -107,6 +108,10 @@ pub struct JetDriverCompileRequest {
     // legality on entry and Lint on the final program. Tests and `--verify`
     // turn it on; ordinary compiles leave it off.
     pub mir_lint_every_pass: Bool
+    // The compiler threads this compile may use (D-JOBS1=A `--threads N`;
+    // automatic, memory-aware admission without it). Every thread count gives
+    // the same diagnostics and output bytes.
+    pub compiler_threads: CompilerThreads
 }
 
 // The compiler's record store, reached only through the host, which owns

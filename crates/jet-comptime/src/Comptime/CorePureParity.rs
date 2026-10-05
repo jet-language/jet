@@ -1162,8 +1162,19 @@ fn db_carrier_display(value: &CtValue) -> Option<String> {
     }
 }
 
+fn plugin_error_display(value: &CtValue) -> Option<String> {
+    let CtValue::Enum { type_name, args, .. } = value else { return None; };
+    if type_name.rsplit("::").next()? != "PluginError" { return None; }
+    let (_, CtValue::Struct { fields, .. }) = args.last()? else { return None; };
+    let (_, CtValue::Str(message)) = fields.iter().find(|(name, _)| name == "message")? else { return None; };
+    Some(message.clone())
+}
+
 pub(super) fn display(value: &CtValue) -> Option<String> {
     if let Some(text) = db_value_display(value).or_else(|| db_carrier_display(value)) {
+        return Some(text);
+    }
+    if let Some(text) = plugin_error_display(value) {
         return Some(text);
     }
     // DataTree values use the ordered JSON projection on every tier. The

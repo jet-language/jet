@@ -233,6 +233,7 @@ pub struct JetRustEmitContext {
     pub ref_bindings: JetRustEmitRefBindings
     // Lookup rows of the function being printed (jet_rust_emit_body_index).
     pub body_index: JetRustEmitBodyIndex
+    pub expected_test_exits: [U64:U64]
     // Ratio-use classification of the last queried function; rebuilt when
     // its function id changes (jet_rust_emit_is_unit_ratio_parameter).
     pub unit_ratio_function: MIRFunctionID?
@@ -1075,6 +1076,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         move_facts: jet_rust_emit_empty_move_facts(),
         ref_bindings: jet_rust_emit_empty_ref_bindings(),
         body_index: jet_rust_emit_empty_body_index(),
+        expected_test_exits: [U64:U64]{},
         unit_ratio_function: None,
         unit_ratio_parameters: [U64:Bool]{},
         selected_modules: [String:Bool]{},

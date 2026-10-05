@@ -1719,8 +1719,8 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "external method",
-            "fn Point.len(self) Int -> 1\n",
-            "impl Point { fn len(self) -> Int -> 1 }\n",
+            "fn Point.len(self) -> Int { 1 }\n",
+            "impl Point { fn len(self) -> Int { 1 } }\n",
         ),
         (
             "enum group separators",
@@ -1834,8 +1834,8 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "external-method rewrite preserves receiver",
-            "fn Point.len(self) Int -> 1\n",
-            "impl Other { fn len(self) -> Int -> 1 }\n",
+            "fn Point.len(self) -> Int { 1 }\n",
+            "impl Other { fn len(self) -> Int { 1 } }\n",
         ),
         (
             "task-block rewrite preserves body",

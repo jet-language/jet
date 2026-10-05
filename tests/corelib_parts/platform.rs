@@ -79,8 +79,9 @@ fn core_files_parallel_walk_and_read_count_share_lowering() {
         r#"
 use core.files as fs
 
-fn count_file(path: String, needle: String) -> Int ->
+fn count_file(path: String, needle: String) -> Int {
     (fs.read(path) ?? panic("read failed")).count(needle)
+}
 
 fn run() {
     entries :: fs.walk_parallel(".") ?? panic("walk failed")

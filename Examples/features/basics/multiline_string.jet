@@ -1,6 +1,7 @@
 // D-SG5: `"""…"""` spans many lines. The newline after the opening `"""` and
 // the one before the closing `"""` are dropped; the closing `"""`'s indentation
 // is stripped from every line. Escapes and `{interp}` stay active.
+// Only spaces or tabs share the delimiter lines (D-TRIPLE-DELIM1=A).
 fn run() {
     who :: "Jet"
     banner :: """
@@ -9,4 +10,7 @@ fn run() {
       - friendly errors
     """
     print("{banner}")
+    // For one line of text, ordinary quotes or a raw backtick fence keep it.
+    print("say \"hi\" to Ann")
+    print(`say "hi" to Ann`)
 }

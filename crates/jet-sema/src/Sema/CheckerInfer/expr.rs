@@ -3347,8 +3347,6 @@ impl<'a> Checker<'a> {
                         ty: Some(params[0].clone()),
                         ty_span: None,
                     }],
-                    result_type: None,
-                    error_type: None,
                     effects: None,
                     body: LambdaBody::Expr(Box::new(body)),
                     span,
