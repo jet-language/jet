@@ -55,7 +55,7 @@ impl ReactiveObserver {
         self.clear_dependencies()
         JET_REACTIVE_OBSERVERS.with(fn(stack) { stack.borrow_mut().push(self.clone()) })
         body :: self.body.lock().unwrap_or_else(fn(e) { e.into_inner() }).clone()
-        if body is Val(callback) { callback() }
+        if body == .Val(callback) { callback() }
         JET_REACTIVE_OBSERVERS.with(fn(stack) { _ :: stack.borrow_mut().pop() })
         self.running.store(false, Ordering.Release)
     }
@@ -183,18 +183,21 @@ impl<T: Clone + Send + Sync> JetSignal<T> {
     // GATE #4565: kernel primitive
     #Unsafe("subscribe under write lock, then read staged or committed value")
     pub fn get(self: &Self) -> T {
-        if jet_reactive_active_observer() is Val(obs) {
+        if jet_reactive_active_observer() == .Val(obs) {
             added :: {
                 c := self.cell.write().unwrap_or_else(fn(e) { e.into_inner() })
                 c.subs.retain(fn((_, weak)) { weak.strong_count() > 0 })
                 if c.subs.iter().any(fn((id, _)) { *id == obs.id }) { false }
-                else { c.subs.push((obs.id, Arc.downgrade(&obs))); true }
+                else {
+                    c.subs.push((obs.id, Arc.downgrade(&obs)))
+                    true
+                }
             }
             if added {
                 weak_cell :: Arc.downgrade(&self.cell)
                 id :: obs.id
                 obs.track(Box.new(fn() {
-                    if weak_cell.upgrade() is Val(cell) {
+                    if weak_cell.upgrade() == .Val(cell) {
                         cell.write().unwrap_or_else(fn(e) { e.into_inner() }).subs.retain(fn((sub_id, _)) { *sub_id != id })
                     }
                 }))
@@ -277,18 +280,21 @@ impl<T: Clone + Send + Sync> JetDerived<T> {
     // GATE #4565: kernel primitive
     #Unsafe("derived reader subscribes active observer under lock and clones committed value")
     pub fn get(self: &Self) -> T {
-        if jet_reactive_active_observer() is Val(obs) {
+        if jet_reactive_active_observer() == .Val(obs) {
             added :: {
                 c := self.cell.write().unwrap_or_else(fn(e) { e.into_inner() })
                 c.subs.retain(fn((_, weak)) { weak.strong_count() > 0 })
                 if c.subs.iter().any(fn((id, _)) { *id == obs.id }) { false }
-                else { c.subs.push((obs.id, Arc.downgrade(&obs))); true }
+                else {
+                    c.subs.push((obs.id, Arc.downgrade(&obs)))
+                    true
+                }
             }
             if added {
                 weak_cell :: Arc.downgrade(&self.cell)
                 id :: obs.id
                 obs.track(Box.new(fn() {
-                    if weak_cell.upgrade() is Val(cell) {
+                    if weak_cell.upgrade() == .Val(cell) {
                         cell.write().unwrap_or_else(fn(e) { e.into_inner() }).subs.retain(fn((sub_id, _)) { *sub_id != id })
                     }
                 }))
@@ -379,7 +385,7 @@ impl JetSubscription {
         if self.active.replace(false) {
             if self.shared_active.as_ref().is_some_and(fn(active) { not active.swap(false, Ordering.AcqRel) }) { return }
             cleanup :: self.cleanup.borrow().clone()
-            if cleanup is Val(callback) { callback() }
+            if cleanup == .Val(callback) { callback() }
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs:578
@@ -413,7 +419,10 @@ impl JetEventScope {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs:612
     pub fn track(self: &Self, sub: JetSubscription) -> JetSubscription {
-        if self.cancelled.get() { sub.unsubscribe(); return ^sub }
+        if self.cancelled.get() {
+            sub.unsubscribe()
+            return ^sub
+        }
         subs := self.subs.borrow_mut()
         subs.retain(fn(tracked) { tracked.active() })
         subs.push(sub.clone())
@@ -473,7 +482,7 @@ impl<T: Clone> JetEvent<T> {
         event_id :: self.id
         owner_id :: scope.id
         sub.set_cleanup(fn() {
-            if listeners.upgrade() is Val(values) { values.borrow_mut().retain(fn(listener) { listener.id != id }) }
+            if listeners.upgrade() == .Val(values) { values.borrow_mut().retain(fn(listener) { listener.id != id }) }
             jet_event_observe("Event", event_id, owner_id, id, 0, "Removed", 0, 0, 0, 0, "None", priority, "None", "None")
         })
         jet_event_observe("Event", self.id, scope.id, id, 0, "Subscribed", 0, 0, 0, 0, "None", priority, "None", "None")
@@ -716,7 +725,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
             handler: Arc.new(fn(payload) { handler.invoke(^payload).into_dispatch_result() })})
         cancel_state :: Arc.downgrade(&self.state)
         scope.track_hard_cancel(self.owner_id, fn() {
-            if cancel_state.upgrade() is Val(state) { Self.hard_cancel_state(&state) }
+            if cancel_state.upgrade() == .Val(state) { Self.hard_cancel_state(&state) }
         })
         state :: Arc.downgrade(&self.state)
         event_id :: self.owner_id
@@ -724,7 +733,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
         capacity :: self.policy.capacity
         overflow :: self.policy.overflow.observation()
         sub.set_cleanup(fn() {
-            if state.upgrade() is Val(values) { values.lock().unwrap().listeners.retain(fn(listener) { listener.id != id }) }
+            if state.upgrade() == .Val(values) { values.lock().unwrap().listeners.retain(fn(listener) { listener.id != id }) }
             jet_event_observe("AsyncEvent", event_id, owner_id, id, 0, "Removed", -1, -1, -1, capacity, overflow, priority, "None", "None")
         })
         (queued, blocked, running) :: {
@@ -778,7 +787,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
                     }
                     .DropNewest -> { _ :: Self.complete_entry(&entry, JET_EVENT_PENDING, false, .DroppedNewest) }
                     .DropOldest -> {
-                        if state.queued.pop_front() is Val(oldest) { _ :: Self.complete_entry(&oldest, JET_EVENT_QUEUED, true, .DroppedOldest) }
+                        if state.queued.pop_front() == .Val(oldest) { _ :: Self.complete_entry(&oldest, JET_EVENT_QUEUED, true, .DroppedOldest) }
                         moved :: entry.phase.compare_exchange(JET_EVENT_PENDING, JET_EVENT_QUEUED, Ordering.AcqRel, Ordering.Acquire).is_ok()
                         debug_assert(moved, "fresh replacement entry must become queued once")
                         entry.accepted.store(true, Ordering.Release)
@@ -876,7 +885,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
     #Unsafe("scheduler dispatch serializes queue admission, reserves once listeners atomically, and preserves typed unwind")
     fn run_entry_inner(self: &Self, entry: &Arc<JetAsyncEntry<T, E>>) -> JetDispatchReport<E> {
         loop {
-            if entry.terminal.lock().unwrap().clone() is Val(report) { return ^report }
+            if entry.terminal.lock().unwrap().clone() == .Val(report) { return ^report }
             // Deadline competes with Queued -> Running; expired payload is never delivered.
             jet_deadline_check("async event dispatch")
             listeners :: {
@@ -889,7 +898,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
                         JetDispatchReport.terminal_with_trace(accepted, .Cancelled, entry.trace.lock().unwrap().clone())
                     })
                 }
-                if state.blocked.iter().position(fn(item) { item.id == entry.id }) is Val(pos) {
+                if state.blocked.iter().position(fn(item) { item.id == entry.id }) == .Val(pos) {
                     if state.closed {
                         _ :: state.blocked.remove(pos)
                         _ :: Self.complete_entry(entry, JET_EVENT_PENDING, false, .Closed)
@@ -934,7 +943,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
                     }
                 } else { None }
             }
-            if listeners is Val(handlers) {
+            if listeners == .Val(handlers) {
                 payload :: entry.payload.lock().unwrap().take() ?? {
                     accepted :: entry.accepted.load(Ordering.Acquire)
                     _ :: Self.complete_entry(entry, JET_EVENT_RUNNING, accepted, .Cancelled)
@@ -972,7 +981,10 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
                                     report.failures.push(.Handler(^error))
                                     report.trace.push("handler:{handler_index}:failed")
                                 }
-                                .Log -> { report.trace.push("handler:{handler_index}:failed"); std.io.eprintln("event handler failed") }
+                                .Log -> {
+                                    report.trace.push("handler:{handler_index}:failed")
+                                    std.io.eprintln("event handler failed")
+                                }
                                 .Ignore -> {}
                             }
                         }
@@ -1075,7 +1087,7 @@ impl<T: Clone, R: Clone> JetHook<T, R> {
         listeners :: Rc.downgrade(&self.listeners)
         id :: self.listeners.borrow().last().expect("hook listener").id
         sub.set_cleanup(fn() {
-            if listeners.upgrade() is Val(values) { values.borrow_mut().retain(fn(listener) { listener.id != id }) }
+            if listeners.upgrade() == .Val(values) { values.borrow_mut().retain(fn(listener) { listener.id != id }) }
         })
         scope.track(^sub)
     }
@@ -1146,7 +1158,7 @@ impl<T: Clone, E: Clone> JetDecisionHook<T, E> {
         event_id :: self.id
         owner_id :: scope.id
         sub.set_cleanup(fn() {
-            if listeners.upgrade() is Val(values) { values.borrow_mut().retain(fn(listener) { listener.id != id }) }
+            if listeners.upgrade() == .Val(values) { values.borrow_mut().retain(fn(listener) { listener.id != id }) }
             jet_event_observe("DecisionHook", event_id, owner_id, id, 0, "Removed", 0, 0, 0, 0, "None", priority, "None", "None")
         })
         jet_event_observe("DecisionHook", self.id, scope.id, id, 0, "Subscribed", 0, 0, 0, 0, "None", priority, "None", "None")
@@ -1241,7 +1253,7 @@ fn jet_watch_json_string(value: &String) -> String {
 fn jet_watch_publish_readiness(id: &String, state: &String, reason: &String) -> {
     timestamp :: jet_watch_topology_now()
     fields :: "{{\"id\":{jet_watch_json_string(id)},\"source\":\"watch-runtime\",\"parent_id\":null,\"state\":{jet_watch_json_string(state)},\"reason\":{jet_watch_json_string(reason)},\"freshness\":{{\"state\":\"fresh\",\"observed_at_ms\":{timestamp}}}}}"
-    if JetDevtoolsEvent.from_parts(timestamp, "watch-runtime", "Readiness", id, ^fields) is Ok(event) { jet_devtools_publish_event(^event) }
+    if JetDevtoolsEvent.from_parts(timestamp, "watch-runtime", "Readiness", id, ^fields) == .Ok(event) { jet_devtools_publish_event(^event) }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs:1985
 #Derive(Clone)
@@ -1377,7 +1389,7 @@ impl WatchSet {
 fn jet_watch_snapshot(root: &String) -> JetWatchSnapshot IOError! {
     out := [String:(U64, I64, Bool)]{}
     stack := [OSPath.from(root)]
-    loop stack.pop() is Val(path) {
+    loop stack.pop() == .Val(path) {
         meta :: fs.symlink_metadata(&path).map_err(fn(e) { io_error_at(.Read, path.to_string_lossy().as_ref(), ^e) })?
         modified :: meta.modified().ok().and_then(fn(t) { t.duration_since(time.UNIX_EPOCH).ok() }).map(fn(d) { d.as_millis() as U64 }).unwrap_or(0)
         path_s :: path.to_string_lossy().to_string()
