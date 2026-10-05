@@ -45,6 +45,11 @@ Two `Apply` types match when their nominal IDs agree, or their leaf names agree
 (module qualification differs between rows), and their arguments match
 pairwise. Structural kinds match their own kind with compatible children.
 
+Unqualified import module IDs use the checked canonical module key. Foreign
+binding aliases obtain that key from their CFFI import-link row, not by guessing
+the generated cache or foreign module's display name. Ordinary module imports
+keep exact-key, owning-child, and unique-name resolution.
+
 ## Rule families
 
 Every rule belongs to one family. The family name is part of the ICE text.

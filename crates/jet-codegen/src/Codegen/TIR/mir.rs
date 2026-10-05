@@ -1462,9 +1462,11 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
     );
     let artifacts =
         lower_artifact_rows(&program.artifact_facts, &program.funcs, &function_registry);
+    let cffi = lower_cffi_facts(&program.artifact_facts.cffi);
     let (modules, imports) = lower_module_rows(
         &program.artifact_facts.modules,
         &program.artifact_facts.imports,
+        &cffi,
         &types,
         &traits,
         &impls,
@@ -1535,7 +1537,7 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
         schema_version: MIR_SCHEMA_VERSION,
         package_identity: program.package_identity.clone(),
         facts: lower_package_facts(&program),
-        cffi: lower_cffi_facts(&program.artifact_facts.cffi),
+        cffi,
         names: lower_name_facts(&program.artifact_facts.names),
         modules,
         imports,
@@ -3434,8 +3436,18 @@ fn lower_module_item(
 /// importing module. Prefer an exact canonical key, then the importing
 /// module's child path, and finally a unique module name. An ambiguous name
 /// remains unchanged rather than guessing a target.
-fn canonical_module_key(modules: &[TirModuleFact], owner: &str, target: &str) -> String {
+fn canonical_module_key(
+    modules: &[TirModuleFact],
+    owner: &str,
+    target: &str,
+    foreign_target: Option<&str>,
+) -> String {
     if target.is_empty() {
+        return target.to_string();
+    }
+    // Foreign binding aliases name the checked linkage target, not a guessed
+    // generated cache-module spelling.
+    if let Some(target) = foreign_target {
         return target.to_string();
     }
     if modules.iter().any(|row| row.key == target) {
@@ -3461,6 +3473,48 @@ fn canonical_module_key(modules: &[TirModuleFact], owner: &str, target: &str) ->
     match (matches.next(), matches.next()) {
         (Some(row), None) => row.key.clone(),
         _ => target.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod canonical_module_target_tests {
+    use super::{TirModuleFact, canonical_module_key};
+
+    fn module(key: &str, name: &str) -> TirModuleFact {
+        TirModuleFact {
+            key: key.into(),
+            name: name.into(),
+            path: key.into(),
+            source_path: key.into(),
+            imports: Vec::new(),
+            item_order: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn checked_foreign_target_does_not_guess_a_generated_cache_name() {
+        let modules = [
+            module(".jet/bindings/c::c.jet", "__c_cache_c"),
+            module("::c.c", "__c_c"),
+        ];
+        assert_eq!(
+            canonical_module_key(&modules, ".::run.jet", "c", Some("::c.c")),
+            "::c.c",
+        );
+        assert_eq!(canonical_module_key(&modules, ".::run.jet", "c", None), "c");
+    }
+
+    #[test]
+    fn ordinary_module_identity_keeps_owner_and_ambiguity_rules() {
+        let modules = [
+            module("owner::child", "child"),
+            module("other::child", "child"),
+        ];
+        assert_eq!(
+            canonical_module_key(&modules, "owner", "child", None),
+            "owner::child",
+        );
+        assert_eq!(canonical_module_key(&modules, "", "child", None), "child");
     }
 }
 
@@ -3518,6 +3572,7 @@ fn lower_import_item(
 fn lower_module_rows(
     modules: &[TirModuleFact],
     import_rows: &[TirImportFact],
+    cffi: &MirCffiFacts,
     types: &[MirTypeDef],
     traits: &[MirTraitDef],
     impls: &[MirImplDef],
@@ -3544,7 +3599,18 @@ fn lower_module_rows(
                 TirImportKind::File { path } => MirImportKind::File { path: path.clone() },
                 TirImportKind::Module { path } => MirImportKind::Module { path: path.clone() },
                 TirImportKind::Unqualified { module, items } => {
-                    let module_key = canonical_module_key(modules, &row.module, module);
+                    let foreign_target = cffi.import_links.iter().find(|link| {
+                        link.importing_module == row.module
+                            && link.scope.is_none()
+                            && (link.alias == row.alias
+                                || items.iter().any(|item| item.local == link.alias))
+                    });
+                    let module_key = canonical_module_key(
+                        modules,
+                        &row.module,
+                        module,
+                        foreign_target.map(|link| link.target_module.as_str()),
+                    );
                     MirImportKind::Unqualified {
                         module: jet_foundation::MIR::MirModuleId(stable_id(
                             "mir-module",
