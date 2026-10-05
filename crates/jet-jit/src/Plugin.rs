@@ -563,18 +563,16 @@ fn plugin_error(rt: &mut JitRuntime, error: plugin_wire::PluginError) -> i64 {
         PluginError::Budget { limit, fault } => (2, Some(limit), fault),
         PluginError::Defect(fault) => (3, None, fault),
     };
+    // String fields stay inline cells (`JetVal::String`), as for every other
+    // host-built record: an `Int` cell is read back as a raw word, not text.
     let frames = fault.frames.into_iter().map(|frame| {
-        let function = rt.heap.alloc_string(frame.function);
-        let component = rt.heap.alloc_string(frame.component);
         JetVal::RecordRef(rt.heap.alloc_record_values(vec![
-            JetVal::Int(function), JetVal::Int(component), JetVal::Int(frame.offset),
+            JetVal::String(frame.function), JetVal::String(frame.component), JetVal::Int(frame.offset),
         ]))
     }).collect();
     let frames = rt.heap.alloc_list_values(frames);
-    let export = rt.heap.alloc_string(fault.export);
-    let message = rt.heap.alloc_string(fault.message);
     let fault = rt.heap.alloc_record_values(vec![
-        JetVal::Int(export), JetVal::Int(message), JetVal::Int(frames),
+        JetVal::String(fault.export), JetVal::String(fault.message), JetVal::Int(frames),
     ]);
     let mut slots = vec![JetVal::Int(tag)];
     if let Some(limit) = limit {

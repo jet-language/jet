@@ -460,8 +460,11 @@ fn run_plugin_resource_child(
     let mut child = command
         .spawn()
         .unwrap_or_else(|error| panic!("spawn isolated plugin {tier} child: {error}"));
+    // The release child first builds the plugin bridge crate (wasmtime) in
+    // its fresh store, so its bound covers a cold Cargo build; the guest's
+    // own fuel, memory and table guards are what stop the call itself.
     let timeout = if tier == "release" {
-        Duration::from_secs(60)
+        Duration::from_secs(900)
     } else {
         Duration::from_secs(10)
     };
@@ -613,6 +616,11 @@ fn plugin_call_stops_a_non_terminating_component_on_all_hosted_tiers() {
     );
 }
 
+/// The example's guest imports the host `read`, so its package declares
+/// `needs: [FS.Read]` (Examples/.../plugin_failure/package.jet); the scratch
+/// project holds the whole FS root because its read root is an absolute path.
+const PLUGIN_FAILURE_PACKAGE: &str = "name: \"plugin_failure\"\nversion: \"0.1.0\"\nauthority: { needs: [FS.Read], holds: { allow: [Exec, FS, IO, Mem.Alloc, Panic] } }\n";
+
 #[test]
 fn plugin_failure_propagation_records_the_host_call_line_on_all_tiers() {
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
@@ -629,7 +637,7 @@ fn plugin_failure_propagation_records_the_host_call_line_on_all_tiers() {
     let mut tiers = vec!["jit", "interpreter"];
     if common::have_rustc() { tiers.push("release"); }
     for tier in tiers {
-        let (code, stdout, stderr) = tir_support::run_plugin_tier("plugin_journey", &source, tier, &path, api);
+        let (code, stdout, stderr) = tir_support::run_plugin_tier_in_package("plugin_journey", &source, tier, &path, api, PLUGIN_FAILURE_PACKAGE);
         assert_ne!(code, 0, "{tier} lost the guest failure");
         assert_eq!(stdout, "", "{tier} entered the success path");
         assert!(stderr.contains("guest trapped"), "{tier} lost the guest operation: {stderr}");
@@ -660,7 +668,7 @@ fn plugin_guest_failure_reports_operation_boundary_and_kind_on_all_hosted_tiers(
     let mut tiers = vec!["jit", "interpreter"];
     if common::have_rustc() { tiers.push("release"); }
     for tier in tiers {
-        let (code, stdout, stderr) = tir_support::run_plugin_tier("plugin_causes", &source, tier, &path, api);
+        let (code, stdout, stderr) = tir_support::run_plugin_tier_in_package("plugin_causes", &source, tier, &path, api, PLUGIN_FAILURE_PACKAGE);
         assert_eq!(code, 0, "{tier} failed the typed plugin witness: {stderr}");
         assert_eq!(stderr, "", "{tier} unexpectedly propagated a handled failure");
         assert_eq!(stdout, expected, "{tier} changed plugin cause, operation, or frame transport");
