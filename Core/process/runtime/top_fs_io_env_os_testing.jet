@@ -527,7 +527,7 @@ fn jet_testing_snap(name: &String, actual: &String) -> Bool {
     path :: OSPath.new("__snapshots__").join("{sanitize_test_name(name)}.snap")
     // GATE #4565: kernel primitive
     #Unsafe("real snapshot files and host update environment; preserve original Bool read/write failure policy") {
-        update :: std.env.var("JET_UPDATE_SNAPSHOTS").ok().as_ref() == Val("1")
+        update :: std.env.var("JET_UPDATE_SNAPSHOTS").ok().as_ref() == "1"
         if update || !path.is_file() {
             if path.parent() == Val(parent) -> _ :: std.fs.create_dir_all(parent)
             return std.fs.write(&path, actual).is_ok()

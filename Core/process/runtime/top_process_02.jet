@@ -498,7 +498,7 @@ fn jet_process_inner_resource_limit(inner: &ProcessHandle, spec: &ProcessSpec) -
 // GATE #4565: kernel primitive
 #Unsafe("selected Unix exit-status signal reports POSIX SIGXCPU without host target assumptions")
 fn jet_process_status_resource_limit(status: &ExitStatus, spec: &ProcessSpec) -> ProcessResourceLimit? {
-    if target.selected_family() == "unix" && spec.cpu_time_limit_ms.is_some() && status.signal() == Val(24) {
+    if target.selected_family() == "unix" && spec.cpu_time_limit_ms.is_some() && status.signal() == 24 {
         return Val(ProcessResourceLimit.CpuTime)
     }
     None
@@ -825,7 +825,7 @@ fn jet_process_stdin_write(handle: &Rc<RefCell<ProcessStdin?>>, text: &String) -
     bytes := text.as_bytes()
     {
         stdin := handle.borrow_mut()
-        if stdin.as_mut() == .Val(ProcessStdin.Terminal(writer)) {
+        if stdin.as_mut() == ProcessStdin.Terminal(writer) {
             // PTY clones share one open-file description: nonblocking input
             // would make the independent output worker see EAGAIN.
             writer.write_all(bytes).map_err(jet_process_stdin_error)?

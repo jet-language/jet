@@ -189,7 +189,7 @@ fn terminate_process_group(pid: U32) -> () NativeIOError! {
     #Unsafe("negative pid targets only the child-assigned process group; capture native errno immediately") {
         if os.kill(-pid, PROCESS_GROUP_SIGKILL) == 0 -> return Ok(())
         error :: NativeIOError.last_os_error()
-        if error.raw_os_error() == Val(PROCESS_GROUP_ESRCH) -> return Ok(())
+        if error.raw_os_error() == PROCESS_GROUP_ESRCH -> return Ok(())
         Err(^error)
     }
 }
