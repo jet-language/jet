@@ -22,7 +22,7 @@ fn knowledge_loss_requires_a_spelled_gate() {
 fn accept_f32(value: F32) {}
 
 fn run() {
-    value :: Float.{1.0}
+    value :: Float{1.0}
     accept_f32(value)
 }
 "#,
