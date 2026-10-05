@@ -1,0 +1,18 @@
+// Function-boundary cell list-reuse: the caller owns one [Int] buffer and
+// the callee refills it in place (`&` capacity reuse; pair: list-fresh).
+#CLI struct Args { n: Int }
+
+fn build_into(out: &[Int], seed: Int, count: Int) {
+    &out.clear()
+    loop i in 0..<count -> &out.push(seed + i)
+}
+
+fn run(args: Args) {
+    acc := 0
+    xs := [Int]{}
+    loop i in 0..<args.n {
+        build_into(&xs, i, 256)
+        loop x in xs -> acc += x
+    }
+    print(acc)
+}

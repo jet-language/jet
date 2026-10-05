@@ -1,0 +1,41 @@
+// Function-boundary cell recursion-aggregate: a divide-and-conquer recursion
+// returns a four-field struct from every call and merges the halves.
+#CLI struct Args { n: Int }
+
+struct Stats {
+    count: Int
+    sum: Int
+    low: Int
+    high: Int
+}
+
+fn stats(lo: Int, hi: Int) -> Stats {
+    if hi - lo <= 4 {
+        s := Stats{count: 0, sum: 0, low: 10007, high: 0}
+        loop i in lo..<hi {
+            v :: (i * 7919) % 10007
+            s.count += 1
+            s.sum += v
+            if v < s.low -> s.low = v
+            if v > s.high -> s.high = v
+        }
+        return s
+    }
+    mid :: lo + (hi - lo) /% 2
+    a :: stats(lo, mid)
+    b :: stats(mid, hi)
+    low := a.low
+    if b.low < low -> low = b.low
+    high := a.high
+    if b.high > high -> high = b.high
+    Stats{count: a.count + b.count, sum: a.sum + b.sum, low: low, high: high}
+}
+
+fn run(args: Args) {
+    acc := 0
+    loop r in 0..<args.n {
+        s :: stats(r, r + 100000)
+        acc += s.count + s.sum + s.low + s.high
+    }
+    print(acc)
+}
