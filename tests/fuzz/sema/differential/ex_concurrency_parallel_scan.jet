@@ -54,7 +54,7 @@ fn gather_paths() -> [String] {
 }
 
 fn scan_parallel(paths: [String]) -> [String] {
-    (sender, ch) :: channel<String>()
+    { sender, receiver: ch } :: channel<String>()
     workers := [Task<()>]{}
     loop path in paths {
         tx :: ~sender

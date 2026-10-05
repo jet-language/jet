@@ -7,8 +7,8 @@ fn wait(ch1: Receiver<Int>, ch2: Receiver<Int>) {
 }
 
 fn run() {
-    (s1, ch1) :: channel<Int>()
-    (s2, ch2) :: channel<Int>()
+    { sender: s1, receiver: ch1 } :: channel<Int>()
+    { sender: s2, receiver: ch2 } :: channel<Int>()
     s1.send(11)
     s2.send(22)
     worker :: task wait(ch1, ch2)

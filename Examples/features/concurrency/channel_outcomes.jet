@@ -21,7 +21,7 @@ fn fill_then_block(tx: Sender<Int>) -> Int {
 }
 
 fn orphan_sender() -> Sender<Int> {
-    (tx, _rx) :: channel<Int>(capacity: 1)
+    { sender: tx, receiver: _rx } :: channel<Int>(capacity: 1)
     tx
 }
 
@@ -35,13 +35,13 @@ fn failure_label(error: TaskFailure) -> String {
 
 fn run() {
     // Capacity 0 is clamped to one slot: the send returns with no receiver.
-    (ztx, zrx) :: channel<Int>(capacity: 0)
+    { sender: ztx, receiver: zrx } :: channel<Int>(capacity: 0)
     ztx.send(10)
     print("capacity 0: send returned before any receive")
     print(zrx.try_receive() ?? -1)
 
     // Capacity 1 holds one value; a second sender waits for the slot.
-    (ftx, frx) :: channel<Int>(capacity: 1)
+    { sender: ftx, receiver: frx } :: channel<Int>(capacity: 1)
     ftx.send(1)
     print("capacity 1 full: ready={frx.is_ready()}")
     filler :: task second_send(ftx)
@@ -50,7 +50,7 @@ fn run() {
     print(frx.try_receive() ?? -1)
 
     // A send after close returns normally and the value is dropped.
-    (ctx, crx) :: channel<Int>(capacity: 2)
+    { sender: ctx, receiver: crx } :: channel<Int>(capacity: 2)
     ctx.send(7)
     ctx.close()
     ctx.send(8)
@@ -64,7 +64,7 @@ fn run() {
     print("send after receiver drop returned (silent)")
 
     // A task parked on a full channel is cancelled at that wait point.
-    (btx, brx) :: channel<Int>(capacity: 1)
+    { sender: btx, receiver: brx } :: channel<Int>(capacity: 1)
     blocked :: task fill_then_block(btx)
     loop {
         if brx.is_ready() -> break
@@ -85,7 +85,7 @@ fn run() {
     print("core.tasks put after close keeps size {tasks.size(tasks.put(closed, 2))} (silent)")
     full :: tasks.put(tasks.put(tasks.channel(1), 1), 2)
     print("core.tasks put on full keeps size {tasks.size(full)} (silent)")
-    (rtx, rrx) :: channel<Int>(capacity: 1)
+    { sender: rtx, receiver: rrx } :: channel<Int>(capacity: 1)
     rtx.close()
     print("core.tasks recv after close = {tasks.recv(rrx)}")
 }

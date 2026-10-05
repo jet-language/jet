@@ -376,7 +376,7 @@ fn run() {
     mapped.value += 1
 
     second := shared Pair{ left: 3, right: 4 }
-    (left, right) :: second.guard_edit().split(
+    { first: left, second: right } :: second.guard_edit().split(
         value -> value.left,
         value -> value.right
     )
@@ -675,7 +675,7 @@ fn inspect(cell: Cell<Pair>) {
     print(mapped.get())
 }
 fn edit_pair(cell: Cell<Pair>) {
-    (left, right) :: cell.guard_edit().split(
+    { first: left, second: right } :: cell.guard_edit().split(
         pair -> pair.left,
         pair -> pair.right
     )
@@ -3640,7 +3640,7 @@ fn write_window_cannot_cross_channel_boundary() {
 fn run() {
     xs := [1, 2, 3]
     edit :: &xs[0..1]
-    (sender, channel) :: channel<ViewMut<Int>>()
+    { sender, receiver: channel } :: channel<ViewMut<Int>>()
     sender.send(edit)
 }
 "#;

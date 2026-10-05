@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0507 — Jet diagnostic</title>
-<meta name="description" content="Collection changed while `for` reads it">
+<meta name="description" content="While the loop is reading `{name}`, nothing may change it">
 <meta property="og:title" content="E0507 — Jet diagnostic">
-<meta property="og:description" content="Collection changed while `for` reads it">
+<meta property="og:description" content="While the loop is reading `{name}`, nothing may change it">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,41 +25,41 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0507</h1>
-<p>Collection changed while `for` reads it</p>
+<p>While the loop is reading `{name}`, nothing may change it</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">Collection changed while `for` reads it</p>
+<p class="diag-copy what" data-registry-field="what">While the loop is reading `{name}`, nothing may change it</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
+<p class="diag-copy why" data-registry-field="why">The loop reads `{name}` across its body, so {operation} can change the visited domain, element order, or termination.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Move the collection mutation outside the `for` loop, or iterate over a snapshot.</p>
+<p class="diag-copy fix" data-registry-field="fix">Choose the collection intent explicitly: use a separate result when the original traversal should stay unchanged; snapshot `{name}` and iterate the fixed original set when only the original values belong in the traversal; or use an explicit work queue when newly added values should be visited. Do not use index traversal unless its fixed domain and result meaning are intended.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0507</code>: <code>tests/ui/lambda_map_mutate_list.stderr</code>.</p>
 <pre class="diag">Error [E0507]: While the loop is reading `nums`, nothing may change it
-  --&gt; tests/ui/lambda_map_mutate_list.jet:5:13
+  --&gt; lambda_map_mutate_list.jet:5:14
     |
-  5 |             nums.push(0)
-    |             ^^^^
- Why: A `loop` borrows the whole collection until the body finishes
- Fix: Collect changes into a second list, or loop over indices: `loop i in 0..nums.len()-1 { }`
+  5 |             &amp;nums.push(0)
+    |              ^^^^
+ Why: The loop reads `nums` across its body, so `nums.push()` can change the visited domain, element order, or termination.
+ Fix: Choose the collection intent explicitly: use a separate result when the original traversal should stay unchanged; snapshot `nums` and iterate the fixed original set when only the original values belong in the traversal; or use an explicit work queue when newly added values should be visited. Do not use index traversal unless its fixed domain and result meaning are intended.
 More: jet-lang.dev/e/E0507
 
 Error [E0507]: While the loop is reading `nums`, nothing may change it
-  --&gt; tests/ui/lambda_map_mutate_list.jet:5:13
+  --&gt; lambda_map_mutate_list.jet:5:14
     |
-  5 |             nums.push(0)
-    |             ^^^^
- Why: A `loop` borrows the whole collection until the body finishes
- Fix: Collect changes into a second list, or loop over indices: `loop i in 0..nums.len()-1 { }`
+  5 |             &amp;nums.push(0)
+    |              ^^^^
+ Why: The loop reads `nums` across its body, so `nums.push()` can change the visited domain, element order, or termination.
+ Fix: Choose the collection intent explicitly: use a separate result when the original traversal should stay unchanged; snapshot `nums` and iterate the fixed original set when only the original values belong in the traversal; or use an explicit work queue when newly added values should be visited. Do not use index traversal unless its fixed domain and result meaning are intended.
 More: jet-lang.dev/e/E0507
 
 Error [E0204]: `nums` is already shared in this call, so it can&#39;t be changed here too
-  --&gt; tests/ui/lambda_map_mutate_list.jet:5:13
+  --&gt; lambda_map_mutate_list.jet:5:14
     |
-  5 |             nums.push(0)
-    |             ^^^^
+  5 |             &amp;nums.push(0)
+    |              ^^^^
  Why: While something is being looked at, nobody else may be changing it
  Fix: Drop the extra use of `nums`, or copy first with `~nums`
 More: jet-lang.dev/e/E0204

@@ -27,7 +27,7 @@ fn mapped_read(cell: Cell<Pair>) {
 }
 
 fn split_read(cell: Cell<Pair>) {
-    (left, right) :: cell.guard_read().split(
+    { first: left, second: right } :: cell.guard_read().split(
         pair -> pair.left,
         pair -> pair.right
     )
@@ -40,7 +40,7 @@ fn mapped_edit(cell: Cell<Pair>) {
 }
 
 fn split_edit(cell: Cell<Pair>) {
-    (left, right) :: cell.guard_edit().split(
+    { first: left, second: right } :: cell.guard_edit().split(
         pair -> pair.left,
         pair -> pair.right
     )
@@ -59,7 +59,7 @@ fn make_edit_guards(cell: Cell<Pair>) -> (
 }
 
 fn edit_returned_split(cell: Cell<Pair>) {
-    (left, right) :: make_edit_guards(cell)
+    { first: left, second: right } :: make_edit_guards(cell)
     &left.set(12)
     &right.set(13)
 }

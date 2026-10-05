@@ -274,6 +274,27 @@ fn scope_member_starts_at(facts: [Int], index: Int) -> Bool Never! {
     return kind_at(facts, cursor) == K_LBRACE
 }
 
+// S74: `{ fields } ::/ :=` begins a new record-pattern statement.
+fn record_binding_starts_at(facts: [Int], index: Int) -> Bool Never! {
+    if kind_at(facts, index) != K_LBRACE -> return false
+    depth := 0
+    cursor := index
+    loop cursor < facts.len() /% 4 {
+        kind :: kind_at(facts, cursor)
+        if kind == K_LBRACE -> depth += 1
+        if kind == K_RBRACE {
+            depth -= 1
+            if depth == 0 {
+                after :: skip_comment_tokens(facts, cursor + 1)
+                return kind_at(facts, after) == K_COLON_COLON || kind_at(facts, after) == K_COLON_EQ
+            }
+        }
+        if kind == K_EOF -> return false
+        cursor += 1
+    }
+    false
+}
+
 fn leading_dot_variant(facts: [Int], index: Int) -> Bool Never! {
     kind :: kind_at(facts, index)
     if kind == K_NULL -> return true
@@ -451,7 +472,7 @@ pub fn terminator_events(source: [U8], facts: [Int]) -> [Int] Never! {
                                 else -> false
                             }
                             if {
-                                split && previous == K_RPAREN -> {
+                                split && previous == K_RPAREN && !record_binding_starts_at(facts, index) -> {
                                     &events.push(2)
                                     &events.push(index)
                                     &events.push(start)

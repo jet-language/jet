@@ -9,7 +9,7 @@ const TASK_PROGRAM: &str = r#"
 use core.tasks as tasks
 
 fn run() {
-    (sender, ch) :: channel<Int>(1)
+    { sender, receiver: ch } :: channel<Int>(1)
     sender.send(1)
     print(ch.receive() ?? panic("channel closed"))
 }

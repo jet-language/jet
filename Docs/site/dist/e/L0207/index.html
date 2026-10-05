@@ -38,13 +38,31 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>L0207</code>: <code>tests/ui_lint/busy_spin.warn</code>.</p>
 <pre class="diag">Warning [L0207] (shared_busy_wait): This unbounded loop polls `Shared` state without waiting
-  --&gt; tests/ui_lint/busy_spin.jet:6:15
+  --&gt; busy_spin.jet:6:15
     |
   6 |     loop flag.ready == false {}
     |               ^^^^^^^^^^^^^^
- Why: Each turn reads a lock-backed value again; a non-blocking body can consume a core while another task makes progress
+ Why: An empty or non-blocking body reads a lock-backed value repeatedly and can consume a core while another task makes progress
  Fix: Wait on a `Condition` through an edit guard, or receive from a channel; an empty plain-field predicate can use that wait directly
 More: jet-lang.dev/e/L0207
+
+Warning [L0528] (mutable_never_reassigned): This mutable binding receives no later write, so its mutability is unused
+  --&gt; busy_spin.jet:45:5
+    |
+ 45 |     flag := shared Flag{ ready: true, ticks: 0 }
+    |     ^^^^
+ Why: The binding is marked mutable but receives no later write.
+ Fix: Declare it with `::` instead of `:=`
+More: jet-lang.dev/e/L0528
+
+Warning [L0528] (mutable_never_reassigned): This mutable binding receives no later write, so its mutability is unused
+  --&gt; busy_spin.jet:46:5
+    |
+ 46 |     changed := Condition.new()
+    |     ^^^^^^^
+ Why: The binding is marked mutable but receives no later write.
+ Fix: Declare it with `::` instead of `:=`
+More: jet-lang.dev/e/L0528
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

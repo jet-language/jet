@@ -862,7 +862,7 @@ pub(crate) fn method_call_in_subset(
     // every other shape: `Task.join()` is the 0-arg `join` (the 1-arg list
     // `join(sep)` is claimed by shape d above); `detach`/`receive` (0 args) and
     // `send` (1 arg) are used by no other builtin. The receiver is a `Task`/
-    // `Receiver`/`Sender` value `(tx, rx) := tasks.channel<T>()`-destructured or
+    // `Receiver`/`Sender` value `{ sender: tx, receiver: rx } := channel<T>()` or
     // `task`-produced. Tried after the collection builtins so a
     // list/map/string method can't be misclaimed.
     if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {

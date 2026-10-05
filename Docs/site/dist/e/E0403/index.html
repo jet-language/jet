@@ -36,25 +36,7 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Handle the failure locally, or declare a compatible failure domain in the enclosing return type.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0403</code>: <code>tests/ui/taskgroup_parameter_escape.stderr</code>.</p>
-<pre class="diag">Error [E1110]: `group` is a `Group` and cannot escape in a lambda
-  --&gt; tests/ui/taskgroup_parameter_escape.jet:3:46
-    |
-  3 | fn escape(group: Group) fn() Int -&gt; { return () -&gt; use_group(group) }
-    |                                              ^^^^^^^^^^^^^^^
- Why: a task group is a scoped spawn authority that may flow only through a direct function or method parameter
- Fix: move this work to a function or method that takes `group: Group` and call it directly
-More: jet-lang.dev/e/E1110
-
-Error [E0403]: this fallible call only works inside a function that returns a fallible result
-  --&gt; tests/ui/taskgroup_parameter_escape.jet:3:52
-    |
-  3 | fn escape(group: Group) fn() Int -&gt; { return () -&gt; use_group(group) }
-    |                                                    ^^^^^^^^^
- Why: ordinary fallible calls propagate their failure automatically to the caller
- Fix: declare `Err` in the return type before `-&gt;`, or handle the result with `??`
-More: jet-lang.dev/e/E0403
-</pre>
+<p>No UI snapshot currently mentions this code.</p>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

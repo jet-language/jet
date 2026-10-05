@@ -429,7 +429,7 @@ fn work() -> Int {
 }
 
 fn run() {
-    (sender, ch) :: channel<Int>()
+    { sender, receiver: ch } :: channel<Int>()
     task.group g {
         t :: task {
             sender.send(work())

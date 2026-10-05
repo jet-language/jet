@@ -40,7 +40,7 @@
 <pre class="diag">Error [E-OSTARGET-UNMATCHED-CALL]: `run_paint` uses `LinuxBackend`, whose `impl` is gated to `#Target(OS.Linux)`, without itself being gated to match
   --&gt; tests/ui/os_target_unmatched_call.jet:14:4
     |
- 14 | fn run_paint(b: LinuxBackend) Int -&gt; b.paint()
+ 14 | fn run_paint(b: LinuxBackend) -&gt; Int { b.paint() }
     |    ^^^^^^^^^
  Why: An OS-gated impl only exists in the build for that OS; code reachable on other platforms would hit a missing method, so this is caught at compile time, not left to fail as a link (or a raw rustc) error
  Fix: Only use `LinuxBackend` from inside an `impl` already gated to `#Target(OS.Linux)`, or move `run_paint`&#39;s body into one
