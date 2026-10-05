@@ -1144,7 +1144,7 @@ fn jet_services_start_with_worker_dispatcher<F: FnMut(&String, JetServiceWorkerH
         endpoint :: tree.workers[index].endpoint.clone()
         result :: match jet_services_authority_update(&endpoint, authority_started) {
             Ok(()) -> Ok(())
-            Err(JetServiceError.Partitioned(_)) | Err(JetServiceError.Unavailable(_)) -> service_authority_register(&endpoint, authority_started)
+            Err(.Partitioned(_)) | Err(.Unavailable(_)) -> service_authority_register(&endpoint, authority_started)
             Err(error) -> Err(^error)
         }.and_then(fn(()) {
             if running { jet_services_bind_delivery_endpoint(&tree.delivery, tree.state_authority.as_ref(), &endpoint) }

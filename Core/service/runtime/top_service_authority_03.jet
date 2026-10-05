@@ -488,7 +488,10 @@ impl JetJobQueue {
                     Err(jet_job_queue_sql_error("commit", error))
                 }
             }
-            Err(error) -> { _ :: store.rollback(); Err(error) }
+            Err(error) -> {
+                _ :: store.rollback()
+                Err(error)
+            }
         }
         self.store = ^store
         result

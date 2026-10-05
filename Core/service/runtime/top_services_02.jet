@@ -59,7 +59,7 @@ fn jet_services_stop(tree: &JetServiceTree) -> () JetServiceError! {
     }
     tree.started = false
     jet_services_publish_tree_topology(tree, JetDevtoolsTopologySupervisorState.Stopped)
-    match first_error { Some(error) -> Err(^error), None -> Ok(()) }
+    match first_error { .Val(error) -> Err(^error), None -> Ok(()) }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1979
 fn jet_services_restart_worker(worker: &JetServiceWorker, budget: &JetServiceRestartBudget, at: I64, preserve_mailbox: Bool) -> {
@@ -246,16 +246,16 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> () JetServiceError! {
         (JetServiceStateAdapter.Empty, None) -> {
             if tree.snapshot.is_some() || !tree.event_log.is_empty() -> return Err(JetServiceError.Policy("Empty state adapter cannot contain durable records"))
         }
-        (JetServiceStateAdapter.Snapshot, Some(authority)) -> {
+        (JetServiceStateAdapter.Snapshot, Val(authority)) -> {
             checked :: jet_services_attach_state_authority(authority, JetServiceStateAdapter.Snapshot)?
             prefix :: "v{checked.version}:"
             if !tree.event_log.is_empty() -> return Err(JetServiceError.Policy("Snapshot state adapter cannot contain event-log records"))
-            if Some(snapshot) :: &tree.snapshot {
+            if Val(snapshot) :: &tree.snapshot {
                 if snapshot.len() > MAX_SERVICE_MESSAGE -> return Err(JetServiceError.Policy("snapshot record exceeds the state record limit"))
                 _ :: jet_services_read_state_record(&prefix, snapshot)?
             }
         }
-        (JetServiceStateAdapter.EventLog, Some(authority)) -> {
+        (JetServiceStateAdapter.EventLog, Val(authority)) -> {
             checked :: jet_services_attach_state_authority(authority, JetServiceStateAdapter.EventLog)?
             prefix :: "v{checked.version}:"
             if tree.snapshot.is_some() -> return Err(JetServiceError.Policy("EventLog state adapter cannot contain a snapshot"))
@@ -264,7 +264,7 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> () JetServiceError! {
                 _ :: jet_services_read_state_record(&prefix, event)?
             }
         }
-        (JetServiceStateAdapter.Empty, Some(_)) | (JetServiceStateAdapter.Snapshot, None) | (JetServiceStateAdapter.EventLog, None) -> {
+        (JetServiceStateAdapter.Empty, Val(_)) | (JetServiceStateAdapter.Snapshot, None) | (JetServiceStateAdapter.EventLog, None) -> {
             return Err(JetServiceError.Policy("service state adapter and authority do not match"))
         }
     }
@@ -297,7 +297,7 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> () JetServiceError! {
     if tree.draining.len() > tree.workers.len() || tree.draining.iter().any(fn(name) { !worker_name_exists(name) }) {
         return Err(JetServiceError.Policy("service draining state is invalid"))
     }
-    if Some(receipt) :: &tree.last_upgrade {
+    if Val(receipt) :: &tree.last_upgrade {
         if receipt.from_generation != tree.previous_generation || receipt.to_generation != tree.generation
             || receipt.from_generation < 1 || receipt.to_generation <= receipt.from_generation
             || receipt.pinned_shards.len() > tree.workers.len() || receipt.pinned_shards.iter().any(fn(name) { !worker_name_exists(name) })
@@ -321,7 +321,7 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> () JetServiceError! {
             || workflow.activity_outcomes.iter().any(fn((key, outcome)) {
                 key.trim().is_empty() || key.len() > MAX_SERVICE_NAME || key.chars().any(fn(c) { c.is_control() })
                     || match outcome {
-                        JetTaskOutcome.Panicked(reason) -> reason.trim().is_empty() || reason.len() > MAX_SERVICE_MESSAGE || reason.chars().any(fn(c) { c.is_control() })
+                        .Panicked(reason) -> reason.trim().is_empty() || reason.len() > MAX_SERVICE_MESSAGE || reason.chars().any(fn(c) { c.is_control() })
                         _ -> false
                     }
             })
@@ -358,7 +358,7 @@ fn jet_services_send(tree: &JetServiceTree, endpoint: &JetServiceEndpoint, messa
     if !running || draining -> return Err(JetServiceError.NotStarted("worker `{worker_name}` is not running"))
     match service_authority_try_send(endpoint, ^message) {
         Ok(()) -> {}
-        Err(JetServiceError.Full(_)) -> return Err(JetServiceError.Full("mailbox for `{worker_name}` is full (capacity {capacity})"))
+        Err(.Full(_)) -> return Err(JetServiceError.Full("mailbox for `{worker_name}` is full (capacity {capacity})"))
         Err(error) -> return Err(^error)
     }
     if Ok(worker) :: jet_services_find_worker_mut(tree, endpoint) {
@@ -412,7 +412,7 @@ fn jet_services_receive(tree: &JetServiceTree, endpoint: &JetServiceEndpoint) ->
                 before :: worker.mailbox.channel.snapshot()
                 if Err(error) :: worker.mailbox.channel.try_send(message.clone()) {
                     delivery_error :: match error {
-                        JetServiceChannelError.Full(_) -> JetServiceError.Policy("service authority delivery exceeded mailbox capacity")
+                        .Full(_) -> JetServiceError.Policy("service authority delivery exceeded mailbox capacity")
                         JetServiceChannelError.Closed -> JetServiceError.NotStarted("service authority worker mailbox is closed")
                         JetServiceChannelError.Empty -> JetServiceError.Policy("service channel returned an invalid send result")
                     }
@@ -460,7 +460,7 @@ fn jet_services_receive(tree: &JetServiceTree, endpoint: &JetServiceEndpoint) ->
                 #Unsafe("update synchronized native worker wait target, release guard before publishing topology") {
                     if Ok(state) :: worker.task.lock() {
                         state.status = JetServiceSupervisorStatus.Running
-                        state.topology_wait_target = Some(^wait_target)
+                        state.topology_wait_target = Val(^wait_target)
                         snapshot :: state.clone()
                         drop(^state)
                         jet_services_topology_publish_state(&snapshot)
@@ -469,7 +469,7 @@ fn jet_services_receive(tree: &JetServiceTree, endpoint: &JetServiceEndpoint) ->
                 return Err(JetServiceError.Ambiguous("mailbox for `{worker.name}` is empty"))
             }
             Err(JetServiceChannelError.Closed) -> return Err(JetServiceError.NotStarted("mailbox for `{worker.name}` is closed"))
-            Err(JetServiceChannelError.Full(_)) -> return Err(JetServiceError.Policy("service channel returned an invalid receive result"))
+            Err(.Full(_)) -> return Err(JetServiceError.Policy("service channel returned an invalid receive result"))
         }
         message_bytes :: message.len() as U64
         worker.sent_bytes = worker.sent_bytes.saturating_add(message_bytes)
@@ -478,13 +478,13 @@ fn jet_services_receive(tree: &JetServiceTree, endpoint: &JetServiceEndpoint) ->
             if Ok(state) :: worker.task.lock() {
                 state.status = JetServiceSupervisorStatus.Running
                 state.topology_wait_target = None
-                Some(state.clone())
+                Val(state.clone())
             } else { None }
         }
         should_stop :: worker.mailbox.channel.depth() == 0
         (^message, should_stop, ^mailbox_before, ^snapshot)
     }
-    if Some(snapshot) :: snapshot.as_ref() -> jet_services_topology_publish_state(snapshot)
+    if Val(snapshot) :: snapshot.as_ref() -> jet_services_topology_publish_state(snapshot)
     if draining && should_stop {
         if Err(error) :: jet_services_finish_drain(tree, endpoint) {
             restore :: tree.workers.iter_mut().find(fn(worker) { worker.endpoint == endpoint })
@@ -517,7 +517,7 @@ fn jet_services_local_delivery_ids(tree: &JetServiceTree, endpoint: &JetServiceE
     tree.idempotency_seen.iter().filter_map(fn((key, recorded_endpoint, message)) {
         if recorded_endpoint.tree != endpoint.tree || recorded_endpoint.worker != endpoint.worker
             || recorded_endpoint.authority != endpoint.authority || !messages.iter().any(fn(queued) { queued == message }) -> return None
-        Some(service_authority_id(&runtime, recorded_endpoint, message, key))
+        Val(service_authority_id(&runtime, recorded_endpoint, message, key))
     }).collect()
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:2902
@@ -539,7 +539,7 @@ fn jet_services_fail_worker(tree: &JetServiceTree, endpoint: &JetServiceEndpoint
         .ok_or_else(fn() { JetServiceError.Unknown("endpoint {endpoint.tree}/{endpoint.worker} is not in this tree") })?
     supervisor_index :: tree.groups.iter().position(fn(group) { group.workers.iter().any(fn(name) { name == &worker_name }) })
         .unwrap_or(tree.groups.len())
-    scope :: if Some(group) :: tree.groups.iter().find(fn(group) { group.workers.iter().any(fn(name) { name == &worker_name }) }) {
+    scope :: if Val(group) :: tree.groups.iter().find(fn(group) { group.workers.iter().any(fn(name) { name == &worker_name }) }) {
         group.workers.iter().filter_map(fn(name) { tree.workers.iter().position(fn(worker) { &worker.name == name }) }).collect()
     } else {
         tree.workers.iter().enumerate()
@@ -584,16 +584,16 @@ fn jet_services_fail_worker(tree: &JetServiceTree, endpoint: &JetServiceEndpoint
                 }
             }
             return Err(match rollback_error {
-                Some(rollback_error) -> JetServiceError.Policy("{error.jet_show()}; service failure authority rollback failed: {rollback_error.jet_show()}")
+                .Val(rollback_error) -> JetServiceError.Policy("{error.jet_show()}; service failure authority rollback failed: {rollback_error.jet_show()}")
                 None -> ^error
             })
         }
         authority_updated.push(index)
     }
     _ :: jet_services_task_fail(&tree.workers[start].task, "worker `{worker_name}` failed under supervisor")
-    if Some(supervisor) :: tree.supervisor_tasks.get(supervisor_index) -> _ :: jet_services_task_fail(supervisor, "supervisor restarted worker `{worker_name}`")
+    if Val(supervisor) :: tree.supervisor_tasks.get(supervisor_index) -> _ :: jet_services_task_fail(supervisor, "supervisor restarted worker `{worker_name}`")
     loop index in ^target_indices -> jet_services_restart_worker(&tree.workers[index], &budget, now, preserve_mailboxes)
-    if Some(supervisor) :: tree.supervisor_tasks.get(supervisor_index) -> _ :: jet_services_task_restart(supervisor)
+    if Val(supervisor) :: tree.supervisor_tasks.get(supervisor_index) -> _ :: jet_services_task_restart(supervisor)
     // Restart cannot silently rejoin an authority-partitioned side of the graph.
     loop worker in &tree.workers {
         if tree.partitioned.iter().any(fn(name) { name == &worker.name }) {
@@ -602,7 +602,7 @@ fn jet_services_fail_worker(tree: &JetServiceTree, endpoint: &JetServiceEndpoint
             #Unsafe("retain partitioned service status and cancelled failure under the native task mutex") {
                 if Ok(state) :: worker.task.lock() {
                     state.status = JetServiceSupervisorStatus.Partitioned
-                    state.failure = Some(JetTaskFailure.Cancelled)
+                    state.failure = Val(JetTaskFailure.Cancelled)
                 }
             }
         }
@@ -701,7 +701,7 @@ fn jet_services_set_state_snapshot(tree: &JetServiceTree, store: JetServiceState
     migration :: jet_services_migration_from_name(&migration)?
     authority :: jet_services_state_authority(&store, ^schema, version, ^migration)?
     tree.state_adapter = JetServiceStateAdapter.Snapshot
-    tree.state_authority = Some(jet_services_attach_state_authority(&authority, JetServiceStateAdapter.Snapshot)?)
+    tree.state_authority = Val(jet_services_attach_state_authority(&authority, JetServiceStateAdapter.Snapshot)?)
     Ok(())
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:3303
@@ -711,7 +711,7 @@ fn jet_services_set_state_event_log(tree: &JetServiceTree, store: JetServiceStat
     migration :: jet_services_migration_from_name(&migration)?
     authority :: jet_services_state_authority(&store, ^schema, version, ^migration)?
     tree.state_adapter = JetServiceStateAdapter.EventLog
-    tree.state_authority = Some(jet_services_attach_state_authority(&authority, JetServiceStateAdapter.EventLog)?)
+    tree.state_authority = Val(jet_services_attach_state_authority(&authority, JetServiceStateAdapter.EventLog)?)
     Ok(())
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:3330
@@ -822,7 +822,7 @@ fn jet_services_rollout_encode(tree_name: &String, state: &JetServiceRolloutStat
     jet_services_rollout_scalar(&bytes, &"previous", state.previous_generation)
     match &state.last_upgrade {
         None -> jet_services_rollout_scalar(&bytes, &"upgrade", "none")
-        Some(receipt) -> {
+        .Val(receipt) -> {
             jet_services_rollout_scalar(&bytes, &"upgrade", "present")
             jet_services_rollout_scalar(&bytes, &"upgrade_from", receipt.from_generation)
             jet_services_rollout_scalar(&bytes, &"upgrade_to", receipt.to_generation)
@@ -872,7 +872,7 @@ fn jet_services_rollout_decode(tree_name: &String, bytes: &[U8]) -> JetServiceRo
     if checksum != expected -> return Err(jet_services_state_error("rollout journal checksum does not match its contents"))
     text :: from_utf8(&bytes[..marker_start + 1]).map_err(fn(_) { jet_services_state_error("rollout journal is not valid UTF-8") })?
     lines := text.lines()
-    if lines.next() != Some("JET-SERVICE-ROLLOUT/1") -> return Err(jet_services_state_error("rollout journal magic is invalid"))
+    if lines.next() != "JET-SERVICE-ROLLOUT/1" -> return Err(jet_services_state_error("rollout journal magic is invalid"))
     if jet_services_rollout_read_frame(&lines, &"tree")? != tree_name -> return Err(jet_services_state_error("rollout journal belongs to a different service tree"))
     generation :: jet_services_rollout_read_scalar(&lines, &"generation")?
     previous_generation :: jet_services_rollout_read_scalar(&lines, &"previous")?
@@ -898,7 +898,7 @@ fn jet_services_rollout_decode(tree_name: &String, bytes: &[U8]) -> JetServiceRo
             }
             _ :: jet_services_migration_from_name(&migration)?
             if rollback_available != !rollback_store.is_empty() -> return Err(jet_services_state_error("rollout journal rollback availability is inconsistent"))
-            Some(JetServiceUpgradeReceipt{from_generation, to_generation, migration: ^migration, rollback_store: ^rollback_store,
+            Val(JetServiceUpgradeReceipt{from_generation, to_generation, migration: ^migration, rollback_store: ^rollback_store,
                 rollback_available, pinned_shards: ^pinned_shards})
         }
         _ -> return Err(jet_services_state_error("rollout journal upgrade marker is invalid"))

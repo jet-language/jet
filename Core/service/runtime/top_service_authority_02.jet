@@ -492,7 +492,7 @@ fn jet_services_runtime_send(runtime: &JetServiceRuntime, endpoint: &JetServiceE
     entries := service_authority_entries(runtime, &records)?
     now :: service_authority_now()
     if service_authority_cleanup_expired(runtime, &entries, now)? -> entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?
-    if entries.iter().find(fn(entry) { entry.key.as_str() == key.as_str() && !entry.authority.is_empty() }) is Val(entry) {
+    if entries.iter().find(fn(entry) { entry.key.as_str() == key.as_str() && !entry.authority.is_empty() }) == .Val(entry) {
         // Generation-scoped provider tokens may change; logical route/message identity may not.
         if entry.tree != endpoint.tree || entry.worker != endpoint.worker || entry.message.as_str() != message.as_str() -> return Err(JetServiceError.Policy("idempotency key was already used by another service authority or delivery"))
         duplicate_delivery :: fn() { service_authority_delivery_for_entry(runtime, entry, true) }

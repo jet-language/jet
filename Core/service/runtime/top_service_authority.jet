@@ -78,7 +78,7 @@ impl<T> JetServiceChannel<T> {
     #Unsafe("dequeue buffered values before reporting closed, under the same FIFO mutex")
     fn try_recv(self: &JetServiceChannel<T>) -> T JetServiceChannelError<T>! {
         values := self.values.lock().unwrap()
-        if Some(value) :: values.pop_front() { return Ok(^value) }
+        if Val(value) :: values.pop_front() { return Ok(^value) }
         if self.closed.load(Ordering.Acquire) { Err(JetServiceChannelError.Closed) } else { Err(JetServiceChannelError.Empty) }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:82
@@ -220,7 +220,7 @@ pub fn jet_services_execution_scope(endpoint: &JetServiceEndpoint) -> JetService
     jet_services_authority_validate(endpoint)?
     // GATE #4565: kernel primitive
     previous :: #Unsafe("install validated endpoint only in this thread; preserve nested scope") {
-        JET_SERVICE_EXECUTION_ENDPOINT.with(fn(slot) { slot.replace(Some(endpoint.clone())) })
+        JET_SERVICE_EXECUTION_ENDPOINT.with(fn(slot) { slot.replace(Val(endpoint.clone())) })
     }
     Ok(JetServiceExecutionScope{previous})
 }
@@ -231,7 +231,7 @@ fn jet_services_active_execution_endpoint_if_present() -> JetServiceEndpoint? Je
     if None == endpoint { return Ok(None) }
     issued :: endpoint.unwrap()
     jet_services_authority_validate(&issued)?
-    Ok(Some(^issued))
+    Ok(Val(^issued))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:321
 pub fn jet_services_active_execution_endpoint() -> JetServiceEndpoint JetServiceError! {
@@ -269,7 +269,7 @@ impl Drop for ServiceAuthorityFileLock {
 fn service_authority_file_lock(store: &String,suffix: &String) -> ServiceAuthorityFileLock JetServiceError! {
     service_authority_validate_store_path(store)?
     path :: OSPath.from("{store}.{suffix}.lock")
-    if Some(parent) :: path.parent().filter(fn(parent) { !parent.as_os_str().is_empty() }) {
+    if Val(parent) :: path.parent().filter(fn(parent) { !parent.as_os_str().is_empty() }) {
         fs.create_dir_all(parent).map_err(fn(error) { service_authority_error("could not create service lock directory: {error}") })?
     }
     started :: service_authority_now()
@@ -290,7 +290,10 @@ fn service_authority_file_lock(store: &String,suffix: &String) -> ServiceAuthori
                     stale :: fs.metadata(&path).and_then(fn(metadata) { metadata.modified() }).ok()
                         .and_then(fn(modified) { modified.elapsed().ok() })
                         .is_some_and(fn(age) { age >= Duration.from_millis(SERVICE_AUTH_LOCK_STALE_MS as U64) })
-                    if stale { _ :: fs.remove_file(&path); continue }
+                    if stale {
+                        _ :: fs.remove_file(&path)
+                        continue
+                    }
                     if now.saturating_sub(started) >= SERVICE_AUTH_LOCK_TIMEOUT_MS {
                         return Err(service_authority_error("service authority lock remained held beyond its recovery budget"))
                     }
@@ -347,7 +350,7 @@ fn service_authority_retention_deadline(now: I64,retention_ms: I64) -> I64 {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:508
 fn service_authority_entry_expired(entry: &ServiceAuthorityEntry,now: I64) -> Bool {
     entry.state != JetDeliveryState.DeadLettered && entry.state != JetDeliveryState.Cancelled &&
-        match entry.retained_until { Some(until) -> until <= now, None -> entry.expires <= now }
+        match entry.retained_until { .Val(until) -> until <= now, None -> entry.expires <= now }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:518
 // GATE #4565: kernel primitive
@@ -366,7 +369,7 @@ fn service_authority_validate_store_path(store: &String) -> () JetServiceError! 
         }
     }
     parent := path.parent()
-    while Some(directory) :: parent {
+    while Val(directory) :: parent {
         match fs.symlink_metadata(directory) {
             Ok(metadata) -> {
                 if metadata.file_type().is_symlink() || !metadata.is_dir() {
@@ -501,10 +504,13 @@ fn service_authority_register(endpoint: &JetServiceEndpoint,started: Bool) -> ()
     if !registry.contains_key(&key) && registry.values().any(fn(state) { state.authority == endpoint.authority && state.tree != endpoint.tree }) {
         return Err(JetServiceError.Revoked("service authority does not match its registered tree"))
     }
-    if Some(state) :: registry.get_mut(&key) {
+    if Val(state) :: registry.get_mut(&key) {
         if state.tree != endpoint.tree || state.worker != endpoint.worker { return Err(JetServiceError.Revoked("service endpoint authority does not match its tree")) }
         if started && state.partitioned { return Err(JetServiceError.Partitioned("service endpoint authority is partitioned")) }
-        if state.generation != endpoint.generation { state.store = None; state.draining = false }
+        if state.generation != endpoint.generation {
+            state.store = None
+            state.draining = false
+        }
         state.generation = endpoint.generation
         state.started = started
         if endpoint.channel.is_some() { state.channel = endpoint.channel.clone() }
@@ -561,7 +567,7 @@ fn service_authority_adopt_alias(source: &JetServiceEndpoint,authority: String) 
     source_state :: registry.get(&source_key).cloned().ok_or_else(fn() { JetServiceError.Partitioned("service endpoint authority is not registered") })?
     if source_state.tree != alias.tree || source_state.worker != alias.worker { return Err(JetServiceError.Revoked("service authority alias does not match its worker")) }
     if source_state.partitioned || !source_state.started { return Err(JetServiceError.Partitioned("service authority alias source is not active")) }
-    if Some(existing) :: registry.get(&alias_key) {
+    if Val(existing) :: registry.get(&alias_key) {
         if existing.tree != alias.tree || existing.worker != alias.worker || existing.generation != alias.generation {
             return Err(JetServiceError.Revoked("service authority alias is already bound to another worker"))
         }
@@ -584,7 +590,10 @@ pub fn jet_services_authority_update(endpoint: &JetServiceEndpoint,started: Bool
         state := registry.get_mut(&key).ok_or_else(fn() { JetServiceError.Partitioned("service endpoint authority is not registered") })?
         if state.tree != endpoint.tree || state.worker != endpoint.worker { return Err(JetServiceError.Revoked("service endpoint authority does not match its tree")) }
         if started && state.partitioned { return Err(JetServiceError.Partitioned("service endpoint authority is partitioned")) }
-        if state.generation != endpoint.generation { state.store = None; state.draining = false }
+        if state.generation != endpoint.generation {
+            state.store = None
+            state.draining = false
+        }
         state.generation = endpoint.generation
         state.started = started
         if endpoint.channel.is_some() { state.channel = endpoint.channel.clone() }
@@ -648,7 +657,7 @@ fn service_authority_try_send(endpoint: &JetServiceEndpoint,message: String) -> 
     key :: service_endpoint_key(&endpoint.authority,&endpoint.worker,endpoint.generation)
     registry :: service_endpoint_registry().lock().map_err(fn(_) { service_authority_error("service endpoint registry lock is poisoned") })?
     state :: match registry.get(&key) {
-        Some(state) -> state,
+        .Val(state) -> state,
         None -> {
             if registry.values().any(fn(candidate) { candidate.tree == endpoint.tree && candidate.worker == endpoint.worker && candidate.generation == endpoint.generation }) {
                 return Err(JetServiceError.Revoked("service endpoint authority does not match the registered worker"))
@@ -667,7 +676,7 @@ fn service_authority_try_send(endpoint: &JetServiceEndpoint,message: String) -> 
     channel :: state.channel.clone().or_else(fn() { endpoint.channel.clone() }).ok_or_else(fn() { JetServiceError.Partitioned("service endpoint mailbox is not connected") })?
     match channel.try_send(^message) {
         Ok(()) -> Ok(()),
-        Err(JetServiceChannelError.Full(_)) -> Err(JetServiceError.Full("service endpoint mailbox is full")),
+        Err(.Full(_)) -> Err(JetServiceError.Full("service endpoint mailbox is full")),
         Err(JetServiceChannelError.Closed) -> Err(JetServiceError.NotStarted("service endpoint mailbox is closed")),
         Err(JetServiceChannelError.Empty) -> Err(JetServiceError.Policy("service channel returned an invalid send result"))
     }
@@ -683,7 +692,7 @@ pub fn jet_services_endpoint_receive(endpoint: &JetServiceEndpoint) -> String Je
         Ok(message) -> Ok(^message),
         Err(JetServiceChannelError.Empty) -> Err(JetServiceError.Ambiguous("service endpoint mailbox is empty")),
         Err(JetServiceChannelError.Closed) -> Err(JetServiceError.NotStarted("service endpoint mailbox is closed")),
-        Err(JetServiceChannelError.Full(_)) -> Err(JetServiceError.Policy("service channel returned an invalid receive result"))
+        Err(.Full(_)) -> Err(JetServiceError.Policy("service channel returned an invalid receive result"))
     }
 }
 use core.service.runtime.top_service_authority_02.[service_authority_read,service_authority_entries,service_authority_append_event,service_authority_entry_routes_to_endpoint,service_authority_hex,service_authority_unhex]
@@ -703,18 +712,18 @@ fn service_authority_current_endpoint(runtime: &JetServiceRuntime,entry: &Servic
             // A stopped replacement never revokes a still-running source generation.
             if state.generation > entry.generation && state.started { newer_generation = true }
             candidate :: (state.authority.clone(),state.tree.clone(),state.worker.clone(),state.generation,
-                state.store.as_ref().and_then(fn((bound,generation)) { if *generation == state.generation { Some(bound.clone()) } else { None } }))
+                state.store.as_ref().and_then(fn((bound,generation)) { if *generation == state.generation { Val(bound.clone()) } else { None } }))
             if state.authority == entry.authority {
-                if state.generation == entry.generation && state.started { exact = Some(^candidate) }
+                if state.generation == entry.generation && state.started { exact = Val(^candidate) }
                 else if state.generation == entry.generation { exact_stopped = true }
                 else if state.generation > entry.generation && state.started {
-                    if newer_exact.as_ref().is_none_or(fn(current) { current.3 < state.generation }) { newer_exact = Some(^candidate) }
+                    if newer_exact.as_ref().is_none_or(fn(current) { current.3 < state.generation }) { newer_exact = Val(^candidate) }
                 }
             } else if state.generation == entry.generation && state.started { candidates.push(^candidate) }
         }
         (^exact,^newer_exact,^candidates,exact_stopped,newer_generation)
     }
-    selected :: if Some(exact) :: exact { ^exact } else if Some(newer_exact) :: newer_exact { ^newer_exact } else {
+    selected :: if Val(exact) :: exact { ^exact } else if Val(newer_exact) :: newer_exact { ^newer_exact } else {
         bound :: candidates.iter().filter(fn(candidate) { candidate.4.as_ref() == Some(&store) }).collect<[&(String,String,String,I64,String?)]>()
         if bound.len() == 1 { bound[0].clone() }
         else if bound.len() > 1 { return Err(JetServiceError.Ambiguous("multiple active service authorities are bound to this store")) }
@@ -740,7 +749,7 @@ pub fn jet_services_authority_validate(endpoint: &JetServiceEndpoint) -> () JetS
     key :: service_endpoint_key(&endpoint.authority,&endpoint.worker,endpoint.generation)
     registry :: service_endpoint_registry().lock().map_err(fn(_) { service_authority_error("service endpoint registry lock is poisoned") })?
     state :: match registry.get(&key) {
-        Some(state) -> state,
+        .Val(state) -> state,
         None -> {
             if registry.values().any(fn(candidate) { candidate.tree == endpoint.tree && candidate.worker == endpoint.worker && candidate.generation == endpoint.generation }) {
                 return Err(JetServiceError.Revoked("service endpoint authority does not match the registered worker"))
@@ -772,7 +781,7 @@ fn service_authority_bound_store(endpoint: &JetServiceEndpoint) -> String? JetSe
     registry :: service_endpoint_registry().lock().map_err(fn(_) { service_authority_error("service endpoint registry lock is poisoned") })?
     state :: registry.get(&key).ok_or_else(fn() { JetServiceError.Partitioned("service endpoint authority is not registered") })?
     if state.tree != endpoint.tree || state.worker != endpoint.worker { return Err(JetServiceError.Revoked("service endpoint authority does not match its tree")) }
-    Ok(state.store.as_ref().and_then(fn((store,generation)) { if *generation == endpoint.generation { Some(store.clone()) } else { None } }))
+    Ok(state.store.as_ref().and_then(fn((store,generation)) { if *generation == endpoint.generation { Val(store.clone()) } else { None } }))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1494
 // GATE #4565: kernel primitive
@@ -785,12 +794,12 @@ fn service_authority_bind_store(runtime: &JetServiceRuntime,endpoint: &JetServic
     registry := service_endpoint_registry().lock().map_err(fn(_) { service_authority_error("service endpoint registry lock is poisoned") })?
     state := registry.get_mut(&key).ok_or_else(fn() { JetServiceError.Partitioned("service endpoint authority is not registered") })?
     if state.tree != endpoint.tree || state.worker != endpoint.worker { return Err(JetServiceError.Revoked("service endpoint authority does not match its tree")) }
-    if Some((bound,generation)) :: state.store.as_ref() {
+    if Val((bound,generation)) :: state.store.as_ref() {
         if *generation == endpoint.generation {
             if bound != &store { return Err(JetServiceError.Revoked("service endpoint authority is bound to another store")) }
         } else { state.store = None }
     }
-    if state.store.is_none() { state.store = Some((store.clone(),endpoint.generation)) }
+    if state.store.is_none() { state.store = Val((store.clone(),endpoint.generation)) }
     Ok(^store)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1532

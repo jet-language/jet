@@ -70,8 +70,8 @@ fn jet_services_execution_scope(endpoint: &JetServiceEndpoint) -> JetServiceExec
 }
 // Rust: crates/jet-codegen/src/Prelude/Service.rs:122
 fn service_display_runtime(value: &MirRuntimeValue) -> String? {
-    if ServicesLite.service_display_value_runtime(value) is Val(rendered) -> return Val(^rendered)
-    if ServicesLite.service_show_value_runtime(value) is Val(rendered) -> return Val(^rendered)
+    if ServicesLite.service_display_value_runtime(value) == .Val(rendered) -> return Val(^rendered)
+    if ServicesLite.service_show_value_runtime(value) == .Val(rendered) -> return Val(^rendered)
     value :: ServicesLite.runtime_to_ct_value(value).ok()?
     SyncLite.sync_show_value(&value).or_else(fn() { display_core_pure_value(&value) })
 }
