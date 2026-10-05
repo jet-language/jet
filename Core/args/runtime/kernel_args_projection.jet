@@ -77,14 +77,23 @@ fn jet_guided_tui_update(model: JetGuidedTuiModel, message: JetGuidedTuiMessage)
         .Key(code, modifiers) -> {
             if (modifiers & 1) != 0 {
                 match code {
-                    "c" -> { model.error = Val("guided input cancelled"); model.done = true }
-                    "u" -> { model.value.clear(); model.cursor = 0 }
+                    "c" -> {
+                        model.error = Val("guided input cancelled")
+                        model.done = true
+                    }
+                    "u" -> {
+                        model.value.clear()
+                        model.cursor = 0
+                    }
                     _ -> {}
                 }
             } else {
                 match code {
                     "enter" -> model.done = true
-                    "escape" -> { model.error = Val("guided input cancelled"); model.done = true }
+                    "escape" -> {
+                        model.error = Val("guided input cancelled")
+                        model.done = true
+                    }
                     "left" -> model.cursor = (model.cursor - 1).max(0)
                     "right" -> model.cursor = (model.cursor + 1).min(model.value.chars().count())
                     "backspace" -> {
@@ -134,7 +143,7 @@ fn jet_guided_visible_input(model: &JetGuidedTuiModel) -> String {
 // Rust: crates/jet-codegen/src/Prelude/Core/ArgsProjection.rs:194
 fn jet_guided_tui_view(model: &JetGuidedTuiModel) -> JetUiNode {
     children := [jet_ui_text(model.label), jet_ui_text_input(jet_guided_visible_input(model), JetUiImeMode.Native)]
-    if model.error is Val(error) { children.push(jet_ui_text("Correction: {error}")) }
+    if model.error == .Val(error) { children.push(jet_ui_text("Correction: {error}")) }
     jet_ui_box(children)
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/ArgsProjection.rs:205
@@ -173,14 +182,17 @@ fn jet_args_guided_tui_prompt(field: &JetGuidedField, initial: String, error: St
     program.step()
     loop {
         key :: jet_term_read_key()
-        if key is .Unknown {
+        if key == .Unknown {
             jet_term_leave()
             return Err("guided input ended before the form was submitted")
         }
         event :: JetTuiEvent.key_with_modifiers(key.code(), key.modifier_bits())
         program.dispatch_event(event)
         program.step()
-        if jet_guided_tui_frame(&program) is Err(error) { jet_term_leave(); return Err(error) }
+        if jet_guided_tui_frame(&program) == .Err(error) {
+            jet_term_leave()
+            return Err(error)
+        }
         model :: program.model() ?? {
             jet_term_leave()
             return Err("guided input model stopped unexpectedly")
@@ -197,7 +209,7 @@ fn jet_args_guided_tui_prompt(field: &JetGuidedField, initial: String, error: St
 fn jet_args_guided_line_prompt(field: &JetGuidedField, initial: String, error: String?) -> String Err! {
     prompt := if field.help.is_empty() { "{field.name}:" } else { "{field.name} — {field.help}:" }
     if not initial.is_empty() { prompt.push_str(" [{initial}]") }
-    if error is Val(error) { prompt.push_str(" Correction: {error}") }
+    if error == .Val(error) { prompt.push_str(" Correction: {error}") }
     prompt.push(' ')
     jet_term_write_stderr(prompt, true).map_err(fn(output_error) { "guided prompt output failed: {output_error}" })?
     match jet_term_read_stdin_line().map_err(fn(error) { error.to_string() })? {
