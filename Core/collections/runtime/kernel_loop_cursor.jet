@@ -72,7 +72,7 @@ pub fn jet_loop_iter_typed_value<T: JetLoopItem, I: Iterator<Item = T>>(cursor: 
 // Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:123
 pub fn jet_loop_iter_typed_advance<T: JetLoopItem, I: Iterator<Item = T>>(cursor: &JetLoopIterCursor<T, I>) -> Unit T.Error! {
     if cursor.exhausted -> return Ok(())
-    for _ in 1..cursor.step {
+    for _ in 1..<cursor.step {
         item :: if cursor.iter.next() == {
             .Val(item) -> item
             .None -> {
@@ -105,10 +105,10 @@ impl JetStringChars.Iterator {
     // Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:171
     fn next(self: &JetStringChars) -> Char? {
         end :: self.offset.saturating_add(4).min(self.bytes.len())
-        bytes :: self.bytes.get(self.offset..end)?
+        bytes :: self.bytes.get(self.offset..<end)?
         tail :: if str.from_utf8(bytes) == {
             .Ok(tail) -> tail
-            .Err(error) -> str.from_utf8(bytes[..error.valid_up_to()]).ok()?
+            .Err(error) -> str.from_utf8(bytes[0..<error.valid_up_to()]).ok()?
         }
         value :: tail.chars().next()?
         self.offset += value.len_utf8()

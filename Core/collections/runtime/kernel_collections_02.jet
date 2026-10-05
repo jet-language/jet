@@ -78,7 +78,7 @@ impl JetRange.JetLoopSource {
             .Plain -> {
                 if !by_value -> jet_loop_source_error(source_kind)
                 end :: if self.exclusive -> self.end else -> self.end.saturating_add(1)
-                Box.new((self.start..end).map(fn(value) { Box.new(JetInt.from_i64(value)) as JetLoopAny }))
+                Box.new((self.start..<end).map(fn(value) { Box.new(JetInt.from_i64(value)) as JetLoopAny }))
             }
             _ -> jet_loop_source_error(source_kind)
         }
@@ -121,7 +121,7 @@ impl JetStringSplitIter.Iterator {
                         }
                         ch :: self.source[self.offset..].chars().next().expect("offset in bounds")
                         width :: ch.len_utf8()
-                        out :: self.source[self.offset..self.offset + width].to_owned()
+                        out :: self.source[self.offset..<self.offset + width].to_owned()
                         self.offset += width
                         .Val(out)
                     }
@@ -140,7 +140,7 @@ impl JetStringSplitIter.Iterator {
                     .Val((relative, separator_len)) -> {
                         end :: start + relative
                         self.offset = end + separator_len
-                        .Val(self.source[start..end].to_owned())
+                        .Val(self.source[start..<end].to_owned())
                     }
                     .None -> {
                         self.done = true
@@ -167,7 +167,7 @@ fn jet_bytes_ascii_whitespace_for_each(bytes: &[U8], space: U8, ws_start: U8, ws
     start := 0
     for (index, byte) in bytes.iter().enumerate() {
         if byte == space || (byte >= ws_start && byte <= ws_end) {
-            if start < index -> f(bytes[start..index], false)
+            if start < index -> f(bytes[start..<index], false)
             start = index + 1
         }
     }
@@ -218,7 +218,7 @@ impl<T> JetChunksIter<T>.Iterator {
     // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2148
     fn next(self: &JetChunksIter<T>) -> [T]? {
         chunk := [T].with_capacity(self.size)
-        for _ in 0..self.size {
+        for _ in 0..<self.size {
             if self.inner.next() == {
                 .Val(x) -> chunk.push(^x)
                 .None -> break
@@ -312,7 +312,7 @@ fn jet_iter_enumerate<T, U>(it: JetIter<T>, f: fn(I64, &T) -> U) -> JetIter<U> {
     JetIter { source: Box.new(it.source.enumerate().map(fn(entry) { f(entry.0 as I64, &entry.1) })) }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2319
-fn jet_iter_indexes(n: I64) -> JetIter<I64> { JetIter { source: Box.new((0..n.max(0)).map(fn(i) { i })) } }
+fn jet_iter_indexes(n: I64) -> JetIter<I64> { JetIter { source: Box.new((0..<n.max(0)).map(fn(i) { i })) } }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2323
 fn jet_iter_zip<A, B, O>(a: JetIter<A>, b: JetIter<B>, f: fn(A, B) -> O) -> JetIter<O> {
     JetIter { source: Box.new(iter.from_fn(fn() { jet_zip_short_step(a.source.next(), fn() { b.source.next() }).map(fn(pair) { f(^pair.0, ^pair.1) }) })) }
@@ -448,7 +448,7 @@ fn jet_list_partition<T, S, I: IntoIterator<Item = T>>(xs: I, f: fn(&T) -> Bool,
 fn jet_iter_repeat<T: Clone>(it: JetIter<T>, n: I64) -> JetIter<T> {
     xs :: it.to_list()
     count :: n.max(0) as Usize
-    JetIter { source: Box.new((0..count).flat_map(fn(_) { xs.clone().into_iter() })) }
+    JetIter { source: Box.new((0..<count).flat_map(fn(_) { xs.clone().into_iter() })) }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2658
 fn jet_iter_cycle<T: Clone>(it: JetIter<T>, n: I64) -> JetIter<T> {
@@ -469,7 +469,7 @@ fn jet_iter_drop_last<T>(it: JetIter<T>, n: I64) -> JetIter<T> {
 fn jet_iter_shuffle<T>(it: JetIter<T>) -> JetIter<T> {
     xs :: it.to_list()
     state: U64 := 0xC0FF_EE42
-    for i in (1..xs.len()).rev() {
+    for i in (1..<xs.len()).rev() {
         state = state.wrapping_mul(6364136223846793005).wrapping_add(1)
         j :: ((state >> 33) as Usize) % (i + 1)
         xs.swap(i, j)
@@ -591,7 +591,7 @@ fn jet_list_slice<T: Clone>(xs: &[T], start: I64, end: I64) -> [T] {
     len :: xs.len() as I64
     s :: start.clamp(0, len) as Usize
     e :: end.clamp(0, len) as Usize
-    if e <= s -> [] else -> xs[s..e].to_vec()
+    if e <= s -> [] else -> xs[s..<e].to_vec()
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2863
 fn jet_list_binary_search<T: Ord>(xs: &[T], needle: &T) -> JetOutcome<I64, JetAbsent> {
@@ -814,7 +814,7 @@ pub fn jet_coll_counter_names(counter: &JetCounter) -> [String] { counter.keys.c
 pub fn jet_coll_counter_elements(counter: &JetCounter) -> [String] {
     out: [String] := []
     for (key, count) in counter.keys.iter().zip(&counter.counts) {
-        for _ in 0..count.max(0) -> out.push(key.clone())
+        for _ in 0..<count.max(0) -> out.push(key.clone())
     }
     ^out
 }
@@ -824,7 +824,7 @@ pub fn jet_coll_counter_most_common(counter: &JetCounter, k: I64) -> JetCounter 
     used :: [Bool].repeat(false, counter.keys.len())
     keys := [String].with_capacity(limit)
     counts := [I64].with_capacity(limit)
-    for _ in 0..limit {
+    for _ in 0..<limit {
         best: Usize? := .None
         for (index, count) in counter.counts.iter().enumerate() {
             if !used[index] && best.is_none_or(fn(best_index) { count > counter.counts[best_index] }) -> best = .Val(index)

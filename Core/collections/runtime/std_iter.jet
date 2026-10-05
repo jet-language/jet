@@ -24,7 +24,7 @@ fn jet_zip_fill_at<T: Clone>(fill_mode: U8, common_fills: &[T], column_fills: &[
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:44
 fn jet_zip_rows<T: Clone>(lengths: &[Usize], mode: U8, read: fn(Usize, Usize) -> T?, fill: fn(Usize) -> T) -> [[T]]? {
     row_count :: jet_zip_row_count(lengths, mode)?
-    Val((0..row_count).map(fn(row) {
+    Val((0..<row_count).map(fn(row) {
         lengths.iter().enumerate().map(fn((column, length)) {
             jet_zip_column_index(row, *length).and_then(fn(index) { read(column, index) }).unwrap_or_else(fn() { fill(column) })
         }).collect<[T]>()
@@ -59,7 +59,7 @@ fn jet_list_count_where_kernel<T>(xs: &[T], predicate: fn(&T) -> Bool) -> I64 {
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:120
 fn jet_list_update_first_kernel<T>(xs: &[T], predicate: fn(&T) -> Bool, replacement: T) -> Bool {
-    for index in 0..xs.len() {
+    for index in 0..<xs.len() {
         if predicate(&xs[index]) {
             xs[index] = ^replacement
             return true
@@ -75,7 +75,7 @@ pub fn jet_list_count_where_result_kernel<T, E>(xs: &[T], predicate: fn(&T) -> B
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:156
 pub fn jet_list_update_first_result_kernel<T, E>(xs: &[T], predicate: fn(&T) -> Bool E!, replacement: T) -> Bool E! {
-    for index in 0..xs.len() {
+    for index in 0..<xs.len() {
         if predicate(&xs[index])? {
             xs[index] = ^replacement
             return Ok(true)
