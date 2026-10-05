@@ -863,7 +863,7 @@ fn jet_compute_storage_len(shape: &[I64]) -> USize JetComputeError! {
 fn jet_compute_view_metadata(tensor: &JetTensor) -> (&[I64], USize) JetComputeError! {
     rank :: tensor.shape.len()
     if tensor.strides.len() == rank -> return (&tensor.strides, 0)
-    if rank.checked_add(1) != Val(tensor.strides.len()) -> return Err(JetComputeError.InvalidShape("Tensor stride and view metadata disagree"))
+    if rank.checked_add(1) != tensor.strides.len() -> return Err(JetComputeError.InvalidShape("Tensor stride and view metadata disagree"))
     offset :: USize.try_from(tensor.strides[rank]).map_err(fn(_) { JetComputeError.InvalidShape("Tensor view offset must be non-negative") })?
     (&tensor.strides[0..<rank], offset)
 }
