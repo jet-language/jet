@@ -392,7 +392,7 @@ fn lexer_payload_golden_program() -> (String, String) {
 
     let bytes = input.bytes().map(|byte| byte.to_string()).collect::<Vec<_>>().join(", ");
     let source = format!(
-        "{PASS_SOURCE}\nfn run() {{\n    result :: lex_payload([U8]{{{bytes}}}, false)\n    index := 0\n    loop index < result.tokens.len() {{\n        print(result.tokens[index].span.start)\n        print(result.tokens[index].span.end)\n        print(result.tokens[index].kind)\n        print(result.tokens[index].payload.text)\n        print(result.tokens[index].payload.integer ?? -1)\n        print(result.tokens[index].payload.decimal ?? Float{{0}})\n        print(result.tokens[index].payload.suffix)\n        index += 1\n    }}\n    print(result.diagnostics.len())\n    nested :: result.tokens[4].payload.string_parts[1].tokens[0]\n    print(nested.span.start)\n    print(nested.span.end)\n    print(nested.kind)\n    print(nested.payload.text)\n    print(nested.payload.decimal ?? Float{{0}})\n}}\n"
+        "{PASS_SOURCE}\nfn run() {{\n    result :: lex_payload([U8]{{{bytes}}}, false)\n    index := 0\n    loop index < result.tokens.len() {{\n        print(result.tokens[index].span.start)\n        print(result.tokens[index].span.end)\n        print(result.tokens[index].kind)\n        print(token_text(result.tables, result.tokens[index]))\n        print(token_integer(result.tables, result.tokens[index]) ?? -1)\n        print(token_decimal(result.tables, result.tokens[index]) ?? Float{{0}})\n        print(token_suffix(result.tables, result.tokens[index]))\n        index += 1\n    }}\n    print(result.diagnostics.len())\n    parts :: token_string_parts(result.tables, result.tokens[4])\n    nested :: parts[1].tokens[0]\n    print(nested.span.start)\n    print(nested.span.end)\n    print(nested.kind)\n    print(token_text(result.tables, nested))\n    print(token_decimal(result.tables, nested) ?? Float{{0}})\n}}\n"
     );
     let mut expected = String::new();
     for token in &tokens {
@@ -451,7 +451,7 @@ fn jet_and_rust_triple_delimiter_lines_have_identical_text_and_diagnostics() {
     for (index, input) in cases.iter().enumerate() {
         let bytes = input.bytes().map(|byte| byte.to_string()).collect::<Vec<_>>().join(", ");
         source.push_str(&format!(
-            "    result{index} :: lex_payload([U8]{{{bytes}}}, false)\n    loop token in result{index}.tokens {{\n        print(token.span.start)\n        print(token.span.end)\n        print(token.kind)\n        print(token.payload.text)\n        print(token.payload.decoded)\n    }}\n    print(result{index}.diagnostics.len())\n    loop diagnostic in result{index}.diagnostics {{\n        print(diagnostic.code)\n        span :: diagnostic.span ?? return\n        print(span.start)\n        print(span.end)\n        print(diagnostic.what)\n        print(diagnostic.why)\n        print(diagnostic.fix)\n    }}\n"
+            "    result{index} :: lex_payload([U8]{{{bytes}}}, false)\n    loop token in result{index}.tokens {{\n        print(token.span.start)\n        print(token.span.end)\n        print(token.kind)\n        print(token_text(result{index}.tables, token))\n        print(token_decoded(result{index}.tables, token))\n    }}\n    print(result{index}.diagnostics.len())\n    loop diagnostic in result{index}.diagnostics {{\n        print(diagnostic.code)\n        span :: diagnostic.span ?? return\n        print(span.start)\n        print(span.end)\n        print(diagnostic.what)\n        print(diagnostic.why)\n        print(diagnostic.fix)\n    }}\n"
         ));
         let (tokens, diagnostics) = Lexer::lex_raw(input);
         for token in tokens {
@@ -485,7 +485,7 @@ fn jet_and_rust_triple_delimiter_lines_have_identical_text_and_diagnostics() {
 #[test]
 fn jet_lexer_exports_parser_ready_tokens_spans_payloads_and_diagnostics() {
     let source = format!(
-        "{PASS_SOURCE}\nfn run() {{\n    result :: lex_payload(\"Name 500ms 1.25 true \\\"ok\\\" 'x'\", false)\n    print(result.tokens[0].kind)\n    print(result.tokens[0].payload.text)\n    print(result.tokens[1].kind)\n    print(result.tokens[1].payload.integer ?? -1)\n    print(result.tokens[1].payload.suffix)\n    print(result.tokens[2].kind)\n    print(result.tokens[2].payload.decimal ?? Float{{0}})\n    print(result.tokens[3].kind)\n    print(result.tokens[4].kind)\n    print(result.tokens[4].payload.decoded)\n    print(result.tokens[5].kind)\n    print(result.tokens[5].payload.decoded)\n    print(result.tokens[6].kind)\n    print(result.diagnostics.len())\n    interpolated :: lex_payload(\"\\\"a{{value + 1}}b\\\"\".bytes(), false)\n    print(interpolated.tokens[0].payload.string_parts.len())\n    print(interpolated.tokens[0].payload.string_parts[0].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens.len())\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[0].span.start)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[3].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[3].span.start)\n    terminated :: lex(\"fn f() {{\\n    value\\n}}\".bytes())\n    print(terminated.tokens[6].kind)\n    print(terminated.tokens[6].span.start)\n    print(terminated.tokens[6].span.end)\n    bad :: lex_payload(\"§§\".bytes(), false)\n    print(bad.diagnostics.len())\n    print(bad.diagnostics[0].span.start)\n    print(bad.diagnostics[1].span.start)\n    prefix :: lex_payload(\"r\\\"bad\\\"\".bytes(), false)\n    print(prefix.diagnostics[0].code)\n    print(prefix.diagnostics[0].span.end)\n}}\n",
+        "{PASS_SOURCE}\nfn run() {{\n    result :: lex_payload(\"Name 500ms 1.25 true \\\"ok\\\" 'x'\", false)\n    print(result.tokens[0].kind)\n    print(token_text(result.tables, result.tokens[0]))\n    print(result.tokens[1].kind)\n    print(token_integer(result.tables, result.tokens[1]) ?? -1)\n    print(token_suffix(result.tables, result.tokens[1]))\n    print(result.tokens[2].kind)\n    print(token_decimal(result.tables, result.tokens[2]) ?? Float{{0}})\n    print(result.tokens[3].kind)\n    print(result.tokens[4].kind)\n    print(token_decoded(result.tables, result.tokens[4]))\n    print(result.tokens[5].kind)\n    print(token_decoded(result.tables, result.tokens[5]))\n    print(result.tokens[6].kind)\n    print(result.diagnostics.len())\n    interpolated :: lex_payload(\"\\\"a{{value + 1}}b\\\"\".bytes(), false)\n    parts :: token_string_parts(interpolated.tables, interpolated.tokens[0])\n    print(parts.len())\n    print(parts[0].kind)\n    print(parts[1].kind)\n    print(parts[1].tokens.len())\n    print(parts[1].tokens[0].span.start)\n    print(parts[1].tokens[3].kind)\n    print(parts[1].tokens[3].span.start)\n    terminated :: lex(\"fn f() {{\\n    value\\n}}\".bytes())\n    print(terminated.tokens[6].kind)\n    print(terminated.tokens[6].span.start)\n    print(terminated.tokens[6].span.end)\n    bad :: lex_payload(\"§§\".bytes(), false)\n    print(bad.diagnostics.len())\n    print(bad.diagnostics[0].span.start)\n    print(bad.diagnostics[1].span.start)\n    prefix :: lex_payload(\"r\\\"bad\\\"\".bytes(), false)\n    print(prefix.diagnostics[0].code)\n    print(prefix.diagnostics[0].span.end)\n}}\n",
     );
     let (code, stdout, stderr) = tir_support::jit_run("selfhost_parser_ready_lexer", &source);
     assert_eq!(code, 0, "lexer interface run failed:\n{stderr}");
@@ -501,8 +501,9 @@ fn jet_lexer_scans_inline_foreign_bodies_and_interpolations() {
         r####"{PASS_SOURCE}
 fn run() {{
     foreign :: lex_payload(`#FFI(C) fn f() {{ """int f() {{ return "x"; }}""" }}`.bytes(), false)
-    print(foreign.tokens[10].payload.decoded)
-    print(foreign.tokens[10].payload.string_parts[0].kind)
+    print(token_decoded(foreign.tables, foreign.tokens[10]))
+    foreign_parts :: token_string_parts(foreign.tables, foreign.tokens[10])
+    print(foreign_parts[0].kind)
     print(foreign.diagnostics.len())
     missing :: lex_payload(`#FFI(C) fn bad() {{ """int f() {{`.bytes(), false)
     print(missing.diagnostics.len())
@@ -510,8 +511,9 @@ fn run() {{
     diagnostic_span :: missing.diagnostics[0].span ?? return
     print(diagnostic_span.start)
     commented :: lex_payload(`"a{{ /* }} */ value + 1}}b"`.bytes(), false)
-    print(commented.tokens[0].payload.string_parts[1].tokens[1].payload.text)
-    print(commented.tokens[0].payload.string_parts[1].tokens[1].span.start)
+    commented_parts :: token_string_parts(commented.tables, commented.tokens[0])
+    print(token_text(commented.tables, commented_parts[1].tokens[1]))
+    print(commented_parts[1].tokens[1].span.start)
 }}
 "####,
     );
@@ -527,10 +529,10 @@ fn jet_lexer_keeps_unicode_alphanumeric_unit_suffixes() {
 fn run() {{
     result :: lex_payload(`12msμ 3usd٢`.bytes(), false)
     print(result.tokens[0].kind)
-    print(result.tokens[0].payload.suffix)
+    print(token_suffix(result.tables, result.tokens[0]))
     print(result.tokens[0].span.end)
     print(result.tokens[1].kind)
-    print(result.tokens[1].payload.suffix)
+    print(token_suffix(result.tables, result.tokens[1]))
     print(result.tokens[1].span.end)
     print(result.tokens[2].kind)
 }}
@@ -547,10 +549,10 @@ fn jet_lexer_uses_zero_for_integer_payload_overflow() {
         r####"{PASS_SOURCE}
 fn run() {{
     values :: lex_payload(`9223372036854775807 9223372036854775808 0x7fffffffffffffff 0x8000000000000000`.bytes(), false)
-    print(values.tokens[0].payload.integer ?? -1)
-    print(values.tokens[1].payload.integer ?? -1)
-    print(values.tokens[2].payload.integer ?? -1)
-    print(values.tokens[3].payload.integer ?? -1)
+    print(token_integer(values.tables, values.tokens[0]) ?? -1)
+    print(token_integer(values.tables, values.tokens[1]) ?? -1)
+    print(token_integer(values.tables, values.tokens[2]) ?? -1)
+    print(token_integer(values.tables, values.tokens[3]) ?? -1)
     print(values.diagnostics.len())
     print(values.tokens[4].kind)
 }}

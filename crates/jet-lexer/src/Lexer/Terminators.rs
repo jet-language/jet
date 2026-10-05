@@ -55,6 +55,8 @@ pub fn with_terminator_driver<R>(driver: Option<TerminatorDriver>, work: impl Fn
 pub const TERMINATOR_PASS_SOURCE: &str = concat!(
     include_str!("../../../../Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet"),
     "\n",
+    include_str!("../../../../Compiler/JetFoundation/Source/AST/Names.jet"),
+    "\n",
     include_str!("../../../../Compiler/JetLexer/Source/Lexer/Scan.jet"),
     "\n",
     include_str!("../../../../Compiler/JetLexer/Source/Lexer/Terminators.jet"),
