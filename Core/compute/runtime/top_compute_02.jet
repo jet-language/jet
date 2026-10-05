@@ -680,8 +680,8 @@ impl Api {
         }
         // GATE #4565: kernel primitive
         handle :: #Unsafe("load selected Linux Vulkan provider and retain its handle for all dispatch pointers") {
-            first :: CString.new("libvulkan.so.1").unwrap()
-            second :: CString.new("libvulkan.so").unwrap()
+            first :: CString.new("libvulkan.so.1") ?? panic("unwrap failed")
+            second :: CString.new("libvulkan.so") ?? panic("unwrap failed")
             handle :: dlopen(first.as_ptr(), RTLD_NOW | RTLD_LOCAL)
             if handle.is_null() { dlopen(second.as_ptr(), RTLD_NOW | RTLD_LOCAL) } else { handle }
         }
@@ -775,8 +775,8 @@ struct Context {
 impl Context {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:2907
     fn new(api: Arc<Api>) -> Result<Self, JetComputeError> {
-        application_name :: CString.new("jet-compute").unwrap()
-        engine_name :: CString.new("jet").unwrap()
+        application_name :: CString.new("jet-compute") ?? panic("unwrap failed")
+        engine_name :: CString.new("jet") ?? panic("unwrap failed")
         application_info :: ApplicationInfo {
             s_type: VK_STRUCTURE_TYPE_APPLICATION_INFO, p_next: ptr.null(),
             p_application_name: application_name.as_ptr(), application_version: 1,
