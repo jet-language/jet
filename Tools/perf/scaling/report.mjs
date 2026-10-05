@@ -37,6 +37,15 @@ export function report(receipts) {
   }
   out.push('', '## Floor failures at the top rung', '', '| Corpus | Layout | Compiler | Failure |', '|---|---|---|---|');
   for (const s of series) for (const f of s.failures ?? []) if (f.kind === 'floor') out.push(`| ${s.shape} | ${s.layout} | ${s.compiler} | ${f.text} |`);
+  out.push('', '## Compile failures, timeouts and incomplete ladders', '',
+    '| Corpus | Layout | Compiler | Phase | Failure |', '|---|---|---|---|---|');
+  for (const s of series) {
+    for (const f of s.failures ?? []) {
+      if (!['compile', 'timeout', 'truncated'].includes(f.kind)) continue;
+      out.push(`| ${s.shape} | ${s.layout} | ${s.compiler} | ${f.phase ?? '-'} | ${f.text} |`);
+    }
+    if (s.done === false || (!s.done && !s.failures)) out.push(`| ${s.shape} | ${s.layout} | ${s.compiler} | - | incomplete checkpoint |`);
+  }
   out.push('', '## Domain corpora: phases projected to 1M lines (budget 10 s end to end)', '',
     '| Corpus | Layout | Compiler | Measured at lines | Phase | Measured s | Exponent | Projected s at 1M |', '|---|---|---|---:|---|---:|---:|---:|');
   for (const s of series) {
@@ -49,11 +58,26 @@ export function report(receipts) {
   return `${out.join('\n')}\n`;
 }
 
+export function readReceipts(args) {
+  const files = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--runs-dir') {
+      const dir = args[++i];
+      if (!dir) throw new Error('--runs-dir requires a directory');
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+        const file = path.join(dir, entry.name, 'receipt.json');
+        if (entry.isDirectory() && entry.name.startsWith('run-') && fs.existsSync(file)) files.push(file);
+      }
+    } else files.push(args[i]);
+  }
+  return [...new Set(files)].map(file => ({ file, receipt: JSON.parse(fs.readFileSync(file, 'utf8')) }));
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const files = process.argv.slice(2);
-  if (!files.length) {
-    console.error('Usage: node report.mjs RECEIPT.json... > SCALING-REPORT.md');
+  const receipts = readReceipts(process.argv.slice(2));
+  if (!receipts.length) {
+    console.error('Usage: node report.mjs RECEIPT.json... | --runs-dir DIR');
     process.exit(2);
   }
-  process.stdout.write(report(files.map(file => ({ file, receipt: JSON.parse(fs.readFileSync(file, 'utf8')) }))));
+  process.stdout.write(report(receipts));
 }

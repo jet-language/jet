@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SHAPES, corpus } from './corpora.mjs';
-import { growth, judge, metricPhase, parseCounters, parseCompiler } from './harness.mjs';
+import { floors, growth, judge, metricPhase, options, parseCounters, parseCompiler, resumeReceipt, run } from './harness.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { report } from './report.mjs';
 
 test('every shape is deterministic and grows with N', () => {
   for (const [shape, entry] of Object.entries(SHAPES)) {
@@ -31,4 +35,36 @@ test('growth against N log N names the phase and its dominating counter', () => 
   assert.equal(failure.counter, 'counter.sema.check.scope_lookups');
   assert.ok(!judged.failures.some(f => f.metric === 'counter.sema.check.tokens'));
   assert.throws(() => parseCompiler('bad'), /LABEL=/);
+});
+
+test('resume preserves completed rungs, including timeouts, without retrying them', async () => {
+  const scratch = path.join(os.homedir(), '.cache/jet-dev/scratch');
+  fs.mkdirSync(scratch, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(scratch, 'scaling-resume-'));
+  try {
+    const config = options(['--compiler', 'fixture=command:exit 99', '--shape', 'modules', '--layout', 'single', '--ladder', 'modules=2,4', '--work-dir', dir]);
+    const receipt = resumeReceipt(config, {});
+    const timedOut = { n: 2, x: 2, ok: false, problems: ['timed out in sema.bodies'], open_phases: ['sema.bodies'], timeout_phase: 'sema.bodies', metrics: {} };
+    receipt.series.push({ shape: 'modules', compiler: 'fixture', layout: 'single', baseline: { ok: true, metrics: {} }, points: [timedOut], truncated: null });
+    assert.equal(resumeReceipt(config, {}, receipt), receipt);
+    assert.throws(() => resumeReceipt({ ...config, seed: 2 }, {}, receipt), /invocation differs/);
+    // The checkpoint has a failed rung but no series verdict yet: do not retry it.
+    receipt.invocation = resumeReceipt(config, floors()).invocation;
+    fs.writeFileSync(config.receipt, JSON.stringify(receipt));
+    const resumed = await run(config);
+    assert.deepEqual(resumed.series[0].points, [timedOut]);
+    assert.equal(resumed.failures.length, 1);
+    assert.equal(resumed.passed, false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('reports merge receipts and retain timeout phase attribution', () => {
+  const receipt = compiler => ({ startedAt: 'start', finishedAt: 'end', compilers: [{ label: compiler, path: '/compiler' }], failures: ['timeout'],
+    series: [{ shape: 'modules', layout: 'files', compiler, points: [], done: true, truncated: 'timed out',
+      failures: [{ kind: 'timeout', phase: 'sema.bodies', text: 'timed out after 120 s in sema.bodies' }] }] });
+  const text = report([{ file: 'a.json', receipt: receipt('a') }, { file: 'b.json', receipt: receipt('b') }]);
+  assert.ok(text.includes('modules | files | a | sema.bodies'));
+  assert.ok(text.includes('modules | files | b | sema.bodies'));
 });

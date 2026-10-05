@@ -1731,7 +1731,15 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
     }
     item_index := 0
     test_names := [String:Bool]{}
+    // #4601: count work at the loops, including summary checks and retries.
+    // Each module publishes a delta; the scaling harness sums the events.
+    items_scanned := 0
+    functions_checked := 0
+    summary_functions_checked := 0
+    method_jobs := 0
+    impl_rows_scanned := 0
     loop item_index < program.items.len() {
+        if trace_sink != None -> items_scanned += 1
         if program.items[item_index] == {
             // Effect declarations are compiler-owned vocabulary metadata
             // (the canonical effect module): registration consumes them and
@@ -1786,6 +1794,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
         // rounds is the upper bound, and no jobs means no summary checks.
         summary_jobs := [Func]{}
         loop item in program.items {
+            if trace_sink != None -> items_scanned += 1
             if item == .Func(func) {
                 if func.inline_foreign != None -> next
                 return_type :: func.return_type ?? next
@@ -1819,6 +1828,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
                         if summary_row == .Val(row) {
                             if row.function == .Val(planned) -> summary_func = planned
                         }
+                        if trace_sink != None -> summary_functions_checked += 1
                         checked := sema_function_check(summary_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), TFuncKind.TopLevel, false, &environment, &scopes, &summary_diagnostics, &summary_calls, &summary_comptime_requests, &summary_name_references)
                         if checked.value == .Val(function) {
                             _ := sema_function_publish_return_views(&scopes, function)
@@ -1836,6 +1846,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
         if trace_sink == .Val(sink) -> trace_functions = sink.functions()
         item_index = 0
         loop item_index < program.items.len() {
+            if trace_sink != None -> items_scanned += 1
             if trace_sink == .Val(sink) -> sink.progress("sema.bodies", item_index, program.items.len())
             if program.items[item_index] == {
                 .Func(func) -> {
@@ -1890,6 +1901,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
                             if trace_functions {
                                 if trace_sink == .Val(sink) -> sink.begin("sema.function", func.name, item_index, program.items.len())
                             }
+                            if trace_sink != None -> functions_checked += 1
                             checked :: sema_function_check(memory_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), TFuncKind.TopLevel, false, &environment, &scopes, &diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references)
                             if trace_functions {
                                 if trace_sink == .Val(sink) -> sink.end("sema.function", 1)
@@ -1932,10 +1944,12 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
             // nested trait impls).
             impl_method_keys := [String:Bool]{}
             loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
+                if trace_sink != None -> impl_rows_scanned += 1
                 loop method in graph.modules[impl_row.module_index].impls[impl_row.row].methods -> impl_method_keys[method.symbol.id.key] = true
             }
             loop method in nominal.methods {
                 if impl_method_keys.get(method.symbol.id.key) != None -> next
+                if trace_sink != None -> method_jobs += 1
                 if !method.declaration.compiler_generated {
                     if !sema_check_registration_method(source_module, memory_plan, method, nominal.ty, None, &scopes, &environment, comptime_functions, comptime_rows, &diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events, &incomplete_reasons, graph.keep_going, pending_obligations) -> complete = false
                     next
@@ -1947,6 +1961,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
         }
         loop implementation in source_module.impls {
             loop method in implementation.methods {
+                if trace_sink != None -> method_jobs += 1
                 if !sema_check_registration_method(source_module, memory_plan, method, implementation.target_type, implementation.trait_symbol, &scopes, &environment, comptime_functions, comptime_rows, &diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events, &incomplete_reasons, graph.keep_going, pending_obligations) -> complete = false
             }
         }
@@ -2009,6 +2024,13 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
         loop diagnostic in sema_liveness_unused_imports(program, foreign_aliases) -> &diagnostics.push(diagnostic)
     }
     sema_attach_diagnostic_source_locations(&diagnostics, 0, source_module.source_segments)
+    if trace_sink == .Val(sink) {
+        sink.progress("counters.sema.module.items_scanned", items_scanned, -1)
+        sink.progress("counters.sema.module.functions_checked", functions_checked, -1)
+        sink.progress("counters.sema.module.summary_functions_checked", summary_functions_checked, -1)
+        sink.progress("counters.sema.module.method_jobs", method_jobs, -1)
+        sink.progress("counters.sema.module.impl_rows_scanned", impl_rows_scanned, -1)
+    }
     SemaGraphModuleResult{
         package_identity: source_module.package_identity,
         module_path: source_module.module_path,

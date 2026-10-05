@@ -271,15 +271,16 @@ async function measure(config, compiler, built, dir) {
     if (phase.items !== null) metrics[`trace.${kind}.items`] = phase.items;
   }
   for (const [name, value] of Object.entries(counters)) metrics[`counter.${name}`] = value;
-  if (measured.killed) problems.push(`timed out after ${config.timeoutS} s`);
+  const open = [...new Set(unclosed)];
+  const timeoutPhase = measured.killed ? open[open.length - 1] ?? (events.length ? 'between phases' : 'startup') : null;
+  if (measured.killed) problems.push(`timed out after ${config.timeoutS} s in ${timeoutPhase}`);
   if (!events.length) problems.push('no JET_TRACE_FILE trace');
   const expectErrors = built.expect.diagnostics;
   if (expectErrors === 0 && (!result.complete || result.errors)) problems.push(`compile failed (exit ${measured.code}${measured.signal ? `, ${measured.signal}` : ''}, ${result.errors} errors); see ${dir}`);
   if (expectErrors > 0 && result.errors < expectErrors) problems.push(`reported ${result.errors} of ${expectErrors} expected diagnostics; see ${dir}`);
   metrics.diagnostics = result.errors;
-  const open = [...new Set(unclosed)];
   return { n: built.n, x: built.kind === 'domain' ? built.code_lines : built.n, code_lines: built.code_lines, source_sha256: built.source_sha256,
-    ok: problems.length === 0, problems, open_phases: open, metrics, dir, exit: measured.code };
+    ok: problems.length === 0, problems, open_phases: open, timeout_phase: timeoutPhase, metrics, dir, exit: measured.code };
 }
 
 function ladderFor(config, shape) {
@@ -290,31 +291,61 @@ function ladderFor(config, shape) {
   return Array.from({ length: config.steps }, (_, i) => base * 2 ** i);
 }
 
-export async function run(config) {
-  fs.mkdirSync(config.workDir, { recursive: true });
-  const limits = floors();
-  const receipt = {
-    schema: 'jet.scaling-gate/v2', startedAt: new Date().toISOString(), workDir: config.workDir, host: os.hostname(),
+// A receipt is a checkpoint, not a cache across different compiler invocations.
+export function resumeReceipt(config, limits, previous = null) {
+  const invocation = JSON.stringify({
+    compilers: config.compilers, shapes: config.shapes, layouts: config.layouts,
+    ladders: Object.fromEntries(config.shapes.map(shape => [shape, ladderFor(config, shape)])),
+    seed: config.seed, memoryMax: config.memoryMax, timeoutS: config.timeoutS,
+    stopAfterS: config.stopAfterS, profileTop: config.profileTop, families: FAMILIES, floors: limits,
+  });
+  if (previous) {
+    if (previous.invocation !== invocation) throw new Error('Receipt invocation differs; use a new --work-dir');
+    return previous;
+  }
+  return {
+    schema: 'jet.scaling-gate/v3', invocation, startedAt: new Date().toISOString(), workDir: config.workDir, host: os.hostname(),
     compilers: config.compilers, families: FAMILIES, floors: limits, target: { lines: TARGET_LINES, seconds: TARGET_SECONDS },
     memoryMax: config.memoryMax, timeoutS: config.timeoutS, stopAfterS: config.stopAfterS, series: [], failures: [],
   };
-  const save = () => fs.writeFileSync(config.receipt, `${JSON.stringify(receipt, null, 2)}\n`);
+}
+
+export async function run(config) {
+  fs.mkdirSync(config.workDir, { recursive: true });
+  const limits = floors();
+  const receipt = resumeReceipt(config, limits, fs.existsSync(config.receipt) ? JSON.parse(fs.readFileSync(config.receipt, 'utf8')) : null);
+  const save = () => {
+    const pending = `${config.receipt}.pending`;
+    fs.writeFileSync(pending, `${JSON.stringify(receipt, null, 2)}\n`);
+    fs.renameSync(pending, config.receipt);
+  };
+  save();
   for (const shape of config.shapes) {
     for (const compiler of config.compilers) {
     for (const layout of config.layouts) {
       const ladder = ladderFor(config, shape);
       const label = `${shape}[${layout}]/${compiler.label}`;
-      const series = { shape, layout, compiler: compiler.label, kind: SHAPES[shape].kind, dimension: SHAPES[shape].dimension, ladder, baseline: null, points: [], truncated: null };
-      receipt.series.push(series);
+      let series = receipt.series.find(s => s.shape === shape && s.compiler === compiler.label && s.layout === layout);
+      if (series?.done) continue;
+      if (!series) {
+        series = { shape, layout, compiler: compiler.label, kind: SHAPES[shape].kind, dimension: SHAPES[shape].dimension, ladder, baseline: null, points: [], truncated: null };
+        receipt.series.push(series);
+      }
       const where = n => path.join(config.workDir, compiler.label, `${shape}-${layout}`, String(n));
-      series.baseline = await measure(config, compiler, corpus(shape, 1, config.seed, layout), where(1));
-      log(config, `${label} N=1 ${summary(series.baseline)}`);
-      for (const n of ladder) {
-        const built = corpus(shape, n, config.seed, layout);
-        const point = await measure(config, compiler, built, where(n));
-        series.points.push(point);
-        log(config, `${label} N=${n} (${built.code_lines} lines) ${summary(point)}`);
+      if (!series.baseline) {
+        series.baseline = await measure(config, compiler, corpus(shape, 1, config.seed, layout), where(1));
         save();
+        log(config, `${label} N=1 ${summary(series.baseline)}`);
+      }
+      for (const n of ladder) {
+        let point = series.points.find(point => point.n === n);
+        if (!point) {
+          const built = corpus(shape, n, config.seed, layout);
+          point = await measure(config, compiler, built, where(n));
+          series.points.push(point);
+          save();
+          log(config, `${label} N=${n} (${built.code_lines} lines) ${summary(point)}`);
+        }
         if (!point.ok) {
           series.truncated = `N=${n}: ${point.problems.join('; ')}${point.open_phases.length ? ` (open phase: ${point.open_phases.join(', ')})` : ''}`;
           break;
@@ -327,22 +358,30 @@ export async function run(config) {
       const judged = judge(series);
       series.metrics = judged.metrics;
       series.failures = judged.failures;
+      if (!series.baseline.ok) series.failures.push({ kind: 'compile', phase: series.baseline.timeout_phase, text: `baseline: ${series.baseline.problems.join('; ')}` });
       const ok = series.points.filter(point => point.ok);
       if (ok.length) {
         const checked = checkFloors(ok[ok.length - 1], limits);
         series.floors = checked.rows;
         series.failures.push(...checked.failures);
       }
-      if (series.truncated) series.failures.push({ kind: series.truncated.startsWith('stopped') ? 'truncated' : 'compile', text: series.truncated });
-      if (SHAPES[shape].kind === 'domain') series.projection = project(series, judged);
-      if (config.profileTop && series.failures.some(failure => failure.kind === 'growth') && ok.length) {
-        series.profile = await profileTop(config, compiler, shape, layout, ok[ok.length - 1], series.failures);
+      if (series.truncated) {
+        const failed = series.points.find(point => !point.ok);
+        series.failures.push({ kind: failed?.timeout_phase ? 'timeout' : series.truncated.startsWith('stopped') ? 'truncated' : 'compile',
+          phase: failed?.timeout_phase ?? null, text: series.truncated });
       }
-      for (const failure of series.failures) receipt.failures.push(`${label}: ${failure.text}`);
+      if (SHAPES[shape].kind === 'domain') series.projection = project(series, judged);
+      save();
+      if (config.profileTop && series.failures.some(failure => failure.kind === 'growth') && ok.length && !series.profile) {
+        series.profile = await profileTop(config, compiler, shape, layout, ok[ok.length - 1], series, save);
+      }
+      series.done = true;
       save();
     }
     }
   }
+  receipt.failures = receipt.series.flatMap(series => (series.failures ?? []).map(failure =>
+    `${series.shape}[${series.layout}]/${series.compiler}: ${failure.text}`));
   receipt.passed = receipt.failures.length === 0;
   receipt.finishedAt = new Date().toISOString();
   save();
@@ -351,11 +390,14 @@ export async function run(config) {
 
 // Re-run the largest passing rung under perf and attribute samples to the
 // failing phases (profile.mjs): the responsible functions with their source.
-async function profileTop(config, compiler, shape, layout, point, failures) {
+async function profileTop(config, compiler, shape, layout, point, series, save) {
   const dir = path.join(config.workDir, compiler.label, `${shape}-${layout}`, `${point.n}-profile`);
-  const phases = [...new Set(failures.filter(f => f.kind === 'growth').map(f => f.phase))];
-  const profiled = await measure({ ...config, profile: { wrap: d => profileRun.wrap(d) } }, compiler, corpus(shape, point.n, config.seed, layout), dir);
-  return profileRun.attribute(dir, phases, { repo: REPO, top: 12, ok: profiled.ok });
+  const phases = [...new Set(series.failures.filter(f => f.kind === 'growth').map(f => f.phase))];
+  if (!series.profilePoint) {
+    series.profilePoint = await measure({ ...config, profile: { wrap: d => profileRun.wrap(d) } }, compiler, corpus(shape, point.n, config.seed, layout), dir);
+    save();
+  }
+  return profileRun.attribute(dir, phases, { repo: REPO, top: 12, ok: series.profilePoint.ok });
 }
 
 function summary(point) {
@@ -381,6 +423,8 @@ const USAGE = `Usage: node harness.mjs --compiler LABEL=KIND:PATH [--compiler ..
   --profile              perf-profile the top rung of every failing series (profile.mjs)
   --layout files|single  repeatable; default both (a multi-file failure is a gate failure)
   --work-dir DIR  --receipt FILE  --seed S
+Receipts checkpoint every baseline, rung and profile compile; rerunning the same
+invocation resumes without retrying completed compiles, including timeouts.
 Exit 0 pass, 1 any growth/floor/compile failure, 2 invalid invocation.`;
 
 export function options(args) {
