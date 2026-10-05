@@ -57,7 +57,7 @@ fn jet_auth_valid_identifier(value: String, max: USize) -> Bool {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:93
 fn jet_auth_constant_time_text_eq(left: String, right: String) -> Bool {
     difference := U8.from(left.len() != right.len())
-    for index in 0..left.len().max(right.len()) {
+    for index in 0..<left.len().max(right.len()) {
         a :: left.as_bytes().get(index).copied().unwrap_or(0)
         b :: right.as_bytes().get(index).copied().unwrap_or(0)
         difference |= a ^ b
@@ -136,9 +136,9 @@ fn jet_oauth_b64url_decode(text: String) -> [U8] Err! {
     bits := U8{0}
     for byte in text.bytes() {
         value :: match byte {
-            65..=90 -> byte - U8{65}
-            97..=122 -> byte - U8{97} + U8{26}
-            48..=57 -> byte - U8{48} + U8{52}
+            65..90 -> byte - U8{65}
+            97..122 -> byte - U8{97} + U8{26}
+            48..57 -> byte - U8{48} + U8{52}
             45 -> U8{62}
             95 -> U8{63}
             _ -> return Err("OAuth assertion encoding is invalid")
@@ -156,7 +156,7 @@ fn jet_oauth_b64url_decode(text: String) -> [U8] Err! {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:247
 fn jet_oauth_json_hex4(chars: [Char], position: &USize) -> U32? {
     value := U32{0}
-    for index in 0..4 {
+    for index in 0..<4 {
         digit :: chars.get(*position)?.to_digit(16)?
         *position += 1
         value = value * 16 + digit
@@ -187,16 +187,16 @@ fn jet_oauth_json_string(chars: [Char], position: &USize) -> String? {
                     't' -> out.push('\t')
                     'u' -> {
                         high :: jet_oauth_json_hex4(chars, position)?
-                        if (0xD800..=0xDBFF).contains(&high) {
+                        if (0xD800..0xDBFF).contains(&high) {
                             if chars.get(*position) != Val(&'\\') { return None }
                             *position += 1
                             if chars.get(*position) != Val(&'u') { return None }
                             *position += 1
                             low :: jet_oauth_json_hex4(chars, position)?
-                            if !(0xDC00..=0xDFFF).contains(&low) { return None }
+                            if !(0xDC00..0xDFFF).contains(&low) { return None }
                             combined :: 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00)
                             out.push(Char.from_u32(combined)?)
-                        } else if (0xDC00..=0xDFFF).contains(&high) { return None }
+                        } else if (0xDC00..0xDFFF).contains(&high) { return None }
                         else { out.push(Char.from_u32(high)?) }
                     }
                     _ -> return None
@@ -312,7 +312,7 @@ fn jet_oauth_parse_claims(text: String) -> JetAuthOAuthClaims Err! {
                     if jet_oauth_json_whitespace(character) || character == ',' || character == '}' || character == ']' { break }
                     position += 1
                 }
-                value :: jet_oauth_parse_i64(chars[start..position].iter().copied().collect::<String>()).ok_or_else(fn() { "OAuth claim `{key}` must be an integer" })?
+                value :: jet_oauth_parse_i64(chars[start..<position].iter().copied().collect::<String>()).ok_or_else(fn() { "OAuth claim `{key}` must be an integer" })?
                 slot :: if key == "exp" { &claims.expires_at } else { &claims.issued_at }
                 if slot.replace(value).is_some() { return Err("OAuth claim `{key}` is duplicated") }
             }

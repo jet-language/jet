@@ -45,9 +45,9 @@ fn jet_auth_b64_decode_inner(s: String) -> [U8] Err! {
         }
         if padding -> return Err("base64 padding must be final")
         v :: match b {
-            U8{65}..=U8{90} -> b - 65
-            U8{97}..=U8{122} -> b - 97 + 26
-            U8{48}..=U8{57} -> b - 48 + 52
+            U8{65}..U8{90} -> b - 65
+            U8{97}..U8{122} -> b - 97 + 26
+            U8{48}..U8{57} -> b - 48 + 52
             U8{43} -> U8{62}
             U8{47} -> U8{63}
             _ -> return Err("invalid base64 character")
@@ -64,7 +64,7 @@ fn jet_auth_b64_decode_inner(s: String) -> [U8] Err! {
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:85
 fn jet_auth_b64url_decode(text: String) -> [U8] Err! {
-    if text.bytes().any(b -> !matches(b, U8{65}..=U8{90} | U8{97}..=U8{122} | U8{48}..=U8{57} | U8{45} | U8{95})) {
+    if text.bytes().any(b -> !matches(b, U8{65}..U8{90} | U8{97}..U8{122} | U8{48}..U8{57} | U8{45} | U8{95})) {
         return Err("invalid base64url character")
     }
     s := text.replace('-', "+").replace('_', "/")
@@ -83,7 +83,7 @@ fn jet_auth_object(text: String) -> [(String, DataTree)] JetAuthError! {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:109
 fn jet_auth_json_hex4(chars: [Char], pos: &USize) -> U32? {
     value := U32{0}
-    for _ in 0..4 {
+    for _ in 0..<4 {
         digit :: chars.get(pos)?.to_digit(16)?
         pos += 1
         value = value * 16 + digit
@@ -113,16 +113,16 @@ fn jet_auth_json_string(chars: [Char], pos: &USize) -> String? {
                     't' -> out.push('\t')
                     'u' -> {
                         high :: jet_auth_json_hex4(chars, &pos)?
-                        if (U32{0xD800}..=U32{0xDBFF}).contains(high) {
+                        if (U32{0xD800}..U32{0xDBFF}).contains(high) {
                             if chars.get(pos) != Val('\\') -> return None
                             pos += 1
                             if chars.get(pos) != Val('u') -> return None
                             pos += 1
                             low :: jet_auth_json_hex4(chars, &pos)?
-                            if !(U32{0xDC00}..=U32{0xDFFF}).contains(low) -> return None
+                            if !(U32{0xDC00}..U32{0xDFFF}).contains(low) -> return None
                             combined :: U32{0x10000} + ((high - U32{0xD800}) << 10) + (low - U32{0xDC00})
                             out.push(Char.from_u32(combined)?)
-                        } else if (U32{0xDC00}..=U32{0xDFFF}).contains(high) {
+                        } else if (U32{0xDC00}..U32{0xDFFF}).contains(high) {
                             return None
                         } else { out.push(Char.from_u32(high)?) }
                     }
@@ -185,7 +185,7 @@ fn jet_auth_number_lexeme(text: String, name: String) -> String? {
         is_number :: chars.get(pos).is_some_and(character -> character == '-' || character.is_ascii_digit())
         if is_number {
             while chars.get(pos).is_some_and(character -> !is_json_structural_whitespace(character) && character != ',' && character != '}') -> pos += 1
-            if key == name -> return Val(chars[value_start..pos].iter().copied().collect())
+            if key == name -> return Val(chars[value_start..<pos].iter().copied().collect())
         } else { jet_auth_json_skip_value(chars, &pos) }
         while chars.get(pos).is_some_and(is_json_structural_whitespace) -> pos += 1
         match chars.get(pos) {
@@ -347,7 +347,7 @@ pub fn jet_auth_verify_paseto_impl<E>(token: String, key: [U8], audience: String
     token_footer :: if parts.get(3) == .Val(encoded) { jet_auth_b64url_decode(encoded).map_err(JetAuthError.DecodeError)? } else { [U8]{} }
     if !jet_ct_eq(token_footer, footer) -> return Err(JetAuthError.InvalidSignature)
     split :: body.len() - 64
-    message :: body[..split].to_vec()
+    message :: body[0..<split].to_vec()
     signature :: body[split..].to_vec()
     signed :: jet_auth_pae(["v4.public.".as_bytes(), message, footer, implicit])
     if !verify(key, signed, signature).unwrap_or(false) -> return Err(JetAuthError.InvalidSignature)
