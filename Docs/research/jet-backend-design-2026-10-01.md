@@ -470,15 +470,34 @@ position-independent, so the same bytes serve every image kind:
   import stub per runtime symbol the code calls, and the data. A stub is
   `jmp qword [rip + 2]; int3; int3` followed by its 8-byte address slot
   (16 bytes, so every slot is 8-byte aligned); runtime calls are rel32 calls
-  to the stub. The image records the entry offset and each import's symbol
-  and slot offset. Loading (`Image/Loader.jet`, below) maps the block into an
-  anonymous private mapping that is writable and not executable, copies it,
-  writes the address of each runtime C-ABI export into its slot, flips the
-  mapping with `mprotect` to read+execute, and runs
-  `jet_rt_main(base + entry)`. No page is ever writable and executable at
-  once; this matches what cranelift-jit's `finalize_definitions` does today.
+  to the stub. The image records the entry offset, the page-separated data
+  boundary, each import's symbol and slot offset, and data pointer relocations.
+  Loading (`Image/Loader.jet`) resolves all imports and validates boundaries
+  before mapping, copies into anonymous read+write memory, rebases pointers,
+  binds import slots, then changes only code pages to read+execute. Data stays
+  read+write and never executable, including frozen runtime-handle fixup cells.
+  Origins honor over-page data alignment. A program runs through
+  `jet_rt_main(base + entry)`; no page is writable and executable together.
   `Tests/load-memory-image.c` performs the same steps in C, out of process,
   as the reference the Jet loader is checked against.
+
+`x64_runtime_current` resolves the host's exported resident runtime;
+`x64_runtime_open` resolves a loaded shared runtime. The host retains that
+runtime until no mapped frame, value or destructor can use it. An unresolved
+symbol is a load failure before any generated code runs, not a request to
+retry on another execution engine.
+
+`Image/Calls.jet` invokes a checked callable through a selector-generated
+System V adapter, rather than reimplementing the register/stack ABI in the
+host. It takes a pointer to 8-byte argument cells and one zeroed result cell;
+the selector places Integer, Pointer and Float arguments and captures the
+return carrier. `lir_lower_callable` preserves failure carriers instead of
+normalizing them as program entries do. Compiler-value marshaling borrows
+runtime String bytes through `jet_rt_string_data` and
+`jet_rt_string_byte_len`, copies before dropping the native owner, and never
+depends on Rust's private String representation. Runtime effects, stop
+recovery, execution limits and composite ownership are compiler-call
+prerequisites, not properties inferred from a successful memory mapping.
 
 ## In-process linking
 
