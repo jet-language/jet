@@ -1,0 +1,593 @@
+// Rust: tests/comptime_core_pure_parity.rs:492
+use tests.conformance.corpus.core.port.comptime_core_pure_parity.*
+use tests.common as common
+use std.thread as thread
+use std.fs as fs
+use std.env as env
+
+#Test("public_transcript_covers_remaining_core_pure_families") {
+    values :: exact_values([
+        "use core.net.mime as mime", "use core.time as time", "use core.time as date", "use core.time as datetime",
+        `mime.from_extension(".PNG") ?? "none"`, `mime.extension("Text/HTML; charset=UTF-8") ?? "none"`, `mime.parse("Text/HTML; charset=UTF-8")`,
+        "time.period(1, 2, 3)", "time.period_days(4)", "time.period_months(5)", "time.period_years(6)",
+        `time.parse_time("23:59:58")`, `time.parse_rfc3339("2024-02-29T12:34:56+02:30")`,
+        "(500ms + 250ms).in(.Milliseconds)", "2s.in(.Milliseconds)", "date.new(2024, 13, 40)", `date.parse("2024-02-29")`,
+        "datetime.from_timestamp(-1)", "time.from_unix_ms(-1)", "measurement(12.5, uncertainty: 0.25).value()"
+    ])
+    assert_eq(values, [
+        "\"image/png\" : String", "\"html\" : String", "Mime(top: text, sub: html, params: [[charset, UTF-8]]) : Result",
+        "Period(years: 1, months: 2, days: 3) : Period", "Period(years: 0, months: 0, days: 4) : Period",
+        "Period(years: 0, months: 5, days: 0) : Period", "Period(years: 6, months: 0, days: 0) : Period",
+        "LocalTime(hour: 23, minute: 59, second: 58) : Result", "DateTime(secs: 1709201096) : Result", "750 : Int", "2000 : Int",
+        "LocalDate(year: 2024, month: 12, day: 31) : LocalDate", "LocalDate(year: 2024, month: 2, day: 29) : Result",
+        "DateTime(secs: -1) : DateTime", "DateTime(secs: -1) : DateTime", "12.5 : Float"
+    ])
+}
+// Rust: tests/comptime_core_pure_parity.rs:539
+#Test("public_transcript_covers_integer_bit_queries_exactly") {
+    assert_eq(exact_values([INTEGER_BIT_QUERIES_DECLS, "integer_bit_queries_view()"]), ["\"{INTEGER_BIT_QUERIES_EXPECTED}\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:548
+#Test("primitive_static_stringification_is_rejected_by_sema") {
+    source :: `fn run() {
+    print(Bool.to_string())
+    print(Char.to_string())
+}`
+    diagnostics :: jet.compile(source).expect_err("primitive stringification belongs to values, not static type names")
+    assert_eq(diagnostics.iter().map(|diagnostic| -> (diagnostic.code, diagnostic.what)).collect(), [("E0102", "`Bool` has no static method `to_string`"), ("E0102", "`Char` has no static method `to_string`")])
+}
+// Rust: tests/comptime_core_pure_parity.rs:568
+#Test("public_transcript_keeps_checked_types_in_imported_functions") {
+    assert_eq(exact_values(["use core.math as math", `fn imported_g(x: U8) -> Int {
+    y :: math.abs(-1.0)
+    return (x).leading_zeros()
+}`, "imported_g(13)"]), ["4 : Int"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:581
+#Test("public_transcript_composes_email_and_codecs_exactly") {
+    values :: exact_values([
+        "use core.email as email", "use core.encoding.xml as xml",
+        `sender :: email.address("Mara <mara@example.com>") ?? panic("sender")`,
+        `recipient :: email.address("ada@example.net") ?? panic("recipient")`,
+        `attachment :: email.attachment("note.txt", "Text/Plain", [104, 105]) ?? panic("attachment")`,
+        `message :: email.message(sender, [recipient], [Address]{}, "Hello", "body", HTML{""}, [attachment]) ?? panic("message")`,
+        "email.envelope(sender, [recipient])",
+        `fn serialized(message: Message) -> Bool {
+    if email.serialize(message) == {
+        Ok(_) -> return true
+        Err(_) -> return false
+    }
+    return false
+}`, "serialized(message)",
+        `xml.canonical(xml.parse("<r b=\"2\" a=\"1\"><x/></r>") ?? panic("xml"), xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) ?? panic("canonical")`
+    ])
+    assert_eq(values, ["Envelope(from: Address(display: Mara, mailbox: mara@example.com), recipients: [Address(display: null, mailbox: ada@example.net)]) : Result", "true : Bool", "\"<r a=\"1\" b=\"2\"><x></x></r>\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:605
+#Test("public_transcript_covers_civil_and_measurement_value_methods_exactly") {
+    values :: exact_values(["use core.time as time", "use core.time as date", "use core.time as datetime", CIVIL_FN, CIVIL_EXPR, MEASUREMENT_FN, MEASUREMENT_EXPR])
+    assert_eq(values, ["\"2|4|60|9|2024-03-01|2025-02-28|28|2024-03-31|2024-02-01|Thu 2024-060|1969-12-31|23:59:59|23:59:59|1969-12-31T23:59:59Z|1969-12-31 23:59:59|0|-60|0\" : String", "\"3.0|5.0|3.0|5.0|0.0|9.0|4.0|0.0\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:625
+#Test("public_transcript_evaluates_pure_add_arguments_once") {
+    assert_eq(exact_values([ADD_ARGUMENT_ONCE_DECLS, "add_argument_once_view()"]), ["\"3.0|1\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:631
+#Test("public_transcript_covers_lru_methods_exactly") {
+    assert_eq(exact_values([LRU_DECLS, "lru_view()"]), ["\"{LRU_EXPECTED}\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:637
+#Test("public_transcript_covers_map_methods_exactly") {
+    assert_eq(exact_values([MAP_DECLS, "map_view()"]), ["\"{MAP_EXPECTED}\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:643
+#Test("public_transcript_preserves_sequential_inline_hof_mutations_exactly") {
+    assert_eq(exact_values([INLINE_HOF_DECLS, "inline_hof_view()"]), ["\"{INLINE_HOF_EXPECTED}\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:649
+#Test("public_transcript_comptime_only_evaluates_map_call_receiver_once") {
+    assert_eq(exact_values([MAP_DECLS, MAP_CALL_RECEIVER_DECLS, "map_call_receiver_view()"]), ["\"true|1\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:659
+#Test("public_transcript_covers_queue_methods_exactly") {
+    assert_eq(exact_values([QUEUE_DECLS, "queue_view()"]), ["\"{QUEUE_EXPECTED}\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:665
+#Test("public_transcript_covers_bits_methods_exactly") {
+    assert_eq(exact_values([BITS_DECLS, "bits_view()"]), ["\"{BITS_EXPECTED}\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:671
+#Test("public_transcript_covers_testing_fake_rng_exactly") {
+    assert_eq(exact_values(["use core.testing as testing", TESTING_FAKE_RNG_FN, "testing_fake_rng_view()"]), ["\"{TESTING_FAKE_RNG_EXPECTED}\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:684
+#Test("public_transcript_covers_testing_fake_clock_exactly") {
+    assert_eq(exact_values(["use core.testing as testing", "use core.time as time", TESTING_FAKE_CLOCK_FN, "testing_fake_clock_view()"]), ["\"{TESTING_FAKE_CLOCK_EXPECTED}\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:698
+#Test("public_transcript_covers_testing_fake_clock_writeback_exactly") {
+    assert_eq(exact_values(["use core.testing as testing", TESTING_FAKE_CLOCK_WRITEBACK_DECLS, "testing_fake_clock_writeback_view()"]), ["\"{TESTING_FAKE_CLOCK_WRITEBACK_EXPECTED}\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:713
+#Test("public_transcript_covers_priority_queue_methods_exactly") {
+    assert_eq(exact_values([PRIORITY_QUEUE_DECLS, "priority_queue_view()"]), ["\"{PRIORITY_QUEUE_EXPECTED}\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:719
+#Test("public_transcript_comptime_only_evaluates_priority_queue_call_receiver_once") {
+    // The read-only call receiver is evaluated once; the AOT nested-receiver boundary stays explicit.
+    assert_eq(exact_values([PRIORITY_QUEUE_DECLS, PRIORITY_QUEUE_CALL_RECEIVER_DECLS, "priority_queue_call_receiver_view()"]), ["\"6|1\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:731
+#Test("public_transcript_covers_set_methods_exactly") {
+    assert_eq(exact_values([SET_DECLS, "set_view()"]), ["\"{SET_EXPECTED}\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:737
+#Test("public_transcript_comptime_only_evaluates_set_call_receiver_once") {
+    // Set.to_list order is unspecified; direct read-only receiver proves evaluation count.
+    assert_eq(exact_values([SET_DECLS, SET_CALL_RECEIVER_DECLS, "set_call_receiver_view()"]), ["\"true|true|true|1\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:749
+#Test("public_transcript_covers_bag_methods_exactly") {
+    assert_eq(exact_values([TALLY_DECLS, "bag_view()"]), ["\"{TALLY_EXPECTED}\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:755
+#Test("public_transcript_comptime_only_evaluates_bag_call_receiver_once") {
+    assert_eq(exact_values([TALLY_DECLS, TALLY_CALL_RECEIVER_DECLS, "bag_call_receiver_view()"]), ["\"1|1\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:767
+#Test("public_transcript_covers_rank_methods_exactly") {
+    assert_eq(exact_values([RANK_DECLS, "rank_view()"]), ["\"{RANK_EXPECTED}\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:773
+#Test("public_transcript_covers_rank_field_writeback_exactly") {
+    // Direct field writeback is covered here independently of AOT place lowering.
+    assert_eq(exact_values([RANK_FIELD_DECLS, "rank_field_view()"]), ["\"{RANK_FIELD_EXPECTED}\" : String"])
+}
+
+// Rust: tests/comptime_core_pure_parity.rs:893
+#Test("rustc_backed_aot_comptime_differentials_cover_return_shapes") {
+    cases :: [
+        ("option/string", parity_source(`mime.extension("image/png") ?? "none"`, "use core.net.mime as mime")),
+        ("result/bytes", parity_source("email_wire()", `use core.email as email
+use core.encoding.hex as hex
+fn email_wire() -> String {
+    message :: email.message(email.address("a@example.com") ?? panic("a"), [email.address("b@example.com") ?? panic("b")], [Address]{}, "s", "body", HTML{""}, [Attachment]{}) ?? panic("m")
+    return hex.encode(email.serialize(message) ?? panic("serialize"))
+}`)),
+        ("result/string", parity_source("xml_canonical()", `use core.encoding.xml as xml
+fn xml_canonical() -> String {
+    tree :: xml.parse("<r b=\"2\" a=\"1\"><x/></r>") ?? panic("xml")
+    return xml.canonical(tree, xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) ?? panic("canonical")
+}`)),
+        ("xml/float-shape-error", parity_source("xml_shape_reason(DataTree.Float(1.5))", `use core.encoding.xml as xml
+fn xml_shape_reason(tree: DataTree) -> String {
+    if xml.canonical(tree, xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) == {
+        Ok(_) -> return "unexpected success"
+        Err(error) -> return error.reason
+    }
+    return "unreachable"
+}`)),
+        ("mime/observable-methods", parity_source("mime_view()", `use core.net.mime as mime
+fn mime_view() -> String {
+    value :: mime.parse("Text/HTML; charset=UTF-8") ?? panic("mime")
+    return "{value.media_type()}|{value.subtype()}|{value.essence()}|{value.param("charset") ?? "none"}|{value.params()}|{value.to_string()}"
+}`)),
+        ("date/observable-methods", parity_source("date_view()", `use core.time as date
+fn date_view() -> String {
+    parsed :: date.parse("2024-02-29") ?? panic("date")
+    clamped :: date.new(2024, 13, 40)
+    return "{parsed.year()}-{parsed.month()}-{parsed.day()}|{parsed.to_string()}|{clamped.to_string()}"
+}`)),
+        ("time/observable-methods", parity_source("time_view()", `use core.time as time
+fn time_view() -> String {
+    local :: time.parse_time("23:59:58") ?? panic("time")
+    datetime :: time.from_unix_ms(-1)
+    period :: time.period(1, 2, 3)
+    return "{local.hour()}:{local.minute()}:{local.second()}|{local.to_string()}|{datetime.to_timestamp()}|{datetime.to_unix_ms()}|{period.to_string()}"
+}`)),
+        ("measurement/observable-methods", parity_source("measurement_view()", `fn measurement_view() -> String {
+    value :: measurement(12.5, uncertainty: 0.25)
+    return "{value.value()}|{value.uncertainty()}"
+}`))
+    ]
+    loop (label, source) in cases { _ :: check_aot_comptime(label, source) }
+}
+// Rust: tests/comptime_core_pure_parity.rs:955
+#Test("time_plane_comptime_matches_aot_and_dev_tiers") {
+    source :: parity_source("time_plane_view()", `use core.time as time
+fn time_plane_view() -> String {
+    wait :: 500ms
+    origin :: time.instant()
+    point :: origin + 5min
+    delta :: point - origin
+    speed :: 12meter / 2s
+    return "{wait.in(.Milliseconds) ?? panic("wait")}|{delta.in(.Minutes) ?? panic("delta")}|{speed}"
+}`)
+    expected :: check_aot_comptime("time-plane-focused", source)
+    assert_eq(expected, "500|5|6 meter/ns")
+    check_dev_tiers("time-plane-focused", source, expected)
+}
+// Rust: tests/comptime_core_pure_parity.rs:974
+#Test("registered_shared_kernel_edges_match_all_execution_tiers") {
+    cases :: [
+        ("mime-one-kernel", parity_source("mime_view()", `use core.net.mime as mime
+fn mime_view() -> String {
+    value :: mime.parse("Text/HTML; charset=UTF-8") ?? panic("mime")
+    return "{value.media_type()}|{value.subtype()}|{value.essence()}|{value.param("charset") ?? "none"}|{value.params()}|{value.to_string()}"
+}`)),
+        ("email-one-kernel", parity_source("email_wire()", `use core.email as email
+use core.encoding.hex as hex
+fn email_wire() -> String {
+    message :: email.message(email.address("a@example.com") ?? panic("a"), [email.address("b@example.com") ?? panic("b")], [Address]{}, "s", "body", HTML{""}, [Attachment]{}) ?? panic("m")
+    return hex.encode(email.serialize(message) ?? panic("serialize"))
+}`)),
+        ("sketch-edge-kernel", parity_source("sketch_edges()", `use core.data.sketch.hll as hll
+use core.data.sketch.tdigest as tdigest
+use core.data.sketch.cms as cms
+use core.data.sketch.reservoir as reservoir
+fn sketch_edges() -> String {
+    cardinality := hll.new()
+    empty_count :: cardinality.count()
+    cardinality.add("same")
+    cardinality.add("same")
+    distribution := tdigest.new()
+    empty_quantile :: distribution.quantile(0.5)
+    distribution.add(-1.0)
+    distribution.add(1.0)
+    frequencies := cms.new()
+    missing :: frequencies.count("missing")
+    frequencies.add("seen")
+    sample := reservoir.new(0)
+    sample.add("first")
+    sample.add("second")
+    return "{empty_count}|{cardinality.count()}|{empty_quantile}|{distribution.quantile(0.0)}|{distribution.quantile(1.0)}|{missing}|{frequencies.count("seen")}|{sample.sample().len()}"
+}`)),
+        ("time-duration-edge-kernel", parity_source("time_duration_edges()", `use core.time as time
+use core.time as date
+fn time_duration_edges() -> String {
+    clamped :: date.new(2023, 2, 31)
+    leap_end :: date.new(2024, 1, 31).add_months(1)
+    negative_time :: time.from_unix_ms(-1)
+    fractional :: Duration.seconds(1.75) ?? panic("fractional duration")
+    negative :: Duration.milliseconds(-1500) ?? panic("negative duration")
+    left :: Duration.milliseconds(500) ?? panic("left")
+    right :: Duration.milliseconds(1500) ?? panic("right")
+    difference :: left.difference(right)
+    zero :: Duration.nanoseconds(0) ?? panic("zero")
+    return "{clamped.to_string()}|{leap_end.to_string()}|{negative_time.to_timestamp()}|{negative_time.to_unix_ms()}|{negative_time.format_rfc3339()}|{fractional.in(.Milliseconds) ?? panic("fractional read")}|{negative.in(.Seconds) ?? panic("negative read")}|{difference.in(.Milliseconds) ?? panic("difference read")}|{zero.is_zero()}"
+}`)),
+        ("time-plane-literal-kernel", parity_source("time_plane_view()", `use core.time as time
+fn time_plane_view() -> String {
+    wait :: 500ms
+    origin :: time.instant()
+    point :: origin + 5min
+    delta :: point - origin
+    speed :: 12meter / 2s
+    return "{wait.in(.Milliseconds) ?? panic("wait")}|{delta.in(.Minutes) ?? panic("delta")}"
+}`)),
+        ("xml-edge-kernel", parity_source("xml_edges()", `use core.encoding.xml as xml
+fn xml_edges() -> String {
+    document :: xml.parse("<catalog><book id=\"7\"><title>Hi</title></book></catalog>") ?? panic("parse")
+    root :: xml.root(document) ?? panic("root")
+    root_name :: xml.expanded_name(root) ?? panic("root name")
+    children :: xml.content(root) ?? panic("content")
+    book_name :: xml.expanded_name(children[0]) ?? panic("book name")
+    attribute :: xml.attribute(children[0], "id")
+    id :: attribute ?? "missing"
+    return "{root_name.local}|{children.len()}|{book_name.local}|{id}|{xml.to_string(document)}"
+}`)),
+        ("measurement-edge-kernel", parity_source(MEASUREMENT_EXPR, MEASUREMENT_DECLS))
+    ]
+    loop (label, source) in cases {
+        expected :: check_aot_comptime(label, source)
+        if label == "sketch-edge-kernel" { assert_eq(expected, "0|1|0.0|-1.0|1.0|0|1|1") }
+        if label == "time-duration-edge-kernel" { assert_eq(expected, "2023-02-28|2024-02-29|-1|-1|1969-12-31T23:59:59.999000000Z|1750|-1|-1000|true") }
+        if label == "time-plane-literal-kernel" { assert_eq(expected, "500|5") }
+        if label == "xml-edge-kernel" { assert_eq(expected, "catalog|1|book|7|<catalog><book id=\"7\"><title>Hi</title></book></catalog>") }
+        if label == "measurement-edge-kernel" { assert_eq(expected, "3.0|5.0|3.0|5.0|0.0|9.0|4.0|0.0") }
+        check_dev_tiers(label, source, expected)
+    }
+}
+// Rust: tests/comptime_core_pure_parity.rs:1102
+#Test("rustc_backed_integer_bit_queries_match_all_execution_tiers_exactly") {
+    source :: "{INTEGER_BIT_QUERIES_DECLS}\nfn run() {{\n    print(\"{{integer_bit_queries_view()}}\")\n}}\n"
+    assert_eq(rustc_aot_stdout("integer-bit-queries", source), "{INTEGER_BIT_QUERIES_EXPECTED}\n")
+    check_dev_tier_output("integer-bit-queries", source, "{INTEGER_BIT_QUERIES_EXPECTED}\n", false)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1119
+#Test("rustc_backed_f32_math_is_native_width_across_comptime_and_dev") {
+    source :: parity_source("f32_math_view()", F32_MATH_DECLS)
+    assert_eq(check_aot_comptime("f32/native-width-math", source), F32_MATH_EXPECTED)
+    check_dev_tiers("f32-native-width-math", source, F32_MATH_EXPECTED)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1129
+#Test("rustc_backed_civil_and_measurement_methods_match_comptime_exactly") {
+    civil :: "2|4|60|9|2024-03-01|2025-02-28|28|2024-03-31|2024-02-01|Thu 2024-060|1969-12-31|23:59:59|23:59:59|1969-12-31T23:59:59Z|1969-12-31 23:59:59|0|-60|0"
+    measurement :: "3.0|5.0|3.0|5.0|0.0|9.0|4.0|0.0"
+    civil_source :: parity_source(CIVIL_EXPR, CIVIL_DECLS)
+    civil_dev :: "2|4|60|9|2024-03-01|2025-02-28|28|2024-02-01|Thu 2024-060|1969-12-31|23:59:59|23:59:59|1969-12-31T23:59:59Z|1969-12-31 23:59:59|-60|0"
+    civil_dev_source :: parity_source("civil_dev_view()", CIVIL_DEV_DECLS)
+    measurement_source :: parity_source(MEASUREMENT_EXPR, MEASUREMENT_DECLS)
+    assert_eq(check_aot_comptime("civil/all-deterministic-methods", civil_source), civil)
+    assert_eq(check_aot_comptime("measurement/arithmetic", measurement_source), measurement)
+    check_dev_tiers("civil", civil_dev_source, civil_dev)
+    check_dev_tiers("measurement", measurement_source, measurement)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1149
+#Test("rustc_backed_datetime_and_measurement_display_are_exact") {
+    assert_eq(check_aot_comptime("datetime/negative-unix-ms-display", parity_source("time.from_unix_ms(-1).to_string()", "use core.time as time")), "1969-12-31 23:59:59 UTC")
+    assert_eq(check_aot_comptime("measurement/interpolation-display", `VALUE :: prep { measurement(12.5, uncertainty: 0.25) }
+EXPECTED :: prep { "{VALUE}" }
+
+fn run() {
+    actual :: measurement(12.5, uncertainty: 0.25)
+    print(EXPECTED)
+    print(actual)
+}
+`), "12.5 ± 0.25")
+}
+// Rust: tests/comptime_core_pure_parity.rs:1167
+#Test("rustc_backed_pivot_sum_invokes_capturing_closures_exactly") {
+    assert_eq(check_aot_comptime("data/pivot-sum-closures", parity_source(PIVOT_EXPR, PIVOT_DECLS)), "pA|x:2:4.0:2.0|pB|y:1:5.0:5.0")
+}
+// Rust: tests/comptime_core_pure_parity.rs:1178
+#Test("rustc_backed_scalar_value_methods_match_all_execution_tiers_exactly") {
+    source :: parity_source(SCALAR_EXPR, SCALAR_DECLS)
+    assert_eq(check_aot_comptime("scalar/value-methods", source), SCALAR_EXPECTED)
+    check_dev_tiers("scalar", source, SCALAR_EXPECTED)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1188
+#Test("rustc_backed_primitive_instance_stringification_matches_all_execution_tiers_exactly") {
+    source :: parity_source("primitive_instance_view()", PRIMITIVE_INSTANCE_DECLS)
+    assert_eq(check_aot_comptime("primitive-instance-stringification", source), PRIMITIVE_INSTANCE_EXPECTED)
+    check_dev_tiers_with_boundary("primitive-instance-stringification", source, PRIMITIVE_INSTANCE_EXPECTED, true)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1203
+#Test("rustc_backed_bytes_matches_all_execution_tiers_exactly") {
+    source :: parity_source("bytes_view()", BYTES_DECLS)
+    assert_eq(check_aot_comptime("byte-buffer/all-methods", source), BYTES_EXPECTED)
+    check_dev_tiers("byte-buffer", source, BYTES_EXPECTED)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1213
+#Test("rustc_backed_lru_matches_all_execution_tiers_exactly") {
+    source :: parity_source("lru_view()", LRU_DECLS)
+    assert_eq(check_aot_comptime("lru/all-methods", source), LRU_EXPECTED)
+    check_dev_tiers("lru", source, LRU_EXPECTED)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1220
+#Test("rustc_backed_map_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly") {
+    source :: parity_source("map_view()", MAP_DECLS)
+    assert_eq(check_aot_comptime("map/all-methods", source), MAP_EXPECTED)
+    check_dev_tiers_with_boundary("map", source, MAP_EXPECTED, true)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1229
+#Test("rustc_backed_pool_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly") {
+    source :: parity_source("pool_view()", POOL_DECLS)
+    assert_eq(check_aot_comptime("pool/generations", source), POOL_EXPECTED)
+    check_dev_tiers_with_boundary("pool", source, POOL_EXPECTED, true)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1239
+#Test("rustc_backed_sequential_inline_hofs_match_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly") {
+    source :: parity_source("inline_hof_view()", INLINE_HOF_DECLS)
+    assert_eq(check_aot_comptime("sequential-inline-hof/writeback", source), INLINE_HOF_EXPECTED)
+    check_dev_tiers_with_boundary("sequential-inline-hof", source, INLINE_HOF_EXPECTED, true)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1252
+#Test("rustc_backed_queue_matches_all_execution_tiers_exactly") {
+    source :: parity_source("queue_view()", QUEUE_DECLS)
+    assert_eq(check_aot_comptime("queue/all-methods", source), QUEUE_EXPECTED)
+    check_dev_tiers("queue", source, QUEUE_EXPECTED)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1262
+#Test("rustc_backed_bits_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly") {
+    source :: parity_source("bits_view()", BITS_DECLS)
+    assert_eq(check_aot_comptime("bit-set/all-methods", source), BITS_EXPECTED)
+    check_dev_tiers_with_boundary("bit-set", source, BITS_EXPECTED, true)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1272
+#Test("rustc_backed_priority_queue_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly") {
+    // Materializing the producer once preserves mutation/writeback without hiding nested receiver boundaries.
+    source :: parity_source("priority_queue_view()", PRIORITY_QUEUE_DECLS)
+    assert_eq(check_aot_comptime("priority-queue/all-methods", source), PRIORITY_QUEUE_EXPECTED)
+    check_dev_tiers_with_boundary("priority-queue", source, PRIORITY_QUEUE_EXPECTED, true)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1286
+#Test("rustc_backed_set_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly") {
+    // Both sides sort unspecified Set iteration order.
+    source :: parity_source("set_view()", SET_DECLS)
+    assert_eq(check_aot_comptime("set/all-methods", source), SET_EXPECTED)
+    check_dev_tiers_with_boundary("set", source, SET_EXPECTED, true)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1296
+#Test("rustc_backed_bag_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly") {
+    source :: parity_source("bag_view()", TALLY_DECLS)
+    assert_eq(check_aot_comptime("tally/all-methods", source), TALLY_EXPECTED)
+    check_dev_tiers_with_boundary("tally", source, TALLY_EXPECTED, true)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1306
+#Test("rustc_backed_rank_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly") {
+    source :: parity_source("rank_view()", RANK_DECLS)
+    assert_eq(check_aot_comptime("sorted-set/all-methods", source), RANK_EXPECTED)
+    check_dev_tiers_with_boundary("sorted-set", source, RANK_EXPECTED, true)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1319
+#Test("rustc_backed_seeded_rng_methods_match_all_execution_tiers_exactly") {
+    source :: parity_source("rng_view()", RNG_DECLS)
+    assert_eq(check_aot_comptime("rng/all-methods", source), RNG_EXPECTED)
+    check_dev_tiers_with_boundary("rng", source, RNG_EXPECTED, true)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1328
+#Test("rustc_backed_testing_fake_rng_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly") {
+    declarations :: "use core.testing as testing\n{TESTING_FAKE_RNG_FN}"
+    source :: parity_source("testing_fake_rng_view()", declarations)
+    assert_eq(check_aot_comptime("testing/fake-rng", source), TESTING_FAKE_RNG_EXPECTED)
+    check_dev_tiers_with_boundary("testing-fake-rng", source, TESTING_FAKE_RNG_EXPECTED, true)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1342
+#Test("rustc_backed_testing_fake_clock_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly") {
+    declarations :: "use core.testing as testing\nuse core.time as time\n{TESTING_FAKE_CLOCK_FN}"
+    source :: parity_source("testing_fake_clock_view()", declarations)
+    assert_eq(check_aot_comptime("testing/fake-clock", source), TESTING_FAKE_CLOCK_EXPECTED)
+    check_dev_tiers_with_boundary("testing-fake-clock", source, TESTING_FAKE_CLOCK_EXPECTED, true)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1362
+#Test("rustc_backed_testing_fake_clock_writeback_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly") {
+    declarations :: "use core.testing as testing\n{TESTING_FAKE_CLOCK_WRITEBACK_DECLS}"
+    source :: parity_source("testing_fake_clock_writeback_view()", declarations)
+    assert_eq(check_aot_comptime("testing/fake-clock-writeback", source), TESTING_FAKE_CLOCK_WRITEBACK_EXPECTED)
+    check_dev_tiers_with_boundary("testing-fake-clock-writeback", source, TESTING_FAKE_CLOCK_WRITEBACK_EXPECTED, true)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1440
+#Test("rustc_backed_linalg_simd_matches_all_execution_tiers_exactly") {
+    // Preserve sized-stack boundary for the linalg/SIMD tier matrix.
+    thread.Builder.new().name("linalg-simd-parity").stack_size(8 * 1024 * 1024).spawn(|| -> {
+        source :: parity_source("linalg_view()", LINALG_DECLS)
+        assert_eq(check_aot_comptime("linalg/simd-direct", source), LINALG_EXPECTED)
+        check_dev_tiers("linalg-simd-direct", source, LINALG_EXPECTED)
+    }).expect("spawn linalg-simd-parity").join().expect("linalg-simd-parity thread")
+}
+// Rust: tests/comptime_core_pure_parity.rs:1460
+#Test("rustc_backed_wide_simd_matches_all_execution_tiers_exactly") {
+    source :: parity_source("simd_wide_view()", SIMD_WIDE_DECLS)
+    assert_eq(check_aot_comptime("simd/wide-lanes", source), SIMD_WIDE_EXPECTED)
+    check_dev_tiers("simd-wide-lanes", source, SIMD_WIDE_EXPECTED)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1470
+#Test("rustc_backed_simd_instance_method_retains_math_prelude_across_tiers") {
+    // Unused helper's typed parameter/method are the only CoreUsage reachability facts.
+    source :: parity_source("simd_instance_view()", SIMD_INSTANCE_DECLS)
+    assert_eq(check_aot_comptime("simd/instance-method", source), SIMD_INSTANCE_EXPECTED)
+    check_dev_tiers("simd-instance-method", source, SIMD_INSTANCE_EXPECTED)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1482
+#Test("rustc_backed_scalar_marker_retains_barrier_prelude_across_tiers") {
+    source :: parity_source("simd_scalar_view()", SIMD_SCALAR_DECLS)
+    assert_eq(check_aot_comptime("simd/scalar-marker", source), SIMD_SCALAR_EXPECTED)
+    check_dev_tiers("simd-scalar-marker", source, SIMD_SCALAR_EXPECTED)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1492
+#Test("rustc_backed_overflow_opt_and_consume_match_aot_comptime") {
+    source :: parity_source("overflow_view()", OVERFLOW_DECLS)
+    assert_eq(check_aot_comptime("overflow/opt-ins", source), OVERFLOW_EXPECTED)
+    check_dev_tiers("overflow-opt-ins", source, OVERFLOW_EXPECTED)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1502
+#Test("public_transcript_covers_linalg_overflow_and_expect_exactly") {
+    assert_eq(exact_values([LINALG_DECLS, "linalg_view()"]), ["\"{LINALG_EXPECTED}\" : String"])
+    assert_eq(exact_values([OVERFLOW_DECLS, "overflow_view()"]), ["\"{OVERFLOW_EXPECTED}\" : String"])
+    // expect constructs the comptime wrapper; consume discards it, independent of AOT snapshot machinery.
+    assert_eq(exact_values([EXPECT_DECLS, "expect_view()"]), ["\"{EXPECT_EXPECTED}\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:1529
+#Test("registered_solver_edges_match_aot_comptime_and_dev_tiers") {
+    source :: parity_source("solver_view()", SOLVER_DECLS)
+    assert_eq(check_aot_comptime("solver/require-status", source), SOLVER_EXPECTED)
+    check_dev_tiers("solver-require-status", source, SOLVER_EXPECTED)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1539
+#Test("public_transcript_covers_solver_exactly") {
+    assert_eq(exact_values(["use core.compute.solve as solve", SOLVER_FN, "solver_view()"]), ["\"{SOLVER_EXPECTED}\" : String"])
+}
+// Rust: tests/comptime_core_pure_parity.rs:1579
+#Test("rustc_backed_archive_matches_aot_comptime_and_dev_tiers") {
+    source :: parity_source("archive_view()", ARCHIVE_DECLS)
+    assert_eq(check_aot_comptime("archive/all-pure-calls", source), ARCHIVE_EXPECTED)
+    check_dev_tiers("archive-all-pure-calls", source, ARCHIVE_EXPECTED)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1589
+#Test("archive_rejects_invalid_tar_names_across_aot_comptime_and_forced_interpreter") {
+    loop (label, name) in [("empty", "\"\""), ("parent", "\"../x\""), ("absolute", "\"/x\"")] {
+        source :: parity_source("invalid_tar_name_view({name})", ARCHIVE_INVALID_TAR_NAME_DECLS)
+        assert_eq(check_aot_comptime("archive/invalid-tar-name/{label}", source), ARCHIVE_INVALID_TAR_NAME_EXPECTED)
+        check_dev_tiers_with_boundary("archive-invalid-tar-name-{label}", source, ARCHIVE_INVALID_TAR_NAME_EXPECTED, true)
+    }
+}
+// Rust: tests/comptime_core_pure_parity.rs:1629
+#Test("ui_values_match_aot_comptime_forced_interpreter_and_default_dev") {
+    source :: parity_source("ui_value_view()", UI_DECLS)
+    assert_eq(check_aot_comptime("ui/value-constructors", source), UI_EXPECTED)
+    check_dev_tiers_with_boundary("ui-value-constructors", source, UI_EXPECTED, true)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1661
+#Test("crypto_values_match_aot_comptime_forced_interpreter_and_default_dev") {
+    source :: parity_source("crypto_value_view()", CRYPTO_DECLS)
+    assert_eq(check_aot_comptime("crypto/expert-pure-values", source), CRYPTO_EXPECTED)
+    check_dev_tiers_with_boundary("crypto-expert-pure-values", source, CRYPTO_EXPECTED, true)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1671
+#Test("crypto_expert_aead_sign_argon_aot_stdout_matches_known_answers") {
+    // Known-answer AOT probe preserves Signature/AEAD cases not folded by prep.
+    source :: `use core.crypto.expert as expert
+fn run() {
+    ed_seed :: [U8]{ 157, 97, 177, 157, 239, 253, 90, 96, 186, 132, 74, 244, 146, 236, 44, 196, 68, 73, 197, 105, 123, 50, 105, 25, 112, 59, 172, 3, 28, 174, 127, 96 }
+    ed_public :: [U8]{ 215, 90, 152, 1, 130, 177, 10, 183, 213, 75, 254, 211, 201, 100, 7, 58, 14, 225, 114, 243, 218, 166, 35, 37, 175, 2, 26, 104, 247, 7, 81, 26 }
+    key :: [U8]{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+    nonce :: [U8]{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+    msg :: [U8]{ 97, 98, 99 }
+    #Unsafe("fixed RFC interop vectors") {
+        signed :: expert.ed25519_sign(ed_seed, []) ?? panic("sign")
+        sealed :: expert.aes256gcm_seal(key, nonce, msg, []) ?? panic("seal")
+        plain :: expert.aes256gcm_open(key, nonce, sealed, []) ?? panic("open")
+        password :: expert.hkdf_sha256_raw([112], [], [], 4) ?? panic("pw")
+        derived :: expert.argon2id(password, [0, 1, 2, 3, 4, 5, 6, 7], 8192, 1, 1, 16) ?? panic("argon")
+        print("{expert.ed25519_verify_strict(ed_public, [], signed.bytes()) ?? false}|{plain}|{expert.secret_bytes(derived).len()}")
+    }
+}
+`
+    output :: rustc_aot_stdout("crypto/expert-aead-sign-argon", source)
+    assert_eq(output.trim(), "true|[97, 98, 99]|16")
+}
+// Rust: tests/comptime_core_pure_parity.rs:1708
+#Test("net_and_forced_style_values_match_all_execution_tiers_exactly") {
+    source :: parity_source("net_style_view()", NET_STYLE_DECLS)
+    assert_eq(check_aot_comptime("net/pure-values-and-style-force", source), NET_STYLE_EXPECTED)
+    check_dev_tiers("net-pure-values-and-style-force", source, NET_STYLE_EXPECTED)
+}
+// Rust: tests/comptime_core_pure_parity.rs:1722
+#Test("round_three_shared_kernels_keep_edge_rules_in_one_adapter_path") {
+    // These source-sharing assertions inspect the retained Rust peer reference, not a runtime Rust bridge.
+    root :: OSPath.from(env.manifest_dir())
+    read_peer :: |path: String| -> fs.read_to_string(root.join(path)).unwrap_or_else(|error| -> panic("read {path}: {error}"))
+    random :: read_peer("crates/jet-codegen/src/Prelude/Core/SeededRandom.rs")
+    assert(random.contains("if high <= low"))
+    assert(random.contains("probability.is_nan()"))
+    assert(random.contains("std::f64::consts::TAU"))
+    assert(read_peer("crates/jet-comptime/src/Comptime/Methods/dispatch.rs").contains("seeded_random_kernel::jet_seeded_rng_normal"))
+    assert(read_peer("crates/jet-jit/src/Random.rs").contains("include!(\"../../jet-codegen/src/Prelude/Core/SeededRandom.rs\")"))
+    path :: read_peer("crates/jet-codegen/src/Prelude/Core/Path.rs")
+    assert(path.contains("ParentDir if normal_depth > 0"))
+    assert(path.contains("ParentDir if !rooted"))
+    assert(read_peer("crates/jet-jit/src/CoreHost.rs").contains("path_kernel::jet_std_path_normalize"))
+    fmt :: read_peer("crates/jet-codegen/src/Prelude/Core/Fmt.rs")
+    assert(fmt.contains("precision.clamp(0, 9)"))
+    assert(fmt.contains("11..=13"))
+    assert(fmt.contains("fill.is_empty()"))
+    assert(read_peer("crates/jet-comptime/src/Comptime/Methods/core_calls.rs").contains("fmt_kernel::jet_fmt_percent"))
+    net :: read_peer("crates/jet-codegen/src/Prelude/Core/NetPure.rs")
+    assert(net.contains("text.parse()"))
+    assert(net.contains("address.is_ipv4()"))
+    assert(read_peer("crates/jet-comptime/src/Comptime/CorePureParity.rs").contains("super::net_pure_kernel::jet_net_pure_parse_socket_addr"))
+    math :: read_peer("crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs")
+    assert(math.contains("if value < 0"))
+    assert(math.contains("value.unsigned_abs()"))
+    assert(math.contains("x.is_nan()"))
+    assert(read_peer("crates/jet-jit/build.rs").contains("MathLibPure.rs"))
+    assert(read_peer("crates/jet-comptime/src/Comptime/Methods/core_calls.rs").contains("math_lib_pure::jet_std_math_gcd"))
+    loadable :: read_peer("crates/jet-codegen/src/Prelude/Core/Loadable.rs")
+    assert(loadable.contains("JET_LOADABLE_FAILED: u8 = 3"))
+    assert(loadable.contains("jet_loadable_has_value"))
+    assert(read_peer("crates/jet-jit/src/Reactive.rs").contains("loadable_kernel::jet_loadable_has_value"))
+    encoding :: read_peer("crates/jet-codegen/src/Prelude/Core/EncodingBase.rs")
+    assert(encoding.contains("while out.len() % 8 != 0"))
+    assert(encoding.contains("s.len() % 2 != 0"))
+    assert(read_peer("crates/jet-jit/src/Encoding.rs").contains("encoding_base_rt::jet_std_base32_encode"))
+    text :: read_peer("crates/jet-comptime/src/Comptime/TextLite.rs")
+    assert(text.contains("UnicodeTables.rs"))
+    assert(text.contains("UnicodeString.rs"))
+    assert(text.contains("CoreLib/Top/Text.rs"))
+    assert(not text.contains("fn nfd_inner"))
+    url :: read_peer("crates/jet-comptime/src/Comptime/UrlLite.rs")
+    assert(url.contains("CoreLib/JetStd/UrlMime.rs"))
+    assert(url.contains("jet_url_percent_decode_str"))
+    assert(not url.contains("fn url_valid_scheme"))
+}

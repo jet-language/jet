@@ -1,830 +1,350 @@
-// PORT-PENDING 1044 tests-encoding-types-single-home-module-group: tests/encoding_types_single_home.rs:1-98
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-BOUND-LAW1=A / I9: shared encoding value types have one Prelude home.
-//RS 
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS 
-//RS const HOME: &str = "crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs";
-//RS const TYPES: &[&str] = &[
-//RS     "EncodingLimits",
-//RS     "EncodingFormat",
-//RS     "EncodingErrorKind",
-//RS     "EncodingCause",
-//RS     "EncodingError",
-//RS ];
-//RS 
-//RS fn root() -> PathBuf {
-//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-//RS }
-//RS 
-//RS fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
-//RS     let Ok(entries) = fs::read_dir(dir) else {
-//RS         return;
-//RS     };
-//RS     for entry in entries.flatten() {
-//RS         let path = entry.path();
-//RS         if path.is_dir() {
-//RS             collect_rs_files(&path, out);
-//RS         } else if path.extension().is_some_and(|ext| ext == "rs") {
-//RS             out.push(path);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn declaration_sites(root: &Path, name: &str) -> Vec<String> {
-//RS     let mut files = Vec::new();
-//RS     collect_rs_files(&root.join("crates"), &mut files);
-//RS     files.sort();
-//RS 
-//RS     let mut sites = Vec::new();
-//RS     for file in files {
-//RS         let relative = file.strip_prefix(root).unwrap_or(&file);
-//RS         let text = fs::read_to_string(&file).unwrap_or_default();
-//RS         for (line_number, line) in text.lines().enumerate() {
-//RS             let code = line.split("//").next().unwrap_or_default();
-//RS             let words: Vec<_> = code
-//RS                 .split(|character: char| {
-//RS                     character.is_whitespace() || "{}()[],:;".contains(character)
-//RS                 })
-//RS                 .filter(|word| !word.is_empty())
-//RS                 .collect();
-//RS             let is_declaration = words
-//RS                 .windows(2)
-//RS                 .any(|window| matches!(window[0], "struct" | "enum") && window[1] == name);
-//RS             if !is_declaration {
-//RS                 continue;
-//RS             }
-//RS             // DataError carries a private unit marker for an absent encoding
-//RS             // cause. It is not the shared EncodingError value type.
-//RS             if name == "EncodingError"
-//RS                 && (code.contains("struct EncodingError;")
-//RS                     || code.contains("struct EncodingError ;"))
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             sites.push(format!("{}:{}", relative.display(), line_number + 1));
-//RS         }
-//RS     }
-//RS     sites
-//RS }
-//RS 
-//RS #[test]
-//RS fn encoding_types_have_one_definition_home_and_jit_include() {
-//RS     let root = root();
-//RS     let home = root.join(HOME);
-//RS     let home_source = fs::read_to_string(&home).expect("EncodingTypes.rs is readable");
-//RS     let jit_source = fs::read_to_string(root.join("crates/jet-jit/src/enc_stream/mod.rs"))
-//RS         .expect("enc_stream/mod.rs is readable");
-//RS 
-//RS     assert!(
-//RS         jit_source.contains(
-//RS             "include!(\"../../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs\");"
-//RS         ),
-//RS         "JIT must include the Prelude encoding type definitions"
-//RS     );
-//RS 
-//RS     for name in TYPES {
-//RS         assert!(
-//RS             home_source.contains(&format!("struct {name}"))
-//RS                 || home_source.contains(&format!("enum {name}")),
-//RS             "Prelude encoding type home is missing {name}"
-//RS         );
-//RS         let sites = declaration_sites(&root, name);
-//RS         assert_eq!(
-//RS             sites,
-//RS             vec![HOME.to_string()],
-//RS             "{name} must have exactly one definition site, {HOME}"
-//RS         );
-//RS     }
-//RS }
-// END-PORT-PENDING 1044 tests/encoding_types_single_home.rs:1-98
+// Rust: tests/encoding_types_single_home.rs:1
+// D-BOUND-LAW1=A / I9: shared encoding values have one native Core home.
+use std.fs as fs
+use std.env
+use std.process.[Command]
+use std.process as process
+use std.time.[Instant]
+use core.sync.atomic.[AtomicU64, Ordering]
+use core.sys.target as target
+use tests.common as common
 
-// PORT-PENDING 1044 tests-encoding-types-single-home-module-group: tests/encoding_variance.rs:1-684
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Card #715 criterion 6: encoding stream variance proof.
-//RS //!
-//RS //! Production codecs only (json / jsonl / csv / cbor file reader+writer).
-//RS //! Hostile I/O schedules force byte splits through the real FileReader/FileWriter
-//RS //! seam (`JET_ENC_HOSTILE_*`); no fixture codecs and no transcript substitution.
-//RS //!
-//RS //! Coverage:
-//RS //! - every 2-chunk byte split for inputs with len ≤ 4096
-//RS //! - 32 recorded deterministic multi-chunk plans for a larger input
-//RS //! - EncodingLimits at limit−1 / limit / limit+1 / overflow
-//RS //! - three clean repetitions on the host AOT tier
-//RS //!
-//RS //! Platform matrix (this environment): linux x86_64 AOT only.
-//RS //! aarch64 / macOS / Windows hosts are unavailable here and are recorded as
-//RS //! explicit gaps — not claimed as green.
-//RS 
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::Command;
-//RS use std::sync::atomic::{AtomicU64, Ordering};
-//RS use std::time::Instant;
-//RS 
-//RS mod common;
-//RS 
-//RS static SEQ: AtomicU64 = AtomicU64::new(0);
-//RS 
-//RS const VARIANCE_SEED: u64 = 0x715C6_A11C_E5EEu64;
-//RS const LARGE_INPUT_LEN: usize = 8192;
-//RS const EVERY_SPLIT_MAX: usize = 4096;
-//RS const CHUNK_PLAN_COUNT: usize = 32;
-//RS const CLEAN_REPS: usize = 3;
-//RS 
-//RS struct Scratch {
-//RS     dir: PathBuf,
-//RS }
-//RS 
-//RS impl Scratch {
-//RS     fn new(tag: &str) -> Self {
-//RS         let dir = std::env::temp_dir().join(format!(
-//RS             "jet_enc_variance_{tag}_{}_{}",
-//RS             std::process::id(),
-//RS             SEQ.fetch_add(1, Ordering::Relaxed)
-//RS         ));
-//RS         let _ = fs::remove_dir_all(&dir);
-//RS         fs::create_dir_all(&dir).unwrap();
-//RS         Self { dir }
-//RS     }
-//RS 
-//RS     fn path(&self) -> &Path {
-//RS         &self.dir
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct RunResult {
-//RS     exit: i32,
-//RS     stdout: String,
-//RS     stderr: String,
-//RS }
-//RS 
-//RS fn host_facts() -> String {
-//RS     let commit = Command::new("git")
-//RS         .args(["rev-parse", "HEAD"])
-//RS         .output()
-//RS         .ok()
-//RS         .and_then(|o| String::from_utf8(o.stdout).ok())
-//RS         .unwrap_or_else(|| "unknown".into())
-//RS         .trim()
-//RS         .to_string();
-//RS     let rustc = Command::new("rustc")
-//RS         .arg("-vV")
-//RS         .output()
-//RS         .ok()
-//RS         .and_then(|o| String::from_utf8(o.stdout).ok())
-//RS         .unwrap_or_else(|| "rustc unavailable".into());
-//RS     let host = rustc
-//RS         .lines()
-//RS         .find(|l| l.starts_with("host:"))
-//RS         .unwrap_or("host: unknown")
-//RS         .to_string();
-//RS     format!(
-//RS         "commit={commit}\nos={}\narch={}\n{host}\nseed={VARIANCE_SEED:#x}\ntier=aot-native\nplatforms_unavailable=aarch64,macos,windows\n",
-//RS         std::env::consts::OS,
-//RS         std::env::consts::ARCH,
-//RS     )
-//RS }
-//RS 
-//RS fn write_evidence(name: &str, body: &str) {
-//RS     let dir = PathBuf::from("/tmp/tower-burndown-e3");
-//RS     let _ = fs::create_dir_all(&dir);
-//RS     let _ = fs::write(dir.join(name), body);
-//RS }
-//RS 
-//RS fn compile_aot(dir: &Path, name: &str, src: &str) -> PathBuf {
-//RS     let jet_path = dir.join(format!("{name}.jet"));
-//RS     fs::write(&jet_path, src).unwrap();
-//RS     let shown = jet_path.to_string_lossy();
-//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
-//RS         panic!(
-//RS             "front end rejected variance fixture:\n{}",
-//RS             jet::render_diagnostics(&shown, src, &diags)
-//RS         )
-//RS     });
-//RS     let rs = dir.join(format!("{name}.rs"));
-//RS     let bin = dir.join(name);
-//RS     fs::write(&rs, &out.rust).unwrap();
-//RS     let mut rustc = Command::new("rustc");
-//RS     rustc.args([
-//RS         "--edition",
-//RS         "2021",
-//RS         rs.to_str().unwrap(),
-//RS         "-o",
-//RS         bin.to_str().unwrap(),
-//RS     ]);
-//RS     if let Some(link) = &out.ffi {
-//RS         rustc
-//RS             .arg("--extern")
-//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-//RS         for deps_dir in link.dependency_dirs().filter(|d| d.is_dir()) {
-//RS             rustc
-//RS                 .arg("-L")
-//RS                 .arg(format!("dependency={}", deps_dir.display()));
-//RS         }
-//RS     }
-//RS     let built = rustc.output().unwrap();
-//RS     assert!(
-//RS         built.status.success(),
-//RS         "rustc rejected variance fixture {name}:\n{}",
-//RS         String::from_utf8_lossy(&built.stderr)
-//RS     );
-//RS     bin
-//RS }
-//RS 
-//RS fn run_bin(bin: &Path, cwd: &Path, env: &[(&str, &str)]) -> RunResult {
-//RS     let mut cmd = Command::new(bin);
-//RS     cmd.current_dir(cwd);
-//RS     // Fresh hostile TLS each process; clear inherited schedules.
-//RS     cmd.env_remove("JET_ENC_HOSTILE_IO");
-//RS     cmd.env_remove("JET_ENC_HOSTILE_READ_ONE");
-//RS     cmd.env_remove("JET_ENC_HOSTILE_READ_PLAN");
-//RS     cmd.env_remove("JET_ENC_HOSTILE_WRITE_MAX");
-//RS     cmd.env_remove("JET_ENC_HOSTILE_WRITE_PLAN");
-//RS     cmd.env_remove("JET_ENC_HOSTILE_INTERRUPT_READS");
-//RS     cmd.env_remove("JET_ENC_HOSTILE_INTERRUPT_WRITES");
-//RS     cmd.env_remove("JET_ENC_HOSTILE_FAIL_READ_AFTER");
-//RS     cmd.env_remove("JET_ENC_HOSTILE_FAIL_WRITE_AFTER");
-//RS     for (k, v) in env {
-//RS         cmd.env(k, v);
-//RS     }
-//RS     let out = cmd.output().unwrap();
-//RS     RunResult {
-//RS         exit: out.status.code().unwrap_or(-1),
-//RS         stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-//RS         stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-//RS     }
-//RS }
-//RS 
-//RS fn hostile(extra: &[(&str, &str)]) -> Vec<(String, String)> {
-//RS     let mut env = vec![("JET_ENC_HOSTILE_IO".to_string(), "1".to_string())];
-//RS     env.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
-//RS     env
-//RS }
-//RS 
-//RS fn run_hostile(bin: &Path, cwd: &Path, extra: &[(&str, &str)]) -> RunResult {
-//RS     let owned = hostile(extra);
-//RS     let refs: Vec<_> = owned
-//RS         .iter()
-//RS         .map(|(k, v)| (k.as_str(), v.as_str()))
-//RS         .collect();
-//RS     run_bin(bin, cwd, &refs)
-//RS }
-//RS 
-//RS fn lcg(state: &mut u64) -> u64 {
-//RS     *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-//RS     *state
-//RS }
-//RS 
-//RS /// 32 deterministic multi-chunk read plans for inputs larger than 4096.
-//RS fn recorded_chunk_plans(seed: u64, input_len: usize) -> Vec<Vec<usize>> {
-//RS     let mut state = seed;
-//RS     let mut plans = Vec::with_capacity(CHUNK_PLAN_COUNT);
-//RS     for plan_i in 0..CHUNK_PLAN_COUNT {
-//RS         let chunks = 3 + (lcg(&mut state) as usize % 6); // 3..8 chunks
-//RS         let mut sizes = Vec::with_capacity(chunks);
-//RS         let mut remaining = input_len;
-//RS         for c in 0..chunks {
-//RS             if c + 1 == chunks {
-//RS                 sizes.push(remaining.max(1));
-//RS                 break;
-//RS             }
-//RS             let span = (remaining / (chunks - c)).max(1);
-//RS             let take = 1 + (lcg(&mut state) as usize % span);
-//RS             let take = take.min(remaining.saturating_sub(chunks - c - 1).max(1));
-//RS             sizes.push(take);
-//RS             remaining = remaining.saturating_sub(take);
-//RS         }
-//RS         // Ensure plan sums cover the input (last entry may overshoot; reader stops at EOF).
-//RS         if sizes.iter().sum::<usize>() < input_len {
-//RS             sizes.push(input_len);
-//RS         }
-//RS         assert!(!sizes.is_empty(), "plan {plan_i} empty for seed {seed:#x}");
-//RS         plans.push(sizes);
-//RS     }
-//RS     plans
-//RS }
-//RS 
-//RS fn json_reader_src(input_rel: &str) -> String {
-//RS     format!(
-//RS         r#"
-//RS use core.encoding as encoding
-//RS use core.encoding.json as json
-//RS use core.files as files
-//RS 
-//RS fn run() {{
-//RS     input :: files.open("{input_rel}") ?? panic("open")
-//RS     reader :: json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
-//RS     count := 0
-//RS     loop item in reader {{
-//RS         count += 1
-//RS     }}
-//RS     print(count)
-//RS }}
-//RS "#
-//RS     )
-//RS }
-//RS 
-//RS fn jsonl_reader_src(input_rel: &str) -> String {
-//RS     format!(
-//RS         r#"
-//RS use core.encoding as encoding
-//RS use core.encoding.jsonl as jsonl
-//RS use core.files as files
-//RS 
-//RS fn run() {{
-//RS     input :: files.open("{input_rel}") ?? panic("open")
-//RS     reader :: jsonl.reader(^input) ?? panic("reader")
-//RS     count := 0
-//RS     loop item in reader {{
-//RS         count += 1
-//RS     }}
-//RS     print(count)
-//RS }}
-//RS "#
-//RS     )
-//RS }
-//RS 
-//RS fn csv_reader_src(input_rel: &str) -> String {
-//RS     format!(
-//RS         r#"
-//RS use core.encoding as encoding
-//RS use core.encoding.csv as csv
-//RS use core.files as files
-//RS 
-//RS fn run() {{
-//RS     input :: files.open("{input_rel}") ?? panic("open")
-//RS     reader :: csv.reader(^input) ?? panic("reader")
-//RS     count := 0
-//RS     loop item in reader {{
-//RS         count += 1
-//RS     }}
-//RS     print(count)
-//RS }}
-//RS "#
-//RS     )
-//RS }
-//RS 
-//RS fn cbor_reader_src(input_rel: &str) -> String {
-//RS     format!(
-//RS         r#"
-//RS use core.encoding as encoding
-//RS use core.encoding.cbor as cbor
-//RS use core.files as files
-//RS 
-//RS fn run() {{
-//RS     input :: files.open("{input_rel}") ?? panic("open")
-//RS     reader :: cbor.reader(^input) ?? panic("reader")
-//RS     count := 0
-//RS     loop item in reader {{
-//RS         count += 1
-//RS     }}
-//RS     print(count)
-//RS }}
-//RS "#
-//RS     )
-//RS }
-//RS 
-//RS fn json_limit_reader_src(input_rel: &str, max_total: u64) -> String {
-//RS     // Drain the full stream: first next() alone can return ObjectStart before
-//RS     // max_total_bytes is crossed.
-//RS     format!(
-//RS         r#"
-//RS use core.encoding as encoding
-//RS use core.encoding.json as json
-//RS use core.files as files
-//RS 
-//RS fn run() {{
-//RS     limits := encoding.EncodingLimits.safe()
-//RS     limits.max_total_bytes = Val({max_total})
-//RS     input :: files.open("{input_rel}") ?? panic("open")
-//RS     reader :: json.reader(^input, limits) ?? panic("reader")
-//RS     loop {{
-//RS         result :: reader.next()
-//RS         if result == {{
-//RS             Ok(maybe) -> {{
-//RS                 if maybe == {{
-//RS                     None -> {{
-//RS                         print("eof")
-//RS                         break
-//RS                     }}
-//RS                     Val(_) -> {{}}
-//RS                 }}
-//RS             }}
-//RS             Err(error) -> {{
-//RS                 print(error.kind == encoding.EncodingErrorKind.Limit)
-//RS                 again :: reader.next()
-//RS                 if again == {{
-//RS                     Err(second) -> print(error.reason == second.reason)
-//RS                     Ok(_) -> print("not-latched")
-//RS                 }}
-//RS                 break
-//RS             }}
-//RS         }}
-//RS     }}
-//RS }}
-//RS "#
-//RS     )
-//RS }
-//RS 
-//RS fn padded_json_object(target_len: usize) -> Vec<u8> {
-//RS     // {"d":"<pad>"}  — keep well-formed JSON of exact length.
-//RS     let overhead = 8; // {"d":""}
-//RS     assert!(target_len >= overhead, "target too small");
-//RS     let pad = target_len - overhead;
-//RS     let mut out = Vec::with_capacity(target_len);
-//RS     out.extend_from_slice(br#"{"d":""#);
-//RS     out.extend(std::iter::repeat(b'x').take(pad));
-//RS     out.extend_from_slice(br#""}"#);
-//RS     assert_eq!(out.len(), target_len);
-//RS     out
-//RS }
-//RS 
-//RS fn padded_jsonl(target_len: usize) -> Vec<u8> {
-//RS     // One JSONL row: {"n":N,"d":"<pad>"}\n sized to target_len.
-//RS     let prefix = br#"{"n":1,"d":""#;
-//RS     let suffix = br#""}"#;
-//RS     let overhead = prefix.len() + suffix.len() + 1; // + newline
-//RS     assert!(target_len >= overhead);
-//RS     let pad = target_len - overhead;
-//RS     let mut out = Vec::with_capacity(target_len);
-//RS     out.extend_from_slice(prefix);
-//RS     out.extend(std::iter::repeat(b'y').take(pad));
-//RS     out.extend_from_slice(suffix);
-//RS     out.push(b'\n');
-//RS     assert_eq!(out.len(), target_len);
-//RS     out
-//RS }
-//RS 
-//RS fn padded_csv(target_len: usize) -> Vec<u8> {
-//RS     // RFC 4180 row: name,payload\r\nada,<pad>\r\n
-//RS     let header = b"name,payload\r\n";
-//RS     let row_prefix = b"ada,";
-//RS     let overhead = header.len() + row_prefix.len() + 2; // trailing \r\n
-//RS     assert!(target_len >= overhead);
-//RS     let pad = target_len - overhead;
-//RS     let mut out = Vec::with_capacity(target_len);
-//RS     out.extend_from_slice(header);
-//RS     out.extend_from_slice(row_prefix);
-//RS     out.extend(std::iter::repeat(b'z').take(pad));
-//RS     out.extend_from_slice(b"\r\n");
-//RS     assert_eq!(out.len(), target_len);
-//RS     out
-//RS }
-//RS 
-//RS fn padded_cbor_text(target_len: usize) -> Vec<u8> {
-//RS     // Major type 3 text string with definite length, UTF-8 'q' payload.
-//RS     // Prefer 2-byte length header (0x79 + u16) when payload fits u16.
-//RS     let payload_len = target_len.checked_sub(3).expect("cbor target too small");
-//RS     assert!(payload_len <= u16::MAX as usize);
-//RS     let mut out = Vec::with_capacity(target_len);
-//RS     out.push(0x79);
-//RS     out.extend_from_slice(&(payload_len as u16).to_be_bytes());
-//RS     out.extend(std::iter::repeat(b'q').take(payload_len));
-//RS     assert_eq!(out.len(), target_len);
-//RS     out
-//RS }
-//RS 
-//RS fn assert_same(label: &str, baseline: &RunResult, got: &RunResult) {
-//RS     assert_eq!(
-//RS         got.exit, baseline.exit,
-//RS         "{label} exit drift: {}",
-//RS         got.stderr
-//RS     );
-//RS     assert_eq!(
-//RS         got.stdout, baseline.stdout,
-//RS         "{label} stdout drift\nbase={:?}\ngot ={:?}",
-//RS         baseline.stdout, got.stdout
-//RS     );
-//RS     assert_eq!(got.stderr, baseline.stderr, "{label} stderr drift");
-//RS }
-//RS 
-//RS fn prove_every_byte_split(
-//RS     label: &str,
-//RS     bin: &Path,
-//RS     cwd: &Path,
-//RS     input_len: usize,
-//RS     baseline: &RunResult,
-//RS     log: &mut String,
-//RS ) {
-//RS     assert!(
-//RS         input_len <= EVERY_SPLIT_MAX,
-//RS         "{label}: every-split input must be ≤ {EVERY_SPLIT_MAX}, got {input_len}"
-//RS     );
-//RS     let t0 = Instant::now();
-//RS     for split in 0..=input_len {
-//RS         let rest = (input_len - split).max(1);
-//RS         let plan = if split == 0 {
-//RS             format!("{rest}")
-//RS         } else {
-//RS             format!("{split},{rest}")
-//RS         };
-//RS         let got = run_hostile(bin, cwd, &[("JET_ENC_HOSTILE_READ_PLAN", &plan)]);
-//RS         if got.exit != baseline.exit || got.stdout != baseline.stdout {
-//RS             panic!(
-//RS                 "{label} first difference at split={split} plan={plan}\nbase exit={} out={:?}\ngot  exit={} out={:?} err={}",
-//RS                 baseline.exit, baseline.stdout, got.exit, got.stdout, got.stderr
-//RS             );
-//RS         }
-//RS     }
-//RS     // One-byte streaming is the strongest schedule and must also match.
-//RS     let one = run_hostile(bin, cwd, &[("JET_ENC_HOSTILE_READ_ONE", "1")]);
-//RS     assert_same(&format!("{label} read-one"), baseline, &one);
-//RS     log.push_str(&format!(
-//RS         "{label}: every-split 0..={input_len} + READ_ONE ok in {:?}\n",
-//RS         t0.elapsed()
-//RS     ));
-//RS }
-//RS 
-//RS fn prove_chunk_plans(
-//RS     label: &str,
-//RS     bin: &Path,
-//RS     cwd: &Path,
-//RS     plans: &[Vec<usize>],
-//RS     baseline: &RunResult,
-//RS     log: &mut String,
-//RS ) {
-//RS     let t0 = Instant::now();
-//RS     for (i, plan) in plans.iter().enumerate() {
-//RS         let plan_s = plan
-//RS             .iter()
-//RS             .map(|n| n.to_string())
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         let got = run_hostile(bin, cwd, &[("JET_ENC_HOSTILE_READ_PLAN", &plan_s)]);
-//RS         if got.exit != baseline.exit || got.stdout != baseline.stdout {
-//RS             panic!(
-//RS                 "{label} chunk plan {i} first difference plan={plan_s}\nbase={:?}\ngot={:?}\nerr={}",
-//RS                 baseline.stdout, got.stdout, got.stderr
-//RS             );
-//RS         }
-//RS         log.push_str(&format!("{label}: plan[{i}]={plan_s}\n"));
-//RS     }
-//RS     log.push_str(&format!(
-//RS         "{label}: {CHUNK_PLAN_COUNT} chunk plans ok in {:?}\n",
-//RS         t0.elapsed()
-//RS     ));
-//RS }
-//RS 
-//RS #[test]
-//RS fn encoding_variance_every_split_chunk_plans_limits_and_reps() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping encoding variance (need rustc)");
-//RS         return;
-//RS     }
-//RS 
-//RS     let mut evidence = host_facts();
-//RS     evidence.push_str("criterion=C6\nagent=e3-enc-715-fix\n");
-//RS     write_evidence("715-c6-host.txt", &evidence);
-//RS 
-//RS     let scratch = Scratch::new("main");
-//RS     let dir = scratch.path();
-//RS 
-//RS     // --- ≤4096 every-byte-split inputs (exact bound exercised) ---
-//RS     let cases: [(&str, Vec<u8>, fn(&str) -> String); 4] = [
-//RS         ("json", padded_json_object(EVERY_SPLIT_MAX), json_reader_src),
-//RS         ("jsonl", padded_jsonl(2048), jsonl_reader_src),
-//RS         ("csv", padded_csv(1024), csv_reader_src),
-//RS         ("cbor", padded_cbor_text(EVERY_SPLIT_MAX), cbor_reader_src),
-//RS     ];
-//RS 
-//RS     let mut log = String::new();
-//RS     for (name, bytes, src_fn) in &cases {
-//RS         let input = dir.join(format!("{name}_small.in"));
-//RS         fs::write(&input, bytes).unwrap();
-//RS         let input_rel = input.file_name().unwrap().to_string_lossy().into_owned();
-//RS         let bin = compile_aot(dir, &format!("{name}_small"), &src_fn(&input_rel));
-//RS         let baseline = run_bin(&bin, dir, &[]);
-//RS         assert_eq!(
-//RS             baseline.exit, 0,
-//RS             "{name} baseline failed: {}",
-//RS             baseline.stderr
-//RS         );
-//RS         assert!(
-//RS             !baseline.stdout.trim().is_empty(),
-//RS             "{name} baseline produced empty stdout"
-//RS         );
-//RS 
-//RS         for rep in 0..CLEAN_REPS {
-//RS             let again = run_bin(&bin, dir, &[]);
-//RS             assert_same(&format!("{name} clean-rep-{rep}"), &baseline, &again);
-//RS         }
-//RS         log.push_str(&format!(
-//RS             "{name}: {CLEAN_REPS} clean AOT reps ok; baseline_stdout={:?}\n",
-//RS             baseline.stdout.trim()
-//RS         ));
-//RS 
-//RS         prove_every_byte_split(name, &bin, dir, bytes.len(), &baseline, &mut log);
-//RS     }
-//RS 
-//RS     // --- >4096: 32 recorded deterministic chunk plans ---
-//RS     let large = padded_json_object(LARGE_INPUT_LEN);
-//RS     assert!(large.len() > EVERY_SPLIT_MAX);
-//RS     let large_path = dir.join("json_large.in");
-//RS     fs::write(&large_path, &large).unwrap();
-//RS     let large_bin = compile_aot(dir, "json_large", &json_reader_src("json_large.in"));
-//RS     let large_base = run_bin(&large_bin, dir, &[]);
-//RS     assert_eq!(large_base.exit, 0, "large baseline: {}", large_base.stderr);
-//RS     for rep in 0..CLEAN_REPS {
-//RS         assert_same(
-//RS             &format!("json-large clean-rep-{rep}"),
-//RS             &large_base,
-//RS             &run_bin(&large_bin, dir, &[]),
-//RS         );
-//RS     }
-//RS     let plans = recorded_chunk_plans(VARIANCE_SEED, large.len());
-//RS     assert_eq!(plans.len(), CHUNK_PLAN_COUNT);
-//RS     let plans_record = plans
-//RS         .iter()
-//RS         .enumerate()
-//RS         .map(|(i, p)| {
-//RS             format!(
-//RS                 "{i}\t{}",
-//RS                 p.iter()
-//RS                     .map(|n| n.to_string())
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(",")
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join("\n");
-//RS     write_evidence(
-//RS         "715-c6-chunk-plans.tsv",
-//RS         &format!(
-//RS             "# seed={VARIANCE_SEED:#x} len={}\n{plans_record}\n",
-//RS             large.len()
-//RS         ),
-//RS     );
-//RS     prove_chunk_plans("json-large", &large_bin, dir, &plans, &large_base, &mut log);
-//RS 
-//RS     // --- limit−1 / limit / limit+1 / overflow on a fixed JSON blob ---
-//RS     let limit_bytes = br#"{"a":"abcdefghij"}"#; // 16 bytes wire
-//RS     let limit_path = dir.join("limit.in");
-//RS     fs::write(&limit_path, limit_bytes).unwrap();
-//RS     let wire_len = limit_bytes.len() as u64;
-//RS     let limit_cases: [(u64, &str); 4] = [
-//RS         (wire_len.saturating_sub(1), "Limit"), // limit−1 → must error
-//RS         (wire_len, "ok-or-limit"),             // exact limit
-//RS         (wire_len + 1, "ok"),                  // limit+1 → accept
-//RS         (1_000_000, "ok"),                     // huge budget → accept
-//RS     ];
-//RS     for (max_total, expect_kind) in limit_cases {
-//RS         let src = json_limit_reader_src("limit.in", max_total);
-//RS         let bin = compile_aot(dir, &format!("limit_{max_total}"), &src);
-//RS         let mut last: Option<RunResult> = None;
-//RS         for rep in 0..CLEAN_REPS {
-//RS             let got = run_bin(&bin, dir, &[]);
-//RS             assert_eq!(got.exit, 0, "limit {max_total} rep {rep}: {}", got.stderr);
-//RS             if let Some(prev) = &last {
-//RS                 assert_same(&format!("limit-{max_total}-rep-{rep}"), prev, &got);
-//RS             }
-//RS             last = Some(got);
-//RS         }
-//RS         let got = last.unwrap();
-//RS         match expect_kind {
-//RS             "Limit" => {
-//RS                 assert!(
-//RS                     got.stdout.contains("true"),
-//RS                     "limit−1 must surface Limit latch, got {:?}",
-//RS                     got.stdout
-//RS                 );
-//RS                 let lines: Vec<_> = got.stdout.lines().collect();
-//RS                 assert!(
-//RS                     lines.first() == Some(&"true"),
-//RS                     "limit−1 first line must be Limit match true, got {:?}",
-//RS                     got.stdout
-//RS                 );
-//RS             }
-//RS             "ok" => {
-//RS                 assert!(
-//RS                     got.stdout.contains("ok") || got.stdout.contains("eof"),
-//RS                     "limit+ / overflow must accept, got {:?}",
-//RS                     got.stdout
-//RS                 );
-//RS             }
-//RS             "ok-or-limit" => {
-//RS                 // Exact budget: accept if the implementation counts finished
-//RS                 // value within budget, else Limit — either is deterministic.
-//RS                 assert!(
-//RS                     got.stdout.contains("ok")
-//RS                         || got.stdout.contains("eof")
-//RS                         || got.stdout.lines().next() == Some("true"),
-//RS                     "exact limit must be deterministic accept or Limit, got {:?}",
-//RS                     got.stdout
-//RS                 );
-//RS             }
-//RS             _ => unreachable!(),
-//RS         }
-//RS         // Hostile one-byte reads must preserve the same limit outcome.
-//RS         let host = run_hostile(&bin, dir, &[("JET_ENC_HOSTILE_READ_ONE", "1")]);
-//RS         assert_same(&format!("limit-{max_total}-hostile"), &got, &host);
-//RS         log.push_str(&format!(
-//RS             "limit max_total={max_total} expect={expect_kind} stdout={:?}\n",
-//RS             got.stdout.trim()
-//RS         ));
-//RS     }
-//RS 
-//RS     // Overflow write path: max_total_bytes = 0 must fail before publishing body.
-//RS     let overflow_src = r#"
-//RS use core.encoding as encoding
-//RS use core.encoding.json as json
-//RS use core.files as files
-//RS 
-//RS fn run() {
-//RS     limits := encoding.EncodingLimits.safe()
-//RS     limits.max_total_bytes = Val(0)
-//RS     out :: files.create("overflow.json") ?? panic("create")
-//RS     writer :: json.writer(^out, limits, false) ?? panic("writer")
-//RS     result :: writer.write(encoding.DataEvent.Text("x"))
-//RS     if result == {
-//RS         Err(first) -> {
-//RS             print(first.kind == encoding.EncodingErrorKind.Limit)
-//RS             again :: writer.finish()
-//RS             if again == {
-//RS                 Err(second) -> print(first.reason == second.reason)
-//RS                 Ok(_) -> print("finish-missed")
-//RS             }
-//RS         }
-//RS         Ok(_) -> print("missed")
-//RS     }
-//RS }
-//RS "#;
-//RS     let overflow_bin = compile_aot(dir, "overflow_write", overflow_src);
-//RS     let mut overflow_base: Option<RunResult> = None;
-//RS     for rep in 0..CLEAN_REPS {
-//RS         let got = run_bin(&overflow_bin, dir, &[]);
-//RS         assert_eq!(got.exit, 0, "overflow write: {}", got.stderr);
-//RS         assert!(
-//RS             got.stdout.lines().next() == Some("true"),
-//RS             "zero budget must Limit, got {:?}",
-//RS             got.stdout
-//RS         );
-//RS         if let Some(prev) = &overflow_base {
-//RS             assert_same(&format!("overflow-rep-{rep}"), prev, &got);
-//RS         }
-//RS         overflow_base = Some(got);
-//RS     }
-//RS     let overflow_host = run_hostile(
-//RS         &overflow_bin,
-//RS         dir,
-//RS         &[("JET_ENC_HOSTILE_WRITE_PLAN", "1,1,1,1")],
-//RS     );
-//RS     assert_same(
-//RS         "overflow-write-plan",
-//RS         overflow_base.as_ref().unwrap(),
-//RS         &overflow_host,
-//RS     );
-//RS     log.push_str("overflow write max_total=0 + WRITE_PLAN ok\n");
-//RS 
-//RS     evidence.push_str(&log);
-//RS     evidence.push_str(
-//RS         "C6_RESULT=met on linux-x86_64 AOT; other native platforms not present in this env\n",
-//RS     );
-//RS     write_evidence("715-c6-evidence.txt", &evidence);
-//RS     eprintln!("{evidence}");
-//RS }
-// END-PORT-PENDING 1044 tests/encoding_variance.rs:1-684
+// Rust: tests/encoding_types_single_home.rs:6
+const HOME: String = "Core/encoding/runtime/std_data_tree.jet"
+// Rust: tests/encoding_types_single_home.rs:7
+const TYPES: [String] = ["EncodingLimits", "EncodingFormat", "EncodingErrorKind", "EncodingCause", "EncodingError"]
+// Rust: tests/encoding_types_single_home.rs:15
+fn root() -> OSPath { common.repo_root() }
+// Rust: tests/encoding_types_single_home.rs:19
+fn collect_rs_files(dir: &OSPath, out: &[OSPath]) -> {
+    entries := fs.read_dir(dir) ?? return // GATE #4494
+    loop entry in entries.flatten() {
+        path := entry.path()
+        if path.is_dir() { collect_rs_files(&path, &out) }
+        else if path.extension().is_some_and((ext) -> ext == "jet") { out.push(path) }
+    }
+}
+// Rust: tests/encoding_types_single_home.rs:33
+fn declaration_sites(root: &OSPath, name: String) -> [String] {
+    files := [OSPath]{}
+    collect_rs_files(&root.join("Core"), &files)
+    files.sort()
+    sites := [String]{}
+    loop file in files {
+        relative := file.strip_prefix(root) ?? file
+        text := fs.read_to_string(&file) ?? ""
+        loop (line_number, line) in text.lines().enumerate() {
+            code := line.split("//").next() ?? ""
+            words := code.split((character) -> character.is_whitespace() || "{}()[],:;".contains(character))
+                .filter((word) -> !word.is_empty()).collect()
+            is_declaration := words.windows(2).any((window) -> (window[0] == "struct" || window[0] == "enum") && window[1] == name)
+            if !is_declaration { continue }
+            // The private absent-cause marker is not the shared EncodingError.
+            if name == "EncodingError" && (code.contains("struct EncodingError;") || code.contains("struct EncodingError ;")) { continue }
+            sites.push("{relative.display()}:{line_number + 1}")
+        }
+    }
+    sites
+}
 
-// PORT-PENDING 1044 tests-encoding-types-single-home-module-group: tests/exact_division.rs:1-36
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS mod common;
-//RS mod tir_support;
-//RS 
-//RS #[test]
-//RS fn exact_integer_division_is_fraction_and_multiplies_back() {
-//RS     tir_support::assert_tiers_agree(
-//RS         "exact_integer_division",
-//RS         r#"
-//RS fn run() {
-//RS     third :: 1 / 3
-//RS     print(third)
-//RS     print("interpolated {third}")
-//RS     print(third * 3 == 1)
-//RS }
-//RS "#,
-//RS         "1/3\ninterpolated 1/3\ntrue\n",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn comptime_division_keeps_the_same_exact_value_as_runtime() {
-//RS     tir_support::assert_tiers_agree(
-//RS         "comptime_exact_division",
-//RS         r#"
-//RS TEN :: prep { 10 }
-//RS THIRD :: prep { TEN / 3 }
-//RS fn run() {
-//RS     runtime :: 10 / 3
-//RS     print(THIRD)
-//RS     print(THIRD == runtime)
-//RS     print(THIRD * 3 == 10)
-//RS }
-//RS "#,
-//RS         "10/3\ntrue\ntrue\n",
-//RS     );
-//RS }
-// END-PORT-PENDING 1044 tests/exact_division.rs:1-36
-
+// Rust: tests/encoding_variance.rs:1
+// Card #715 C6: production file reader/writer seams, every byte split <=4096,
+// 32 recorded deterministic larger plans, exact limit controls and 3 clean reps.
+// Hostile schedules remain real native IO schedules, not transcript substitutes.
+// Rust: tests/encoding_variance.rs:25
+static SEQ: AtomicU64 = AtomicU64.new(0) // GATE #4494
+// Rust: tests/encoding_variance.rs:27
+const VARIANCE_SEED: U64 = 0x715C6_A11C_E5EE
+// Rust: tests/encoding_variance.rs:28
+const LARGE_INPUT_LEN: USize = 8192
+// Rust: tests/encoding_variance.rs:29
+const EVERY_SPLIT_MAX: USize = 4096
+// Rust: tests/encoding_variance.rs:30
+const CHUNK_PLAN_COUNT: USize = 32
+// Rust: tests/encoding_variance.rs:31
+const CLEAN_REPS: USize = 3
+// Rust: tests/encoding_variance.rs:33
+struct Scratch { dir: OSPath }
+impl Scratch {
+    // Rust: tests/encoding_variance.rs:38
+    fn new(tag: String) -> Scratch {
+        dir := env.temp_dir().join("jet_enc_variance_{tag}_{process.id()}_{SEQ.fetch_add(1, Ordering.Relaxed)}")
+        _ :: fs.remove_dir_all(&dir)
+        fs.create_dir_all(&dir).unwrap()
+        Scratch{ dir: dir }
+    }
+    // Rust: tests/encoding_variance.rs:49
+    fn path(self) -> &OSPath { &self.dir }
+}
+// Rust: tests/encoding_variance.rs:54
+#Clone
+#Debug
+struct RunResult { exit: I32, stdout: String, stderr: String }
+// Rust: tests/encoding_variance.rs:61
+fn host_facts() -> String {
+    // This is evidence about the actual process host, not selected-target cfg.
+    commit := Command.new("git").args(["rev-parse", "HEAD"]).output().ok()
+        .and_then((o) -> String.from_utf8(o.stdout).ok()) ?? "unknown"
+    commit := commit.trim().to_string() // #4303
+    rustc := Command.new("rustc").arg("-vV").output().ok()
+        .and_then((o) -> String.from_utf8(o.stdout).ok()) ?? "rustc unavailable"
+    host := rustc.lines().find((l) -> l.starts_with("host:")) ?? "host: unknown"
+    "commit={commit}\nos={env.consts.OS}\narch={env.consts.ARCH}\n{host}\nseed={VARIANCE_SEED:#x}\ntier=aot-native\nplatforms_unavailable=aarch64,macos,windows\n"
+}
+// Rust: tests/encoding_variance.rs:88
+fn write_evidence(name: String, body: String) -> {
+    dir := OSPath.from_text("/tmp/tower-burndown-e3")
+    _ :: fs.create_dir_all(&dir)
+    _ :: fs.write(dir.join(name), body)
+}
+// Rust: tests/encoding_variance.rs:94
+fn compile_aot(dir: &OSPath, name: String, src: String) -> OSPath {
+    jet_path := dir.join("{name}.jet")
+    fs.write(&jet_path, src).unwrap()
+    shown := jet_path.to_string_lossy()
+    _ :: jet.compile_with_path(src, &shown) ?? {
+        panic("front end rejected variance fixture:\n{jet.render_diagnostics(&shown, src, &err)}")
+    }
+    bin := dir.join(name)
+    // Clean native-backend cutover: build Jet, never generate or run Rust.
+    built := Command.new(env.test_binary("jet")) // GATE #4494
+        .args(["build", jet_path.to_str().unwrap(), "--output", bin.to_str().unwrap()]).output().unwrap()
+    assert(built.status.success(), "native compiler rejected variance fixture {name}:\n{String.from_utf8_lossy(&built.stderr)}")
+    bin
+}
+// Rust: tests/encoding_variance.rs:134
+fn run_bin(bin: &OSPath, cwd: &OSPath, environment: [(String, String)]) -> RunResult {
+    cmd := Command.new(bin)
+    cmd.current_dir(cwd)
+    // Fresh hostile TLS every process; clear every inherited schedule.
+    cmd.env_remove("JET_ENC_HOSTILE_IO")
+    cmd.env_remove("JET_ENC_HOSTILE_READ_ONE")
+    cmd.env_remove("JET_ENC_HOSTILE_READ_PLAN")
+    cmd.env_remove("JET_ENC_HOSTILE_WRITE_MAX")
+    cmd.env_remove("JET_ENC_HOSTILE_WRITE_PLAN")
+    cmd.env_remove("JET_ENC_HOSTILE_INTERRUPT_READS")
+    cmd.env_remove("JET_ENC_HOSTILE_INTERRUPT_WRITES")
+    cmd.env_remove("JET_ENC_HOSTILE_FAIL_READ_AFTER")
+    cmd.env_remove("JET_ENC_HOSTILE_FAIL_WRITE_AFTER")
+    loop (k, v) in environment { cmd.env(k, v) }
+    out := cmd.output().unwrap()
+    RunResult{exit: out.status.code() ?? -1, stdout: String.from_utf8_lossy(&out.stdout).to_string(), stderr: String.from_utf8_lossy(&out.stderr).to_string()}
+}
+// Rust: tests/encoding_variance.rs:158
+fn hostile(extra: [(String, String)]) -> [(String, String)] {
+    environment := [("JET_ENC_HOSTILE_IO", "1")]
+    environment.extend(extra.iter().map((pair) -> (~pair.0, ~pair.1)))
+    environment
+}
+// Rust: tests/encoding_variance.rs:164
+fn run_hostile(bin: &OSPath, cwd: &OSPath, extra: [(String, String)]) -> RunResult {
+    owned := hostile(extra)
+    run_bin(bin, cwd, owned)
+}
+// Rust: tests/encoding_variance.rs:173
+fn lcg(state: &U64) -> U64 {
+    state = state.wrapping_mul(6364136223846793005).wrapping_add(1)
+    state
+}
+// Rust: tests/encoding_variance.rs:178
+// 32 deterministic multi-chunk read plans for inputs larger than 4096.
+fn recorded_chunk_plans(seed: U64, input_len: USize) -> [[USize]] {
+    state := seed
+    plans := [[USize]].with_capacity(CHUNK_PLAN_COUNT)
+    loop plan_i in 0..CHUNK_PLAN_COUNT {
+        chunks := 3 + (USize{lcg(&state) & target.usize_max()} % 6) // GATE #4483: Rust truncating usize cast.
+        sizes := [USize].with_capacity(chunks)
+        remaining := input_len
+        loop c in 0..chunks {
+            if c + 1 == chunks { sizes.push(remaining.max(1)); break }
+            span := (remaining / (chunks - c)).max(1)
+            take := 1 + (USize{lcg(&state) & target.usize_max()} % span)
+            take := take.min(remaining.saturating_sub(chunks - c - 1).max(1))
+            sizes.push(take)
+            remaining = remaining.saturating_sub(take)
+        }
+        if sizes.iter().sum<USize>() < input_len { sizes.push(input_len) }
+        assert(!sizes.is_empty(), "plan {plan_i} empty for seed {seed:#x}")
+        plans.push(sizes)
+    }
+    plans
+}
+// Rust: tests/encoding_variance.rs:207
+fn json_reader_src(input_rel: String) -> String {
+    """
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+fn run() -> {
+    input :: files.open("$INPUT") ?? panic("open")
+    reader :: json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
+    count := 0
+    loop item in reader { count += 1 }
+    print(count)
+}
+""".replace("$INPUT", input_rel)
+}
+// Rust: tests/encoding_variance.rs:227
+fn jsonl_reader_src(input_rel: String) -> String {
+    """
+use core.encoding as encoding
+use core.encoding.jsonl as jsonl
+use core.files as files
+fn run() -> {
+    input :: files.open("$INPUT") ?? panic("open")
+    reader :: jsonl.reader(^input) ?? panic("reader")
+    count := 0
+    loop item in reader { count += 1 }
+    print(count)
+}
+""".replace("$INPUT", input_rel)
+}
+// Rust: tests/encoding_variance.rs:247
+fn csv_reader_src(input_rel: String) -> String {
+    """
+use core.encoding as encoding
+use core.encoding.csv as csv
+use core.files as files
+fn run() -> {
+    input :: files.open("$INPUT") ?? panic("open")
+    reader :: csv.reader(^input) ?? panic("reader")
+    count := 0
+    loop item in reader { count += 1 }
+    print(count)
+}
+""".replace("$INPUT", input_rel)
+}
+// Rust: tests/encoding_variance.rs:267
+fn cbor_reader_src(input_rel: String) -> String {
+    """
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+fn run() -> {
+    input :: files.open("$INPUT") ?? panic("open")
+    reader :: cbor.reader(^input) ?? panic("reader")
+    count := 0
+    loop item in reader { count += 1 }
+    print(count)
+}
+""".replace("$INPUT", input_rel)
+}
+// Rust: tests/encoding_variance.rs:287
+fn json_limit_reader_src(input_rel: String, max_total: U64) -> String {
+    // Drain the stream: ObjectStart alone can precede crossing max_total_bytes.
+    """
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+fn run() -> {
+    limits := encoding.EncodingLimits.safe()
+    limits.max_total_bytes = Val($MAX)
+    input :: files.open("$INPUT") ?? panic("open")
+    reader :: json.reader(^input, limits) ?? panic("reader")
+    loop {
+        result :: reader.next()
+        if result == {
+            Ok(maybe) -> {
+                if maybe == { None -> { print("eof"); break }; Val(_) -> {} }
+            }
+            Err(error) -> {
+                print(error.kind == encoding.EncodingErrorKind.Limit)
+                again :: reader.next()
+                if again == { Err(second) -> print(error.reason == second.reason); Ok(_) -> print("not-latched") }
+                break
+            }
+        }
+    }
+}
+""".replace("$MAX", max_total.to_string()).replace("$INPUT", input_rel)
+}
+// Rust: tests/encoding_variance.rs:329
+fn padded_json_object(target_len: USize) -> [U8] {
+    overhead := 8
+    assert(target_len >= overhead, "target too small")
+    pad := target_len - overhead
+    out := [U8].with_capacity(target_len)
+    out.extend_from_slice("{\"d\":\"".as_bytes())
+    loop _ in 0..pad { out.push(120) }
+    out.extend_from_slice("\"}".as_bytes())
+    assert(out.len() == target_len)
+    out
+}
+// Rust: tests/encoding_variance.rs:342
+fn padded_jsonl(target_len: USize) -> [U8] {
+    prefix := "{\"n\":1,\"d\":\"".as_bytes()
+    suffix := "\"}".as_bytes()
+    overhead := prefix.len() + suffix.len() + 1
+    assert(target_len >= overhead)
+    pad := target_len - overhead
+    out := [U8].with_capacity(target_len)
+    out.extend_from_slice(prefix)
+    loop _ in 0..pad { out.push(121) }
+    out.extend_from_slice(suffix)
+    out.push(10)
+    assert(out.len() == target_len)
+    out
+}
+// Rust: tests/encoding_variance.rs:358
+fn padded_csv(target_len: USize) -> [U8] {
+    header := "name,payload\r\n".as_bytes()
+    row_prefix := "ada,".as_bytes()
+    overhead := header.len() + row_prefix.len() + 2
+    assert(target_len >= overhead)
+    pad := target_len - overhead
+    out := [U8].with_capacity(target_len)
+    out.extend_from_slice(header)
+    out.extend_from_slice(row_prefix)
+    loop _ in 0..pad { out.push(122) }
+    out.extend_from_slice("\r\n".as_bytes())
+    assert(out.len() == target_len)
+    out
+}
+// Rust: tests/encoding_variance.rs:374
+fn padded_cbor_text(target_len: USize) -> [U8] {
+    payload_len := target_len.checked_sub(3).expect("cbor target too small")
+    assert(payload_len <= USize{U16.MAX})
+    out := [U8].with_capacity(target_len)
+    out.push(0x79)
+    out.extend_from_slice(&U16{payload_len}.to_be_bytes())
+    loop _ in 0..payload_len { out.push(113) }
+    assert(out.len() == target_len)
+    out
+}
+// Rust: tests/encoding_variance.rs:387
+fn assert_same(label: String, baseline: &RunResult, got: &RunResult) -> {
+    assert(got.exit == baseline.exit, "{label} exit drift: {got.stderr}")
+    assert(got.stdout == baseline.stdout, "{label} stdout drift\nbase={baseline.stdout:?}\ngot ={got.stdout:?}")
+    assert(got.stderr == baseline.stderr, "{label} stderr drift")
+}
+// Rust: tests/encoding_variance.rs:401
+fn prove_every_byte_split(label: String, bin: &OSPath, cwd: &OSPath, input_len: USize, baseline: &RunResult, log: &String) -> {
+    assert(input_len <= EVERY_SPLIT_MAX, "{label}: every-split input must be ≤ {EVERY_SPLIT_MAX}, got {input_len}")
+    t0 := Instant.now()
+    loop split in 0..=input_len {
+        rest := (input_len - split).max(1)
+        plan := if split == 0 -> "{rest}" else -> "{split},{rest}"
+        got := run_hostile(bin, cwd, [("JET_ENC_HOSTILE_READ_PLAN", plan)])
+        if got.exit != baseline.exit || got.stdout != baseline.stdout {
+            panic("{label} first difference at split={split} plan={plan}\nbase exit={baseline.exit} out={baseline.stdout:?}\ngot  exit={got.exit} out={got.stdout:?} err={got.stderr}")
+        }
+    }
+    one := run_hostile(bin, cwd, [("JET_ENC_HOSTILE_READ_ONE", "1")])
+    assert_same("{label} read-one", baseline, &one)
+    log.push_str("{label}: every-split 0..={input_len} + READ_ONE ok in {t0.elapsed():?}\n")
+}
+// Rust: tests/encoding_variance.rs:438
+fn prove_chunk_plans(label: String, bin: &OSPath, cwd: &OSPath, plans: &[[USize]], baseline: &RunResult, log: &String) -> {
+    t0 := Instant.now()
+    loop (i, plan) in plans.iter().enumerate() {
+        plan_s := plan.iter().map((n) -> n.to_string()).collect().join(",")
+        got := run_hostile(bin, cwd, [("JET_ENC_HOSTILE_READ_PLAN", plan_s)])
+        if got.exit != baseline.exit || got.stdout != baseline.stdout {
+            panic("{label} chunk plan {i} first difference plan={plan_s}\nbase={baseline.stdout:?}\ngot={got.stdout:?}\nerr={got.stderr}")
+        }
+        log.push_str("{label}: plan[{i}]={plan_s}\n")
+    }
+    log.push_str("{label}: {CHUNK_PLAN_COUNT} chunk plans ok in {t0.elapsed():?}\n")
+}
+// Rust tests encoding_types_single_home:71, encoding_variance:469 and
+// exact_division:5/21 are registered in encoding_types_single_homeTests.jet.

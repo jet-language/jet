@@ -1,1833 +1,689 @@
-// PORT-PENDING 0636 crates-jet-pkg-model-src-prelude-http-slice-1786: crates/jet-pkg-model/src/Prelude/HTTP.rs:1786-3614
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn connect_plain(
-//RS     dns: &Arc<Mutex<DNSCache>>,
-//RS     facts: &Arc<ResponseFacts>,
-//RS     url: &ParsedUrl,
-//RS     dns_timeout: Duration,
-//RS     timeout: Duration,
-//RS ) -> Result<TcpStream, JetHTTPBridgeError> {
-//RS     let mut last = JetHTTPBridgeError::Connect;
-//RS     let dns_started = Instant::now();
-//RS     let key = (url.host.clone(), url.port);
-//RS     let cached = dns
-//RS         .lock()
-//RS         .map_err(|_| JetHTTPBridgeError::Internal)?
-//RS         .get(&key);
-//RS     let cache_miss = cached.is_none();
-//RS     let result = if let Some(cached) = cached {
-//RS         cached
-//RS     } else {
-//RS         let (send, receive) = std::sync::mpsc::sync_channel(1);
-//RS         let target = url.clone();
-//RS         std::thread::spawn(move || {
-//RS             let result = resolve(&target).and_then(|addresses| {
-//RS                 (!addresses.is_empty())
-//RS                     .then_some(addresses)
-//RS                     .ok_or(JetHTTPBridgeError::Resolve)
-//RS             });
-//RS             let _ = send.send(result);
-//RS         });
-//RS         receive
-//RS             .recv_timeout(dns_timeout)
-//RS             .map_err(|_| JetHTTPBridgeError::Timeout)?
-//RS     };
-//RS     if cache_miss {
-//RS         dns.lock()
-//RS             .map_err(|_| JetHTTPBridgeError::Internal)?
-//RS             .put(key, result.clone());
-//RS     }
-//RS     set_timing(facts, 0, elapsed_ms(dns_started));
-//RS     let addresses = result?;
-//RS     let connect_started = Instant::now();
-//RS     for address in addresses {
-//RS         match TcpStream::connect_timeout(&address, timeout) {
-//RS             Ok(stream) => {
-//RS                 set_timing(facts, 1, elapsed_ms(connect_started));
-//RS                 return Ok(stream);
-//RS             }
-//RS             Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
-//RS                 last = JetHTTPBridgeError::Timeout;
-//RS             }
-//RS             Err(_) => last = JetHTTPBridgeError::Connect,
-//RS         }
-//RS     }
-//RS     set_timing(facts, 1, elapsed_ms(connect_started));
-//RS     Err(last)
-//RS }
-//RS 
-//RS fn http_tls_pem_certificates(pem: &[u8]) -> Result<Vec<Vec<u8>>, JetHTTPBridgeError> {
-//RS     const BEGIN: &str = "-----BEGIN CERTIFICATE-----";
-//RS     const END: &str = "-----END CERTIFICATE-----";
-//RS     let text = std::str::from_utf8(pem).map_err(|_| JetHTTPBridgeError::TLS)?;
-//RS     let mut rest = text;
-//RS     let mut out = Vec::new();
-//RS     while let Some(start) = rest.find(BEGIN) {
-//RS         if !rest[..start].trim().is_empty() {
-//RS             return Err(JetHTTPBridgeError::TLS);
-//RS         }
-//RS         rest = &rest[start + BEGIN.len()..];
-//RS         let stop = rest.find(END).ok_or(JetHTTPBridgeError::TLS)?;
-//RS         out.push(http_tls_pem_base64(&rest[..stop])?);
-//RS         rest = &rest[stop + END.len()..];
-//RS     }
-//RS     if out.is_empty() || !rest.trim().is_empty() {
-//RS         return Err(JetHTTPBridgeError::TLS);
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn http_tls_private_key(
-//RS     pem: &[u8],
-//RS ) -> Result<rustls::pki_types::PrivateKeyDer<'static>, JetHTTPBridgeError> {
-//RS     let text = std::str::from_utf8(pem).map_err(|_| JetHTTPBridgeError::TLS)?;
-//RS     let parse = |begin: &str, end: &str| -> Result<Option<Vec<u8>>, JetHTTPBridgeError> {
-//RS         let Some(start) = text.find(begin) else {
-//RS             return Ok(None);
-//RS         };
-//RS         if !text[..start].trim().is_empty() {
-//RS             return Err(JetHTTPBridgeError::TLS);
-//RS         }
-//RS         let rest = &text[start + begin.len()..];
-//RS         let stop = rest.find(end).ok_or(JetHTTPBridgeError::TLS)?;
-//RS         if !rest[stop + end.len()..].trim().is_empty() {
-//RS             return Err(JetHTTPBridgeError::TLS);
-//RS         }
-//RS         Ok(Some(http_tls_pem_base64(&rest[..stop])?))
-//RS     };
-//RS     if let Some(der) = parse("-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----")? {
-//RS         return Ok(rustls::pki_types::PrivateKeyDer::Pkcs8(
-//RS             rustls::pki_types::PrivatePkcs8KeyDer::from(der),
-//RS         ));
-//RS     }
-//RS     if let Some(der) = parse("-----BEGIN RSA PRIVATE KEY-----", "-----END RSA PRIVATE KEY-----")? {
-//RS         return Ok(rustls::pki_types::PrivateKeyDer::Pkcs1(
-//RS             rustls::pki_types::PrivatePkcs1KeyDer::from(der),
-//RS         ));
-//RS     }
-//RS     if let Some(der) = parse("-----BEGIN EC PRIVATE KEY-----", "-----END EC PRIVATE KEY-----")? {
-//RS         return Ok(rustls::pki_types::PrivateKeyDer::Sec1(
-//RS             rustls::pki_types::PrivateSec1KeyDer::from(der),
-//RS         ));
-//RS     }
-//RS     Err(JetHTTPBridgeError::TLS)
-//RS }
-//RS 
-//RS fn http_tls_pem_base64(text: &str) -> Result<Vec<u8>, JetHTTPBridgeError> {
-//RS     let filtered: Vec<u8> = text.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-//RS     if filtered.len() % 4 != 0 {
-//RS         return Err(JetHTTPBridgeError::TLS);
-//RS     }
-//RS     let mut out = Vec::new();
-//RS     let mut i = 0;
-//RS     while i < filtered.len() {
-//RS         let mut vals = [0u8; 4];
-//RS         let mut pad = 0usize;
-//RS         for j in 0..4 {
-//RS             let byte = filtered[i + j];
-//RS             vals[j] = match byte {
-//RS                 b'A'..=b'Z' => byte - b'A',
-//RS                 b'a'..=b'z' => byte - b'a' + 26,
-//RS                 b'0'..=b'9' => byte - b'0' + 52,
-//RS                 b'+' => 62,
-//RS                 b'/' => 63,
-//RS                 b'=' => {
-//RS                     pad += 1;
-//RS                     0
-//RS                 }
-//RS                 _ => return Err(JetHTTPBridgeError::TLS),
-//RS             };
-//RS             if byte == b'=' && j < 2 {
-//RS                 return Err(JetHTTPBridgeError::TLS);
-//RS             }
-//RS         }
-//RS         if pad > 2 {
-//RS             return Err(JetHTTPBridgeError::TLS);
-//RS         }
-//RS         out.push((vals[0] << 2) | (vals[1] >> 4));
-//RS         if pad < 2 {
-//RS             out.push(((vals[1] & 0x0f) << 4) | (vals[2] >> 2));
-//RS         }
-//RS         if pad < 1 {
-//RS             out.push(((vals[2] & 0x03) << 6) | vals[3]);
-//RS         }
-//RS         i += 4;
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn tls_stream(
-//RS     tcp: TcpStream,
-//RS     host: &str,
-//RS     timeout: Duration,
-//RS     http2: bool,
-//RS     http11: bool,
-//RS     tls: TLSSettings<'_>,
-//RS ) -> Result<HTTPStream, JetHTTPBridgeError> {
-//RS     static PROVIDER: std::sync::Once = std::sync::Once::new();
-//RS     PROVIDER.call_once(|| {
-//RS         let _ = rustls::crypto::ring::default_provider().install_default();
-//RS     });
-//RS     tcp.set_read_timeout(Some(timeout))
-//RS         .map_err(|_| JetHTTPBridgeError::TLS)?;
-//RS     tcp.set_write_timeout(Some(timeout))
-//RS         .map_err(|_| JetHTTPBridgeError::TLS)?;
-//RS     let mut roots = rustls::RootCertStore::empty();
-//RS     if tls.system_roots {
-//RS         let native =
-//RS             rustls_native_certs::load_native_certs().map_err(|_| JetHTTPBridgeError::TLS)?;
-//RS         for cert in native {
-//RS             roots.add(cert).map_err(|_| JetHTTPBridgeError::TLS)?;
-//RS         }
-//RS     }
-//RS     for cert in tls.custom_roots {
-//RS         roots
-//RS             .add(rustls::pki_types::CertificateDer::from(cert.clone()))
-//RS             .map_err(|_| JetHTTPBridgeError::TLS)?;
-//RS     }
-//RS     if roots.is_empty() {
-//RS         return Err(JetHTTPBridgeError::TLS);
-//RS     }
-//RS     if tls.min_version > tls.max_version
-//RS         || !matches!(tls.min_version, 12 | 13)
-//RS         || !matches!(tls.max_version, 12 | 13)
-//RS     {
-//RS         return Err(JetHTTPBridgeError::TLS);
-//RS     }
-//RS     let versions: &[&'static rustls::SupportedProtocolVersion] = match (tls.min_version, tls.max_version) {
-//RS         (12, 12) => &[&rustls::version::TLS12],
-//RS         (13, 13) => &[&rustls::version::TLS13],
-//RS         _ => &[&rustls::version::TLS13, &rustls::version::TLS12],
-//RS     };
-//RS     let builder = rustls::ClientConfig::builder_with_protocol_versions(versions)
-//RS         .with_root_certificates(roots);
-//RS     let mut config = if tls.identity_cert.is_empty() {
-//RS         builder.with_no_client_auth()
-//RS     } else {
-//RS         let certs = http_tls_pem_certificates(tls.identity_cert)?
-//RS             .into_iter()
-//RS             .map(rustls::pki_types::CertificateDer::from)
-//RS             .collect::<Vec<_>>();
-//RS         let key = http_tls_private_key(tls.identity_key)?;
-//RS         builder
-//RS             .with_client_auth_cert(certs, key)
-//RS             .map_err(|_| JetHTTPBridgeError::TLS)?
-//RS     };
-//RS     config.alpn_protocols = [
-//RS         http2.then(|| b"h2".to_vec()),
-//RS         http11.then(|| b"http/1.1".to_vec()),
-//RS     ]
-//RS     .into_iter()
-//RS     .flatten()
-//RS     .collect();
-//RS     let name = rustls::pki_types::ServerName::try_from(host.to_string())
-//RS         .map_err(|_| JetHTTPBridgeError::TLS)?;
-//RS     let mut connection = rustls::ClientConnection::new(Arc::new(config), name)
-//RS         .map_err(|_| JetHTTPBridgeError::TLS)?;
-//RS     let mut tcp = tcp;
-//RS     while connection.is_handshaking() {
-//RS         connection
-//RS             .complete_io(&mut tcp)
-//RS             .map_err(|_| JetHTTPBridgeError::TLS)?;
-//RS     }
-//RS     let selected = connection.alpn_protocol().map(<[u8]>::to_vec);
-//RS     let stream = HTTPStream::TLS(Box::new(rustls::StreamOwned::new(connection, tcp)));
-//RS     match selected.as_deref() {
-//RS         Some(b"h2") if http2 => Ok(HTTPStream::H2(Arc::new(Mutex::new(H2Connection::new(
-//RS             stream,
-//RS         )?)))),
-//RS         Some(b"http/1.1") | None if http11 => Ok(stream),
-//RS         _ => Err(JetHTTPBridgeError::Protocol),
-//RS     }
-//RS }
-//RS 
-//RS fn body_readers() -> &'static Mutex<std::collections::HashMap<i64, BodyReader>> {
-//RS     static READERS: OnceLock<Mutex<std::collections::HashMap<i64, BodyReader>>> = OnceLock::new();
-//RS     READERS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
-//RS }
-//RS 
-//RS fn register_body(reader: Box<dyn Read + Send>) -> i64 {
-//RS     static NEXT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
-//RS     let handle = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-//RS     body_readers()
-//RS         .lock()
-//RS         .expect("HTTP body registry lock")
-//RS         .insert(handle, Arc::new(Mutex::new(reader)));
-//RS     handle
-//RS }
-//RS 
-//RS pub fn jet_http_client_body_read_impl(
-//RS     handle: i64,
-//RS     max_chunk: usize,
-//RS ) -> Result<Option<Vec<u8>>, JetHTTPBridgeError> {
-//RS     let reader = body_readers()
-//RS         .lock()
-//RS         .map_err(|_| JetHTTPBridgeError::Internal)?
-//RS         .get(&handle)
-//RS         .cloned()
-//RS         .ok_or(JetHTTPBridgeError::Internal)?;
-//RS     let mut chunk = vec![0; max_chunk.min(HTTP_RESPONSE_READ_CHUNK_LIMIT)];
-//RS     let read = reader
-//RS         .lock()
-//RS         .map_err(|_| JetHTTPBridgeError::Internal)?
-//RS         .read(&mut chunk)
-//RS         .map_err(|error| match error.kind() {
-//RS             std::io::ErrorKind::InvalidData => JetHTTPBridgeError::InvalidFraming,
-//RS             std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => {
-//RS                 JetHTTPBridgeError::Timeout
-//RS             }
-//RS             _ => JetHTTPBridgeError::IO,
-//RS         })?;
-//RS     if read == 0 {
-//RS         let _ = body_readers()
-//RS             .lock()
-//RS             .map(|mut readers| readers.remove(&handle));
-//RS         return Ok(None);
-//RS     }
-//RS     chunk.truncate(read);
-//RS     Ok(Some(chunk))
-//RS }
-//RS 
-//RS pub fn jet_http_client_body_close_impl(handle: i64) {
-//RS     let _ = body_readers()
-//RS         .lock()
-//RS         .map(|mut readers| readers.remove(&handle));
-//RS }
-//RS 
-//RS /// Open response-body registry size — bridge harness leak oracle.
-//RS pub fn jet_http_client_open_body_count_impl() -> usize {
-//RS     body_readers()
-//RS         .lock()
-//RS         .map(|readers| readers.len())
-//RS         .unwrap_or(0)
-//RS }
-//RS 
-//RS fn validated_timeout(name: &str, milliseconds: i64) -> Result<Duration, JetHTTPBridgeError> {
-//RS     let milliseconds = u64::try_from(milliseconds).map_err(|_| {
-//RS         let _ = name;
-//RS         JetHTTPBridgeError::Timeout
-//RS     })?;
-//RS     Ok(Duration::from_millis(milliseconds))
-//RS }
-//RS 
-//RS struct PhaseTimeouts {
-//RS     dns: Duration,
-//RS     connect: Duration,
-//RS     tls: Duration,
-//RS     write: Duration,
-//RS     first_byte: Duration,
-//RS     read: Duration,
-//RS     total: Option<Instant>,
-//RS }
-//RS 
-//RS fn resolve_phase_timeout(
-//RS     explicit: Option<i64>,
-//RS     name: &str,
-//RS     blanket: Option<Duration>,
-//RS     policy: Duration,
-//RS ) -> Result<Duration, JetHTTPBridgeError> {
-//RS     if let Some(ms) = explicit {
-//RS         return validated_timeout(name, ms);
-//RS     }
-//RS     Ok(blanket.unwrap_or(policy))
-//RS }
-//RS 
-//RS fn resolve_request_phase_timeouts(
-//RS     blanket_ms: Option<i64>,
-//RS     connect_ms: Option<i64>,
-//RS     read_ms: Option<i64>,
-//RS     total_ms: Option<i64>,
-//RS     dns_ms: Option<i64>,
-//RS     tls_ms: Option<i64>,
-//RS     write_ms: Option<i64>,
-//RS     first_byte_ms: Option<i64>,
-//RS     policy: &ClientPolicy,
-//RS     oneshot_default: bool,
-//RS ) -> Result<PhaseTimeouts, JetHTTPBridgeError> {
-//RS     let blanket = if oneshot_default {
-//RS         Some(validated_timeout(
-//RS             "timeout",
-//RS             blanket_ms.unwrap_or(30_000),
-//RS         )?)
-//RS     } else {
-//RS         blanket_ms
-//RS             .map(|value| validated_timeout("timeout", value))
-//RS             .transpose()?
-//RS     };
-//RS     let total = compose_total_deadline(match total_ms {
-//RS         Some(ms) => Some(validated_timeout("total timeout", ms)?),
-//RS         None if oneshot_default => None,
-//RS         None => policy.total_timeout,
-//RS     })?;
-//RS     Ok(PhaseTimeouts {
-//RS         dns: resolve_phase_timeout(dns_ms, "DNS timeout", blanket, policy.dns_timeout)?,
-//RS         connect: resolve_phase_timeout(
-//RS             connect_ms,
-//RS             "connect timeout",
-//RS             blanket,
-//RS             policy.connect_timeout,
-//RS         )?,
-//RS         tls: resolve_phase_timeout(tls_ms, "TLS timeout", blanket, policy.tls_timeout)?,
-//RS         write: resolve_phase_timeout(write_ms, "write timeout", blanket, policy.write_timeout)?,
-//RS         first_byte: resolve_phase_timeout(
-//RS             first_byte_ms,
-//RS             "first byte timeout",
-//RS             blanket,
-//RS             policy.first_byte_timeout,
-//RS         )?,
-//RS         read: resolve_phase_timeout(read_ms, "read timeout", blanket, policy.read_timeout)?,
-//RS         total,
-//RS     })
-//RS }
-//RS 
-//RS /// Perform an HTTP GET and return owned response parts.
-//RS pub fn jet_http_client_get_parts_impl(
-//RS     url: &String,
-//RS ) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
-//RS     jet_http_client_send_parts_impl(
-//RS         "GET",
-//RS         url,
-//RS         &[],
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         &[],
-//RS         &[],
-//RS         &[],
-//RS     )
-//RS }
-//RS 
-//RS 
-//RS /// Perform an HTTP POST with a string body.
-//RS pub fn jet_http_client_post_parts_impl(
-//RS     url: &String,
-//RS     body: &String,
-//RS ) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
-//RS     jet_http_client_send_parts_impl(
-//RS         "POST",
-//RS         url,
-//RS         &[],
-//RS         Some(body.as_bytes()),
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         &[],
-//RS         &[],
-//RS         &[],
-//RS     )
-//RS }
-//RS 
-//RS 
-//RS /// Perform a generic HTTP request.
-//RS /// headers_flat: alternating [key, value, key, value, ...]
-//RS 
-//RS pub fn jet_http_client_send_stream_parts_impl(
-//RS     method: &str,
-//RS     url: &String,
-//RS     headers_flat: &[String],
-//RS     body_len: Option<i64>,
-//RS     has_user_body: bool,
-//RS     body_read: &mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHTTPBridgeError>,
-//RS     timeout_ms: Option<i64>,
-//RS     connect_timeout_ms: Option<i64>,
-//RS     read_timeout_ms: Option<i64>,
-//RS     total_timeout_ms: Option<i64>,
-//RS     dns_timeout_ms: Option<i64>,
-//RS     tls_timeout_ms: Option<i64>,
-//RS     write_timeout_ms: Option<i64>,
-//RS     first_byte_timeout_ms: Option<i64>,
-//RS     redirects: Option<i64>,
-//RS     proxy: Option<&str>,
-//RS     cookies_flat: &[String],
-//RS     form_flat: &[String],
-//RS     multipart_flat: &[String],
-//RS ) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
-//RS     let phases = resolve_request_phase_timeouts(
-//RS         timeout_ms,
-//RS         connect_timeout_ms,
-//RS         read_timeout_ms,
-//RS         total_timeout_ms,
-//RS         dns_timeout_ms,
-//RS         tls_timeout_ms,
-//RS         write_timeout_ms,
-//RS         first_byte_timeout_ms,
-//RS         &ClientPolicy::default(),
-//RS         true,
-//RS     )?;
-//RS     let redirects = redirects
-//RS         .map(|limit| u32::try_from(limit).map_err(|_| JetHTTPBridgeError::Redirect))
-//RS         .transpose()?;
-//RS     let explicit_redirect_limit = redirects.is_some();
-//RS     let redirect_limit = redirects.unwrap_or(HTTP_CLIENT_DEFAULT_REDIRECTS);
-//RS     let (headers, form_body) = if has_user_body {
-//RS         prepare_request_parts(headers_flat, None, cookies_flat, &[], &[])?
-//RS     } else {
-//RS         prepare_request_parts(headers_flat, None, cookies_flat, form_flat, multipart_flat)?
-//RS     };
-//RS     let stream_len = if has_user_body {
-//RS         body_len.and_then(|value| usize::try_from(value).ok())
-//RS     } else {
-//RS         form_body.as_ref().map(Vec::len)
-//RS     };
-//RS     send_following_redirects_upload(
-//RS         default_client_pool().clone(),
-//RS         0,
-//RS         default_dns_cache().clone(),
-//RS         default_origin_limits().clone(),
-//RS         None,
-//RS         true,
-//RS         method,
-//RS         url,
-//RS         headers,
-//RS         form_body,
-//RS         if has_user_body { Some(body_read) } else { None },
-//RS         stream_len,
-//RS         phases.dns,
-//RS         phases.connect,
-//RS         phases.tls,
-//RS         phases.first_byte,
-//RS         phases.read,
-//RS         phases.write,
-//RS         phases.total,
-//RS         redirect_limit,
-//RS         explicit_redirect_limit,
-//RS         true,
-//RS         false,
-//RS         RetryPolicy::Safe,
-//RS         proxy,
-//RS         true,
-//RS         true,
-//RS         false,
-//RS         TLSSettings::SYSTEM,
-//RS     )
-//RS }
-//RS 
-//RS 
-//RS pub fn jet_http_client_send_with_stream_parts_impl(
-//RS     id: i64,
-//RS     method: &str,
-//RS     url: &String,
-//RS     headers_flat: &[String],
-//RS     body_len: Option<i64>,
-//RS     has_user_body: bool,
-//RS     body_read: &mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHTTPBridgeError>,
-//RS     timeout_ms: Option<i64>,
-//RS     connect_timeout_ms: Option<i64>,
-//RS     read_timeout_ms: Option<i64>,
-//RS     total_timeout_ms: Option<i64>,
-//RS     dns_timeout_ms: Option<i64>,
-//RS     tls_timeout_ms: Option<i64>,
-//RS     write_timeout_ms: Option<i64>,
-//RS     first_byte_timeout_ms: Option<i64>,
-//RS     redirects: Option<i64>,
-//RS     proxy: Option<&str>,
-//RS     cookies_flat: &[String],
-//RS     form_flat: &[String],
-//RS     multipart_flat: &[String],
-//RS ) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
-//RS     let handle = client_handles()
-//RS         .lock()
-//RS         .map_err(|_| JetHTTPBridgeError::Internal)?
-//RS         .get(&id)
-//RS         .cloned()
-//RS         .ok_or(JetHTTPBridgeError::Internal)?;
-//RS     let phases = resolve_request_phase_timeouts(
-//RS         timeout_ms,
-//RS         connect_timeout_ms,
-//RS         read_timeout_ms,
-//RS         total_timeout_ms,
-//RS         dns_timeout_ms,
-//RS         tls_timeout_ms,
-//RS         write_timeout_ms,
-//RS         first_byte_timeout_ms,
-//RS         &handle.policy,
-//RS         false,
-//RS     )?;
-//RS     let (redirect_limit, explicit_redirect_limit) = match redirects {
-//RS         Some(value) => (
-//RS             u32::try_from(value).map_err(|_| JetHTTPBridgeError::Redirect)?,
-//RS             true,
-//RS         ),
-//RS         None => (handle.policy.redirect_limit, false),
-//RS     };
-//RS     let (headers, form_body) = if has_user_body {
-//RS         prepare_request_parts(headers_flat, None, cookies_flat, &[], &[])?
-//RS     } else {
-//RS         prepare_request_parts(headers_flat, None, cookies_flat, form_flat, multipart_flat)?
-//RS     };
-//RS     let stream_len = if has_user_body {
-//RS         body_len.and_then(|value| usize::try_from(value).ok())
-//RS     } else {
-//RS         form_body.as_ref().map(Vec::len)
-//RS     };
-//RS     let configured_proxy = proxy
-//RS         .or(handle.policy.proxy.as_deref())
-//RS         .or((!handle.policy.use_environment_proxy).then_some(""));
-//RS     send_following_redirects_upload(
-//RS         handle.shared.pool.clone(),
-//RS         handle.namespace,
-//RS         handle.shared.dns.clone(),
-//RS         handle.shared.limits.clone(),
-//RS         handle.policy.cookies.then(|| handle.shared.jar.clone()),
-//RS         handle.policy.decompress,
-//RS         method,
-//RS         url,
-//RS         headers,
-//RS         form_body,
-//RS         if has_user_body { Some(body_read) } else { None },
-//RS         stream_len,
-//RS         phases.dns,
-//RS         phases.connect,
-//RS         phases.tls,
-//RS         phases.first_byte,
-//RS         phases.read,
-//RS         phases.write,
-//RS         phases.total,
-//RS         redirect_limit,
-//RS         explicit_redirect_limit,
-//RS         handle.policy.same_origin_credentials,
-//RS         handle.policy.allow_http_downgrade,
-//RS         handle.policy.retry_policy,
-//RS         configured_proxy,
-//RS         handle.policy.http2,
-//RS         handle.policy.http11,
-//RS         handle.policy.h2c,
-//RS         handle.policy.tls_settings(),
-//RS     )
-//RS }
-//RS 
-//RS 
-//RS pub fn jet_http_client_send_parts_impl(
-//RS     method: &str,
-//RS     url: &String,
-//RS     headers_flat: &[String],
-//RS     body: Option<&[u8]>,
-//RS     timeout_ms: Option<i64>,
-//RS     connect_timeout_ms: Option<i64>,
-//RS     read_timeout_ms: Option<i64>,
-//RS     total_timeout_ms: Option<i64>,
-//RS     dns_timeout_ms: Option<i64>,
-//RS     tls_timeout_ms: Option<i64>,
-//RS     write_timeout_ms: Option<i64>,
-//RS     first_byte_timeout_ms: Option<i64>,
-//RS     redirects: Option<i64>,
-//RS     proxy: Option<&str>,
-//RS     cookies_flat: &[String],
-//RS     form_flat: &[String],
-//RS     multipart_flat: &[String],
-//RS ) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
-//RS     #[cfg(not(any(
-//RS         target_os = "linux",
-//RS         target_os = "android",
-//RS         target_os = "macos",
-//RS         target_os = "ios",
-//RS         target_os = "freebsd",
-//RS         target_os = "openbsd",
-//RS         target_os = "netbsd",
-//RS         target_os = "windows"
-//RS     )))]
-//RS     {
-//RS         let _ = (
-//RS             method, url, headers_flat, body, timeout_ms, connect_timeout_ms, read_timeout_ms,
-//RS             total_timeout_ms, dns_timeout_ms, tls_timeout_ms, write_timeout_ms, first_byte_timeout_ms,
-//RS             redirects, proxy, cookies_flat, form_flat, multipart_flat,
-//RS         );
-//RS         return Err(JetHTTPBridgeError::UnsupportedTarget);
-//RS     }
-//RS 
-//RS     validate_request_headers(headers_flat)?;
-//RS     jet_http_client_send_owned_impl(
-//RS         method,
-//RS         url,
-//RS         coalesce_request_headers(headers_flat),
-//RS         body.map(ToOwned::to_owned),
-//RS         timeout_ms,
-//RS         connect_timeout_ms,
-//RS         read_timeout_ms,
-//RS         total_timeout_ms,
-//RS         dns_timeout_ms,
-//RS         tls_timeout_ms,
-//RS         write_timeout_ms,
-//RS         first_byte_timeout_ms,
-//RS         redirects,
-//RS         proxy,
-//RS         cookies_flat,
-//RS         form_flat,
-//RS         multipart_flat,
-//RS     )
-//RS }
-//RS 
-//RS 
-//RS /// Owned request parts are the direct typed bridge used by resident JIT and
-//RS /// generated AOT. The caller transfers headers/body once; policy and redirect
-//RS /// handling remain in this one canonical client path.
-//RS pub fn jet_http_client_send_owned_impl(
-//RS     method: &str,
-//RS     url: &String,
-//RS     headers: Vec<(String, String)>,
-//RS     body: Option<Vec<u8>>,
-//RS     timeout_ms: Option<i64>,
-//RS     connect_timeout_ms: Option<i64>,
-//RS     read_timeout_ms: Option<i64>,
-//RS     total_timeout_ms: Option<i64>,
-//RS     dns_timeout_ms: Option<i64>,
-//RS     tls_timeout_ms: Option<i64>,
-//RS     write_timeout_ms: Option<i64>,
-//RS     first_byte_timeout_ms: Option<i64>,
-//RS     redirects: Option<i64>,
-//RS     proxy: Option<&str>,
-//RS     cookies_flat: &[String],
-//RS     form_flat: &[String],
-//RS     multipart_flat: &[String],
-//RS ) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
-//RS     let phases = resolve_request_phase_timeouts(
-//RS         timeout_ms,
-//RS         connect_timeout_ms,
-//RS         read_timeout_ms,
-//RS         total_timeout_ms,
-//RS         dns_timeout_ms,
-//RS         tls_timeout_ms,
-//RS         write_timeout_ms,
-//RS         first_byte_timeout_ms,
-//RS         &ClientPolicy::default(),
-//RS         true,
-//RS     )?;
-//RS     let redirects = redirects
-//RS         .map(|limit| u32::try_from(limit).map_err(|_| JetHTTPBridgeError::Redirect))
-//RS         .transpose()?;
-//RS     let explicit_redirect_limit = redirects.is_some();
-//RS     let redirect_limit = redirects.unwrap_or(HTTP_CLIENT_DEFAULT_REDIRECTS);
-//RS     let (headers, body) =
-//RS         prepare_request_parts_owned(headers, body, cookies_flat, form_flat, multipart_flat)?;
-//RS     send_following_redirects(
-//RS         default_client_pool().clone(),
-//RS         0,
-//RS         default_dns_cache().clone(),
-//RS         default_origin_limits().clone(),
-//RS         None,
-//RS         true,
-//RS         method,
-//RS         url,
-//RS         headers,
-//RS         body,
-//RS         phases.dns,
-//RS         phases.connect,
-//RS         phases.tls,
-//RS         phases.first_byte,
-//RS         phases.read,
-//RS         phases.write,
-//RS         phases.total,
-//RS         redirect_limit,
-//RS         explicit_redirect_limit,
-//RS         true,
-//RS         false,
-//RS         RetryPolicy::Safe,
-//RS         proxy,
-//RS         true,
-//RS         true,
-//RS         false,
-//RS         TLSSettings::SYSTEM,
-//RS     )
-//RS }
-//RS 
-//RS const HTTP_FORBIDDEN_REQUEST_HEADERS: &[&str] = &[
-//RS     "host",
-//RS     "content-length",
-//RS     "transfer-encoding",
-//RS     "connection",
-//RS     "proxy-connection",
-//RS     "keep-alive",
-//RS     "te",
-//RS     "trailer",
-//RS     "upgrade",
-//RS     "proxy-authenticate",
-//RS     "proxy-authorization",
-//RS ];
-//RS fn connection_close_value(value: &str) -> bool {
-//RS     !value.trim().is_empty()
-//RS         && value
-//RS             .split(',')
-//RS             .all(|item| item.trim().eq_ignore_ascii_case("close"))
-//RS }
-//RS 
-//RS 
-//RS fn validate_request_header(name: &str, value: &str) -> Result<(), JetHTTPBridgeError> {
-//RS     if name.is_empty()
-//RS         || !name.bytes().all(http_token_byte)
-//RS         || !value.bytes().all(http_field_value_byte)
-//RS     {
-//RS         return Err(JetHTTPBridgeError::InvalidHeader);
-//RS     }
-//RS     if HTTP_FORBIDDEN_REQUEST_HEADERS
-//RS         .iter()
-//RS         .any(|candidate| name.eq_ignore_ascii_case(candidate))
-//RS         && !(name.eq_ignore_ascii_case("connection") && connection_close_value(value))
-//RS     {
-//RS         return Err(JetHTTPBridgeError::InvalidFraming);
-//RS     }
-//RS 
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_request_headers(headers_flat: &[String]) -> Result<(), JetHTTPBridgeError> {
-//RS     if headers_flat.len() % 2 != 0 {
-//RS         return Err(JetHTTPBridgeError::InvalidHeader);
-//RS     }
-//RS     for pair in headers_flat.chunks_exact(2) {
-//RS         validate_request_header(&pair[0], &pair[1])?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_request_header_pairs(
-//RS     headers: &[(String, String)],
-//RS ) -> Result<(), JetHTTPBridgeError> {
-//RS     for (name, value) in headers {
-//RS         validate_request_header(name, value)?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn prepare_request_parts(
-//RS     headers_flat: &[String],
-//RS     body: Option<&[u8]>,
-//RS     cookies_flat: &[String],
-//RS     form_flat: &[String],
-//RS     multipart_flat: &[String],
-//RS ) -> Result<(Vec<(String, String)>, Option<Vec<u8>>), JetHTTPBridgeError> {
-//RS     validate_request_headers(headers_flat)?;
-//RS     prepare_request_parts_owned(
-//RS         coalesce_request_headers(headers_flat),
-//RS         body.map(ToOwned::to_owned),
-//RS         cookies_flat,
-//RS         form_flat,
-//RS         multipart_flat,
-//RS     )
-//RS }
-//RS 
-//RS fn prepare_request_parts_owned(
-//RS     mut headers: Vec<(String, String)>,
-//RS     body: Option<Vec<u8>>,
-//RS     cookies_flat: &[String],
-//RS     form_flat: &[String],
-//RS     multipart_flat: &[String],
-//RS ) -> Result<(Vec<(String, String)>, Option<Vec<u8>>), JetHTTPBridgeError> {
-//RS     validate_request_header_pairs(&headers)?;
-//RS     headers = coalesce_request_header_pairs(headers);
-//RS     if !cookies_flat.is_empty() {
-//RS         let cookie = cookies_flat
-//RS             .chunks_exact(2)
-//RS             .map(|pair| format!("{}={}", pair[0], pair[1]))
-//RS             .collect::<Vec<_>>()
-//RS             .join("; ");
-//RS         headers.push(("cookie".to_string(), cookie));
-//RS     }
-//RS     let body = if body.is_some() {
-//RS         body
-//RS     } else if !multipart_flat.is_empty() {
-//RS         let boundary = multipart_boundary(multipart_flat);
-//RS         headers.push((
-//RS             "content-type".to_string(),
-//RS             format!("multipart/form-data; boundary={boundary}"),
-//RS         ));
-//RS         Some(encode_multipart(multipart_flat, &boundary).into_bytes())
-//RS     } else if !form_flat.is_empty() {
-//RS         headers.push((
-//RS             "content-type".to_string(),
-//RS             "application/x-www-form-urlencoded".to_string(),
-//RS         ));
-//RS         Some(encode_form(form_flat).into_bytes())
-//RS     } else {
-//RS         None
-//RS     };
-//RS     validate_request_header_pairs(&headers)?;
-//RS     Ok((headers, body))
-//RS }
-//RS 
-//RS fn send_following_redirects(
-//RS     pool: Arc<Mutex<ClientPool>>,
-//RS     namespace: i64,
-//RS     dns: Arc<Mutex<DNSCache>>,
-//RS     limits: Arc<OriginLimits>,
-//RS     jar: Option<Arc<Mutex<CookieJar>>>,
-//RS     decompress: bool,
-//RS     original_method: &str,
-//RS     original_url: &str,
-//RS     headers: Vec<(String, String)>,
-//RS     original_body: Option<Vec<u8>>,
-//RS     dns_timeout: Duration,
-//RS     connect_timeout: Duration,
-//RS     tls_timeout: Duration,
-//RS     first_byte_timeout: Duration,
-//RS     read_timeout: Duration,
-//RS     write_timeout: Duration,
-//RS     total_deadline: Option<Instant>,
-//RS     redirect_limit: u32,
-//RS     explicit_redirect_limit: bool,
-//RS     same_origin_credentials: bool,
-//RS     allow_http_downgrade: bool,
-//RS     retry_policy: RetryPolicy,
-//RS     explicit_proxy: Option<&str>,
-//RS     http2: bool,
-//RS     http11: bool,
-//RS     h2c: bool,
-//RS     tls: TLSSettings<'_>,
-//RS ) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
-//RS     send_following_redirects_upload(
-//RS         pool,
-//RS         namespace,
-//RS         dns,
-//RS         limits,
-//RS         jar,
-//RS         decompress,
-//RS         original_method,
-//RS         original_url,
-//RS         headers,
-//RS         original_body,
-//RS         None,
-//RS         None,
-//RS         dns_timeout,
-//RS         connect_timeout,
-//RS         tls_timeout,
-//RS         first_byte_timeout,
-//RS         read_timeout,
-//RS         write_timeout,
-//RS         total_deadline,
-//RS         redirect_limit,
-//RS         explicit_redirect_limit,
-//RS         same_origin_credentials,
-//RS         allow_http_downgrade,
-//RS         retry_policy,
-//RS         explicit_proxy,
-//RS         http2,
-//RS         http11,
-//RS         h2c,
-//RS         tls,
-//RS     )
-//RS }
-//RS 
-//RS fn send_following_redirects_upload(
-//RS     pool: Arc<Mutex<ClientPool>>,
-//RS     namespace: i64,
-//RS     dns: Arc<Mutex<DNSCache>>,
-//RS     limits: Arc<OriginLimits>,
-//RS     jar: Option<Arc<Mutex<CookieJar>>>,
-//RS     decompress: bool,
-//RS     original_method: &str,
-//RS     original_url: &str,
-//RS     mut headers: Vec<(String, String)>,
-//RS     mut body: Option<Vec<u8>>,
-//RS     mut body_stream: Option<&mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHTTPBridgeError>>,
-//RS     stream_len: Option<usize>,
-//RS     dns_timeout: Duration,
-//RS     connect_timeout: Duration,
-//RS     tls_timeout: Duration,
-//RS     first_byte_timeout: Duration,
-//RS     read_timeout: Duration,
-//RS     write_timeout: Duration,
-//RS     total_deadline: Option<Instant>,
-//RS     redirect_limit: u32,
-//RS     explicit_redirect_limit: bool,
-//RS     same_origin_credentials: bool,
-//RS     allow_http_downgrade: bool,
-//RS     retry_policy: RetryPolicy,
-//RS     explicit_proxy: Option<&str>,
-//RS     http2: bool,
-//RS     http11: bool,
-//RS     h2c: bool,
-//RS     tls: TLSSettings<'_>,
-//RS ) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
-//RS     let mut method = original_method.to_string();
-//RS     let mut url = original_url.to_string();
-//RS     let mut visited = std::collections::HashSet::new();
-//RS     let mut redirect_history = Vec::new();
-//RS     let started = Instant::now();
-//RS     let cookie_site = schemeful_site(&parse_url(original_url)?);
-//RS     for followed in 0..=redirect_limit {
-//RS         if !visited.insert(url.clone()) {
-//RS             return Err(JetHTTPBridgeError::Redirect);
-//RS         }
-//RS         let parsed = parse_url(&url)?;
-//RS         let proxy = select_proxy(&parsed, explicit_proxy)?;
-//RS         let mut request_headers = headers.clone();
-//RS         if !request_headers
-//RS             .iter()
-//RS             .any(|(name, _)| name.eq_ignore_ascii_case("cookie"))
-//RS         {
-//RS             let same_site = cookie_site == schemeful_site(&parsed);
-//RS             let safe_method = matches!(method.as_str(), "GET" | "HEAD" | "OPTIONS" | "TRACE");
-//RS             let allow_jar_cookie = followed == 0 || (same_origin_credentials && same_site);
-//RS             if allow_jar_cookie {
-//RS                 if let Some(cookie) = jar
-//RS                     .as_ref()
-//RS                     .and_then(|jar| jar.lock().ok()?.header(&parsed, same_site, safe_method))
-//RS                 {
-//RS                     request_headers.push(("cookie".to_string(), cookie));
-//RS                 }
-//RS             }
-//RS         }
-//RS         let response = if let Some(ref bytes) = body {
-//RS             send_once(
-//RS                 pool.clone(),
-//RS                 namespace,
-//RS                 dns.clone(),
-//RS                 limits.clone(),
-//RS                 &method,
-//RS                 &parsed,
-//RS                 &request_headers,
-//RS                 Some(bytes.as_slice()),
-//RS                 dns_timeout,
-//RS                 connect_timeout,
-//RS                 tls_timeout,
-//RS                 first_byte_timeout,
-//RS                 read_timeout,
-//RS                 write_timeout,
-//RS                 total_deadline,
-//RS                 proxy.as_ref(),
-//RS                 decompress,
-//RS                 started,
-//RS                 http2,
-//RS                 http11,
-//RS                 h2c,
-//RS                 tls,
-//RS                 retry_policy,
-//RS             )?
-//RS         } else if let Some(ref mut read) = body_stream {
-//RS             // Buffer only when a later redirect may need the body again (307/308
-//RS             // preserve method+body for non-safe methods). Connection-retry
-//RS             // policy excludes POST and must not gate this tee.
-//RS             // redirects(0) and bodyless/safe methods stream with no tee.
-//RS             let mut tee = (redirect_limit > 0 && redirect_may_replay_body(method.as_str()))
-//RS                 .then(Vec::new);
-//RS             let chunked = stream_len.is_none();
-//RS             let has_body = true;
-//RS             let response = send_once_upload(
-//RS                 pool.clone(),
-//RS                 namespace,
-//RS                 dns.clone(),
-//RS                 limits.clone(),
-//RS                 &method,
-//RS                 &parsed,
-//RS                 &request_headers,
-//RS                 stream_len,
-//RS                 chunked,
-//RS                 has_body,
-//RS                 read,
-//RS                 &mut tee,
-//RS                 dns_timeout,
-//RS                 connect_timeout,
-//RS                 tls_timeout,
-//RS                 first_byte_timeout,
-//RS                 read_timeout,
-//RS                 write_timeout,
-//RS                 total_deadline,
-//RS                 proxy.as_ref(),
-//RS                 decompress,
-//RS                 started,
-//RS                 http2,
-//RS                 http11,
-//RS                 h2c,
-//RS                 tls,
-//RS                 retry_policy,
-//RS             )?;
-//RS             body = tee;
-//RS             body_stream = None;
-//RS             response
-//RS         } else {
-//RS             send_once(
-//RS                 pool.clone(),
-//RS                 namespace,
-//RS                 dns.clone(),
-//RS                 limits.clone(),
-//RS                 &method,
-//RS                 &parsed,
-//RS                 &request_headers,
-//RS                 None,
-//RS                 dns_timeout,
-//RS                 connect_timeout,
-//RS                 tls_timeout,
-//RS                 first_byte_timeout,
-//RS                 read_timeout,
-//RS                 write_timeout,
-//RS                 total_deadline,
-//RS                 proxy.as_ref(),
-//RS                 decompress,
-//RS                 started,
-//RS                 http2,
-//RS                 http11,
-//RS                 h2c,
-//RS                 tls,
-//RS                 retry_policy,
-//RS             )?
-//RS         };
-//RS         if let Some(jar) = &jar {
-//RS             if let Ok(mut jar) = jar.lock() {
-//RS                 for value in response
-//RS                     .headers
-//RS                     .iter()
-//RS                     .filter(|(name, _)| name == "set-cookie")
-//RS                     .map(|(_, value)| value)
-//RS                 {
-//RS                     jar.store(&parsed, value);
-//RS                 }
-//RS             }
-//RS         }
-//RS         if !matches!(response.status, 301 | 302 | 303 | 307 | 308) {
-//RS             return finalize_response(response, redirect_history, started);
-//RS         }
-//RS         let location = header_first(&response.headers, "location");
-//RS         let Some(location) = location else {
-//RS             return finalize_response(response, redirect_history, started);
-//RS         };
-//RS         if followed == redirect_limit
-//RS             || (explicit_redirect_limit && redirect_limit != 0 && followed + 1 == redirect_limit)
-//RS         {
-//RS             return if redirect_limit == 0 {
-//RS                 finalize_response(response, redirect_history, started)
-//RS             } else {
-//RS                 jet_http_client_body_close_impl(response.body_handle);
-//RS                 Err(JetHTTPBridgeError::Redirect)
-//RS             };
-//RS         }
-//RS         let next = resolve_redirect(&parsed, location)?;
-//RS         let next_parsed = parse_url(&next)?;
-//RS         if parsed.scheme == "https" && next_parsed.scheme == "http" && !allow_http_downgrade {
-//RS             jet_http_client_body_close_impl(response.body_handle);
-//RS             return Err(JetHTTPBridgeError::Redirect);
-//RS         }
-//RS         let cross_origin = parsed.host != next_parsed.host
-//RS             || parsed.port != next_parsed.port
-//RS             || parsed.scheme != next_parsed.scheme;
-//RS         // D-HTTP-CLIENT2: cross-origin always strips credentials; same-origin
-//RS         // keeps them only when same_origin_credentials is true.
-//RS         if cross_origin || !same_origin_credentials {
-//RS             headers.retain(|(name, _)| {
-//RS                 !matches!(
-//RS                     name.to_ascii_lowercase().as_str(),
-//RS                     "authorization" | "proxy-authorization" | "cookie"
-//RS                 )
-//RS             });
-//RS         }
-//RS         if matches!(response.status, 301 | 302 | 303) && method == "POST" {
-//RS             method = "GET".to_string();
-//RS             body = None;
-//RS             headers.retain(|(name, _)| {
-//RS                 !matches!(
-//RS                     name.to_ascii_lowercase().as_str(),
-//RS                     "content-length" | "content-type"
-//RS                 )
-//RS             });
-//RS         } else if matches!(response.status, 307 | 308)
-//RS             && body.is_none()
-//RS             && !matches!(method.as_str(), "GET" | "HEAD" | "OPTIONS" | "TRACE")
-//RS         {
-//RS             jet_http_client_body_close_impl(response.body_handle);
-//RS             return Err(JetHTTPBridgeError::Redirect);
-//RS         }
-//RS         redirect_history.push(url.clone());
-//RS         drain_redirect_body(response.body_handle);
-//RS         url = next;
-//RS     }
-//RS     Err(JetHTTPBridgeError::Redirect)
-//RS }
-//RS 
-//RS fn finalize_response(
-//RS     response: NativeResponse,
-//RS     redirect_history: Vec<String>,
-//RS     started: Instant,
-//RS ) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
-//RS     let NativeResponse {
-//RS         status,
-//RS         headers,
-//RS         body_handle,
-//RS         body_length,
-//RS         reused_connection,
-//RS         remote_address,
-//RS         protocol,
-//RS         facts,
-//RS     } = response;
-//RS     facts.set_total(elapsed_ms(started));
-//RS     let (timings_ms, raw_content_encoding) = facts.snapshot();
-//RS     Ok(JetHTTPResponseParts {
-//RS         status,
-//RS         body_handle,
-//RS         body_length,
-//RS         headers,
-//RS         context: JetHTTPResponseContext {
-//RS             protocol,
-//RS             remote_address,
-//RS             redirect_history,
-//RS             timings_ms,
-//RS             reused_connection,
-//RS             raw_content_encoding,
-//RS         },
-//RS     })
-//RS }
-//RS 
-//RS fn elapsed_ms(started: Instant) -> i64 {
-//RS     started.elapsed().as_millis().min(i64::MAX as u128) as i64
-//RS }
-//RS 
-//RS fn set_timing(facts: &ResponseFacts, index: usize, value: i64) {
-//RS     facts.add_timing(index, value);
-//RS }
-//RS 
-//RS fn drain_redirect_body(handle: i64) {
-//RS     let mut total = 0usize;
-//RS     loop {
-//RS         match jet_http_client_body_read_impl(handle, 64 * 1024) {
-//RS             Ok(Some(bytes)) if total.saturating_add(bytes.len()) <= 1024 * 1024 => {
-//RS                 total += bytes.len()
-//RS             }
-//RS             Ok(None) => return,
-//RS             _ => {
-//RS                 jet_http_client_body_close_impl(handle);
-//RS                 return;
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn resolve_redirect(base: &ParsedUrl, location: &str) -> Result<String, JetHTTPBridgeError> {
-//RS     if location.starts_with("http://") || location.starts_with("https://") {
-//RS         parse_url(location)?;
-//RS         return Ok(location.to_string());
-//RS     }
-//RS     if location.starts_with("//") {
-//RS         return Ok(format!("{}:{location}", base.scheme));
-//RS     }
-//RS     let authority = if (base.scheme == "http" && base.port == 80)
-//RS         || (base.scheme == "https" && base.port == 443)
-//RS     {
-//RS         base.host.clone()
-//RS     } else {
-//RS         format!("{}:{}", base.host, base.port)
-//RS     };
-//RS     if location.starts_with('/') {
-//RS         return Ok(format!("{}://{}{}", base.scheme, authority, location));
-//RS     }
-//RS     let directory = base
-//RS         .target
-//RS         .split('?')
-//RS         .next()
-//RS         .unwrap_or("/")
-//RS         .rsplit_once('/')
-//RS         .map(|(dir, _)| format!("{dir}/"))
-//RS         .unwrap_or_else(|| "/".to_string());
-//RS     Ok(format!(
-//RS         "{}://{}{}{}",
-//RS         base.scheme, authority, directory, location
-//RS     ))
-//RS }
-//RS 
-//RS fn select_proxy(
-//RS     url: &ParsedUrl,
-//RS     explicit: Option<&str>,
-//RS ) -> Result<Option<ParsedUrl>, JetHTTPBridgeError> {
-//RS     if let Some(value) = explicit {
-//RS         if value.is_empty() {
-//RS             return Ok(None);
-//RS         }
-//RS         return parse_url(value)
-//RS             .map(Some)
-//RS             .map_err(|_| JetHTTPBridgeError::Proxy);
-//RS     }
-//RS     let no_proxy = std::env::var("no_proxy")
-//RS         .ok()
-//RS         .or_else(|| std::env::var("NO_PROXY").ok());
-//RS     if no_proxy
-//RS         .as_deref()
-//RS         .is_some_and(|list| no_proxy_matches(list, &url.host, url.port))
-//RS     {
-//RS         return Ok(None);
-//RS     }
-//RS     let names: &[&str] = if url.scheme == "https" {
-//RS         &["https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"]
-//RS     } else {
-//RS         &["http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"]
-//RS     };
-//RS     for name in names {
-//RS         if let Ok(value) = std::env::var(name) {
-//RS             if !value.is_empty() {
-//RS                 return parse_url(&value)
-//RS                     .map(Some)
-//RS                     .map_err(|_| JetHTTPBridgeError::Proxy);
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(None)
-//RS }
-//RS 
-//RS fn no_proxy_matches(list: &str, host: &str, port: u16) -> bool {
-//RS     list.split(',').map(str::trim).any(|entry| {
-//RS         if entry == "*" {
-//RS             return true;
-//RS         }
-//RS         let (name, entry_port) = entry
-//RS             .rsplit_once(':')
-//RS             .and_then(|(name, port)| port.parse::<u16>().ok().map(|port| (name, Some(port))))
-//RS             .unwrap_or((entry, None));
-//RS         if entry_port.is_some_and(|expected| expected != port) {
-//RS             return false;
-//RS         }
-//RS         let name = name.trim_start_matches('.');
-//RS         host.eq_ignore_ascii_case(name)
-//RS             || host.len() > name.len()
-//RS                 && host.as_bytes()[host.len() - name.len() - 1] == b'.'
-//RS                 && host[host.len() - name.len()..].eq_ignore_ascii_case(name)
-//RS     })
-//RS }
-//RS 
-//RS struct NativeResponse {
-//RS     status: i64,
-//RS     headers: Vec<(String, String)>,
-//RS     body_handle: i64,
-//RS     body_length: Option<i64>,
-//RS     reused_connection: bool,
-//RS     remote_address: String,
-//RS     protocol: String,
-//RS     facts: Arc<ResponseFacts>,
-//RS }
-//RS 
-//RS 
-//RS // One instance is created for each request. Body readers can finish after the
-//RS // response headers are projected, so phase counters are lock-free and the
-//RS // encoding fact is published once.
-//RS struct ResponseFacts {
-//RS     // dns, connect, tls, write_idle, first_byte, read_idle, total
-//RS     timings_ms: [AtomicI64; 7],
-//RS     raw_content_encoding: OnceLock<String>,
-//RS }
-//RS 
-//RS impl Default for ResponseFacts {
-//RS     fn default() -> Self {
-//RS         Self {
-//RS             timings_ms: std::array::from_fn(|_| AtomicI64::new(0)),
-//RS             raw_content_encoding: OnceLock::new(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl ResponseFacts {
-//RS     fn add_timing(&self, index: usize, value: i64) {
-//RS         let _ = self.timings_ms[index].fetch_update(
-//RS             Ordering::Relaxed,
-//RS             Ordering::Relaxed,
-//RS             |current| Some(current.saturating_add(value)),
-//RS         );
-//RS     }
-//RS 
-//RS     fn max_timing(&self, index: usize, value: i64) {
-//RS         let _ = self.timings_ms[index].fetch_update(
-//RS             Ordering::Relaxed,
-//RS             Ordering::Relaxed,
-//RS             |current| Some(current.max(value)),
-//RS         );
-//RS     }
-//RS 
-//RS     fn set_total(&self, value: i64) {
-//RS         self.timings_ms[6].store(value, Ordering::Relaxed);
-//RS     }
-//RS 
-//RS     fn set_raw_content_encoding(&self, value: Option<String>) {
-//RS         // Absence is not publication: a later real header must remain able to
-//RS         // install the immutable fact.
-//RS         if let Some(value) = value {
-//RS             let _ = self.raw_content_encoding.set(value);
-//RS         }
-//RS     }
-//RS 
-//RS     fn snapshot(&self) -> ([i64; 7], Option<String>) {
-//RS         (
-//RS             std::array::from_fn(|index| self.timings_ms[index].load(Ordering::Relaxed)),
-//RS             self.raw_content_encoding.get().cloned(),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Default)]
-//RS pub struct JetHTTPResponseContext {
-//RS     pub protocol: String,
-//RS     pub remote_address: String,
-//RS     pub redirect_history: Vec<String>,
-//RS     pub timings_ms: [i64; 7],
-//RS     pub reused_connection: bool,
-//RS     pub raw_content_encoding: Option<String>,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub struct JetHTTPResponseParts {
-//RS     pub status: i64,
-//RS     pub body_handle: i64,
-//RS     pub body_length: Option<i64>,
-//RS     pub headers: Vec<(String, String)>,
-//RS     pub context: JetHTTPResponseContext,
-//RS }
-//RS 
-//RS 
-//RS 
-//RS fn remaining_timeout(
-//RS     default: Duration,
-//RS     deadline: Option<Instant>,
-//RS ) -> Result<Duration, JetHTTPBridgeError> {
-//RS     match deadline {
-//RS         Some(deadline) => deadline
-//RS             .checked_duration_since(Instant::now())
-//RS             .map(|remaining| remaining.min(default))
-//RS             .ok_or(JetHTTPBridgeError::Timeout),
-//RS         None => Ok(default),
-//RS     }
-//RS }
-//RS 
-//RS fn send_once(
-//RS     pool: Arc<Mutex<ClientPool>>,
-//RS     namespace: i64,
-//RS     dns: Arc<Mutex<DNSCache>>,
-//RS     limits: Arc<OriginLimits>,
-//RS     method: &str,
-//RS     url: &ParsedUrl,
-//RS     headers: &[(String, String)],
-//RS     body: Option<&[u8]>,
-//RS     dns_timeout: Duration,
-//RS     connect_timeout: Duration,
-//RS     tls_timeout: Duration,
-//RS     first_byte_timeout: Duration,
-//RS     read_timeout: Duration,
-//RS     write_timeout: Duration,
-//RS     total_deadline: Option<Instant>,
-//RS     proxy: Option<&ParsedUrl>,
-//RS     decompress: bool,
-//RS     request_started: Instant,
-//RS     http2: bool,
-//RS     http11: bool,
-//RS     h2c: bool,
-//RS     tls: TLSSettings<'_>,
-//RS     retry_policy: RetryPolicy,
-//RS ) -> Result<NativeResponse, JetHTTPBridgeError> {
-//RS     let body_len = body.map(|bytes| bytes.len());
-//RS     let has_body = body.is_some();
-//RS     let mut offset = 0usize;
-//RS     let bytes = body.unwrap_or(&[]);
-//RS     let mut tee = None;
-//RS     let mut read = slice_body_reader(bytes, &mut offset);
-//RS     send_once_upload(
-//RS         pool,
-//RS         namespace,
-//RS         dns,
-//RS         limits,
-//RS         method,
-//RS         url,
-//RS         headers,
-//RS         body_len,
-//RS         false,
-//RS         has_body,
-//RS         &mut read,
-//RS         &mut tee,
-//RS         dns_timeout,
-//RS         connect_timeout,
-//RS         tls_timeout,
-//RS         first_byte_timeout,
-//RS         read_timeout,
-//RS         write_timeout,
-//RS         total_deadline,
-//RS         proxy,
-//RS         decompress,
-//RS         request_started,
-//RS         http2,
-//RS         http11,
-//RS         h2c,
-//RS         tls,
-//RS         retry_policy,
-//RS     )
-//RS }
-//RS 
-//RS fn send_once_upload(
-//RS     pool: Arc<Mutex<ClientPool>>,
-//RS     namespace: i64,
-//RS     dns: Arc<Mutex<DNSCache>>,
-//RS     limits: Arc<OriginLimits>,
-//RS     method: &str,
-//RS     url: &ParsedUrl,
-//RS     headers: &[(String, String)],
-//RS     body_len: Option<usize>,
-//RS     chunked: bool,
-//RS     has_body: bool,
-//RS     body_read: &mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHTTPBridgeError>,
-//RS     tee: &mut Option<Vec<u8>>,
-//RS     dns_timeout: Duration,
-//RS     connect_timeout: Duration,
-//RS     tls_timeout: Duration,
-//RS     first_byte_timeout: Duration,
-//RS     read_timeout: Duration,
-//RS     write_timeout: Duration,
-//RS     total_deadline: Option<Instant>,
-//RS     proxy: Option<&ParsedUrl>,
-//RS     decompress: bool,
-//RS     request_started: Instant,
-//RS     http2: bool,
-//RS     http11: bool,
-//RS     h2c: bool,
-//RS     tls: TLSSettings<'_>,
-//RS     retry_policy: RetryPolicy,
-//RS ) -> Result<NativeResponse, JetHTTPBridgeError> {
-//RS     if method.is_empty() || !method.bytes().all(http_token_byte) {
-//RS         return Err(JetHTTPBridgeError::InvalidHeader);
-//RS     }
-//RS     validate_request_header_pairs(headers)?;
-//RS     let proxy_key = proxy.map(|proxy| format!("{}://{}:{}", proxy.scheme, proxy.host, proxy.port));
-//RS     let base_key = PoolKey {
-//RS         namespace,
-//RS         scheme: url.scheme.clone(),
-//RS         host: url.host.clone(),
-//RS         port: url.port,
-//RS         proxy: proxy_key,
-//RS         protocol: "any",
-//RS     };
-//RS     let permit = limits.acquire(base_key.clone(), total_deadline)?;
-//RS     let mut reused = false;
-//RS     let facts = Arc::new(ResponseFacts::default());
-//RS     let mut h2_key = base_key.clone();
-//RS     h2_key.protocol = "h2";
-//RS     let mut h1_key = base_key;
-//RS     h1_key.protocol = "http/1.1";
-//RS     let mut pool_guard = pool.lock().map_err(|_| JetHTTPBridgeError::Internal)?;
-//RS     let mut stream = if http2 {
-//RS         pool_guard.take(&h2_key)
-//RS     } else {
-//RS         None
-//RS     };
-//RS     if stream.is_none() && http11 {
-//RS         stream = pool_guard.take(&h1_key);
-//RS     }
-//RS     drop(pool_guard);
-//RS     if stream.is_some() {
-//RS         reused = true;
-//RS     }
-//RS     if stream.is_none() {
-//RS         stream = Some(connect(
-//RS             &dns,
-//RS             &facts,
-//RS             url,
-//RS             proxy,
-//RS             dns_timeout,
-//RS             connect_timeout,
-//RS             tls_timeout,
-//RS             total_deadline,
-//RS             http2,
-//RS             http11,
-//RS             h2c,
-//RS             tls,
-//RS         )?);
-//RS     }
-//RS     let mut stream = stream.unwrap();
-//RS     if reused {
-//RS         if let HTTPStream::H2(connection) = &stream {
-//RS             let probe = {
-//RS                 let mut connection = connection
-//RS                     .lock()
-//RS                     .map_err(|_| JetHTTPBridgeError::Internal)?;
-//RS                 if connection.active_streams.is_empty() {
-//RS                     set_stream_timeouts(
-//RS                         &mut connection.io,
-//RS                         first_byte_timeout,
-//RS                         write_timeout,
-//RS                         total_deadline,
-//RS                     )?;
-//RS                     connection.probe()
-//RS                 } else {
-//RS                     Ok(())
-//RS                 }
-//RS             };
-//RS             if probe.is_err() {
-//RS                 pool.lock()
-//RS                     .map_err(|_| JetHTTPBridgeError::Internal)?
-//RS                     .remove_h2(&h2_key, connection);
-//RS                 stream = connect(
-//RS                     &dns,
-//RS                     &facts,
-//RS                     url,
-//RS                     proxy,
-//RS                     dns_timeout,
-//RS                     connect_timeout,
-//RS                     tls_timeout,
-//RS                     total_deadline,
-//RS                     http2,
-//RS                     http11,
-//RS                     h2c,
-//RS                     tls,
-//RS                 )?;
-//RS                 reused = false;
-//RS             }
-//RS         }
-//RS     }
-//RS     let key = if stream.is_h2() { h2_key } else { h1_key };
-//RS     if stream.is_h2() {
-//RS         let HTTPStream::H2(connection) = stream else {
-//RS             unreachable!()
-//RS         };
-//RS         if !reused {
-//RS             pool.lock()
-//RS                 .map_err(|_| JetHTTPBridgeError::Internal)?
-//RS                 .put(key.clone(), HTTPStream::H2(connection.clone()));
-//RS         }
-//RS         let (stream_id, remote_address) = {
-//RS             let mut connection = connection
-//RS                 .lock()
-//RS                 .map_err(|_| JetHTTPBridgeError::Internal)?;
-//RS             set_stream_timeouts(
-//RS                 &mut connection.io,
-//RS                 first_byte_timeout,
-//RS                 write_timeout,
-//RS                 total_deadline,
-//RS             )?;
-//RS             let stream_id = connection.start_request(
-//RS                 method,
-//RS                 url,
-//RS                 headers,
-//RS                 body_len,
-//RS                 has_body,
-//RS                 body_read,
-//RS                 tee,
-//RS                 decompress,
-//RS                 &facts,
-//RS             )?;
-//RS             let remote_address = connection
-//RS                 .io
-//RS                 .peer_addr()
-//RS                 .map(|address| address.to_string())
-//RS                 .unwrap_or_default();
-//RS             (stream_id, remote_address)
-//RS         };
-//RS         let first_started = Instant::now();
-//RS         let first_deadline = Instant::now()
-//RS             .checked_add(first_byte_timeout)
-//RS             .map(|deadline| total_deadline.map_or(deadline, |total| total.min(deadline)))
-//RS             .ok_or(JetHTTPBridgeError::Timeout)?;
-//RS         let (status, response_headers, end_stream) = loop {
-//RS             if Instant::now() >= first_deadline {
-//RS                 return Err(JetHTTPBridgeError::Timeout);
-//RS             }
-//RS             let polled = {
-//RS                 let mut connection = connection
-//RS                     .lock()
-//RS                     .map_err(|_| JetHTTPBridgeError::Internal)?;
-//RS                 let slice = first_deadline
-//RS                     .saturating_duration_since(Instant::now())
-//RS                     .min(Duration::from_millis(10));
-//RS                 set_stream_timeouts(&mut connection.io, slice, write_timeout, total_deadline)?;
-//RS                 connection.poll_response_headers(stream_id)?
-//RS             };
-//RS             if let Some(response) = polled {
-//RS                 break response;
-//RS             }
-//RS             std::thread::yield_now();
-//RS         };
-//RS         set_timing(&facts, 4, elapsed_ms(first_started));
-//RS         return read_h2_response(
-//RS             connection,
-//RS             stream_id,
-//RS             status,
-//RS             response_headers,
-//RS             end_stream,
-//RS             key,
-//RS             pool,
-//RS             decompress,
-//RS             facts,
-//RS             request_started,
-//RS             read_timeout,
-//RS             total_deadline,
-//RS             permit,
-//RS             reused,
-//RS             remote_address,
-//RS         );
-//RS     }
-//RS     let request = encode_request(method, url, proxy, headers, body_len, chunked, decompress)?;
-//RS     set_stream_timeouts(
-//RS         &mut stream,
-//RS         first_byte_timeout,
-//RS         write_timeout,
-//RS         total_deadline,
-//RS     )?;
-//RS     let write_started = Instant::now();
-//RS     if let Err((error, wrote_any)) = write_request(&mut stream, &request) {
-//RS         // D-HTTP-CLIENT2: reconnect only on stale-pool IO before any request
-//RS         // bytes — never Timeout / post-write first-byte failures.
-//RS         if reused
-//RS             && !wrote_any
-//RS             && matches!(error, JetHTTPBridgeError::IO)
-//RS             && connection_retry_allowed(retry_policy, method)
-//RS         {
-//RS             let mut fresh = connect(
-//RS                 &dns,
-//RS                 &facts,
-//RS                 url,
-//RS                 proxy,
-//RS                 dns_timeout,
-//RS                 connect_timeout,
-//RS                 tls_timeout,
-//RS                 total_deadline,
-//RS                 false,
-//RS                 true,
-//RS                 false,
-//RS                 tls,
-//RS             )?;
-//RS             set_stream_timeouts(
-//RS                 &mut fresh,
-//RS                 first_byte_timeout,
-//RS                 write_timeout,
-//RS                 total_deadline,
-//RS             )?;
-//RS             write_request(&mut fresh, &request).map_err(|(error, _)| error)?;
-//RS             stream = fresh;
-//RS             reused = false;
-//RS         } else {
-//RS             return Err(error);
-//RS         }
-//RS     }
-//RS     if has_body {
-//RS         if let Err((error, _)) = write_upload_body(&mut stream, chunked, &mut *body_read, tee) {
-//RS             return Err(error);
-//RS         }
-//RS     }
-//RS     set_timing(&facts, 3, elapsed_ms(write_started));
-//RS     let remote_address = stream
-//RS         .peer_addr()
-//RS         .map(|address| address.to_string())
-//RS         .unwrap_or_default();
-//RS     let mut response = read_response(
-//RS         stream,
-//RS         key,
-//RS         pool,
-//RS         method == "HEAD",
-//RS         decompress,
-//RS         facts,
-//RS         request_started,
-//RS         read_timeout,
-//RS         total_deadline,
-//RS         permit,
-//RS     )?;
-//RS     response.reused_connection = reused;
-//RS     response.remote_address = remote_address;
-//RS     Ok(response)
-//RS }
-//RS 
-//RS fn http_token_byte(byte: u8) -> bool {
-//RS     byte.is_ascii_alphanumeric()
-//RS         || matches!(
-//RS             byte,
-//RS             b'!' | b'#'
-//RS                 | b'$'
-//RS                 | b'%'
-//RS                 | b'&'
-//RS                 | b'\''
-//RS                 | b'*'
-//RS                 | b'+'
-//RS                 | b'-'
-//RS                 | b'.'
-//RS                 | b'^'
-//RS                 | b'_'
-//RS                 | b'`'
-//RS                 | b'|'
-//RS                 | b'~'
-//RS         )
-//RS }
-//RS 
-//RS fn http_field_value_byte(byte: u8) -> bool {
-//RS     byte == b'\t' || (0x20..=0x7e).contains(&byte) || byte >= 0x80
-//RS }
-//RS 
-//RS fn connection_retry_allowed(policy: RetryPolicy, method: &str) -> bool {
-//RS     match policy {
-//RS         RetryPolicy::None => false,
-//RS         RetryPolicy::Safe => matches!(method, "GET" | "HEAD" | "OPTIONS" | "TRACE"),
-//RS         RetryPolicy::Idempotent => {
-//RS             matches!(method, "GET" | "HEAD" | "PUT" | "DELETE" | "OPTIONS" | "TRACE")
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Methods whose body can survive a 307/308 follow. 301/302/303 rewrite POST to
-//RS /// GET and drop the body; GET/HEAD/OPTIONS/TRACE never need an upload tee.
-//RS fn redirect_may_replay_body(method: &str) -> bool {
-//RS     !matches!(method, "GET" | "HEAD" | "OPTIONS" | "TRACE")
-//RS }
-//RS 
-//RS fn connect(
-//RS     dns: &Arc<Mutex<DNSCache>>,
-//RS     facts: &Arc<ResponseFacts>,
-//RS     url: &ParsedUrl,
-//RS     proxy: Option<&ParsedUrl>,
-//RS     dns_timeout: Duration,
-//RS     connect_timeout: Duration,
-//RS     tls_timeout: Duration,
-//RS     deadline: Option<Instant>,
-//RS     http2: bool,
-//RS     http11: bool,
-//RS     h2c: bool,
-//RS     tls: TLSSettings<'_>,
-//RS ) -> Result<HTTPStream, JetHTTPBridgeError> {
-//RS     let destination = proxy.unwrap_or(url);
-//RS     let timeout = remaining_timeout(connect_timeout, deadline)?;
-//RS     let mut tcp = connect_plain(
-//RS         dns,
-//RS         facts,
-//RS         destination,
-//RS         remaining_timeout(dns_timeout, deadline)?,
-//RS         timeout,
-//RS     )?;
-//RS     if url.scheme == "https" && proxy.is_some() {
-//RS         tcp.set_read_timeout(Some(remaining_timeout(tls_timeout, deadline)?))
-//RS             .map_err(|_| JetHTTPBridgeError::Proxy)?;
-//RS         tcp.set_write_timeout(Some(remaining_timeout(tls_timeout, deadline)?))
-//RS             .map_err(|_| JetHTTPBridgeError::Proxy)?;
-//RS         let authority = format!("{}:{}", url.host, url.port);
-//RS         write!(tcp, "CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\nProxy-Connection: keep-alive\r\n\r\n")
-//RS             .map_err(|_| JetHTTPBridgeError::Proxy)?;
-//RS         let (head, _, _) = read_head_bytes(&mut tcp).map_err(|_| JetHTTPBridgeError::Proxy)?;
-//RS         let status = parse_status_and_headers(&head)
-//RS             .map_err(|_| JetHTTPBridgeError::Proxy)?
-//RS             .0;
-//RS         if status != 200 {
-//RS             return Err(JetHTTPBridgeError::Proxy);
-//RS         }
-//RS     }
-//RS     if url.scheme == "https" {
-//RS         let started = Instant::now();
-//RS         let stream = tls_stream(
-//RS             tcp,
-//RS             &url.host,
-//RS             remaining_timeout(tls_timeout, deadline)?,
-//RS             http2,
-//RS             http11,
-//RS             tls,
-//RS         );
-//RS         set_timing(facts, 2, elapsed_ms(started));
-//RS         stream
-//RS     } else if h2c && http2 && proxy.is_none() {
-//RS         Ok(HTTPStream::H2(Arc::new(Mutex::new(H2Connection::new(
-//RS             HTTPStream::Plain(tcp),
-//RS         )?))))
-//RS     } else if http11 {
-//RS         Ok(HTTPStream::Plain(tcp))
-//RS     } else {
-//RS         Err(JetHTTPBridgeError::Protocol)
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 0636 crates/jet-pkg-model/src/Prelude/HTTP.rs:1786-3614
+// Private fragment of canonical core.http; Main wires this fragment beside http.jet.
+use core.http as http
+use core.sys as sys
+use std.sync.[Arc, Mutex, Once, OnceLock]
+use std.sync.atomic.[AtomicI64, Ordering]
+use std.sync.mpsc as mpsc
+use std.thread as thread
+use std.time.[Duration, Instant]
+use std.net.TcpStream
+use std.io.[Read, ErrorKind]
+use std.env as env
+use core.net.tls as tls_native
+// GATE #4494: native synchronization, TCP, clocks and TLS provider primitives.
+// GATE #4499: DNS/PoolKey composite-key hashing stays at its canonical owner.
 
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:1786
+fn connect_plain(dns: Arc<Mutex<DNSCache>>, facts: Arc<ResponseFacts>, url: ParsedUrl, dns_timeout: Duration, timeout: Duration) -> TcpStream JetHTTPBridgeError! {
+    last := JetHTTPBridgeError.Connect
+    dns_started :: Instant.now()
+    key :: (~url.host, url.port)
+    cached :: dns.lock() ?? return Err(JetHTTPBridgeError.Internal)
+    result_cached :: cached.get(key)
+    drop(cached)
+    cache_miss :: result_cached == None
+    result := if result_cached == .Val(value) { value } else {
+        (send, receive) :: mpsc.sync_channel(1) // GATE #4494
+        target :: ~url
+        _ :: thread.spawn(() -> {
+            addresses := resolve(target)
+            if addresses == .Ok(values) && values.is_empty() -> addresses = Err(JetHTTPBridgeError.Resolve)
+            _ :: send.send(^addresses)
+        })
+        receive.recv_timeout(dns_timeout) ?? return Err(JetHTTPBridgeError.Timeout)
+    }
+    if cache_miss {
+        guard :: dns.lock() ?? return Err(JetHTTPBridgeError.Internal)
+        guard.put(^key, ~result)
+    }
+    set_timing(facts, 0, elapsed_ms(dns_started))
+    addresses :: result ?? return Err(err)
+    connect_started :: Instant.now()
+    loop address in addresses {
+        if TcpStream.connect_timeout(address, timeout) == {
+            .Ok(stream) -> { set_timing(facts, 1, elapsed_ms(connect_started)); return stream }
+            .Err(error) -> { last = if error.kind() == .TimedOut { JetHTTPBridgeError.Timeout } else { JetHTTPBridgeError.Connect } }
+        }
+    }
+    set_timing(facts, 1, elapsed_ms(connect_started))
+    Err(last)
+}
+
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:1842
+fn http_tls_pem_certificates(pem: [U8]) -> [[U8]] JetHTTPBridgeError! {
+    BEGIN :: "-----BEGIN CERTIFICATE-----"
+    END :: "-----END CERTIFICATE-----"
+    text :: String.from_utf8(pem) ?? return Err(JetHTTPBridgeError.TLS)
+    rest := text
+    out := [[U8]]{}
+    loop rest.find(BEGIN) == .Val(start) {
+        prefix := rest[..<start].trim() // #4303
+        if !prefix.is_empty() -> return Err(JetHTTPBridgeError.TLS)
+        rest = rest[start + BEGIN.len()..]
+        stop :: rest.find(END) ?? return Err(JetHTTPBridgeError.TLS)
+        &out.push(http_tls_pem_base64(rest[..<stop]) ?? return Err(err))
+        rest = rest[stop + END.len()..]
+    }
+    tail := rest.trim() // #4303
+    if out.is_empty() || !tail.is_empty() -> return Err(JetHTTPBridgeError.TLS)
+    out
+}
+
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:1863
+fn http_tls_private_key(pem: [U8]) -> tls_native.PrivateKeyDer JetHTTPBridgeError! {
+    text :: String.from_utf8(pem) ?? return Err(JetHTTPBridgeError.TLS)
+    parse :: (begin: String, end: String) -> [U8]? JetHTTPBridgeError! {
+        start :: text.find(begin) ?? return None
+        prefix := text[..<start].trim() // #4303
+        if !prefix.is_empty() -> return Err(JetHTTPBridgeError.TLS)
+        rest :: text[start + begin.len()..]
+        stop :: rest.find(end) ?? return Err(JetHTTPBridgeError.TLS)
+        tail := rest[stop + end.len()..].trim() // #4303
+        if !tail.is_empty() -> return Err(JetHTTPBridgeError.TLS)
+        Val(http_tls_pem_base64(rest[..<stop]) ?? return Err(err))
+    }
+    if (parse("-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----") ?? return Err(err)) == .Val(der) -> return tls_native.PrivateKeyDer.Pkcs8(tls_native.PrivatePkcs8KeyDer.from(^der))
+    if (parse("-----BEGIN RSA PRIVATE KEY-----", "-----END RSA PRIVATE KEY-----") ?? return Err(err)) == .Val(der) -> return tls_native.PrivateKeyDer.Pkcs1(tls_native.PrivatePkcs1KeyDer.from(^der))
+    if (parse("-----BEGIN EC PRIVATE KEY-----", "-----END EC PRIVATE KEY-----") ?? return Err(err)) == .Val(der) -> return tls_native.PrivateKeyDer.Sec1(tls_native.PrivateSec1KeyDer.from(^der))
+    Err(JetHTTPBridgeError.TLS)
+}
+
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:1899
+fn http_tls_pem_base64(text: String) -> [U8] JetHTTPBridgeError! {
+    filtered :: text.bytes().filter((b) -> !b.is_ascii_whitespace()).collect()
+    if filtered.len() % 4 != 0 -> return Err(JetHTTPBridgeError.TLS)
+    out := [U8]{}
+    i := 0
+    loop i < filtered.len() {
+        vals := [U8]{0, 0, 0, 0}
+        pad := 0
+        loop j in 0..<4 {
+            byte :: filtered[i + j]
+            if byte >= 65 && byte <= 90 { vals[j] = byte - 65 }
+            else if byte >= 97 && byte <= 122 { vals[j] = byte - 97 + 26 }
+            else if byte >= 48 && byte <= 57 { vals[j] = byte - 48 + 52 }
+            else if byte == 43 { vals[j] = 62 }
+            else if byte == 47 { vals[j] = 63 }
+            else if byte == 61 { pad += 1; vals[j] = 0 }
+            else { return Err(JetHTTPBridgeError.TLS) }
+            if byte == 61 && j < 2 -> return Err(JetHTTPBridgeError.TLS)
+        }
+        if pad > 2 -> return Err(JetHTTPBridgeError.TLS)
+        &out.push((vals[0] << 2) | (vals[1] >> 4))
+        if pad < 2 -> &out.push(((vals[1] & 0x0f) << 4) | (vals[2] >> 2))
+        if pad < 1 -> &out.push(((vals[2] & 0x03) << 6) | vals[3])
+        i += 4
+    }
+    out
+}
+
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:1942
+fn tls_stream(tcp: TcpStream, host: String, timeout: Duration, http2: Bool, http11: Bool, tls: TLSSettings) -> HTTPStream JetHTTPBridgeError! {
+    // GATE #4494: real native TLS roots, crypto and handshake provider, not Rust callbacks.
+    static PROVIDER: Once = Once.new()
+    PROVIDER.call_once(() -> { _ :: tls_native.crypto.ring.default_provider().install_default() })
+    tcp.set_read_timeout(Val(timeout)) ?? return Err(JetHTTPBridgeError.TLS)
+    tcp.set_write_timeout(Val(timeout)) ?? return Err(JetHTTPBridgeError.TLS)
+    roots := tls_native.RootCertStore.empty()
+    if tls.system_roots {
+        native :: tls_native.load_native_certs() ?? return Err(JetHTTPBridgeError.TLS)
+        loop cert in native -> roots.add(^cert) ?? return Err(JetHTTPBridgeError.TLS)
+    }
+    loop cert in tls.custom_roots -> roots.add(tls_native.CertificateDer.from(~cert)) ?? return Err(JetHTTPBridgeError.TLS)
+    if roots.is_empty() -> return Err(JetHTTPBridgeError.TLS)
+    if tls.min_version > tls.max_version || (tls.min_version != 12 && tls.min_version != 13) || (tls.max_version != 12 && tls.max_version != 13) -> return Err(JetHTTPBridgeError.TLS)
+    versions :: if tls.min_version == 12 && tls.max_version == 12 { [tls_native.version.TLS12] }
+        else if tls.min_version == 13 && tls.max_version == 13 { [tls_native.version.TLS13] }
+        else { [tls_native.version.TLS13, tls_native.version.TLS12] }
+    builder :: tls_native.ClientConfig.builder_with_protocol_versions(versions).with_root_certificates(^roots)
+    config := if tls.identity_cert.is_empty() { builder.with_no_client_auth() } else {
+        certs :: (http_tls_pem_certificates(tls.identity_cert) ?? return Err(err)).into_iter().map((cert) -> tls_native.CertificateDer.from(^cert)).collect()
+        key :: http_tls_private_key(tls.identity_key) ?? return Err(err)
+        builder.with_client_auth_cert(^certs, ^key) ?? return Err(JetHTTPBridgeError.TLS)
+    }
+    config.alpn_protocols = [[U8]]{}
+    if http2 -> &config.alpn_protocols.push("h2".into_bytes())
+    if http11 -> &config.alpn_protocols.push("http/1.1".into_bytes())
+    name :: tls_native.ServerName.try_from(~host) ?? return Err(JetHTTPBridgeError.TLS)
+    connection := tls_native.ClientConnection.new(Arc.new(^config), ^name) ?? return Err(JetHTTPBridgeError.TLS)
+    loop connection.is_handshaking() -> connection.complete_io(&tcp) ?? return Err(JetHTTPBridgeError.TLS)
+    selected :: connection.alpn_protocol().map((bytes) -> ~bytes)
+    stream :: HTTPStream.TLS(Box.new(tls_native.StreamOwned.new(^connection, ^tcp)))
+    if selected == .Val(protocol) {
+        if protocol == "h2".as_bytes() && http2 -> return HTTPStream.H2(Arc.new(Mutex.new(H2Connection.new(^stream) ?? return Err(err))))
+        if protocol == "http/1.1".as_bytes() && http11 -> return stream
+    } else if http11 { return stream }
+    Err(JetHTTPBridgeError.Protocol)
+}
+
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2027
+fn body_readers() -> Mutex<[I64:BodyReader]> {
+    static READERS: OnceLock<Mutex<[I64:BodyReader]>> = OnceLock.new() // GATE #4494
+    READERS.get_or_init(() -> Mutex.new([I64:BodyReader]{}))
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2032
+fn register_body(reader: Box<Read + Send>) -> I64 {
+    static NEXT: AtomicI64 = AtomicI64.new(1) // GATE #4494
+    handle :: NEXT.fetch_add(1, Ordering.Relaxed)
+    guard :: body_readers().lock().expect("HTTP body registry lock")
+    _ :: guard.insert(handle, Arc.new(Mutex.new(^reader)))
+    handle
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2042
+pub fn jet_http_client_body_read_impl(handle: I64, max_chunk: USize) -> [U8]? JetHTTPBridgeError! {
+    guard :: body_readers().lock() ?? return Err(JetHTTPBridgeError.Internal)
+    reader :: guard.get(handle).cloned() ?? return Err(JetHTTPBridgeError.Internal)
+    drop(guard)
+    chunk := [U8].repeat(0, max_chunk.min(HTTP_RESPONSE_READ_CHUNK_LIMIT))
+    locked :: reader.lock() ?? return Err(JetHTTPBridgeError.Internal)
+    read :: locked.read(&chunk) ?? {
+        // GATE #4409: preserve IO kind, not generic error collapse.
+        return Err(if err.kind() == {
+            .InvalidData -> JetHTTPBridgeError.InvalidFraming
+            .TimedOut | .WouldBlock -> JetHTTPBridgeError.Timeout
+            else -> JetHTTPBridgeError.IO
+        })
+    }
+    drop(locked)
+    if read == 0 {
+        _ :: body_readers().lock().map((readers) -> readers.remove(handle))
+        return None
+    }
+    &chunk.truncate(read)
+    Val(^chunk)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2074
+pub fn jet_http_client_body_close_impl(handle: I64) -> {
+    _ :: body_readers().lock().map((readers) -> readers.remove(handle))
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2081
+pub fn jet_http_client_open_body_count_impl() -> USize {
+    body_readers().lock().map((readers) -> readers.len()).unwrap_or(0)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2088
+fn validated_timeout(name: String, milliseconds: I64) -> Duration JetHTTPBridgeError! {
+    ms :: U64.try_from(milliseconds) ?? { _ :: name; return Err(JetHTTPBridgeError.Timeout) }
+    Duration.from_millis(ms)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2096
+struct PhaseTimeouts {
+    dns: Duration
+    connect: Duration
+    tls: Duration
+    write: Duration
+    first_byte: Duration
+    read: Duration
+    total: Instant?
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2106
+fn resolve_phase_timeout(explicit: I64?, name: String, blanket: Duration?, policy: Duration) -> Duration JetHTTPBridgeError! {
+    if explicit == .Val(ms) -> return validated_timeout(name, ms)
+    blanket ?? policy
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2118
+fn resolve_request_phase_timeouts(blanket_ms: I64?, connect_ms: I64?, read_ms: I64?, total_ms: I64?, dns_ms: I64?, tls_ms: I64?, write_ms: I64?, first_byte_ms: I64?, policy: ClientPolicy, oneshot_default: Bool) -> PhaseTimeouts JetHTTPBridgeError! {
+    blanket := Duration?{None}
+    if oneshot_default { blanket = Val(validated_timeout("timeout", blanket_ms ?? 30_000) ?? return Err(err)) }
+    else if blanket_ms == .Val(value) { blanket = Val(validated_timeout("timeout", value) ?? return Err(err)) }
+    total_timeout := Duration?{None}
+    if total_ms == .Val(ms) { total_timeout = Val(validated_timeout("total timeout", ms) ?? return Err(err)) }
+    else if !oneshot_default { total_timeout = policy.total_timeout }
+    total :: compose_total_deadline(total_timeout) ?? return Err(err)
+    PhaseTimeouts{
+        dns: resolve_phase_timeout(dns_ms, "DNS timeout", blanket, policy.dns_timeout) ?? return Err(err),
+        connect: resolve_phase_timeout(connect_ms, "connect timeout", blanket, policy.connect_timeout) ?? return Err(err),
+        tls: resolve_phase_timeout(tls_ms, "TLS timeout", blanket, policy.tls_timeout) ?? return Err(err),
+        write: resolve_phase_timeout(write_ms, "write timeout", blanket, policy.write_timeout) ?? return Err(err),
+        first_byte: resolve_phase_timeout(first_byte_ms, "first byte timeout", blanket, policy.first_byte_timeout) ?? return Err(err),
+        read: resolve_phase_timeout(read_ms, "read timeout", blanket, policy.read_timeout) ?? return Err(err), total: total,
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2167
+pub fn jet_http_client_get_parts_impl(url: String) -> JetHTTPResponseParts JetHTTPBridgeError! {
+    jet_http_client_send_parts_impl("GET", url, [], None, None, None, None, None, None, None, None, None, None, None, [], [], [])
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2193
+pub fn jet_http_client_post_parts_impl(url: String, body: String) -> JetHTTPResponseParts JetHTTPBridgeError! {
+    jet_http_client_send_parts_impl("POST", url, [], Val(body.as_bytes()), None, None, None, None, None, None, None, None, None, None, [], [], [])
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2222
+pub fn jet_http_client_send_stream_parts_impl(method: String, url: String, headers_flat: [String], body_len: I64?, has_user_body: Bool, body_read: &fn() -> [U8]? JetHTTPBridgeError!, timeout_ms: I64?, connect_timeout_ms: I64?, read_timeout_ms: I64?, total_timeout_ms: I64?, dns_timeout_ms: I64?, tls_timeout_ms: I64?, write_timeout_ms: I64?, first_byte_timeout_ms: I64?, redirects: I64?, proxy: String?, cookies_flat: [String], form_flat: [String], multipart_flat: [String]) -> JetHTTPResponseParts JetHTTPBridgeError! {
+    phases :: resolve_request_phase_timeouts(timeout_ms, connect_timeout_ms, read_timeout_ms, total_timeout_ms, dns_timeout_ms, tls_timeout_ms, write_timeout_ms, first_byte_timeout_ms, ClientPolicy.default(), true) ?? return Err(err)
+    redirects_checked := U32?{None}
+    if redirects == .Val(limit) -> redirects_checked = Val(U32.try_from(limit) ?? return Err(JetHTTPBridgeError.Redirect))
+    explicit_redirect_limit :: redirects_checked != None
+    redirect_limit :: redirects_checked ?? HTTP_CLIENT_DEFAULT_REDIRECTS
+    (headers, form_body) :: if has_user_body { prepare_request_parts(headers_flat, None, cookies_flat, [], []) ?? return Err(err) }
+        else { prepare_request_parts(headers_flat, None, cookies_flat, form_flat, multipart_flat) ?? return Err(err) }
+    stream_len :: if has_user_body { body_len.and_then((value) -> USize.try_from(value).ok()) } else { form_body.as_ref().map((body) -> body.len()) }
+    send_following_redirects_upload(default_client_pool().clone(), 0, default_dns_cache().clone(), default_origin_limits().clone(), None, true, method, url, ^headers, ^form_body, if has_user_body { Val(body_read) } else { None }, stream_len, phases.dns, phases.connect, phases.tls, phases.first_byte, phases.read, phases.write, phases.total, redirect_limit, explicit_redirect_limit, true, false, RetryPolicy.Safe, proxy, true, true, false, TLSSettings.SYSTEM)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2304
+pub fn jet_http_client_send_with_stream_parts_impl(id: I64, method: String, url: String, headers_flat: [String], body_len: I64?, has_user_body: Bool, body_read: &fn() -> [U8]? JetHTTPBridgeError!, timeout_ms: I64?, connect_timeout_ms: I64?, read_timeout_ms: I64?, total_timeout_ms: I64?, dns_timeout_ms: I64?, tls_timeout_ms: I64?, write_timeout_ms: I64?, first_byte_timeout_ms: I64?, redirects: I64?, proxy: String?, cookies_flat: [String], form_flat: [String], multipart_flat: [String]) -> JetHTTPResponseParts JetHTTPBridgeError! {
+    guard :: client_handles().lock() ?? return Err(JetHTTPBridgeError.Internal)
+    handle :: guard.get(id).cloned() ?? return Err(JetHTTPBridgeError.Internal)
+    drop(guard)
+    phases :: resolve_request_phase_timeouts(timeout_ms, connect_timeout_ms, read_timeout_ms, total_timeout_ms, dns_timeout_ms, tls_timeout_ms, write_timeout_ms, first_byte_timeout_ms, handle.policy, false) ?? return Err(err)
+    redirect_limit := handle.policy.redirect_limit
+    explicit_redirect_limit :: redirects != None
+    if redirects == .Val(value) -> redirect_limit = U32.try_from(value) ?? return Err(JetHTTPBridgeError.Redirect)
+    (headers, form_body) :: if has_user_body { prepare_request_parts(headers_flat, None, cookies_flat, [], []) ?? return Err(err) }
+        else { prepare_request_parts(headers_flat, None, cookies_flat, form_flat, multipart_flat) ?? return Err(err) }
+    stream_len :: if has_user_body { body_len.and_then((value) -> USize.try_from(value).ok()) } else { form_body.as_ref().map((body) -> body.len()) }
+    configured_proxy := proxy.or(handle.policy.proxy.as_ref())
+    if configured_proxy == None && !handle.policy.use_environment_proxy -> configured_proxy = Val("")
+    send_following_redirects_upload(handle.shared.pool.clone(), handle.namespace, handle.shared.dns.clone(), handle.shared.limits.clone(), if handle.policy.cookies { Val(handle.shared.jar.clone()) } else { None }, handle.policy.decompress, method, url, ^headers, ^form_body, if has_user_body { Val(body_read) } else { None }, stream_len, phases.dns, phases.connect, phases.tls, phases.first_byte, phases.read, phases.write, phases.total, redirect_limit, explicit_redirect_limit, handle.policy.same_origin_credentials, handle.policy.allow_http_downgrade, handle.policy.retry_policy, configured_proxy, handle.policy.http2, handle.policy.http11, handle.policy.h2c, handle.policy.tls_settings())
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2398
+pub fn jet_http_client_send_parts_impl(method: String, url: String, headers_flat: [String], body: [U8]?, timeout_ms: I64?, connect_timeout_ms: I64?, read_timeout_ms: I64?, total_timeout_ms: I64?, dns_timeout_ms: I64?, tls_timeout_ms: I64?, write_timeout_ms: I64?, first_byte_timeout_ms: I64?, redirects: I64?, proxy: String?, cookies_flat: [String], form_flat: [String], multipart_flat: [String]) -> JetHTTPResponseParts JetHTTPBridgeError! {
+    // GATE #4483: selected compilation target, not the build host.
+    os :: sys.target.selected_os()
+    if os != "linux" && os != "android" && os != "macos" && os != "ios" && os != "freebsd" && os != "openbsd" && os != "netbsd" && os != "windows" -> return Err(JetHTTPBridgeError.UnsupportedTarget)
+    validate_request_headers(headers_flat) ?? return Err(err)
+    jet_http_client_send_owned_impl(method, url, coalesce_request_headers(headers_flat), body.map((bytes) -> ~bytes), timeout_ms, connect_timeout_ms, read_timeout_ms, total_timeout_ms, dns_timeout_ms, tls_timeout_ms, write_timeout_ms, first_byte_timeout_ms, redirects, proxy, cookies_flat, form_flat, multipart_flat)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2462
+pub fn jet_http_client_send_owned_impl(method: String, url: String, headers: ^[(String, String)], body: ^[U8]?, timeout_ms: I64?, connect_timeout_ms: I64?, read_timeout_ms: I64?, total_timeout_ms: I64?, dns_timeout_ms: I64?, tls_timeout_ms: I64?, write_timeout_ms: I64?, first_byte_timeout_ms: I64?, redirects: I64?, proxy: String?, cookies_flat: [String], form_flat: [String], multipart_flat: [String]) -> JetHTTPResponseParts JetHTTPBridgeError! {
+    phases :: resolve_request_phase_timeouts(timeout_ms, connect_timeout_ms, read_timeout_ms, total_timeout_ms, dns_timeout_ms, tls_timeout_ms, write_timeout_ms, first_byte_timeout_ms, ClientPolicy.default(), true) ?? return Err(err)
+    redirects_checked := U32?{None}
+    if redirects == .Val(limit) -> redirects_checked = Val(U32.try_from(limit) ?? return Err(JetHTTPBridgeError.Redirect))
+    explicit_redirect_limit :: redirects_checked != None
+    redirect_limit :: redirects_checked ?? HTTP_CLIENT_DEFAULT_REDIRECTS
+    (prepared_headers, prepared_body) :: prepare_request_parts_owned(^headers, ^body, cookies_flat, form_flat, multipart_flat) ?? return Err(err)
+    send_following_redirects(default_client_pool().clone(), 0, default_dns_cache().clone(), default_origin_limits().clone(), None, true, method, url, ^prepared_headers, ^prepared_body, phases.dns, phases.connect, phases.tls, phases.first_byte, phases.read, phases.write, phases.total, redirect_limit, explicit_redirect_limit, true, false, RetryPolicy.Safe, proxy, true, true, false, TLSSettings.SYSTEM)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2531
+HTTP_FORBIDDEN_REQUEST_HEADERS :: ["host", "content-length", "transfer-encoding", "connection", "proxy-connection", "keep-alive", "te", "trailer", "upgrade", "proxy-authenticate", "proxy-authorization"]
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2544
+fn connection_close_value(value: String) -> Bool {
+    trimmed := value.trim() // #4303
+    !trimmed.is_empty() && value.split(',').all((item) -> { part := item.trim(); part.eq_ignore_ascii_case("close") })
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2552
+fn validate_request_header(name: String, value: String) -> () JetHTTPBridgeError! {
+    if name.is_empty() || !name.bytes().all(http_token_byte) || !value.bytes().all(http_field_value_byte) -> return Err(JetHTTPBridgeError.InvalidHeader)
+    if HTTP_FORBIDDEN_REQUEST_HEADERS.iter().any((candidate) -> name.eq_ignore_ascii_case(candidate)) && !(name.eq_ignore_ascii_case("connection") && connection_close_value(value)) -> return Err(JetHTTPBridgeError.InvalidFraming)
+    Ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2570
+fn validate_request_headers(headers_flat: [String]) -> () JetHTTPBridgeError! {
+    if headers_flat.len() % 2 != 0 -> return Err(JetHTTPBridgeError.InvalidHeader)
+    loop pair in headers_flat.chunks_exact(2) -> validate_request_header(pair[0], pair[1]) ?? return Err(err)
+    Ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2580
+fn validate_request_header_pairs(headers: [(String, String)]) -> () JetHTTPBridgeError! {
+    loop (name, value) in headers -> validate_request_header(name, value) ?? return Err(err)
+    Ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2589
+fn prepare_request_parts(headers_flat: [String], body: [U8]?, cookies_flat: [String], form_flat: [String], multipart_flat: [String]) -> ([(String, String)], [U8]?) JetHTTPBridgeError! {
+    validate_request_headers(headers_flat) ?? return Err(err)
+    prepare_request_parts_owned(coalesce_request_headers(headers_flat), body.map((bytes) -> ~bytes), cookies_flat, form_flat, multipart_flat)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2606
+fn prepare_request_parts_owned(headers: ^[(String, String)], body: ^[U8]?, cookies_flat: [String], form_flat: [String], multipart_flat: [String]) -> ([(String, String)], [U8]?) JetHTTPBridgeError! {
+    validate_request_header_pairs(headers) ?? return Err(err)
+    headers = coalesce_request_header_pairs(^headers)
+    if !cookies_flat.is_empty() {
+        cookie :: cookies_flat.chunks_exact(2).map((pair) -> "{pair[0]}={pair[1]}").collect().join("; ")
+        &headers.push(("cookie", cookie))
+    }
+    prepared_body :: if body != None { ^body }
+        else if !multipart_flat.is_empty() {
+            boundary :: multipart_boundary(multipart_flat)
+            &headers.push(("content-type", "multipart/form-data; boundary={boundary}"))
+            Val(encode_multipart(multipart_flat, boundary).into_bytes())
+        } else if !form_flat.is_empty() {
+            &headers.push(("content-type", "application/x-www-form-urlencoded"))
+            Val(encode_form(form_flat).into_bytes())
+        } else { None }
+    validate_request_header_pairs(headers) ?? return Err(err)
+    (^headers, ^prepared_body)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2645
+fn send_following_redirects(pool: Arc<Mutex<ClientPool>>, namespace: I64, dns: Arc<Mutex<DNSCache>>, limits: Arc<OriginLimits>, jar: Arc<Mutex<CookieJar>>?, decompress: Bool, original_method: String, original_url: String, headers: ^[(String, String)], original_body: ^[U8]?, dns_timeout: Duration, connect_timeout: Duration, tls_timeout: Duration, first_byte_timeout: Duration, read_timeout: Duration, write_timeout: Duration, total_deadline: Instant?, redirect_limit: U32, explicit_redirect_limit: Bool, same_origin_credentials: Bool, allow_http_downgrade: Bool, retry_policy: RetryPolicy, explicit_proxy: String?, http2: Bool, http11: Bool, h2c: Bool, tls: TLSSettings) -> JetHTTPResponseParts JetHTTPBridgeError! {
+    send_following_redirects_upload(^pool, namespace, ^dns, ^limits, ^jar, decompress, original_method, original_url, ^headers, ^original_body, None, None, dns_timeout, connect_timeout, tls_timeout, first_byte_timeout, read_timeout, write_timeout, total_deadline, redirect_limit, explicit_redirect_limit, same_origin_credentials, allow_http_downgrade, retry_policy, explicit_proxy, http2, http11, h2c, tls)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2707
+fn send_following_redirects_upload(pool: Arc<Mutex<ClientPool>>, namespace: I64, dns: Arc<Mutex<DNSCache>>, limits: Arc<OriginLimits>, jar: Arc<Mutex<CookieJar>>?, decompress: Bool, original_method: String, original_url: String, headers: ^[(String, String)], body: ^[U8]?, body_stream: (&fn() -> [U8]? JetHTTPBridgeError!)?, stream_len: USize?, dns_timeout: Duration, connect_timeout: Duration, tls_timeout: Duration, first_byte_timeout: Duration, read_timeout: Duration, write_timeout: Duration, total_deadline: Instant?, redirect_limit: U32, explicit_redirect_limit: Bool, same_origin_credentials: Bool, allow_http_downgrade: Bool, retry_policy: RetryPolicy, explicit_proxy: String?, http2: Bool, http11: Bool, h2c: Bool, tls: TLSSettings) -> JetHTTPResponseParts JetHTTPBridgeError! {
+    method := ~original_method
+    url := ~original_url
+    visited := Set<String>.new()
+    redirect_history := [String]{}
+    started :: Instant.now()
+    cookie_site :: schemeful_site(parse_url(original_url) ?? return Err(err))
+    loop followed in 0..=redirect_limit {
+        if !&visited.insert(~url) -> return Err(JetHTTPBridgeError.Redirect)
+        parsed :: parse_url(url) ?? return Err(err)
+        proxy :: select_proxy(parsed, explicit_proxy) ?? return Err(err)
+        request_headers := ~headers
+        if !request_headers.iter().any((pair) -> pair.0.eq_ignore_ascii_case("cookie")) {
+            same_site :: cookie_site == schemeful_site(parsed)
+            safe_method :: method == "GET" || method == "HEAD" || method == "OPTIONS" || method == "TRACE"
+            allow_jar_cookie :: followed == 0 || (same_origin_credentials && same_site)
+            if allow_jar_cookie && jar == .Val(cookie_jar) {
+                if cookie_jar.lock() == .Ok(guard) {
+                    if guard.header(parsed, same_site, safe_method) == .Val(cookie) -> &request_headers.push(("cookie", ^cookie))
+                }
+            }
+        }
+        response :: if body == .Val(bytes) {
+            send_once(pool.clone(), namespace, dns.clone(), limits.clone(), method, parsed, request_headers, Val(bytes.as_slice()), dns_timeout, connect_timeout, tls_timeout, first_byte_timeout, read_timeout, write_timeout, total_deadline, proxy.as_ref(), decompress, started, http2, http11, h2c, tls, retry_policy) ?? return Err(err)
+        } else if body_stream == .Val(read) {
+            // Tee only bodies that a 307/308 can replay; retry policy never gates POST tee.
+            tee := [U8]?{None}
+            if redirect_limit > 0 && redirect_may_replay_body(method) -> tee = Val([U8]{})
+            response :: send_once_upload(pool.clone(), namespace, dns.clone(), limits.clone(), method, parsed, request_headers, stream_len, stream_len == None, true, read, &tee, dns_timeout, connect_timeout, tls_timeout, first_byte_timeout, read_timeout, write_timeout, total_deadline, proxy.as_ref(), decompress, started, http2, http11, h2c, tls, retry_policy) ?? return Err(err)
+            body = ^tee
+            body_stream = None
+            response
+        } else {
+            send_once(pool.clone(), namespace, dns.clone(), limits.clone(), method, parsed, request_headers, None, dns_timeout, connect_timeout, tls_timeout, first_byte_timeout, read_timeout, write_timeout, total_deadline, proxy.as_ref(), decompress, started, http2, http11, h2c, tls, retry_policy) ?? return Err(err)
+        }
+        if jar == .Val(cookie_jar) {
+            if cookie_jar.lock() == .Ok(guard) {
+                loop (name, value) in response.headers { if name == "set-cookie" -> guard.store(parsed, value) }
+            }
+        }
+        if response.status != 301 && response.status != 302 && response.status != 303 && response.status != 307 && response.status != 308 -> return finalize_response(^response, ^redirect_history, started)
+        location :: header_first(response.headers, "location") ?? return finalize_response(^response, ^redirect_history, started)
+        if followed == redirect_limit || (explicit_redirect_limit && redirect_limit != 0 && followed + 1 == redirect_limit) {
+            if redirect_limit == 0 -> return finalize_response(^response, ^redirect_history, started)
+            jet_http_client_body_close_impl(response.body_handle)
+            return Err(JetHTTPBridgeError.Redirect)
+        }
+        next :: resolve_redirect(parsed, location) ?? return Err(err)
+        next_parsed :: parse_url(next) ?? return Err(err)
+        if parsed.scheme == "https" && next_parsed.scheme == "http" && !allow_http_downgrade {
+            jet_http_client_body_close_impl(response.body_handle)
+            return Err(JetHTTPBridgeError.Redirect)
+        }
+        cross_origin :: parsed.host != next_parsed.host || parsed.port != next_parsed.port || parsed.scheme != next_parsed.scheme
+        if cross_origin || !same_origin_credentials {
+            &headers.retain((pair) -> { name :: pair.0.to_ascii_lowercase(); name != "authorization" && name != "proxy-authorization" && name != "cookie" })
+        }
+        if (response.status == 301 || response.status == 302 || response.status == 303) && method == "POST" {
+            method = "GET"
+            body = None
+            &headers.retain((pair) -> { name :: pair.0.to_ascii_lowercase(); name != "content-length" && name != "content-type" })
+        } else if (response.status == 307 || response.status == 308) && body == None && redirect_may_replay_body(method) {
+            jet_http_client_body_close_impl(response.body_handle)
+            return Err(JetHTTPBridgeError.Redirect)
+        }
+        &redirect_history.push(~url)
+        drain_redirect_body(response.body_handle)
+        url = ^next
+    }
+    Err(JetHTTPBridgeError.Redirect)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2932
+fn finalize_response(response: ^NativeResponse, redirect_history: ^[String], started: Instant) -> JetHTTPResponseParts JetHTTPBridgeError! {
+    response.facts.set_total(elapsed_ms(started))
+    (timings_ms, raw_content_encoding) :: response.facts.snapshot()
+    JetHTTPResponseParts{status: response.status, body_handle: response.body_handle, body_length: response.body_length, headers: ^response.headers,
+        context: JetHTTPResponseContext{protocol: ^response.protocol, remote_address: ^response.remote_address, redirect_history: ^redirect_history, timings_ms: timings_ms, reused_connection: response.reused_connection, raw_content_encoding: ^raw_content_encoding}}
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2965
+fn elapsed_ms(started: Instant) -> I64 { started.elapsed().as_millis().min(I64.MAX as U128) as I64 }
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2969
+fn set_timing(facts: ResponseFacts, index: USize, value: I64) -> { facts.add_timing(index, value) }
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2973
+fn drain_redirect_body(handle: I64) -> {
+    total := USize{0}
+    loop {
+        if jet_http_client_body_read_impl(handle, 64 * 1024) == {
+            .Ok(.Val(bytes)) -> {
+                if total.saturating_add(bytes.len()) <= 1024 * 1024 { total += bytes.len() }
+                else { jet_http_client_body_close_impl(handle); return }
+            }
+            .Ok(.None) -> return
+            else -> { jet_http_client_body_close_impl(handle); return }
+        }
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2989
+fn resolve_redirect(base: ParsedUrl, location: String) -> String JetHTTPBridgeError! {
+    if location.starts_with("http://") || location.starts_with("https://") { parse_url(location) ?? return Err(err); return ~location }
+    if location.starts_with("//") -> return "{base.scheme}:{location}"
+    authority :: if (base.scheme == "http" && base.port == 80) || (base.scheme == "https" && base.port == 443) { ~base.host } else { "{base.host}:{base.port}" }
+    if location.starts_with('/') -> return "{base.scheme}://{authority}{location}"
+    path :: base.target.split('?').next() ?? "/"
+    directory :: if path.rsplit_once('/') == .Val(pair) { "{pair.0}/" } else { "/" }
+    "{base.scheme}://{authority}{directory}{location}"
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3021
+fn select_proxy(url: ParsedUrl, explicit: String?) -> ParsedUrl? JetHTTPBridgeError! {
+    if explicit == .Val(value) {
+        if value.is_empty() -> return None
+        return Val(parse_url(value) ?? return Err(JetHTTPBridgeError.Proxy))
+    }
+    no_proxy :: env.var("no_proxy").ok().or_else(() -> env.var("NO_PROXY").ok()) // GATE #4494
+    if no_proxy == .Val(list) && no_proxy_matches(list, url.host, url.port) -> return None
+    names :: if url.scheme == "https" { ["https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"] } else { ["http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"] }
+    loop name in names {
+        if env.var(name) == .Ok(value) && !value.is_empty() -> return Val(parse_url(value) ?? return Err(JetHTTPBridgeError.Proxy))
+    }
+    None
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3059
+fn no_proxy_matches(list: String, host: String, port: U16) -> Bool {
+    loop raw in list.split(',') {
+        entry := raw.trim() // #4303
+        if entry == "*" -> return true
+        name := entry
+        entry_port := U16?{None}
+        if entry.rsplit_once(':') == .Val(pair) {
+            if U16.parse(pair.1) == .Val(parsed_port) { name = pair.0; entry_port = Val(parsed_port) }
+        }
+        if entry_port == .Val(expected) && expected != port -> next
+        name = name.trim_start_matches('.')
+        if host.eq_ignore_ascii_case(name) || (host.len() > name.len() && host.as_bytes()[host.len() - name.len() - 1] == 46 && host[host.len() - name.len()..].eq_ignore_ascii_case(name)) -> return true
+    }
+    false
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3079
+struct NativeResponse {
+    status: I64
+    headers: [(String, String)]
+    body_handle: I64
+    body_length: I64?
+    reused_connection: Bool
+    remote_address: String
+    protocol: String
+    facts: Arc<ResponseFacts>
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3094
+struct ResponseFacts {
+    // dns, connect, tls, write_idle, first_byte, read_idle, total
+    timings_ms: [AtomicI64; 7]
+    raw_content_encoding: OnceLock<String>
+}
+impl ResponseFacts {
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3101
+    fn default() -> ResponseFacts {
+        ResponseFacts{timings_ms: Array.from_fn((_) -> AtomicI64.new(0)), raw_content_encoding: OnceLock.new()}
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3110
+    fn add_timing(self, index: USize, value: I64) -> {
+        _ :: self.timings_ms[index].fetch_update(Ordering.Relaxed, Ordering.Relaxed, (current) -> Val(current.saturating_add(value)))
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3118
+    fn max_timing(self, index: USize, value: I64) -> {
+        _ :: self.timings_ms[index].fetch_update(Ordering.Relaxed, Ordering.Relaxed, (current) -> Val(current.max(value)))
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3126
+    fn set_total(self, value: I64) -> { self.timings_ms[6].store(value, Ordering.Relaxed) }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3130
+    fn set_raw_content_encoding(self, value: ^String?) -> {
+        // Absence is not publication; a later actual header can publish once.
+        if value == .Val(text) -> _ :: self.raw_content_encoding.set(^text)
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3138
+    fn snapshot(self) -> ([I64; 7], String?) {
+        (Array.from_fn((index) -> self.timings_ms[index].load(Ordering.Relaxed)), self.raw_content_encoding.get().cloned())
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3147
+#Clone
+#Default
+pub struct JetHTTPResponseContext {
+    pub protocol: String
+    pub remote_address: String
+    pub redirect_history: [String]
+    pub timings_ms: [I64; 7]
+    pub reused_connection: Bool
+    pub raw_content_encoding: String?
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3157
+#Clone
+pub struct JetHTTPResponseParts {
+    pub status: I64
+    pub body_handle: I64
+    pub body_length: I64?
+    pub headers: [(String, String)]
+    pub context: JetHTTPResponseContext
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3167
+fn remaining_timeout(default: Duration, deadline: Instant?) -> Duration JetHTTPBridgeError! {
+    if deadline == .Val(end) {
+        remaining :: end.checked_duration_since(Instant.now()) ?? return Err(JetHTTPBridgeError.Timeout)
+        return remaining.min(default)
+    }
+    default
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3180
+fn send_once(pool: Arc<Mutex<ClientPool>>, namespace: I64, dns: Arc<Mutex<DNSCache>>, limits: Arc<OriginLimits>, method: String, url: ParsedUrl, headers: [(String, String)], body: [U8]?, dns_timeout: Duration, connect_timeout: Duration, tls_timeout: Duration, first_byte_timeout: Duration, read_timeout: Duration, write_timeout: Duration, total_deadline: Instant?, proxy: ParsedUrl?, decompress: Bool, request_started: Instant, http2: Bool, http11: Bool, h2c: Bool, tls: TLSSettings, retry_policy: RetryPolicy) -> NativeResponse JetHTTPBridgeError! {
+    body_len :: body.map((bytes) -> bytes.len())
+    has_body :: body != None
+    offset := USize{0}
+    bytes :: body ?? []
+    tee := [U8]?{None}
+    read := slice_body_reader(bytes, &offset)
+    send_once_upload(^pool, namespace, ^dns, ^limits, method, url, headers, body_len, false, has_body, &read, &tee, dns_timeout, connect_timeout, tls_timeout, first_byte_timeout, read_timeout, write_timeout, total_deadline, proxy, decompress, request_started, http2, http11, h2c, tls, retry_policy)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3242
+fn send_once_upload(pool: Arc<Mutex<ClientPool>>, namespace: I64, dns: Arc<Mutex<DNSCache>>, limits: Arc<OriginLimits>, method: String, url: ParsedUrl, headers: [(String, String)], body_len: USize?, chunked: Bool, has_body: Bool, body_read: &fn() -> [U8]? JetHTTPBridgeError!, tee: &[U8]?, dns_timeout: Duration, connect_timeout: Duration, tls_timeout: Duration, first_byte_timeout: Duration, read_timeout: Duration, write_timeout: Duration, total_deadline: Instant?, proxy: ParsedUrl?, decompress: Bool, request_started: Instant, http2: Bool, http11: Bool, h2c: Bool, tls: TLSSettings, retry_policy: RetryPolicy) -> NativeResponse JetHTTPBridgeError! {
+    if method.is_empty() || !method.bytes().all(http_token_byte) -> return Err(JetHTTPBridgeError.InvalidHeader)
+    validate_request_header_pairs(headers) ?? return Err(err)
+    proxy_key :: proxy.map((value) -> "{value.scheme}://{value.host}:{value.port}")
+    base_key :: PoolKey{namespace: namespace, scheme: ~url.scheme, host: ~url.host, port: url.port, proxy: ^proxy_key, protocol: "any"}
+    permit :: limits.acquire(~base_key, total_deadline) ?? return Err(err)
+    reused := false
+    facts :: Arc.new(ResponseFacts.default())
+    h2_key := ~base_key
+    h2_key.protocol = "h2"
+    h1_key := ^base_key
+    h1_key.protocol = "http/1.1"
+    pool_guard :: pool.lock() ?? return Err(JetHTTPBridgeError.Internal)
+    stream_opt := if http2 { pool_guard.take(h2_key) } else { None }
+    if stream_opt == None && http11 -> stream_opt = pool_guard.take(h1_key)
+    drop(pool_guard)
+    if stream_opt != None -> reused = true
+    if stream_opt == None -> stream_opt = Val(connect(dns, facts, url, proxy, dns_timeout, connect_timeout, tls_timeout, total_deadline, http2, http11, h2c, tls) ?? return Err(err))
+    stream := stream_opt.unwrap()
+    if reused && stream == .H2(connection) {
+        guard :: connection.lock() ?? return Err(JetHTTPBridgeError.Internal)
+        probe :: if guard.active_streams.is_empty() {
+            set_stream_timeouts(&guard.io, first_byte_timeout, write_timeout, total_deadline) ?? return Err(err)
+            guard.probe()
+        } else { Ok() }
+        drop(guard)
+        if probe.is_err() {
+            locked :: pool.lock() ?? return Err(JetHTTPBridgeError.Internal)
+            locked.remove_h2(h2_key, connection)
+            drop(locked)
+            stream = connect(dns, facts, url, proxy, dns_timeout, connect_timeout, tls_timeout, total_deadline, http2, http11, h2c, tls) ?? return Err(err)
+            reused = false
+        }
+    }
+    key :: if stream.is_h2() { ^h2_key } else { ^h1_key }
+    if stream.is_h2() {
+        connection :: if stream == .H2(value) { value } else { panic("unreachable HTTP/2 stream variant") }
+        if !reused {
+            locked :: pool.lock() ?? return Err(JetHTTPBridgeError.Internal)
+            locked.put(~key, HTTPStream.H2(connection.clone()))
+        }
+        guard :: connection.lock() ?? return Err(JetHTTPBridgeError.Internal)
+        set_stream_timeouts(&guard.io, first_byte_timeout, write_timeout, total_deadline) ?? return Err(err)
+        stream_id :: guard.start_request(method, url, headers, body_len, has_body, body_read, tee, decompress, facts) ?? return Err(err)
+        remote_address :: guard.io.peer_addr().map((address) -> address.to_string()).unwrap_or_default()
+        drop(guard)
+        first_started :: Instant.now()
+        first_deadline :: Instant.now().checked_add(first_byte_timeout).map((deadline) -> total_deadline.map_or(deadline, (total) -> total.min(deadline))) ?? return Err(JetHTTPBridgeError.Timeout)
+        response_headers_result := (I64, [(String, String)], Bool)?{None}
+        loop {
+            if Instant.now() >= first_deadline -> return Err(JetHTTPBridgeError.Timeout)
+            locked :: connection.lock() ?? return Err(JetHTTPBridgeError.Internal)
+            slice :: first_deadline.saturating_duration_since(Instant.now()).min(Duration.from_millis(10))
+            set_stream_timeouts(&locked.io, slice, write_timeout, total_deadline) ?? return Err(err)
+            polled :: locked.poll_response_headers(stream_id) ?? return Err(err)
+            drop(locked)
+            if polled != None { response_headers_result = ^polled; break }
+            thread.yield_now() // GATE #4494
+        }
+        (status, response_headers, end_stream) :: response_headers_result.unwrap()
+        set_timing(facts, 4, elapsed_ms(first_started))
+        return read_h2_response(^connection, stream_id, status, ^response_headers, end_stream, ^key, ^pool, decompress, ^facts, request_started, read_timeout, total_deadline, ^permit, reused, ^remote_address)
+    }
+    request :: encode_request(method, url, proxy, headers, body_len, chunked, decompress) ?? return Err(err)
+    set_stream_timeouts(&stream, first_byte_timeout, write_timeout, total_deadline) ?? return Err(err)
+    write_started :: Instant.now()
+    if write_request(&stream, request) == .Err((error, wrote_any)) {
+        // Reconnect only stale pooled IO before ANY request bytes, never Timeout.
+        if reused && !wrote_any && error == JetHTTPBridgeError.IO && connection_retry_allowed(retry_policy, method) {
+            fresh := connect(dns, facts, url, proxy, dns_timeout, connect_timeout, tls_timeout, total_deadline, false, true, false, tls) ?? return Err(err)
+            set_stream_timeouts(&fresh, first_byte_timeout, write_timeout, total_deadline) ?? return Err(err)
+            write_request(&fresh, request) ?? return Err(err.0)
+            stream = ^fresh
+            reused = false
+        } else { return Err(error) }
+    }
+    if has_body -> write_upload_body(&stream, chunked, body_read, tee) ?? return Err(err.0)
+    set_timing(facts, 3, elapsed_ms(write_started))
+    remote_address :: stream.peer_addr().map((address) -> address.to_string()).unwrap_or_default()
+    response := read_response(^stream, ^key, ^pool, method == "HEAD", decompress, ^facts, request_started, read_timeout, total_deadline, ^permit) ?? return Err(err)
+    response.reused_connection = reused
+    response.remote_address = ^remote_address
+    response
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3512
+fn http_token_byte(byte: U8) -> Bool {
+    byte.is_ascii_alphanumeric() || byte == 33 || byte == 35 || byte == 36 || byte == 37 || byte == 38 || byte == 39 || byte == 42 || byte == 43 || byte == 45 || byte == 46 || byte == 94 || byte == 95 || byte == 96 || byte == 124 || byte == 126
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3533
+fn http_field_value_byte(byte: U8) -> Bool { byte == 9 || (byte >= 0x20 && byte <= 0x7e) || byte >= 0x80 }
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3537
+fn connection_retry_allowed(policy: RetryPolicy, method: String) -> Bool {
+    if policy == {
+        .None -> false
+        .Safe -> method == "GET" || method == "HEAD" || method == "OPTIONS" || method == "TRACE"
+        .Idempotent -> method == "GET" || method == "HEAD" || method == "PUT" || method == "DELETE" || method == "OPTIONS" || method == "TRACE"
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3549
+fn redirect_may_replay_body(method: String) -> Bool { method != "GET" && method != "HEAD" && method != "OPTIONS" && method != "TRACE" }
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3553
+fn connect(dns: Arc<Mutex<DNSCache>>, facts: Arc<ResponseFacts>, url: ParsedUrl, proxy: ParsedUrl?, dns_timeout: Duration, connect_timeout: Duration, tls_timeout: Duration, deadline: Instant?, http2: Bool, http11: Bool, h2c: Bool, tls: TLSSettings) -> HTTPStream JetHTTPBridgeError! {
+    destination :: proxy ?? url
+    timeout :: remaining_timeout(connect_timeout, deadline) ?? return Err(err)
+    tcp := connect_plain(dns, facts, destination, remaining_timeout(dns_timeout, deadline) ?? return Err(err), timeout) ?? return Err(err)
+    if url.scheme == "https" && proxy != None {
+        tcp.set_read_timeout(Val(remaining_timeout(tls_timeout, deadline) ?? return Err(err))) ?? return Err(JetHTTPBridgeError.Proxy)
+        tcp.set_write_timeout(Val(remaining_timeout(tls_timeout, deadline) ?? return Err(err))) ?? return Err(JetHTTPBridgeError.Proxy)
+        authority :: "{url.host}:{url.port}"
+        tcp.write_fmt("CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\nProxy-Connection: keep-alive\r\n\r\n") ?? return Err(JetHTTPBridgeError.Proxy)
+        (head, _, _) :: read_head_bytes(&tcp) ?? return Err(JetHTTPBridgeError.Proxy)
+        parsed :: parse_status_and_headers(head) ?? return Err(JetHTTPBridgeError.Proxy)
+        if parsed.0 != 200 -> return Err(JetHTTPBridgeError.Proxy)
+    }
+    if url.scheme == "https" {
+        started :: Instant.now()
+        stream :: tls_stream(^tcp, url.host, remaining_timeout(tls_timeout, deadline) ?? return Err(err), http2, http11, tls)
+        set_timing(facts, 2, elapsed_ms(started))
+        return stream
+    }
+    if h2c && http2 && proxy == None -> return HTTPStream.H2(Arc.new(Mutex.new(H2Connection.new(HTTPStream.Plain(^tcp)) ?? return Err(err))))
+    if http11 -> return HTTPStream.Plain(^tcp)
+    Err(JetHTTPBridgeError.Protocol)
+}

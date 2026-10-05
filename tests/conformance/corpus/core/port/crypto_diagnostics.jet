@@ -1,0 +1,10 @@
+use tests.common
+use std.[fs, env, process, thread]
+// Rust: tests/crypto_diagnostics.rs:6
+fn scratch() -> OSPath {
+    // GATE #4494: filesystem and native process/thread identity.
+    path :: env.temp_dir().join("jet-e2702-{process.id()}-{thread.current().name().unwrap_or("test")}")
+    _ :: fs.remove_dir_all(path)
+    fs.create_dir_all(path).unwrap()
+    path
+}

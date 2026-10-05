@@ -1,0 +1,788 @@
+use tests.conformance.corpus.core.port.http_server_lifecycle.*
+use core.http.runtime.top_http_server.*
+use core.http.runtime.top_http_message.*
+use core.http.runtime.top_http_route.*
+use std.net.[TcpListener, TcpStream, SocketAddr, Shutdown]
+use std.sync.[Arc]
+use std.sync.atomic.[AtomicUsize, AtomicBool, Ordering]
+use std.time.Duration
+use std.thread
+use std.io.ErrorKind
+// GATE #4494: actual socket IO, shared atomics and native threads use the std substrate names.
+// GATE #4409: ConnectionReset terminates response reads; every other IO error fails the test.
+
+// Rust: tests/http_server_lifecycle.rs:1779
+#Test("chunked_requests_are_bounded_strict_and_preserve_pipeline_boundaries") {
+    // Rust: tests/http_server_lifecycle.rs:1783
+    fn exchange(addr: SocketAddr, request: [U8]) -> String {
+        stream := TcpStream.connect(addr).expect("connect")
+        stream.write_all(request).expect("request write")
+        stream.shutdown(Shutdown.Write).expect("finish request")
+        response := [U8]{}
+        buf := [U8#1024]{0}
+        loop {
+            read :: stream.read(&buf) ?? {
+                if err.kind() == ErrorKind.ConnectionReset { break }
+                panic("response read: {err}")
+            }
+            if read == 0 { break }
+            response.extend_from_slice(buf[..<read])
+        }
+        String.from_utf8(^response).expect("response UTF-8")
+    }
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    addr :: listener.local_addr().expect("address")
+    mux :: jet_http_mux_new()
+    post_calls :: Arc.new(AtomicUsize.new(0))
+    handler_calls :: post_calls.clone()
+    jet_http_mux_add_handler(&mux, "POST", "/echo", Arc.new(req -> {
+        body :: req.body.text(1024 * 1024)?
+        _ :: handler_calls.fetch_add(1, Ordering.AcqRel)
+        length :: body.len()
+        preview :: if length <= 32 { body.as_str() } else { "" }
+        Ok(jet_http_srv_response(200, &"{length}:{preview}"))
+    }))
+    jet_http_mux_add(&mux, "GET", "/next", _ -> jet_http_srv_response(200, &"next"))
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: shutdown.clone()
+    options := JetHTTPServerOptions.safe()
+    options.workers = 1
+    options.admission_queue = 16
+    options.read_header_timeout = Duration.from_secs(1)
+    options.read_idle_timeout = Duration.from_secs(1)
+    options.read_body_timeout = Duration.from_secs(1)
+    server :: thread.spawn(() -> {
+        jet_http_server_run_listener(^listener, ^mux, ^options, ^server_shutdown, None, None, None).expect("server")
+    })
+    pipelined :: exchange(addr, "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: ChUnKeD\r\n\r\n4;name=value\r\nWiki\r\n5;note=\"quoted value\"\r\npedia\r\n0\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".as_bytes())
+    assert_eq(pipelined.matches("HTTP/1.1 200 OK").count(), 2, pipelined)
+    echoed :: pipelined.find("\r\n\r\n9:Wikipedia").expect("decoded chunked body")
+    next_response :: pipelined.rfind("\r\n\r\nnext").expect("pipelined next response")
+    assert(echoed < next_response, "pipeline order changed: {pipelined}")
+    split_request := "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n1\r\n".into_bytes()
+    split_request.push(195)
+    split_request.extend_from_slice("\r\n1\r\n".as_bytes())
+    split_request.push(169)
+    split_request.extend_from_slice("\r\n1\r\n!\r\n0\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".as_bytes())
+    split_codepoint :: exchange(addr, split_request)
+    assert_eq(split_codepoint.matches("HTTP/1.1 200 OK").count(), 2, split_codepoint)
+    split_body :: split_codepoint.find("\r\n\r\n3:é!").expect("split UTF-8 codepoint")
+    split_next :: split_codepoint.rfind("\r\n\r\nnext").expect("split pipeline tail")
+    assert(split_body < split_next, "split-codepoint pipeline order changed: {split_codepoint}")
+    limit :: 1024 * 1024
+    exact_request :: "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{limit:x}\r\n{"x".repeat(limit)}\r\n0\r\n\r\n"
+    exact :: exchange(addr, exact_request.as_bytes())
+    assert(exact.ends_with("\r\n\r\n{limit}:"), "exact limit failed: {exact}")
+    over_limit_request :: "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n100001\r\n{"x".repeat(1024 * 1024 + 1)}\r\n0\r\n\r\n"
+    over_limit :: exchange(addr, over_limit_request.as_bytes())
+    assert(over_limit.starts_with("HTTP/1.1 413 Payload Too Large"), over_limit)
+    loop invalid in [
+        "POST /echo HTTP/1.0\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: gzip, chunked\r\n\r\n0\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n+1\r\nx\r\n0\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n1;bad=\"unterminated\r\nx\r\n0\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nxX0\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nX-Trailer: hidden\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nx\r\n"
+    ] {
+        response :: exchange(addr, invalid.as_bytes())
+        assert(response.starts_with("HTTP/1.1 400 Bad Request"), response)
+        assert_eq(response.matches("HTTP/1.1").count(), 1, "invalid framing persisted: {response}")
+        assert(response.ends_with("Connection: close\r\n\r\n"), response)
+    }
+    loop invalid_whitespace in ["Content-Length:\u{000b}0", "Content-Length:\u{000c}0", "Content-Length:\u{00a0}0", "Transfer-Encoding:\u{00a0}chunked", "X-Invalid:\u{007f}"] {
+        request :: "POST /echo HTTP/1.1\r\nHost: local\r\n{invalid_whitespace}\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+        response :: exchange(addr, request.as_bytes())
+        assert(response.starts_with("HTTP/1.1 400 Bad Request"), response)
+        assert_eq(response.matches("HTTP/1.1").count(), 1, "invalid whitespace reused connection: {response}")
+        assert(!response.contains("200 OK"), "invalid whitespace reached a handler: {response}")
+    }
+    excessive_framing :: "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n{"1\r\nx\r\n".repeat(7_000)}0\r\n\r\n"
+    excessive :: exchange(addr, excessive_framing.as_bytes())
+    assert(excessive.starts_with("HTTP/1.1 413 Payload Too Large"), excessive)
+    assert_eq(post_calls.load(Ordering.Acquire), 3, "invalid framing reached handler")
+    shutdown.store(true, Ordering.Release)
+    report :: server.join().expect("server join")
+    assert_eq(report.user_accepted, 19)
+    assert_eq(report.user_completed, 19)
+}
+
+// Rust: tests/http_server_lifecycle.rs:1958
+#Test("gzip_content_encoding_is_transparent_bounded_and_strict") {
+    // Rust: tests/http_server_lifecycle.rs:1962
+    fn exchange(addr: SocketAddr, request: [U8]) -> String {
+        stream := TcpStream.connect(addr).expect("connect")
+        stream.write_all(request).expect("request write")
+        stream.shutdown(Shutdown.Write).expect("finish request")
+        response := [U8]{}
+        buf := [U8#1024]{0}
+        loop {
+            read :: stream.read(&buf) ?? {
+                if err.kind() == ErrorKind.ConnectionReset { break }
+                panic("response read: {err}")
+            }
+            if read == 0 { break }
+            response.extend_from_slice(buf[..<read])
+        }
+        String.from_utf8(^response).expect("response UTF-8")
+    }
+    // Rust: tests/http_server_lifecycle.rs:1981
+    fn request_with_body(headers: String, body: [U8]) -> [U8] {
+        request := "POST /echo HTTP/1.1\r\nHost: local\r\n{headers}\r\n".into_bytes()
+        request.extend_from_slice(body)
+        ^request
+    }
+    // Rust: tests/http_server_lifecycle.rs:1988
+    fn dynamic_empty_gzip(complete_code_tree: Bool) -> [U8] {
+        // Rust: tests/http_server_lifecycle.rs:1989
+        fn bits(output: &[U8], cursor: &USize, value: U32, count: USize) -> {
+            loop offset in 0..<count {
+                if cursor / 8 == output.len() { output.push(0) }
+                output[cursor / 8] |= ((value >> offset) as U8 & 1) << (cursor % 8)
+                cursor += 1
+            }
+        }
+        // Rust: tests/http_server_lifecycle.rs:1999
+        ORDER :: [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1]
+        deflate := [U8]{}
+        cursor := 0 as USize
+        bits(&deflate, &cursor, 1, 1) // final block
+        bits(&deflate, &cursor, 2, 2) // dynamic Huffman
+        bits(&deflate, &cursor, 0, 5) // 257 literal codes
+        bits(&deflate, &cursor, 0, 5) // one distance code
+        bits(&deflate, &cursor, 14, 4) // 18 code-length codes
+        loop symbol in ORDER {
+            length :: if symbol == 18 { if complete_code_tree { 1 } else { 2 } } else if symbol == 0 || symbol == 1 { 2 } else { 0 }
+            bits(&deflate, &cursor, length, 3)
+        }
+        (repeat_code, repeat_bits, one_code) :: if complete_code_tree { (0, 1, 3) } else { (1, 2, 2) }
+        bits(&deflate, &cursor, repeat_code, repeat_bits)
+        bits(&deflate, &cursor, 127, 7) // 138 zero lengths
+        bits(&deflate, &cursor, repeat_code, repeat_bits)
+        bits(&deflate, &cursor, 107, 7) // 118 zero lengths
+        bits(&deflate, &cursor, one_code, 2) // end-of-block length 1
+        bits(&deflate, &cursor, one_code, 2) // distance length 1
+        bits(&deflate, &cursor, 0, 1) // end-of-block symbol
+        gzip := [U8]{31, 139, 8, 0, 0, 0, 0, 0, 0, 3}
+        gzip.extend(^deflate)
+        gzip.extend([U8#8]{0}) // empty body CRC32 and ISIZE
+        ^gzip
+    }
+    stored :: [U8]{31, 139, 8, 0, 0, 0, 0, 0, 0, 3, 1, 3, 0, 252, 255, 97, 98, 99, 194, 65, 36, 53, 3, 0, 0, 0}
+    assert_eq(jet_http_gzip_decode(stored, 3).unwrap(), "abc".as_bytes())
+    dynamic :: jet_http_gzip_decode(GZIP_DYNAMIC, 300).unwrap()
+    assert_eq(dynamic.len(), 300)
+    assert(dynamic.starts_with("# AGENTS.md".as_bytes()))
+    assert_eq(jet_http_gzip_decode(dynamic_empty_gzip(true), 0).unwrap(), [U8]{})
+    assert_eq(jet_http_gzip_decode(dynamic_empty_gzip(false), 0).unwrap_err().status, 400, "an incomplete dynamic code-length tree must not be accepted")
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    addr :: listener.local_addr().expect("address")
+    mux :: jet_http_mux_new()
+    calls :: Arc.new(AtomicUsize.new(0))
+    handler_calls :: calls.clone()
+    jet_http_mux_add_handler(&mux, "POST", "/echo", Arc.new(req -> {
+        assert_eq(req.headers.first("content-encoding"), None)
+        assert_eq(req.headers.first("content-length"), None)
+        body :: req.body.text(100)?
+        _ :: handler_calls.fetch_add(1, Ordering.AcqRel)
+        Ok(jet_http_srv_response(200, &body))
+    }))
+    jet_http_mux_add(&mux, "GET", "/next", _ -> jet_http_srv_response(200, &"next"))
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: shutdown.clone()
+    options := JetHTTPServerOptions.safe()
+    options.max_body_bytes = 100
+    options.workers = 1
+    options.admission_queue = 8
+    server :: thread.spawn(() -> {
+        jet_http_server_run_listener(^listener, ^mux, ^options, ^server_shutdown, None, None, None).expect("server")
+    })
+    encoded :: exchange(addr, request_with_body("Content-Encoding: GZip\r\nContent-Length: {HELLO_GZIP.len()}\r\nConnection: close\r\n", HELLO_GZIP))
+    assert(encoded.starts_with("HTTP/1.1 200 OK"), encoded)
+    assert(encoded.ends_with("\r\n\r\nhello gzip"), encoded)
+    chunks := [U8]{}
+    loop chunk in HELLO_GZIP.chunks(7) {
+        chunks.extend_from_slice("{chunk.len():x}\r\n".as_bytes())
+        chunks.extend_from_slice(chunk)
+        chunks.extend_from_slice("\r\n".as_bytes())
+    }
+    chunks.extend_from_slice("0\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".as_bytes())
+    chunked :: exchange(addr, request_with_body("Content-Encoding: gzip\r\nTransfer-Encoding: chunked\r\n", chunks))
+    assert_eq(chunked.matches("HTTP/1.1 200 OK").count(), 2, chunked)
+    assert(chunked.find("\r\n\r\nhello gzip").unwrap() < chunked.rfind("\r\n\r\nnext").unwrap())
+    unsupported :: exchange(addr, request_with_body("Content-Encoding: br\r\nContent-Length: 0\r\nConnection: close\r\n", [U8]{}))
+    assert(unsupported.starts_with("HTTP/1.1 415 Unsupported Media Type"), unsupported)
+    mixed :: exchange(addr, request_with_body("Content-Encoding: gzip, br\r\nContent-Length: 0\r\nConnection: close\r\n", [U8]{}))
+    assert(mixed.starts_with("HTTP/1.1 415 Unsupported Media Type"), mixed)
+    corrupt := HELLO_GZIP.to_vec()
+    corrupt[HELLO_GZIP.len() - 8] ^= 1
+    malformed :: exchange(addr, request_with_body("Content-Encoding: gzip\r\nContent-Length: {corrupt.len()}\r\nConnection: close\r\n", corrupt))
+    assert(malformed.starts_with("HTTP/1.1 400 Bad Request"), malformed)
+    expansion :: exchange(addr, request_with_body("Content-Encoding: gzip\r\nContent-Length: {GZIP_EXPANSION.len()}\r\nConnection: close\r\n", GZIP_EXPANSION))
+    assert(expansion.starts_with("HTTP/1.1 413 Payload Too Large"), expansion)
+    assert_eq(calls.load(Ordering.Acquire), 2, "rejected encoding reached handler")
+    shutdown.store(true, Ordering.Release)
+    report :: server.join().expect("server join")
+    assert_eq(report.user_accepted, 6)
+    assert_eq(report.user_completed, 6)
+}
+
+// Rust: tests/http_server_lifecycle.rs:2190
+#Test("expect_continue_is_ordered_bounded_and_rejects_before_dispatch") {
+    // Rust: tests/http_server_lifecycle.rs:2194
+    fn read_rest(stream: &TcpStream) -> String {
+        response := [U8]{}
+        buf := [U8#1024]{0}
+        loop {
+            read :: stream.read(&buf) ?? {
+                if err.kind() == ErrorKind.ConnectionReset { break }
+                panic("response read: {err}")
+            }
+            if read == 0 { break }
+            response.extend_from_slice(buf[..<read])
+        }
+        String.from_utf8(^response).expect("response UTF-8")
+    }
+    // Rust: tests/http_server_lifecycle.rs:2208
+    fn exchange(addr: SocketAddr, request: [U8]) -> String {
+        stream := TcpStream.connect(addr).expect("connect")
+        stream.write_all(request).expect("request write")
+        stream.shutdown(Shutdown.Write).expect("finish request")
+        read_rest(&stream)
+    }
+    // Rust: tests/http_server_lifecycle.rs:2217
+    fn continue_exchange(addr: SocketAddr, head: [U8], body_and_tail: [U8]) -> String {
+        stream := TcpStream.connect(addr).expect("connect")
+        stream.set_read_timeout(Val(Duration.from_secs(1))).expect("timeout")
+        stream.write_all(head).expect("request head")
+        expected :: "HTTP/1.1 100 Continue\r\n\r\n".as_bytes()
+        interim := [U8]{0}.repeat(expected.len())
+        stream.read_exact(&interim).expect("100 Continue")
+        assert_eq(interim, expected)
+        stream.write_all(body_and_tail).expect("request body")
+        stream.shutdown(Shutdown.Write).expect("finish request")
+        response :: read_rest(&stream)
+        assert(!response.contains("100 Continue"), "server sent a second interim response: {response}")
+        response
+    }
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    addr :: listener.local_addr().expect("address")
+    arrived_content_length := TcpStream.connect(addr).expect("pre-arrived CL connect")
+    arrived_content_length.write_all("POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 5\r\nExpect: 100-continue\r\nConnection: close\r\n\r\nearly".as_bytes()).expect("pre-arrived CL write")
+    arrived_content_length.shutdown(Shutdown.Write).expect("pre-arrived CL finish")
+    arrived_chunked := TcpStream.connect(addr).expect("pre-arrived chunked connect")
+    arrived_chunked.write_all("POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nExpect: 100-continue\r\n\r\n5\r\nearly\r\n0\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".as_bytes()).expect("pre-arrived chunked write")
+    arrived_chunked.shutdown(Shutdown.Write).expect("pre-arrived chunked finish")
+    mux :: jet_http_mux_new()
+    calls :: Arc.new(AtomicUsize.new(0))
+    post_calls :: calls.clone()
+    jet_http_mux_add_handler(&mux, "POST", "/echo", Arc.new(req -> {
+        body :: req.body.text(1024 * 1024)?
+        _ :: post_calls.fetch_add(1, Ordering.AcqRel)
+        Ok(jet_http_srv_response(200, &body))
+    }))
+    get_calls :: calls.clone()
+    jet_http_mux_add(&mux, "GET", "/next", _ -> {
+        _ :: get_calls.fetch_add(1, Ordering.AcqRel)
+        jet_http_srv_response(200, &"next")
+    })
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: shutdown.clone()
+    options := JetHTTPServerOptions.safe()
+    options.workers = 1
+    options.admission_queue = 8
+    options.read_header_timeout = Duration.from_millis(200)
+    options.read_idle_timeout = Duration.from_millis(200)
+    options.read_body_timeout = Duration.from_millis(200)
+    server :: thread.spawn(() -> {
+        jet_http_server_run_listener(^listener, ^mux, ^options, ^server_shutdown, None, None, None).expect("server")
+    })
+    arrived_cl_response :: read_rest(&arrived_content_length)
+    assert_eq(arrived_cl_response.matches("HTTP/1.1 200 OK").count(), 1, arrived_cl_response)
+    assert(!arrived_cl_response.contains("100 Continue"), "fully arrived CL received interim: {arrived_cl_response}")
+    assert(arrived_cl_response.ends_with("\r\n\r\nearly"), arrived_cl_response)
+    arrived_chunk_response :: read_rest(&arrived_chunked)
+    assert_eq(arrived_chunk_response.matches("HTTP/1.1 200 OK").count(), 2, arrived_chunk_response)
+    assert(!arrived_chunk_response.contains("100 Continue"), "fully arrived chunked request received interim: {arrived_chunk_response}")
+    assert(arrived_chunk_response.find("\r\n\r\nearly").unwrap() < arrived_chunk_response.rfind("\r\n\r\nnext").unwrap())
+    content_length :: continue_exchange(addr, "POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 5\r\nExpect: 100-continue\r\n\r\n".as_bytes(), "helloGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".as_bytes())
+    assert_eq(content_length.matches("HTTP/1.1 200 OK").count(), 2, content_length)
+    assert(content_length.find("\r\n\r\nhello").unwrap() < content_length.rfind("\r\n\r\nnext").unwrap())
+    chunked :: continue_exchange(addr, "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nExpect: 100-continue\r\n\r\n".as_bytes(), "5\r\nworld\r\n0\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".as_bytes())
+    assert_eq(chunked.matches("HTTP/1.1 200 OK").count(), 2, chunked)
+    assert(chunked.find("\r\n\r\nworld").unwrap() < chunked.rfind("\r\n\r\nnext").unwrap())
+    oversized :: exchange(addr, "POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 1048577\r\nExpect: 100-continue\r\nConnection: close\r\n\r\n".as_bytes())
+    assert(oversized.starts_with("HTTP/1.1 413 Payload Too Large"), oversized)
+    assert(!oversized.contains("100 Continue"), "oversized body was invited: {oversized}")
+    loop invalid in [
+        "POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\nExpect: fancy\r\n\r\nxGET /next HTTP/1.1\r\nHost: local\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\nExpect: 100-continue\r\nExpect: 100-continue\r\n\r\nxGET /next HTTP/1.1\r\nHost: local\r\n\r\n",
+        "POST /echo HTTP/1.0\r\nHost: local\r\nContent-Length: 1\r\nExpect: 100-continue\r\n\r\nxGET /next HTTP/1.1\r\nHost: local\r\n\r\n"
+    ] {
+        response :: exchange(addr, invalid.as_bytes())
+        assert(response.starts_with("HTTP/1.1 417 Expectation Failed"), response)
+        assert(!response.contains("100 Continue"), "invalid expectation was invited: {response}")
+        assert(!response.contains("200 OK"), "invalid expectation dispatched or reused: {response}")
+        assert(response.ends_with("Connection: close\r\n\r\n"), response)
+    }
+    assert_eq(calls.load(Ordering.Acquire), 7, "rejected expectation reached a handler")
+    shutdown.store(true, Ordering.Release)
+    report :: server.join().expect("server join")
+    assert_eq(report.user_accepted, 8)
+    assert_eq(report.user_completed, 8)
+}
+
+// Rust: tests/http_server_lifecycle.rs:2377
+#Test("host_authority_is_single_valid_and_required_for_http11") {
+    // Rust: tests/http_server_lifecycle.rs:2381
+    fn exchange(addr: SocketAddr, request: [U8]) -> String {
+        stream := TcpStream.connect(addr).expect("connect")
+        stream.write_all(request).expect("request write")
+        stream.shutdown(Shutdown.Write).expect("finish request")
+        response := [U8]{}
+        buf := [U8#1024]{0}
+        loop {
+            read :: stream.read(&buf) ?? {
+                if err.kind() == ErrorKind.ConnectionReset { break }
+                panic("response read: {err}")
+            }
+            if read == 0 { break }
+            response.extend_from_slice(buf[..<read])
+        }
+        String.from_utf8(^response).expect("response UTF-8")
+    }
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    addr :: listener.local_addr().expect("address")
+    mux :: jet_http_mux_new()
+    calls :: Arc.new(AtomicUsize.new(0))
+    handler_calls :: calls.clone()
+    jet_http_mux_add(&mux, "GET", "/", _ -> {
+        _ :: handler_calls.fetch_add(1, Ordering.AcqRel)
+        jet_http_srv_response(200, &"ok")
+    })
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: shutdown.clone()
+    options := JetHTTPServerOptions.safe()
+    options.workers = 1
+    options.admission_queue = 24
+    server :: thread.spawn(() -> {
+        jet_http_server_run_listener(^listener, ^mux, ^options, ^server_shutdown, None, None, None).expect("server")
+    })
+    loop valid in [
+        "GET / HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+        "GET / HTTP/1.1\r\nHost: example.com:8080\r\nConnection: close\r\n\r\n",
+        "GET / HTTP/1.1\r\nHost: 127.0.0.1:80\r\nConnection: close\r\n\r\n",
+        "GET / HTTP/1.1\r\nHost: percent%2Dname.example\r\nConnection: close\r\n\r\n",
+        "GET / HTTP/1.1\r\nHost: [::1]:443\r\nConnection: close\r\n\r\n",
+        "GET / HTTP/1.1\r\nHost: [v1.fe80::a]:80\r\nConnection: close\r\n\r\n",
+        "GET / HTTP/1.0\r\nConnection: close\r\n\r\n"
+    ] {
+        response :: exchange(addr, valid.as_bytes())
+        assert(response.contains("200 OK"), "valid authority rejected: {response}")
+    }
+    loop invalid_host in ["", "Host:\r\n", "Host: one\r\nHost: two\r\n", "Host: one,two\r\n", "Host: user@local\r\n", "Host: local/path\r\n", "Host: ::1\r\n", "Host: [::1\r\n", "Host: []\r\n", "Host: [127.0.0.1]\r\n", "Host: [v.fe]\r\n", "Host: [v1.]\r\n", "Host: local:abc\r\n", "Host: local:65536\r\n", "Host: bad host\r\n", "Host: bad%ZZ\r\n"] {
+        request :: "GET / HTTP/1.1\r\n{invalid_host}\r\nGET / HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+        response :: exchange(addr, request.as_bytes())
+        assert(response.starts_with("HTTP/1.1 400 Bad Request"), "accepted invalid Host {invalid_host:?}: {response}")
+        assert(!response.contains("200 OK"), "invalid Host dispatched or reused: {response}")
+        assert_eq(response.matches("HTTP/1.1").count(), 1, "invalid Host reused connection: {response}")
+        assert(response.ends_with("Connection: close\r\n\r\n"), response)
+    }
+    loop invalid_host in ["Host: bad host\r\n", "Host: one\r\nHost: two\r\n"] {
+        request :: "GET / HTTP/1.0\r\n{invalid_host}\r\nGET / HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+        response :: exchange(addr, request.as_bytes())
+        assert(response.starts_with("HTTP/1.1 400 Bad Request"), "HTTP/1.0 accepted invalid Host {invalid_host:?}: {response}")
+        assert(!response.contains("200 OK"), "invalid HTTP/1.0 Host dispatched or reused: {response}")
+        assert_eq(response.matches("HTTP/1.1").count(), 1, "invalid HTTP/1.0 Host reused connection: {response}")
+        assert(response.ends_with("Connection: close\r\n\r\n"), response)
+    }
+    assert_eq(calls.load(Ordering.Acquire), 7, "invalid Host reached handler")
+    shutdown.store(true, Ordering.Release)
+    report :: server.join().expect("server join")
+    assert_eq(report.user_accepted, 25)
+    assert_eq(report.user_completed, 25)
+}
+
+// Rust: tests/http_server_lifecycle.rs:2512
+#Test("absolute_form_target_matches_host_before_routing") {
+    // Rust: tests/http_server_lifecycle.rs:2516
+    fn exchange(addr: SocketAddr, request: [U8]) -> String {
+        stream := TcpStream.connect(addr).expect("connect")
+        stream.write_all(request).expect("request write")
+        stream.shutdown(Shutdown.Write).expect("finish request")
+        response := [U8]{}
+        buf := [U8#1024]{0}
+        loop {
+            read :: stream.read(&buf) ?? {
+                if err.kind() == ErrorKind.ConnectionReset { break }
+                panic("response read: {err}")
+            }
+            if read == 0 { break }
+            response.extend_from_slice(buf[..<read])
+        }
+        String.from_utf8(^response).expect("response UTF-8")
+    }
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    addr :: listener.local_addr().expect("address")
+    mux :: jet_http_mux_new()
+    calls :: Arc.new(AtomicUsize.new(0))
+    handler_calls :: calls.clone()
+    jet_http_mux_add(&mux, "GET", "/resource", req -> {
+        _ :: handler_calls.fetch_add(1, Ordering.AcqRel)
+        jet_http_srv_response(200, &req.path)
+    })
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: shutdown.clone()
+    options := JetHTTPServerOptions.safe()
+    options.workers = 1
+    options.admission_queue = 16
+    server :: thread.spawn(() -> {
+        jet_http_server_run_listener(^listener, ^mux, ^options, ^server_shutdown, None, None, None).expect("server")
+    })
+    loop (request, expected_path) in [
+        ("GET http://local/resource?x=1 HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n", "/resource?x=1"),
+        ("GET HTTP://EXAMPLE.COM:80/resource HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n", "/resource"),
+        ("GET http://local:8080/resource HTTP/1.1\r\nHost: local:8080\r\nConnection: close\r\n\r\n", "/resource"),
+        ("GET https://[::1]/resource HTTP/1.1\r\nHost: [::1]:443\r\nConnection: close\r\n\r\n", "/resource"),
+        ("GET http://percent%2Dname.example/resource HTTP/1.1\r\nHost: percent%2dname.example:80\r\nConnection: close\r\n\r\n", "/resource"),
+        ("GET http://local/resource HTTP/1.0\r\nConnection: close\r\n\r\n", "/resource"),
+        ("GET /resource?x=%2F:@!$&'()*+,;=~._-/? HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n", "/resource?x=%2F:@!$&'()*+,;=~._-/?"),
+        ("GET http://local/resource?x=%2f:@!$&'()*+,;=~._-/? HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n", "/resource?x=%2f:@!$&'()*+,;=~._-/?")
+    ] {
+        response :: exchange(addr, request.as_bytes())
+        assert(response.starts_with("HTTP/1.") && response.contains(" 200 OK\r\n"), "valid absolute-form rejected: {response}")
+        assert(response.ends_with("\r\n\r\n{expected_path}"), "target was not normalized once: {response}")
+    }
+    loop invalid_target in [
+        "GET http://one/resource HTTP/1.1\r\nHost: two\r\n",
+        "GET http://local:8080/resource HTTP/1.1\r\nHost: local\r\n",
+        "GET http://user@local/resource HTTP/1.1\r\nHost: local\r\n",
+        "GET http://local/resource#fragment HTTP/1.1\r\nHost: local\r\n",
+        "GET ftp://local/resource HTTP/1.1\r\nHost: local\r\n",
+        "GET relative HTTP/1.1\r\nHost: local\r\n",
+        "GET http://local\t/resource HTTP/1.1\r\nHost: local\r\n",
+        "GET http:///resource HTTP/1.1\r\nHost: local\r\n",
+        "GET /resource% HTTP/1.1\r\nHost: local\r\n",
+        "GET http://local/resource%zz HTTP/1.1\r\nHost: local\r\n",
+        "GET /resource\\evil HTTP/1.1\r\nHost: local\r\n",
+        "GET /resource?x=<bad> HTTP/1.1\r\nHost: local\r\n",
+        "GET /resource?x=é HTTP/1.1\r\nHost: local\r\n",
+        "GET /resource#fragment HTTP/1.1\r\nHost: local\r\n",
+        "GET * HTTP/1.1\r\nHost: local\r\n"
+    ] {
+        request :: "{invalid_target}\r\nGET /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+        response :: exchange(addr, request.as_bytes())
+        assert(response.starts_with("HTTP/1.1 400 Bad Request"), "accepted invalid target: {response}")
+        assert(!response.contains("200 OK"), "invalid target dispatched or reused: {response}")
+        assert_eq(response.matches("HTTP/1.1").count(), 1, "invalid target reused connection: {response}")
+    }
+    mismatched_expect :: exchange(addr, "POST http://one/resource HTTP/1.1\r\nHost: two\r\nContent-Length: 1\r\nExpect: 100-continue\r\n\r\n".as_bytes())
+    assert(mismatched_expect.starts_with("HTTP/1.1 400 Bad Request"), mismatched_expect)
+    assert(!mismatched_expect.contains("100 Continue"), "mismatch received body permission: {mismatched_expect}")
+    malformed_expect :: exchange(addr, "POST /resource?x=%zz HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\nExpect: 100-continue\r\n\r\n".as_bytes())
+    assert(malformed_expect.starts_with("HTTP/1.1 400 Bad Request"), malformed_expect)
+    assert(!malformed_expect.contains("100 Continue"), "malformed target received body permission: {malformed_expect}")
+    assert_eq(calls.load(Ordering.Acquire), 8, "invalid target reached handler")
+    shutdown.store(true, Ordering.Release)
+    report :: server.join().expect("server join")
+    assert_eq(report.user_accepted, 25)
+    assert_eq(report.user_completed, 25)
+}
+
+// Rust: tests/http_server_lifecycle.rs:2643
+#Test("connect_authority_form_matches_host_before_routing") {
+    // Rust: tests/http_server_lifecycle.rs:2647
+    fn exchange(addr: SocketAddr, request: [U8]) -> String {
+        stream := TcpStream.connect(addr).expect("connect")
+        stream.write_all(request).expect("request write")
+        stream.shutdown(Shutdown.Write).expect("finish request")
+        response := [U8]{}
+        buf := [U8#1024]{0}
+        loop {
+            read :: stream.read(&buf) ?? {
+                if err.kind() == ErrorKind.ConnectionReset { break }
+                panic("response read: {err}")
+            }
+            if read == 0 { break }
+            response.extend_from_slice(buf[..<read])
+        }
+        String.from_utf8(^response).expect("response UTF-8")
+    }
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    addr :: listener.local_addr().expect("address")
+    mux :: jet_http_mux_new()
+    calls :: Arc.new(AtomicUsize.new(0))
+    handler_calls :: calls.clone()
+    jet_http_mux_add(&mux, "CONNECT", "/:authority", req -> {
+        _ :: handler_calls.fetch_add(1, Ordering.AcqRel)
+        jet_http_srv_response(200, &req.path)
+    })
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: shutdown.clone()
+    options := JetHTTPServerOptions.safe()
+    options.workers = 1
+    options.admission_queue = 16
+    server :: thread.spawn(() -> {
+        jet_http_server_run_listener(^listener, ^mux, ^options, ^server_shutdown, None, None, None).expect("server")
+    })
+    loop (request, expected_path) in [
+        ("CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\nConnection: close\r\n\r\n", "example.com:443"),
+        ("CONNECT EXAMPLE.COM:443 HTTP/1.1\r\nHost: example.com:443\r\nConnection: close\r\n\r\n", "example.com:443"),
+        ("CONNECT percent%2dname.example:8443 HTTP/1.1\r\nHost: percent%2Dname.example:8443\r\nConnection: close\r\n\r\n", "percent%2Dname.example:8443"),
+        ("CONNECT [::1]:443 HTTP/1.1\r\nHost: [::1]:443\r\nConnection: close\r\n\r\n", "[::1]:443"),
+        ("CONNECT [v1.fe80::a]:80 HTTP/1.1\r\nHost: [v1.fe80::a]:80\r\nConnection: close\r\n\r\n", "[v1.fe80::a]:80"),
+        ("CONNECT example.com:443 HTTP/1.0\r\nConnection: close\r\n\r\n", "example.com:443"),
+        ("CONNECT example.com HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n", "example.com")
+    ] {
+        response :: exchange(addr, request.as_bytes())
+        assert(response.starts_with("HTTP/1.") && response.contains(" 200 OK\r\n"), "valid CONNECT authority-form rejected: {response}")
+        assert(response.ends_with("\r\n\r\n{expected_path}"), "CONNECT authority was not normalized once: {response}")
+    }
+    loop invalid_target in [
+        "CONNECT /tunnel HTTP/1.1\r\nHost: example.com:443\r\n",
+        "CONNECT http://example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n",
+        "CONNECT * HTTP/1.1\r\nHost: example.com:443\r\n",
+        "CONNECT example.com:443 HTTP/1.1\r\nHost: other.com:443\r\n",
+        "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com\r\n",
+        "CONNECT example.com HTTP/1.1\r\nHost: example.com:443\r\n",
+        "CONNECT user@example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n",
+        "CONNECT example.com:443/path HTTP/1.1\r\nHost: example.com:443\r\n",
+        "CONNECT example.com:abc HTTP/1.1\r\nHost: example.com:abc\r\n",
+        "CONNECT [::1 HTTP/1.1\r\nHost: [::1\r\n",
+        "GET example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n",
+        "OPTIONS example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n"
+    ] {
+        request :: "{invalid_target}\r\nCONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\nConnection: close\r\n\r\n"
+        response :: exchange(addr, request.as_bytes())
+        assert(response.starts_with("HTTP/1.1 400 Bad Request"), "accepted invalid CONNECT target: {response}")
+        assert(!response.contains("200 OK"), "invalid CONNECT dispatched or reused: {response}")
+        assert_eq(response.matches("HTTP/1.1").count(), 1, "invalid CONNECT reused connection: {response}")
+    }
+    mismatched_expect :: exchange(addr, "CONNECT one:443 HTTP/1.1\r\nHost: two:443\r\nContent-Length: 1\r\nExpect: 100-continue\r\n\r\n".as_bytes())
+    assert(mismatched_expect.starts_with("HTTP/1.1 400 Bad Request"), mismatched_expect)
+    assert(!mismatched_expect.contains("100 Continue"), "mismatch received body permission: {mismatched_expect}")
+    assert_eq(calls.load(Ordering.Acquire), 7, "invalid CONNECT reached handler")
+    shutdown.store(true, Ordering.Release)
+    report :: server.join().expect("server join")
+    assert_eq(report.user_accepted, 20)
+    assert_eq(report.user_completed, 20)
+}
+
+// Rust: tests/http_server_lifecycle.rs:2784
+#Test("http2_connect_omits_path_and_routes_authority") {
+    // Rust: tests/http_server_lifecycle.rs:2788
+    fn empty_body() -> JetHTTPBody { JetHTTPBody.from_bytes([U8]{}) }
+    loop (authority, expected) in [
+        ("example.com:443", "example.com:443"),
+        ("EXAMPLE.COM:443", "example.com:443"),
+        ("percent%2dname.example:8443", "percent%2Dname.example:8443"),
+        ("[::1]:443", "[::1]:443"),
+        ("[v1.fe80::a]:80", "[v1.fe80::a]:80"),
+        ("example.com", "example.com")
+    ] {
+        (request, _) :: jet_http2_request([(":method", "CONNECT"), (":authority", authority)], empty_body()) ?? panic("valid CONNECT rejected for {authority}: {err}")
+        assert_eq(request.method, "CONNECT")
+        assert_eq(request.path, expected, "authority {authority}")
+        assert_eq(request.headers.get("host").map(value -> value.as_str()), Val(expected))
+    }
+    with_host :: jet_http2_request([(":method", "CONNECT"), (":authority", "Example.COM:443"), ("host", "example.com:443")], empty_body()).expect("matching host")
+    assert_eq(with_host.0.path, "example.com:443")
+    loop (label, headers) in [
+        ("with :path", [(":method", "CONNECT"), (":authority", "example.com:443"), (":path", "/")]),
+        ("with :scheme", [(":method", "CONNECT"), (":authority", "example.com:443"), (":scheme", "https")]),
+        ("missing :authority", [(":method", "CONNECT")]),
+        ("host mismatch", [(":method", "CONNECT"), (":authority", "example.com:443"), ("host", "other.com:443")]),
+        ("port mismatch", [(":method", "CONNECT"), (":authority", "example.com:443"), ("host", "example.com")]),
+        ("malformed authority", [(":method", "CONNECT"), (":authority", "user@example.com:443")]),
+        ("GET without :path", [(":method", "GET"), (":scheme", "https"), (":authority", "example.com")])
+    ] {
+        error :: jet_http2_request(headers, empty_body()).err() ?? panic("accepted invalid CONNECT case: {label}")
+        assert(error.contains("CONNECT") || error.contains("path is missing") || error.contains("authority") || error.contains("host"), "{label}: {error}")
+    }
+    mux :: jet_http_mux_new()
+    calls :: Arc.new(AtomicUsize.new(0))
+    handler_calls :: calls.clone()
+    jet_http_mux_add(&mux, "CONNECT", "/:authority", req -> {
+        _ :: handler_calls.fetch_add(1, Ordering.AcqRel)
+        jet_http_srv_response(200, &req.path)
+    })
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    client := TcpStream.connect(addr).unwrap()
+    (server_socket, _) := listener.accept().unwrap()
+    options :: JetHTTPServerOptions.safe()
+    worker :: thread.spawn(() -> {
+        jet_http2_serve(&server_socket, &mux, &options, &AtomicBool.new(false), None, None)
+    })
+    client.write_all(JET_HTTP2_PREFACE).unwrap()
+    client.write_all(h2_frame(4, 0, 0, [U8]{})).unwrap()
+    client.write_all(h2_frame(1, 0x5, 1, h2_connect_headers("EXAMPLE.COM:443"))).unwrap()
+    client.flush().unwrap()
+    saw_headers := false
+    body := [U8]{}
+    loop {
+        (kind, flags, stream, payload) :: h2_read_frame(&client)
+        if kind == 4 && flags & 0x1 == 0 {
+            client.write_all(h2_frame(4, 0x1, 0, [U8]{})).unwrap()
+            next
+        }
+        if kind == 1 && stream == 1 {
+            saw_headers = true
+            hpack := JetHTTP2Hpack.new()
+            decoded :: jet_http2_decode_headers(&hpack, payload).unwrap()
+            assert(decoded.iter().any((name, value) -> name == ":status" && value == "200"), "CONNECT missing 200: {decoded:?}")
+            if flags & 0x1 != 0 { break }
+            next
+        }
+        if kind == 0 && stream == 1 {
+            body.extend_from_slice(payload)
+            if flags & 0x1 != 0 { break }
+        }
+    }
+    assert(saw_headers, "CONNECT response headers missing")
+    assert_eq(String.from_utf8(^body).unwrap(), "example.com:443")
+    assert_eq(calls.load(Ordering.Acquire), 1)
+    client.write_all(h2_frame(7, 0, 0, [U8#8]{0})).unwrap()
+    client.flush().unwrap()
+    assert(worker.join().unwrap().is_ok())
+    bad_mux :: jet_http_mux_new()
+    jet_http_mux_add(&bad_mux, "CONNECT", "/:authority", _ -> jet_http_srv_response(200, &"no"))
+    bad_listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    bad_addr :: bad_listener.local_addr().unwrap()
+    bad_client := TcpStream.connect(bad_addr).unwrap()
+    (bad_server_socket, _) := bad_listener.accept().unwrap()
+    bad_options :: JetHTTPServerOptions.safe()
+    bad_worker :: thread.spawn(() -> {
+        jet_http2_serve(&bad_server_socket, &bad_mux, &bad_options, &AtomicBool.new(false), None, None)
+    })
+    bad_client.write_all(JET_HTTP2_PREFACE).unwrap()
+    bad_client.write_all(h2_frame(4, 0, 0, [U8]{})).unwrap()
+    bad := h2_connect_headers("example.com:443")
+    bad.extend_from_slice(h2_literal_header(0x04, "/tunnel"))
+    bad_client.write_all(h2_frame(1, 0x5, 1, bad)).unwrap()
+    bad_client.flush().unwrap()
+    result :: bad_worker.join().unwrap()
+    assert(result.as_ref().err().is_some_and(error -> error.contains("CONNECT must omit :path")), "CONNECT with :path survived: {result:?}")
+}
+
+// Rust: tests/http_server_lifecycle.rs:2994
+#Test("request_method_is_one_http_token_before_body_or_dispatch") {
+    // Rust: tests/http_server_lifecycle.rs:2998
+    fn exchange(addr: SocketAddr, request: [U8]) -> String {
+        stream := TcpStream.connect(addr).expect("connect")
+        stream.write_all(request).expect("request write")
+        stream.shutdown(Shutdown.Write).expect("finish request")
+        response := [U8]{}
+        buf := [U8#1024]{0}
+        loop {
+            read :: stream.read(&buf) ?? {
+                if err.kind() == ErrorKind.ConnectionReset { break }
+                panic("response read: {err}")
+            }
+            if read == 0 { break }
+            response.extend_from_slice(buf[..<read])
+        }
+        String.from_utf8(^response).expect("response UTF-8")
+    }
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    addr :: listener.local_addr().expect("address")
+    mux :: jet_http_mux_new()
+    calls :: Arc.new(AtomicUsize.new(0))
+    loop method in ["GET", "M-SEARCH", "custom!#$%&'*+-.^_`|~"] {
+        handler_calls :: calls.clone()
+        jet_http_mux_add(&mux, method, "/resource", req -> {
+            _ :: handler_calls.fetch_add(1, Ordering.AcqRel)
+            jet_http_srv_response(200, &req.method)
+        })
+    }
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: shutdown.clone()
+    options := JetHTTPServerOptions.safe()
+    options.workers = 1
+    options.admission_queue = 16
+    server :: thread.spawn(() -> {
+        jet_http_server_run_listener(^listener, ^mux, ^options, ^server_shutdown, None, None, None).expect("server")
+    })
+    loop method in ["GET", "M-SEARCH", "custom!#$%&'*+-.^_`|~"] {
+        response :: exchange(addr, "{method} /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".as_bytes())
+        assert(response.starts_with("HTTP/1.1 200 OK"), "valid method rejected: {response}")
+        assert(response.ends_with("\r\n\r\n{method}"), "method changed before dispatch: {response}")
+    }
+    loop invalid_method in ["G/ET", "G:ET", "G\\ET", "GÉT", "GET\t", "GE(T", "", "\u{007f}GET"] {
+        request :: "{invalid_method} /resource HTTP/1.1\r\nHost: local\r\n\r\nGET /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+        response :: exchange(addr, request.as_bytes())
+        assert(response.starts_with("HTTP/1.1 400 Bad Request"), "accepted invalid method: {response}")
+        assert(!response.contains("200 OK"), "invalid method dispatched or reused: {response}")
+        assert_eq(response.matches("HTTP/1.1").count(), 1, "invalid method reused connection: {response}")
+    }
+    invalid_expect :: exchange(addr, "G/ET /resource HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\nExpect: 100-continue\r\n\r\n".as_bytes())
+    assert(invalid_expect.starts_with("HTTP/1.1 400 Bad Request"), invalid_expect)
+    assert(!invalid_expect.contains("100 Continue"), "invalid method received body permission: {invalid_expect}")
+    assert_eq(calls.load(Ordering.Acquire), 3, "invalid method reached handler")
+    shutdown.store(true, Ordering.Release)
+    report :: server.join().expect("server join")
+    assert_eq(report.user_accepted, 12)
+    assert_eq(report.user_completed, 12)
+}
+
+// Rust: tests/http_server_lifecycle.rs:3101
+#Test("request_methods_are_case_sensitive_during_routing") {
+    // Rust: tests/http_server_lifecycle.rs:3105
+    fn exchange(addr: SocketAddr, request: [U8]) -> String {
+        stream := TcpStream.connect(addr).expect("connect")
+        stream.write_all(request).expect("request write")
+        stream.shutdown(Shutdown.Write).expect("finish request")
+        response := [U8]{}
+        buf := [U8#1024]{0}
+        loop {
+            read :: stream.read(&buf) ?? {
+                if err.kind() == ErrorKind.ConnectionReset { break }
+                panic("response read: {err}")
+            }
+            if read == 0 { break }
+            response.extend_from_slice(buf[..<read])
+        }
+        String.from_utf8(^response).expect("response UTF-8")
+    }
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    addr :: listener.local_addr().expect("address")
+    mux :: jet_http_mux_new()
+    calls :: Arc.new(AtomicUsize.new(0))
+    handler_calls :: calls.clone()
+    jet_http_mux_add(&mux, "GET", "/resource", _ -> {
+        _ :: handler_calls.fetch_add(1, Ordering.AcqRel)
+        jet_http_srv_response(200, &"GET")
+    })
+    lower_handler_calls :: calls.clone()
+    jet_http_mux_add(&mux, "get", "/resource", _ -> {
+        _ :: lower_handler_calls.fetch_add(1, Ordering.AcqRel)
+        jet_http_srv_response(200, &"get")
+    })
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: shutdown.clone()
+    options := JetHTTPServerOptions.safe()
+    options.workers = 1
+    options.admission_queue = 16
+    server :: thread.spawn(() -> {
+        jet_http_server_run_listener(^listener, ^mux, ^options, ^server_shutdown, None, None, None).expect("server")
+    })
+    loop method in ["GET", "get"] {
+        response :: exchange(addr, "{method} /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".as_bytes())
+        assert(response.starts_with("HTTP/1.1 200 OK"), "case-distinct route rejected: {response}")
+        assert(response.ends_with("\r\n\r\n{method}"), "wrong case-distinct route dispatched: {response}")
+    }
+    loop method in ["GeT", "head", "options"] {
+        response :: exchange(addr, "{method} /resource HTTP/1.1\r\nHost: local\r\n\r\nGET /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".as_bytes())
+        assert(response.starts_with("HTTP/1.1 405 Method Not Allowed"), "{method} matched uppercase semantics: {response}")
+        assert(response.contains("Allow: GET, HEAD, OPTIONS, get\r\n"), "wrong exact Allow methods: {response}")
+        assert_eq(response.matches("HTTP/1.1 200 OK").count(), 1, "valid unmatched method broke reuse: {response}")
+        assert(response.ends_with("\r\n\r\nGET"), "uppercase successor did not dispatch: {response}")
+    }
+    assert_eq(calls.load(Ordering.Acquire), 5, "method case changed before routing")
+    shutdown.store(true, Ordering.Release)
+    report :: server.join().expect("server join")
+    assert_eq(report.user_accepted, 5)
+    assert_eq(report.user_completed, 5)
+}

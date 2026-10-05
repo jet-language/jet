@@ -1,0 +1,852 @@
+use std.env
+use std.process
+use std.fs as fs
+use std.thread
+use core.sys.target as target
+use core.encoding.cbor as cbor
+use core.encoding as encoding
+use common.[build_and_run]
+use jet.Interpreter as Interpreter
+
+// Rust: tests/corelib_parts/encoding_streams.rs:1787
+#Test("cbor_stream_is_incremental_bounded_deterministic_and_terminal") {
+    dir := env.temp_dir().join("jet_cbor_stream_{process.id()}") // GATE #4494
+    fs.create_dir_all(&dir).unwrap()
+    output := dir.join("output.cbor")
+    float_output := dir.join("float.cbor")
+    indefinite := dir.join("indefinite.cbor")
+    truncated := dir.join("truncated.cbor")
+    half := dir.join("half.cbor")
+    non_shortest := dir.join("non-shortest.cbor")
+    nested := dir.join("nested.cbor")
+    fs.write(&indefinite, [0x9f, 0x01, 0x7f, 0x61, 97, 0xff, 0x42, 0x01, 0x02, 0xff]).unwrap()
+    fs.write(&truncated, [0x63, 97]).unwrap()
+    fs.write(&half, [0xf9, 0x3c, 0x00]).unwrap()
+    fs.write(&non_shortest, [0x18, 0x01]).unwrap()
+    fs.write(&nested, [0x81, 0x80]).unwrap()
+    output_text := output.to_string_lossy().replace("\\", "\\\\")
+    float_output_text := float_output.to_string_lossy().replace("\\", "\\\\")
+    indefinite_text := indefinite.to_string_lossy().replace("\\", "\\\\")
+    truncated_text := truncated.to_string_lossy().replace("\\", "\\\\")
+    half_text := half.to_string_lossy().replace("\\", "\\\\")
+    non_shortest_text := non_shortest.to_string_lossy().replace("\\", "\\\\")
+    nested_text := nested.to_string_lossy().replace("\\", "\\\\")
+    source := """
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+fn run() -> {
+    output :: files.create("$OUTPUT") ?? panic("create")
+    writer :: cbor.writer(^output) ?? panic("writer")
+    writer.write(encoding.DataEvent.ObjectStart) ?? panic("start")
+    writer.write(encoding.DataEvent.Key("b")) ?? panic("key")
+    writer.write(encoding.DataEvent.Text("xy")) ?? panic("text")
+    writer.write(encoding.DataEvent.Key("a")) ?? panic("key")
+    writer.write(encoding.DataEvent.Int(1)) ?? panic("int")
+    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
+    &writer.flush() ?? panic("flush")
+    writer.finish() ?? panic("finish")
+    writer.finish() ?? panic("finish twice")
+    float_file :: files.create("$FLOAT") ?? panic("float create")
+    float_writer :: cbor.writer(^float_file) ?? panic("float writer")
+    float_writer.write(encoding.DataEvent.ArrayStart) ?? panic("float array")
+    float_writer.write(encoding.DataEvent.Float(1.0)) ?? panic("float write")
+    float_writer.write(encoding.DataEvent.Float(100000.0)) ?? panic("float32 write")
+    float_writer.write(encoding.DataEvent.Float(1.1)) ?? panic("float64 write")
+    float_writer.write(encoding.DataEvent.Float(0.0 / 0.0)) ?? panic("nan write")
+    float_writer.write(encoding.DataEvent.Float(-0.0)) ?? panic("negative zero write")
+    float_writer.write(encoding.DataEvent.ArrayEnd) ?? panic("float array end")
+    float_writer.finish() ?? panic("float finish")
+    whole_tree :: DataTree.Object(["b": DataTree.Text("xy"), "a": DataTree.Int(1)])
+    expected_whole :: [U8]{ 162, 97, 97, 1, 97, 98, 98, 120, 121 }
+    print((cbor.to_bytes_canonical(whole_tree) ?? panic("whole encode")) == expected_whole)
+    after :: writer.write(encoding.DataEvent.Null)
+    if after == {
+        .Ok(_) -> print(false)
+        .Err(writer_first) -> {
+            again :: &writer.flush()
+            if again == {
+                .Ok(_) -> print(false)
+                .Err(writer_second) -> print(writer_first.reason == writer_second.reason)
+            }
+        }
+    }
+    input :: files.open("$OUTPUT") ?? panic("open")
+    reader :: cbor.reader(^input) ?? panic("reader")
+    count := 0
+    loop count < 6 {
+        event :: reader.next() ?? panic("next")
+        if event == { Val(_) -> count += 1; None -> print("early") }
+    }
+    eof :: reader.next() ?? panic("eof")
+    if eof == { None -> print(count); Val(_) -> print("late") }
+    indef_input :: files.open("$INDEFINITE") ?? panic("indef open")
+    indef_reader :: cbor.reader(^indef_input) ?? panic("indef reader")
+    indef_count := 0
+    loop indef_count < 5 {
+        indef_event :: indef_reader.next() ?? panic("indef next")
+        if indef_event == { Val(_) -> indef_count += 1; None -> print("indef early") }
+    }
+    print(indef_count)
+    half_input :: files.open("$HALF") ?? panic("half open")
+    half_reader :: cbor.reader(^half_input) ?? panic("half reader")
+    if half_reader.next() == { .Ok(_) -> print(true); .Err(_) -> print(false) }
+    short_input :: files.open("$SHORT") ?? panic("short open")
+    short_reader :: cbor.reader(^short_input) ?? panic("short reader")
+    if short_reader.next() == { .Ok(_) -> print(true); .Err(_) -> print(false) }
+    depth_limits := encoding.EncodingLimits.safe()
+    depth_limits.max_depth = 1
+    nested_input :: files.open("$NESTED") ?? panic("nested open")
+    nested_reader :: cbor.reader(^nested_input, depth_limits) ?? panic("nested reader")
+    root_event :: nested_reader.next() ?? panic("root array")
+    if nested_reader.next() == {
+        .Ok(_) -> print(false)
+        .Err(depth_error) -> print(depth_error.reason == "max_depth 1 exceeded")
+    }
+    bad_input :: files.open("$TRUNCATED") ?? panic("bad open")
+    bad_reader :: cbor.reader(^bad_input) ?? panic("bad reader")
+    first_bad :: bad_reader.next()
+    if first_bad == {
+        .Ok(_) -> print("missed")
+        .Err(bad_first) -> {
+            second_bad :: bad_reader.next()
+            if second_bad == {
+                .Ok(_) -> print("unlatched")
+                .Err(bad_second) -> {
+                    print(bad_first.byte_offset)
+                    print(bad_first.path)
+                    print(bad_first.reason == bad_second.reason)
+                }
+            }
+        }
+    }
+}
+""".replace("$OUTPUT", output_text).replace("$FLOAT", float_output_text)
+        .replace("$INDEFINITE", indefinite_text).replace("$HALF", half_text)
+        .replace("$SHORT", non_shortest_text).replace("$NESTED", nested_text)
+        .replace("$TRUNCATED", truncated_text)
+    (code, stdout, stderr) := build_and_run(&dir, "cbor_stream", &source, [], None)
+    assert(code == 0, "stderr: {stderr}")
+    assert(stdout == "true\ntrue\n6\n5\ntrue\ntrue\ntrue\n2\n$\ntrue\n")
+    assert(fs.read(&output).unwrap() == [0xa2, 0x61, 97, 0x01, 0x61, 98, 0x62, 120, 121])
+    assert(fs.read(&float_output).unwrap() == [
+        0x85, 0xf9, 0x3c, 0x00, 0xfa, 0x47, 0xc3, 0x50, 0x00,
+        0xfb, 0x3f, 0xf1, 0x99, 0x99, 0x99, 0x99, 0x99, 0x9a,
+        0xf9, 0x7e, 0x00, 0xf9, 0x80, 0x00,
+    ])
+    assert(stderr == "")
+    dev_path := dir.join("cbor_stream.jet")
+    fs.write(&dev_path, &source).unwrap()
+    if Interpreter.dev_iteration(dev_path.to_str().unwrap(), false, false) == {
+        .Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } -> {
+            assert((exit_code, dev_stdout, dev_stderr) == (0, stdout, ""))
+        }
+        other -> panic("CBOR stream default-dev failed: {other:?}")
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/corelib_parts/encoding_streams.rs:1944
+#Test("cbor_stream_hostile_inputs_and_replacement_limits_are_exact") {
+    dir := env.temp_dir().join("jet_cbor_hostile_{process.id()}") // GATE #4494
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    fixtures: [(String, [U8])] := [
+        ("indef-map.cbor", [0xbf, 0x61, 97, 0x7f, 0x61, 120, 0x61, 121, 0xff, 0xff]),
+        ("indef-bytes.cbor", [0x5f, 0x42, 1, 2, 0x41, 3, 0xff]),
+        ("duplicate.cbor", [0xbf, 0x61, 97, 1, 0x61, 97, 2, 0xff]),
+        ("nontext.cbor", [0xa1, 1, 2]), ("tag.cbor", [0xc0, 1]),
+        ("range.cbor", [0x1b, 0x80, 0, 0, 0, 0, 0, 0, 0]),
+        ("trunc-int.cbor", [0x1a, 0]), ("trunc-float.cbor", [0xfa, 0, 0]),
+        ("trunc-indef.cbor", [0x7f, 0x62, 97]), ("trailing.cbor", [1, 2]),
+        ("nested.cbor", [0x81, 0xa1, 0x61, 120, 0x1a, 0]),
+    ]
+    loop (name, bytes) in fixtures { fs.write(dir.join(name), bytes).unwrap() }
+    path := (name: String) -> dir.join(name).to_string_lossy().replace("\\", "\\\\")
+    array_ok := path("array-ok.cbor")
+    array_fail := path("array-fail.cbor")
+    object_ok := path("object-ok.cbor")
+    object_fail := path("object-fail.cbor")
+    incomplete := path("incomplete.cbor")
+    source := """
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {
+    repeated :: reader.next()
+    if repeated == { .Err(error) -> return error.reason == reason; .Ok(_) -> return false }
+    return false
+}
+fn writer_terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {
+    repeated :: writer.flush()
+    if repeated == { .Err(error) -> return error.reason == reason; .Ok(_) -> return false }
+    return false
+}
+fn run() -> {
+    map_limits := encoding.EncodingLimits.safe()
+    map_limits.max_item_bytes = 3
+    map_input :: files.open("$MAP") ?? panic("map open")
+    map_reader :: cbor.reader(^map_input, map_limits) ?? panic("map reader")
+    map_count := 0
+    loop map_count < 4 {
+        map_event :: map_reader.next() ?? panic("map error")
+        if map_event == { Val(_) -> map_count += 1; None -> panic("map eof") }
+    }
+    print(map_count)
+    tight_limits := encoding.EncodingLimits.safe()
+    tight_limits.max_item_bytes = 2
+    tight_input :: files.open("$MAP") ?? panic("tight open")
+    tight_reader := cbor.reader(^tight_input, tight_limits) ?? panic("tight reader")
+    tight_object :: tight_reader.next() ?? panic("tight object")
+    tight_key :: tight_reader.next() ?? panic("tight key")
+    tight_first :: tight_reader.next()
+    if tight_first == {
+        .Ok(_) -> panic("combined key/chunk budget missed")
+        .Err(first) -> print(first.path == "$[\"a\"]" && first.byte_offset == 6 && reader_terminal(&tight_reader, ~first.reason))
+    }
+    bytes_input :: files.open("$BYTES") ?? panic("bytes open")
+    bytes_reader :: cbor.reader(^bytes_input) ?? panic("bytes reader")
+    bytes_event :: bytes_reader.next() ?? panic("bytes event")
+    if bytes_event == { Val(_) -> print(true); None -> print(false) }
+    short_input :: files.open("$SHORT") ?? panic("short open")
+    short_reader :: cbor.reader(^short_input) ?? panic("short reader")
+    short_event :: short_reader.next() ?? panic("short event")
+    if short_event == { Val(_) -> print(true); None -> print(false) }
+    duplicate_input :: files.open("$DUPLICATE") ?? panic("duplicate open")
+    duplicate_reader := cbor.reader(^duplicate_input) ?? panic("duplicate reader")
+    duplicate_object :: duplicate_reader.next() ?? panic("duplicate object")
+    duplicate_key :: duplicate_reader.next() ?? panic("duplicate key")
+    duplicate_value :: duplicate_reader.next() ?? panic("duplicate value")
+    duplicate_first :: duplicate_reader.next()
+    if duplicate_first == {
+        .Err(first) -> print(first.byte_offset == 4 && first.path == "$" && reader_terminal(&duplicate_reader, ~first.reason))
+        .Ok(_) -> print(false)
+    }
+    nontext_input :: files.open("$NONTEXT") ?? panic("nontext open")
+    nontext_reader :: cbor.reader(^nontext_input) ?? panic("nontext reader")
+    nontext_object :: nontext_reader.next() ?? panic("nontext object")
+    if nontext_reader.next() == {
+        .Err(e) -> print(e.byte_offset == 1 && e.path == "$" && e.reason == "CBOR map key must be text")
+        .Ok(_) -> print(false)
+    }
+    tag_input :: files.open("$TAG") ?? panic("tag open")
+    tag_reader :: cbor.reader(^tag_input) ?? panic("tag reader")
+    if tag_reader.next() == {
+        .Err(e) -> print(e.byte_offset == 0 && e.path == "$" && e.reason == "CBOR tags are outside DataEvent")
+        .Ok(_) -> print(false)
+    }
+    range_input :: files.open("$RANGE") ?? panic("range open")
+    range_reader :: cbor.reader(^range_input) ?? panic("range reader")
+    if range_reader.next() == {
+        .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR integer is outside Jet Int")
+        .Ok(_) -> print(false)
+    }
+    int_input :: files.open("$INT") ?? panic("int open")
+    int_reader := cbor.reader(^int_input) ?? panic("int reader")
+    if int_reader.next() == {
+        .Err(first) -> print(first.byte_offset == 2 && reader_terminal(&int_reader, ~first.reason))
+        .Ok(_) -> print(false)
+    }
+    float_input :: files.open("$FLOAT") ?? panic("float open")
+    float_reader := cbor.reader(^float_input) ?? panic("float reader")
+    if float_reader.next() == {
+        .Err(first) -> print(first.byte_offset == 3 && reader_terminal(&float_reader, ~first.reason))
+        .Ok(_) -> print(false)
+    }
+    indef_input :: files.open("$INDEF") ?? panic("indef open")
+    indef_reader := cbor.reader(^indef_input) ?? panic("indef reader")
+    if indef_reader.next() == {
+        .Err(first) -> print(first.byte_offset == 3 && reader_terminal(&indef_reader, ~first.reason))
+        .Ok(_) -> print(false)
+    }
+    trailing_input :: files.open("$TRAILING") ?? panic("trailing open")
+    trailing_reader := cbor.reader(^trailing_input) ?? panic("trailing reader")
+    trailing_root :: trailing_reader.next() ?? panic("root")
+    if trailing_reader.next() == {
+        .Err(first) -> print(first.byte_offset == 1 && reader_terminal(&trailing_reader, ~first.reason))
+        .Ok(_) -> print(false)
+    }
+    nested_input :: files.open("$NESTED") ?? panic("nested open")
+    nested_reader :: cbor.reader(^nested_input) ?? panic("nested reader")
+    nested_array :: nested_reader.next() ?? panic("nested array")
+    nested_object :: nested_reader.next() ?? panic("nested object")
+    nested_key :: nested_reader.next() ?? panic("nested key")
+    if nested_reader.next() == {
+        .Err(e) -> print(e.byte_offset == 6 && e.path == "$[0][\"x\"]")
+        .Ok(_) -> print(false)
+    }
+    array_limits := encoding.EncodingLimits.safe()
+    array_limits.max_item_bytes = 2
+    array_output :: files.create("$ARRAY_OK") ?? panic("array output")
+    array_writer :: cbor.writer(^array_output, array_limits) ?? panic("array writer")
+    array_writer.write(encoding.DataEvent.ArrayStart) ?? panic("array start")
+    array_writer.write(encoding.DataEvent.Null) ?? panic("array null")
+    array_writer.write(encoding.DataEvent.ArrayEnd) ?? panic("array end")
+    array_writer.finish() ?? panic("array finish")
+    array_tight := encoding.EncodingLimits.safe()
+    array_tight.max_item_bytes = 1
+    array_fail_output :: files.create("$ARRAY_FAIL") ?? panic("array fail output")
+    array_fail_writer := cbor.writer(^array_fail_output, array_tight) ?? panic("array fail writer")
+    array_fail_writer.write(encoding.DataEvent.ArrayStart) ?? panic("array fail start")
+    array_fail_writer.write(encoding.DataEvent.Null) ?? panic("array fail null")
+    if array_fail_writer.write(encoding.DataEvent.ArrayEnd) == {
+        .Err(first) -> print(writer_terminal(&array_fail_writer, ~first.reason))
+        .Ok(_) -> print(false)
+    }
+    object_limits := encoding.EncodingLimits.safe()
+    object_limits.max_item_bytes = 4
+    object_output :: files.create("$OBJECT_OK") ?? panic("object output")
+    object_writer :: cbor.writer(^object_output, object_limits) ?? panic("object writer")
+    object_writer.write(encoding.DataEvent.ObjectStart) ?? panic("object start")
+    object_writer.write(encoding.DataEvent.Key("a")) ?? panic("object key")
+    object_writer.write(encoding.DataEvent.Null) ?? panic("object null")
+    object_writer.write(encoding.DataEvent.ObjectEnd) ?? panic("object end")
+    object_writer.finish() ?? panic("object finish")
+    object_tight := encoding.EncodingLimits.safe()
+    object_tight.max_item_bytes = 3
+    object_fail_output :: files.create("$OBJECT_FAIL") ?? panic("object fail output")
+    object_fail_writer :: cbor.writer(^object_fail_output, object_tight) ?? panic("object fail writer")
+    object_fail_writer.write(encoding.DataEvent.ObjectStart) ?? panic("object fail start")
+    object_fail_writer.write(encoding.DataEvent.Key("a")) ?? panic("object fail key")
+    object_fail_writer.write(encoding.DataEvent.Null) ?? panic("object fail null")
+    if object_fail_writer.write(encoding.DataEvent.ObjectEnd) == { .Err(_) -> print(true); .Ok(_) -> print(false) }
+    incomplete_output :: files.create("$INCOMPLETE") ?? panic("incomplete output")
+    incomplete_writer := cbor.writer(^incomplete_output) ?? panic("incomplete writer")
+    incomplete_writer.write(encoding.DataEvent.ArrayStart) ?? panic("incomplete start")
+    incomplete_writer.flush() ?? panic("incomplete flush")
+    if incomplete_writer.finish() == {
+        .Err(first) -> print(writer_terminal(&incomplete_writer, ~first.reason))
+        .Ok(_) -> print(false)
+    }
+}
+""".replace("$MAP", path("indef-map.cbor")).replace("$BYTES", path("indef-bytes.cbor"))
+        .replace("$SHORT", path("non-shortest.cbor")).replace("$DUPLICATE", path("duplicate.cbor"))
+        .replace("$NONTEXT", path("nontext.cbor")).replace("$TAG", path("tag.cbor"))
+        .replace("$RANGE", path("range.cbor")).replace("$INT", path("trunc-int.cbor"))
+        .replace("$FLOAT", path("trunc-float.cbor")).replace("$INDEF", path("trunc-indef.cbor"))
+        .replace("$TRAILING", path("trailing.cbor")).replace("$NESTED", path("nested.cbor"))
+        .replace("$ARRAY_OK", array_ok).replace("$ARRAY_FAIL", array_fail)
+        .replace("$OBJECT_OK", object_ok).replace("$OBJECT_FAIL", object_fail).replace("$INCOMPLETE", incomplete)
+    fs.write(dir.join("non-shortest.cbor"), [0x18, 0x01]).unwrap()
+    (code, stdout, stderr) := build_and_run(&dir, "cbor_hostile", &source, [], None)
+    assert(code == 0, "stderr: {stderr}\nsource:\n{source}")
+    assert(stdout == "4\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n")
+    assert(fs.read(&array_ok).unwrap() == [0x81, 0xf6])
+    assert(fs.read(&object_ok).unwrap() == [0xa1, 0x61, 97, 0xf6])
+    assert(fs.read(&incomplete).unwrap().is_empty())
+    assert(stderr == "")
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/corelib_parts/encoding_streams.rs:2192
+#Test("cbor_stream_workspace_growth_is_prospective_and_terminal") {
+    dir := env.temp_dir().join("jet_cbor_workspace_{process.id()}") // GATE #4494
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    success := dir.join("success.cbor").to_string_lossy().replace("\\", "\\\\")
+    rejected := dir.join("rejected.cbor").to_string_lossy().replace("\\", "\\\\")
+    source := """
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+fn terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {
+    repeated :: writer.finish()
+    if repeated == { .Err(error) -> return error.reason == reason; .Ok(_) -> return false }
+    return false
+}
+fn close_array(writer: &cbor.CBORWriter) -> {
+    result :: writer.write(encoding.DataEvent.ArrayEnd)
+    if result == { .Err(error) -> panic("{error.reason}"); .Ok(_) -> return }
+}
+fn run() -> {
+    roomy := encoding.EncodingLimits.safe()
+    roomy.max_item_bytes = 9
+    output :: files.create("$SUCCESS") ?? panic("create")
+    writer := cbor.writer(^output, roomy) ?? panic("writer")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("start")
+    loop _ in 0..7 { writer.write(encoding.DataEvent.Null) ?? panic("null") }
+    close_array(&writer)
+    writer.finish() ?? panic("finish")
+    tight := encoding.EncodingLimits.safe()
+    tight.max_item_bytes = 7
+    rejected_output :: files.create("$REJECTED") ?? panic("create rejected")
+    rejected_writer := cbor.writer(^rejected_output, tight) ?? panic("rejected writer")
+    rejected_writer.write(encoding.DataEvent.ArrayStart) ?? panic("rejected start")
+    loop _ in 0..6 { rejected_writer.write(encoding.DataEvent.Null) ?? panic("accepted null") }
+    if rejected_writer.write(encoding.DataEvent.Null) == {
+        .Err(first) -> {
+            print(first.reason == "max_item_bytes 7 exceeded")
+            print(terminal(&rejected_writer, ~first.reason))
+        }
+        .Ok(_) -> { print(false); print(false) }
+    }
+}
+""".replace("$SUCCESS", success).replace("$REJECTED", rejected)
+    (code, stdout, stderr) := build_and_run(&dir, "cbor_workspace", &source, [], None)
+    assert(code == 0, "CBOR workspace program failed: {stderr}")
+    assert(stdout == "true\ntrue\n")
+    assert(fs.read(dir.join("success.cbor")).unwrap() == [0x88, 0xf6, 0xf6, 0xf6, 0xf6, 0xf6, 0xf6, 0xf6, 0xf6])
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/corelib_parts/encoding_streams.rs:2257
+#Test("cbor_stream_io_errors_latch_in_aot_and_default_dev") {
+    // GATE #4483: selected target, not build-host OS.
+    if target.selected_os() == .Linux {
+        dir := env.temp_dir().join("jet_cbor_io_{process.id()}") // GATE #4494
+        _ :: fs.remove_dir_all(&dir)
+        fs.create_dir_all(&dir).unwrap()
+        directory := dir.to_string_lossy().replace("\\", "\\\\")
+        source := """
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {
+    repeated :: reader.next()
+    if repeated == { .Err(error) -> return error.reason == reason; .Ok(_) -> return false }
+    return false
+}
+fn writer_terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {
+    repeated :: &writer.flush()
+    if repeated == { .Err(error) -> return error.reason == reason; .Ok(_) -> return false }
+    return false
+}
+fn run() -> {
+    directory_input :: files.open("$DIRECTORY") ?? panic("directory open")
+    directory_reader := cbor.reader(^directory_input) ?? panic("directory reader")
+    if directory_reader.next() == {
+        .Err(first) -> print(reader_terminal(&directory_reader, ~first.reason))
+        .Ok(_) -> print(false)
+    }
+    full_output :: files.create("/dev/full") ?? panic("full open")
+    full_writer := cbor.writer(^full_output) ?? panic("full writer")
+    full_writer.write(encoding.DataEvent.Null) ?? panic("full buffered write")
+    if &full_writer.flush() == {
+        .Err(first) -> print(writer_terminal(&full_writer, ~first.reason))
+        .Ok(_) -> print(false)
+    }
+}
+""".replace("$DIRECTORY", directory)
+        (code, stdout, stderr) := build_and_run(&dir, "cbor_io", &source, [], None)
+        assert((code, stdout, stderr) == (0, "true\ntrue\n", ""))
+        path := dir.join("cbor_io.jet")
+        fs.write(&path, &source).unwrap()
+        if Interpreter.dev_iteration(path.to_str().unwrap(), false, false) == {
+            .Ran { stdout, stderr, exit_code } -> assert((exit_code, stdout, stderr) == (0, "true\ntrue\n", ""))
+            other -> panic("CBOR default-dev fallback failed: {other:?}")
+        }
+        _ :: fs.remove_dir_all(&dir)
+    }
+}
+
+// Rust: tests/corelib_parts/encoding_streams.rs:2315
+#Test("cbor_whole_codable_bytes_and_original_wire_canonical_validation") {
+    // GATE #4494: native thread stack reservation and panic propagation.
+    thread.Builder.new().stack_size(64 * 1024 * 1024)
+        .spawn(cbor_whole_codable_bytes_and_original_wire_canonical_validation_inner)
+        .expect("spawn CBOR parity worker").join().expect("CBOR parity worker must not panic")
+}
+
+// Rust: tests/corelib_parts/encoding_streams.rs:2324
+fn cbor_whole_codable_bytes_and_original_wire_canonical_validation_inner() -> {
+    if !common.have_rustc() {
+        eprintln("note: skipping cbor whole-value test (need rustc)")
+        return
+    }
+    dir := env.temp_dir().join("jet_cbor_whole_{process.id()}") // GATE #4494
+    fs.create_dir_all(&dir).unwrap()
+    source := """
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+#Codable
+struct Packet { id: Int, payload: [U8] }
+fn run() -> {
+    packet := Packet{ id: 7, payload: [222, 173] }
+    wire := cbor.to_bytes(packet) ?? panic("encode")
+    stable := cbor.to_bytes_canonical(packet) ?? panic("canonical encode")
+    back := Packet{ cbor.decode<Packet>(wire) ?? panic("decode") }
+    raw_wire := cbor.to_bytes([1, 2, 255]) ?? panic("byte encode")
+    raw := [U8]{ cbor.decode<[U8]>(raw_wire) ?? panic("byte decode") }
+    print(wire)
+    print(stable == wire)
+    print(back.id)
+    print(back.payload)
+    print(raw)
+    strict := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }
+    rejected := cbor.parse([24, 1], strict) ?? DataTree.Int(-1)
+    print(rejected.int() ?? -2)
+    strict_decode := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }
+    if cbor.decode<[Int]>([129, 97, 120], strict_decode) == {
+        .Ok(_) -> print("unexpected success")
+        .Err(error) -> print("{error[0].path}|{error[0].reason}")
+    }
+    if cbor.decode<Int>([65, 0]) == {
+        .Ok(_) -> print("unexpected success")
+        .Err(error) -> print("{error[0].path}|{error[0].reason}")
+    }
+}
+"""
+    (code, stdout, stderr) := build_and_run(&dir, "cbor_whole", source, [], None)
+    assert(code == 0, "CBOR whole-value program failed: {stderr}")
+    assert(stdout == "[162, 98, 105, 100, 7, 103, 112, 97, 121, 108, 111, 97, 100, 66, 222, 173]\ntrue\n7\n[222, 173]\n[1, 2, 255]\n-1\n[0]|expected Int, found text \"x\"\n|expected Int, found Bytes\n")
+    path := dir.join("cbor_whole.jet")
+    fs.write(&path, source).unwrap()
+    bundle := jet.Loader.load_entry(path.to_str().unwrap()).expect("CBOR fixture loads")
+    diagnostics := jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(diagnostics.iter().all((diag) -> diag.severity != jet.Diagnostics.Severity.Error),
+        "CBOR fixture must type-check: {diagnostics:?}")
+    // Resident-JIT representation checks are retired. Preserve their behavioral
+    // obligation across O0/default-dev and O1/O2/Web, not the retired engine.
+    loop tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+        result := common.execute_bundle(&bundle, tier).expect("CBOR fixture must compile and execute")
+        assert((result.exit_code, result.stdout, result.stderr) == (0, stdout, ""))
+    }
+    if Interpreter.dev_iteration(path.to_str().unwrap(), false, false) == {
+        .Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } -> assert((exit_code, dev_stdout, dev_stderr) == (0, stdout, ""))
+        other -> panic("CBOR whole-value default-dev failed: {other:?}")
+    }
+    if Interpreter.dev_iteration(path.to_str().unwrap(), false, true) == {
+        .Ran { stdout: interpreter_stdout, stderr: interpreter_stderr, exit_code } -> {
+            assert((exit_code, interpreter_stdout, interpreter_stderr) == (0, stdout, ""),
+                "CBOR whole-value interpreter drifted from AOT")
+        }
+        other -> panic("CBOR whole-value forced interpreter failed: {other:?}")
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/corelib_parts/encoding_streams.rs:2436
+#Test("cbor_whole_live_allocation_and_preferred_float_validation") {
+    if !common.have_rustc() {
+        eprintln("note: skipping cbor whole-value limits test (need rustc)")
+        return
+    }
+    dir := env.temp_dir().join("jet_cbor_whole_limits_{process.id()}") // GATE #4494
+    fs.create_dir_all(&dir).unwrap()
+    source := """
+use core.encoding.cbor as cbor
+fn run() -> {
+    strict := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1024, require_canonical: true }
+    if cbor.parse([249, 62, 0], ~strict) == {
+        .Ok(value) -> print(value.float() ?? -1.0)
+        .Err(_) -> print(-2.0)
+    }
+    if cbor.parse([250, 63, 192, 0, 0], ~strict) == {
+        .Ok(_) -> print(false)
+        .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR Float does not use its preferred shortest encoding")
+    }
+    if cbor.parse([249, 126, 1], ~strict) == {
+        .Ok(_) -> print(false)
+        .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR NaN is not the canonical 0xf97e00 encoding")
+    }
+    if cbor.parse([249, 126, 0], ~strict) == { .Ok(_) -> print(true); .Err(_) -> print(false) }
+    tiny := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }
+    if cbor.parse([130, 1, 2], tiny) == {
+        .Ok(_) -> print(false)
+        .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR array allocation exceeds max_bytes 3")
+    }
+}
+"""
+    (code, stdout, stderr) := build_and_run(&dir, "cbor_whole_limits", source, [], None)
+    assert(code == 0, "CBOR whole-value limits program failed: {stderr}")
+    assert(stdout == "1.5\ntrue\ntrue\ntrue\ntrue\n")
+}
+
+// Rust: tests/corelib_parts/encoding_streams.rs:2478
+#Test("cbor_whole_indefinite_values_obey_normal_canonical_and_limit_laws") {
+    if !common.have_rustc() {
+        eprintln("note: skipping CBOR indefinite-value test (need rustc)")
+        return
+    }
+    dir := env.temp_dir().join("jet_cbor_indefinite_{process.id()}") // GATE #4494
+    fs.create_dir_all(&dir).unwrap()
+    source := """
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+#Codable
+struct Packet { name: String, data: [U8] }
+fn run() -> {
+    array := [Int]{ cbor.decode<[Int]>([159, 1, 2, 255]) ?? panic("indefinite array") }
+    text := cbor.parse([127, 97, 97, 98, 98, 99, 255]) ?? panic("indefinite text")
+    print(array)
+    print(text.text() ?? "bad")
+    packet := Packet{ cbor.decode<Packet>([191, 100, 110, 97, 109, 101, 127, 97, 74, 98, 101, 116, 255, 100, 100, 97, 116, 97, 95, 66, 1, 2, 65, 3, 255, 255]) ?? panic("typed indefinite decode") }
+    print(packet.name)
+    print(packet.data)
+    strict := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }
+    if cbor.parse([159, 1, 255], ~strict) == {
+        .Ok(_) -> print(false)
+        .Err(e) -> print(e.byte_offset == 0 && e.path == "$" && e.reason == "indefinite-length CBOR is not Core deterministic")
+    }
+    if cbor.parse([129, 127, 97, 120, 255], ~strict) == {
+        .Ok(_) -> print(false)
+        .Err(e) -> print(e.byte_offset == 1 && e.path == "$[0]")
+    }
+    item_limited := cbor.CBOROptions{ max_depth: 256, max_items: 2, max_bytes: 1024, require_canonical: false }
+    if cbor.parse([159, 1, 2, 255], item_limited) == {
+        .Ok(_) -> print(false)
+        .Err(e) -> print(e.byte_offset == 2 && e.path == "$[1]" && e.reason == "max_items 2 exceeded")
+    }
+    chunk_limited := cbor.CBOROptions{ max_depth: 256, max_items: 2, max_bytes: 1024, require_canonical: false }
+    if cbor.parse([127, 97, 97, 97, 98, 255], chunk_limited) == {
+        .Ok(_) -> print(false)
+        .Err(e) -> print(e.byte_offset == 3 && e.path == "$" && e.reason == "max_items 2 exceeded")
+    }
+    depth_limited := cbor.CBOROptions{ max_depth: 1, max_items: 100, max_bytes: 64, require_canonical: false }
+    if cbor.parse([159, 127, 97, 120, 255, 255], depth_limited) == {
+        .Ok(_) -> print(false)
+        .Err(e) -> print(e.byte_offset == 1 && e.path == "$[0]" && e.reason == "max_depth 1 exceeded")
+    }
+    if cbor.parse([127, 65, 120, 255]) == {
+        .Ok(_) -> print(false)
+        .Err(e) -> print(e.byte_offset == 1 && e.reason == "indefinite CBOR string contains a wrong or indefinite chunk")
+    }
+    if cbor.parse([159, 1]) == {
+        .Ok(_) -> print(false)
+        .Err(e) -> print(e.byte_offset == 2 && e.reason == "indefinite CBOR array ended before its break")
+    }
+    if cbor.parse([191, 97, 107, 255]) == {
+        .Ok(_) -> print(false)
+        .Err(e) -> print(e.byte_offset == 3 && e.reason == "indefinite CBOR map break appears where a value is required")
+    }
+    if cbor.parse([255]) == {
+        .Ok(_) -> print(false)
+        .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR break outside an indefinite container")
+    }
+}
+"""
+    (code, stdout, stderr) := build_and_run(&dir, "cbor_indefinite", source, [], None)
+    assert(code == 0, "CBOR indefinite-value program failed: {stderr}")
+    assert(stdout == "[1, 2]\nabc\nJet\n[1, 2, 3]\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n")
+}
+
+// Rust: tests/corelib_parts/encoding_streams.rs:2556
+#Test("cbor_whole_hostile_byte_corpus_matches_aot_and_default_dev") {
+    if !common.have_rustc() {
+        eprintln("note: skipping CBOR hostile whole-value corpus (need rustc)")
+        return
+    }
+    dir := env.temp_dir().join("jet_cbor_whole_corpus_{process.id()}") // GATE #4494
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    source := """
+use core.encoding.cbor as cbor
+fn wire(values: [Int]) -> [U8] {
+    bytes := [U8]{}
+    loop value in values { &bytes.push(U8.from_int(value) ?? panic("corpus byte outside U8")) }
+    return bytes
+}
+fn accepted(values: [Int]) -> Bool {
+    if cbor.parse(wire(values)) == { .Ok(_) -> return true; .Err(_) -> return false }
+    return false
+}
+fn rejected(values: [Int], offset: Int, path: String, reason: String) -> Bool {
+    if cbor.parse(wire(values)) == {
+        .Ok(_) -> return false
+        .Err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
+    }
+    return false
+}
+fn canonical_rejected(values: [Int], offset: Int, path: String, reason: String) -> Bool {
+    strict := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }
+    if cbor.parse(wire(values), strict) == {
+        .Ok(_) -> return false
+        .Err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
+    }
+    return false
+}
+fn run() -> {
+    empty := [Int]{}
+    print(accepted([0]))
+    print(accepted([23]))
+    print(accepted([24, 24]))
+    print(accepted([25, 1, 0]))
+    print(accepted([26, 0, 1, 0, 0]))
+    print(accepted([27, 0, 0, 0, 1, 0, 0, 0, 0]))
+    print(accepted([32]))
+    print(accepted([56, 24]))
+    print(accepted([96]))
+    print(accepted([99, 226, 130, 172]))
+    print(accepted([131, 1, 130, 2, 3, 161, 97, 107, 245]))
+    print(accepted([246]))
+    print(accepted([249, 62, 0]))
+    print(accepted([250, 71, 195, 80, 0]))
+    print(accepted([127, 97, 97, 98, 98, 99, 255]))
+    print(accepted([159, 1, 2, 255]))
+    print(accepted([191, 97, 107, 1, 255]))
+    print(rejected(empty, 0, "$", "CBOR value is missing"))
+    print(rejected([28], 0, "$", "indefinite/reserved CBOR length is unsupported by whole-value decoding"))
+    print(rejected([26, 0], 2, "$", "CBOR length argument is truncated"))
+    print(rejected([27, 128, 0, 0, 0, 0, 0, 0, 0], 0, "$", "CBOR integer is outside Jet Int"))
+    print(rejected([59, 128, 0, 0, 0, 0, 0, 0, 0], 0, "$", "CBOR integer is outside Jet Int"))
+    print(rejected([65, 0], 0, "$", "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>"))
+    print(rejected([98, 97], 2, "$", "CBOR byte/text string is truncated"))
+    print(rejected([97, 255], 0, "$", "CBOR text is not UTF-8"))
+    print(rejected([127, 98, 97], 3, "$", "CBOR byte/text string chunk is truncated"))
+    print(rejected([130, 1], 2, "$[1]", "CBOR value is missing"))
+    print(rejected([161, 1, 2], 1, "$", "CBOR map key must be text"))
+    print(rejected([162, 97, 97, 1, 97, 97, 2], 4, "$", "duplicate CBOR text map key"))
+    print(rejected([161, 97, 97], 3, "$[\"a\"]", "CBOR value is missing"))
+    print(rejected([192, 1], 0, "$", "CBOR tags are unsupported"))
+    print(rejected([247], 0, "$", "unsupported CBOR simple value 23"))
+    print(rejected([255], 0, "$", "CBOR break outside an indefinite container"))
+    print(rejected([249, 0], 2, "$", "CBOR Float16 is truncated"))
+    print(rejected([1, 2], 1, "$", "trailing CBOR data after root value"))
+    print(canonical_rejected([24, 1], 0, "$", "CBOR argument does not use its shortest form"))
+    print(canonical_rejected([120, 1, 97], 0, "$", "CBOR argument does not use its shortest form"))
+    print(canonical_rejected([162, 97, 98, 1, 97, 97, 2], 4, "$", "CBOR map keys are not in Core deterministic bytewise order"))
+    print(canonical_rejected([250, 63, 192, 0, 0], 0, "$", "CBOR Float does not use its preferred shortest encoding"))
+    print(canonical_rejected([159, 1, 255], 0, "$", "indefinite-length CBOR is not Core deterministic"))
+}
+"""
+    (code, stdout, stderr) := build_and_run(&dir, "cbor_whole_corpus", source, [], None)
+    assert(code == 0, "CBOR hostile whole-value corpus failed: {stderr}")
+    lines := stdout.lines().collect()
+    assert(lines.len() == 40, "hostile corpus case count drifted: {stdout}")
+    assert(lines.iter().all((line) -> line == "true"), "hostile corpus mismatch: {stdout}")
+    assert(stderr == "")
+    path := dir.join("cbor_whole_corpus.jet")
+    fs.write(&path, source).unwrap()
+    if Interpreter.dev_iteration(path.to_str().unwrap(), false, false) == {
+        .Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } -> assert((exit_code, dev_stdout, dev_stderr) == (0, stdout, ""))
+        other -> panic("CBOR hostile corpus default-dev failed: {other:?}")
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/corelib_parts/encoding_streams.rs:2678
+#Test("cbor_whole_requested_allocation_stays_under_counting_allocator_ceiling") {
+    if !common.have_rustc() {
+        eprintln("note: skipping cbor counting-allocator test (need rustc)")
+        return
+    }
+    dir := env.temp_dir().join("jet_cbor_counted_{process.id()}") // GATE #4494
+    fs.create_dir_all(&dir).unwrap()
+    // The old generated-Rust text replacement is retired. The executable Jet
+    // fixture installs the same actual allocation probe and wraps the canonical
+    // parse/decode calls; no Rust callback or generated-name seam is involved.
+    source := """
+use core.encoding.cbor as cbor
+use core.encoding.[DataTree, FieldError, Decode]
+use core.alloc.[GlobalAlloc, Layout]
+use core.sync.atomic.[AtomicBool, AtomicUsize, Ordering]
+use std.alloc.[System]
+
+// Rust: tests/corelib_parts/encoding_streams.rs:2727 (embedded allocator)
+struct CountingAlloc {}
+// GATE #4494: actual atomics, global allocator registration, and native System.
+static COUNTING: AtomicBool = AtomicBool.new(false)
+static LIVE: AtomicUsize = AtomicUsize.new(0)
+static PEAK: AtomicUsize = AtomicUsize.new(0)
+
+// Rust: tests/corelib_parts/encoding_streams.rs:2731 (embedded add)
+fn add(size: USize) -> {
+    live := LIVE.fetch_add(size, Ordering.SeqCst) + size
+    peak := PEAK.load(Ordering.SeqCst)
+    loop live > peak {
+        if PEAK.compare_exchange(peak, live, Ordering.SeqCst, Ordering.SeqCst) == {
+            .Ok(_) -> break
+            .Err(next) -> peak = next
+        }
+    }
+}
+
+// Rust: tests/corelib_parts/encoding_streams.rs:2741 (embedded GlobalAlloc)
+impl GlobalAlloc for CountingAlloc {
+    // Rust: tests/corelib_parts/encoding_streams.rs:2742
+    fn alloc(self, layout: Layout) -> *U8 {
+        #Unsafe("GlobalAlloc receives a valid layout; System owns allocation; GATE #4494") {
+            ptr := System.alloc(layout)
+            if !ptr.is_null() && COUNTING.load(Ordering.SeqCst) { add(layout.size()) }
+            ptr
+        }
+    }
+    // Rust: tests/corelib_parts/encoding_streams.rs:2747
+    fn dealloc(self, ptr: *U8, layout: Layout) -> {
+        #Unsafe("release to System with the exact original pointer and layout; GATE #4494") {
+            if COUNTING.load(Ordering.SeqCst) { _ :: LIVE.fetch_sub(layout.size(), Ordering.SeqCst) }
+            System.dealloc(ptr, layout)
+        }
+    }
+    // Rust: tests/corelib_parts/encoding_streams.rs:2751
+    fn realloc(self, ptr: *U8, old: Layout, new_size: USize) -> *U8 {
+        #Unsafe("GlobalAlloc contract supplies a valid old allocation; preserve failed realloc accounting; GATE #4494") {
+            counting := COUNTING.load(Ordering.SeqCst)
+            if counting { _ :: LIVE.fetch_sub(old.size(), Ordering.SeqCst) }
+            next := System.realloc(ptr, old, new_size)
+            if counting {
+                if next.is_null() { add(old.size()) } else { add(new_size) }
+            }
+            next
+        }
+    }
+}
+// Rust: tests/corelib_parts/encoding_streams.rs:2759
+fn begin() -> {
+    LIVE.store(0, Ordering.SeqCst)
+    PEAK.store(0, Ordering.SeqCst)
+    COUNTING.store(true, Ordering.SeqCst)
+}
+// Rust: tests/corelib_parts/encoding_streams.rs:2760
+fn finish() -> USize {
+    COUNTING.store(false, Ordering.SeqCst)
+    PEAK.load(Ordering.SeqCst)
+}
+// Rust: tests/corelib_parts/encoding_streams.rs:2762
+#GlobalAllocator
+static JET_CBOR_ALLOC: CountingAlloc = CountingAlloc{}
+
+// Rust: tests/corelib_parts/encoding_streams.rs:2764
+fn jet_enc_cbor_parse(bytes: &[U8], options: cbor.CBOROptions) -> DataTree cbor.CBORError! {
+    ceiling := USize.from_int(options.max_bytes).unwrap() // GATE #4483: selected width.
+    begin()
+    result := cbor.parse(bytes, options)
+    peak := finish()
+    assert(peak <= ceiling, "CBOR requested allocation peak {peak} exceeded {ceiling}")
+    result
+}
+// Rust: tests/corelib_parts/encoding_streams.rs:2772
+fn jet_enc_cbor_decode<T: Decode>(bytes: &[U8], options: cbor.CBOROptions) -> T [FieldError]! {
+    ceiling := USize.from_int(options.max_bytes).unwrap() // GATE #4483
+    begin()
+    result := cbor.decode<T>(bytes, options)
+    peak := finish()
+    assert(peak <= ceiling, "CBOR typed requested allocation peak {peak} exceeded {ceiling}")
+    result
+}
+// Rust: tests/corelib_parts/encoding_streams.rs:2688 (embedded run)
+fn run() -> {
+    options := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 100, require_canonical: false }
+    value := jet_enc_cbor_parse([130, 97, 120, 97, 121], ~options) ?? panic("definite parse")
+    indefinite := jet_enc_cbor_parse([159, 97, 120, 97, 121, 255], ~options) ?? panic("indefinite parse")
+    if jet_enc_cbor_parse([130, 97, 120], options) == {
+        .Ok(_) -> panic("truncated array accepted")
+        .Err(e) -> print(e.path == "$[1]" && e.reason == "CBOR value is missing")
+    }
+    roomy := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 256, require_canonical: false }
+    if jet_enc_cbor_parse([129, 130, 97, 120], ~roomy) == {
+        .Ok(_) -> panic("nested truncation accepted")
+        .Err(e) -> print(e.path == "$[0][1]" && e.reason == "CBOR value is missing")
+    }
+    if jet_enc_cbor_parse([162, 97, 97, 1, 97, 97, 2], ~roomy) == {
+        .Ok(_) -> panic("duplicate key accepted")
+        .Err(e) -> print(e.path == "$" && e.reason == "duplicate CBOR text map key")
+    }
+    if jet_enc_cbor_decode<[Int]>([129, 97, 120], roomy) == {
+        .Ok(_) -> panic("typed mismatch accepted")
+        .Err(e) -> print(e[0].path == "[0]" && e[0].reason.contains("expected Int"))
+    }
+    print(true)
+}
+"""
+    path := dir.join("counted.jet")
+    fs.write(&path, source).unwrap()
+    shown := path.to_string_lossy()
+    out := jet.compile_with_path(source, &shown) ?? {
+        panic("front end rejected fixture:\n{jet.render_diagnostics(&shown, source, &err)}")
+    }
+    // Compilation and actual allocator-backed execution remain required.
+    (code, stdout, stderr) := build_and_run(&dir, "counted", source, [], None)
+    assert(code == 0, "counted CBOR program failed:\n{stderr}")
+    assert(stdout == "true\ntrue\ntrue\ntrue\ntrue\n")
+}

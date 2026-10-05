@@ -1,2200 +1,1153 @@
-// PORT-PENDING 0246 crates-jet-rt-src-lib: crates/jet-rt/src/lib.rs:1-2196
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS #![deny(warnings)]
-//RS 
-//RS use std::collections::BTreeMap;
-//RS 
-//RS pub const RECORD_FIELD_ADDRESS_I64: i64 = 0;
-//RS pub const RECORD_FIELD_ADDRESS_F64: i64 = 1;
-//RS pub const RECORD_FIELD_ADDRESS_BOOL: i64 = 2;
-//RS pub const RECORD_FIELD_ADDRESS_CHAR: i64 = 3;
-//RS 
-//RS 
-//RS /// Canonical exact-number carrier shared by all resident arenas and the AOT,
-//RS /// JIT, interpreter, and web adapters. Small values remain inline; spilled
-//RS /// values own a reusable immutable Foundation node through Clone/Drop.
-//RS mod exact_int_bridge {
-//RS     use jet_foundation::Numeric::{CtBigInt, JetInt};
-//RS 
-//RS     pub const SMALL_MIN: i64 = JetInt::inline_min();
-//RS     pub const SMALL_MAX: i64 = JetInt::inline_max();
-//RS 
-//RS     #[inline]
-//RS     pub fn is_tagged(value: i64) -> bool {
-//RS         // Spilled words carry tag bits outside the small range, so an
-//RS         // in-range word is classified without touching an owner.
-//RS         if (SMALL_MIN..=SMALL_MAX).contains(&value) {
-//RS             return false;
-//RS         }
-//RS         // SAFETY: the borrowed word is only classified; `ManuallyDrop` keeps
-//RS         // this view from releasing the caller's owner.
-//RS         let word = std::mem::ManuallyDrop::new(unsafe { JetInt::from_raw_owned(value) });
-//RS         !word.is_inline()
-//RS     }
-//RS 
-//RS     pub fn big_value(value: i64) -> Option<CtBigInt> {
-//RS         if !is_tagged(value) {
-//RS             return None;
-//RS         }
-//RS         // SAFETY: callers pass a borrowed spilled carrier; the clone keeps its
-//RS         // node alive while the value is copied out.
-//RS         let value = unsafe { JetInt::clone_from_raw(value) };
-//RS         Some(value.to_big())
-//RS     }
-//RS 
-//RS     pub fn value(value: i64) -> CtBigInt {
-//RS         big_value(value).unwrap_or_else(|| CtBigInt::from_int(value))
-//RS     }
-//RS 
-//RS     pub fn pack(value: CtBigInt) -> i64 {
-//RS         JetInt::from_big(value).into_raw()
-//RS     }
-//RS 
-//RS     pub fn add(left: i64, right: i64) -> i64 {
-//RS         let left = unsafe { JetInt::clone_from_raw(left) };
-//RS         let right = unsafe { JetInt::clone_from_raw(right) };
-//RS         left.add(&right)
-//RS             .unwrap_or_else(|_| std::process::abort())
-//RS             .into_raw()
-//RS     }
-//RS 
-//RS     pub fn try_new(value: i64) -> Result<i64, jet_foundation::Outcome::AllocError> {
-//RS         JetInt::try_from_i64(value).map(|value| value.into_raw())
-//RS     }
-//RS 
-//RS     pub fn try_add(
-//RS         left: i64,
-//RS         right: i64,
-//RS     ) -> Result<i64, jet_foundation::Outcome::AllocError> {
-//RS         let left = unsafe { JetInt::clone_from_raw(left) };
-//RS         let right = unsafe { JetInt::clone_from_raw(right) };
-//RS         left.try_add(&right).map(|value| value.into_raw())
-//RS     }
-//RS 
-//RS     pub fn compare(left: i64, right: i64) -> i64 {
-//RS         let left = unsafe { JetInt::clone_from_raw(left) };
-//RS         let right = unsafe { JetInt::clone_from_raw(right) };
-//RS         match left.compare(&right) {
-//RS             std::cmp::Ordering::Less => -1,
-//RS             std::cmp::Ordering::Equal => 0,
-//RS             std::cmp::Ordering::Greater => 1,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn to_string(value: i64) -> String {
-//RS         unsafe { JetInt::clone_from_raw(value) }.to_string_rep()
-//RS     }
-//RS }
-//RS 
-//RS pub use exact_int_bridge::{
-//RS     add as exact_int_add, big_value as exact_int_big_value, compare as exact_int_compare,
-//RS     is_tagged as exact_int_is_tagged, pack as exact_int_pack, to_string as exact_int_to_string,
-//RS     try_add as exact_int_try_add, try_new as exact_int_try_new, value as exact_int_value,
-//RS     SMALL_MAX as EXACT_INT_SMALL_MAX, SMALL_MIN as EXACT_INT_SMALL_MIN,
-//RS };
-//RS 
-//RS /// The arena only marshals resident values into the shared Prelude carrier.
-//RS mod map_key_semantics {
-//RS     include!("../../jet-codegen/src/Prelude/Core/MapKey.rs");
-//RS }
-//RS pub use map_key_semantics::{jet_map_key_cmp, JetMapKey};
-//RS 
-//RS /// The value-semantic map key for one exact `Int` word: equal values give
-//RS /// equal keys whether the word is inline or a spilled node, and keys order by
-//RS /// value.
-//RS fn exact_int_map_key(raw: i64) -> JetMapKey {
-//RS     let value = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(raw) };
-//RS     if value.is_inline() {
-//RS         return JetMapKey::Int(raw);
-//RS     }
-//RS     let big = value.to_big();
-//RS     if let Some(small) = big.try_i64() {
-//RS         return JetMapKey::Int(small);
-//RS     }
-//RS     let mut limbs = big.limbs;
-//RS     while limbs.last() == Some(&0) {
-//RS         limbs.pop();
-//RS     }
-//RS     JetMapKey::BigInt {
-//RS         negative: big.negative,
-//RS         limbs,
-//RS     }
-//RS }
-//RS 
-//RS #[allow(dead_code)]
-//RS mod uninit_semantics {
-//RS     include!("../../jet-codegen/src/Prelude/Uninit.rs");
-//RS }
-//RS #[doc(hidden)]
-//RS pub(crate) mod jet_mem {
-//RS     pub(crate) use jet_foundation::MemSentry::{jet_memory_ledger_record, MemoryLedgerWitness};
-//RS }
-//RS 
-//RS /// Compiler/runtime-only traced heap. Jet source reaches this through codegen.
-//RS #[doc(hidden)]
-//RS pub mod __gc;
-//RS 
-//RS pub fn display_f32(v: f32) -> String {
-//RS     format!("{v:?}")
-//RS }
-//RS 
-//RS pub fn display_f64(v: f64) -> String {
-//RS     format!("{v:?}")
-//RS }
-//RS 
-//RS pub fn string_len_chars(s: &str) -> i64 {
-//RS     s.chars().count() as i64
-//RS }
-//RS 
-//RS pub fn string_trim(s: &str) -> String {
-//RS     jet_foundation::generated::UnicodeString::jet_unicode_trim(s)
-//RS }
-//RS 
-//RS pub fn string_to_upper(s: &str) -> String {
-//RS     jet_foundation::generated::UnicodeString::jet_unicode_upper(s)
-//RS }
-//RS 
-//RS pub fn string_to_lower(s: &str) -> String {
-//RS     jet_foundation::generated::UnicodeString::jet_unicode_lower(s)
-//RS }
-//RS 
-//RS pub fn string_replace(s: &str, from: &str, to: &str) -> String {
-//RS     s.replace(from, to)
-//RS }
-//RS 
-//RS pub fn string_after(s: &str, sep: &str) -> String {
-//RS     match s.find(sep) {
-//RS         Some(i) => s[i + sep.len()..].to_string(),
-//RS         None => s.to_string(),
-//RS     }
-//RS }
-//RS 
-//RS pub fn string_before(s: &str, sep: &str) -> String {
-//RS     match s.find(sep) {
-//RS         Some(i) => s[..i].to_string(),
-//RS         None => s.to_string(),
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub enum JetVal {
-//RS     /// JIT value carrier for sema-proved uninitialized fixed-list storage.
-//RS     /// Initialization policy comes from the canonical Prelude source above.
-//RS     UninitList {
-//RS         values: Vec<JetVal>,
-//RS         initialized: Vec<bool>,
-//RS     },
-//RS     Int(i64),
-//RS     /// Fixed-width integer bits, never a tagged exact-Int owner. This tag
-//RS     /// survives erased record copies and recursive marshalling.
-//RS     Word { value: i64, unsigned: bool },
-//RS     Float(f64),
-//RS     Bool(bool),
-//RS     Char(char),
-//RS     String(String),
-//RS     StringView {
-//RS         owner: i64,
-//RS         start: usize,
-//RS         end: usize,
-//RS     },
-//RS     /// Dense resident carrier for integer-backed lists. String and opaque
-//RS     /// handles use the same `i64` word representation.
-//RS     IntList(Vec<i64>),
-//RS     List(Vec<JetVal>),
-//RS     /// D-RANGE-VALUE1: inline list element, not an arena record handle.
-//RS     Range {
-//RS         start: i64,
-//RS         end: i64,
-//RS         exclusive: bool,
-//RS     },
-//RS     /// Ordered map; each entry keeps the raw key handle for `keys()` and the
-//RS     /// packed value word used by the JIT ABI.
-//RS     Map(BTreeMap<JetMapKey, (i64, i64)>),
-//RS     Record(Vec<JetVal>),
-//RS     /// A record handle stored in another record. Keeping the distinction from
-//RS     /// `Int` lets recursive map-key marshalling follow the declared field
-//RS     /// shape without mistaking an integer that happens to equal an arena index
-//RS     /// for a nested record.
-//RS     RecordRef(i64),
-//RS     // D-INTBIG1: exact Int spill carrier. Reuses `CtBigInt` (jet-foundation)
-//RS     // limb-for-limb so a JIT-computed spilled Int prints byte-identical to the
-//RS     // AOT and comptime exact integer paths (R12 parity).
-//RS     ExactInt(jet_foundation::Numeric::CtBigInt),
-//RS }
-//RS 
-//RS /// Cell representation of an integer-backed list. Exact `Int` cells may hold
-//RS /// a tagged pointer to a spilled exact integer, so storing one retains it.
-//RS /// Fixed-width 64-bit words (`I64`, `U64`) use every bit pattern: they are
-//RS /// never read as exact-integer pointers, and `U64` words order unsigned.
-//RS #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-//RS pub enum IntCells {
-//RS     #[default]
-//RS     Exact,
-//RS     Word { unsigned: bool },
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS pub struct JetArena {
-//RS     values: Vec<JetVal>,
-//RS     /// Roots for spilled exact words stored in erased i64 carriers. The
-//RS     /// arena owns these until reset; atomic cells clone before publication.
-//RS     exact_roots: Vec<jet_foundation::Numeric::JetInt>,
-//RS     /// Cell kind per list handle, chosen from the checked element type when
-//RS     /// the list is created; handles past the end are `IntCells::Exact`.
-//RS     int_cells: Vec<IntCells>,
-//RS }
-//RS 
-//RS impl Default for JetArena {
-//RS     fn default() -> Self {
-//RS         Self {
-//RS             values: Vec::new(),
-//RS             exact_roots: Vec::new(),
-//RS             int_cells: Vec::new(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS impl JetArena {
-//RS     fn retain_exact_raw(roots: &mut Vec<jet_foundation::Numeric::JetInt>, raw: i64) {
-//RS         // SAFETY: only a tagged Foundation exact word has a pointer payload;
-//RS         // ordinary arena handles stay inline and therefore retain nothing.
-//RS         let owner = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(raw) };
-//RS         if !owner.is_inline() {
-//RS             roots.push(owner);
-//RS         }
-//RS     }
-//RS 
-//RS     fn retain_value_roots(
-//RS         roots: &mut Vec<jet_foundation::Numeric::JetInt>,
-//RS         value: &JetVal,
-//RS     ) {
-//RS         match value {
-//RS             JetVal::Int(raw) => Self::retain_exact_raw(roots, *raw),
-//RS             JetVal::IntList(values) => {
-//RS                 for raw in values {
-//RS                     Self::retain_exact_raw(roots, *raw);
-//RS                 }
-//RS             }
-//RS             JetVal::List(values)
-//RS             | JetVal::Record(values)
-//RS             | JetVal::UninitList { values, .. } => {
-//RS                 for value in values {
-//RS                     Self::retain_value_roots(roots, value);
-//RS                 }
-//RS             }
-//RS             JetVal::Range {
-//RS                 start,
-//RS                 end,
-//RS                 exclusive: _,
-//RS             } => {
-//RS                 Self::retain_exact_raw(roots, *start);
-//RS                 Self::retain_exact_raw(roots, *end);
-//RS             }
-//RS             JetVal::Map(entries) => {
-//RS                 for (key_id, value) in entries.values() {
-//RS                     Self::retain_exact_raw(roots, *key_id);
-//RS                     Self::retain_exact_raw(roots, *value);
-//RS                 }
-//RS             }
-//RS             JetVal::Float(_)
-//RS             | JetVal::Word { .. }
-//RS             | JetVal::Bool(_)
-//RS             | JetVal::Char(_)
-//RS             | JetVal::String(_)
-//RS             | JetVal::StringView { .. }
-//RS             | JetVal::RecordRef(_)
-//RS             | JetVal::ExactInt(_) => {}
-//RS         }
-//RS     }
-//RS 
-//RS     fn own_exact(&mut self, value: jet_foundation::Numeric::JetInt) -> i64 {
-//RS         let raw = value.to_raw();
-//RS         if !value.is_inline() {
-//RS             self.exact_roots.push(value);
-//RS         }
-//RS         raw
-//RS     }
-//RS     pub fn alloc_empty_string(&mut self) -> i64 {
-//RS         self.alloc_string(String::new())
-//RS     }
-//RS 
-//RS     pub fn alloc_string(&mut self, text: impl Into<String>) -> i64 {
-//RS         let id = self.values.len() as i64;
-//RS         self.values.push(JetVal::String(text.into()));
-//RS         id
-//RS     }
-//RS     /// Allocate one erased carrier supplied by a checked marshalling adapter.
-//RS     /// The adapter owns recursive type validation; this method only appends the
-//RS     /// representation to the arena and returns its handle.
-//RS     pub fn alloc_value(&mut self, value: JetVal) -> i64 {
-//RS         Self::retain_value_roots(&mut self.exact_roots, &value);
-//RS         let id = self.values.len() as i64;
-//RS         self.values.push(value);
-//RS         id
-//RS     }
-//RS     /// Copy one arena slot for a descriptor-guided marshalling pass.
-//RS     pub fn clone_value(&self, id: i64) -> Option<JetVal> {
-//RS         self.values.get(id as usize).cloned()
-//RS     }
-//RS 
-//RS     pub fn get_string(&self, id: i64) -> Option<&str> {
-//RS         match self.values.get(id as usize) {
-//RS             Some(JetVal::String(value)) => Some(value.as_str()),
-//RS             Some(JetVal::StringView { owner, start, end }) => {
-//RS                 let Some(JetVal::String(value)) = self.values.get(*owner as usize) else {
-//RS                     return None;
-//RS                 };
-//RS                 value.get(*start..*end)
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn clone_string(&self, id: i64) -> Option<String> {
-//RS         self.get_string(id).map(str::to_owned)
-//RS     }
-//RS 
-//RS     pub fn alloc_string_view(&mut self, owner: i64, start: usize, end: usize) -> Option<i64> {
-//RS         let (owner, base, len) = match self.values.get(owner as usize)? {
-//RS             JetVal::String(value) => (owner, 0, value.len()),
-//RS             JetVal::StringView { owner, start, end } => (*owner, *start, end.checked_sub(*start)?),
-//RS             _ => return None,
-//RS         };
-//RS         if start > end || end > len {
-//RS             return None;
-//RS         }
-//RS         let start = base.checked_add(start)?;
-//RS         let end = base.checked_add(end)?;
-//RS         let JetVal::String(value) = self.values.get(owner as usize)? else {
-//RS             return None;
-//RS         };
-//RS         value.get(start..end)?;
-//RS         let id = self.values.len() as i64;
-//RS         self.values.push(JetVal::StringView { owner, start, end });
-//RS         Some(id)
-//RS     }
-//RS 
-//RS     pub fn get_string_mut(&mut self, id: i64) -> Option<&mut String> {
-//RS         match self.values.get_mut(id as usize) {
-//RS             Some(JetVal::String(value)) => Some(value),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn clear(&mut self) {
-//RS         self.values.clear();
-//RS         self.exact_roots.clear();
-//RS         self.int_cells.clear();
-//RS     }
-//RS 
-//RS     /// Indices of `String` values allocated during JIT lowering (baked into code as handles).
-//RS     pub fn string_slots(&self) -> Vec<(usize, String)> {
-//RS         self.values
-//RS             .iter()
-//RS             .enumerate()
-//RS             .filter_map(|(i, value)| match value {
-//RS                 JetVal::String(text) => Some((i, text.clone())),
-//RS                 _ => None,
-//RS             })
-//RS             .collect()
-//RS     }
-//RS 
-//RS     /// Whether restoring string slots alone would lose live arena state.
-//RS     pub fn has_non_string_state(&self) -> bool {
-//RS         !self.exact_roots.is_empty()
-//RS             || self.values.iter().any(|value| !matches!(value, JetVal::String(_)))
-//RS     }
-//RS 
-//RS     /// Restore compile-time string handles so cached machine code sees the same ids.
-//RS     pub fn install_string_slots(&mut self, slots: &[(usize, String)]) {
-//RS         if slots.is_empty() {
-//RS             return;
-//RS         }
-//RS         let max = slots.iter().map(|(i, _)| *i).max().unwrap_or(0);
-//RS         while self.values.len() <= max {
-//RS             self.values.push(JetVal::Int(0));
-//RS         }
-//RS         for (i, text) in slots {
-//RS             self.values[*i] = JetVal::String(text.clone());
-//RS         }
-//RS     }
-//RS     /// Borrow an initialized list carrier without copying its source rows.
-//RS     pub fn list_value(&self, list: i64) -> Option<&JetVal> {
-//RS         let value = self.values.get(list as usize)?;
-//RS         match value {
-//RS             JetVal::IntList(_) | JetVal::List(_) => Some(value),
-//RS             JetVal::UninitList { initialized, .. } => {
-//RS                 uninit_semantics::jet_uninit_all(initialized).ok()?;
-//RS                 Some(value)
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Copy the logical list slots, expanding dense integer storage without
-//RS     /// retaining any arena-owned handle.
-//RS     pub fn clone_list_values(&self, list: i64) -> Option<Vec<JetVal>> {
-//RS         match self.values.get(list as usize)? {
-//RS             JetVal::IntList(values) => Some(values.iter().copied().map(JetVal::Int).collect()),
-//RS             JetVal::List(values) => Some(values.clone()),
-//RS             JetVal::UninitList {
-//RS                 values,
-//RS                 initialized,
-//RS             } => {
-//RS                 uninit_semantics::jet_uninit_all(initialized).ok()?;
-//RS                 Some(values.clone())
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Allocate a heterogeneous list carrier after its elements were
-//RS     /// recursively materialized by a checked adapter.
-//RS     pub fn alloc_list_values(&mut self, values: Vec<JetVal>) -> i64 {
-//RS         self.alloc_value(JetVal::List(values))
-//RS     }
-//RS 
-//RS     pub fn alloc_int_list(&mut self, values: Vec<i64>) -> i64 {
-//RS         for raw in &values {
-//RS             Self::retain_exact_raw(&mut self.exact_roots, *raw);
-//RS         }
-//RS         let id = self.values.len() as i64;
-//RS         self.values.push(JetVal::IntList(values));
-//RS         id
-//RS     }
-//RS 
-//RS     pub fn alloc_empty_list(&mut self) -> i64 {
-//RS         let id = self.values.len() as i64;
-//RS         self.values.push(JetVal::List(Vec::new()));
-//RS         id
-//RS     }
-//RS 
-//RS     /// Allocate an empty list of fixed-width 64-bit words. Its cells are never
-//RS     /// retained as exact-integer pointers, whichever route stores them.
-//RS     pub fn alloc_word_list(&mut self, unsigned: bool) -> i64 {
-//RS         let id = self.alloc_empty_list();
-//RS         self.set_int_cells(id, IntCells::Word { unsigned });
-//RS         id
-//RS     }
-//RS 
-//RS     /// Allocate a dense list derived from `source` (copy, slice, reorder),
-//RS     /// keeping the source's cell kind.
-//RS     pub fn alloc_int_list_like(&mut self, source: i64, values: Vec<i64>) -> i64 {
-//RS         let cells = self.int_cells(source);
-//RS         if cells == IntCells::Exact {
-//RS             return self.alloc_int_list(values);
-//RS         }
-//RS         let id = self.values.len() as i64;
-//RS         self.values.push(JetVal::IntList(values));
-//RS         self.set_int_cells(id, cells);
-//RS         id
-//RS     }
-//RS 
-//RS     pub fn int_cells(&self, list: i64) -> IntCells {
-//RS         usize::try_from(list)
-//RS             .ok()
-//RS             .and_then(|index| self.int_cells.get(index))
-//RS             .copied()
-//RS             .unwrap_or_default()
-//RS     }
-//RS 
-//RS     fn set_int_cells(&mut self, list: i64, cells: IntCells) {
-//RS         if cells == IntCells::Exact {
-//RS             return;
-//RS         }
-//RS         let index = list as usize;
-//RS         if self.int_cells.len() <= index {
-//RS             self.int_cells.resize(index + 1, IntCells::Exact);
-//RS         }
-//RS         self.int_cells[index] = cells;
-//RS     }
-//RS 
-//RS     pub fn alloc_uninit_list(&mut self, len: usize) -> i64 {
-//RS         let id = self.values.len() as i64;
-//RS         self.values.push(JetVal::UninitList {
-//RS             values: vec![JetVal::Int(0); len],
-//RS             initialized: uninit_semantics::jet_uninit_bitmap(len),
-//RS         });
-//RS         id
-//RS     }
-//RS 
-//RS     /// Fixed-length uninitialized carrier for 64-bit words (see
-//RS     /// `alloc_word_list`).
-//RS     pub fn alloc_uninit_word_list(&mut self, len: usize, unsigned: bool) -> i64 {
-//RS         let id = self.alloc_uninit_list(len);
-//RS         self.set_int_cells(id, IntCells::Word { unsigned });
-//RS         id
-//RS     }
-//RS 
-//RS     /// Allocate a list carrier derived from `source` (concatenation and other
-//RS     /// element-preserving results), keeping the source's cell kind.
-//RS     pub fn alloc_list_values_like(&mut self, source: i64, values: Vec<JetVal>) -> i64 {
-//RS         let cells = self.int_cells(source);
-//RS         if cells == IntCells::Exact {
-//RS             return self.alloc_list_values(values);
-//RS         }
-//RS         let id = self.values.len() as i64;
-//RS         self.values.push(JetVal::List(values));
-//RS         self.set_int_cells(id, cells);
-//RS         id
-//RS     }
-//RS 
-//RS     pub fn alloc_empty_map(&mut self) -> i64 {
-//RS         let id = self.values.len() as i64;
-//RS         self.values.push(JetVal::Map(BTreeMap::new()));
-//RS         id
-//RS     }
-//RS 
-//RS     pub fn map_insert(&mut self, map: i64, key_id: i64, value: i64) -> Option<()> {
-//RS         let key = self.clone_string(key_id)?;
-//RS         match self.values.get_mut(map as usize) {
-//RS             Some(JetVal::Map(entries)) => {
-//RS                 Self::retain_exact_raw(&mut self.exact_roots, value);
-//RS                 entries.insert(JetMapKey::String(key), (key_id, value));
-//RS                 Some(())
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn map_insert_bool(&mut self, map: i64, key: bool, value: i64) -> Option<()> {
-//RS         match self.values.get_mut(map as usize) {
-//RS             Some(JetVal::Map(entries)) => {
-//RS                 Self::retain_exact_raw(&mut self.exact_roots, value);
-//RS                 entries.insert(JetMapKey::Bool(key), (i64::from(key), value));
-//RS                 Some(())
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn map_get(&self, map: i64, key_id: i64) -> Option<i64> {
-//RS         let key = self.get_string(key_id)?;
-//RS         match self.values.get(map as usize) {
-//RS             Some(JetVal::Map(entries)) => entries
-//RS                 .get(&JetMapKey::String(key.to_string()))
-//RS                 .map(|(_, value)| *value),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn map_remove(&mut self, map: i64, key_id: i64) -> Option<i64> {
-//RS         let key = self.clone_string(key_id)?;
-//RS         match self.values.get_mut(map as usize) {
-//RS             Some(JetVal::Map(entries)) => entries
-//RS                 .remove(&JetMapKey::String(key))
-//RS                 .map(|(_, value)| value),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn map_insert_int(&mut self, map: i64, key: i64, value: i64) -> Option<()> {
-//RS         match self.values.get_mut(map as usize) {
-//RS             Some(JetVal::Map(entries)) => {
-//RS                 Self::retain_exact_raw(&mut self.exact_roots, key);
-//RS                 Self::retain_exact_raw(&mut self.exact_roots, value);
-//RS                 entries.insert(exact_int_map_key(key), (key, value));
-//RS                 Some(())
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn map_get_int(&self, map: i64, key: i64) -> Option<i64> {
-//RS         match self.values.get(map as usize) {
-//RS             Some(JetVal::Map(entries)) => entries
-//RS                 .get(&exact_int_map_key(key))
-//RS                 .map(|(_, value)| *value),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn map_remove_int(&mut self, map: i64, key: i64) -> Option<i64> {
-//RS         match self.values.get_mut(map as usize) {
-//RS             Some(JetVal::Map(entries)) => entries
-//RS                 .remove(&exact_int_map_key(key))
-//RS                 .map(|(_, value)| value),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Convert a generated tuple/struct record into the structural key used by
-//RS     /// the JIT map adapter. Record references recurse through the same
-//RS     /// structural carrier; the shared Prelude `jet_map_key_cmp` supplies the
-//RS     /// ordered value comparison without a second map policy.
-//RS     fn composite_key(&self, key_id: i64) -> Option<JetMapKey> {
-//RS         let JetVal::Record(fields) = self.values.get(key_id as usize)? else {
-//RS             return None;
-//RS         };
-//RS         fields
-//RS             .iter()
-//RS             .map(|field| self.composite_key_field(field))
-//RS             .collect::<Option<Vec<_>>>()
-//RS             .map(JetMapKey::Record)
-//RS     }
-//RS 
-//RS     fn composite_key_field(&self, field: &JetVal) -> Option<JetMapKey> {
-//RS         let fields = match field {
-//RS             JetVal::Int(value) => return Some(exact_int_map_key(*value)),
-//RS             JetVal::Word { value, unsigned } => return Some(if *unsigned {
-//RS                 JetMapKey::UInt(*value as u64)
-//RS             } else {
-//RS                 JetMapKey::Int(*value)
-//RS             }),
-//RS             JetVal::String(value) => return Some(JetMapKey::String(value.clone())),
-//RS             JetVal::Bool(value) => return Some(JetMapKey::Bool(*value)),
-//RS             JetVal::Char(value) => return Some(JetMapKey::Char(*value)),
-//RS             JetVal::RecordRef(handle) => match self.values.get(*handle as usize)? {
-//RS                 JetVal::Record(fields) => fields,
-//RS                 _ => return None,
-//RS             },
-//RS             JetVal::Record(fields) => fields,
-//RS             _ => return None,
-//RS         };
-//RS         fields
-//RS             .iter()
-//RS             .map(|field| self.composite_key_field(field))
-//RS             .collect::<Option<Vec<_>>>()
-//RS             .map(JetMapKey::Record)
-//RS     }
-//RS 
-//RS     pub fn map_insert_composite(&mut self, map: i64, key_id: i64, value: i64) -> Option<()> {
-//RS         let key = self.composite_key(key_id)?;
-//RS         match self.values.get_mut(map as usize) {
-//RS             Some(JetVal::Map(entries)) => {
-//RS                 Self::retain_exact_raw(&mut self.exact_roots, value);
-//RS                 entries.insert(key, (key_id, value));
-//RS                 Some(())
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn map_get_composite(&self, map: i64, key_id: i64) -> Option<i64> {
-//RS         let key = self.composite_key(key_id)?;
-//RS         match self.values.get(map as usize) {
-//RS             Some(JetVal::Map(entries)) => entries.get(&key).map(|(_, value)| *value),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn map_remove_composite(&mut self, map: i64, key_id: i64) -> Option<i64> {
-//RS         let key = self.composite_key(key_id)?;
-//RS         match self.values.get_mut(map as usize) {
-//RS             Some(JetVal::Map(entries)) => entries.remove(&key).map(|(_, value)| value),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn map_len(&self, map: i64) -> Option<i64> {
-//RS         match self.values.get(map as usize) {
-//RS             Some(JetVal::Map(entries)) => Some(entries.len() as i64),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Snapshot raw map pairs without cloning structural keys or payloads.
-//RS     pub fn clone_map_pairs(&self, map: i64) -> Option<Vec<(i64, i64)>> {
-//RS         match self.values.get(map as usize)? {
-//RS             JetVal::Map(entries) => Some(entries.values().copied().collect()),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn map_key_at(&mut self, map: i64, index: i64) -> Option<i64> {
-//RS         if index < 0 {
-//RS             return None;
-//RS         }
-//RS         let key = match self.values.get(map as usize) {
-//RS             Some(JetVal::Map(entries)) => entries.values().nth(index as usize)?.0,
-//RS             _ => return None,
-//RS         };
-//RS         Some(key)
-//RS     }
-//RS 
-//RS     pub fn map_value_at(&self, map: i64, index: i64) -> Option<i64> {
-//RS         if index < 0 {
-//RS             return None;
-//RS         }
-//RS         match self.values.get(map as usize) {
-//RS             Some(JetVal::Map(entries)) => entries
-//RS                 .values()
-//RS                 .nth(index as usize)
-//RS                 .map(|(_, value)| *value),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn list_push_int(&mut self, list: i64, value: i64) -> Option<()> {
-//RS         let exact = self.int_cells(list) == IntCells::Exact;
-//RS         match self.values.get_mut(list as usize) {
-//RS             Some(JetVal::IntList(values)) => {
-//RS                 if exact {
-//RS                     Self::retain_exact_raw(&mut self.exact_roots, value);
-//RS                 }
-//RS                 values.push(value);
-//RS                 Some(())
-//RS             }
-//RS             // An empty untyped list promotes to the dense carrier on first
-//RS             // push; a populated one keeps its boxed shape. Read emptiness
-//RS             // through a borrow that ends before the slot is overwritten.
-//RS             Some(slot) => {
-//RS                 let empty = match &*slot {
-//RS                     JetVal::List(values) => values.is_empty(),
-//RS                     _ => return None,
-//RS                 };
-//RS                 if exact {
-//RS                     Self::retain_exact_raw(&mut self.exact_roots, value);
-//RS                 }
-//RS                 if empty {
-//RS                     *slot = JetVal::IntList(vec![value]);
-//RS                 } else if let JetVal::List(values) = slot {
-//RS                     values.push(JetVal::Int(value));
-//RS                 }
-//RS                 Some(())
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn list_push_float(&mut self, list: i64, value: f64) -> Option<()> {
-//RS         match self.values.get_mut(list as usize) {
-//RS             Some(JetVal::List(values)) => {
-//RS                 values.push(JetVal::Float(value));
-//RS                 Some(())
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn replace_int_list(&mut self, list: i64, values: Vec<i64>) -> Option<()> {
-//RS         if !matches!(
-//RS             self.values.get(list as usize),
-//RS             Some(JetVal::List(_)) | Some(JetVal::IntList(_))
-//RS         ) {
-//RS             return None;
-//RS         }
-//RS         if self.int_cells(list) == IntCells::Exact {
-//RS             for raw in &values {
-//RS                 Self::retain_exact_raw(&mut self.exact_roots, *raw);
-//RS             }
-//RS         }
-//RS         match self.values.get_mut(list as usize) {
-//RS             Some(slot @ JetVal::List(_)) => {
-//RS                 *slot = JetVal::IntList(values);
-//RS                 Some(())
-//RS             }
-//RS             Some(JetVal::IntList(target)) => {
-//RS                 *target = values;
-//RS                 Some(())
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS     /// Clear a list without changing its carrier or giving up its allocation.
-//RS     ///
-//RS     /// Dense integer lists must stay dense: converting them through
-//RS     /// `list_values_mut` would allocate one `JetVal` per element and erase the
-//RS     /// resident loop's typed storage.
-//RS     pub fn list_clear(&mut self, list: i64) -> Option<()> {
-//RS         match self.values.get_mut(list as usize)? {
-//RS             JetVal::IntList(values) => {
-//RS                 values.clear();
-//RS                 Some(())
-//RS             }
-//RS             JetVal::List(values) => {
-//RS                 values.clear();
-//RS                 Some(())
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS 
-//RS     pub fn replace_float_list(&mut self, list: i64, values: Vec<f64>) -> Option<()> {
-//RS         match self.values.get_mut(list as usize) {
-//RS             Some(JetVal::List(target)) => {
-//RS                 *target = values.into_iter().map(JetVal::Float).collect();
-//RS                 Some(())
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn list_push_range(
-//RS         &mut self,
-//RS         list: i64,
-//RS         start: i64,
-//RS         end: i64,
-//RS         exclusive: bool,
-//RS     ) -> Option<()> {
-//RS         if !matches!(self.values.get(list as usize), Some(JetVal::List(_))) {
-//RS             return None;
-//RS         }
-//RS         Self::retain_exact_raw(&mut self.exact_roots, start);
-//RS         Self::retain_exact_raw(&mut self.exact_roots, end);
-//RS         match self.values.get_mut(list as usize) {
-//RS             Some(JetVal::List(values)) => {
-//RS                 values.push(JetVal::Range {
-//RS                     start,
-//RS                     end,
-//RS                     exclusive,
-//RS                 });
-//RS                 Some(())
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn list_len(&self, list: i64) -> Option<i64> {
-//RS         match self.values.get(list as usize) {
-//RS             Some(JetVal::IntList(values)) => Some(values.len() as i64),
-//RS             Some(JetVal::List(values)) => Some(values.len() as i64),
-//RS             Some(JetVal::UninitList { values, .. }) => Some(values.len() as i64),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS     /// Borrow a dense integer list for native read-only kernels.
-//RS     ///
-//RS     /// `[U8]` literals and other packed integer lists use this representation;
-//RS     /// callers must finish the read before mutating the arena.
-//RS     pub fn int_list_slice(&self, list: i64) -> Option<&[i64]> {
-//RS         match self.values.get(list as usize) {
-//RS             Some(JetVal::IntList(values)) => Some(values.as_slice()),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Mutable erased view for collection operations whose shared kernels use
-//RS     /// `JetVal` values. Converting a dense integer carrier here is a cold
-//RS     /// mutation boundary; native read-only reductions keep the dense carrier.
-//RS     pub fn list_values_mut(&mut self, list: i64) -> Option<&mut Vec<JetVal>> {
-//RS         if matches!(self.values.get(list as usize), Some(JetVal::IntList(_))) {
-//RS             let dense = match self.values.get_mut(list as usize)? {
-//RS                 JetVal::IntList(values) => std::mem::take(values),
-//RS                 _ => unreachable!(),
-//RS             };
-//RS             self.values[list as usize] = JetVal::List(dense.into_iter().map(JetVal::Int).collect());
-//RS         }
-//RS         match self.values.get_mut(list as usize)? {
-//RS             JetVal::List(values) => Some(values),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn list_get_int(&self, list: i64, index: i64) -> Option<i64> {
-//RS         if index < 0 {
-//RS             return None;
-//RS         }
-//RS         match self.values.get(list as usize) {
-//RS             Some(JetVal::IntList(values)) => values.get(index as usize).copied(),
-//RS             Some(JetVal::List(values)) => match values.get(index as usize) {
-//RS                 Some(JetVal::Int(value) | JetVal::Word { value, .. }) => Some(*value),
-//RS                 _ => None,
-//RS             },
-//RS             Some(JetVal::UninitList {
-//RS                 values,
-//RS                 initialized,
-//RS             }) => {
-//RS                 let index = uninit_semantics::jet_uninit_read(initialized, index as usize).ok()?;
-//RS                 match values.get(index) {
-//RS                     Some(JetVal::Int(value) | JetVal::Word { value, .. }) => Some(*value),
-//RS                     _ => None,
-//RS                 }
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS     /// Read one list slot through the erased i64 ABI used by generic MIR
-//RS     /// indexing. Dense integers stay packed; heterogeneous values preserve
-//RS     /// handles and materialize inline carriers only when a handle is required.
-//RS     pub fn list_get_raw(&mut self, list: i64, index: i64) -> Option<i64> {
-//RS         if index < 0 {
-//RS             return None;
-//RS         }
-//RS         let value = match self.values.get(list as usize)? {
-//RS             JetVal::IntList(values) => JetVal::Int(*values.get(index as usize)?),
-//RS             JetVal::List(values) => values.get(index as usize)?.clone(),
-//RS             JetVal::UninitList {
-//RS                 values,
-//RS                 initialized,
-//RS             } => {
-//RS                 let index = uninit_semantics::jet_uninit_read(initialized, index as usize).ok()?;
-//RS                 values.get(index)?.clone()
-//RS             }
-//RS             _ => return None,
-//RS         };
-//RS         match value {
-//RS             JetVal::UninitList {
-//RS                 values,
-//RS                 initialized,
-//RS             } => Some(self.alloc_value(JetVal::UninitList {
-//RS                 values,
-//RS                 initialized,
-//RS             })),
-//RS             JetVal::Int(value) | JetVal::Word { value, .. } | JetVal::RecordRef(value) => Some(value),
-//RS             JetVal::Float(value) => Some(value.to_bits() as i64),
-//RS             JetVal::Bool(value) => Some(i64::from(value)),
-//RS             JetVal::Char(value) => Some(i64::from(value as u32)),
-//RS             JetVal::String(value) => Some(self.alloc_string(value)),
-//RS             JetVal::StringView { owner, start, end } => {
-//RS                 let value = self.get_string(owner)?.get(start..end)?.to_owned();
-//RS                 Some(self.alloc_string(value))
-//RS             }
-//RS             JetVal::IntList(values) => Some(self.alloc_int_list(values)),
-//RS             JetVal::List(values) => Some(self.alloc_list_values(values)),
-//RS             JetVal::Range {
-//RS                 start,
-//RS                 end,
-//RS                 exclusive,
-//RS             } => Some(self.alloc_value(JetVal::Range {
-//RS                 start,
-//RS                 end,
-//RS                 exclusive,
-//RS             })),
-//RS             JetVal::Map(values) => Some(self.alloc_value(JetVal::Map(values))),
-//RS             JetVal::Record(values) => Some(self.alloc_record_values(values)),
-//RS             JetVal::ExactInt(value) => Some(self.own_exact(
-//RS                 jet_foundation::Numeric::JetInt::from_big(value),
-//RS             )),
-//RS         }
-//RS     }
-//RS 
-//RS 
-//RS     /// Read a sema-proven fixed-list integer slot. This path has no user-facing
-//RS     /// bounds check; an invalid carrier is an internal compiler/runtime fault.
-//RS     pub fn list_get_int_proven(&self, list: i64, index: i64) -> i64 {
-//RS         let value = match self.values.get(list as usize) {
-//RS             Some(JetVal::IntList(values)) => return values[index as usize],
-//RS             Some(JetVal::List(values)) => &values[index as usize],
-//RS             Some(JetVal::UninitList {
-//RS                 values,
-//RS                 initialized,
-//RS             }) => {
-//RS                 let index = uninit_semantics::jet_uninit_read(initialized, index as usize)
-//RS                     .expect("proven fixed-list read of uninitialized slot");
-//RS                 &values[index]
-//RS             }
-//RS             _ => jet_foundation::ice!(None, "proven fixed-list read of a non-list carrier"),
-//RS         };
-//RS         match value {
-//RS             JetVal::Int(value) | JetVal::Word { value, .. } => *value,
-//RS             _ => jet_foundation::ice!(None, "proven fixed-list integer read of a non-integer slot"),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Clone one string handle from a homogeneous `[String]` list. JIT host
-//RS     /// adapters use this to marshal lists into shared Prelude functions;
-//RS     /// numeric list storage remains unchanged because string handles are the
-//RS     /// established erased `Int` representation.
-//RS     pub fn list_get_string(&self, list: i64, index: i64) -> Option<String> {
-//RS         if index < 0 {
-//RS             return None;
-//RS         }
-//RS         let handle = match self.values.get(list as usize)? {
-//RS             JetVal::IntList(values) => Some(*values.get(index as usize)?),
-//RS             JetVal::List(values) => match values.get(index as usize)? {
-//RS                 JetVal::Int(handle) => Some(*handle),
-//RS                 JetVal::String(value) => return Some(value.clone()),
-//RS                 _ => None,
-//RS             },
-//RS             _ => None,
-//RS         }?;
-//RS         self.clone_string(handle)
-//RS     }
-//RS 
-//RS     pub fn list_get_float(&self, list: i64, index: i64) -> Option<f64> {
-//RS         if index < 0 {
-//RS             return None;
-//RS         }
-//RS         match self.values.get(list as usize) {
-//RS             Some(JetVal::List(values)) => match values.get(index as usize) {
-//RS                 Some(JetVal::Float(value)) => Some(*value),
-//RS                 _ => None,
-//RS             },
-//RS             Some(JetVal::UninitList {
-//RS                 values,
-//RS                 initialized,
-//RS             }) => {
-//RS                 let index = uninit_semantics::jet_uninit_read(initialized, index as usize).ok()?;
-//RS                 match values.get(index) {
-//RS                     Some(JetVal::Float(value)) => Some(*value),
-//RS                     _ => None,
-//RS                 }
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS     /// Read one `Float` field from a record element in a resident columnar
-//RS     /// list without materializing rows or a transient cell store.
-//RS     pub fn list_record_get_float(
-//RS         &self,
-//RS         list: i64,
-//RS         row: i64,
-//RS         field: i64,
-//RS     ) -> Option<f64> {
-//RS         let row = usize::try_from(row).ok()?;
-//RS         let field = usize::try_from(field).ok()?;
-//RS         let row = match self.values.get(list as usize)? {
-//RS             JetVal::List(values) => values.get(row)?,
-//RS             JetVal::UninitList {
-//RS                 values,
-//RS                 initialized,
-//RS             } => {
-//RS                 let row = uninit_semantics::jet_uninit_read(initialized, row).ok()?;
-//RS                 values.get(row)?
-//RS             }
-//RS             _ => return None,
-//RS         };
-//RS         let fields = match row {
-//RS             JetVal::Record(fields) => fields,
-//RS             JetVal::Int(handle) | JetVal::RecordRef(handle) => {
-//RS                 let JetVal::Record(fields) = self.values.get(*handle as usize)? else {
-//RS                     return None;
-//RS                 };
-//RS                 fields
-//RS             }
-//RS             _ => return None,
-//RS         };
-//RS         match fields.get(field)? {
-//RS             JetVal::Float(value) => Some(*value),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Read a sema-proven fixed-list float slot without a language bounds check.
-//RS     pub fn list_get_float_proven(&self, list: i64, index: i64) -> f64 {
-//RS         let value = match self.values.get(list as usize) {
-//RS             Some(JetVal::List(values)) => &values[index as usize],
-//RS             Some(JetVal::UninitList {
-//RS                 values,
-//RS                 initialized,
-//RS             }) => {
-//RS                 let index = uninit_semantics::jet_uninit_read(initialized, index as usize)
-//RS                     .expect("proven fixed-list read of uninitialized slot");
-//RS                 &values[index]
-//RS             }
-//RS             _ => jet_foundation::ice!(None, "proven fixed-list read of a non-list carrier"),
-//RS         };
-//RS         match value {
-//RS             JetVal::Float(value) => *value,
-//RS             _ => jet_foundation::ice!(None, "proven fixed-list float read of a non-float slot"),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn list_get_range(&self, list: i64, index: i64) -> Option<(i64, i64, bool)> {
-//RS         if index < 0 {
-//RS             return None;
-//RS         }
-//RS         match self.values.get(list as usize) {
-//RS             Some(JetVal::List(values)) => match values.get(index as usize) {
-//RS                 Some(JetVal::Range {
-//RS                     start,
-//RS                     end,
-//RS                     exclusive,
-//RS                 }) => Some((*start, *end, *exclusive)),
-//RS                 _ => None,
-//RS             },
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn list_set_int(&mut self, list: i64, index: i64, value: i64) -> Option<()> {
-//RS         if index < 0 {
-//RS             return None;
-//RS         }
-//RS         let exact = self.int_cells(list) == IntCells::Exact;
-//RS         match self.values.get_mut(list as usize) {
-//RS             Some(JetVal::IntList(values)) => {
-//RS                 let slot = values.get_mut(index as usize)?;
-//RS                 if exact {
-//RS                     Self::retain_exact_raw(&mut self.exact_roots, value);
-//RS                 }
-//RS                 *slot = value;
-//RS                 Some(())
-//RS             }
-//RS             Some(JetVal::List(values)) => match values.get_mut(index as usize) {
-//RS                 Some(slot @ JetVal::Int(_)) => {
-//RS                     if exact {
-//RS                         Self::retain_exact_raw(&mut self.exact_roots, value);
-//RS                     }
-//RS                     *slot = JetVal::Int(value);
-//RS                     Some(())
-//RS                 }
-//RS                 _ => None,
-//RS             },
-//RS             Some(JetVal::UninitList {
-//RS                 values,
-//RS                 initialized,
-//RS             }) => {
-//RS                 let (index, _) =
-//RS                     uninit_semantics::jet_uninit_write(initialized, index as usize).ok()?;
-//RS                 if exact {
-//RS                     Self::retain_exact_raw(&mut self.exact_roots, value);
-//RS                 }
-//RS                 values[index] = JetVal::Int(value);
-//RS                 Some(())
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn list_set_float(&mut self, list: i64, index: i64, value: f64) -> Option<()> {
-//RS         if index < 0 {
-//RS             return None;
-//RS         }
-//RS         match self.values.get_mut(list as usize) {
-//RS             Some(JetVal::List(values)) => match values.get_mut(index as usize) {
-//RS                 Some(slot @ JetVal::Float(_)) => {
-//RS                     *slot = JetVal::Float(value);
-//RS                     Some(())
-//RS                 }
-//RS                 _ => None,
-//RS             },
-//RS             Some(JetVal::UninitList {
-//RS                 values,
-//RS                 initialized,
-//RS             }) => {
-//RS                 let (index, _) =
-//RS                     uninit_semantics::jet_uninit_write(initialized, index as usize).ok()?;
-//RS                 values[index] = JetVal::Float(value);
-//RS                 Some(())
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn list_sort_int(&mut self, list: i64) -> Option<()> {
-//RS         let unsigned = self.int_cells(list) == IntCells::Word { unsigned: true };
-//RS         match self.values.get_mut(list as usize) {
-//RS             Some(JetVal::IntList(values)) => {
-//RS                 if unsigned {
-//RS                     values.sort_unstable_by_key(|value| *value as u64);
-//RS                 } else {
-//RS                     values.sort_unstable();
-//RS                 }
-//RS                 Some(())
-//RS             }
-//RS             Some(JetVal::List(values)) => {
-//RS                 let mut ints = Vec::with_capacity(values.len());
-//RS                 for value in values.iter() {
-//RS                     let JetVal::Int(value) = value else {
-//RS                         return None;
-//RS                     };
-//RS                     ints.push(*value);
-//RS                 }
-//RS                 if unsigned {
-//RS                     ints.sort_unstable_by_key(|value| *value as u64);
-//RS                 } else {
-//RS                     ints.sort_unstable();
-//RS                 }
-//RS                 *values = ints.into_iter().map(JetVal::Int).collect();
-//RS                 Some(())
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn list_slice(&mut self, list: i64, start: i64, end: i64) -> Option<i64> {
-//RS         if start < 0 || end < start {
-//RS             return None;
-//RS         }
-//RS         let slice = match self.values.get(list as usize) {
-//RS             Some(JetVal::IntList(values)) if end <= values.len() as i64 => {
-//RS                 JetVal::IntList(values[start as usize..end as usize].to_vec())
-//RS             }
-//RS             Some(JetVal::List(values)) if end <= values.len() as i64 => {
-//RS                 JetVal::List(values[start as usize..end as usize].to_vec())
-//RS             }
-//RS             _ => return None,
-//RS         };
-//RS         let cells = self.int_cells(list);
-//RS         if cells == IntCells::Exact {
-//RS             Self::retain_value_roots(&mut self.exact_roots, &slice);
-//RS         }
-//RS         let id = self.values.len() as i64;
-//RS         self.values.push(slice);
-//RS         self.set_int_cells(id, cells);
-//RS         Some(id)
-//RS     }
-//RS 
-//RS     pub fn clone_int_list(&self, list: i64) -> Option<Vec<i64>> {
-//RS         match self.values.get(list as usize) {
-//RS             Some(JetVal::IntList(values)) => Some(values.clone()),
-//RS             Some(JetVal::List(values)) => {
-//RS                 let mut out = Vec::with_capacity(values.len());
-//RS                 for value in values {
-//RS                     let JetVal::Int(value) = value else {
-//RS                         return None;
-//RS                     };
-//RS                     out.push(*value);
-//RS                 }
-//RS                 Some(out)
-//RS             }
-//RS             Some(JetVal::UninitList {
-//RS                 values,
-//RS                 initialized,
-//RS             }) => {
-//RS                 uninit_semantics::jet_uninit_all(initialized).ok()?;
-//RS                 let mut out = Vec::with_capacity(values.len());
-//RS                 for value in values {
-//RS                     let JetVal::Int(value) = value else {
-//RS                         return None;
-//RS                     };
-//RS                     out.push(*value);
-//RS                 }
-//RS                 Some(out)
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Borrow the dense carrier used by the resident JIT's proven native loop.
-//RS     /// The caller must keep this arena alive and must not mutate this list while
-//RS     /// using the pointer.
-//RS     pub fn int_list_ptr(&self, list: i64) -> Option<*const i64> {
-//RS         match self.values.get(list as usize) {
-//RS             Some(JetVal::IntList(values)) => Some(values.as_ptr()),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn clone_list(&mut self, list: i64) -> Option<i64> {
-//RS         let value = match self.values.get(list as usize) {
-//RS             Some(JetVal::IntList(values)) => JetVal::IntList(values.clone()),
-//RS             Some(JetVal::List(values)) => JetVal::List(values.clone()),
-//RS             Some(JetVal::UninitList {
-//RS                 values,
-//RS                 initialized,
-//RS             }) => JetVal::UninitList {
-//RS                 values: values.clone(),
-//RS                 initialized: initialized.clone(),
-//RS             },
-//RS             _ => return None,
-//RS         };
-//RS         let cells = self.int_cells(list);
-//RS         if cells == IntCells::Exact {
-//RS             Self::retain_value_roots(&mut self.exact_roots, &value);
-//RS         }
-//RS         let id = self.values.len() as i64;
-//RS         self.values.push(value);
-//RS         self.set_int_cells(id, cells);
-//RS         Some(id)
-//RS     }
-//RS 
-//RS     pub fn alloc_record(&mut self, fields: usize) -> i64 {
-//RS         let id = self.values.len() as i64;
-//RS         self.values
-//RS             .push(JetVal::Record(vec![JetVal::Int(0); fields]));
-//RS         id
-//RS     }
-//RS     /// Copy record slots for a descriptor-guided marshalling pass.
-//RS     pub fn clone_record_values(&self, record: i64) -> Option<Vec<JetVal>> {
-//RS         match self.values.get(record as usize)? {
-//RS             JetVal::Record(fields) => Some(fields.clone()),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Allocate a record carrier after all field values were recursively
-//RS     /// materialized by a checked adapter.
-//RS     pub fn alloc_record_values(&mut self, fields: Vec<JetVal>) -> i64 {
-//RS         self.alloc_value(JetVal::Record(fields))
-//RS     }
-//RS 
-//RS     fn record_set(&mut self, record: i64, index: i64, value: JetVal) -> Option<()> {
-//RS         if index < 0 {
-//RS             return None;
-//RS         }
-//RS         let Some(JetVal::Record(fields)) = self.values.get(record as usize) else {
-//RS             return None;
-//RS         };
-//RS         if index as usize >= fields.len() {
-//RS             return None;
-//RS         }
-//RS         Self::retain_value_roots(&mut self.exact_roots, &value);
-//RS         let Some(JetVal::Record(fields)) = self.values.get_mut(record as usize) else {
-//RS             return None;
-//RS         };
-//RS         fields[index as usize] = value;
-//RS         Some(())
-//RS     }
-//RS 
-//RS     pub fn record_get(&self, record: i64, index: i64) -> Option<&JetVal> {
-//RS         if index < 0 {
-//RS             return None;
-//RS         }
-//RS         match self.values.get(record as usize) {
-//RS             Some(JetVal::Record(fields)) => fields.get(index as usize),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn record_len(&self, record: i64) -> Option<i64> {
-//RS         match self.values.get(record as usize) {
-//RS             Some(JetVal::Record(fields)) => i64::try_from(fields.len()).ok(),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Return a typed native address for one record slot.
-//RS     ///
-//RS     /// The address points into the record's inner field allocation, not the
-//RS     /// outer arena `values` element. Growing that arena may relocate the
-//RS     /// record header, but it cannot relocate this inner `Vec<JetVal>` buffer.
-//RS     /// The checked native borrow must not retain the address or replace this
-//RS     /// record slot until its synchronous call returns.
-//RS     pub fn record_field_address(
-//RS         &mut self,
-//RS         record: i64,
-//RS         index: i64,
-//RS         kind: i64,
-//RS     ) -> Option<i64> {
-//RS         let record = usize::try_from(record).ok()?;
-//RS         let index = usize::try_from(index).ok()?;
-//RS         let JetVal::Record(fields) = self.values.get_mut(record)? else {
-//RS             return None;
-//RS         };
-//RS         let field = fields.get_mut(index)?;
-//RS         let address = match kind {
-//RS             RECORD_FIELD_ADDRESS_I64 => match field {
-//RS                 JetVal::Int(value) | JetVal::Word { value, .. } | JetVal::RecordRef(value) => {
-//RS                     value as *mut i64 as *mut u8
-//RS                 }
-//RS                 _ => return None,
-//RS             },
-//RS             RECORD_FIELD_ADDRESS_F64 => match field {
-//RS                 JetVal::Float(value) => value as *mut f64 as *mut u8,
-//RS                 _ => return None,
-//RS             },
-//RS             RECORD_FIELD_ADDRESS_BOOL => match field {
-//RS                 JetVal::Bool(value) => value as *mut bool as *mut u8,
-//RS                 _ => return None,
-//RS             },
-//RS             RECORD_FIELD_ADDRESS_CHAR => match field {
-//RS                 JetVal::Char(value) => value as *mut char as *mut u8,
-//RS                 _ => return None,
-//RS             },
-//RS             _ => return None,
-//RS         };
-//RS         i64::try_from(address as usize).ok()
-//RS     }
-//RS 
-//RS     pub fn record_set_int(&mut self, record: i64, index: i64, value: i64) -> Option<()> {
-//RS         self.record_set(record, index, JetVal::Int(value))
-//RS     }
-//RS 
-//RS     pub fn record_set_word(&mut self, record: i64, index: i64, value: i64, unsigned: bool) -> Option<()> {
-//RS         self.record_set(record, index, JetVal::Word { value, unsigned })
-//RS     }
-//RS 
-//RS     pub fn record_set_float(&mut self, record: i64, index: i64, value: f64) -> Option<()> {
-//RS         self.record_set(record, index, JetVal::Float(value))
-//RS     }
-//RS 
-//RS     pub fn record_set_bool(&mut self, record: i64, index: i64, value: bool) -> Option<()> {
-//RS         self.record_set(record, index, JetVal::Bool(value))
-//RS     }
-//RS 
-//RS     pub fn record_set_char(&mut self, record: i64, index: i64, value: char) -> Option<()> {
-//RS         self.record_set(record, index, JetVal::Char(value))
-//RS     }
-//RS 
-//RS     pub fn record_set_string(&mut self, record: i64, index: i64, value_handle: i64) -> Option<()> {
-//RS         let value = self.clone_string(value_handle)?;
-//RS         self.record_set(record, index, JetVal::String(value))
-//RS     }
-//RS     /// as the interpreter ambient does, and marshals them into THE shared
-//RS     /// Prelude column store for the two reads the layout defines. This is the
-//RS     /// read side of that marshalling: it hands the rows over as cells so the
-//RS     /// host never has to know the arena's private shape, and the store — not an
-//RS     /// engine — owns the layout, the row bookkeeping and the bounds policy (I9).
-//RS     pub fn record_rows(&self, list: i64) -> Option<Vec<Vec<JetVal>>> {
-//RS         let values = match self.values.get(list as usize)? {
-//RS             JetVal::IntList(values) => values.iter().copied().map(JetVal::Int).collect(),
-//RS             JetVal::List(values) => values.clone(),
-//RS             _ => return None,
-//RS         };
-//RS         values
-//RS             .iter()
-//RS             .map(|value| match value {
-//RS                 // A struct element is an arena record reached through its
-//RS                 // handle; `Record` in place is the same row already inline.
-//RS                 JetVal::Int(handle) | JetVal::RecordRef(handle) => {
-//RS                     match self.values.get(*handle as usize) {
-//RS                         Some(JetVal::Record(fields)) => Some(fields.clone()),
-//RS                         _ => None,
-//RS                     }
-//RS                 }
-//RS                 JetVal::Record(fields) => Some(fields.clone()),
-//RS                 _ => None,
-//RS             })
-//RS             .collect()
-//RS     }
-//RS 
-//RS     /// The write side of the same marshalling: one record straight from the
-//RS     /// cells a gather returned. Cell order is column order, which is the slot
-//RS     /// order the tier already lays a record of that struct out in, so the row is
-//RS     /// rebuilt slot-for-slot with no second numbering.
-//RS     pub fn alloc_record_cells(&mut self, cells: Vec<JetVal>) -> i64 {
-//RS         let id = self.values.len() as i64;
-//RS         self.values.push(JetVal::Record(cells));
-//RS         id
-//RS     }
-//RS 
-//RS     pub fn record_get_int(&self, record: i64, index: i64) -> Option<i64> {
-//RS         match self.record_get(record, index) {
-//RS             Some(JetVal::Int(value) | JetVal::Word { value, .. }) => Some(*value),
-//RS             Some(JetVal::RecordRef(value)) => Some(*value),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// A nested record or list handle stored in a record cell. Unlike
-//RS     /// `record_get_int`, a plain integer payload is not a handle, so a cell
-//RS     /// holding `Int` is rejected instead of being read as an arena index.
-//RS     pub fn record_get_record(&self, record: i64, index: i64) -> Option<i64> {
-//RS         match self.record_get(record, index) {
-//RS             Some(JetVal::RecordRef(value)) => Some(*value),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn record_set_record(&mut self, record: i64, index: i64, value_handle: i64) -> Option<()> {
-//RS         self.record_set(record, index, JetVal::RecordRef(value_handle))
-//RS     }
-//RS 
-//RS     pub fn record_assign_from(&mut self, dst: i64, src: i64) -> Option<()> {
-//RS         let src_fields = match self.values.get(src as usize)? {
-//RS             JetVal::Record(fields) => fields.clone(),
-//RS             _ => return None,
-//RS         };
-//RS         match self.values.get_mut(dst as usize)? {
-//RS             JetVal::Record(fields) => {
-//RS                 *fields = src_fields;
-//RS                 Some(())
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn record_get_float(&self, record: i64, index: i64) -> Option<f64> {
-//RS         match self.record_get(record, index) {
-//RS             Some(JetVal::Float(value)) => Some(*value),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn record_get_bool(&self, record: i64, index: i64) -> Option<bool> {
-//RS         match self.record_get(record, index) {
-//RS             Some(JetVal::Bool(value)) => Some(*value),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn record_get_char(&self, record: i64, index: i64) -> Option<char> {
-//RS         match self.record_get(record, index) {
-//RS             Some(JetVal::Char(value)) => Some(*value),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn record_clone_string(&self, record: i64, index: i64) -> Option<String> {
-//RS         match self.record_get(record, index) {
-//RS             Some(JetVal::String(value)) => Some(value.clone()),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn record_get_string(&mut self, record: i64, index: i64) -> Option<i64> {
-//RS         let value = match self.record_get(record, index)? {
-//RS             JetVal::String(value) => value.clone(),
-//RS             _ => return None,
-//RS         };
-//RS         Some(self.alloc_string(value))
-//RS     }
-//RS 
-//RS     // ── D-INTBIG1: packed default `Int` ───────────────────────────────────
-//RS     // Resident values stay inline. Larger values use the Foundation's
-//RS     // immutable exact nodes, which carry ownership and reclaim spilled data
-//RS     // after the final reader releases it.
-//RS     pub const INT_SMALL_MIN: i64 = EXACT_INT_SMALL_MIN;
-//RS     pub const INT_SMALL_MAX: i64 = EXACT_INT_SMALL_MAX;
-//RS 
-//RS     #[inline(always)]
-//RS     fn int_is_tagged(value: i64) -> bool {
-//RS         exact_int_is_tagged(value)
-//RS     }
-//RS 
-//RS     #[inline(always)]
-//RS     fn int_is_small(value: i64) -> bool {
-//RS         (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value)
-//RS     }
-//RS 
-//RS     #[inline(always)]
-//RS     fn int_small_pair(left: i64, right: i64) -> bool {
-//RS         Self::int_is_small(left) & Self::int_is_small(right)
-//RS     }
-//RS 
-//RS     fn int_big_value(&self, value: i64) -> Option<jet_foundation::Numeric::CtBigInt> {
-//RS         exact_int_big_value(value)
-//RS     }
-//RS 
-//RS     fn int_value(&self, value: i64) -> jet_foundation::Numeric::CtBigInt {
-//RS         exact_int_value(value)
-//RS     }
-//RS 
-//RS     fn int_pack(&mut self, value: jet_foundation::Numeric::CtBigInt) -> i64 {
-//RS         self.own_exact(jet_foundation::Numeric::JetInt::from_big(value))
-//RS     }
-//RS 
-//RS     pub fn int_from_i64(&mut self, value: i64) -> i64 {
-//RS         if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value) {
-//RS             value
-//RS         } else {
-//RS             self.own_exact(jet_foundation::Numeric::JetInt::from_i64(value))
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn int_from_u64(&mut self, value: u64) -> i64 {
-//RS         if value <= Self::INT_SMALL_MAX as u64 {
-//RS             value as i64
-//RS         } else {
-//RS             self.own_exact(jet_foundation::Numeric::JetInt::from_big(
-//RS                 jet_foundation::Numeric::CtBigInt::from_u64(value),
-//RS             ))
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn int_from_str(&mut self, value: &str) -> Result<i64, String> {
-//RS         Ok(self.int_pack(jet_foundation::Numeric::CtBigInt::from_str(value)?))
-//RS     }
-//RS 
-//RS     pub fn int_to_i64(&self, value: i64) -> Option<i64> {
-//RS         match self.int_big_value(value) {
-//RS             Some(value) => value.try_i64(),
-//RS             None => Some(value),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn int_to_i128(&self, value: i64) -> Option<i128> {
-//RS         self.int_big_value(value)
-//RS             .map(|value| value.try_i128())
-//RS             .unwrap_or_else(|| Some(i128::from(value)))
-//RS     }
-//RS 
-//RS     pub fn int_is_zero(&self, value: i64) -> bool {
-//RS         if Self::int_is_small(value) {
-//RS             return value == 0;
-//RS         }
-//RS         self.int_big_value(value)
-//RS             .map(|value| value.is_zero())
-//RS             .unwrap_or(value == 0)
-//RS     }
-//RS 
-//RS     pub fn int_is_negative(&self, value: i64) -> bool {
-//RS         if Self::int_is_small(value) {
-//RS             return value < 0;
-//RS         }
-//RS         self.int_big_value(value)
-//RS             .map(|value| value.negative)
-//RS             .unwrap_or(value < 0)
-//RS     }
-//RS 
-//RS     pub fn int_to_string(&self, value: i64) -> String {
-//RS         self.int_big_value(value)
-//RS             .map(|value| value.to_string_rep())
-//RS             .unwrap_or_else(|| value.to_string())
-//RS     }
-//RS 
-//RS     pub fn int_to_f64(&self, value: i64) -> f64 {
-//RS         self.int_to_string(value)
-//RS             .parse::<f64>()
-//RS             .unwrap_or_else(|_| {
-//RS                 if self.int_is_negative(value) {
-//RS                     f64::NEG_INFINITY
-//RS                 } else {
-//RS                     f64::INFINITY
-//RS                 }
-//RS             })
-//RS     }
-//RS 
-//RS     pub fn int_checked_widen(&self, value: i64, target_f32: bool) -> Option<f64> {
-//RS         self.int_value(value).checked_widen(target_f32)
-//RS     }
-//RS 
-//RS     pub fn int_bit_count(&self, value: i64, width: u32, method: &str) -> Option<i64> {
-//RS         if Self::int_is_small(value) && matches!(method, "bit_count" | "bit_length") {
-//RS             let magnitude = value.unsigned_abs();
-//RS             return Some(match method {
-//RS                 "bit_count" => i64::from(magnitude.count_ones()),
-//RS                 "bit_length" => i64::from(64 - magnitude.leading_zeros()),
-//RS                 _ => unreachable!(),
-//RS             });
-//RS         }
-//RS         self.int_value(value).bit_count(width, method)
-//RS     }
-//RS 
-//RS     pub fn int_compare(&self, left: i64, right: i64) -> i64 {
-//RS         if Self::int_is_small(left) && Self::int_is_small(right) {
-//RS             return match left.cmp(&right) {
-//RS                 std::cmp::Ordering::Less => -1,
-//RS                 std::cmp::Ordering::Equal => 0,
-//RS                 std::cmp::Ordering::Greater => 1,
-//RS             };
-//RS         }
-//RS         match self.int_value(left).compare(&self.int_value(right)) {
-//RS             std::cmp::Ordering::Less => -1,
-//RS             std::cmp::Ordering::Equal => 0,
-//RS             std::cmp::Ordering::Greater => 1,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn int_add(&mut self, left: i64, right: i64) -> i64 {
-//RS         if Self::int_is_small(left) && Self::int_is_small(right) {
-//RS             if let Some(value) = left.checked_add(right) {
-//RS                 if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value) {
-//RS                     return value;
-//RS                 }
-//RS             }
-//RS         }
-//RS         self.int_pack(self.int_value(left).add(&self.int_value(right)))
-//RS     }
-//RS 
-//RS     pub fn int_sub(&mut self, left: i64, right: i64) -> i64 {
-//RS         if Self::int_is_small(left) && Self::int_is_small(right) {
-//RS             if let Some(value) = left.checked_sub(right) {
-//RS                 if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value) {
-//RS                     return value;
-//RS                 }
-//RS             }
-//RS         }
-//RS         self.int_pack(self.int_value(left).sub(&self.int_value(right)))
-//RS     }
-//RS 
-//RS     pub fn int_mul(&mut self, left: i64, right: i64) -> i64 {
-//RS         if Self::int_is_small(left) && Self::int_is_small(right) {
-//RS             if let Some(value) = left.checked_mul(right) {
-//RS                 if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value) {
-//RS                     return value;
-//RS                 }
-//RS             }
-//RS         }
-//RS         self.int_pack(self.int_value(left).mul(&self.int_value(right)))
-//RS     }
-//RS 
-//RS     // Two's-complement bit operations on sign-extended small payloads stay
-//RS     // inside the small range, so the fast route needs no result check.
-//RS     pub fn int_bit_and(&mut self, left: i64, right: i64) -> i64 {
-//RS         if Self::int_small_pair(left, right) {
-//RS             return left & right;
-//RS         }
-//RS         let left = self.int_value(left);
-//RS         let right = self.int_value(right);
-//RS         self.int_pack(left.bit_and(&right))
-//RS     }
-//RS 
-//RS     pub fn int_bit_or(&mut self, left: i64, right: i64) -> i64 {
-//RS         if Self::int_small_pair(left, right) {
-//RS             return left | right;
-//RS         }
-//RS         let left = self.int_value(left);
-//RS         let right = self.int_value(right);
-//RS         self.int_pack(left.bit_or(&right))
-//RS     }
-//RS 
-//RS     pub fn int_bit_xor(&mut self, left: i64, right: i64) -> i64 {
-//RS         if Self::int_small_pair(left, right) {
-//RS             return left ^ right;
-//RS         }
-//RS         let left = self.int_value(left);
-//RS         let right = self.int_value(right);
-//RS         self.int_pack(left.bit_xor(&right))
-//RS     }
-//RS 
-//RS     pub fn int_neg(&mut self, value: i64) -> i64 {
-//RS         if Self::int_is_small(value) {
-//RS             if let Some(value) = value.checked_neg() {
-//RS                 if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value) {
-//RS                     return value;
-//RS                 }
-//RS             }
-//RS         }
-//RS         self.int_pack(self.int_value(value).neg())
-//RS     }
-//RS 
-//RS     pub fn int_abs(&mut self, value: i64) -> i64 {
-//RS         if self.int_is_negative(value) {
-//RS             self.int_neg(value)
-//RS         } else if Self::int_is_tagged(value) {
-//RS             // Positive spilled values are borrowed raw carriers. Re-pack them
-//RS             // so the result is rooted independently in this arena.
-//RS             self.int_pack(self.int_value(value))
-//RS         } else {
-//RS             value
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn int_try_from(&self, value: i64, kind: i64) -> Option<i128> {
-//RS         self.int_to_i128(value)
-//RS             .and_then(|value| jet_foundation::NumericConversion::jet_numeric_fixed_from_i128(value, kind))
-//RS     }
-//RS 
-//RS     pub fn int_not(&mut self, value: i64) -> i64 {
-//RS         // `!v == -v - 1` maps the small range onto itself.
-//RS         if Self::int_is_small(value) {
-//RS             return !value;
-//RS         }
-//RS         let negated = self.int_neg(value);
-//RS         let one = self.int_from_i64(1);
-//RS         self.int_sub(negated, one)
-//RS     }
-//RS 
-//RS     pub fn int_shl(&mut self, value: i64, count: i64) -> Option<i64> {
-//RS         if Self::int_is_small(value) && (0..63).contains(&count) {
-//RS             let shifted = value << count;
-//RS             if shifted >> count == value && Self::int_is_small(shifted) {
-//RS                 return Some(shifted);
-//RS             }
-//RS         }
-//RS         let value = self.int_value(value);
-//RS         let count = self.int_value(count);
-//RS         Some(self.int_pack(value.shl(&count)?))
-//RS     }
-//RS 
-//RS     pub fn int_shr(&mut self, value: i64, count: i64) -> Option<i64> {
-//RS         // An arithmetic shift floors toward negative infinity, matching the
-//RS         // exact carrier; a count past the payload width leaves only the sign.
-//RS         if Self::int_is_small(value) && (0..=Self::INT_SMALL_MAX).contains(&count) {
-//RS             return Some(value >> count.min(63));
-//RS         }
-//RS         let value = self.int_value(value);
-//RS         let count = self.int_value(count);
-//RS         Some(self.int_pack(value.shr(&count)?))
-//RS     }
-//RS 
-//RS     pub fn int_div_rem(&mut self, value: i64, divisor: i64) -> Option<(i64, i64)> {
-//RS         if Self::int_small_pair(value, divisor) && divisor != 0 {
-//RS             let quotient = value.wrapping_div(divisor);
-//RS             if Self::int_is_small(quotient) {
-//RS                 return Some((quotient, value.wrapping_rem(divisor)));
-//RS             }
-//RS         }
-//RS         if self.int_is_zero(divisor) {
-//RS             return None;
-//RS         }
-//RS         let (quotient, remainder) = self.int_value(value).div_rem(&self.int_value(divisor))?;
-//RS         Some((self.int_pack(quotient), self.int_pack(remainder)))
-//RS     }
-//RS 
-//RS     pub fn int_div(&mut self, value: i64, divisor: i64) -> Option<i64> {
-//RS         Some(self.int_div_rem(value, divisor)?.0)
-//RS     }
-//RS 
-//RS     pub fn int_rem(&mut self, value: i64, divisor: i64) -> Option<i64> {
-//RS         Some(self.int_div_rem(value, divisor)?.1)
-//RS     }
-//RS 
-//RS     pub fn int_div_rem_euclid(&mut self, value: i64, divisor: i64) -> Option<(i64, i64)> {
-//RS         if Self::int_small_pair(value, divisor) && divisor != 0 {
-//RS             let quotient = value.wrapping_div_euclid(divisor);
-//RS             if Self::int_is_small(quotient) {
-//RS                 return Some((quotient, value.wrapping_rem_euclid(divisor)));
-//RS             }
-//RS         }
-//RS         let (quotient, remainder) = self
-//RS             .int_value(value)
-//RS             .div_rem_euclid(&self.int_value(divisor))?;
-//RS         Some((self.int_pack(quotient), self.int_pack(remainder)))
-//RS     }
-//RS 
-//RS     pub fn int_div_euclid(&mut self, value: i64, divisor: i64) -> Option<i64> {
-//RS         Some(self.int_div_rem_euclid(value, divisor)?.0)
-//RS     }
-//RS 
-//RS     pub fn int_rem_euclid(&mut self, value: i64, divisor: i64) -> Option<i64> {
-//RS         Some(self.int_div_rem_euclid(value, divisor)?.1)
-//RS     }
-//RS 
-//RS     pub fn int_floor_div(&mut self, value: i64, divisor: i64) -> Option<i64> {
-//RS         let (quotient, remainder) = self.int_div_rem(value, divisor)?;
-//RS         if !self.int_is_zero(remainder)
-//RS             && self.int_is_negative(value) != self.int_is_negative(divisor)
-//RS         {
-//RS             let one = self.int_from_i64(1);
-//RS             Some(self.int_sub(quotient, one))
-//RS         } else {
-//RS             Some(quotient)
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn int_mod(&mut self, value: i64, divisor: i64) -> Option<i64> {
-//RS         let (quotient, remainder) = self.int_div_rem(value, divisor)?;
-//RS         if !self.int_is_zero(remainder)
-//RS             && self.int_is_negative(value) != self.int_is_negative(divisor)
-//RS         {
-//RS             Some(self.int_add(remainder, divisor))
-//RS         } else {
-//RS             let _ = quotient;
-//RS             Some(remainder)
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn int_pow(&mut self, value: i64, exponent: i64) -> Option<i64> {
-//RS         self.int_value(value)
-//RS             .pow(&self.int_value(exponent))
-//RS             .map(|result| self.int_pack(result))
-//RS     }
-//RS 
-//RS     pub fn int_factorial(&mut self, value: i64) -> Option<i64> {
-//RS         if self.int_is_negative(value) {
-//RS             return None;
-//RS         }
-//RS         let mut current = self.int_from_i64(2);
-//RS         let mut result = self.int_from_i64(1);
-//RS         while self.int_compare(current, value) <= 0 {
-//RS             result = self.int_mul(result, current);
-//RS             let one = self.int_from_i64(1);
-//RS             current = self.int_add(current, one);
-//RS         }
-//RS         Some(result)
-//RS     }
-//RS 
-//RS     pub fn int_is_even(&self, value: i64) -> bool {
-//RS         self.int_value(value).is_even()
-//RS     }
-//RS 
-//RS     pub fn int_is_odd(&self, value: i64) -> bool {
-//RS         self.int_value(value).is_odd()
-//RS     }
-//RS 
-//RS     pub fn int_isqrt(&mut self, value: i64) -> Option<i64> {
-//RS         self.int_value(value)
-//RS             .isqrt()
-//RS             .map(|result| self.int_pack(result))
-//RS     }
-//RS 
-//RS     pub fn int_binomial(&mut self, n: i64, k: i64) -> Option<i64> {
-//RS         let n = self.int_value(n);
-//RS         let k = self.int_value(k);
-//RS         jet_foundation::Numeric::CtBigInt::binomial(&n, &k).map(|result| self.int_pack(result))
-//RS     }
-//RS 
-//RS     pub fn int_digits(&self, value: i64) -> i64 {
-//RS         self.int_value(value).digits()
-//RS     }
-//RS 
-//RS     pub fn int_leading_ones(&self, value: i64) -> i64 {
-//RS         self.int_value(value).leading_ones()
-//RS     }
-//RS 
-//RS     pub fn int_trailing_ones(&self, value: i64) -> i64 {
-//RS         self.int_value(value).trailing_ones()
-//RS     }
-//RS 
-//RS     pub fn int_checked_abs(&mut self, value: i64) -> Option<i64> {
-//RS         Some(self.int_abs(value))
-//RS     }
-//RS 
-//RS     pub fn int_checked_neg(&mut self, value: i64) -> Option<i64> {
-//RS         Some(self.int_neg(value))
-//RS     }
-//RS 
-//RS     pub fn int_checked_add(&mut self, left: i64, right: i64) -> Option<i64> {
-//RS         Some(self.int_add(left, right))
-//RS     }
-//RS 
-//RS     pub fn int_checked_sub(&mut self, left: i64, right: i64) -> Option<i64> {
-//RS         Some(self.int_sub(left, right))
-//RS     }
-//RS 
-//RS     pub fn int_checked_mul(&mut self, left: i64, right: i64) -> Option<i64> {
-//RS         Some(self.int_mul(left, right))
-//RS     }
-//RS 
-//RS     pub fn int_checked_div(&mut self, left: i64, right: i64) -> Option<i64> {
-//RS         self.int_div(left, right)
-//RS     }
-//RS 
-//RS     pub fn int_checked_rem(&mut self, left: i64, right: i64) -> Option<i64> {
-//RS         self.int_rem(left, right)
-//RS     }
-//RS 
-//RS     pub fn int_checked_pow(&mut self, left: i64, right: i64) -> Option<i64> {
-//RS         self.int_pow(left, right)
-//RS     }
-//RS 
-//RS     pub fn int_saturating_add(&mut self, left: i64, right: i64) -> i64 {
-//RS         self.int_add(left, right)
-//RS     }
-//RS 
-//RS     pub fn int_saturating_sub(&mut self, left: i64, right: i64) -> i64 {
-//RS         self.int_sub(left, right)
-//RS     }
-//RS 
-//RS     pub fn int_saturating_mul(&mut self, left: i64, right: i64) -> i64 {
-//RS         self.int_mul(left, right)
-//RS     }
-//RS 
-//RS     pub fn int_int_pow(&mut self, left: i64, right: i64) -> i64 {
-//RS         self.int_pow(left, right)
-//RS             .unwrap_or_else(|| self.int_from_i64(0))
-//RS     }
-//RS 
-//RS     pub fn int_gcd(&mut self, left: i64, right: i64) -> i64 {
-//RS         let left = self.int_value(left);
-//RS         let right = self.int_value(right);
-//RS         self.int_pack(jet_foundation::Numeric::CtBigInt::gcd(&left, &right))
-//RS     }
-//RS 
-//RS     pub fn int_lcm(&mut self, left: i64, right: i64) -> i64 {
-//RS         let left = self.int_value(left);
-//RS         let right = self.int_value(right);
-//RS         self.int_pack(jet_foundation::Numeric::CtBigInt::lcm(&left, &right))
-//RS     }
-//RS 
-//RS     pub fn int_div_mod(&mut self, value: i64, divisor: i64) -> Option<(i64, i64)> {
-//RS         let (quotient, remainder) = self.int_div_rem(value, divisor)?;
-//RS         if !self.int_is_zero(remainder)
-//RS             && self.int_is_negative(value) != self.int_is_negative(divisor)
-//RS         {
-//RS             let one = self.int_from_i64(1);
-//RS             let quotient = self.int_sub(quotient, one);
-//RS             let remainder = self.int_add(remainder, divisor);
-//RS             Some((quotient, remainder))
-//RS         } else {
-//RS             Some((quotient, remainder))
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn record_word_cells_never_retain_exact_integer_tags() {
-//RS         let mut arena = JetArena::default();
-//RS         let record = arena.alloc_record(3);
-//RS         let words = [7299585414513572552, i64::MIN, -1];
-//RS         for (index, word) in words.into_iter().enumerate() {
-//RS             arena.record_set_word(record, index as i64, word, true).unwrap();
-//RS         }
-//RS         let copy = arena.alloc_record_values(arena.clone_record_values(record).unwrap());
-//RS         for (index, word) in words.into_iter().enumerate() {
-//RS             assert_eq!(arena.record_get_int(copy, index as i64), Some(word));
-//RS         }
-//RS         assert!(arena.exact_roots.is_empty());
-//RS         assert!(arena.record_get_record(copy, 0).is_none());
-//RS         assert_eq!(
-//RS             arena.composite_key(copy),
-//RS             Some(JetMapKey::Record(words.into_iter().map(|value| JetMapKey::UInt(value as u64)).collect()))
-//RS         );
-//RS         let signed = arena.alloc_record(1);
-//RS         arena.record_set_word(signed, 0, i64::MIN, false).unwrap();
-//RS         assert_eq!(arena.composite_key(signed), Some(JetMapKey::Record(vec![JetMapKey::Int(i64::MIN)])));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn record_exact_cells_still_retain_spilled_owners() {
-//RS         let mut arena = JetArena::default();
-//RS         let record = arena.alloc_record(1);
-//RS         let spilled = arena.int_add(JetArena::INT_SMALL_MAX, 1);
-//RS         let before = arena.exact_roots.len();
-//RS         arena.record_set_int(record, 0, spilled).unwrap();
-//RS         assert_eq!(arena.exact_roots.len(), before + 1);
-//RS         assert_eq!(arena.int_compare(arena.record_get_int(record, 0).unwrap(), spilled), 0);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn display_matches_aot_float_prelude() {
-//RS         assert_eq!(display_f32(1.0), "1.0");
-//RS         assert_eq!(display_f64(-5.0), "-5.0");
-//RS         assert_eq!(display_f64(2.5), "2.5");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn exact_int_small_path_and_spill_boundary() {
-//RS         let mut arena = JetArena::default();
-//RS 
-//RS         let inline = arena.int_add(JetArena::INT_SMALL_MAX - 1, 1);
-//RS         assert_eq!(inline, JetArena::INT_SMALL_MAX);
-//RS 
-//RS         let positive_spill = arena.int_add(JetArena::INT_SMALL_MAX, 1);
-//RS         assert_eq!(
-//RS             exact_int_big_value(positive_spill)
-//RS                 .expect("large exact value must be in the shared store")
-//RS                 .to_string_rep(),
-//RS             "4611686018427387904"
-//RS         );
-//RS 
-//RS         let negative_spill = arena.int_sub(JetArena::INT_SMALL_MIN, 1);
-//RS         assert_eq!(
-//RS             exact_int_big_value(negative_spill)
-//RS                 .expect("large exact value must be in the shared store")
-//RS                 .to_string_rep(),
-//RS             "-4611686018427387905"
-//RS         );
-//RS         assert_eq!(arena.int_compare(positive_spill, positive_spill), 0);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn string_helpers_match_prelude_semantics() {
-//RS         assert_eq!(string_len_chars("aé日"), 3);
-//RS         assert_eq!(string_trim("  jet\n"), "jet");
-//RS         assert_eq!(string_to_upper("Jet"), "JET");
-//RS         assert_eq!(string_to_lower("Jet"), "jet");
-//RS         // Unicode 17 introduced this pair; casing follows the pinned UCD, not host data.
-//RS         assert_eq!(string_to_lower("\u{A7CE}"), "\u{A7CF}");
-//RS         assert_eq!(string_to_upper("\u{A7CF}"), "\u{A7CE}");
-//RS         assert_eq!(string_trim("\u{2003}jet\u{2003}"), "jet");
-//RS         assert_eq!(string_replace("one two one", "one", "1"), "1 two 1");
-//RS         assert_eq!(string_after("nate@jet-lang.dev", "@"), "jet-lang.dev");
-//RS         assert_eq!(string_before("nate@jet-lang.dev", "@"), "nate");
-//RS         assert_eq!(string_after("no-at-sign", "@"), "no-at-sign");
-//RS         assert_eq!(string_before("no-at-sign", "@"), "no-at-sign");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn arena_allocates_string_handles() {
-//RS         let mut arena = JetArena::default();
-//RS         let first = arena.alloc_empty_string();
-//RS         let second = arena.alloc_string("jet");
-//RS 
-//RS         arena.get_string_mut(first).unwrap().push_str("dev");
-//RS 
-//RS         assert_eq!(first, 0);
-//RS         assert_eq!(second, 1);
-//RS         assert_eq!(arena.get_string(first), Some("dev"));
-//RS         assert_eq!(arena.clone_string(second), Some("jet".to_string()));
-//RS 
-//RS         arena.clear();
-//RS         assert_eq!(arena.get_string(first), None);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn arena_allocates_int_lists() {
-//RS         let mut arena = JetArena::default();
-//RS         let list = arena.alloc_int_list(vec![3, 1, 2]);
-//RS 
-//RS         arena.list_push_int(list, 4).unwrap();
-//RS         arena.list_sort_int(list).unwrap();
-//RS         assert_eq!(arena.list_len(list), Some(4));
-//RS         assert_eq!(arena.list_get_int(list, 2), Some(3));
-//RS         arena.list_set_int(list, 2, 9).unwrap();
-//RS         assert_eq!(arena.clone_int_list(list), Some(vec![1, 2, 9, 4]));
-//RS         assert_eq!(arena.int_list_slice(list), Some(&[1, 2, 9, 4][..]));
-//RS 
-//RS         let slice = arena.list_slice(list, 1, 3).unwrap();
-//RS         assert_eq!(arena.clone_int_list(slice), Some(vec![2, 9]));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn arena_allocates_float_lists() {
-//RS         let mut arena = JetArena::default();
-//RS         let list = arena.alloc_empty_list();
-//RS 
-//RS         arena.list_push_float(list, 1.5).unwrap();
-//RS         arena.list_push_float(list, 2.5).unwrap();
-//RS         assert_eq!(arena.list_get_float(list, 1), Some(2.5));
-//RS         arena.list_set_float(list, 1, 4.5).unwrap();
-//RS         assert_eq!(arena.list_get_float(list, 1), Some(4.5));
-//RS 
-//RS         let slice = arena.list_slice(list, 0, 1).unwrap();
-//RS         assert_eq!(arena.list_get_float(slice, 0), Some(1.5));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn arena_stores_ranges_inline_in_lists() {
-//RS         let mut arena = JetArena::default();
-//RS         let list = arena.alloc_empty_list();
-//RS 
-//RS         arena.list_push_range(list, 2, 5, true).unwrap();
-//RS 
-//RS         assert_eq!(arena.list_get_range(list, 0), Some((2, 5, true)));
-//RS         assert_eq!(
-//RS             arena.values.len(),
-//RS             1,
-//RS             "a Range list element must not allocate an arena record"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn arena_allocates_records() {
-//RS         let mut arena = JetArena::default();
-//RS         let name = arena.alloc_string("jet");
-//RS         let record = arena.alloc_record(4);
-//RS 
-//RS         arena.record_set_string(record, 0, name).unwrap();
-//RS         arena.record_set_float(record, 1, 2.5).unwrap();
-//RS         arena.record_set_bool(record, 2, true).unwrap();
-//RS         arena.record_set_char(record, 3, 'J').unwrap();
-//RS 
-//RS         let cloned_name = arena.record_get_string(record, 0).unwrap();
-//RS         assert_eq!(arena.get_string(cloned_name), Some("jet"));
-//RS         assert_eq!(arena.record_get_float(record, 1), Some(2.5));
-//RS         assert_eq!(arena.record_get_bool(record, 2), Some(true));
-//RS         assert_eq!(arena.record_get_char(record, 3), Some('J'));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn record_field_borrows_survive_arena_growth() {
-//RS         let mut arena = JetArena::default();
-//RS         let record = arena.alloc_record(4);
-//RS         arena.record_set_int(record, 0, 10).unwrap();
-//RS         arena.record_set_float(record, 1, 2.5).unwrap();
-//RS         arena.record_set_bool(record, 2, false).unwrap();
-//RS         arena.record_set_char(record, 3, 'a').unwrap();
-//RS         let kinds = [
-//RS             RECORD_FIELD_ADDRESS_I64,
-//RS             RECORD_FIELD_ADDRESS_F64,
-//RS             RECORD_FIELD_ADDRESS_BOOL,
-//RS             RECORD_FIELD_ADDRESS_CHAR,
-//RS         ];
-//RS         let addresses: [i64; 4] = std::array::from_fn(|index| {
-//RS             arena.record_field_address(record, index as i64, kinds[index]).unwrap()
-//RS         });
-//RS 
-//RS         // Allocate the new arena while the old allocation is still live, so
-//RS         // moving the record headers cannot accidentally reuse their addresses.
-//RS         let replacement = Vec::with_capacity(arena.values.capacity() + 1);
-//RS         let original = std::mem::replace(&mut arena.values, replacement);
-//RS         arena.values.extend(original);
-//RS         for (index, address) in addresses.iter().enumerate() {
-//RS             assert_eq!(
-//RS                 arena.record_field_address(record, index as i64, kinds[index]),
-//RS                 Some(*address),
-//RS             );
-//RS         }
-//RS         // SAFETY: the typed borrows above still own their unchanged field
-//RS         // slots, as checked after moving the outer arena. No slot is replaced.
-//RS         unsafe {
-//RS             *(addresses[0] as usize as *mut i64) = 41;
-//RS             *(addresses[1] as usize as *mut f64) = 3.5;
-//RS             *(addresses[2] as usize as *mut bool) = true;
-//RS             *(addresses[3] as usize as *mut char) = 'z';
-//RS         }
-//RS         assert_eq!(arena.record_get_int(record, 0), Some(41));
-//RS         assert_eq!(arena.record_get_float(record, 1), Some(3.5));
-//RS         assert_eq!(arena.record_get_bool(record, 2), Some(true));
-//RS         assert_eq!(arena.record_get_char(record, 3), Some('z'));
-//RS         assert_eq!(arena.record_field_address(record, 0, RECORD_FIELD_ADDRESS_F64), None);
-//RS         assert_eq!(arena.record_field_address(record, 4, RECORD_FIELD_ADDRESS_I64), None);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn string_views_borrow_owned_storage_and_validate_bounds() {
-//RS         let mut arena = JetArena::default();
-//RS         let owner = arena.alloc_string("αbeta");
-//RS         let view = arena.alloc_string_view(owner, 2, 6).unwrap();
-//RS         let nested = arena.alloc_string_view(view, 1, 4).unwrap();
-//RS         assert_eq!(arena.get_string(view), Some("beta"));
-//RS         assert_eq!(arena.get_string(nested), Some("eta"));
-//RS         assert_eq!(arena.string_slots(), vec![(0, "αbeta".to_string())]);
-//RS         assert_eq!(arena.alloc_string_view(owner, 1, 3), None);
-//RS         assert_eq!(arena.alloc_string_view(999, 0, 0), None);
-//RS     }
-//RS }
-// END-PORT-PENDING 0246 crates/jet-rt/src/lib.rs:1-2196
+use jet_foundation.Numeric.[CtBigInt, JetInt]
+use jet_foundation.Outcome.[AllocError]
+use jet_foundation.NumericConversion.[jet_numeric_fixed_from_i128]
+use jet_foundation.generated.UnicodeString.[jet_unicode_trim, jet_unicode_upper, jet_unicode_lower]
+use jet_codegen.Prelude.Core.MapKey.[JetMapKey, jet_map_key_cmp]
+use jet_codegen.Prelude.Uninit as uninit_semantics
+use jet_foundation.MemSentry.[jet_memory_ledger_record, MemoryLedgerWitness]
+use core.mem as mem
+use core.mem.runtime.gc as __gc
+use std.process.[abort]
 
+// Rust: crates/jet-rt/src/lib.rs:5
+pub RECORD_FIELD_ADDRESS_I64 :: I64{0}
+// Rust: crates/jet-rt/src/lib.rs:6
+pub RECORD_FIELD_ADDRESS_F64 :: I64{1}
+// Rust: crates/jet-rt/src/lib.rs:7
+pub RECORD_FIELD_ADDRESS_BOOL :: I64{2}
+// Rust: crates/jet-rt/src/lib.rs:8
+pub RECORD_FIELD_ADDRESS_CHAR :: I64{3}
+// Rust: crates/jet-rt/src/lib.rs:17
+pub EXACT_INT_SMALL_MIN :: prep { JetInt.inline_min() }
+// Rust: crates/jet-rt/src/lib.rs:18
+pub EXACT_INT_SMALL_MAX :: prep { JetInt.inline_max() }
+
+// Rust: crates/jet-rt/src/lib.rs:21
+pub fn exact_int_is_tagged(value: I64) -> Bool {
+    if value >= EXACT_INT_SMALL_MIN and value <= EXACT_INT_SMALL_MAX -> return false
+    // GATE #4494: non-dropping borrowed view of an owned raw exact carrier.
+    #Unsafe("classify a borrowed carrier without releasing its owner") {
+        word :: mem.ManuallyDrop.new(JetInt.from_raw_owned(value))
+        not word.is_inline()
+    }
+}
+// Rust: crates/jet-rt/src/lib.rs:33
+pub fn exact_int_big_value(value: I64) -> CtBigInt? {
+    if not exact_int_is_tagged(value) -> return None
+    #Unsafe("clone a borrowed spilled exact carrier") { Val(JetInt.clone_from_raw(value).to_big()) }
+}
+// Rust: crates/jet-rt/src/lib.rs:43
+pub fn exact_int_value(value: I64) -> CtBigInt {
+    exact_int_big_value(value).unwrap_or_else(|| -> CtBigInt.from_int(value))
+}
+// Rust: crates/jet-rt/src/lib.rs:47
+pub fn exact_int_pack(value: CtBigInt) -> I64 { JetInt.from_big(^value).into_raw() }
+// Rust: crates/jet-rt/src/lib.rs:51
+pub fn exact_int_add(left: I64, right: I64) -> I64 {
+    #Unsafe("retain both borrowed raw operands") {
+        l :: JetInt.clone_from_raw(left)
+        r :: JetInt.clone_from_raw(right)
+        // GATE #4494: process abort on allocation failure.
+        l.add(&r).unwrap_or_else(|_| -> abort()).into_raw()
+    }
+}
+// Rust: crates/jet-rt/src/lib.rs:59
+pub fn exact_int_try_new(value: I64) -> I64 AllocError! {
+    JetInt.try_from_i64(value)?.into_raw()
+}
+// Rust: crates/jet-rt/src/lib.rs:63
+pub fn exact_int_try_add(left: I64, right: I64) -> I64 AllocError! {
+    #Unsafe("retain borrowed operands for fallible exact addition") {
+        l :: JetInt.clone_from_raw(left)
+        r :: JetInt.clone_from_raw(right)
+        l.try_add(&r)?.into_raw()
+    }
+}
+// Rust: crates/jet-rt/src/lib.rs:72
+pub fn exact_int_compare(left: I64, right: I64) -> I64 {
+    #Unsafe("retain borrowed operands while comparing") {
+        l :: JetInt.clone_from_raw(left)
+        r :: JetInt.clone_from_raw(right)
+        match l.compare(&r) { .Less -> I64{-1}, .Equal -> I64{0}, .Greater -> I64{1} }
+    }
+}
+// Rust: crates/jet-rt/src/lib.rs:82
+pub fn exact_int_to_string(value: I64) -> String {
+    #Unsafe("retain borrowed carrier while formatting") { JetInt.clone_from_raw(value).to_string_rep() }
+}
+// Rust: crates/jet-rt/src/lib.rs:103
+fn exact_int_map_key(raw: I64) -> JetMapKey {
+    value :: #Unsafe("retain borrowed exact map key") { JetInt.clone_from_raw(raw) }
+    if value.is_inline() -> return .Int(raw)
+    big := value.to_big()
+    if big.try_i64() is Val(small) -> return .Int(small)
+    limbs := ^big.limbs
+    loop limbs.last() == Val(U32{0}) { _ :: &limbs.pop() }
+    .BigInt{negative: big.negative, limbs: ^limbs}
+}
+// Rust: crates/jet-rt/src/lib.rs:135
+pub fn display_f32(v: F32) -> String { v.debug() }
+// Rust: crates/jet-rt/src/lib.rs:139
+pub fn display_f64(v: F64) -> String { v.debug() }
+// Rust: crates/jet-rt/src/lib.rs:143
+pub fn string_len_chars(s: String) -> I64 { I64{s.chars().count()} }
+// Rust: crates/jet-rt/src/lib.rs:147
+pub fn string_trim(s: String) -> String { jet_unicode_trim(s) }
+// Rust: crates/jet-rt/src/lib.rs:151
+pub fn string_to_upper(s: String) -> String { jet_unicode_upper(s) }
+// Rust: crates/jet-rt/src/lib.rs:155
+pub fn string_to_lower(s: String) -> String { jet_unicode_lower(s) }
+// Rust: crates/jet-rt/src/lib.rs:159
+pub fn string_replace(s: String, from: String, to: String) -> String { s.replace(from, to) }
+// Rust: crates/jet-rt/src/lib.rs:163
+pub fn string_after(s: String, sep: String) -> String {
+    match s.find(sep) { Val(i) -> s[i + sep.len()..].to_string(), None -> s.to_string() }
+}
+// Rust: crates/jet-rt/src/lib.rs:170
+pub fn string_before(s: String, sep: String) -> String {
+    match s.find(sep) { Val(i) -> s[..i].to_string(), None -> s.to_string() }
+}
+
+// Rust: crates/jet-rt/src/lib.rs:178
+#Derive(Clone, Debug, PartialEq)
+pub enum JetVal {
+    UninitList{values: [JetVal], initialized: [Bool]}
+    Int(I64)
+    Word{value: I64, unsigned: Bool}
+    Float(F64)
+    Bool(Bool)
+    Char(Char)
+    String(String)
+    StringView{owner: I64, start: USize, end: USize}
+    IntList([I64])
+    List([JetVal])
+    Range{start: I64, end: I64, exclusive: Bool}
+    Map([JetMapKey:(I64, I64)])
+    Record([JetVal])
+    RecordRef(I64)
+    ExactInt(CtBigInt)
+}
+// Rust: crates/jet-rt/src/lib.rs:228
+#Derive(Clone, Copy, Debug, PartialEq, Eq)
+pub enum IntCells { Exact, Word{unsigned: Bool} }
+impl IntCells { fn default() -> IntCells { .Exact } }
+// Rust: crates/jet-rt/src/lib.rs:235
+#Derive(Clone, Debug)
+pub struct JetArena {
+    values: [JetVal]
+    exact_roots: [JetInt]
+    int_cells: [IntCells]
+}
+impl JetArena {
+    // Rust: crates/jet-rt/src/lib.rs:246
+    pub fn default() -> JetArena { JetArena{values: [], exact_roots: [], int_cells: []} }
+    // Rust: crates/jet-rt/src/lib.rs:257
+    fn retain_exact_raw(roots: &[JetInt], raw: I64) -> {
+        owner :: #Unsafe("only tagged exact words carry a pointer; ordinary handles are inline") { JetInt.clone_from_raw(raw) }
+        if not owner.is_inline() { &roots.push(^owner) }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:266
+    fn retain_value_roots(roots: &[JetInt], value: JetVal) -> {
+        match value {
+            .Int(raw) -> JetArena.retain_exact_raw(&roots, raw)
+            .IntList(values) -> { loop raw in values { JetArena.retain_exact_raw(&roots, raw) } }
+            .List(values) | .Record(values) | .UninitList{values, ..} -> {
+                loop child in values { JetArena.retain_value_roots(&roots, child) }
+            }
+            .Range{start, end, ..} -> {
+                JetArena.retain_exact_raw(&roots, start)
+                JetArena.retain_exact_raw(&roots, end)
+            }
+            .Map(entries) -> {
+                loop pair in entries.values() {
+                    JetArena.retain_exact_raw(&roots, pair.0)
+                    JetArena.retain_exact_raw(&roots, pair.1)
+                }
+            }
+            .Float(_) | .Word{..} | .Bool(_) | .Char(_) | .String(_) | .StringView{..} | .RecordRef(_) | .ExactInt(_) -> {}
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:309
+    fn own_exact(self: &JetArena, value: JetInt) -> I64 {
+        raw :: value.to_raw()
+        if not value.is_inline() { &self.exact_roots.push(^value) }
+        raw
+    }
+    // Rust: crates/jet-rt/src/lib.rs:316
+    pub fn alloc_empty_string(self: &JetArena) -> I64 { self.alloc_string("") }
+    // Rust: crates/jet-rt/src/lib.rs:320
+    pub fn alloc_string(self: &JetArena, text: String) -> I64 {
+        id :: I64{self.values.len()}
+        &self.values.push(.String(^text))
+        id
+    }
+    // Rust: crates/jet-rt/src/lib.rs:328
+    pub fn alloc_value(self: &JetArena, value: JetVal) -> I64 {
+        JetArena.retain_value_roots(&self.exact_roots, value)
+        id :: I64{self.values.len()}
+        &self.values.push(^value)
+        id
+    }
+    // Rust: crates/jet-rt/src/lib.rs:335
+    pub fn clone_value(self, id: I64) -> JetVal? { self.values.get(USize{id}).map(|v| -> v.clone()) }
+    // Rust: crates/jet-rt/src/lib.rs:339
+    pub fn get_string(self, id: I64) -> StringView? {
+        match self.values.get(USize{id}) {
+            Val(.String(value)) -> Val(value.as_str())
+            Val(.StringView{owner, start, end}) -> {
+                match self.values.get(USize{owner}) {
+                    Val(.String(value)) -> value.get(start..end)
+                    _ -> None
+                }
+            }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:352
+    pub fn clone_string(self, id: I64) -> String? { self.get_string(id).map(|s| -> s.to_string()) }
+    // Rust: crates/jet-rt/src/lib.rs:356
+    pub fn alloc_string_view(self: &JetArena, owner: I64, start: USize, end: USize) -> I64? {
+        (owner, base, len) :: match self.values.get(USize{owner})? {
+            .String(value) -> (owner, USize{0}, USize{value.len()})
+            .StringView{owner, start, end} -> (owner, start, end.checked_sub(start)?)
+            _ -> return None
+        }
+        if start > end or end > len -> return None
+        start :: base.checked_add(start)?
+        end :: base.checked_add(end)?
+        match self.values.get(USize{owner})? {
+            .String(value) -> { _ :: value.get(start..end)? }
+            _ -> return None
+        }
+        id :: I64{self.values.len()}
+        &self.values.push(.StringView{owner: owner, start: start, end: end})
+        Val(id)
+    }
+    // Rust: crates/jet-rt/src/lib.rs:376
+    pub fn get_string_mut(self: &JetArena, id: I64) -> (&String)? {
+        match self.values.get_mut(USize{id}) { Val(.String(value)) -> Val(&value), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:383
+    pub fn clear(self: &JetArena) -> {
+        &self.values.clear()
+        &self.exact_roots.clear()
+        &self.int_cells.clear()
+    }
+    // Rust: crates/jet-rt/src/lib.rs:390
+    pub fn string_slots(self) -> [(USize, String)] {
+        out := [(USize, String)]{}
+        loop (i, value) in self.values.iter().enumerate() {
+            if value is .String(text) { &out.push((USize{i}, text.clone())) }
+        }
+        out
+    }
+    // Rust: crates/jet-rt/src/lib.rs:402
+    pub fn has_non_string_state(self) -> Bool {
+        not self.exact_roots.is_empty() or self.values.iter().any(|v| -> not (v is .String(_)))
+    }
+    // Rust: crates/jet-rt/src/lib.rs:408
+    pub fn install_string_slots(self: &JetArena, slots: [(USize, String)]) -> {
+        if slots.is_empty() -> return
+        max :: slots.iter().map(|p| -> p.0).max().unwrap_or(USize{0})
+        loop self.values.len() <= max { &self.values.push(.Int(I64{0})) }
+        loop (i, text) in slots { self.values[i] = .String(text.clone()) }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:421
+    pub fn list_value(self, list: I64) -> JetVal? {
+        value :: self.values.get(USize{list})?
+        match value {
+            .IntList(_) | .List(_) -> Val(value)
+            .UninitList{initialized, ..} -> { _ :: uninit_semantics.jet_uninit_all(initialized).ok()?; Val(value) }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:435
+    pub fn clone_list_values(self, list: I64) -> [JetVal]? {
+        match self.values.get(USize{list})? {
+            .IntList(values) -> Val(values.iter().map(|v| -> JetVal.Int(v)).collect())
+            .List(values) -> Val(values.clone())
+            .UninitList{values, initialized} -> {
+                _ :: uninit_semantics.jet_uninit_all(initialized).ok()?
+                Val(values.clone())
+            }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:452
+    pub fn alloc_list_values(self: &JetArena, values: [JetVal]) -> I64 { self.alloc_value(.List(^values)) }
+    // Rust: crates/jet-rt/src/lib.rs:456
+    pub fn alloc_int_list(self: &JetArena, values: [I64]) -> I64 {
+        loop raw in values { JetArena.retain_exact_raw(&self.exact_roots, raw) }
+        id :: I64{self.values.len()}
+        &self.values.push(.IntList(^values))
+        id
+    }
+    // Rust: crates/jet-rt/src/lib.rs:465
+    pub fn alloc_empty_list(self: &JetArena) -> I64 {
+        id :: I64{self.values.len()}
+        &self.values.push(.List([]))
+        id
+    }
+    // Rust: crates/jet-rt/src/lib.rs:473
+    pub fn alloc_word_list(self: &JetArena, unsigned: Bool) -> I64 {
+        id :: self.alloc_empty_list()
+        self.set_int_cells(id, .Word{unsigned: unsigned})
+        id
+    }
+    // Rust: crates/jet-rt/src/lib.rs:481
+    pub fn alloc_int_list_like(self: &JetArena, source: I64, values: [I64]) -> I64 {
+        cells :: self.int_cells(source)
+        if cells == .Exact -> return self.alloc_int_list(^values)
+        id :: I64{self.values.len()}
+        &self.values.push(.IntList(^values))
+        self.set_int_cells(id, cells)
+        id
+    }
+    // Rust: crates/jet-rt/src/lib.rs:492
+    pub fn int_cells(self, list: I64) -> IntCells {
+        if list < I64{0} -> return .Exact
+        self.int_cells.get(USize{list}).copied().unwrap_or(.Exact)
+    }
+    // Rust: crates/jet-rt/src/lib.rs:500
+    fn set_int_cells(self: &JetArena, list: I64, cells: IntCells) -> {
+        if cells == .Exact -> return
+        index :: USize{list}
+        if self.int_cells.len() <= index { &self.int_cells.resize(index + 1, .Exact) }
+        self.int_cells[index] = cells
+    }
+    // Rust: crates/jet-rt/src/lib.rs:511
+    pub fn alloc_uninit_list(self: &JetArena, len: USize) -> I64 {
+        id :: I64{self.values.len()}
+        &self.values.push(.UninitList{values: [JetVal.Int(I64{0}); len], initialized: uninit_semantics.jet_uninit_bitmap(len)})
+        id
+    }
+    // Rust: crates/jet-rt/src/lib.rs:522
+    pub fn alloc_uninit_word_list(self: &JetArena, len: USize, unsigned: Bool) -> I64 {
+        id :: self.alloc_uninit_list(len)
+        self.set_int_cells(id, .Word{unsigned: unsigned})
+        id
+    }
+    // Rust: crates/jet-rt/src/lib.rs:530
+    pub fn alloc_list_values_like(self: &JetArena, source: I64, values: [JetVal]) -> I64 {
+        cells :: self.int_cells(source)
+        if cells == .Exact -> return self.alloc_list_values(^values)
+        id :: I64{self.values.len()}
+        &self.values.push(.List(^values))
+        self.set_int_cells(id, cells)
+        id
+    }
+    // Rust: crates/jet-rt/src/lib.rs:541
+    pub fn alloc_empty_map(self: &JetArena) -> I64 {
+        id :: I64{self.values.len()}
+        &self.values.push(.Map([JetMapKey:(I64, I64)]{}))
+        id
+    }
+    // Rust: crates/jet-rt/src/lib.rs:547
+    pub fn map_insert(self: &JetArena, map: I64, key_id: I64, value: I64) -> ()? {
+        key :: self.clone_string(key_id)?
+        match self.values.get_mut(USize{map}) {
+            Val(.Map(entries)) -> {
+                JetArena.retain_exact_raw(&self.exact_roots, value)
+                _ :: &entries.insert(.String(^key), (key_id, value))
+                Val(())
+            }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:559
+    pub fn map_insert_bool(self: &JetArena, map: I64, key: Bool, value: I64) -> ()? {
+        match self.values.get_mut(USize{map}) {
+            Val(.Map(entries)) -> {
+                JetArena.retain_exact_raw(&self.exact_roots, value)
+                _ :: &entries.insert(.Bool(key), (if key { I64{1} } else { I64{0} }, value))
+                Val(())
+            }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:570
+    pub fn map_get(self, map: I64, key_id: I64) -> I64? {
+        key :: self.get_string(key_id)?
+        match self.values.get(USize{map}) { Val(.Map(entries)) -> entries.get(.String(key.to_string())).map(|p| -> p.1), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:580
+    pub fn map_remove(self: &JetArena, map: I64, key_id: I64) -> I64? {
+        key :: self.clone_string(key_id)?
+        match self.values.get_mut(USize{map}) { Val(.Map(entries)) -> &entries.remove(.String(^key)).map(|p| -> p.1), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:590
+    pub fn map_insert_int(self: &JetArena, map: I64, key: I64, value: I64) -> ()? {
+        match self.values.get_mut(USize{map}) {
+            Val(.Map(entries)) -> {
+                JetArena.retain_exact_raw(&self.exact_roots, key)
+                JetArena.retain_exact_raw(&self.exact_roots, value)
+                _ :: &entries.insert(exact_int_map_key(key), (key, value))
+                Val(())
+            }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:602
+    pub fn map_get_int(self, map: I64, key: I64) -> I64? {
+        match self.values.get(USize{map}) { Val(.Map(entries)) -> entries.get(exact_int_map_key(key)).map(|p| -> p.1), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:611
+    pub fn map_remove_int(self: &JetArena, map: I64, key: I64) -> I64? {
+        match self.values.get_mut(USize{map}) { Val(.Map(entries)) -> &entries.remove(exact_int_map_key(key)).map(|p| -> p.1), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:624
+    fn composite_key(self, key_id: I64) -> JetMapKey? {
+        fields :: match self.values.get(USize{key_id})? { .Record(fields) -> fields, _ -> return None }
+        keys := [JetMapKey]{}.with_capacity(fields.len())
+        loop field in fields { &keys.push(self.composite_key_field(field)?) }
+        Val(.Record(^keys))
+    }
+    // Rust: crates/jet-rt/src/lib.rs:635
+    fn composite_key_field(self, field: JetVal) -> JetMapKey? {
+        fields :: match field {
+            .Int(value) -> return Val(exact_int_map_key(value))
+            .Word{value, unsigned} -> return Val(if unsigned { JetMapKey.UInt(U64{value}) } else { JetMapKey.Int(value) })
+            .String(value) -> return Val(.String(value.clone()))
+            .Bool(value) -> return Val(.Bool(value))
+            .Char(value) -> return Val(.Char(value))
+            .RecordRef(handle) -> match self.values.get(USize{handle})? { .Record(fields) -> fields, _ -> return None }
+            .Record(fields) -> fields
+            _ -> return None
+        }
+        keys := [JetMapKey]{}.with_capacity(fields.len())
+        loop child in fields { &keys.push(self.composite_key_field(child)?) }
+        Val(.Record(^keys))
+    }
+    // Rust: crates/jet-rt/src/lib.rs:660
+    pub fn map_insert_composite(self: &JetArena, map: I64, key_id: I64, value: I64) -> ()? {
+        key :: self.composite_key(key_id)?
+        match self.values.get_mut(USize{map}) {
+            Val(.Map(entries)) -> {
+                JetArena.retain_exact_raw(&self.exact_roots, value)
+                _ :: &entries.insert(^key, (key_id, value))
+                Val(())
+            }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:672
+    pub fn map_get_composite(self, map: I64, key_id: I64) -> I64? {
+        key :: self.composite_key(key_id)?
+        match self.values.get(USize{map}) { Val(.Map(entries)) -> entries.get(key).map(|p| -> p.1), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:680
+    pub fn map_remove_composite(self: &JetArena, map: I64, key_id: I64) -> I64? {
+        key :: self.composite_key(key_id)?
+        match self.values.get_mut(USize{map}) { Val(.Map(entries)) -> &entries.remove(key).map(|p| -> p.1), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:688
+    pub fn map_len(self, map: I64) -> I64? {
+        match self.values.get(USize{map}) { Val(.Map(entries)) -> Val(I64{entries.len()}), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:696
+    pub fn clone_map_pairs(self, map: I64) -> [(I64, I64)]? {
+        match self.values.get(USize{map})? {
+            .Map(entries) -> {
+                keys := entries.keys().collect()
+                &keys.sort_by(|a, b| -> jet_map_key_cmp(a, b))
+                Val(keys.iter().map(|key| -> entries[key]).collect())
+            }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:703
+    pub fn map_key_at(self: &JetArena, map: I64, index: I64) -> I64? {
+        if index < I64{0} -> return None
+        match self.values.get(USize{map}) {
+            Val(.Map(entries)) -> {
+                keys := entries.keys().collect()
+                &keys.sort_by(|a, b| -> jet_map_key_cmp(a, b))
+                Val(entries[keys.get(USize{index})?].0)
+            }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:714
+    pub fn map_value_at(self, map: I64, index: I64) -> I64? {
+        if index < I64{0} -> return None
+        match self.values.get(USize{map}) {
+            Val(.Map(entries)) -> {
+                keys := entries.keys().collect()
+                &keys.sort_by(|a, b| -> jet_map_key_cmp(a, b))
+                Val(entries[keys.get(USize{index})?].1)
+            }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:727
+    pub fn list_push_int(self: &JetArena, list: I64, value: I64) -> ()? {
+        exact :: self.int_cells(list) == .Exact
+        slot :: self.values.get_mut(USize{list})?
+        match slot {
+            .IntList(values) -> {
+                if exact { JetArena.retain_exact_raw(&self.exact_roots, value) }
+                &values.push(value)
+                Val(())
+            }
+            .List(values) -> {
+                empty :: values.is_empty()
+                if exact { JetArena.retain_exact_raw(&self.exact_roots, value) }
+                if empty { slot = .IntList([value]) } else { &values.push(.Int(value)) }
+                Val(())
+            }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:759
+    pub fn list_push_float(self: &JetArena, list: I64, value: F64) -> ()? {
+        match self.values.get_mut(USize{list}) { Val(.List(values)) -> { &values.push(.Float(value)); Val(()) }, _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:769
+    pub fn replace_int_list(self: &JetArena, list: I64, values: [I64]) -> ()? {
+        match self.values.get(USize{list}) { Val(.List(_)) | Val(.IntList(_)) -> {}, _ -> return None }
+        if self.int_cells(list) == .Exact { loop raw in values { JetArena.retain_exact_raw(&self.exact_roots, raw) } }
+        self.values[USize{list}] = .IntList(^values)
+        Val(())
+    }
+    // Rust: crates/jet-rt/src/lib.rs:798
+    pub fn list_clear(self: &JetArena, list: I64) -> ()? {
+        match self.values.get_mut(USize{list})? {
+            .IntList(values) -> { &values.clear(); Val(()) }
+            .List(values) -> { &values.clear(); Val(()) }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:813
+    pub fn replace_float_list(self: &JetArena, list: I64, values: [F64]) -> ()? {
+        match self.values.get_mut(USize{list}) {
+            Val(.List(target)) -> { target = values.into_iter().map(|v| -> JetVal.Float(v)).collect(); Val(()) }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:823
+    pub fn list_push_range(self: &JetArena, list: I64, start: I64, end: I64, exclusive: Bool) -> ()? {
+        match self.values.get(USize{list}) { Val(.List(_)) -> {}, _ -> return None }
+        JetArena.retain_exact_raw(&self.exact_roots, start)
+        JetArena.retain_exact_raw(&self.exact_roots, end)
+        match self.values.get_mut(USize{list}) {
+            Val(.List(values)) -> { &values.push(.Range{start: start, end: end, exclusive: exclusive}); Val(()) }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:848
+    pub fn list_len(self, list: I64) -> I64? {
+        match self.values.get(USize{list}) {
+            Val(.IntList(values)) -> Val(I64{values.len()})
+            Val(.List(values)) | Val(.UninitList{values, ..}) -> Val(I64{values.len()})
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:860
+    pub fn int_list_slice(self, list: I64) -> ([I64]View)? {
+        match self.values.get(USize{list}) { Val(.IntList(values)) -> Val(values.as_slice()), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:870
+    pub fn list_values_mut(self: &JetArena, list: I64) -> (&[JetVal])? {
+        if self.values.get(USize{list}) is Val(.IntList(_)) {
+            dense :: match self.values.get_mut(USize{list})? { .IntList(values) -> mem.take(&values), _ -> unreachable() }
+            self.values[USize{list}] = .List(dense.into_iter().map(|v| -> JetVal.Int(v)).collect())
+        }
+        match self.values.get_mut(USize{list})? { .List(values) -> Val(&values), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:884
+    pub fn list_get_int(self, list: I64, index: I64) -> I64? {
+        if index < I64{0} -> return None
+        value :: match self.values.get(USize{list}) {
+            Val(.IntList(values)) -> return values.get(USize{index}).copied()
+            Val(.List(values)) -> values.get(USize{index})?
+            Val(.UninitList{values, initialized}) -> {
+                index :: uninit_semantics.jet_uninit_read(initialized, USize{index}).ok()?
+                values.get(index)?
+            }
+            _ -> return None
+        }
+        match value { .Int(v) | .Word{value: v, ..} -> Val(v), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:910
+    pub fn list_get_raw(self: &JetArena, list: I64, index: I64) -> I64? {
+        if index < I64{0} -> return None
+        value :: match self.values.get(USize{list})? {
+            .IntList(values) -> JetVal.Int(values.get(USize{index}).copied()?)
+            .List(values) -> values.get(USize{index})?.clone()
+            .UninitList{values, initialized} -> {
+                index :: uninit_semantics.jet_uninit_read(initialized, USize{index}).ok()?
+                values.get(index)?.clone()
+            }
+            _ -> return None
+        }
+        match value {
+            .UninitList{values, initialized} -> Val(self.alloc_value(.UninitList{values: ^values, initialized: ^initialized}))
+            .Int(v) | .Word{value: v, ..} | .RecordRef(v) -> Val(v)
+            .Float(v) -> Val(I64{v.to_bits()})
+            .Bool(v) -> Val(if v { I64{1} } else { I64{0} })
+            .Char(v) -> Val(I64{U32{v}})
+            .String(v) -> Val(self.alloc_string(^v))
+            .StringView{owner, start, end} -> {
+                text :: self.get_string(owner)?.get(start..end)?.to_string()
+                Val(self.alloc_string(^text))
+            }
+            .IntList(v) -> Val(self.alloc_int_list(^v))
+            .List(v) -> Val(self.alloc_list_values(^v))
+            .Range{start, end, exclusive} -> Val(self.alloc_value(.Range{start: start, end: end, exclusive: exclusive}))
+            .Map(v) -> Val(self.alloc_value(.Map(^v)))
+            .Record(v) -> Val(self.alloc_record_values(^v))
+            .ExactInt(v) -> Val(self.own_exact(JetInt.from_big(^v)))
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:965
+    pub fn list_get_int_proven(self, list: I64, index: I64) -> I64 {
+        value :: match self.values.get(USize{list}) {
+            Val(.IntList(values)) -> return values[USize{index}]
+            Val(.List(values)) -> values[USize{index}]
+            Val(.UninitList{values, initialized}) -> {
+                index :: uninit_semantics.jet_uninit_read(initialized, USize{index}).expect("proven fixed-list read of uninitialized slot")
+                values[index]
+            }
+            _ -> jet_foundation.ice(None, "proven fixed-list read of a non-list carrier")
+        }
+        match value { .Int(v) | .Word{value: v, ..} -> v, _ -> jet_foundation.ice(None, "proven fixed-list integer read of a non-integer slot") }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:989
+    pub fn list_get_string(self, list: I64, index: I64) -> String? {
+        if index < I64{0} -> return None
+        handle :: match self.values.get(USize{list})? {
+            .IntList(values) -> values.get(USize{index})?.copied()
+            .List(values) -> match values.get(USize{index})? {
+                .Int(handle) -> handle
+                .String(value) -> return Val(value.clone())
+                _ -> return None
+            }
+            _ -> return None
+        }
+        self.clone_string(handle)
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1005
+    pub fn list_get_float(self, list: I64, index: I64) -> F64? {
+        if index < I64{0} -> return None
+        value :: match self.values.get(USize{list}) {
+            Val(.List(values)) -> values.get(USize{index})?
+            Val(.UninitList{values, initialized}) -> {
+                index :: uninit_semantics.jet_uninit_read(initialized, USize{index}).ok()?
+                values.get(index)?
+            }
+            _ -> return None
+        }
+        match value { .Float(v) -> Val(v), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1029
+    pub fn list_record_get_float(self, list: I64, row: I64, field: I64) -> F64? {
+        row :: USize.try_from(row).ok()?
+        field :: USize.try_from(field).ok()?
+        row :: match self.values.get(USize{list})? {
+            .List(values) -> values.get(row)?
+            .UninitList{values, initialized} -> values.get(uninit_semantics.jet_uninit_read(initialized, row).ok()?)?
+            _ -> return None
+        }
+        fields :: match row {
+            .Record(fields) -> fields
+            .Int(handle) | .RecordRef(handle) -> match self.values.get(USize{handle})? { .Record(fields) -> fields, _ -> return None }
+            _ -> return None
+        }
+        match fields.get(field)? { .Float(value) -> Val(value), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1065
+    pub fn list_get_float_proven(self, list: I64, index: I64) -> F64 {
+        value :: match self.values.get(USize{list}) {
+            Val(.List(values)) -> values[USize{index}]
+            Val(.UninitList{values, initialized}) -> {
+                index :: uninit_semantics.jet_uninit_read(initialized, USize{index}).expect("proven fixed-list read of uninitialized slot")
+                values[index]
+            }
+            _ -> jet_foundation.ice(None, "proven fixed-list read of a non-list carrier")
+        }
+        match value { .Float(v) -> v, _ -> jet_foundation.ice(None, "proven fixed-list float read of a non-float slot") }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1084
+    pub fn list_get_range(self, list: I64, index: I64) -> (I64, I64, Bool)? {
+        if index < I64{0} -> return None
+        match self.values.get(USize{list}) {
+            Val(.List(values)) -> match values.get(USize{index}) { Val(.Range{start, end, exclusive}) -> Val((start, end, exclusive)), _ -> None }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1101
+    pub fn list_set_int(self: &JetArena, list: I64, index: I64, value: I64) -> ()? {
+        if index < I64{0} -> return None
+        exact :: self.int_cells(list) == .Exact
+        match self.values.get_mut(USize{list}) {
+            Val(.IntList(values)) -> {
+                slot :: values.get_mut(USize{index})?
+                if exact { JetArena.retain_exact_raw(&self.exact_roots, value) }
+                slot = value
+                Val(())
+            }
+            Val(.List(values)) -> {
+                slot :: values.get_mut(USize{index})?
+                if not (slot is .Int(_)) -> return None
+                if exact { JetArena.retain_exact_raw(&self.exact_roots, value) }
+                slot = .Int(value)
+                Val(())
+            }
+            Val(.UninitList{values, initialized}) -> {
+                (index, _) :: uninit_semantics.jet_uninit_write(&initialized, USize{index}).ok()?
+                if exact { JetArena.retain_exact_raw(&self.exact_roots, value) }
+                values[index] = .Int(value)
+                Val(())
+            }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1141
+    pub fn list_set_float(self: &JetArena, list: I64, index: I64, value: F64) -> ()? {
+        if index < I64{0} -> return None
+        match self.values.get_mut(USize{list}) {
+            Val(.List(values)) -> {
+                slot :: values.get_mut(USize{index})?
+                if not (slot is .Float(_)) -> return None
+                slot = .Float(value)
+                Val(())
+            }
+            Val(.UninitList{values, initialized}) -> {
+                (index, _) :: uninit_semantics.jet_uninit_write(&initialized, USize{index}).ok()?
+                values[index] = .Float(value)
+                Val(())
+            }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1166
+    pub fn list_sort_int(self: &JetArena, list: I64) -> ()? {
+        unsigned :: self.int_cells(list) == IntCells.Word{unsigned: true}
+        match self.values.get_mut(USize{list}) {
+            Val(.IntList(values)) -> {
+                if unsigned { &values.sort_unstable_by_key(|v| -> U64{v}) } else { &values.sort_unstable() }
+                Val(())
+            }
+            Val(.List(values)) -> {
+                ints := [I64]{}.with_capacity(values.len())
+                loop value in values {
+                    match value { .Int(v) -> &ints.push(v), _ -> return None }
+                }
+                if unsigned { &ints.sort_unstable_by_key(|v| -> U64{v}) } else { &ints.sort_unstable() }
+                values = ints.into_iter().map(|v| -> JetVal.Int(v)).collect()
+                Val(())
+            }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1197
+    pub fn list_slice(self: &JetArena, list: I64, start: I64, end: I64) -> I64? {
+        if start < I64{0} or end < start -> return None
+        slice :: match self.values.get(USize{list}) {
+            Val(.IntList(values)) if end <= I64{values.len()} -> JetVal.IntList(values[USize{start}..USize{end}].to_vec())
+            Val(.List(values)) if end <= I64{values.len()} -> JetVal.List(values[USize{start}..USize{end}].to_vec())
+            _ -> return None
+        }
+        cells :: self.int_cells(list)
+        if cells == .Exact { JetArena.retain_value_roots(&self.exact_roots, slice) }
+        id :: I64{self.values.len()}
+        &self.values.push(^slice)
+        self.set_int_cells(id, cells)
+        Val(id)
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1220
+    pub fn clone_int_list(self, list: I64) -> [I64]? {
+        values :: match self.values.get(USize{list}) {
+            Val(.IntList(values)) -> return Val(values.clone())
+            Val(.List(values)) -> values
+            Val(.UninitList{values, initialized}) -> { _ :: uninit_semantics.jet_uninit_all(initialized).ok()?; values }
+            _ -> return None
+        }
+        out := [I64]{}.with_capacity(values.len())
+        loop value in values { match value { .Int(v) -> &out.push(v), _ -> return None } }
+        Val(^out)
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1254
+    // GATE #4494: caller keeps the arena alive and does not mutate the borrowed list.
+    pub fn int_list_ptr(self, list: I64) -> (mem.Ptr<I64>)? {
+        match self.values.get(USize{list}) { Val(.IntList(values)) -> Val(values.as_ptr()), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1261
+    pub fn clone_list(self: &JetArena, list: I64) -> I64? {
+        value :: match self.values.get(USize{list}) {
+            Val(.IntList(values)) -> JetVal.IntList(values.clone())
+            Val(.List(values)) -> JetVal.List(values.clone())
+            Val(.UninitList{values, initialized}) -> JetVal.UninitList{values: values.clone(), initialized: initialized.clone()}
+            _ -> return None
+        }
+        cells :: self.int_cells(list)
+        if cells == .Exact { JetArena.retain_value_roots(&self.exact_roots, value) }
+        id :: I64{self.values.len()}
+        &self.values.push(^value)
+        self.set_int_cells(id, cells)
+        Val(id)
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1284
+    pub fn alloc_record(self: &JetArena, fields: USize) -> I64 {
+        id :: I64{self.values.len()}
+        &self.values.push(.Record([JetVal.Int(I64{0}); fields]))
+        id
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1291
+    pub fn clone_record_values(self, record: I64) -> [JetVal]? {
+        match self.values.get(USize{record})? { .Record(fields) -> Val(fields.clone()), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1300
+    pub fn alloc_record_values(self: &JetArena, fields: [JetVal]) -> I64 { self.alloc_value(.Record(^fields)) }
+    // Rust: crates/jet-rt/src/lib.rs:1304
+    fn record_set(self: &JetArena, record: I64, index: I64, value: JetVal) -> ()? {
+        if index < I64{0} -> return None
+        match self.values.get(USize{record}) {
+            Val(.Record(fields)) -> { if USize{index} >= fields.len() -> return None }
+            _ -> return None
+        }
+        JetArena.retain_value_roots(&self.exact_roots, value)
+        match self.values.get_mut(USize{record}) {
+            Val(.Record(fields)) -> { fields[USize{index}] = ^value; Val(()) }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1322
+    pub fn record_get(self, record: I64, index: I64) -> JetVal? {
+        if index < I64{0} -> return None
+        match self.values.get(USize{record}) { Val(.Record(fields)) -> fields.get(USize{index}), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1332
+    pub fn record_len(self, record: I64) -> I64? {
+        match self.values.get(USize{record}) { Val(.Record(fields)) -> I64.try_from(fields.len()).ok(), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1346
+    // GATE #4494: address is a synchronous typed borrow into the inner field buffer.
+    pub fn record_field_address(self: &JetArena, record: I64, index: I64, kind: I64) -> I64? {
+        record :: USize.try_from(record).ok()?
+        index :: USize.try_from(index).ok()?
+        field :: match self.values.get_mut(record)? { .Record(fields) -> fields.get_mut(index)?, _ -> return None }
+        address :: match kind {
+            RECORD_FIELD_ADDRESS_I64 -> match field {
+                .Int(value) | .Word{value, ..} | .RecordRef(value) -> mem.address_of(&value).cast<U8>()
+                _ -> return None
+            }
+            RECORD_FIELD_ADDRESS_F64 -> match field { .Float(value) -> mem.address_of(&value).cast<U8>(), _ -> return None }
+            RECORD_FIELD_ADDRESS_BOOL -> match field { .Bool(value) -> mem.address_of(&value).cast<U8>(), _ -> return None }
+            RECORD_FIELD_ADDRESS_CHAR -> match field { .Char(value) -> mem.address_of(&value).cast<U8>(), _ -> return None }
+            _ -> return None
+        }
+        I64.try_from(address.addr()).ok()
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1382
+    pub fn record_set_int(self: &JetArena, record: I64, index: I64, value: I64) -> ()? { self.record_set(record, index, .Int(value)) }
+    // Rust: crates/jet-rt/src/lib.rs:1386
+    pub fn record_set_word(self: &JetArena, record: I64, index: I64, value: I64, unsigned: Bool) -> ()? {
+        self.record_set(record, index, .Word{value: value, unsigned: unsigned})
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1390
+    pub fn record_set_float(self: &JetArena, record: I64, index: I64, value: F64) -> ()? { self.record_set(record, index, .Float(value)) }
+    // Rust: crates/jet-rt/src/lib.rs:1394
+    pub fn record_set_bool(self: &JetArena, record: I64, index: I64, value: Bool) -> ()? { self.record_set(record, index, .Bool(value)) }
+    // Rust: crates/jet-rt/src/lib.rs:1398
+    pub fn record_set_char(self: &JetArena, record: I64, index: I64, value: Char) -> ()? { self.record_set(record, index, .Char(value)) }
+    // Rust: crates/jet-rt/src/lib.rs:1402
+    pub fn record_set_string(self: &JetArena, record: I64, index: I64, value_handle: I64) -> ()? {
+        value :: self.clone_string(value_handle)?
+        self.record_set(record, index, .String(^value))
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1411
+    pub fn record_rows(self, list: I64) -> [[JetVal]]? {
+        values :: match self.values.get(USize{list})? {
+            .IntList(values) -> values.iter().map(|v| -> JetVal.Int(v)).collect()
+            .List(values) -> values.clone()
+            _ -> return None
+        }
+        rows := [[JetVal]]{}.with_capacity(values.len())
+        loop value in values {
+            fields :: match value {
+                .Int(handle) | .RecordRef(handle) -> match self.values.get(USize{handle}) { Val(.Record(fields)) -> fields, _ -> return None }
+                .Record(fields) -> fields
+                _ -> return None
+            }
+            &rows.push(fields.clone())
+        }
+        Val(^rows)
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1438
+    pub fn alloc_record_cells(self: &JetArena, cells: [JetVal]) -> I64 {
+        id :: I64{self.values.len()}
+        &self.values.push(.Record(^cells))
+        id
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1444
+    pub fn record_get_int(self, record: I64, index: I64) -> I64? {
+        match self.record_get(record, index) { Val(.Int(v)) | Val(.Word{value: v, ..}) | Val(.RecordRef(v)) -> Val(v), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1455
+    pub fn record_get_record(self, record: I64, index: I64) -> I64? {
+        match self.record_get(record, index) { Val(.RecordRef(v)) -> Val(v), _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1462
+    pub fn record_set_record(self: &JetArena, record: I64, index: I64, value_handle: I64) -> ()? { self.record_set(record, index, .RecordRef(value_handle)) }
+    // Rust: crates/jet-rt/src/lib.rs:1466
+    pub fn record_assign_from(self: &JetArena, dst: I64, src: I64) -> ()? {
+        src_fields :: match self.values.get(USize{src})? { .Record(fields) -> fields.clone(), _ -> return None }
+        match self.values.get_mut(USize{dst})? { .Record(fields) -> { fields = ^src_fields; Val(()) }, _ -> None }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1480
+    pub fn record_get_float(self, record: I64, index: I64) -> F64? { match self.record_get(record, index) { Val(.Float(v)) -> Val(v), _ -> None } }
+    // Rust: crates/jet-rt/src/lib.rs:1487
+    pub fn record_get_bool(self, record: I64, index: I64) -> Bool? { match self.record_get(record, index) { Val(.Bool(v)) -> Val(v), _ -> None } }
+    // Rust: crates/jet-rt/src/lib.rs:1494
+    pub fn record_get_char(self, record: I64, index: I64) -> Char? { match self.record_get(record, index) { Val(.Char(v)) -> Val(v), _ -> None } }
+    // Rust: crates/jet-rt/src/lib.rs:1501
+    pub fn record_clone_string(self, record: I64, index: I64) -> String? { match self.record_get(record, index) { Val(.String(v)) -> Val(v.clone()), _ -> None } }
+    // Rust: crates/jet-rt/src/lib.rs:1508
+    pub fn record_get_string(self: &JetArena, record: I64, index: I64) -> I64? {
+        value :: match self.record_get(record, index)? { .String(v) -> v.clone(), _ -> return None }
+        Val(self.alloc_string(^value))
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1520
+    pub INT_SMALL_MIN :: EXACT_INT_SMALL_MIN
+    // Rust: crates/jet-rt/src/lib.rs:1521
+    pub INT_SMALL_MAX :: EXACT_INT_SMALL_MAX
+    // Rust: crates/jet-rt/src/lib.rs:1524
+    fn int_is_tagged(value: I64) -> Bool { exact_int_is_tagged(value) }
+    // Rust: crates/jet-rt/src/lib.rs:1529
+    fn int_is_small(value: I64) -> Bool { value >= JetArena.INT_SMALL_MIN and value <= JetArena.INT_SMALL_MAX }
+    // Rust: crates/jet-rt/src/lib.rs:1534
+    fn int_small_pair(left: I64, right: I64) -> Bool { JetArena.int_is_small(left) & JetArena.int_is_small(right) }
+    // Rust: crates/jet-rt/src/lib.rs:1538
+    fn int_big_value(self, value: I64) -> CtBigInt? { exact_int_big_value(value) }
+    // Rust: crates/jet-rt/src/lib.rs:1542
+    fn int_value(self, value: I64) -> CtBigInt { exact_int_value(value) }
+    // Rust: crates/jet-rt/src/lib.rs:1546
+    fn int_pack(self: &JetArena, value: CtBigInt) -> I64 { self.own_exact(JetInt.from_big(^value)) }
+    // Rust: crates/jet-rt/src/lib.rs:1550
+    pub fn int_from_i64(self: &JetArena, value: I64) -> I64 {
+        if JetArena.int_is_small(value) { value } else { self.own_exact(JetInt.from_i64(value)) }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1558
+    pub fn int_from_u64(self: &JetArena, value: U64) -> I64 {
+        if value <= U64{JetArena.INT_SMALL_MAX} { I64{value} } else { self.own_exact(JetInt.from_big(CtBigInt.from_u64(value))) }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1568
+    pub fn int_from_str(self: &JetArena, value: String) -> I64 Err! { self.int_pack(CtBigInt.from_str(value)?) }
+    // Rust: crates/jet-rt/src/lib.rs:1572
+    pub fn int_to_i64(self, value: I64) -> I64? { match self.int_big_value(value) { Val(v) -> v.try_i64(), None -> Val(value) } }
+    // Rust: crates/jet-rt/src/lib.rs:1579
+    pub fn int_to_i128(self, value: I64) -> I128? { match self.int_big_value(value) { Val(v) -> v.try_i128(), None -> Val(I128{value}) } }
+    // Rust: crates/jet-rt/src/lib.rs:1585
+    pub fn int_is_zero(self, value: I64) -> Bool {
+        if JetArena.int_is_small(value) -> return value == I64{0}
+        self.int_big_value(value).map(|v| -> v.is_zero()).unwrap_or(value == I64{0})
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1594
+    pub fn int_is_negative(self, value: I64) -> Bool {
+        if JetArena.int_is_small(value) -> return value < I64{0}
+        self.int_big_value(value).map(|v| -> v.negative).unwrap_or(value < I64{0})
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1603
+    pub fn int_to_string(self, value: I64) -> String {
+        self.int_big_value(value).map(|v| -> v.to_string_rep()).unwrap_or_else(|| -> value.to_string())
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1609
+    pub fn int_to_f64(self, value: I64) -> F64 {
+        self.int_to_string(value).parse<F64>().unwrap_or_else(|_| -> if self.int_is_negative(value) { F64.NEG_INFINITY } else { F64.INFINITY })
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1621
+    pub fn int_checked_widen(self, value: I64, target_f32: Bool) -> F64? { self.int_value(value).checked_widen(target_f32) }
+    // Rust: crates/jet-rt/src/lib.rs:1625
+    pub fn int_bit_count(self, value: I64, width: U32, method: String) -> I64? {
+        if JetArena.int_is_small(value) and (method == "bit_count" or method == "bit_length") {
+            magnitude :: value.unsigned_abs()
+            return Val(if method == "bit_count" { I64{magnitude.count_ones()} } else { I64{64 - magnitude.leading_zeros()} })
+        }
+        self.int_value(value).bit_count(width, method)
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1637
+    pub fn int_compare(self, left: I64, right: I64) -> I64 {
+        if JetArena.int_is_small(left) and JetArena.int_is_small(right) {
+            return if left < right { I64{-1} } else if left > right { I64{1} } else { I64{0} }
+        }
+        match self.int_value(left).compare(self.int_value(right)) { .Less -> I64{-1}, .Equal -> I64{0}, .Greater -> I64{1} }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1652
+    pub fn int_add(self: &JetArena, left: I64, right: I64) -> I64 {
+        if JetArena.int_is_small(left) and JetArena.int_is_small(right) {
+            if left.checked_add(right) is Val(value) { if JetArena.int_is_small(value) -> return value }
+        }
+        self.int_pack(self.int_value(left).add(self.int_value(right)))
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1663
+    pub fn int_sub(self: &JetArena, left: I64, right: I64) -> I64 {
+        if JetArena.int_is_small(left) and JetArena.int_is_small(right) {
+            if left.checked_sub(right) is Val(value) { if JetArena.int_is_small(value) -> return value }
+        }
+        self.int_pack(self.int_value(left).sub(self.int_value(right)))
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1674
+    pub fn int_mul(self: &JetArena, left: I64, right: I64) -> I64 {
+        if JetArena.int_is_small(left) and JetArena.int_is_small(right) {
+            if left.checked_mul(right) is Val(value) { if JetArena.int_is_small(value) -> return value }
+        }
+        self.int_pack(self.int_value(left).mul(self.int_value(right)))
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1687
+    pub fn int_bit_and(self: &JetArena, left: I64, right: I64) -> I64 {
+        if JetArena.int_small_pair(left, right) -> return left & right
+        self.int_pack(self.int_value(left).bit_and(self.int_value(right)))
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1696
+    pub fn int_bit_or(self: &JetArena, left: I64, right: I64) -> I64 {
+        if JetArena.int_small_pair(left, right) -> return left | right
+        self.int_pack(self.int_value(left).bit_or(self.int_value(right)))
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1705
+    pub fn int_bit_xor(self: &JetArena, left: I64, right: I64) -> I64 {
+        if JetArena.int_small_pair(left, right) -> return left ^ right
+        self.int_pack(self.int_value(left).bit_xor(self.int_value(right)))
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1714
+    pub fn int_neg(self: &JetArena, value: I64) -> I64 {
+        if JetArena.int_is_small(value) {
+            if value.checked_neg() is Val(negated) { if JetArena.int_is_small(negated) -> return negated }
+        }
+        self.int_pack(self.int_value(value).neg())
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1725
+    pub fn int_abs(self: &JetArena, value: I64) -> I64 {
+        if self.int_is_negative(value) { self.int_neg(value) }
+        else if JetArena.int_is_tagged(value) { self.int_pack(self.int_value(value)) }
+        else { value }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1737
+    pub fn int_try_from(self, value: I64, kind: I64) -> I128? { jet_numeric_fixed_from_i128(self.int_to_i128(value)?, kind) }
+    // Rust: crates/jet-rt/src/lib.rs:1742
+    pub fn int_not(self: &JetArena, value: I64) -> I64 {
+        if JetArena.int_is_small(value) -> return !value
+        negated :: self.int_neg(value)
+        one :: self.int_from_i64(I64{1})
+        self.int_sub(negated, one)
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1752
+    pub fn int_shl(self: &JetArena, value: I64, count: I64) -> I64? {
+        if JetArena.int_is_small(value) and count >= I64{0} and count < I64{63} {
+            shifted :: value << count
+            if shifted >> count == value and JetArena.int_is_small(shifted) -> return Val(shifted)
+        }
+        Val(self.int_pack(self.int_value(value).shl(self.int_value(count))?))
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1764
+    pub fn int_shr(self: &JetArena, value: I64, count: I64) -> I64? {
+        if JetArena.int_is_small(value) and count >= I64{0} and count <= JetArena.INT_SMALL_MAX -> return Val(value >> count.min(I64{63}))
+        Val(self.int_pack(self.int_value(value).shr(self.int_value(count))?))
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1775
+    pub fn int_div_rem(self: &JetArena, value: I64, divisor: I64) -> (I64, I64)? {
+        if JetArena.int_small_pair(value, divisor) and divisor != I64{0} {
+            quotient :: value.wrapping_div(divisor)
+            if JetArena.int_is_small(quotient) -> return Val((quotient, value.wrapping_rem(divisor)))
+        }
+        if self.int_is_zero(divisor) -> return None
+        (quotient, remainder) :: self.int_value(value).div_rem(self.int_value(divisor))?
+        Val((self.int_pack(^quotient), self.int_pack(^remainder)))
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1789
+    pub fn int_div(self: &JetArena, value: I64, divisor: I64) -> I64? { Val(self.int_div_rem(value, divisor)?.0) }
+    // Rust: crates/jet-rt/src/lib.rs:1793
+    pub fn int_rem(self: &JetArena, value: I64, divisor: I64) -> I64? { Val(self.int_div_rem(value, divisor)?.1) }
+    // Rust: crates/jet-rt/src/lib.rs:1797
+    pub fn int_div_rem_euclid(self: &JetArena, value: I64, divisor: I64) -> (I64, I64)? {
+        if JetArena.int_small_pair(value, divisor) and divisor != I64{0} {
+            quotient :: value.wrapping_div_euclid(divisor)
+            if JetArena.int_is_small(quotient) -> return Val((quotient, value.wrapping_rem_euclid(divisor)))
+        }
+        (quotient, remainder) :: self.int_value(value).div_rem_euclid(self.int_value(divisor))?
+        Val((self.int_pack(^quotient), self.int_pack(^remainder)))
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1810
+    pub fn int_div_euclid(self: &JetArena, value: I64, divisor: I64) -> I64? { Val(self.int_div_rem_euclid(value, divisor)?.0) }
+    // Rust: crates/jet-rt/src/lib.rs:1814
+    pub fn int_rem_euclid(self: &JetArena, value: I64, divisor: I64) -> I64? { Val(self.int_div_rem_euclid(value, divisor)?.1) }
+    // Rust: crates/jet-rt/src/lib.rs:1818
+    pub fn int_floor_div(self: &JetArena, value: I64, divisor: I64) -> I64? {
+        (quotient, remainder) :: self.int_div_rem(value, divisor)?
+        if not self.int_is_zero(remainder) and self.int_is_negative(value) != self.int_is_negative(divisor) {
+            one :: self.int_from_i64(I64{1})
+            Val(self.int_sub(quotient, one))
+        } else { Val(quotient) }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1830
+    pub fn int_mod(self: &JetArena, value: I64, divisor: I64) -> I64? {
+        (_, remainder) :: self.int_div_rem(value, divisor)?
+        if not self.int_is_zero(remainder) and self.int_is_negative(value) != self.int_is_negative(divisor) {
+            Val(self.int_add(remainder, divisor))
+        } else { Val(remainder) }
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1842
+    pub fn int_pow(self: &JetArena, value: I64, exponent: I64) -> I64? { Val(self.int_pack(self.int_value(value).pow(self.int_value(exponent))?)) }
+    // Rust: crates/jet-rt/src/lib.rs:1848
+    pub fn int_factorial(self: &JetArena, value: I64) -> I64? {
+        if self.int_is_negative(value) -> return None
+        current := self.int_from_i64(I64{2})
+        result := self.int_from_i64(I64{1})
+        loop self.int_compare(current, value) <= I64{0} {
+            result = self.int_mul(result, current)
+            one :: self.int_from_i64(I64{1})
+            current = self.int_add(current, one)
+        }
+        Val(result)
+    }
+    // Rust: crates/jet-rt/src/lib.rs:1862
+    pub fn int_is_even(self, value: I64) -> Bool { self.int_value(value).is_even() }
+    // Rust: crates/jet-rt/src/lib.rs:1866
+    pub fn int_is_odd(self, value: I64) -> Bool { self.int_value(value).is_odd() }
+    // Rust: crates/jet-rt/src/lib.rs:1870
+    pub fn int_isqrt(self: &JetArena, value: I64) -> I64? { Val(self.int_pack(self.int_value(value).isqrt()?)) }
+    // Rust: crates/jet-rt/src/lib.rs:1876
+    pub fn int_binomial(self: &JetArena, n: I64, k: I64) -> I64? { Val(self.int_pack(CtBigInt.binomial(self.int_value(n), self.int_value(k))?)) }
+    // Rust: crates/jet-rt/src/lib.rs:1882
+    pub fn int_digits(self, value: I64) -> I64 { self.int_value(value).digits() }
+    // Rust: crates/jet-rt/src/lib.rs:1886
+    pub fn int_leading_ones(self, value: I64) -> I64 { self.int_value(value).leading_ones() }
+    // Rust: crates/jet-rt/src/lib.rs:1890
+    pub fn int_trailing_ones(self, value: I64) -> I64 { self.int_value(value).trailing_ones() }
+    // Rust: crates/jet-rt/src/lib.rs:1894
+    pub fn int_checked_abs(self: &JetArena, value: I64) -> I64? { Val(self.int_abs(value)) }
+    // Rust: crates/jet-rt/src/lib.rs:1898
+    pub fn int_checked_neg(self: &JetArena, value: I64) -> I64? { Val(self.int_neg(value)) }
+    // Rust: crates/jet-rt/src/lib.rs:1902
+    pub fn int_checked_add(self: &JetArena, left: I64, right: I64) -> I64? { Val(self.int_add(left, right)) }
+    // Rust: crates/jet-rt/src/lib.rs:1906
+    pub fn int_checked_sub(self: &JetArena, left: I64, right: I64) -> I64? { Val(self.int_sub(left, right)) }
+    // Rust: crates/jet-rt/src/lib.rs:1910
+    pub fn int_checked_mul(self: &JetArena, left: I64, right: I64) -> I64? { Val(self.int_mul(left, right)) }
+    // Rust: crates/jet-rt/src/lib.rs:1914
+    pub fn int_checked_div(self: &JetArena, left: I64, right: I64) -> I64? { self.int_div(left, right) }
+    // Rust: crates/jet-rt/src/lib.rs:1918
+    pub fn int_checked_rem(self: &JetArena, left: I64, right: I64) -> I64? { self.int_rem(left, right) }
+    // Rust: crates/jet-rt/src/lib.rs:1922
+    pub fn int_checked_pow(self: &JetArena, left: I64, right: I64) -> I64? { self.int_pow(left, right) }
+    // Rust: crates/jet-rt/src/lib.rs:1926
+    pub fn int_saturating_add(self: &JetArena, left: I64, right: I64) -> I64 { self.int_add(left, right) }
+    // Rust: crates/jet-rt/src/lib.rs:1930
+    pub fn int_saturating_sub(self: &JetArena, left: I64, right: I64) -> I64 { self.int_sub(left, right) }
+    // Rust: crates/jet-rt/src/lib.rs:1934
+    pub fn int_saturating_mul(self: &JetArena, left: I64, right: I64) -> I64 { self.int_mul(left, right) }
+    // Rust: crates/jet-rt/src/lib.rs:1938
+    pub fn int_int_pow(self: &JetArena, left: I64, right: I64) -> I64 { self.int_pow(left, right).unwrap_or_else(|| -> self.int_from_i64(I64{0})) }
+    // Rust: crates/jet-rt/src/lib.rs:1943
+    pub fn int_gcd(self: &JetArena, left: I64, right: I64) -> I64 { self.int_pack(CtBigInt.gcd(self.int_value(left), self.int_value(right))) }
+    // Rust: crates/jet-rt/src/lib.rs:1949
+    pub fn int_lcm(self: &JetArena, left: I64, right: I64) -> I64 { self.int_pack(CtBigInt.lcm(self.int_value(left), self.int_value(right))) }
+    // Rust: crates/jet-rt/src/lib.rs:1955
+    pub fn int_div_mod(self: &JetArena, value: I64, divisor: I64) -> (I64, I64)? {
+        (quotient, remainder) :: self.int_div_rem(value, divisor)?
+        if not self.int_is_zero(remainder) and self.int_is_negative(value) != self.int_is_negative(divisor) {
+            one :: self.int_from_i64(I64{1})
+            Val((self.int_sub(quotient, one), self.int_add(remainder, divisor)))
+        } else { Val((quotient, remainder)) }
+    }
+}

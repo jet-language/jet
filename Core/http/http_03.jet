@@ -1,1924 +1,1051 @@
-// PORT-PENDING 0637 crates-jet-pkg-model-src-prelude-http-slice-3615: crates/jet-pkg-model/src/Prelude/HTTP.rs:3615-5534
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn set_stream_timeouts(
-//RS     stream: &mut HTTPStream,
-//RS     read: Duration,
-//RS     write: Duration,
-//RS     deadline: Option<Instant>,
-//RS ) -> Result<(), JetHTTPBridgeError> {
-//RS     let read = remaining_timeout(read, deadline)?;
-//RS     let write = remaining_timeout(write, deadline)?;
-//RS     let tcp = match stream {
-//RS         HTTPStream::Plain(stream) => stream,
-//RS         HTTPStream::TLS(stream) => stream.get_mut(),
-//RS         HTTPStream::H2(connection) => {
-//RS             let mut connection = connection
-//RS                 .lock()
-//RS                 .map_err(|_| JetHTTPBridgeError::Internal)?;
-//RS             return set_stream_timeouts(&mut connection.io, read, write, deadline);
-//RS         }
-//RS     };
-//RS     tcp.set_read_timeout(Some(read))
-//RS         .map_err(|_| JetHTTPBridgeError::IO)?;
-//RS     tcp.set_write_timeout(Some(write))
-//RS         .map_err(|_| JetHTTPBridgeError::IO)?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn encode_request(
-//RS     method: &str,
-//RS     url: &ParsedUrl,
-//RS     proxy: Option<&ParsedUrl>,
-//RS     headers: &[(String, String)],
-//RS     body_len: Option<usize>,
-//RS     chunked: bool,
-//RS     decompress: bool,
-//RS ) -> Result<Vec<u8>, JetHTTPBridgeError> {
-//RS     let target = if proxy.is_some() && url.scheme == "http" {
-//RS         format!("{}://{}{}", url.scheme, url.authority, url.target)
-//RS     } else {
-//RS         url.target.clone()
-//RS     };
-//RS     let mut out = format!("{method} {target} HTTP/1.1\r\nHost: {}\r\n", url.authority).into_bytes();
-//RS     let mut has_length = false;
-//RS     let mut has_connection = false;
-//RS     let mut has_accept_encoding = false;
-//RS     let mut has_transfer = false;
-//RS     for (name, value) in headers {
-//RS         has_length |= name.eq_ignore_ascii_case("content-length");
-//RS         has_connection |= name.eq_ignore_ascii_case("connection");
-//RS         has_accept_encoding |= name.eq_ignore_ascii_case("accept-encoding");
-//RS         has_transfer |= name.eq_ignore_ascii_case("transfer-encoding");
-//RS         out.extend_from_slice(name.as_bytes());
-//RS         out.extend_from_slice(b": ");
-//RS         out.extend_from_slice(value.as_bytes());
-//RS         out.extend_from_slice(b"\r\n");
-//RS     }
-//RS     if decompress && !has_accept_encoding {
-//RS         out.extend_from_slice(b"Accept-Encoding: gzip\r\n");
-//RS     }
-//RS     if !has_connection {
-//RS         out.extend_from_slice(b"Connection: keep-alive\r\n");
-//RS     }
-//RS     if chunked {
-//RS         if !has_transfer {
-//RS             out.extend_from_slice(b"Transfer-Encoding: chunked\r\n");
-//RS         }
-//RS     } else if let Some(length) = body_len {
-//RS         if !has_length {
-//RS             out.extend_from_slice(format!("Content-Length: {length}\r\n").as_bytes());
-//RS         }
-//RS     }
-//RS     out.extend_from_slice(b"\r\n");
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn tee_upload_chunk(tee: &mut Option<Vec<u8>>, chunk: &[u8]) -> Result<(), JetHTTPBridgeError> {
-//RS     let Some(buffer) = tee.as_mut() else {
-//RS         return Ok(());
-//RS     };
-//RS     let new_len = buffer
-//RS         .len()
-//RS         .checked_add(chunk.len())
-//RS         .ok_or(JetHTTPBridgeError::ResourceUnavailable)?;
-//RS     if new_len > HTTP_UPLOAD_REPLAY_CAP {
-//RS         return Err(JetHTTPBridgeError::ResourceUnavailable);
-//RS     }
-//RS     buffer.extend_from_slice(chunk);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn write_upload_body(
-//RS     stream: &mut HTTPStream,
-//RS     chunked: bool,
-//RS     mut body_read: impl FnMut() -> Result<Option<Vec<u8>>, JetHTTPBridgeError>,
-//RS     tee: &mut Option<Vec<u8>>,
-//RS ) -> Result<(), (JetHTTPBridgeError, bool)> {
-//RS     let mut wrote_any = false;
-//RS     loop {
-//RS         let chunk = body_read().map_err(|error| (error, wrote_any))?;
-//RS         let Some(chunk) = chunk else {
-//RS             break;
-//RS         };
-//RS         if chunk.is_empty() {
-//RS             continue;
-//RS         }
-//RS         tee_upload_chunk(tee, &chunk).map_err(|error| (error, wrote_any))?;
-//RS         if chunked {
-//RS             let framing = format!("{:x}\r\n", chunk.len());
-//RS             write_request(stream, framing.as_bytes()).map_err(|(error, wrote)| (error, wrote_any || wrote))?;
-//RS             wrote_any = true;
-//RS             write_request(stream, &chunk).map_err(|(error, _)| (error, true))?;
-//RS             write_request(stream, b"\r\n").map_err(|(error, _)| (error, true))?;
-//RS         } else {
-//RS             write_request(stream, &chunk).map_err(|(error, wrote)| (error, wrote_any || wrote))?;
-//RS             wrote_any = true;
-//RS         }
-//RS     }
-//RS     if chunked {
-//RS         write_request(stream, b"0\r\n\r\n").map_err(|(error, wrote)| (error, wrote_any || wrote))?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn slice_body_reader<'a>(
-//RS     bytes: &'a [u8],
-//RS     offset: &'a mut usize,
-//RS ) -> impl FnMut() -> Result<Option<Vec<u8>>, JetHTTPBridgeError> + 'a {
-//RS     move || {
-//RS         if *offset >= bytes.len() {
-//RS             return Ok(None);
-//RS         }
-//RS         let end = (*offset + HTTP_UPLOAD_CHUNK).min(bytes.len());
-//RS         let chunk = bytes[*offset..end].to_vec();
-//RS         *offset = end;
-//RS         Ok(Some(chunk))
-//RS     }
-//RS }
-//RS 
-//RS fn write_request(stream: &mut HTTPStream, bytes: &[u8]) -> Result<(), (JetHTTPBridgeError, bool)> {
-//RS     let mut written = 0;
-//RS     while written < bytes.len() {
-//RS         match stream.write(&bytes[written..]) {
-//RS             Ok(0) => return Err((JetHTTPBridgeError::IO, written != 0)),
-//RS             Ok(count) => written += count,
-//RS             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-//RS             Err(error)
-//RS                 if matches!(
-//RS                     error.kind(),
-//RS                     std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-//RS                 ) =>
-//RS             {
-//RS                 return Err((JetHTTPBridgeError::Timeout, written != 0));
-//RS             }
-//RS             Err(_) => return Err((JetHTTPBridgeError::IO, written != 0)),
-//RS         }
-//RS     }
-//RS     stream
-//RS         .flush()
-//RS         .map_err(|_| (JetHTTPBridgeError::IO, written != 0))
-//RS }
-//RS 
-//RS fn read_head_bytes(stream: &mut impl Read) -> Result<(Vec<u8>, Vec<u8>, i64), JetHTTPBridgeError> {
-//RS     read_head_bytes_after(stream, Vec::new())
-//RS }
-//RS 
-//RS fn read_head_bytes_after(
-//RS     stream: &mut impl Read,
-//RS     mut bytes: Vec<u8>,
-//RS ) -> Result<(Vec<u8>, Vec<u8>, i64), JetHTTPBridgeError> {
-//RS     const MAX_HEAD: usize = 64 * 1024;
-//RS     let mut chunk = [0u8; 4096];
-//RS     let started = Instant::now();
-//RS     let mut first_byte_ms = None;
-//RS     loop {
-//RS         if let Some(end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
-//RS             let body = bytes.split_off(end + 4);
-//RS             bytes.truncate(end + 4);
-//RS             return Ok((
-//RS                 bytes,
-//RS                 body,
-//RS                 first_byte_ms.unwrap_or_else(|| elapsed_ms(started)),
-//RS             ));
-//RS         }
-//RS         if bytes.len() >= MAX_HEAD {
-//RS             return Err(JetHTTPBridgeError::InvalidHeader);
-//RS         }
-//RS         let read = stream.read(&mut chunk).map_err(|error| {
-//RS             if matches!(
-//RS                 error.kind(),
-//RS                 std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-//RS             ) {
-//RS                 JetHTTPBridgeError::Timeout
-//RS             } else {
-//RS                 JetHTTPBridgeError::IO
-//RS             }
-//RS         })?;
-//RS         if read == 0 {
-//RS             return Err(JetHTTPBridgeError::IO);
-//RS         }
-//RS         if first_byte_ms.is_none() {
-//RS             first_byte_ms = Some(elapsed_ms(started));
-//RS         }
-//RS         bytes.extend_from_slice(&chunk[..read]);
-//RS     }
-//RS }
-//RS 
-//RS fn parse_status_and_headers(
-//RS     head: &[u8],
-//RS ) -> Result<(i64, String, Vec<(String, String)>), JetHTTPBridgeError> {
-//RS     let text = std::str::from_utf8(head).map_err(|_| JetHTTPBridgeError::InvalidHeader)?;
-//RS     let mut lines = text
-//RS         .strip_suffix("\r\n\r\n")
-//RS         .ok_or(JetHTTPBridgeError::InvalidFraming)?
-//RS         .split("\r\n");
-//RS     let status_line = lines.next().ok_or(JetHTTPBridgeError::InvalidFraming)?;
-//RS     let mut status_parts = status_line.splitn(3, ' ');
-//RS     let version = status_parts
-//RS         .next()
-//RS         .ok_or(JetHTTPBridgeError::InvalidFraming)?;
-//RS     if !version.starts_with("HTTP/") {
-//RS         return Err(JetHTTPBridgeError::InvalidFraming);
-//RS     }
-//RS     if !matches!(version, "HTTP/1.0" | "HTTP/1.1") {
-//RS         return Err(JetHTTPBridgeError::Protocol);
-//RS     }
-//RS     let status = status_parts
-//RS         .next()
-//RS         .ok_or(JetHTTPBridgeError::InvalidFraming)?
-//RS         .parse::<i64>()
-//RS         .map_err(|_| JetHTTPBridgeError::InvalidFraming)?;
-//RS     if !(100..=599).contains(&status) || status_parts.next().is_none() {
-//RS         return Err(JetHTTPBridgeError::InvalidFraming);
-//RS     }
-//RS     let mut headers = Vec::new();
-//RS     for line in lines {
-//RS         if headers.len() == 100 {
-//RS             return Err(JetHTTPBridgeError::InvalidHeader);
-//RS         }
-//RS         if line.starts_with([' ', '\t']) {
-//RS             return Err(JetHTTPBridgeError::InvalidHeader);
-//RS         }
-//RS         let (name, value) = line
-//RS             .split_once(':')
-//RS             .ok_or(JetHTTPBridgeError::InvalidHeader)?;
-//RS         if name.is_empty()
-//RS             || !name.bytes().all(http_token_byte)
-//RS             || !value.bytes().all(http_field_value_byte)
-//RS         {
-//RS             return Err(JetHTTPBridgeError::InvalidHeader);
-//RS         }
-//RS         headers.push((
-//RS             name.to_ascii_lowercase(),
-//RS             value.trim_matches([' ', '\t']).to_string(),
-//RS         ));
-//RS     }
-//RS     Ok((status, version.to_string(), headers))
-//RS }
-//RS 
-//RS fn header_first<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
-//RS     headers
-//RS         .iter()
-//RS         .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
-//RS         .map(|(_, value)| value.as_str())
-//RS }
-//RS 
-//RS fn content_length(headers: &[(String, String)]) -> Result<Option<usize>, JetHTTPBridgeError> {
-//RS     let mut found = None;
-//RS     for value in headers
-//RS         .iter()
-//RS         .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
-//RS         .flat_map(|(_, value)| value.split(','))
-//RS     {
-//RS         if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
-//RS             return Err(JetHTTPBridgeError::InvalidFraming);
-//RS         }
-//RS         let length = value
-//RS             .parse::<usize>()
-//RS             .map_err(|_| JetHTTPBridgeError::InvalidFraming)?;
-//RS         if found.is_some_and(|prior| prior != length) {
-//RS             return Err(JetHTTPBridgeError::InvalidFraming);
-//RS         }
-//RS         found = Some(length);
-//RS     }
-//RS     Ok(found)
-//RS }
-//RS 
-//RS fn decoded_gzip(
-//RS     headers: &[(String, String)],
-//RS     decompress: bool,
-//RS ) -> Result<bool, JetHTTPBridgeError> {
-//RS     let Some(encoding) = header_first(headers, "content-encoding") else {
-//RS         return Ok(false);
-//RS     };
-//RS     if !decompress || encoding.eq_ignore_ascii_case("identity") {
-//RS         return Ok(false);
-//RS     }
-//RS     if encoding.eq_ignore_ascii_case("gzip") {
-//RS         Ok(true)
-//RS     } else {
-//RS         Err(JetHTTPBridgeError::UnsupportedEncoding)
-//RS     }
-//RS }
-//RS fn read_h2_response(
-//RS     connection: Arc<Mutex<H2Connection>>,
-//RS     stream_id: u32,
-//RS     status: i64,
-//RS     headers: Vec<(String, String)>,
-//RS     end_stream: bool,
-//RS     key: PoolKey,
-//RS     pool: Arc<Mutex<ClientPool>>,
-//RS     decompress: bool,
-//RS     facts: Arc<ResponseFacts>,
-//RS     request_started: Instant,
-//RS     read_timeout: Duration,
-//RS     total_deadline: Option<Instant>,
-//RS     permit: OriginPermit,
-//RS     reused_connection: bool,
-//RS     remote_address: String,
-//RS ) -> Result<NativeResponse, JetHTTPBridgeError> {
-//RS     facts.set_raw_content_encoding(header_first(&headers, "content-encoding").map(str::to_string));
-//RS     let length = content_length(&headers)?;
-//RS     if length.is_some_and(|length| length > HTTP_RESPONSE_BODY_LIMIT) {
-//RS         return Err(JetHTTPBridgeError::InvalidFraming);
-//RS     }
-//RS     let reader = H2BodyReader {
-//RS         connection: Some(connection),
-//RS         key,
-//RS         pool,
-//RS         stream_id,
-//RS         pending: Vec::new(),
-//RS         cursor: 0,
-//RS         end_after_pending: end_stream,
-//RS         finished: false,
-//RS         expected: length,
-//RS         received: 0,
-//RS         facts: facts.clone(),
-//RS         request_started,
-//RS         read_timeout,
-//RS         total_deadline,
-//RS         permit: Some(permit),
-//RS     };
-//RS     let encoded_gzip = decoded_gzip(&headers, decompress)?;
-//RS     let reader: Box<dyn Read + Send> = if encoded_gzip {
-//RS         Box::new(GzipReader::new(reader))
-//RS     } else {
-//RS         Box::new(reader)
-//RS     };
-//RS     let body_handle = register_body(reader);
-//RS     let public_length = if encoded_gzip {
-//RS         None
-//RS     } else {
-//RS         length.and_then(|length| i64::try_from(length).ok())
-//RS     };
-//RS     let public_headers = if encoded_gzip {
-//RS         headers
-//RS             .into_iter()
-//RS             .filter(|(name, _)| !matches!(name.as_str(), "content-encoding" | "content-length"))
-//RS             .collect()
-//RS     } else {
-//RS         headers
-//RS     };
-//RS     Ok(NativeResponse {
-//RS         status,
-//RS         headers: public_headers,
-//RS         body_handle,
-//RS         body_length: public_length,
-//RS         reused_connection,
-//RS         remote_address,
-//RS         protocol: "HTTP/2".to_string(),
-//RS         facts,
-//RS     })
-//RS }
-//RS 
-//RS struct H2BodyReader {
-//RS     connection: Option<Arc<Mutex<H2Connection>>>,
-//RS     key: PoolKey,
-//RS     pool: Arc<Mutex<ClientPool>>,
-//RS     stream_id: u32,
-//RS     pending: Vec<u8>,
-//RS     cursor: usize,
-//RS     end_after_pending: bool,
-//RS     finished: bool,
-//RS     expected: Option<usize>,
-//RS     received: usize,
-//RS     facts: Arc<ResponseFacts>,
-//RS     request_started: Instant,
-//RS     read_timeout: Duration,
-//RS     total_deadline: Option<Instant>,
-//RS     permit: Option<OriginPermit>,
-//RS }
-//RS 
-//RS impl H2BodyReader {
-//RS     fn release_stream(&self) {
-//RS         if let Some(session) = &self.connection {
-//RS             if let Ok(mut connection) = session.try_lock() {
-//RS                 connection.release_stream(self.stream_id);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn finish(&mut self) -> std::io::Result<()> {
-//RS         if self.finished {
-//RS             return Ok(());
-//RS         }
-//RS         if self
-//RS             .expected
-//RS             .is_some_and(|expected| expected != self.received)
-//RS         {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::InvalidData,
-//RS                 "HTTP/2 content-length mismatch",
-//RS             ));
-//RS         }
-//RS         self.finished = true;
-//RS         self.release_stream();
-//RS         self.permit.take();
-//RS         self.facts.set_total(elapsed_ms(self.request_started));
-//RS         self.connection.take();
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn refill(&mut self) -> std::io::Result<()> {
-//RS         let session = self
-//RS             .connection
-//RS             .as_ref()
-//RS             .expect("HTTP/2 response connection")
-//RS             .clone();
-//RS         let mut connection = session
-//RS             .lock()
-//RS             .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "HTTP/2 session lock"))?;
-//RS         set_stream_timeouts(
-//RS             &mut connection.io,
-//RS             self.read_timeout,
-//RS             self.read_timeout,
-//RS             self.total_deadline,
-//RS         )
-//RS         .map_err(|error| std::io::Error::new(std::io::ErrorKind::TimedOut, format!("{error:?}")))?;
-//RS         loop {
-//RS             let frame = match connection.dequeue_frame(self.stream_id) {
-//RS                 Some(frame) => frame,
-//RS                 None => h2_read_frame(&mut connection.io).map_err(h2_reader_error)?,
-//RS             };
-//RS             if connection.discard_abandoned_frame(&frame) {
-//RS                 continue;
-//RS             }
-//RS             if connection.control(&frame).map_err(h2_reader_error)? {
-//RS                 continue;
-//RS             }
-//RS             if frame.stream != self.stream_id {
-//RS                 connection
-//RS                     .enqueue_frame(frame, None)
-//RS                     .map_err(h2_reader_error)?;
-//RS                 continue;
-//RS             }
-//RS             match frame.kind {
-//RS                 0 => {
-//RS                     let mut payload = frame.payload;
-//RS                     if frame.flags & 8 != 0 {
-//RS                         let padding = usize::from(*payload.first().ok_or_else(|| {
-//RS                             std::io::Error::new(
-//RS                                 std::io::ErrorKind::InvalidData,
-//RS                                 "missing HTTP/2 padding",
-//RS                             )
-//RS                         })?);
-//RS                         payload.remove(0);
-//RS                         payload.truncate(payload.len().checked_sub(padding).ok_or_else(|| {
-//RS                             std::io::Error::new(
-//RS                                 std::io::ErrorKind::InvalidData,
-//RS                                 "invalid HTTP/2 padding",
-//RS                             )
-//RS                         })?);
-//RS                     }
-//RS                     self.received = self.received.checked_add(payload.len()).ok_or_else(|| {
-//RS                         std::io::Error::new(
-//RS                             std::io::ErrorKind::InvalidData,
-//RS                             "HTTP/2 body too large",
-//RS                         )
-//RS                     })?;
-//RS                     if self.received > HTTP_RESPONSE_BODY_LIMIT {
-//RS                         return Err(std::io::Error::new(
-//RS                             std::io::ErrorKind::InvalidData,
-//RS                             "HTTP/2 body exceeds 64 MiB",
-//RS                         ));
-//RS                     }
-//RS                     if self
-//RS                         .expected
-//RS                         .is_some_and(|expected| self.received > expected)
-//RS                     {
-//RS                         return Err(std::io::Error::new(
-//RS                             std::io::ErrorKind::InvalidData,
-//RS                             "HTTP/2 content-length mismatch",
-//RS                         ));
-//RS                     }
-//RS                     self.pending = payload;
-//RS                     self.cursor = 0;
-//RS                     self.end_after_pending = frame.flags & 1 != 0;
-//RS                     if self.pending.is_empty() && self.end_after_pending {
-//RS                         connection.release_stream(self.stream_id);
-//RS                         self.finish()?;
-//RS                     }
-//RS                     return Ok(());
-//RS                 }
-//RS                 1 => {
-//RS                     let (block, end) =
-//RS                         h2_header_block(&mut connection.io, frame).map_err(h2_reader_error)?;
-//RS                     let trailers = connection.decoder.decode(&block).map_err(h2_reader_error)?;
-//RS                     if trailers.iter().any(|(name, _)| name.starts_with(':')) {
-//RS                         return Err(std::io::Error::new(
-//RS                             std::io::ErrorKind::InvalidData,
-//RS                             "pseudo-header in HTTP/2 trailers",
-//RS                         ));
-//RS                     }
-//RS                     if end {
-//RS                         connection.release_stream(self.stream_id);
-//RS                         self.finish()?;
-//RS                         return Ok(());
-//RS                     }
-//RS                 }
-//RS                 3 => {
-//RS                     return Err(std::io::Error::new(
-//RS                         std::io::ErrorKind::ConnectionReset,
-//RS                         "HTTP/2 stream reset",
-//RS                     ))
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for H2BodyReader {
-//RS     fn drop(&mut self) {
-//RS         let Some(session) = self.connection.take() else {
-//RS             self.permit.take();
-//RS             return;
-//RS         };
-//RS         let cleanup = session
-//RS             .lock()
-//RS             .map_err(|_| JetHTTPBridgeError::Internal)
-//RS             .and_then(|mut connection| {
-//RS                 if self.end_after_pending {
-//RS                     connection.release_stream(self.stream_id);
-//RS                     Ok(())
-//RS                 } else {
-//RS                     connection.abandon_stream(self.stream_id)
-//RS                 }
-//RS             });
-//RS         if cleanup.is_err() {
-//RS             if let Ok(mut pool) = self.pool.lock() {
-//RS                 pool.remove_h2(&self.key, &session);
-//RS             }
-//RS         }
-//RS         self.permit.take();
-//RS     }
-//RS }
-//RS 
-//RS fn h2_reader_error(error: JetHTTPBridgeError) -> std::io::Error {
-//RS     std::io::Error::new(
-//RS         if error == JetHTTPBridgeError::Timeout {
-//RS             std::io::ErrorKind::TimedOut
-//RS         } else {
-//RS             std::io::ErrorKind::InvalidData
-//RS         },
-//RS         format!("{error:?}"),
-//RS     )
-//RS }
-//RS 
-//RS impl Read for H2BodyReader {
-//RS     fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
-//RS         if out.is_empty() || self.finished {
-//RS             return Ok(0);
-//RS         }
-//RS         let started = Instant::now();
-//RS         if self.cursor == self.pending.len() {
-//RS             if self.end_after_pending {
-//RS                 self.finish()?;
-//RS                 return Ok(0);
-//RS             }
-//RS             self.refill()?;
-//RS             if self.finished {
-//RS                 return Ok(0);
-//RS             }
-//RS         }
-//RS         let count = out.len().min(self.pending.len() - self.cursor);
-//RS         out[..count].copy_from_slice(&self.pending[self.cursor..self.cursor + count]);
-//RS         self.cursor += count;
-//RS         if self.cursor == self.pending.len() {
-//RS             if !self.end_after_pending {
-//RS                 if let Some(session) = self.connection.as_ref() {
-//RS                     let mut connection = session.lock().map_err(|_| {
-//RS                         std::io::Error::new(std::io::ErrorKind::Other, "HTTP/2 session lock")
-//RS                     })?;
-//RS                     let amount = u32::try_from(self.pending.len())
-//RS                         .unwrap_or(u32::MAX)
-//RS                         .to_be_bytes();
-//RS                     h2_write_frame(&mut connection.io, 8, 0, 0, &amount)
-//RS                         .map_err(h2_reader_error)?;
-//RS                     h2_write_frame(&mut connection.io, 8, 0, self.stream_id, &amount)
-//RS                         .map_err(h2_reader_error)?;
-//RS                 }
-//RS             }
-//RS             self.pending.clear();
-//RS             self.cursor = 0;
-//RS             if self.end_after_pending {
-//RS                 self.finish()?;
-//RS             }
-//RS         }
-//RS         self.facts.max_timing(5, elapsed_ms(started));
-//RS         Ok(count)
-//RS     }
-//RS }
-//RS 
-//RS fn read_response(
-//RS     mut stream: HTTPStream,
-//RS     key: PoolKey,
-//RS     pool: Arc<Mutex<ClientPool>>,
-//RS     head_request: bool,
-//RS     decompress: bool,
-//RS     facts: Arc<ResponseFacts>,
-//RS     request_started: Instant,
-//RS     read_timeout: Duration,
-//RS     total_deadline: Option<Instant>,
-//RS     permit: OriginPermit,
-//RS ) -> Result<NativeResponse, JetHTTPBridgeError> {
-//RS     let (status, version, headers, initial) = {
-//RS         let mut pending = Vec::new();
-//RS         let mut first_byte_ms = None;
-//RS         let mut interim_count = 0usize;
-//RS         loop {
-//RS             let (head, after, elapsed) = read_head_bytes_after(&mut stream, pending)?;
-//RS             first_byte_ms.get_or_insert(elapsed);
-//RS             let (status, version, headers) = parse_status_and_headers(&head)?;
-//RS             if status == 101 {
-//RS                 return Err(JetHTTPBridgeError::Protocol);
-//RS             }
-//RS             if (100..=199).contains(&status) {
-//RS                 interim_count += 1;
-//RS                 if interim_count > 16 {
-//RS                     return Err(JetHTTPBridgeError::InvalidFraming);
-//RS                 }
-//RS                 pending = after;
-//RS                 continue;
-//RS             }
-//RS             set_timing(&facts, 4, first_byte_ms.unwrap_or(elapsed));
-//RS             break (status, version, headers, after);
-//RS         }
-//RS     };
-//RS     set_stream_timeouts(&mut stream, read_timeout, read_timeout, total_deadline)?;
-//RS     facts.set_raw_content_encoding(header_first(&headers, "content-encoding").map(str::to_string));
-//RS     let transfer = headers
-//RS         .iter()
-//RS         .filter(|(name, _)| name == "transfer-encoding")
-//RS         .flat_map(|(_, value)| value.split(','))
-//RS         .map(|value| value.trim().to_ascii_lowercase())
-//RS         .collect::<Vec<_>>();
-//RS     if transfer.len() > 1 || transfer.first().is_some_and(|value| value != "chunked") {
-//RS         return Err(JetHTTPBridgeError::InvalidFraming);
-//RS     }
-//RS     let length = content_length(&headers)?;
-//RS     if length.is_some_and(|length| length > HTTP_RESPONSE_BODY_LIMIT) {
-//RS         return Err(JetHTTPBridgeError::InvalidFraming);
-//RS     }
-//RS     if !transfer.is_empty() && length.is_some() {
-//RS         return Err(JetHTTPBridgeError::InvalidFraming);
-//RS     }
-//RS     let bodyless = head_request || matches!(status, 100..=199 | 204 | 304);
-//RS     let close = version == "HTTP/1.0"
-//RS         || headers.iter().any(|(name, value)| {
-//RS             name == "connection"
-//RS                 && value
-//RS                     .split(',')
-//RS                     .any(|item| item.trim().eq_ignore_ascii_case("close"))
-//RS         });
-//RS     let framing = if bodyless {
-//RS         BodyFraming::Length(0)
-//RS     } else if !transfer.is_empty() {
-//RS         BodyFraming::Chunked
-//RS     } else if let Some(length) = length {
-//RS         BodyFraming::Length(length)
-//RS     } else {
-//RS         BodyFraming::Close
-//RS     };
-//RS     let reusable = !close && !matches!(framing, BodyFraming::Close);
-//RS     let reader = ResponseBodyReader {
-//RS         stream: Some(stream),
-//RS         key,
-//RS         pool,
-//RS         initial,
-//RS         cursor: 0,
-//RS         framing,
-//RS         reusable,
-//RS         chunk_remaining: 0,
-//RS         received: 0,
-//RS         finished: false,
-//RS         facts: facts.clone(),
-//RS         request_started,
-//RS         permit: Some(permit),
-//RS         read_timeout,
-//RS         total_deadline,
-//RS     };
-//RS     let encoded_gzip = decoded_gzip(&headers, decompress)?;
-//RS     let reader: Box<dyn Read + Send> = if encoded_gzip {
-//RS         Box::new(GzipReader::new(reader))
-//RS     } else {
-//RS         Box::new(reader)
-//RS     };
-//RS     let body_handle = register_body(reader);
-//RS     let public_length = if encoded_gzip {
-//RS         None
-//RS     } else {
-//RS         length.and_then(|length| i64::try_from(length).ok())
-//RS     };
-//RS     let public_headers = if encoded_gzip {
-//RS         headers
-//RS             .into_iter()
-//RS             .filter(|(name, _)| !matches!(name.as_str(), "content-encoding" | "content-length"))
-//RS             .collect()
-//RS     } else {
-//RS         headers
-//RS     };
-//RS     Ok(NativeResponse {
-//RS         status,
-//RS         headers: public_headers,
-//RS         body_handle,
-//RS         body_length: public_length,
-//RS         reused_connection: false,
-//RS         remote_address: String::new(),
-//RS         protocol: "HTTP/1.1".to_string(),
-//RS         facts,
-//RS     })
-//RS }
-//RS 
-//RS #[derive(Clone, Copy)]
-//RS enum BodyFraming {
-//RS     Length(usize),
-//RS     Chunked,
-//RS     Close,
-//RS }
-//RS 
-//RS struct ResponseBodyReader {
-//RS     stream: Option<HTTPStream>,
-//RS     key: PoolKey,
-//RS     pool: Arc<Mutex<ClientPool>>,
-//RS     initial: Vec<u8>,
-//RS     cursor: usize,
-//RS     framing: BodyFraming,
-//RS     reusable: bool,
-//RS     chunk_remaining: usize,
-//RS     received: usize,
-//RS     finished: bool,
-//RS     facts: Arc<ResponseFacts>,
-//RS     request_started: Instant,
-//RS     permit: Option<OriginPermit>,
-//RS     read_timeout: Duration,
-//RS     total_deadline: Option<Instant>,
-//RS }
-//RS 
-//RS impl ResponseBodyReader {
-//RS     fn finish(&mut self) {
-//RS         if self.finished {
-//RS             return;
-//RS         }
-//RS         self.finished = true;
-//RS         self.permit.take();
-//RS         self.facts.set_total(elapsed_ms(self.request_started));
-//RS         if self.reusable {
-//RS             if let Some(stream) = self.stream.take() {
-//RS                 let _ = self
-//RS                     .pool
-//RS                     .lock()
-//RS                     .map(|mut pool| pool.put(self.key.clone(), stream));
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn read_raw(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
-//RS         if self.cursor < self.initial.len() {
-//RS             let count = out.len().min(self.initial.len() - self.cursor);
-//RS             out[..count].copy_from_slice(&self.initial[self.cursor..self.cursor + count]);
-//RS             self.cursor += count;
-//RS             if self.cursor == self.initial.len() {
-//RS                 self.initial.clear();
-//RS                 self.cursor = 0;
-//RS             }
-//RS             return Ok(count);
-//RS         }
-//RS         let stream = self.stream.as_mut().expect("response stream");
-//RS         set_stream_timeouts(
-//RS             stream,
-//RS             self.read_timeout,
-//RS             self.read_timeout,
-//RS             self.total_deadline,
-//RS         )
-//RS         .map_err(|error| {
-//RS             std::io::Error::new(
-//RS                 if error == JetHTTPBridgeError::Timeout {
-//RS                     std::io::ErrorKind::TimedOut
-//RS                 } else {
-//RS                     std::io::ErrorKind::Other
-//RS                 },
-//RS                 format!("{error:?}"),
-//RS             )
-//RS         })?;
-//RS         stream.read(out)
-//RS     }
-//RS 
-//RS     fn account_body_bytes(&mut self, count: usize) -> std::io::Result<()> {
-//RS         self.received = self.received.checked_add(count).ok_or_else(|| {
-//RS             std::io::Error::new(std::io::ErrorKind::InvalidData, "HTTP body too large")
-//RS         })?;
-//RS         if self.received > HTTP_RESPONSE_BODY_LIMIT {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::InvalidData,
-//RS                 "HTTP body exceeds 64 MiB",
-//RS             ));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn read_exact_raw(&mut self, out: &mut [u8]) -> std::io::Result<()> {
-//RS         let mut filled = 0;
-//RS         while filled < out.len() {
-//RS             let read = self.read_raw(&mut out[filled..])?;
-//RS             if read == 0 {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::UnexpectedEof,
-//RS                     "truncated HTTP body",
-//RS                 ));
-//RS             }
-//RS             filled += read;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn chunk_size(&mut self) -> std::io::Result<usize> {
-//RS         let mut line = Vec::new();
-//RS         loop {
-//RS             let mut byte = [0];
-//RS             self.read_exact_raw(&mut byte)?;
-//RS             line.push(byte[0]);
-//RS             if line.ends_with(b"\r\n") {
-//RS                 break;
-//RS             }
-//RS             if line.len() > 1024 {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidData,
-//RS                     "oversized chunk line",
-//RS                 ));
-//RS             }
-//RS         }
-//RS         line.truncate(line.len() - 2);
-//RS         let digits = line.split(|byte| *byte == b';').next().unwrap_or(&[]);
-//RS         let text = std::str::from_utf8(digits).map_err(|_| {
-//RS             std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid chunk size")
-//RS         })?;
-//RS         usize::from_str_radix(text, 16)
-//RS             .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid chunk size"))
-//RS     }
-//RS }
-//RS 
-//RS impl Read for ResponseBodyReader {
-//RS     fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
-//RS         if out.is_empty() || self.finished {
-//RS             return Ok(0);
-//RS         }
-//RS         let started = Instant::now();
-//RS         let result = match self.framing {
-//RS             BodyFraming::Length(0) => {
-//RS                 self.finish();
-//RS                 Ok(0)
-//RS             }
-//RS             BodyFraming::Length(remaining) => {
-//RS                 let wanted = remaining.min(out.len());
-//RS                 let read = self.read_raw(&mut out[..wanted])?;
-//RS                 if read == 0 {
-//RS                     return Err(std::io::Error::new(
-//RS                         std::io::ErrorKind::UnexpectedEof,
-//RS                         "truncated HTTP body",
-//RS                     ));
-//RS                 }
-//RS                 self.account_body_bytes(read)?;
-//RS                 self.framing = BodyFraming::Length(remaining - read);
-//RS                 if remaining == read {
-//RS                     self.finish();
-//RS                 }
-//RS                 Ok(read)
-//RS             }
-//RS             BodyFraming::Close => {
-//RS                 let read = self.read_raw(out)?;
-//RS                 self.account_body_bytes(read)?;
-//RS                 if read == 0 {
-//RS                     self.finished = true;
-//RS                     self.stream.take();
-//RS                 }
-//RS                 Ok(read)
-//RS             }
-//RS             BodyFraming::Chunked => {
-//RS                 if self.chunk_remaining == 0 {
-//RS                     self.chunk_remaining = self.chunk_size()?;
-//RS                     if self
-//RS                         .received
-//RS                         .checked_add(self.chunk_remaining)
-//RS                         .is_none_or(|total| total > HTTP_RESPONSE_BODY_LIMIT)
-//RS                     {
-//RS                         return Err(std::io::Error::new(
-//RS                             std::io::ErrorKind::InvalidData,
-//RS                             "HTTP body exceeds 64 MiB",
-//RS                         ));
-//RS                     }
-//RS                     if self.chunk_remaining == 0 {
-//RS                         let mut end = [0; 2];
-//RS                         self.read_exact_raw(&mut end)?;
-//RS                         if end != *b"\r\n" {
-//RS                             return Err(std::io::Error::new(
-//RS                                 std::io::ErrorKind::InvalidData,
-//RS                                 "HTTP trailers unsupported",
-//RS                             ));
-//RS                         }
-//RS                         self.finish();
-//RS                         return Ok(0);
-//RS                     }
-//RS                 }
-//RS                 let wanted = self.chunk_remaining.min(out.len());
-//RS                 let read = self.read_raw(&mut out[..wanted])?;
-//RS                 if read == 0 {
-//RS                     return Err(std::io::Error::new(
-//RS                         std::io::ErrorKind::UnexpectedEof,
-//RS                         "truncated chunk",
-//RS                     ));
-//RS                 }
-//RS                 self.account_body_bytes(read)?;
-//RS                 self.chunk_remaining -= read;
-//RS                 if self.chunk_remaining == 0 {
-//RS                     let mut end = [0; 2];
-//RS                     self.read_exact_raw(&mut end)?;
-//RS                     if end != *b"\r\n" {
-//RS                         return Err(std::io::Error::new(
-//RS                             std::io::ErrorKind::InvalidData,
-//RS                             "invalid chunk ending",
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS                 Ok(read)
-//RS             }
-//RS         };
-//RS         self.facts.max_timing(5, elapsed_ms(started));
-//RS         result
-//RS     }
-//RS }
-//RS 
-//RS const GZIP_COMPRESSED_LIMIT: usize = 64 * 1024 * 1024;
-//RS const GZIP_DECODED_LIMIT: usize = 8 * 1024 * 1024;
-//RS 
-//RS fn invalid_gzip() -> std::io::Error {
-//RS     std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid gzip body")
-//RS }
-//RS 
-//RS struct GzipBits<R> {
-//RS     inner: R,
-//RS     current: u8,
-//RS     remaining: u8,
-//RS     compressed: usize,
-//RS }
-//RS 
-//RS impl<R: Read> GzipBits<R> {
-//RS     fn new(inner: R) -> Self {
-//RS         Self {
-//RS             inner,
-//RS             current: 0,
-//RS             remaining: 0,
-//RS             compressed: 0,
-//RS         }
-//RS     }
-//RS 
-//RS     fn next_byte(&mut self) -> std::io::Result<u8> {
-//RS         if self.compressed == GZIP_COMPRESSED_LIMIT {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::InvalidData,
-//RS                 "gzip body too large",
-//RS             ));
-//RS         }
-//RS         let mut byte = [0];
-//RS         self.inner.read_exact(&mut byte)?;
-//RS         self.compressed += 1;
-//RS         Ok(byte[0])
-//RS     }
-//RS 
-//RS     fn bits(&mut self, count: usize) -> std::io::Result<u32> {
-//RS         let mut value = 0;
-//RS         for offset in 0..count {
-//RS             if self.remaining == 0 {
-//RS                 self.current = self.next_byte()?;
-//RS                 self.remaining = 8;
-//RS             }
-//RS             value |= u32::from(self.current & 1) << offset;
-//RS             self.current >>= 1;
-//RS             self.remaining -= 1;
-//RS         }
-//RS         Ok(value)
-//RS     }
-//RS 
-//RS     fn align(&mut self) {
-//RS         self.remaining = 0;
-//RS     }
-//RS 
-//RS     fn aligned_byte(&mut self) -> std::io::Result<u8> {
-//RS         self.align();
-//RS         self.next_byte()
-//RS     }
-//RS 
-//RS     fn ensure_eof(&mut self) -> std::io::Result<()> {
-//RS         self.align();
-//RS         let mut byte = [0];
-//RS         match self.inner.read(&mut byte)? {
-//RS             0 => Ok(()),
-//RS             _ => Err(invalid_gzip()),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct Huffman {
-//RS     symbols: Vec<(u32, u8, u16)>,
-//RS     max: u8,
-//RS }
-//RS 
-//RS fn reverse_bits(mut code: u32, length: u8) -> u32 {
-//RS     let mut reversed = 0;
-//RS     for _ in 0..length {
-//RS         reversed = reversed << 1 | code & 1;
-//RS         code >>= 1;
-//RS     }
-//RS     reversed
-//RS }
-//RS 
-//RS impl Huffman {
-//RS     fn from_lengths(lengths: &[u8]) -> Result<Self, ()> {
-//RS         let max = lengths.iter().copied().max().unwrap_or(0);
-//RS         if max == 0 || max > 15 {
-//RS             return Err(());
-//RS         }
-//RS         let mut counts = [0u32; 16];
-//RS         for &length in lengths {
-//RS             if length > 15 {
-//RS                 return Err(());
-//RS             }
-//RS             if length != 0 {
-//RS                 counts[length as usize] += 1;
-//RS             }
-//RS         }
-//RS         let mut left = 1i32;
-//RS         for bits in 1..=15 {
-//RS             left = left * 2 - counts[bits] as i32;
-//RS             if left < 0 {
-//RS                 return Err(());
-//RS             }
-//RS         }
-//RS         let mut next = [0u32; 16];
-//RS         let mut code = 0;
-//RS         for bits in 1..=15 {
-//RS             code = (code + counts[bits - 1]) << 1;
-//RS             next[bits] = code;
-//RS         }
-//RS         let mut symbols = Vec::new();
-//RS         for (symbol, &length) in lengths.iter().enumerate() {
-//RS             if length == 0 {
-//RS                 continue;
-//RS             }
-//RS             let canonical = next[length as usize];
-//RS             next[length as usize] += 1;
-//RS             symbols.push((reverse_bits(canonical, length), length, symbol as u16));
-//RS         }
-//RS         Ok(Self { symbols, max })
-//RS     }
-//RS 
-//RS     fn decode<R: Read>(&self, bits: &mut GzipBits<R>) -> std::io::Result<u16> {
-//RS         let mut code = 0;
-//RS         for length in 1..=self.max {
-//RS             code |= bits.bits(1)? << (length - 1);
-//RS             if let Some((_, _, symbol)) = self
-//RS                 .symbols
-//RS                 .iter()
-//RS                 .find(|(candidate, len, _)| *len == length && *candidate == code)
-//RS             {
-//RS                 return Ok(*symbol);
-//RS             }
-//RS         }
-//RS         Err(invalid_gzip())
-//RS     }
-//RS }
-//RS 
-//RS fn fixed_trees() -> Result<(Huffman, Huffman), ()> {
-//RS     let mut literals = vec![0u8; 288];
-//RS     literals[..144].fill(8);
-//RS     literals[144..256].fill(9);
-//RS     literals[256..280].fill(7);
-//RS     literals[280..].fill(8);
-//RS     Ok((
-//RS         Huffman::from_lengths(&literals)?,
-//RS         Huffman::from_lengths(&[5; 32])?,
-//RS     ))
-//RS }
-//RS 
-//RS fn dynamic_trees<R: Read>(bits: &mut GzipBits<R>) -> std::io::Result<(Huffman, Huffman)> {
-//RS     let literal_count = bits.bits(5)? as usize + 257;
-//RS     let distance_count = bits.bits(5)? as usize + 1;
-//RS     let code_count = bits.bits(4)? as usize + 4;
-//RS     let order = [
-//RS         16usize, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
-//RS     ];
-//RS     let mut code_lengths = [0u8; 19];
-//RS     for index in 0..code_count {
-//RS         code_lengths[order[index]] = bits.bits(3)? as u8;
-//RS     }
-//RS     let code_tree = Huffman::from_lengths(&code_lengths).map_err(|_| invalid_gzip())?;
-//RS     let mut lengths = Vec::with_capacity(literal_count + distance_count);
-//RS     while lengths.len() < literal_count + distance_count {
-//RS         match code_tree.decode(bits)? {
-//RS             value @ 0..=15 => lengths.push(value as u8),
-//RS             16 => {
-//RS                 let prior = *lengths.last().ok_or_else(invalid_gzip)?;
-//RS                 let repeat = bits.bits(2)? as usize + 3;
-//RS                 lengths.extend(std::iter::repeat(prior).take(repeat));
-//RS             }
-//RS             17 => {
-//RS                 let repeat = bits.bits(3)? as usize + 3;
-//RS                 lengths.extend(std::iter::repeat(0).take(repeat));
-//RS             }
-//RS             18 => {
-//RS                 let repeat = bits.bits(7)? as usize + 11;
-//RS                 lengths.extend(std::iter::repeat(0).take(repeat));
-//RS             }
-//RS             _ => return Err(invalid_gzip()),
-//RS         }
-//RS         if lengths.len() > literal_count + distance_count {
-//RS             return Err(invalid_gzip());
-//RS         }
-//RS     }
-//RS     Ok((
-//RS         Huffman::from_lengths(&lengths[..literal_count]).map_err(|_| invalid_gzip())?,
-//RS         Huffman::from_lengths(&lengths[literal_count..]).map_err(|_| invalid_gzip())?,
-//RS     ))
-//RS }
-//RS 
-//RS const LENGTH_BASE: [usize; 29] = [
-//RS     3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131,
-//RS     163, 195, 227, 258,
-//RS ];
-//RS const LENGTH_EXTRA: [usize; 29] = [
-//RS     0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
-//RS ];
-//RS const DIST_BASE: [usize; 30] = [
-//RS     1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537,
-//RS     2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
-//RS ];
-//RS const DIST_EXTRA: [usize; 30] = [
-//RS     0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13,
-//RS     13,
-//RS ];
-//RS 
-//RS enum InflateBlock {
-//RS     GzipHeader,
-//RS     DeflateHeader,
-//RS     Stored(usize),
-//RS     Huffman {
-//RS         literals: Huffman,
-//RS         distances: Huffman,
-//RS     },
-//RS     Trailer,
-//RS     Done,
-//RS }
-//RS 
-//RS struct GzipReader<R> {
-//RS     bits: GzipBits<R>,
-//RS     block: InflateBlock,
-//RS     final_block: bool,
-//RS     window: VecDeque<u8>,
-//RS     copy_distance: usize,
-//RS     copy_remaining: usize,
-//RS     crc: u32,
-//RS     decoded: usize,
-//RS     failed: bool,
-//RS }
-//RS 
-//RS impl<R: Read> GzipReader<R> {
-//RS     fn new(inner: R) -> Self {
-//RS         Self {
-//RS             bits: GzipBits::new(inner),
-//RS             block: InflateBlock::GzipHeader,
-//RS             final_block: false,
-//RS             window: VecDeque::with_capacity(32 * 1024),
-//RS             copy_distance: 0,
-//RS             copy_remaining: 0,
-//RS             crc: !0,
-//RS             decoded: 0,
-//RS             failed: false,
-//RS         }
-//RS     }
-//RS 
-//RS     fn record(&mut self, byte: u8) -> std::io::Result<u8> {
-//RS         if self.decoded == GZIP_DECODED_LIMIT {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::InvalidData,
-//RS                 "gzip decoded body too large",
-//RS             ));
-//RS         }
-//RS         self.crc ^= u32::from(byte);
-//RS         for _ in 0..8 {
-//RS             self.crc = if self.crc & 1 != 0 {
-//RS                 self.crc >> 1 ^ 0xedb8_8320
-//RS             } else {
-//RS                 self.crc >> 1
-//RS             };
-//RS         }
-//RS         if self.window.len() == 32 * 1024 {
-//RS             self.window.pop_front();
-//RS         }
-//RS         self.window.push_back(byte);
-//RS         self.decoded += 1;
-//RS         Ok(byte)
-//RS     }
-//RS 
-//RS     fn read_gzip_header(&mut self) -> std::io::Result<()> {
-//RS         let mut header = [0; 10];
-//RS         for byte in &mut header {
-//RS             *byte = self.bits.aligned_byte()?;
-//RS         }
-//RS         if header[..3] != [0x1f, 0x8b, 8] || header[3] & 0xe0 != 0 {
-//RS             return Err(invalid_gzip());
-//RS         }
-//RS         let flags = header[3];
-//RS         if flags & 4 != 0 {
-//RS             let length = usize::from(u16::from_le_bytes([
-//RS                 self.bits.aligned_byte()?,
-//RS                 self.bits.aligned_byte()?,
-//RS             ]));
-//RS             for _ in 0..length {
-//RS                 self.bits.aligned_byte()?;
-//RS             }
-//RS         }
-//RS         for flag in [8, 16] {
-//RS             if flags & flag != 0 {
-//RS                 while self.bits.aligned_byte()? != 0 {}
-//RS             }
-//RS         }
-//RS         if flags & 2 != 0 {
-//RS             self.bits.aligned_byte()?;
-//RS             self.bits.aligned_byte()?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn trailer(&mut self) -> std::io::Result<()> {
-//RS         self.bits.align();
-//RS         let mut crc = [0; 4];
-//RS         let mut size = [0; 4];
-//RS         for byte in &mut crc {
-//RS             *byte = self.bits.aligned_byte()?;
-//RS         }
-//RS         for byte in &mut size {
-//RS             *byte = self.bits.aligned_byte()?;
-//RS         }
-//RS         if u32::from_le_bytes(crc) != !self.crc || u32::from_le_bytes(size) != self.decoded as u32 {
-//RS             return Err(invalid_gzip());
-//RS         }
-//RS         self.bits.ensure_eof()
-//RS     }
-//RS 
-//RS     fn next_decoded(&mut self) -> std::io::Result<Option<u8>> {
-//RS         loop {
-//RS             if self.copy_remaining != 0 {
-//RS                 if self.copy_distance == 0 || self.copy_distance > self.window.len() {
-//RS                     return Err(invalid_gzip());
-//RS                 }
-//RS                 let byte = self.window[self.window.len() - self.copy_distance];
-//RS                 self.copy_remaining -= 1;
-//RS                 return self.record(byte).map(Some);
-//RS             }
-//RS             match &mut self.block {
-//RS                 InflateBlock::GzipHeader => {
-//RS                     self.read_gzip_header()?;
-//RS                     self.block = InflateBlock::DeflateHeader;
-//RS                 }
-//RS                 InflateBlock::DeflateHeader => {
-//RS                     self.final_block = self.bits.bits(1)? != 0;
-//RS                     self.block = match self.bits.bits(2)? {
-//RS                         0 => {
-//RS                             self.bits.align();
-//RS                             let length = self.bits.bits(16)? as u16;
-//RS                             if self.bits.bits(16)? as u16 != !length {
-//RS                                 return Err(invalid_gzip());
-//RS                             }
-//RS                             InflateBlock::Stored(usize::from(length))
-//RS                         }
-//RS                         1 => {
-//RS                             let (literals, distances) =
-//RS                                 fixed_trees().map_err(|_| invalid_gzip())?;
-//RS                             InflateBlock::Huffman {
-//RS                                 literals,
-//RS                                 distances,
-//RS                             }
-//RS                         }
-//RS                         2 => {
-//RS                             let (literals, distances) = dynamic_trees(&mut self.bits)?;
-//RS                             InflateBlock::Huffman {
-//RS                                 literals,
-//RS                                 distances,
-//RS                             }
-//RS                         }
-//RS                         _ => return Err(invalid_gzip()),
-//RS                     };
-//RS                 }
-//RS                 InflateBlock::Stored(remaining) => {
-//RS                     if *remaining == 0 {
-//RS                         self.block = if self.final_block {
-//RS                             InflateBlock::Trailer
-//RS                         } else {
-//RS                             InflateBlock::DeflateHeader
-//RS                         };
-//RS                         continue;
-//RS                     }
-//RS                     *remaining -= 1;
-//RS                     let byte = self.bits.bits(8)? as u8;
-//RS                     return self.record(byte).map(Some);
-//RS                 }
-//RS                 InflateBlock::Huffman {
-//RS                     literals,
-//RS                     distances,
-//RS                 } => match literals.decode(&mut self.bits)? {
-//RS                     literal @ 0..=255 => return self.record(literal as u8).map(Some),
-//RS                     256 => {
-//RS                         self.block = if self.final_block {
-//RS                             InflateBlock::Trailer
-//RS                         } else {
-//RS                             InflateBlock::DeflateHeader
-//RS                         };
-//RS                     }
-//RS                     symbol @ 257..=285 => {
-//RS                         let index = symbol as usize - 257;
-//RS                         self.copy_remaining =
-//RS                             LENGTH_BASE[index] + self.bits.bits(LENGTH_EXTRA[index])? as usize;
-//RS                         let distance_symbol = distances.decode(&mut self.bits)? as usize;
-//RS                         if distance_symbol >= DIST_BASE.len() {
-//RS                             return Err(invalid_gzip());
-//RS                         }
-//RS                         self.copy_distance = DIST_BASE[distance_symbol]
-//RS                             + self.bits.bits(DIST_EXTRA[distance_symbol])? as usize;
-//RS                     }
-//RS                     _ => return Err(invalid_gzip()),
-//RS                 },
-//RS                 InflateBlock::Trailer => {
-//RS                     self.trailer()?;
-//RS                     self.block = InflateBlock::Done;
-//RS                     return Ok(None);
-//RS                 }
-//RS                 InflateBlock::Done => return Ok(None),
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<R: Read> Read for GzipReader<R> {
-//RS     fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
-//RS         if self.failed {
-//RS             return Err(invalid_gzip());
-//RS         }
-//RS         if out.is_empty() {
-//RS             return Ok(0);
-//RS         }
-//RS         let mut written = 0;
-//RS         while written < out.len() {
-//RS             match self.next_decoded() {
-//RS                 Ok(Some(byte)) => {
-//RS                     out[written] = byte;
-//RS                     written += 1;
-//RS                 }
-//RS                 Ok(None) => break,
-//RS                 Err(error) => {
-//RS                     self.failed = true;
-//RS                     if written == 0 {
-//RS                         return Err(error);
-//RS                     }
-//RS                     break;
-//RS                 }
-//RS             }
-//RS         }
-//RS         Ok(written)
-//RS     }
-//RS }
-//RS 
-//RS const HPACK_STATIC: [(&str, &str); 61] = [
-//RS     (":authority", ""),
-//RS     (":method", "GET"),
-//RS     (":method", "POST"),
-//RS     (":path", "/"),
-//RS     (":path", "/index.html"),
-//RS     (":scheme", "http"),
-//RS     (":scheme", "https"),
-//RS     (":status", "200"),
-//RS     (":status", "204"),
-//RS     (":status", "206"),
-//RS     (":status", "304"),
-//RS     (":status", "400"),
-//RS     (":status", "404"),
-//RS     (":status", "500"),
-//RS     ("accept-charset", ""),
-//RS     ("accept-encoding", "gzip, deflate"),
-//RS     ("accept-language", ""),
-//RS     ("accept-ranges", ""),
-//RS     ("accept", ""),
-//RS     ("access-control-allow-origin", ""),
-//RS     ("age", ""),
-//RS     ("allow", ""),
-//RS     ("authorization", ""),
-//RS     ("cache-control", ""),
-//RS     ("content-disposition", ""),
-//RS     ("content-encoding", ""),
-//RS     ("content-language", ""),
-//RS     ("content-length", ""),
-//RS     ("content-location", ""),
-//RS     ("content-range", ""),
-//RS     ("content-type", ""),
-//RS     ("cookie", ""),
-//RS     ("date", ""),
-//RS     ("etag", ""),
-//RS     ("expect", ""),
-//RS     ("expires", ""),
-//RS     ("from", ""),
-//RS     ("host", ""),
-//RS     ("if-match", ""),
-//RS     ("if-modified-since", ""),
-//RS     ("if-none-match", ""),
-//RS     ("if-range", ""),
-//RS     ("if-unmodified-since", ""),
-//RS     ("last-modified", ""),
-//RS     ("link", ""),
-//RS     ("location", ""),
-//RS     ("max-forwards", ""),
-//RS     ("proxy-authenticate", ""),
-//RS     ("proxy-authorization", ""),
-//RS     ("range", ""),
-//RS     ("referer", ""),
-//RS     ("refresh", ""),
-//RS     ("retry-after", ""),
-//RS     ("server", ""),
-//RS     ("set-cookie", ""),
-//RS     ("strict-transport-security", ""),
-//RS     ("transfer-encoding", ""),
-//RS     ("user-agent", ""),
-//RS     ("vary", ""),
-//RS     ("via", ""),
-//RS     ("www-authenticate", ""),
-//RS ];
-//RS 
-//RS fn hpack_integer(out: &mut Vec<u8>, value: usize, prefix: u8, first: u8) {
-//RS     let mask = (1usize << prefix) - 1;
-//RS     if value < mask {
-//RS         out.push(first | value as u8);
-//RS         return;
-//RS     }
-//RS     out.push(first | mask as u8);
-//RS     let mut rest = value - mask;
-//RS     while rest >= 128 {
-//RS         out.push((rest as u8 & 0x7f) | 0x80);
-//RS         rest >>= 7;
-//RS     }
-//RS     out.push(rest as u8);
-//RS }
-//RS 
-//RS fn hpack_string(out: &mut Vec<u8>, value: &str) {
-//RS     hpack_integer(out, value.len(), 7, 0);
-//RS     out.extend_from_slice(value.as_bytes());
-//RS }
-//RS 
-//RS fn hpack_literal(out: &mut Vec<u8>, name: &str, value: &str, sensitive: bool) {
-//RS     let name_index = HPACK_STATIC
-//RS         .iter()
-//RS         .position(|(candidate, _)| *candidate == name)
-//RS         .map(|index| index + 1)
-//RS         .unwrap_or(0);
-//RS     hpack_integer(out, name_index, 4, if sensitive { 0x10 } else { 0 });
-//RS     if name_index == 0 {
-//RS         hpack_string(out, name);
-//RS     }
-//RS     hpack_string(out, value);
-//RS }
-//RS 
-//RS fn hpack_request(
-//RS     method: &str,
-//RS     url: &ParsedUrl,
-//RS     headers: &[(String, String)],
-//RS     body_len: Option<usize>,
-//RS     decompress: bool,
-//RS ) -> Result<Vec<u8>, JetHTTPBridgeError> {
-//RS     let mut out = Vec::new();
-//RS     match method {
-//RS         "GET" => out.push(0x82),
-//RS         "POST" => out.push(0x83),
-//RS         value => hpack_literal(&mut out, ":method", value, false),
-//RS     }
-//RS     if url.target == "/" {
-//RS         out.push(0x84);
-//RS     } else {
-//RS         hpack_literal(&mut out, ":path", &url.target, false);
-//RS     }
-//RS     out.push(if url.scheme == "https" { 0x87 } else { 0x86 });
-//RS     hpack_literal(&mut out, ":authority", &url.authority, false);
-//RS     let mut has_length = false;
-//RS     let mut has_accept_encoding = false;
-//RS     for (name, value) in headers {
-//RS         let name = name.to_ascii_lowercase();
-//RS         if name == "connection" {
-//RS             return Err(JetHTTPBridgeError::InvalidFraming);
-//RS         }
-//RS         has_length |= name == "content-length";
-//RS         has_accept_encoding |= name == "accept-encoding";
-//RS         hpack_literal(
-//RS             &mut out,
-//RS             &name,
-//RS             value,
-//RS             matches!(
-//RS                 name.as_str(),
-//RS                 "authorization" | "cookie" | "set-cookie",
-//RS             ),
-//RS         );
-//RS     }
-//RS     if decompress && !has_accept_encoding {
-//RS         hpack_literal(&mut out, "accept-encoding", "gzip", false);
-//RS     }
-//RS     if let Some(length) = body_len {
-//RS         if !has_length {
-//RS             hpack_literal(&mut out, "content-length", &length.to_string(), false);
-//RS         }
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS #[derive(Default)]
-//RS struct HpackDecoder {
-//RS     dynamic: VecDeque<(String, String)>,
-//RS     size: usize,
-//RS     max: usize,
-//RS }
-//RS 
-//RS impl HpackDecoder {
-//RS     fn new() -> Self {
-//RS         Self {
-//RS             dynamic: VecDeque::new(),
-//RS             size: 0,
-//RS             max: 4096,
-//RS         }
-//RS     }
-//RS 
-//RS     fn entry(&self, index: usize) -> Result<(String, String), JetHTTPBridgeError> {
-//RS         if index == 0 {
-//RS             return Err(JetHTTPBridgeError::Protocol);
-//RS         }
-//RS         if index <= HPACK_STATIC.len() {
-//RS             let (name, value) = HPACK_STATIC[index - 1];
-//RS             return Ok((name.to_string(), value.to_string()));
-//RS         }
-//RS         self.dynamic
-//RS             .get(index - HPACK_STATIC.len() - 1)
-//RS             .cloned()
-//RS             .ok_or(JetHTTPBridgeError::Protocol)
-//RS     }
-//RS 
-//RS     fn insert(&mut self, name: String, value: String) {
-//RS         let size = name.len().saturating_add(value.len()).saturating_add(32);
-//RS         if size > self.max {
-//RS             self.dynamic.clear();
-//RS             self.size = 0;
-//RS             return;
-//RS         }
-//RS         while self.size.saturating_add(size) > self.max {
-//RS             if let Some((name, value)) = self.dynamic.pop_back() {
-//RS                 self.size -= name.len() + value.len() + 32;
-//RS             } else {
-//RS                 break;
-//RS             }
-//RS         }
-//RS         self.dynamic.push_front((name, value));
-//RS         self.size += size;
-//RS     }
-//RS 
-//RS     fn decode(&mut self, bytes: &[u8]) -> Result<Vec<(String, String)>, JetHTTPBridgeError> {
-//RS         let mut cursor = 0usize;
-//RS         let mut out = Vec::new();
-//RS         let mut saw_field = false;
-//RS         while cursor < bytes.len() {
-//RS             let first = bytes[cursor];
-//RS             if first & 0x80 != 0 {
-//RS                 let index = hpack_read_integer(bytes, &mut cursor, 7)?;
-//RS                 out.push(self.entry(index)?);
-//RS                 saw_field = true;
-//RS             } else if first & 0x40 != 0 {
-//RS                 let index = hpack_read_integer(bytes, &mut cursor, 6)?;
-//RS                 let name = if index == 0 {
-//RS                     hpack_read_string(bytes, &mut cursor)?
-//RS                 } else {
-//RS                     self.entry(index)?.0
-//RS                 };
-//RS                 let value = hpack_read_string(bytes, &mut cursor)?;
-//RS                 self.insert(name.clone(), value.clone());
-//RS                 out.push((name, value));
-//RS                 saw_field = true;
-//RS             } else if first & 0x20 != 0 {
-//RS                 if saw_field {
-//RS                     return Err(JetHTTPBridgeError::Protocol);
-//RS                 }
-//RS                 let max = hpack_read_integer(bytes, &mut cursor, 5)?;
-//RS                 if max > 4096 {
-//RS                     return Err(JetHTTPBridgeError::Protocol);
-//RS                 }
-//RS                 self.max = max;
-//RS                 while self.size > self.max {
-//RS                     let (name, value) = self
-//RS                         .dynamic
-//RS                         .pop_back()
-//RS                         .ok_or(JetHTTPBridgeError::Protocol)?;
-//RS                     self.size -= name.len() + value.len() + 32;
-//RS                 }
-//RS             } else {
-//RS                 let index = hpack_read_integer(bytes, &mut cursor, 4)?;
-//RS                 let name = if index == 0 {
-//RS                     hpack_read_string(bytes, &mut cursor)?
-//RS                 } else {
-//RS                     self.entry(index)?.0
-//RS                 };
-//RS                 let value = hpack_read_string(bytes, &mut cursor)?;
-//RS                 out.push((name, value));
-//RS                 saw_field = true;
-//RS             }
-//RS             if out.len() > 100
-//RS                 || out
-//RS                     .iter()
-//RS                     .map(|(name, value)| name.len() + value.len() + 32)
-//RS                     .sum::<usize>()
-//RS                     > 64 * 1024
-//RS             {
-//RS                 return Err(JetHTTPBridgeError::InvalidHeader);
-//RS             }
-//RS         }
-//RS         Ok(out)
-//RS     }
-//RS }
-//RS 
-//RS fn hpack_read_integer(
-//RS     bytes: &[u8],
-//RS     cursor: &mut usize,
-//RS     prefix: u8,
-//RS ) -> Result<usize, JetHTTPBridgeError> {
-//RS     let first = *bytes.get(*cursor).ok_or(JetHTTPBridgeError::Protocol)?;
-//RS     *cursor += 1;
-//RS     let mask = (1usize << prefix) - 1;
-//RS     let mut value = usize::from(first) & mask;
-//RS     if value < mask {
-//RS         return Ok(value);
-//RS     }
-//RS     let mut shift = 0usize;
-//RS     loop {
-//RS         let byte = *bytes.get(*cursor).ok_or(JetHTTPBridgeError::Protocol)?;
-//RS         *cursor += 1;
-//RS         if shift > usize::BITS as usize - 7 {
-//RS             return Err(JetHTTPBridgeError::Protocol);
-//RS         }
-//RS         value = value
-//RS             .checked_add(usize::from(byte & 0x7f) << shift)
-//RS             .ok_or(JetHTTPBridgeError::Protocol)?;
-//RS         if byte & 0x80 == 0 {
-//RS             return Ok(value);
-//RS         }
-//RS         shift += 7;
-//RS     }
-//RS }
-//RS 
-//RS fn hpack_read_string(bytes: &[u8], cursor: &mut usize) -> Result<String, JetHTTPBridgeError> {
-//RS     let huffman = bytes.get(*cursor).is_some_and(|byte| byte & 0x80 != 0);
-//RS     let length = hpack_read_integer(bytes, cursor, 7)?;
-//RS     if length > 64 * 1024 {
-//RS         return Err(JetHTTPBridgeError::InvalidHeader);
-//RS     }
-//RS     let end = cursor
-//RS         .checked_add(length)
-//RS         .filter(|end| *end <= bytes.len())
-//RS         .ok_or(JetHTTPBridgeError::Protocol)?;
-//RS     let value = if huffman {
-//RS         hpack_huffman_decode(&bytes[*cursor..end])?
-//RS     } else {
-//RS         bytes[*cursor..end].to_vec()
-//RS     };
-//RS     *cursor = end;
-//RS     String::from_utf8(value).map_err(|_| JetHTTPBridgeError::InvalidHeader)
-//RS }
-//RS 
-//RS fn hpack_huffman_decode(bytes: &[u8]) -> Result<Vec<u8>, JetHTTPBridgeError> {
-//RS     const CODES: [u32; 257] = [
-//RS         0x1ff8, 0x7fffd8, 0xfffffe2, 0xfffffe3, 0xfffffe4, 0xfffffe5, 0xfffffe6, 0xfffffe7,
-//RS         0xfffffe8, 0xffffea, 0x3ffffffc, 0xfffffe9, 0xfffffea, 0x3ffffffd, 0xfffffeb, 0xfffffec,
-//RS         0xfffffed, 0xfffffee, 0xfffffef, 0xffffff0, 0xffffff1, 0xffffff2, 0x3ffffffe, 0xffffff3,
-//RS         0xffffff4, 0xffffff5, 0xffffff6, 0xffffff7, 0xffffff8, 0xffffff9, 0xffffffa, 0xffffffb,
-//RS         0x14, 0x3f8, 0x3f9, 0xffa, 0x1ff9, 0x15, 0xf8, 0x7fa, 0x3fa, 0x3fb, 0xf9, 0x7fb, 0xfa,
-//RS         0x16, 0x17, 0x18, 0x0, 0x1, 0x2, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x5c, 0xfb,
-//RS         0x7ffc, 0x20, 0xffb, 0x3fc, 0x1ffa, 0x21, 0x5d, 0x5e, 0x5f, 0x60, 0x61, 0x62, 0x63, 0x64,
-//RS         0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0x71, 0x72, 0xfc,
-//RS         0x73, 0xfd, 0x1ffb, 0x7fff0, 0x1ffc, 0x3ffc, 0x22, 0x7ffd, 0x3, 0x23, 0x4, 0x24, 0x5, 0x25,
-//RS         0x26, 0x27, 0x6, 0x74, 0x75, 0x28, 0x29, 0x2a, 0x7, 0x2b, 0x76, 0x2c, 0x8, 0x9, 0x2d, 0x77,
-//RS         0x78, 0x79, 0x7a, 0x7b, 0x7ffe, 0x7fc, 0x3ffd, 0x1ffd, 0xffffffc, 0xfffe6, 0x3fffd2,
-//RS         0xfffe7, 0xfffe8, 0x3fffd3, 0x3fffd4, 0x3fffd5, 0x7fffd9, 0x3fffd6, 0x7fffda, 0x7fffdb,
-//RS         0x7fffdc, 0x7fffdd, 0x7fffde, 0xffffeb, 0x7fffdf, 0xffffec, 0xffffed, 0x3fffd7, 0x7fffe0,
-//RS         0xffffee, 0x7fffe1, 0x7fffe2, 0x7fffe3, 0x7fffe4, 0x1fffdc, 0x3fffd8, 0x7fffe5, 0x3fffd9,
-//RS         0x7fffe6, 0x7fffe7, 0xffffef, 0x3fffda, 0x1fffdd, 0xfffe9, 0x3fffdb, 0x3fffdc, 0x7fffe8,
-//RS         0x7fffe9, 0x1fffde, 0x7fffea, 0x3fffdd, 0x3fffde, 0xfffff0, 0x1fffdf, 0x3fffdf, 0x7fffeb,
-//RS         0x7fffec, 0x1fffe0, 0x1fffe1, 0x3fffe0, 0x1fffe2, 0x7fffed, 0x3fffe1, 0x7fffee, 0x7fffef,
-//RS         0xfffea, 0x3fffe2, 0x3fffe3, 0x3fffe4, 0x7ffff0, 0x3fffe5, 0x3fffe6, 0x7ffff1, 0x3ffffe0,
-//RS         0x3ffffe1, 0xfffeb, 0x7fff1, 0x3fffe7, 0x7ffff2, 0x3fffe8, 0x1ffffec, 0x3ffffe2, 0x3ffffe3,
-//RS         0x3ffffe4, 0x7ffffde, 0x7ffffdf, 0x3ffffe5, 0xfffff1, 0x1ffffed, 0x7fff2, 0x1fffe3,
-//RS         0x3ffffe6, 0x7ffffe0, 0x7ffffe1, 0x3ffffe7, 0x7ffffe2, 0xfffff2, 0x1fffe4, 0x1fffe5,
-//RS         0x3ffffe8, 0x3ffffe9, 0xffffffd, 0x7ffffe3, 0x7ffffe4, 0x7ffffe5, 0xfffec, 0xfffff3,
-//RS         0xfffed, 0x1fffe6, 0x3fffe9, 0x1fffe7, 0x1fffe8, 0x7ffff3, 0x3fffea, 0x3fffeb, 0x1ffffee,
-//RS         0x1ffffef, 0xfffff4, 0xfffff5, 0x3ffffea, 0x7ffff4, 0x3ffffeb, 0x7ffffe6, 0x3ffffec,
-//RS         0x3ffffed, 0x7ffffe7, 0x7ffffe8, 0x7ffffe9, 0x7ffffea, 0x7ffffeb, 0xffffffe, 0x7ffffec,
-//RS         0x7ffffed, 0x7ffffee, 0x7ffffef, 0x7fffff0, 0x3ffffee, 0x3fffffff,
-//RS     ];
-//RS     const LENGTHS: [u8; 257] = [
-//RS         13, 23, 28, 28, 28, 28, 28, 28, 28, 24, 30, 28, 28, 30, 28, 28, 28, 28, 28, 28, 28, 28, 30,
-//RS         28, 28, 28, 28, 28, 28, 28, 28, 28, 6, 10, 10, 12, 13, 6, 8, 11, 10, 10, 8, 11, 8, 6, 6, 6,
-//RS         5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 7, 8, 15, 6, 12, 10, 13, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-//RS         7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 7, 8, 13, 19, 13, 14, 6, 15, 5, 6, 5, 6, 5, 6, 6, 6, 5,
-//RS         7, 7, 6, 6, 6, 5, 6, 7, 6, 5, 5, 6, 7, 7, 7, 7, 7, 15, 11, 14, 13, 28, 20, 22, 20, 20, 22,
-//RS         22, 22, 23, 22, 23, 23, 23, 23, 23, 24, 23, 24, 24, 22, 23, 24, 23, 23, 23, 23, 21, 22, 23,
-//RS         22, 23, 23, 24, 22, 21, 20, 22, 22, 23, 23, 21, 23, 22, 22, 24, 21, 22, 23, 23, 21, 21, 22,
-//RS         21, 23, 22, 23, 23, 20, 22, 22, 22, 23, 22, 22, 23, 26, 26, 20, 19, 22, 23, 22, 25, 26, 26,
-//RS         26, 27, 27, 26, 24, 25, 19, 21, 26, 27, 27, 26, 27, 24, 21, 21, 26, 26, 28, 27, 27, 27, 20,
-//RS         24, 20, 21, 22, 21, 21, 23, 22, 22, 25, 25, 24, 24, 26, 23, 26, 27, 26, 26, 27, 27, 27, 27,
-//RS         27, 28, 27, 27, 27, 27, 27, 26, 30,
-//RS     ];
-//RS     #[derive(Clone, Copy)]
-//RS     struct Node {
-//RS         next: [i16; 2],
-//RS         symbol: i16,
-//RS     }
-//RS     static TREE: OnceLock<Vec<Node>> = OnceLock::new();
-//RS     let tree = TREE.get_or_init(|| {
-//RS         let mut nodes = vec![Node {
-//RS             next: [-1; 2],
-//RS             symbol: -1,
-//RS         }];
-//RS         for (symbol, (&code, length)) in CODES.iter().zip(LENGTHS).enumerate() {
-//RS             let mut node = 0usize;
-//RS             for shift in (0..length).rev() {
-//RS                 let bit = usize::from(((code >> shift) & 1) as u8);
-//RS                 if nodes[node].next[bit] < 0 {
-//RS                     let next = nodes.len();
-//RS                     nodes.push(Node {
-//RS                         next: [-1; 2],
-//RS                         symbol: -1,
-//RS                     });
-//RS                     nodes[node].next[bit] = next as i16;
-//RS                 }
-//RS                 node = nodes[node].next[bit] as usize;
-//RS             }
-//RS             nodes[node].symbol = symbol as i16;
-//RS         }
-//RS         nodes
-//RS     });
-//RS     let mut out = Vec::new();
-//RS     let mut node = 0usize;
-//RS     let mut length = 0u8;
-//RS     let mut tail = 0u8;
-//RS     for &byte in bytes {
-//RS         for shift in (0..8).rev() {
-//RS             let bit = usize::from((byte >> shift) & 1);
-//RS             length += 1;
-//RS             tail = tail << 1 | ((byte >> shift) & 1);
-//RS             let next = tree[node].next[bit];
-//RS             if next < 0 {
-//RS                 return Err(JetHTTPBridgeError::Protocol);
-//RS             }
-//RS             node = next as usize;
-//RS             if tree[node].symbol >= 0 {
-//RS                 let symbol = tree[node].symbol as usize;
-//RS                 if symbol == 256 {
-//RS                     return Err(JetHTTPBridgeError::Protocol);
-//RS                 }
-//RS                 out.push(symbol as u8);
-//RS                 node = 0;
-//RS                 length = 0;
-//RS                 tail = 0;
-//RS                 if out.len() > 64 * 1024 {
-//RS                     return Err(JetHTTPBridgeError::InvalidHeader);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     if length > 7 || length != 0 && tail != (1u8 << length) - 1 {
-//RS         return Err(JetHTTPBridgeError::Protocol);
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS fn coalesce_request_header_pairs(
-//RS     headers: Vec<(String, String)>,
-//RS ) -> Vec<(String, String)> {
-//RS     let mut out: Vec<(String, String)> = Vec::with_capacity(headers.len());
-//RS     for (name, value) in headers {
-//RS         if let Some((_, current)) = out
-//RS             .iter_mut()
-//RS             .find(|(candidate, _)| candidate.eq_ignore_ascii_case(&name))
-//RS         {
-//RS             current.push_str(if name.eq_ignore_ascii_case("cookie") {
-//RS                 "; "
-//RS             } else {
-//RS                 ", "
-//RS             });
-//RS             current.push_str(&value);
-//RS         } else {
-//RS             out.push((name, value));
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn coalesce_request_headers(flat: &[String]) -> Vec<(String, String)> {
-//RS     let mut headers: Vec<(String, String)> = Vec::new();
-//RS     for pair in flat.chunks_exact(2) {
-//RS         if let Some((_, value)) = headers
-//RS             .iter_mut()
-//RS             .find(|(name, _)| name.eq_ignore_ascii_case(&pair[0]))
-//RS         {
-//RS             value.push_str(if pair[0].eq_ignore_ascii_case("cookie") {
-//RS                 "; "
-//RS             } else {
-//RS                 ", "
-//RS             });
-//RS             value.push_str(&pair[1]);
-//RS         } else {
-//RS             headers.push((pair[0].clone(), pair[1].clone()));
-//RS         }
-//RS     }
-//RS     headers
-//RS }
-//RS 
-//RS fn encode_component(s: &str) -> String {
-//RS     let mut out = String::new();
-//RS     for b in s.bytes() {
-//RS         match b {
-//RS             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-//RS                 out.push(b as char)
-//RS             }
-//RS             b' ' => out.push('+'),
-//RS             _ => out.push_str(&format!("%{b:02X}")),
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn encode_form(fields: &[String]) -> String {
-//RS     let mut out = String::new();
-//RS     let mut i = 0;
-//RS     while i + 1 < fields.len() {
-//RS         if !out.is_empty() {
-//RS             out.push('&');
-//RS         }
-//RS         out.push_str(&encode_component(&fields[i]));
-//RS         out.push('=');
-//RS         out.push_str(&encode_component(&fields[i + 1]));
-//RS         i += 2;
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn multipart_boundary(fields: &[String]) -> String {
-//RS     const PREFIX: &str = "jet-http-boundary-";
-//RS     const LENGTH: usize = PREFIX.len() + 16;
-//RS 
-//RS     let mut used = std::collections::HashSet::new();
-//RS     for field in fields {
-//RS         for window in field.as_bytes().windows(LENGTH) {
-//RS             let Some(suffix) = window.strip_prefix(PREFIX.as_bytes()) else {
-//RS                 continue;
-//RS             };
-//RS             let Ok(suffix) = std::str::from_utf8(suffix) else {
-//RS                 continue;
-//RS             };
-//RS             if let Ok(suffix) = u64::from_str_radix(suffix, 16) {
-//RS                 used.insert(suffix);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     let mut suffix = 0u64;
-//RS     while used.contains(&suffix) {
-//RS         suffix = suffix
-//RS             .checked_add(1)
-//RS             .expect("in-memory multipart fields cannot contain every u64 boundary suffix");
-//RS     }
-//RS     format!("{PREFIX}{suffix:016x}")
-//RS }
-//RS 
-//RS fn encode_multipart(fields: &[String], boundary: &str) -> String {
-//RS     let mut out = String::new();
-//RS     let mut i = 0;
-//RS     while i + 1 < fields.len() {
-//RS         out.push_str("--");
-//RS         out.push_str(boundary);
-//RS         out.push_str("\r\nContent-Disposition: form-data; name=\"");
-//RS         out.push_str(
-//RS             &fields[i]
-//RS                 .replace('"', "%22")
-//RS                 .replace('\r', "%0D")
-//RS                 .replace('\n', "%0A"),
-//RS         );
-//RS         out.push_str("\"\r\n\r\n");
-//RS         out.push_str(&fields[i + 1]);
-//RS         out.push_str("\r\n");
-//RS         i += 2;
-//RS     }
-//RS     out.push_str("--");
-//RS     out.push_str(boundary);
-//RS     out.push_str("--\r\n");
-//RS     out
-//RS }
-// END-PORT-PENDING 0637 crates/jet-pkg-model/src/Prelude/HTTP.rs:3615-5534
+// Private continuation of canonical core.http, wired by Main with http_02.jet.
+use std.sync.[Arc, Mutex, OnceLock]
+use std.time.[Duration, Instant]
+use std.io.[Read, Error, ErrorKind]
+use std.collections.VecDeque
+// GATE #4494: native IO, synchronization and time; #4409: exact IO kinds.
 
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3615
+fn set_stream_timeouts(stream: &HTTPStream, read: Duration, write: Duration, deadline: Instant?) -> () JetHTTPBridgeError! {
+    read :: remaining_timeout(read, deadline) ?? return Err(err)
+    write :: remaining_timeout(write, deadline) ?? return Err(err)
+    tcp :: if stream == {
+        .Plain(value) -> value
+        .TLS(value) -> value.get_mut()
+        .H2(connection) -> {
+            guard :: connection.lock() ?? return Err(JetHTTPBridgeError.Internal)
+            return set_stream_timeouts(&guard.io, read, write, deadline)
+        }
+    }
+    tcp.set_read_timeout(Val(read)) ?? return Err(JetHTTPBridgeError.IO)
+    tcp.set_write_timeout(Val(write)) ?? return Err(JetHTTPBridgeError.IO)
+    Ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3640
+fn encode_request(method: String, url: ParsedUrl, proxy: ParsedUrl?, headers: [(String, String)], body_len: USize?, chunked: Bool, decompress: Bool) -> [U8] JetHTTPBridgeError! {
+    target :: if proxy != None && url.scheme == "http" { "{url.scheme}://{url.authority}{url.target}" } else { ~url.target }
+    out := "{method} {target} HTTP/1.1\r\nHost: {url.authority}\r\n".into_bytes()
+    has_length := false
+    has_connection := false
+    has_accept_encoding := false
+    has_transfer := false
+    loop (name, value) in headers {
+        has_length |= name.eq_ignore_ascii_case("content-length")
+        has_connection |= name.eq_ignore_ascii_case("connection")
+        has_accept_encoding |= name.eq_ignore_ascii_case("accept-encoding")
+        has_transfer |= name.eq_ignore_ascii_case("transfer-encoding")
+        &out.extend_from_slice(name.as_bytes()); &out.extend_from_slice(": ".as_bytes())
+        &out.extend_from_slice(value.as_bytes()); &out.extend_from_slice("\r\n".as_bytes())
+    }
+    if decompress && !has_accept_encoding -> &out.extend_from_slice("Accept-Encoding: gzip\r\n".as_bytes())
+    if !has_connection -> &out.extend_from_slice("Connection: keep-alive\r\n".as_bytes())
+    if chunked {
+        if !has_transfer -> &out.extend_from_slice("Transfer-Encoding: chunked\r\n".as_bytes())
+    } else if body_len == .Val(length) && !has_length { &out.extend_from_slice("Content-Length: {length}\r\n".as_bytes()) }
+    &out.extend_from_slice("\r\n".as_bytes())
+    out
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3688
+fn tee_upload_chunk(tee: &[U8]?, chunk: [U8]) -> () JetHTTPBridgeError! {
+    buffer :: tee.as_mut() ?? return Ok()
+    new_len :: buffer.len().checked_add(chunk.len()) ?? return Err(JetHTTPBridgeError.ResourceUnavailable)
+    if new_len > HTTP_UPLOAD_REPLAY_CAP -> return Err(JetHTTPBridgeError.ResourceUnavailable)
+    &buffer.extend_from_slice(chunk)
+    Ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3703
+fn write_upload_body(stream: &HTTPStream, chunked: Bool, body_read: &fn() -> [U8]? JetHTTPBridgeError!, tee: &[U8]?) -> () (JetHTTPBridgeError, Bool)! {
+    wrote_any := false
+    loop {
+        chunk :: body_read() ?? return Err((err, wrote_any))
+        bytes :: chunk ?? break
+        if bytes.is_empty() -> next
+        tee_upload_chunk(tee, bytes) ?? return Err((err, wrote_any))
+        if chunked {
+            framing :: format("{:x}\r\n", bytes.len())
+            write_request(stream, framing.as_bytes()) ?? return Err((err.0, wrote_any || err.1))
+            wrote_any = true
+            write_request(stream, bytes) ?? return Err((err.0, true))
+            write_request(stream, "\r\n".as_bytes()) ?? return Err((err.0, true))
+        } else {
+            write_request(stream, bytes) ?? return Err((err.0, wrote_any || err.1))
+            wrote_any = true
+        }
+    }
+    if chunked -> write_request(stream, "0\r\n\r\n".as_bytes()) ?? return Err((err.0, wrote_any || err.1))
+    Ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3736
+fn slice_body_reader(bytes: [U8], offset: &USize) -> fn() -> [U8]? JetHTTPBridgeError! {
+    () -> {
+        if offset >= bytes.len() -> return None
+        end :: (offset + HTTP_UPLOAD_CHUNK).min(bytes.len())
+        chunk :: ~bytes[offset..<end]
+        offset = end
+        Val(^chunk)
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3751
+fn write_request(stream: &HTTPStream, bytes: [U8]) -> () (JetHTTPBridgeError, Bool)! {
+    written := 0
+    loop written < bytes.len() {
+        if stream.write(bytes[written..]) == {
+            .Ok(0) -> return Err((JetHTTPBridgeError.IO, written != 0))
+            .Ok(count) -> written += count
+            .Err(error) -> {
+                if error.kind() == .Interrupted -> next
+                if error.kind() == .TimedOut || error.kind() == .WouldBlock -> return Err((JetHTTPBridgeError.Timeout, written != 0))
+                return Err((JetHTTPBridgeError.IO, written != 0))
+            }
+        }
+    }
+    stream.flush() ?? return Err((JetHTTPBridgeError.IO, written != 0))
+    Ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3774
+fn read_head_bytes(stream: &Read) -> ([U8], [U8], I64) JetHTTPBridgeError! { read_head_bytes_after(stream, []) }
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3778
+fn read_head_bytes_after(stream: &Read, bytes: ^[U8]) -> ([U8], [U8], I64) JetHTTPBridgeError! {
+    MAX_HEAD :: 64 * 1024
+    chunk := [U8; 4096].filled(0)
+    started :: Instant.now()
+    first_byte_ms := I64?{None}
+    scan := 0
+    loop {
+        // Incremental search avoids rescanning previous header bytes on each read.
+        loop scan + 4 <= bytes.len() {
+            if bytes[scan..<scan + 4] == "\r\n\r\n".as_bytes() {
+                body :: &bytes.split_off(scan + 4)
+                &bytes.truncate(scan + 4)
+                return (^bytes, ^body, first_byte_ms ?? elapsed_ms(started))
+            }
+            scan += 1
+        }
+        if bytes.len() >= MAX_HEAD -> return Err(JetHTTPBridgeError.InvalidHeader)
+        read :: stream.read(&chunk) ?? return Err(if err.kind() == .TimedOut || err.kind() == .WouldBlock { JetHTTPBridgeError.Timeout } else { JetHTTPBridgeError.IO })
+        if read == 0 -> return Err(JetHTTPBridgeError.IO)
+        if first_byte_ms == None -> first_byte_ms = Val(elapsed_ms(started))
+        &bytes.extend_from_slice(chunk[..<read])
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3819
+fn parse_status_and_headers(head: [U8]) -> (I64, String, [(String, String)]) JetHTTPBridgeError! {
+    text :: String.from_utf8(head) ?? return Err(JetHTTPBridgeError.InvalidHeader)
+    lines := (text.strip_suffix("\r\n\r\n") ?? return Err(JetHTTPBridgeError.InvalidFraming)).split("\r\n")
+    status_line :: lines.next() ?? return Err(JetHTTPBridgeError.InvalidFraming)
+    status_parts := status_line.splitn(3, ' ')
+    version :: status_parts.next() ?? return Err(JetHTTPBridgeError.InvalidFraming)
+    if !version.starts_with("HTTP/") -> return Err(JetHTTPBridgeError.InvalidFraming)
+    if version != "HTTP/1.0" && version != "HTTP/1.1" -> return Err(JetHTTPBridgeError.Protocol)
+    status_text :: status_parts.next() ?? return Err(JetHTTPBridgeError.InvalidFraming)
+    status :: I64.parse(status_text) ?? return Err(JetHTTPBridgeError.InvalidFraming)
+    if status < 100 || status > 599 || status_parts.next() == None -> return Err(JetHTTPBridgeError.InvalidFraming)
+    headers := [(String, String)]{}
+    loop line in lines {
+        if headers.len() == 100 -> return Err(JetHTTPBridgeError.InvalidHeader)
+        if line.starts_with(' ') || line.starts_with('\t') -> return Err(JetHTTPBridgeError.InvalidHeader)
+        (name, value) :: line.split_once(':') ?? return Err(JetHTTPBridgeError.InvalidHeader)
+        if name.is_empty() || !name.bytes().all(http_token_byte) || !value.bytes().all(http_field_value_byte) -> return Err(JetHTTPBridgeError.InvalidHeader)
+        trimmed := value.trim_matches([' ', '\t']) // #4303
+        &headers.push((name.to_ascii_lowercase(), ~trimmed))
+    }
+    (status, ~version, ^headers)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3871
+fn header_first(headers: [(String, String)], name: String) -> String? {
+    headers.iter().find((pair) -> pair.0.eq_ignore_ascii_case(name)).map((pair) -> pair.1)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3878
+fn content_length(headers: [(String, String)]) -> USize? JetHTTPBridgeError! {
+    found := USize?{None}
+    loop (name, value) in headers {
+        if !name.eq_ignore_ascii_case("content-length") -> next
+        loop part in value.split(',') {
+            if part.is_empty() || !part.bytes().all((byte) -> byte.is_ascii_digit()) -> return Err(JetHTTPBridgeError.InvalidFraming)
+            length :: USize.parse(part) ?? return Err(JetHTTPBridgeError.InvalidFraming)
+            if found == .Val(prior) && prior != length -> return Err(JetHTTPBridgeError.InvalidFraming)
+            found = Val(length)
+        }
+    }
+    found
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3899
+fn decoded_gzip(headers: [(String, String)], decompress: Bool) -> Bool JetHTTPBridgeError! {
+    encoding :: header_first(headers, "content-encoding") ?? return false
+    if !decompress || encoding.eq_ignore_ascii_case("identity") -> return false
+    if encoding.eq_ignore_ascii_case("gzip") -> return true
+    Err(JetHTTPBridgeError.UnsupportedEncoding)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3915
+fn read_h2_response(connection: Arc<Mutex<H2Connection>>, stream_id: U32, status: I64, headers: ^[(String, String)], end_stream: Bool, key: PoolKey, pool: Arc<Mutex<ClientPool>>, decompress: Bool, facts: Arc<ResponseFacts>, request_started: Instant, read_timeout: Duration, total_deadline: Instant?, permit: OriginPermit, reused_connection: Bool, remote_address: String) -> NativeResponse JetHTTPBridgeError! {
+    facts.set_raw_content_encoding(header_first(headers, "content-encoding").map((value) -> ~value))
+    length :: content_length(headers) ?? return Err(err)
+    if length == .Val(size) && size > HTTP_RESPONSE_BODY_LIMIT -> return Err(JetHTTPBridgeError.InvalidFraming)
+    reader :: H2BodyReader{connection: Val(^connection), key: ^key, pool: ^pool, stream_id: stream_id, pending: [], cursor: 0, end_after_pending: end_stream, finished: false, expected: length, received: 0, facts: facts.clone(), request_started: request_started, read_timeout: read_timeout, total_deadline: total_deadline, permit: Val(^permit)}
+    encoded_gzip :: decoded_gzip(headers, decompress) ?? return Err(err)
+    boxed :: if encoded_gzip { Box.new(GzipReader.new(^reader)) } else { Box.new(^reader) }
+    body_handle :: register_body(^boxed)
+    public_length :: if encoded_gzip { None } else { length.and_then((size) -> I64.try_from(size).ok()) }
+    public_headers :: if encoded_gzip { headers.into_iter().filter((pair) -> pair.0 != "content-encoding" && pair.0 != "content-length").collect() } else { ^headers }
+    NativeResponse{status: status, headers: ^public_headers, body_handle: body_handle, body_length: public_length, reused_connection: reused_connection, remote_address: ^remote_address, protocol: "HTTP/2", facts: ^facts}
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3986
+struct H2BodyReader {
+    connection: Arc<Mutex<H2Connection>>?
+    key: PoolKey
+    pool: Arc<Mutex<ClientPool>>
+    stream_id: U32
+    pending: [U8]
+    cursor: USize
+    end_after_pending: Bool
+    finished: Bool
+    expected: USize?
+    received: USize
+    facts: Arc<ResponseFacts>
+    request_started: Instant
+    read_timeout: Duration
+    total_deadline: Instant?
+    permit: OriginPermit?
+}
+impl H2BodyReader {
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4005
+    fn release_stream(self) -> {
+        if self.connection == .Val(session) {
+            if session.try_lock() == .Ok(connection) -> connection.release_stream(self.stream_id)
+        }
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4013
+    fn finish(self: &Self) -> () Error! {
+        if self.finished -> return Ok()
+        if self.expected == .Val(expected) && expected != self.received -> return Err(Error.new(.InvalidData, "HTTP/2 content-length mismatch"))
+        self.finished = true
+        self.release_stream()
+        _ :: &self.permit.take()
+        self.facts.set_total(elapsed_ms(self.request_started))
+        _ :: &self.connection.take()
+        Ok()
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4034
+    fn refill(self: &Self) -> () Error! {
+        session :: self.connection.as_ref().expect("HTTP/2 response connection").clone()
+        connection :: session.lock() ?? return Err(Error.new(.Other, "HTTP/2 session lock"))
+        set_stream_timeouts(&connection.io, self.read_timeout, self.read_timeout, self.total_deadline) ?? return Err(Error.new(.TimedOut, format("{:?}", err)))
+        loop {
+            frame :: connection.dequeue_frame(self.stream_id) ?? (h2_read_frame(&connection.io) ?? return Err(h2_reader_error(err)))
+            if connection.discard_abandoned_frame(frame) -> next
+            if connection.control(frame) ?? return Err(h2_reader_error(err)) -> next
+            if frame.stream != self.stream_id { connection.enqueue_frame(^frame, None) ?? return Err(h2_reader_error(err)); next }
+            if frame.kind == {
+                0 -> {
+                    payload := ^frame.payload
+                    if frame.flags & 8 != 0 {
+                        padding :: payload.first() ?? return Err(Error.new(.InvalidData, "missing HTTP/2 padding"))
+                        padding_count :: USize.from(padding)
+                        _ :: &payload.remove(0)
+                        new_len :: payload.len().checked_sub(padding_count) ?? return Err(Error.new(.InvalidData, "invalid HTTP/2 padding"))
+                        &payload.truncate(new_len)
+                    }
+                    self.received = self.received.checked_add(payload.len()) ?? return Err(Error.new(.InvalidData, "HTTP/2 body too large"))
+                    if self.received > HTTP_RESPONSE_BODY_LIMIT -> return Err(Error.new(.InvalidData, "HTTP/2 body exceeds 64 MiB"))
+                    if self.expected == .Val(expected) && self.received > expected -> return Err(Error.new(.InvalidData, "HTTP/2 content-length mismatch"))
+                    self.pending = ^payload
+                    self.cursor = 0
+                    self.end_after_pending = frame.flags & 1 != 0
+                    if self.pending.is_empty() && self.end_after_pending { connection.release_stream(self.stream_id); self.finish() ?? return Err(err) }
+                    return Ok()
+                }
+                1 -> {
+                    (block, end) :: h2_header_block(&connection.io, ^frame) ?? return Err(h2_reader_error(err))
+                    trailers :: connection.decoder.decode(block) ?? return Err(h2_reader_error(err))
+                    if trailers.iter().any((pair) -> pair.0.starts_with(':')) -> return Err(Error.new(.InvalidData, "pseudo-header in HTTP/2 trailers"))
+                    if end { connection.release_stream(self.stream_id); self.finish() ?? return Err(err); return Ok() }
+                }
+                3 -> return Err(Error.new(.ConnectionReset, "HTTP/2 stream reset"))
+                else -> {}
+            }
+        }
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4144
+    fn drop(self: &Self) -> {
+        session :: &self.connection.take() ?? { _ :: &self.permit.take(); return }
+        cleanup :: session.lock().map_err((_) -> JetHTTPBridgeError.Internal).and_then((connection) -> {
+            if self.end_after_pending { connection.release_stream(self.stream_id); Ok() } else { connection.abandon_stream(self.stream_id) }
+        })
+        if cleanup.is_err() {
+            if self.pool.lock() == .Ok(pool) -> pool.remove_h2(self.key, session)
+        }
+        _ :: &self.permit.take()
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4181
+    fn read(self: &Self, out: &[U8]) -> USize Error! {
+        if out.is_empty() || self.finished -> return 0
+        started :: Instant.now()
+        if self.cursor == self.pending.len() {
+            if self.end_after_pending { self.finish() ?? return Err(err); return 0 }
+            self.refill() ?? return Err(err)
+            if self.finished -> return 0
+        }
+        count :: out.len().min(self.pending.len() - self.cursor)
+        &out[..<count].copy_from_slice(self.pending[self.cursor..<self.cursor + count])
+        self.cursor += count
+        if self.cursor == self.pending.len() {
+            if !self.end_after_pending && self.connection == .Val(session) {
+                connection :: session.lock() ?? return Err(Error.new(.Other, "HTTP/2 session lock"))
+                amount :: (U32.try_from(self.pending.len()) ?? U32.MAX).to_be_bytes()
+                h2_write_frame(&connection.io, 8, 0, 0, amount) ?? return Err(h2_reader_error(err))
+                h2_write_frame(&connection.io, 8, 0, self.stream_id, amount) ?? return Err(h2_reader_error(err))
+            }
+            &self.pending.clear()
+            self.cursor = 0
+            if self.end_after_pending -> self.finish() ?? return Err(err)
+        }
+        self.facts.max_timing(5, elapsed_ms(started))
+        count
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4169
+fn h2_reader_error(error: JetHTTPBridgeError) -> Error {
+    Error.new(if error == JetHTTPBridgeError.Timeout { ErrorKind.TimedOut } else { ErrorKind.InvalidData }, format("{:?}", error))
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4225
+fn read_response(stream: HTTPStream, key: PoolKey, pool: Arc<Mutex<ClientPool>>, head_request: Bool, decompress: Bool, facts: Arc<ResponseFacts>, request_started: Instant, read_timeout: Duration, total_deadline: Instant?, permit: OriginPermit) -> NativeResponse JetHTTPBridgeError! {
+    pending := [U8]{}
+    first_byte_ms := I64?{None}
+    interim_count := 0
+    final_head := (I64, String, [(String, String)], [U8])?{None}
+    loop {
+        (head, after, elapsed) :: read_head_bytes_after(&stream, ^pending) ?? return Err(err)
+        if first_byte_ms == None -> first_byte_ms = Val(elapsed)
+        (status, version, headers) :: parse_status_and_headers(head) ?? return Err(err)
+        if status == 101 -> return Err(JetHTTPBridgeError.Protocol)
+        if status >= 100 && status <= 199 {
+            interim_count += 1
+            if interim_count > 16 -> return Err(JetHTTPBridgeError.InvalidFraming)
+            pending = ^after
+            next
+        }
+        set_timing(facts, 4, first_byte_ms ?? elapsed)
+        final_head = Val((status, ^version, ^headers, ^after))
+        break
+    }
+    (status, version, headers, initial) :: final_head.unwrap()
+    set_stream_timeouts(&stream, read_timeout, read_timeout, total_deadline) ?? return Err(err)
+    facts.set_raw_content_encoding(header_first(headers, "content-encoding").map((value) -> ~value))
+    transfer := [String]{}
+    loop (name, value) in headers {
+        if name == "transfer-encoding" -> loop part in value.split(',') { trimmed := part.trim(); &transfer.push(trimmed.to_ascii_lowercase()) }
+    }
+    if transfer.len() > 1 || (transfer.first() == .Val(value) && value != "chunked") -> return Err(JetHTTPBridgeError.InvalidFraming)
+    length :: content_length(headers) ?? return Err(err)
+    if length == .Val(size) && size > HTTP_RESPONSE_BODY_LIMIT -> return Err(JetHTTPBridgeError.InvalidFraming)
+    if !transfer.is_empty() && length != None -> return Err(JetHTTPBridgeError.InvalidFraming)
+    bodyless :: head_request || (status >= 100 && status <= 199) || status == 204 || status == 304
+    close :: version == "HTTP/1.0" || headers.iter().any((pair) -> pair.0 == "connection" && pair.1.split(',').any((item) -> { trimmed := item.trim(); trimmed.eq_ignore_ascii_case("close") }))
+    framing :: if bodyless { BodyFraming.Length(0) } else if !transfer.is_empty() { BodyFraming.Chunked } else if length == .Val(size) { BodyFraming.Length(size) } else { BodyFraming.Close }
+    reusable :: !close && framing != BodyFraming.Close
+    reader :: ResponseBodyReader{stream: Val(^stream), key: ^key, pool: ^pool, initial: ^initial, cursor: 0, framing: framing, reusable: reusable, chunk_remaining: 0, received: 0, finished: false, facts: facts.clone(), request_started: request_started, permit: Val(^permit), read_timeout: read_timeout, total_deadline: total_deadline}
+    encoded_gzip :: decoded_gzip(headers, decompress) ?? return Err(err)
+    boxed :: if encoded_gzip { Box.new(GzipReader.new(^reader)) } else { Box.new(^reader) }
+    body_handle :: register_body(^boxed)
+    public_length :: if encoded_gzip { None } else { length.and_then((size) -> I64.try_from(size).ok()) }
+    public_headers :: if encoded_gzip { headers.into_iter().filter((pair) -> pair.0 != "content-encoding" && pair.0 != "content-length").collect() } else { ^headers }
+    NativeResponse{status: status, headers: ^public_headers, body_handle: body_handle, body_length: public_length, reused_connection: false, remote_address: "", protocol: "HTTP/1.1", facts: ^facts}
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4346
+#Clone
+#Copy
+ enum BodyFraming { Length(USize), Chunked, Close }
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4352
+struct ResponseBodyReader {
+    stream: HTTPStream?
+    key: PoolKey
+    pool: Arc<Mutex<ClientPool>>
+    initial: [U8]
+    cursor: USize
+    framing: BodyFraming
+    reusable: Bool
+    chunk_remaining: USize
+    received: USize
+    finished: Bool
+    facts: Arc<ResponseFacts>
+    request_started: Instant
+    permit: OriginPermit?
+    read_timeout: Duration
+    total_deadline: Instant?
+}
+impl ResponseBodyReader {
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4371
+    fn finish(self: &Self) -> {
+        if self.finished -> return
+        self.finished = true
+        _ :: &self.permit.take()
+        self.facts.set_total(elapsed_ms(self.request_started))
+        if self.reusable {
+            if &self.stream.take() == .Val(stream) -> _ :: self.pool.lock().map((pool) -> pool.put(~self.key, ^stream))
+        }
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4388
+    fn read_raw(self: &Self, out: &[U8]) -> USize Error! {
+        if self.cursor < self.initial.len() {
+            count :: out.len().min(self.initial.len() - self.cursor)
+            &out[..<count].copy_from_slice(self.initial[self.cursor..<self.cursor + count])
+            self.cursor += count
+            if self.cursor == self.initial.len() { &self.initial.clear(); self.cursor = 0 }
+            return count
+        }
+        stream :: self.stream.as_mut().expect("response stream")
+        set_stream_timeouts(stream, self.read_timeout, self.read_timeout, self.total_deadline) ?? return Err(Error.new(if err == JetHTTPBridgeError.Timeout { ErrorKind.TimedOut } else { ErrorKind.Other }, format("{:?}", err)))
+        stream.read(out)
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4419
+    fn account_body_bytes(self: &Self, count: USize) -> () Error! {
+        self.received = self.received.checked_add(count) ?? return Err(Error.new(.InvalidData, "HTTP body too large"))
+        if self.received > HTTP_RESPONSE_BODY_LIMIT -> return Err(Error.new(.InvalidData, "HTTP body exceeds 64 MiB"))
+        Ok()
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4432
+    fn read_exact_raw(self: &Self, out: &[U8]) -> () Error! {
+        filled := 0
+        loop filled < out.len() {
+            read :: self.read_raw(&out[filled..]) ?? return Err(err)
+            if read == 0 -> return Err(Error.new(.UnexpectedEof, "truncated HTTP body"))
+            filled += read
+        }
+        Ok()
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4447
+    fn chunk_size(self: &Self) -> USize Error! {
+        line := [U8]{}
+        loop {
+            byte := [U8]{0}
+            self.read_exact_raw(&byte) ?? return Err(err)
+            &line.push(byte[0])
+            if line.ends_with("\r\n".as_bytes()) -> break
+            if line.len() > 1024 -> return Err(Error.new(.InvalidData, "oversized chunk line"))
+        }
+        &line.truncate(line.len() - 2)
+        digits :: line.split((byte) -> byte == 59).next() ?? []
+        text :: String.from_utf8(digits) ?? return Err(Error.new(.InvalidData, "invalid chunk size"))
+        USize.from_str_radix(text, 16) ?? return Err(Error.new(.InvalidData, "invalid chunk size"))
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4474
+    fn read(self: &Self, out: &[U8]) -> USize Error! {
+        if out.is_empty() || self.finished -> return 0
+        started :: Instant.now()
+        result :: if self.framing == {
+            .Length(0) -> { self.finish(); 0 }
+            .Length(remaining) -> {
+                wanted :: remaining.min(out.len())
+                read :: self.read_raw(&out[..<wanted]) ?? return Err(err)
+                if read == 0 -> return Err(Error.new(.UnexpectedEof, "truncated HTTP body"))
+                self.account_body_bytes(read) ?? return Err(err)
+                self.framing = .Length(remaining - read)
+                if remaining == read -> self.finish()
+                read
+            }
+            .Close -> {
+                read :: self.read_raw(out) ?? return Err(err)
+                self.account_body_bytes(read) ?? return Err(err)
+                if read == 0 { self.finished = true; _ :: &self.stream.take() }
+                read
+            }
+            .Chunked -> {
+                if self.chunk_remaining == 0 {
+                    self.chunk_remaining = self.chunk_size() ?? return Err(err)
+                    total :: self.received.checked_add(self.chunk_remaining) ?? return Err(Error.new(.InvalidData, "HTTP body exceeds 64 MiB"))
+                    if total > HTTP_RESPONSE_BODY_LIMIT -> return Err(Error.new(.InvalidData, "HTTP body exceeds 64 MiB"))
+                    if self.chunk_remaining == 0 {
+                        end := [U8]{0, 0}
+                        self.read_exact_raw(&end) ?? return Err(err)
+                        if end != "\r\n".as_bytes() -> return Err(Error.new(.InvalidData, "HTTP trailers unsupported"))
+                        self.finish()
+                        return 0
+                    }
+                }
+                wanted :: self.chunk_remaining.min(out.len())
+                read :: self.read_raw(&out[..<wanted]) ?? return Err(err)
+                if read == 0 -> return Err(Error.new(.UnexpectedEof, "truncated chunk"))
+                self.account_body_bytes(read) ?? return Err(err)
+                self.chunk_remaining -= read
+                if self.chunk_remaining == 0 {
+                    end := [U8]{0, 0}
+                    self.read_exact_raw(&end) ?? return Err(err)
+                    if end != "\r\n".as_bytes() -> return Err(Error.new(.InvalidData, "invalid chunk ending"))
+                }
+                read
+            }
+        }
+        self.facts.max_timing(5, elapsed_ms(started))
+        result
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4563
+GZIP_COMPRESSED_LIMIT :: 64 * 1024 * 1024
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4564
+GZIP_DECODED_LIMIT :: 8 * 1024 * 1024
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4566
+fn invalid_gzip() -> Error { Error.new(.InvalidData, "invalid gzip body") }
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4570
+struct GzipBits<R> { inner: R, current: U8, remaining: U8, compressed: USize }
+impl<R: Read> GzipBits<R> {
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4578
+    fn new(inner: ^R) -> Self { Self{inner: ^inner, current: 0, remaining: 0, compressed: 0} }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4587
+    fn next_byte(self: &Self) -> U8 Error! {
+        if self.compressed == GZIP_COMPRESSED_LIMIT -> return Err(Error.new(.InvalidData, "gzip body too large"))
+        byte := [U8]{0}
+        self.inner.read_exact(&byte) ?? return Err(err)
+        self.compressed += 1
+        byte[0]
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4600
+    fn bits(self: &Self, count: USize) -> U32 Error! {
+        value := U32{0}
+        loop offset in 0..<count {
+            if self.remaining == 0 { self.current = self.next_byte() ?? return Err(err); self.remaining = 8 }
+            value |= U32.from(self.current & 1) << offset
+            self.current >>= 1
+            self.remaining -= 1
+        }
+        value
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4614
+    fn align(self: &Self) -> { self.remaining = 0 }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4618
+    fn aligned_byte(self: &Self) -> U8 Error! { self.align(); self.next_byte() }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4623
+    fn ensure_eof(self: &Self) -> () Error! {
+        self.align()
+        byte := [U8]{0}
+        count :: self.inner.read(&byte) ?? return Err(err)
+        if count != 0 -> return Err(invalid_gzip())
+        Ok()
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4634
+#Clone
+struct Huffman { symbols: [(U32, U8, U16)], max: U8 }
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4639
+fn reverse_bits(code: U32, length: U8) -> U32 {
+    reversed := U32{0}
+    loop _ in 0..<length { reversed = reversed << 1 | code & 1; code >>= 1 }
+    reversed
+}
+impl Huffman {
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4649
+    fn from_lengths(lengths: [U8]) -> Self ()! {
+        max :: lengths.iter().max() ?? 0
+        if max == 0 || max > 15 -> return Err(())
+        counts := [U32; 16].filled(0)
+        loop length in lengths {
+            if length > 15 -> return Err(())
+            if length != 0 -> counts[length as USize] += 1
+        }
+        left := I32{1}
+        loop bits in 1..=15 { left = left * 2 - counts[bits] as I32; if left < 0 -> return Err(()) }
+        next := [U32; 16].filled(0)
+        code := U32{0}
+        loop bits in 1..=15 { code = (code + counts[bits - 1]) << 1; next[bits] = code }
+        symbols := [(U32, U8, U16)]{}
+        loop (symbol, length) in lengths.iter().enumerate() {
+            if length == 0 -> next
+            canonical :: next[length as USize]
+            next[length as USize] += 1
+            &symbols.push((reverse_bits(canonical, length), length, symbol as U16))
+        }
+        Self{symbols: ^symbols, max: max}
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4688
+    fn decode<R: Read>(self, bits: &GzipBits<R>) -> U16 Error! {
+        code := U32{0}
+        loop length in 1..=self.max {
+            code |= (bits.bits(1) ?? return Err(err)) << (length - 1)
+            if self.symbols.iter().find((item) -> item.1 == length && item.0 == code) == .Val(item) -> return item.2
+        }
+        Err(invalid_gzip())
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4704
+fn fixed_trees() -> (Huffman, Huffman) ()! {
+    literals := [U8].repeat(0, 288)
+    &literals[..<144].fill(8); &literals[144..<256].fill(9)
+    &literals[256..<280].fill(7); &literals[280..].fill(8)
+    (Huffman.from_lengths(literals) ?? return Err(err), Huffman.from_lengths([U8; 32].filled(5)) ?? return Err(err))
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4716
+fn dynamic_trees<R: Read>(bits: &GzipBits<R>) -> (Huffman, Huffman) Error! {
+    literal_count :: (bits.bits(5) ?? return Err(err)) as USize + 257
+    distance_count :: (bits.bits(5) ?? return Err(err)) as USize + 1
+    code_count :: (bits.bits(4) ?? return Err(err)) as USize + 4
+    order :: [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
+    code_lengths := [U8; 19].filled(0)
+    loop index in 0..<code_count -> code_lengths[order[index]] = (bits.bits(3) ?? return Err(err)) as U8
+    code_tree :: Huffman.from_lengths(code_lengths) ?? return Err(invalid_gzip())
+    lengths := [U8].with_capacity(literal_count + distance_count)
+    loop lengths.len() < literal_count + distance_count {
+        value :: code_tree.decode(bits) ?? return Err(err)
+        if value <= 15 { &lengths.push(value as U8) }
+        else if value == 16 {
+            prior :: lengths.last() ?? return Err(invalid_gzip())
+            repeat :: (bits.bits(2) ?? return Err(err)) as USize + 3
+            loop _ in 0..<repeat -> &lengths.push(prior)
+        } else if value == 17 {
+            repeat :: (bits.bits(3) ?? return Err(err)) as USize + 3
+            loop _ in 0..<repeat -> &lengths.push(0)
+        } else if value == 18 {
+            repeat :: (bits.bits(7) ?? return Err(err)) as USize + 11
+            loop _ in 0..<repeat -> &lengths.push(0)
+        } else { return Err(invalid_gzip()) }
+        if lengths.len() > literal_count + distance_count -> return Err(invalid_gzip())
+    }
+    (Huffman.from_lengths(lengths[..<literal_count]) ?? return Err(invalid_gzip()), Huffman.from_lengths(lengths[literal_count..]) ?? return Err(invalid_gzip()))
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4757
+LENGTH_BASE :: [USize]{3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4761
+LENGTH_EXTRA :: [USize]{0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4764
+DIST_BASE :: [USize]{1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4768
+DIST_EXTRA :: [USize]{0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4773
+ enum InflateBlock { GzipHeader, DeflateHeader, Stored(USize), Huffman(literals: Huffman, distances: Huffman), Trailer, Done }
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4785
+struct GzipReader<R> {
+    bits: GzipBits<R>
+    block: InflateBlock
+    final_block: Bool
+    window: VecDeque<U8>
+    copy_distance: USize
+    copy_remaining: USize
+    crc: U32
+    decoded: USize
+    failed: Bool
+}
+impl<R: Read> GzipReader<R> {
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4798
+    fn new(inner: ^R) -> Self {
+        Self{bits: GzipBits.new(^inner), block: .GzipHeader, final_block: false, window: VecDeque.with_capacity(32 * 1024), copy_distance: 0, copy_remaining: 0, crc: !U32{0}, decoded: 0, failed: false}
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4812
+    fn record(self: &Self, byte: U8) -> U8 Error! {
+        if self.decoded == GZIP_DECODED_LIMIT -> return Err(Error.new(.InvalidData, "gzip decoded body too large"))
+        self.crc ^= U32.from(byte)
+        loop _ in 0..<8 -> self.crc = if self.crc & 1 != 0 { self.crc >> 1 ^ 0xedb8_8320 } else { self.crc >> 1 }
+        if self.window.len() == 32 * 1024 -> _ :: &self.window.pop_front()
+        &self.window.push_back(byte)
+        self.decoded += 1
+        byte
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4835
+    fn read_gzip_header(self: &Self) -> () Error! {
+        header := [U8; 10].filled(0)
+        loop i in 0..<10 -> header[i] = self.bits.aligned_byte() ?? return Err(err)
+        if header[..<3] != [U8]{0x1f, 0x8b, 8} || header[3] & 0xe0 != 0 -> return Err(invalid_gzip())
+        flags :: header[3]
+        if flags & 4 != 0 {
+            length :: USize.from(U16.from_le_bytes([self.bits.aligned_byte() ?? return Err(err), self.bits.aligned_byte() ?? return Err(err)]))
+            loop _ in 0..<length -> _ :: self.bits.aligned_byte() ?? return Err(err)
+        }
+        loop flag in [U8]{8, 16} {
+            if flags & flag != 0 -> loop { if (self.bits.aligned_byte() ?? return Err(err)) == 0 -> break }
+        }
+        if flags & 2 != 0 { _ :: self.bits.aligned_byte() ?? return Err(err); _ :: self.bits.aligned_byte() ?? return Err(err) }
+        Ok()
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4865
+    fn trailer(self: &Self) -> () Error! {
+        self.bits.align()
+        crc := [U8; 4].filled(0)
+        size := [U8; 4].filled(0)
+        loop i in 0..<4 -> crc[i] = self.bits.aligned_byte() ?? return Err(err)
+        loop i in 0..<4 -> size[i] = self.bits.aligned_byte() ?? return Err(err)
+        if U32.from_le_bytes(crc) != !self.crc || U32.from_le_bytes(size) != self.decoded as U32 -> return Err(invalid_gzip())
+        self.bits.ensure_eof()
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4881
+    fn next_decoded(self: &Self) -> U8? Error! {
+        loop {
+            if self.copy_remaining != 0 {
+                if self.copy_distance == 0 || self.copy_distance > self.window.len() -> return Err(invalid_gzip())
+                byte :: self.window[self.window.len() - self.copy_distance]
+                self.copy_remaining -= 1
+                return Val(self.record(byte) ?? return Err(err))
+            }
+            if self.block == {
+                .GzipHeader -> { self.read_gzip_header() ?? return Err(err); self.block = .DeflateHeader }
+                .DeflateHeader -> {
+                    self.final_block = (self.bits.bits(1) ?? return Err(err)) != 0
+                    kind :: self.bits.bits(2) ?? return Err(err)
+                    if kind == 0 {
+                        self.bits.align()
+                        length :: (self.bits.bits(16) ?? return Err(err)) as U16
+                        if (self.bits.bits(16) ?? return Err(err)) as U16 != !length -> return Err(invalid_gzip())
+                        self.block = .Stored(USize.from(length))
+                    } else if kind == 1 {
+                        (literals, distances) :: fixed_trees() ?? return Err(invalid_gzip())
+                        self.block = .Huffman(^literals, ^distances)
+                    } else if kind == 2 {
+                        (literals, distances) :: dynamic_trees(&self.bits) ?? return Err(err)
+                        self.block = .Huffman(^literals, ^distances)
+                    } else { return Err(invalid_gzip()) }
+                }
+                .Stored(remaining) -> {
+                    if remaining == 0 { self.block = if self.final_block { .Trailer } else { .DeflateHeader }; next }
+                    self.block = .Stored(remaining - 1)
+                    byte :: (self.bits.bits(8) ?? return Err(err)) as U8
+                    return Val(self.record(byte) ?? return Err(err))
+                }
+                .Huffman(literals, distances) -> {
+                    symbol :: literals.decode(&self.bits) ?? return Err(err)
+                    if symbol <= 255 -> return Val(self.record(symbol as U8) ?? return Err(err))
+                    if symbol == 256 { self.block = if self.final_block { .Trailer } else { .DeflateHeader } }
+                    else if symbol >= 257 && symbol <= 285 {
+                        index :: symbol as USize - 257
+                        self.copy_remaining = LENGTH_BASE[index] + (self.bits.bits(LENGTH_EXTRA[index]) ?? return Err(err)) as USize
+                        distance_symbol :: (distances.decode(&self.bits) ?? return Err(err)) as USize
+                        if distance_symbol >= DIST_BASE.len() -> return Err(invalid_gzip())
+                        self.copy_distance = DIST_BASE[distance_symbol] + (self.bits.bits(DIST_EXTRA[distance_symbol]) ?? return Err(err)) as USize
+                    } else { return Err(invalid_gzip()) }
+                }
+                .Trailer -> { self.trailer() ?? return Err(err); self.block = .Done; return None }
+                .Done -> return None
+            }
+        }
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4975
+    fn read(self: &Self, out: &[U8]) -> USize Error! {
+        if self.failed -> return Err(invalid_gzip())
+        if out.is_empty() -> return 0
+        written := 0
+        loop written < out.len() {
+            if self.next_decoded() == {
+                .Ok(.Val(byte)) -> { out[written] = byte; written += 1 }
+                .Ok(.None) -> break
+                .Err(error) -> { self.failed = true; if written == 0 -> return Err(error); break }
+            }
+        }
+        written
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5003
+HPACK_STATIC :: [(String, String)]{
+    (":authority", ""), (":method", "GET"), (":method", "POST"), (":path", "/"), (":path", "/index.html"), (":scheme", "http"), (":scheme", "https"),
+    (":status", "200"), (":status", "204"), (":status", "206"), (":status", "304"), (":status", "400"), (":status", "404"), (":status", "500"),
+    ("accept-charset", ""), ("accept-encoding", "gzip, deflate"), ("accept-language", ""), ("accept-ranges", ""), ("accept", ""), ("access-control-allow-origin", ""),
+    ("age", ""), ("allow", ""), ("authorization", ""), ("cache-control", ""), ("content-disposition", ""), ("content-encoding", ""), ("content-language", ""),
+    ("content-length", ""), ("content-location", ""), ("content-range", ""), ("content-type", ""), ("cookie", ""), ("date", ""), ("etag", ""), ("expect", ""),
+    ("expires", ""), ("from", ""), ("host", ""), ("if-match", ""), ("if-modified-since", ""), ("if-none-match", ""), ("if-range", ""), ("if-unmodified-since", ""),
+    ("last-modified", ""), ("link", ""), ("location", ""), ("max-forwards", ""), ("proxy-authenticate", ""), ("proxy-authorization", ""), ("range", ""),
+    ("referer", ""), ("refresh", ""), ("retry-after", ""), ("server", ""), ("set-cookie", ""), ("strict-transport-security", ""), ("transfer-encoding", ""),
+    ("user-agent", ""), ("vary", ""), ("via", ""), ("www-authenticate", ""),
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5067
+fn hpack_integer(out: &[U8], value: USize, prefix: U8, first: U8) -> {
+    mask :: (USize{1} << prefix) - 1
+    if value < mask { &out.push(first | value as U8); return }
+    &out.push(first | mask as U8)
+    rest := value - mask
+    loop rest >= 128 { &out.push((rest as U8 & 0x7f) | 0x80); rest >>= 7 }
+    &out.push(rest as U8)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5082
+fn hpack_string(out: &[U8], value: String) -> { hpack_integer(out, value.len(), 7, 0); &out.extend_from_slice(value.as_bytes()) }
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5087
+fn hpack_literal(out: &[U8], name: String, value: String, sensitive: Bool) -> {
+    name_index :: HPACK_STATIC.iter().position((pair) -> pair.0 == name).map((index) -> index + 1) ?? 0
+    hpack_integer(out, name_index, 4, if sensitive { 0x10 } else { 0 })
+    if name_index == 0 -> hpack_string(out, name)
+    hpack_string(out, value)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5100
+fn hpack_request(method: String, url: ParsedUrl, headers: [(String, String)], body_len: USize?, decompress: Bool) -> [U8] JetHTTPBridgeError! {
+    out := [U8]{}
+    if method == "GET" { &out.push(0x82) } else if method == "POST" { &out.push(0x83) } else { hpack_literal(&out, ":method", method, false) }
+    if url.target == "/" { &out.push(0x84) } else { hpack_literal(&out, ":path", url.target, false) }
+    &out.push(if url.scheme == "https" { 0x87 } else { 0x86 })
+    hpack_literal(&out, ":authority", url.authority, false)
+    has_length := false
+    has_accept_encoding := false
+    loop (raw_name, value) in headers {
+        name :: raw_name.to_ascii_lowercase()
+        if name == "connection" -> return Err(JetHTTPBridgeError.InvalidFraming)
+        has_length |= name == "content-length"
+        has_accept_encoding |= name == "accept-encoding"
+        hpack_literal(&out, name, value, name == "authorization" || name == "cookie" || name == "set-cookie")
+    }
+    if decompress && !has_accept_encoding -> hpack_literal(&out, "accept-encoding", "gzip", false)
+    if body_len == .Val(length) && !has_length -> hpack_literal(&out, "content-length", length.to_string(), false)
+    out
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5150
+#Default
+struct HpackDecoder { dynamic: VecDeque<(String, String)>, size: USize, max: USize }
+impl HpackDecoder {
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5158
+    fn new() -> Self { Self{dynamic: VecDeque.new(), size: 0, max: 4096} }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5166
+    fn entry(self, index: USize) -> (String, String) JetHTTPBridgeError! {
+        if index == 0 -> return Err(JetHTTPBridgeError.Protocol)
+        if index <= HPACK_STATIC.len() -> return ~HPACK_STATIC[index - 1]
+        self.dynamic.get(index - HPACK_STATIC.len() - 1).cloned() ?? return Err(JetHTTPBridgeError.Protocol)
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5180
+    fn insert(self: &Self, name: ^String, value: ^String) -> {
+        size :: name.len().saturating_add(value.len()).saturating_add(32)
+        if size > self.max { &self.dynamic.clear(); self.size = 0; return }
+        loop self.size.saturating_add(size) > self.max {
+            (old_name, old_value) :: &self.dynamic.pop_back() ?? break
+            self.size -= old_name.len() + old_value.len() + 32
+        }
+        &self.dynamic.push_front((^name, ^value))
+        self.size += size
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5198
+    fn decode(self: &Self, bytes: [U8]) -> [(String, String)] JetHTTPBridgeError! {
+        cursor := USize{0}
+        out := [(String, String)]{}
+        saw_field := false
+        header_size := USize{0}
+        loop cursor < bytes.len() {
+            first :: bytes[cursor]
+            if first & 0x80 != 0 {
+                index :: hpack_read_integer(bytes, &cursor, 7) ?? return Err(err)
+                pair :: self.entry(index) ?? return Err(err)
+                header_size += pair.0.len() + pair.1.len() + 32
+                &out.push(^pair)
+                saw_field = true
+            } else if first & 0x40 != 0 {
+                index :: hpack_read_integer(bytes, &cursor, 6) ?? return Err(err)
+                name :: if index == 0 { hpack_read_string(bytes, &cursor) ?? return Err(err) } else { (self.entry(index) ?? return Err(err)).0 }
+                value :: hpack_read_string(bytes, &cursor) ?? return Err(err)
+                self.insert(~name, ~value)
+                header_size += name.len() + value.len() + 32
+                &out.push((^name, ^value))
+                saw_field = true
+            } else if first & 0x20 != 0 {
+                if saw_field -> return Err(JetHTTPBridgeError.Protocol)
+                max :: hpack_read_integer(bytes, &cursor, 5) ?? return Err(err)
+                if max > 4096 -> return Err(JetHTTPBridgeError.Protocol)
+                self.max = max
+                loop self.size > self.max {
+                    (name, value) :: &self.dynamic.pop_back() ?? return Err(JetHTTPBridgeError.Protocol)
+                    self.size -= name.len() + value.len() + 32
+                }
+            } else {
+                index :: hpack_read_integer(bytes, &cursor, 4) ?? return Err(err)
+                name :: if index == 0 { hpack_read_string(bytes, &cursor) ?? return Err(err) } else { (self.entry(index) ?? return Err(err)).0 }
+                value :: hpack_read_string(bytes, &cursor) ?? return Err(err)
+                header_size += name.len() + value.len() + 32
+                &out.push((^name, ^value))
+                saw_field = true
+            }
+            if out.len() > 100 || header_size > 64 * 1024 -> return Err(JetHTTPBridgeError.InvalidHeader)
+        }
+        out
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5260
+fn hpack_read_integer(bytes: [U8], cursor: &USize, prefix: U8) -> USize JetHTTPBridgeError! {
+    first :: bytes.get(cursor) ?? return Err(JetHTTPBridgeError.Protocol)
+    cursor += 1
+    mask :: (USize{1} << prefix) - 1
+    value := USize.from(first) & mask
+    if value < mask -> return value
+    shift := USize{0}
+    loop {
+        byte :: bytes.get(cursor) ?? return Err(JetHTTPBridgeError.Protocol)
+        cursor += 1
+        // GATE #4483: USize.BITS derives from selected target width.
+        if shift > USize.BITS as USize - 7 -> return Err(JetHTTPBridgeError.Protocol)
+        value = value.checked_add(USize.from(byte & 0x7f) << shift) ?? return Err(JetHTTPBridgeError.Protocol)
+        if byte & 0x80 == 0 -> return value
+        shift += 7
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5289
+fn hpack_read_string(bytes: [U8], cursor: &USize) -> String JetHTTPBridgeError! {
+    huffman :: bytes.get(cursor).is_some_and((byte) -> byte & 0x80 != 0)
+    length :: hpack_read_integer(bytes, cursor, 7) ?? return Err(err)
+    if length > 64 * 1024 -> return Err(JetHTTPBridgeError.InvalidHeader)
+    end :: cursor.checked_add(length).filter((end) -> end <= bytes.len()) ?? return Err(JetHTTPBridgeError.Protocol)
+    value :: if huffman { hpack_huffman_decode(bytes[cursor..<end]) ?? return Err(err) } else { ~bytes[cursor..<end] }
+    cursor = end
+    String.from_utf8(^value) ?? return Err(JetHTTPBridgeError.InvalidHeader)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5308
+fn hpack_huffman_decode(bytes: [U8]) -> [U8] JetHTTPBridgeError! {
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5309
+    CODES :: [U32]{
+        0x1ff8, 0x7fffd8, 0xfffffe2, 0xfffffe3, 0xfffffe4, 0xfffffe5, 0xfffffe6, 0xfffffe7,
+        0xfffffe8, 0xffffea, 0x3ffffffc, 0xfffffe9, 0xfffffea, 0x3ffffffd, 0xfffffeb, 0xfffffec,
+        0xfffffed, 0xfffffee, 0xfffffef, 0xffffff0, 0xffffff1, 0xffffff2, 0x3ffffffe, 0xffffff3,
+        0xffffff4, 0xffffff5, 0xffffff6, 0xffffff7, 0xffffff8, 0xffffff9, 0xffffffa, 0xffffffb,
+        0x14, 0x3f8, 0x3f9, 0xffa, 0x1ff9, 0x15, 0xf8, 0x7fa, 0x3fa, 0x3fb, 0xf9, 0x7fb, 0xfa,
+        0x16, 0x17, 0x18, 0x0, 0x1, 0x2, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x5c, 0xfb,
+        0x7ffc, 0x20, 0xffb, 0x3fc, 0x1ffa, 0x21, 0x5d, 0x5e, 0x5f, 0x60, 0x61, 0x62, 0x63, 0x64,
+        0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0x71, 0x72, 0xfc,
+        0x73, 0xfd, 0x1ffb, 0x7fff0, 0x1ffc, 0x3ffc, 0x22, 0x7ffd, 0x3, 0x23, 0x4, 0x24, 0x5, 0x25,
+        0x26, 0x27, 0x6, 0x74, 0x75, 0x28, 0x29, 0x2a, 0x7, 0x2b, 0x76, 0x2c, 0x8, 0x9, 0x2d, 0x77,
+        0x78, 0x79, 0x7a, 0x7b, 0x7ffe, 0x7fc, 0x3ffd, 0x1ffd, 0xffffffc, 0xfffe6, 0x3fffd2,
+        0xfffe7, 0xfffe8, 0x3fffd3, 0x3fffd4, 0x3fffd5, 0x7fffd9, 0x3fffd6, 0x7fffda, 0x7fffdb,
+        0x7fffdc, 0x7fffdd, 0x7fffde, 0xffffeb, 0x7fffdf, 0xffffec, 0xffffed, 0x3fffd7, 0x7fffe0,
+        0xffffee, 0x7fffe1, 0x7fffe2, 0x7fffe3, 0x7fffe4, 0x1fffdc, 0x3fffd8, 0x7fffe5, 0x3fffd9,
+        0x7fffe6, 0x7fffe7, 0xffffef, 0x3fffda, 0x1fffdd, 0xfffe9, 0x3fffdb, 0x3fffdc, 0x7fffe8,
+        0x7fffe9, 0x1fffde, 0x7fffea, 0x3fffdd, 0x3fffde, 0xfffff0, 0x1fffdf, 0x3fffdf, 0x7fffeb,
+        0x7fffec, 0x1fffe0, 0x1fffe1, 0x3fffe0, 0x1fffe2, 0x7fffed, 0x3fffe1, 0x7fffee, 0x7fffef,
+        0xfffea, 0x3fffe2, 0x3fffe3, 0x3fffe4, 0x7ffff0, 0x3fffe5, 0x3fffe6, 0x7ffff1, 0x3ffffe0,
+        0x3ffffe1, 0xfffeb, 0x7fff1, 0x3fffe7, 0x7ffff2, 0x3fffe8, 0x1ffffec, 0x3ffffe2, 0x3ffffe3,
+        0x3ffffe4, 0x7ffffde, 0x7ffffdf, 0x3ffffe5, 0xfffff1, 0x1ffffed, 0x7fff2, 0x1fffe3,
+        0x3ffffe6, 0x7ffffe0, 0x7ffffe1, 0x3ffffe7, 0x7ffffe2, 0xfffff2, 0x1fffe4, 0x1fffe5,
+        0x3ffffe8, 0x3ffffe9, 0xffffffd, 0x7ffffe3, 0x7ffffe4, 0x7ffffe5, 0xfffec, 0xfffff3,
+        0xfffed, 0x1fffe6, 0x3fffe9, 0x1fffe7, 0x1fffe8, 0x7ffff3, 0x3fffea, 0x3fffeb, 0x1ffffee,
+        0x1ffffef, 0xfffff4, 0xfffff5, 0x3ffffea, 0x7ffff4, 0x3ffffeb, 0x7ffffe6, 0x3ffffec,
+        0x3ffffed, 0x7ffffe7, 0x7ffffe8, 0x7ffffe9, 0x7ffffea, 0x7ffffeb, 0xffffffe, 0x7ffffec,
+        0x7ffffed, 0x7ffffee, 0x7ffffef, 0x7fffff0, 0x3ffffee, 0x3fffffff,
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5337
+    LENGTHS :: [U8]{
+        13, 23, 28, 28, 28, 28, 28, 28, 28, 24, 30, 28, 28, 30, 28, 28, 28, 28, 28, 28, 28, 28, 30,
+        28, 28, 28, 28, 28, 28, 28, 28, 28, 6, 10, 10, 12, 13, 6, 8, 11, 10, 10, 8, 11, 8, 6, 6, 6,
+        5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 7, 8, 15, 6, 12, 10, 13, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 7, 8, 13, 19, 13, 14, 6, 15, 5, 6, 5, 6, 5, 6, 6, 6, 5,
+        7, 7, 6, 6, 6, 5, 6, 7, 6, 5, 5, 6, 7, 7, 7, 7, 7, 15, 11, 14, 13, 28, 20, 22, 20, 20, 22,
+        22, 22, 23, 22, 23, 23, 23, 23, 23, 24, 23, 24, 24, 22, 23, 24, 23, 23, 23, 23, 21, 22, 23,
+        22, 23, 23, 24, 22, 21, 20, 22, 22, 23, 23, 21, 23, 22, 22, 24, 21, 22, 23, 23, 21, 21, 22,
+        21, 23, 22, 23, 23, 20, 22, 22, 22, 23, 22, 22, 23, 26, 26, 20, 19, 22, 23, 22, 25, 26, 26,
+        26, 27, 27, 26, 24, 25, 19, 21, 26, 27, 27, 26, 27, 24, 21, 21, 26, 26, 28, 27, 27, 27, 20,
+        24, 20, 21, 22, 21, 21, 23, 22, 22, 25, 25, 24, 24, 26, 23, 26, 27, 26, 26, 27, 27, 27, 27,
+        27, 28, 27, 27, 27, 27, 27, 26, 30,
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5351
+    #Clone
+    #Copy
+    struct Node { next: [I16; 2], symbol: I16 }
+    // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5355
+    static TREE: OnceLock<[Node]> = OnceLock.new() // GATE #4494
+    tree :: TREE.get_or_init(() -> {
+        nodes := [Node]{Node{next: [-1, -1], symbol: -1}}
+        loop (symbol, pair) in CODES.iter().zip(LENGTHS).enumerate() {
+            (code, length) :: pair
+            node := USize{0}
+            loop shift in (0..<length).rev() {
+                bit :: USize.from(((code >> shift) & 1) as U8)
+                if nodes[node].next[bit] < 0 {
+                    next :: nodes.len()
+                    &nodes.push(Node{next: [-1, -1], symbol: -1})
+                    nodes[node].next[bit] = next as I16
+                }
+                node = nodes[node].next[bit] as USize
+            }
+            nodes[node].symbol = symbol as I16
+        }
+        nodes
+    })
+    out := [U8]{}
+    node := USize{0}
+    length := U8{0}
+    tail := U8{0}
+    loop byte in bytes {
+        loop shift in (0..<8).rev() {
+            bit :: USize.from((byte >> shift) & 1)
+            length += 1
+            tail = tail << 1 | ((byte >> shift) & 1)
+            next :: tree[node].next[bit]
+            if next < 0 -> return Err(JetHTTPBridgeError.Protocol)
+            node = next as USize
+            if tree[node].symbol >= 0 {
+                symbol :: tree[node].symbol as USize
+                if symbol == 256 -> return Err(JetHTTPBridgeError.Protocol)
+                &out.push(symbol as U8)
+                node = 0; length = 0; tail = 0
+                if out.len() > 64 * 1024 -> return Err(JetHTTPBridgeError.InvalidHeader)
+            }
+        }
+    }
+    if length > 7 || (length != 0 && tail != (U8{1} << length) - 1) -> return Err(JetHTTPBridgeError.Protocol)
+    out
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5413
+fn coalesce_request_header_pairs(headers: ^[(String, String)]) -> [(String, String)] {
+    out := [(String, String)].with_capacity(headers.len())
+    indices := [String:USize]{}
+    loop (name, value) in headers {
+        key :: name.to_ascii_lowercase()
+        if indices.get(key) == .Val(index) {
+            &out[index].1.push_str(if name.eq_ignore_ascii_case("cookie") { "; " } else { ", " })
+            &out[index].1.push_str(value)
+        } else {
+            indices[key] = out.len()
+            &out.push((^name, ^value))
+        }
+    }
+    out
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5435
+fn coalesce_request_headers(flat: [String]) -> [(String, String)] {
+    headers := [(String, String)]{}
+    indices := [String:USize]{}
+    loop pair in flat.chunks_exact(2) {
+        key :: pair[0].to_ascii_lowercase()
+        if indices.get(key) == .Val(index) {
+            &headers[index].1.push_str(if pair[0].eq_ignore_ascii_case("cookie") { "; " } else { ", " })
+            &headers[index].1.push_str(pair[1])
+        } else {
+            indices[key] = headers.len()
+            &headers.push((~pair[0], ~pair[1]))
+        }
+    }
+    headers
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5455
+fn encode_component(s: String) -> String {
+    out := String.new()
+    loop b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b == 45 || b == 95 || b == 46 || b == 126 { &out.push(b as Char) }
+        else if b == 32 { &out.push('+') }
+        else { &out.push_str(format("%{:02X}", b)) }
+    }
+    out
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5469
+fn encode_form(fields: [String]) -> String {
+    out := String.new()
+    i := 0
+    loop i + 1 < fields.len() {
+        if !out.is_empty() -> &out.push('&')
+        &out.push_str(encode_component(fields[i])); &out.push('='); &out.push_str(encode_component(fields[i + 1]))
+        i += 2
+    }
+    out
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5484
+fn multipart_boundary(fields: [String]) -> String {
+    PREFIX :: "jet-http-boundary-"
+    LENGTH :: PREFIX.len() + 16
+    used := Set<U64>.new()
+    loop field in fields {
+        loop window in field.as_bytes().windows(LENGTH) {
+            suffix :: window.strip_prefix(PREFIX.as_bytes()) ?? next
+            text :: String.from_utf8(suffix) ?? next
+            value :: U64.from_str_radix(text, 16) ?? next
+            _ :: &used.insert(value)
+        }
+    }
+    suffix := U64{0}
+    loop used.contains(suffix) -> suffix = suffix.checked_add(1).expect("in-memory multipart fields cannot contain every u64 boundary suffix")
+    format("{}{:016x}", PREFIX, suffix)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5512
+fn encode_multipart(fields: [String], boundary: String) -> String {
+    out := String.new()
+    i := 0
+    loop i + 1 < fields.len() {
+        &out.push_str("--"); &out.push_str(boundary); &out.push_str("\r\nContent-Disposition: form-data; name=\"")
+        &out.push_str(fields[i].replace('"', "%22").replace('\r', "%0D").replace('\n', "%0A"))
+        &out.push_str("\"\r\n\r\n"); &out.push_str(fields[i + 1]); &out.push_str("\r\n")
+        i += 2
+    }
+    &out.push_str("--"); &out.push_str(boundary); &out.push_str("--\r\n")
+    out
+}

@@ -1,0 +1,17 @@
+use core.http.[parse_status_and_headers, content_length, hpack_huffman_decode, coalesce_request_headers, encode_form, JetHTTPBridgeError]
+// Behavioral controls for HTTP.rs3819,3878,5308,5435,5469 (no inline originals).
+#Test("http_response_header_framing_controls") {
+    parsed :: parse_status_and_headers("HTTP/1.1 200 OK\r\nX-Test: value\r\n\r\n".as_bytes()).unwrap()
+    assert(parsed.0 == 200)
+    assert(parsed.2 == [("x-test", "value")])
+    assert(content_length([("content-length", "3,3")]) == .Ok(.Val(3)))
+    assert(content_length([("content-length", "3,4")]) == .Err(JetHTTPBridgeError.InvalidFraming))
+}
+#Test("hpack_huffman_rfc7541_control") {
+    assert(hpack_huffman_decode([U8]{0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff}) == .Ok("www.example.com".into_bytes()))
+    assert(hpack_huffman_decode([U8]{0xff}) == .Err(JetHTTPBridgeError.Protocol))
+}
+#Test("http_form_and_header_coalescing_controls") {
+    assert(encode_form(["a b", "c+d"]) == "a+b=c%2Bd")
+    assert(coalesce_request_headers(["Cookie", "a=1", "cookie", "b=2", "X", "one", "x", "two"]) == [("Cookie", "a=1; b=2"), ("X", "one, two")])
+}

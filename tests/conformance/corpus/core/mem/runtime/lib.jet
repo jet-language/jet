@@ -1,0 +1,167 @@
+use core.mem.runtime.lib.*
+use jet_codegen.Prelude.Core.MapKey.[JetMapKey]
+use core.mem as mem
+
+// Rust: crates/jet-rt/src/lib.rs:1975
+#Test("record_word_cells_never_retain_exact_integer_tags") {
+    arena := JetArena.default()
+    record :: arena.alloc_record(3)
+    words :: [I64{7299585414513572552}, I64.MIN, I64{-1}]
+    loop (index, word) in words.iter().enumerate() { _ :: arena.record_set_word(record, I64{index}, word, true).unwrap() }
+    copy :: arena.alloc_record_values(arena.clone_record_values(record).unwrap())
+    loop (index, word) in words.iter().enumerate() { assert_eq(arena.record_get_int(copy, I64{index}), Val(word)) }
+    assert(arena.exact_roots.is_empty())
+    assert(arena.record_get_record(copy, 0).is_none())
+    assert_eq(arena.composite_key(copy), Val(JetMapKey.Record(words.iter().map(|value| -> JetMapKey.UInt(U64{value})).collect())))
+    signed :: arena.alloc_record(1)
+    _ :: arena.record_set_word(signed, 0, I64.MIN, false).unwrap()
+    assert_eq(arena.composite_key(signed), Val(JetMapKey.Record([JetMapKey.Int(I64.MIN)])))
+}
+// Rust: crates/jet-rt/src/lib.rs:1998
+#Test("record_exact_cells_still_retain_spilled_owners") {
+    arena := JetArena.default()
+    record :: arena.alloc_record(1)
+    spilled :: arena.int_add(JetArena.INT_SMALL_MAX, 1)
+    before :: arena.exact_roots.len()
+    _ :: arena.record_set_int(record, 0, spilled).unwrap()
+    assert_eq(arena.exact_roots.len(), before + 1)
+    assert_eq(arena.int_compare(arena.record_get_int(record, 0).unwrap(), spilled), 0)
+}
+// Rust: crates/jet-rt/src/lib.rs:2009
+#Test("display_matches_aot_float_prelude") {
+    assert_eq(display_f32(F32{1.0}), "1.0")
+    assert_eq(display_f64(F64{-5.0}), "-5.0")
+    assert_eq(display_f64(F64{2.5}), "2.5")
+}
+// Rust: crates/jet-rt/src/lib.rs:2016
+#Test("exact_int_small_path_and_spill_boundary") {
+    arena := JetArena.default()
+    inline :: arena.int_add(JetArena.INT_SMALL_MAX - 1, 1)
+    assert_eq(inline, JetArena.INT_SMALL_MAX)
+    positive_spill :: arena.int_add(JetArena.INT_SMALL_MAX, 1)
+    assert_eq(exact_int_big_value(positive_spill).expect("large exact value must be in the shared store").to_string_rep(), "4611686018427387904")
+    negative_spill :: arena.int_sub(JetArena.INT_SMALL_MIN, 1)
+    assert_eq(exact_int_big_value(negative_spill).expect("large exact value must be in the shared store").to_string_rep(), "-4611686018427387905")
+    assert_eq(arena.int_compare(positive_spill, positive_spill), 0)
+}
+// Rust: crates/jet-rt/src/lib.rs:2041
+#Test("string_helpers_match_prelude_semantics") {
+    assert_eq(string_len_chars("aé日"), 3)
+    assert_eq(string_trim("  jet\n"), "jet")
+    assert_eq(string_to_upper("Jet"), "JET")
+    assert_eq(string_to_lower("Jet"), "jet")
+    // Unicode 17 casing follows the pinned UCD, not host data.
+    assert_eq(string_to_lower("꟎"), "꟏")
+    assert_eq(string_to_upper("꟏"), "꟎")
+    assert_eq(string_trim(" jet "), "jet")
+    assert_eq(string_replace("one two one", "one", "1"), "1 two 1")
+    assert_eq(string_after("nate@jet-lang.dev", "@"), "jet-lang.dev")
+    assert_eq(string_before("nate@jet-lang.dev", "@"), "nate")
+    assert_eq(string_after("no-at-sign", "@"), "no-at-sign")
+    assert_eq(string_before("no-at-sign", "@"), "no-at-sign")
+}
+// Rust: crates/jet-rt/src/lib.rs:2058
+#Test("arena_allocates_string_handles") {
+    arena := JetArena.default()
+    first :: arena.alloc_empty_string()
+    second :: arena.alloc_string("jet")
+    &arena.get_string_mut(first).unwrap().push_str("dev")
+    assert_eq(first, 0)
+    assert_eq(second, 1)
+    assert_eq(arena.get_string(first), Val("dev"))
+    assert_eq(arena.clone_string(second), Val("jet"))
+    arena.clear()
+    assert_eq(arena.get_string(first), None)
+}
+// Rust: crates/jet-rt/src/lib.rs:2075
+#Test("arena_allocates_int_lists") {
+    arena := JetArena.default()
+    list :: arena.alloc_int_list([3, 1, 2])
+    _ :: arena.list_push_int(list, 4).unwrap()
+    _ :: arena.list_sort_int(list).unwrap()
+    assert_eq(arena.list_len(list), Val(4))
+    assert_eq(arena.list_get_int(list, 2), Val(3))
+    _ :: arena.list_set_int(list, 2, 9).unwrap()
+    assert_eq(arena.clone_int_list(list), Val([1, 2, 9, 4]))
+    assert_eq(arena.int_list_slice(list), Val([I64{1}, I64{2}, I64{9}, I64{4}].as_slice()))
+    slice :: arena.list_slice(list, 1, 3).unwrap()
+    assert_eq(arena.clone_int_list(slice), Val([2, 9]))
+}
+// Rust: crates/jet-rt/src/lib.rs:2092
+#Test("arena_allocates_float_lists") {
+    arena := JetArena.default()
+    list :: arena.alloc_empty_list()
+    _ :: arena.list_push_float(list, F64{1.5}).unwrap()
+    _ :: arena.list_push_float(list, F64{2.5}).unwrap()
+    assert_eq(arena.list_get_float(list, 1), Val(F64{2.5}))
+    _ :: arena.list_set_float(list, 1, F64{4.5}).unwrap()
+    assert_eq(arena.list_get_float(list, 1), Val(F64{4.5}))
+    slice :: arena.list_slice(list, 0, 1).unwrap()
+    assert_eq(arena.list_get_float(slice, 0), Val(F64{1.5}))
+}
+// Rust: crates/jet-rt/src/lib.rs:2107
+#Test("arena_stores_ranges_inline_in_lists") {
+    arena := JetArena.default()
+    list :: arena.alloc_empty_list()
+    _ :: arena.list_push_range(list, 2, 5, true).unwrap()
+    assert_eq(arena.list_get_range(list, 0), Val((I64{2}, I64{5}, true)))
+    assert_eq(arena.values.len(), 1, "a Range list element must not allocate an arena record")
+}
+// Rust: crates/jet-rt/src/lib.rs:2122
+#Test("arena_allocates_records") {
+    arena := JetArena.default()
+    name :: arena.alloc_string("jet")
+    record :: arena.alloc_record(4)
+    _ :: arena.record_set_string(record, 0, name).unwrap()
+    _ :: arena.record_set_float(record, 1, F64{2.5}).unwrap()
+    _ :: arena.record_set_bool(record, 2, true).unwrap()
+    _ :: arena.record_set_char(record, 3, 'J').unwrap()
+    cloned_name :: arena.record_get_string(record, 0).unwrap()
+    assert_eq(arena.get_string(cloned_name), Val("jet"))
+    assert_eq(arena.record_get_float(record, 1), Val(F64{2.5}))
+    assert_eq(arena.record_get_bool(record, 2), Val(true))
+    assert_eq(arena.record_get_char(record, 3), Val('J'))
+}
+// Rust: crates/jet-rt/src/lib.rs:2140
+#Test("record_field_borrows_survive_arena_growth") {
+    arena := JetArena.default()
+    record :: arena.alloc_record(4)
+    _ :: arena.record_set_int(record, 0, 10).unwrap()
+    _ :: arena.record_set_float(record, 1, F64{2.5}).unwrap()
+    _ :: arena.record_set_bool(record, 2, false).unwrap()
+    _ :: arena.record_set_char(record, 3, 'a').unwrap()
+    kinds :: [RECORD_FIELD_ADDRESS_I64, RECORD_FIELD_ADDRESS_F64, RECORD_FIELD_ADDRESS_BOOL, RECORD_FIELD_ADDRESS_CHAR]
+    addresses :: [I64#4].from_fn(|index| -> arena.record_field_address(record, I64{index}, kinds[index]).unwrap())
+    // Allocate while original backing is still live, forcing outer header relocation.
+    replacement :: [JetVal]{}.with_capacity(arena.values.capacity() + 1)
+    original :: mem.replace(&arena.values, ^replacement)
+    &arena.values.extend(^original)
+    loop (index, address) in addresses.iter().enumerate() {
+        assert_eq(arena.record_field_address(record, I64{index}, kinds[index]), Val(address))
+    }
+    // GATE #4494: typed native writes through synchronous retained field addresses.
+    #Unsafe("unchanged inner record slots remain borrowed after relocating outer arena headers") {
+        mem.Ptr<I64>.from_addr(USize{addresses[0]}).write(I64{41})
+        mem.Ptr<F64>.from_addr(USize{addresses[1]}).write(F64{3.5})
+        mem.Ptr<Bool>.from_addr(USize{addresses[2]}).write(true)
+        mem.Ptr<Char>.from_addr(USize{addresses[3]}).write('z')
+    }
+    assert_eq(arena.record_get_int(record, 0), Val(I64{41}))
+    assert_eq(arena.record_get_float(record, 1), Val(F64{3.5}))
+    assert_eq(arena.record_get_bool(record, 2), Val(true))
+    assert_eq(arena.record_get_char(record, 3), Val('z'))
+    assert_eq(arena.record_field_address(record, 0, RECORD_FIELD_ADDRESS_F64), None)
+    assert_eq(arena.record_field_address(record, 4, RECORD_FIELD_ADDRESS_I64), None)
+}
+// Rust: crates/jet-rt/src/lib.rs:2184
+#Test("string_views_borrow_owned_storage_and_validate_bounds") {
+    arena := JetArena.default()
+    owner :: arena.alloc_string("αbeta")
+    view :: arena.alloc_string_view(owner, 2, 6).unwrap()
+    nested :: arena.alloc_string_view(view, 1, 4).unwrap()
+    assert_eq(arena.get_string(view), Val("beta"))
+    assert_eq(arena.get_string(nested), Val("eta"))
+    assert_eq(arena.string_slots(), [(USize{0}, "αbeta")])
+    assert_eq(arena.alloc_string_view(owner, 1, 3), None)
+    assert_eq(arena.alloc_string_view(999, 0, 0), None)
+}

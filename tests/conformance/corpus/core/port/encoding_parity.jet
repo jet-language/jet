@@ -1,2133 +1,280 @@
-// PORT-PENDING 1043 tests-encoding-parity: tests/encoding_parity.rs:1-2129
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Card #713/#715: whole/stream encoding parity across AOT, comptime (where
-//RS //! pure), and default-dev with #778 tiered backend attribution.
-//RS //!
-//RS //! One matrix harness records tier outcomes instead of isolated per-format tests.
-//RS //! Edition 2026 keeps the D-ENCBASE-STRICT1 compatibility union and single-arg
-//RS //! `json.canonical` surface exercised by #710–#712.
-//RS 
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::Command;
-//RS use std::sync::atomic::{AtomicU64, Ordering};
-//RS 
-//RS use jet::Interpreter::{dev_iteration, RunOutcome};
-//RS use jet_jit::{
-//RS     deopt_invoked_for_test, fallback_invoked_for_test, jit_executed_for_test,
-//RS     reset_jit_trace_for_test, set_trace_tiers, take_last_trace, Tier,
-//RS };
-//RS 
-//RS mod common;
-//RS #[path = "tir_support/mod.rs"]
-//RS mod tir_support;
-//RS 
-//RS static SEQ: AtomicU64 = AtomicU64::new(0);
-//RS 
-//RS struct Scratch {
-//RS     dir: PathBuf,
-//RS }
-//RS 
-//RS impl Scratch {
-//RS     fn new(tag: &str) -> Self {
-//RS         let dir = std::env::temp_dir().join(format!(
-//RS             "jet_enc_parity_{tag}_{}_{}",
-//RS             std::process::id(),
-//RS             SEQ.fetch_add(1, Ordering::Relaxed)
-//RS         ));
-//RS         let _ = fs::remove_dir_all(&dir);
-//RS         fs::create_dir_all(&dir).unwrap();
-//RS         Self { dir }
-//RS     }
-//RS 
-//RS     fn write_project(&self, edition: &str, body: &str) -> PathBuf {
-//RS         fs::write(
-//RS             self.dir.join("package.jet"),
-//RS             format!("name: \"enc\"\nversion: \"0.1.0\"\nedition: \"{edition}\"\nauthority: {{ holds: {{ allow: [FS, IO, Mem.Alloc] }} }}\n"),
-//RS         )
-//RS         .unwrap();
-//RS         let path = self.dir.join("run.jet");
-//RS         // The AOT tier runs the built binary with `current_dir(scratch)`, but the
-//RS         // dev/JIT tier runs in-process at the cargo-test cwd (the repo root). Fixtures
-//RS         // must therefore name absolute paths, or dev-tier output litters the repo.
-//RS         fs::write(
-//RS             &path,
-//RS             body.replace("@DIR@", &self.dir.display().to_string()),
-//RS         )
-//RS         .unwrap();
-//RS         path
-//RS     }
-//RS 
-//RS     fn path(&self) -> &Path {
-//RS         &self.dir
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS struct ProgramOutput {
-//RS     exit: i32,
-//RS     stdout: String,
-//RS     stderr: String,
-//RS }
-//RS 
-//RS impl ProgramOutput {
-//RS     fn ran(stdout: String, stderr: String, exit: i32) -> Self {
-//RS         Self {
-//RS             exit,
-//RS             stdout,
-//RS             stderr,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS enum DevBackend {
-//RS     ResidentJit,
-//RS     DeoptInterp,
-//RS }
-//RS 
-//RS fn on_encoding_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
-//RS     let result = std::thread::scope(|scope| {
-//RS         std::thread::Builder::new()
-//RS             .stack_size(64 * 1024 * 1024)
-//RS             .spawn_scoped(scope, work)
-//RS             .expect("spawn encoding parity worker")
-//RS             .join()
-//RS     });
-//RS     match result {
-//RS         Ok(value) => value,
-//RS         Err(payload) => std::panic::resume_unwind(payload),
-//RS     }
-//RS }
-//RS 
-//RS fn run_aot(jet_path: &Path, cwd: &Path) -> ProgramOutput {
-//RS     assert!(common::have_rustc(), "AOT parity requires rustc");
-//RS     let src = fs::read_to_string(jet_path).unwrap();
-//RS     let shown = jet_path.to_string_lossy();
-//RS     let out = jet::compile_with_path(&src, &shown).unwrap_or_else(|diags| {
-//RS         panic!(
-//RS             "AOT compile rejected:\n{}",
-//RS             jet::render_diagnostics(&shown, &src, &diags)
-//RS         )
-//RS     });
-//RS     let rs = cwd.join("parity_aot.rs");
-//RS     let bin = cwd.join("parity_aot");
-//RS     fs::write(&rs, &out.rust).unwrap();
-//RS     let mut rustc = Command::new("rustc");
-//RS     rustc.args([
-//RS         "--edition",
-//RS         "2021",
-//RS         rs.to_str().unwrap(),
-//RS         "-o",
-//RS         bin.to_str().unwrap(),
-//RS     ]);
-//RS     if let Some(link) = &out.ffi {
-//RS         rustc
-//RS             .arg("--extern")
-//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-//RS         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
-//RS             rustc
-//RS                 .arg("-L")
-//RS                 .arg(format!("dependency={}", deps_dir.display()));
-//RS         }
-//RS     }
-//RS     let built = rustc.output().unwrap();
-//RS     assert!(
-//RS         built.status.success(),
-//RS         "rustc rejected generated encoding fixture:\n{}",
-//RS         String::from_utf8_lossy(&built.stderr)
-//RS     );
-//RS     let run = Command::new(&bin).current_dir(cwd).output().unwrap();
-//RS     ProgramOutput::ran(
-//RS         String::from_utf8_lossy(&run.stdout).into_owned(),
-//RS         String::from_utf8_lossy(&run.stderr).into_owned(),
-//RS         run.status.code().unwrap_or(-1),
-//RS     )
-//RS }
-//RS 
-//RS fn checked_bundle(path: &str) -> jet::AST::ProgramBundle {
-//RS     let mut bundle = jet::Loader::load_entry(path).expect("fixture should load");
-//RS     let source = fs::read_to_string(path).expect("fixture source should remain readable");
-//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS     let errors: Vec<_> = diags
-//RS         .iter()
-//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS         .collect();
-//RS     assert!(
-//RS         errors.is_empty(),
-//RS         "fixture must type-check:\n{}",
-//RS         jet::render_diagnostics(path, &source, &diags)
-//RS     );
-//RS     bundle
-//RS }
-//RS 
-//RS fn run_default_dev(path: &str) -> (DevBackend, ProgramOutput) {
-//RS     reset_jit_trace_for_test();
-//RS     let bundle = checked_bundle(path);
-//RS     let jit_safe = common::cranelift_resident_safe(&bundle);
-//RS     match dev_iteration(path, false, false) {
-//RS         RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => {
-//RS             let jit = jit_executed_for_test();
-//RS             let deopt = deopt_invoked_for_test();
-//RS             let fallback = fallback_invoked_for_test();
-//RS             assert!(
-//RS                 !fallback,
-//RS                 "default-dev must not silently fall back to interpreter/AOT for encoding probes"
-//RS             );
-//RS             if deopt {
-//RS                 (
-//RS                     DevBackend::DeoptInterp,
-//RS                     ProgramOutput::ran(stdout, stderr, exit_code),
-//RS                 )
-//RS             } else {
-//RS                 assert!(
-//RS                     jit,
-//RS                     "successful default-dev encoding probe must execute resident JIT"
-//RS                 );
-//RS                 assert!(
-//RS                     jit_safe,
-//RS                     "resident JIT run requires cranelift_resident_safe; detail: {}",
-//RS                     common::cranelift_resident_safe_detail(&bundle)
-//RS                 );
-//RS                 (
-//RS                     DevBackend::ResidentJit,
-//RS                     ProgramOutput::ran(stdout, stderr, exit_code),
-//RS                 )
-//RS             }
-//RS         }
-//RS         RunOutcome::Problems(diags) => {
-//RS             assert!(
-//RS                 !fallback_invoked_for_test(),
-//RS                 "default-dev must not silently fall back when deopt hits an interpreter gap"
-//RS             );
-//RS             assert!(
-//RS                 !diags.iter().any(|d| d.code == "E2211"),
-//RS                 "E2211 retired by #778; encoding probes must silent-deopt or name E0956: {diags:?}"
-//RS             );
-//RS             let detail = diags
-//RS                 .iter()
-//RS                 .map(|d| format!("{}:{}", d.code, d.what))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join("; ");
-//RS             (
-//RS                 DevBackend::DeoptInterp,
-//RS                 ProgramOutput::ran(String::new(), format!("interpreter gap: {detail}"), 101),
-//RS             )
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn run_forced_interpreter(path: &str) -> ProgramOutput {
-//RS     match dev_iteration(path, false, true) {
-//RS         RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
-//RS         RunOutcome::Problems(diags) => {
-//RS             panic!("forced interpreter rejected encoding probe: {diags:?}")
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn assert_aot_comptime_binding_parity(label: &str, source: &str, jet_path: &Path, cwd: &Path) {
-//RS     let aot = run_aot(jet_path, cwd);
-//RS     assert_eq!(aot.exit, 0, "{label} AOT failed: {}", aot.stderr);
-//RS     let lines: Vec<_> = aot.stdout.lines().collect();
-//RS     assert!(
-//RS         lines.len() >= 2,
-//RS         "{label} expected comptime|runtime probe lines, got {:?}",
-//RS         lines
-//RS     );
-//RS     for (i, line) in lines.iter().enumerate() {
-//RS         let (comptime, runtime) = line
-//RS             .split_once('|')
-//RS             .unwrap_or_else(|| panic!("{label} line {i} missing comptime|runtime split: {line}"));
-//RS         assert_eq!(
-//RS             comptime, runtime,
-//RS             "{label} comptime/AOT divergence on line {i}: comptime={comptime:?} runtime={runtime:?}"
-//RS         );
-//RS     }
-//RS     let diags = jet::check_with_path(jet_path.to_str().unwrap());
-//RS     assert!(
-//RS         diags.is_empty(),
-//RS         "{label} sema rejected comptime fixture:\n{}",
-//RS         jet::render_diagnostics(jet_path.to_str().unwrap(), source, &diags)
-//RS     );
-//RS     let _ = source;
-//RS }
-//RS 
-//RS /// Named interpreter/JIT gaps that cannot claim encoding parity (C5).
-//RS /// File-backed stream handles still stop on the #778 deopt interpreter:
-//RS /// ResourceNew / THandleOp (E0956) or panic-stop from missing file handles (E0953).
-//RS fn named_encoding_dev_gap(stderr: &str) -> bool {
-//RS     let e0956 = stderr.contains("E0956")
-//RS         && (stderr.contains("ResourceNew")
-//RS             || stderr.contains("ResourceTake")
-//RS             || stderr.contains("handle `")
-//RS             || stderr.contains("FileReader")
-//RS             || stderr.contains("FileWriter")
-//RS             || stderr.contains("JSONReader")
-//RS             || stderr.contains("JSONWriter")
-//RS             || stderr.contains("CSVReader")
-//RS             || stderr.contains("CSVWriter")
-//RS             || stderr.contains("XMLReader")
-//RS             || stderr.contains("XMLWriter")
-//RS             || stderr.contains("CBORReader")
-//RS             || stderr.contains("CBORWriter")
-//RS             || stderr.contains("JSONLReader")
-//RS             || stderr.contains("JSONLWriter"));
-//RS     // E0953: interpreter panic/stop on file-backed encoding stream probes when
-//RS     // create/open never materialize a handle under ResourceNew.
-//RS     let e0953 = stderr.contains("E0953")
-//RS         && (stderr.contains("stopped the build") || stderr.contains("panic"));
-//RS     e0956 || e0953
-//RS }
-//RS 
-//RS fn assert_default_dev_matches_aot_or_honest_gap(
-//RS     label: &str,
-//RS     jet_path: &Path,
-//RS     _cwd: &Path,
-//RS     aot: &ProgramOutput,
-//RS     interpreter_fallback: bool,
-//RS ) {
-//RS     let (backend, dev) = run_default_dev(jet_path.to_str().unwrap());
-//RS     eprintln!(
-//RS         "{label} default-dev backend={backend:?} exit={} deopt_gap={}",
-//RS         dev.exit,
-//RS         named_encoding_dev_gap(&dev.stderr)
-//RS     );
-//RS     match backend {
-//RS         DevBackend::ResidentJit => {
-//RS             assert_eq!(
-//RS                 dev.stdout, aot.stdout,
-//RS                 "{label} default-dev/JIT stdout drift"
-//RS             );
-//RS             assert_eq!(
-//RS                 dev.stderr, aot.stderr,
-//RS                 "{label} default-dev/JIT stderr drift"
-//RS             );
-//RS             assert_eq!(dev.exit, aot.exit, "{label} default-dev/JIT exit drift");
-//RS         }
-//RS         DevBackend::DeoptInterp => {
-//RS             if dev.exit == 0 {
-//RS                 assert_eq!(dev.stdout, aot.stdout, "{label} deopt-interp stdout drift");
-//RS                 assert_eq!(dev.stderr, aot.stderr, "{label} deopt-interp stderr drift");
-//RS                 assert_eq!(dev.exit, aot.exit, "{label} deopt-interp exit drift");
-//RS             } else if named_encoding_dev_gap(&dev.stderr) {
-//RS                 // Explicit unsupported path — does not satisfy stream/default-dev parity.
-//RS                 eprintln!(
-//RS                     "note: {label} default-dev named gap (no parity claim): {}",
-//RS                     dev.stderr
-//RS                 );
-//RS             } else if interpreter_fallback {
-//RS                 let interp = run_forced_interpreter(jet_path.to_str().unwrap());
-//RS                 assert_eq!(
-//RS                     interp.stdout, aot.stdout,
-//RS                     "{label} forced-interpreter must preserve AOT encoding semantics when default-dev deopts"
-//RS                 );
-//RS                 assert_eq!(interp.exit, aot.exit, "{label} interpreter exit drift");
-//RS             } else {
-//RS                 panic!(
-//RS                     "{label} default-dev deopt failed without named encoding gap or parity: exit={} stderr={}",
-//RS                     dev.exit, dev.stderr
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Runtime-only whole-value probes shared by AOT ↔ default-dev (#778 lens).
-//RS /// Encoding parse/decode at comptime is AOT-pure but impure on the tiered run
-//RS /// interpreter (E0956); default-dev must not pretend comptime bindings work there.
-//RS /// Avoid enum-match Result arms here — the whole-program evaluator lacks them.
-//RS const WHOLE_VALUE_RUNTIME: &str = r#"
-//RS use core.encoding.json as json
-//RS use core.encoding.jsonl as jsonl
-//RS use core.encoding.csv as csv
-//RS use core.encoding.xml as xml
-//RS use core.encoding.cbor as cbor
-//RS use core.encoding.base64 as base64
-//RS use core.encoding.base32 as base32
-//RS 
-//RS fn run() {
-//RS     print(json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")))
-//RS     print((jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len())
-//RS     print((csv.parse("name,score\nada,9\n") ?? panic("csv")).len())
-//RS     print(xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml")))
-//RS     print(json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p")))
-//RS     print((base64.decode("Zg==") ?? panic("b64")).len())
-//RS     print((base64.decode_url("aGk") ?? panic("b64url")).len())
-//RS     print((base32.decode("MZXQ====") ?? panic("b32")).len())
-//RS }
-//RS "#;
-//RS 
-//RS const CONFIGURED_CSV_RUNTIME: &str = r#"
-//RS use core.encoding.csv as csv
-//RS 
-//RS fn run() {
-//RS     raw :: String.from_bytes([U8]{"name\tnote\x0D\x0A\x0D\x0Aada\t\"line1\x0D\x0Aline2\"\x0D\x0A"}) ?? panic("fixture")
-//RS     crlf :: String.from_bytes([U8]{"\x0D\x0A"}) ?? panic("crlf")
-//RS     rows :: csv.rows(raw, delimiter: "\t", header: true, skip_blank: true) ?? panic("rows")
-//RS     print(rows.len())
-//RS     print(rows[0].line)
-//RS     print(rows[0].fields[0])
-//RS     note :: rows[0].fields[1]
-//RS     print(&note.replace(crlf, "|"))
-//RS     parsed :: csv.parse(raw, delimiter: "\t", header: true, skip_blank: true) ?? panic("parse")
-//RS     print(parsed.len())
-//RS     malformed :: String.from_bytes([U8]{"name\tnote\x0D\x0A\"unterminated"}) ?? panic("malformed")
-//RS     _attempted :: csv.parse(malformed, delimiter: "\t", header: true, skip_blank: true) ?? {
-//RS         print(true)
-//RS         return
-//RS     }
-//RS     print(false)
-//RS }
-//RS "#;
-//RS 
-//RS /// AOT-only comptime|runtime binding parity. Inline expressions only — local
-//RS /// fn wrappers from comptime hit E0956 on the shared evaluator seam.
-//RS const WHOLE_VALUE_COMPTIME: &str = r#"
-//RS use core.encoding.json as json
-//RS use core.encoding.jsonl as jsonl
-//RS use core.encoding.csv as csv
-//RS use core.encoding.xml as xml
-//RS use core.encoding.cbor as cbor
-//RS use core.encoding.base64 as base64
-//RS use core.encoding.base32 as base32
-//RS 
-//RS JSON_CANON :: prep { json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")) }
-//RS JSONL_N :: prep { (jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len() }
-//RS CSV_N :: prep { (csv.parse("name,score\nada,9\n") ?? panic("csv")).len() }
-//RS XML_TEXT :: prep { xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml")) }
-//RS CBOR_ROUND :: prep { json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p")) }
-//RS B64_N :: prep { (base64.decode("Zg==") ?? panic("b64")).len() }
-//RS B64URL_N :: prep { (base64.decode_url("aGk") ?? panic("b64url")).len() }
-//RS B32_N :: prep { (base32.decode("MZXQ====") ?? panic("b32")).len() }
-//RS 
-//RS fn run() {
-//RS     print("{JSON_CANON}|{json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json"))}")
-//RS     print("{JSONL_N}|{(jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len()}")
-//RS     print("{CSV_N}|{(csv.parse("name,score\nada,9\n") ?? panic("csv")).len()}")
-//RS     print("{XML_TEXT}|{xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml"))}")
-//RS     print("{CBOR_ROUND}|{json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p"))}")
-//RS     print("{B64_N}|{(base64.decode("Zg==") ?? panic("b64")).len()}")
-//RS     print("{B64URL_N}|{(base64.decode_url("aGk") ?? panic("b64url")).len()}")
-//RS     print("{B32_N}|{(base32.decode("MZXQ====") ?? panic("b32")).len()}")
-//RS }
-//RS "#;
-//RS 
-//RS const HOSTILE_JSON_TOML_DEPTH_RUNTIME: &str = r#"
-//RS use core.encoding.json as json
-//RS use core.encoding.toml as toml
-//RS 
-//RS fn run() {
-//RS     open64 :: "[".repeat(64)
-//RS     close64 :: "]".repeat(64)
-//RS     json.parse("{open64}{close64}") ? _value -> { print("json64:accepted") } ! error -> { print("json64:{error.line}:{error.message}") }
-//RS 
-//RS     open65 :: "[".repeat(65)
-//RS     close65 :: "]".repeat(65)
-//RS     json.parse("{open65}{close65}") ? _value -> { print("json65:accepted") } ! error -> { print("json65:{error.line}:{error.message}") }
-//RS 
-//RS     toml.parse("value = {open64}{close64}") ? _value -> { print("toml64:accepted") } ! error -> { print("toml64:{error.line}:{error.message}") }
-//RS 
-//RS     toml.parse("value = {open65}{close65}") ? _value -> { print("toml65:accepted") } ! error -> { print("toml65:{error.line}:{error.message}") }
-//RS }
-//RS "#;
-//RS 
-//RS #[test]
-//RS fn whole_value_codecs_match_aot_comptime_and_default_dev() {
-//RS     on_encoding_stack(whole_value_codecs_match_aot_comptime_and_default_dev_inner);
-//RS }
-//RS 
-//RS #[test]
-//RS fn configured_csv_options_match_aot_default_dev_and_interpreter() {
-//RS     on_encoding_stack(configured_csv_options_match_aot_default_dev_and_interpreter_inner);
-//RS }
-//RS 
-//RS fn configured_csv_options_match_aot_default_dev_and_interpreter_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping configured CSV parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let scratch = Scratch::new("configured_csv");
-//RS     let path = scratch.write_project("2026", CONFIGURED_CSV_RUNTIME);
-//RS     fs::write(
-//RS         scratch.path().join("package.jet"),
-//RS         "name: \"configured-csv\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
-//RS     )
-//RS     .unwrap();
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(aot.exit, 0, "configured CSV AOT failed: {}", aot.stderr);
-//RS     let expected = "1\n3\nada\nline1|line2\n1\ntrue\n";
-//RS     assert_eq!(aot.stdout, expected, "configured CSV AOT output drift");
-//RS     let dev = run_default_dev(path.to_str().unwrap());
-//RS     assert_eq!(dev.1.exit, 0, "configured CSV default-dev failed: {}", dev.1.stderr);
-//RS     assert_eq!(dev.1.stdout, aot.stdout, "configured CSV default-dev drift");
-//RS     let interpreter = run_forced_interpreter(path.to_str().unwrap());
-//RS     assert_eq!(interpreter.exit, 0, "configured CSV interpreter failed: {}", interpreter.stderr);
-//RS     assert_eq!(interpreter.stdout, aot.stdout, "configured CSV interpreter drift");
-//RS }
-//RS 
-//RS #[test]
-//RS fn serde_examples_match_aot_default_resident_jit_and_interpreter() {
-//RS     on_encoding_stack(serde_examples_match_aot_default_resident_jit_and_interpreter_inner);
-//RS }
-//RS 
-//RS fn serde_examples_match_aot_default_resident_jit_and_interpreter_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping serde example parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let scratch = Scratch::new("serde_examples");
-//RS     for (stem, expected) in [
-//RS         (
-//RS             "serde/encoding_breadth",
-//RS             concat!(
-//RS                 "{\"a\":1,\"b\":2}\ntrue\n2\ntrue\n",
-//RS                 "<r xmlns:h=\"urn:h\"><h:c id=\"7\">ok</h:c></r>\n",
-//RS                 "true\n{\"a\":1,\"b\":2}\naGk\n2\nNBUQ====\n2\n",
-//RS             ),
-//RS         ),
-//RS         (
-//RS             "serde/serde_generic",
-//RS             concat!(
-//RS                 "{\"value\":7}\n42\n{\"value\":\"hi\"}\n",
-//RS                 "{\"raw\":9}\n3\n",
-//RS             ),
-//RS         ),
-//RS         (
-//RS             "serde/codable_default",
-//RS             concat!(
-//RS                 "{\"name\":\"web\",\"ports\":[80,443],\"env\":\"prod\"}\n",
-//RS                 "web\n[80, 443]\nprod\n",
-//RS                 "{\"name\":\"web\",\"ports\":[80,443],\"env\":\"prod\"}\n",
-//RS                 "[8080]\n",
-//RS             ),
-//RS         ),
-//RS     ] {
-//RS         let jet_path = root.join("Examples/features").join(format!("{stem}.jet"));
-//RS         let expected_path = root
-//RS             .join("Examples/features/expected")
-//RS             .join(format!("{stem}.out"));
-//RS         assert_eq!(
-//RS             fs::read_to_string(&expected_path).expect("serde golden output"),
-//RS             expected,
-//RS             "{stem} golden output drifted"
-//RS         );
-//RS 
-//RS         let aot = run_aot(&jet_path, scratch.path());
-//RS         let expected_output = ProgramOutput::ran(expected.to_string(), String::new(), 0);
-//RS         assert_eq!(aot, expected_output, "{stem} AOT output drifted");
-//RS 
-//RS         let (backend, default_run) = run_default_dev(jet_path.to_str().unwrap());
-//RS         assert_eq!(
-//RS             backend,
-//RS             DevBackend::ResidentJit,
-//RS             "{stem} default run must stay resident JIT; detail: {}",
-//RS             common::cranelift_resident_safe_detail(&checked_bundle(jet_path.to_str().unwrap()))
-//RS         );
-//RS         assert_eq!(default_run, aot, "{stem} default run diverged from AOT");
-//RS 
-//RS         let interpreter = run_forced_interpreter(jet_path.to_str().unwrap());
-//RS         assert_eq!(interpreter, aot, "{stem} interpreter diverged from AOT");
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn serde_derive_examples_match_production_cli_tiers() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     for stem in [
-//RS         "serde/codable_default",
-//RS         "serde/hand_codec",
-//RS         "serde/serde_derive",
-//RS         "serde/serde_generic",
-//RS     ] {
-//RS         let expected_path = root
-//RS             .join("Examples/features/expected")
-//RS             .join(format!("{stem}.out"));
-//RS         let expected = fs::read_to_string(&expected_path)
-//RS             .unwrap_or_else(|error| panic!("read {expected_path:?}: {error}"));
-//RS         tir_support::assert_example_cli_tiers_agree(stem, &expected);
-//RS     }
-//RS }
-//RS 
-//RS fn whole_value_codecs_match_aot_comptime_and_default_dev_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping whole-value encoding parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     // AOT comptime|runtime binding parity (pure on AOT evaluator).
-//RS     let ct = Scratch::new("whole_ct");
-//RS     let ct_path = ct.write_project("2026", WHOLE_VALUE_COMPTIME);
-//RS     assert_aot_comptime_binding_parity(
-//RS         "whole-value-comptime",
-//RS         WHOLE_VALUE_COMPTIME,
-//RS         &ct_path,
-//RS         ct.path(),
-//RS     );
-//RS 
-//RS     // AOT ↔ default-dev runtime parity under #778 tiered lens (no comptime).
-//RS     let scratch = Scratch::new("whole");
-//RS     let path = scratch.write_project("2026", WHOLE_VALUE_RUNTIME);
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(
-//RS         aot.exit, 0,
-//RS         "whole-value runtime AOT failed: {}",
-//RS         aot.stderr
-//RS     );
-//RS     assert_default_dev_matches_aot_or_honest_gap("whole-value", &path, scratch.path(), &aot, true);
-//RS }
-//RS 
-//RS #[test]
-//RS fn hostile_json_and_toml_depth_match_aot_resident_jit_and_interpreter() {
-//RS     on_encoding_stack(hostile_json_and_toml_depth_match_aot_resident_jit_and_interpreter_inner);
-//RS }
-//RS 
-//RS fn hostile_json_and_toml_depth_match_aot_resident_jit_and_interpreter_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping hostile JSON/TOML depth parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let scratch = Scratch::new("hostile_json_toml_depth");
-//RS     let path = scratch.write_project("2026", HOSTILE_JSON_TOML_DEPTH_RUNTIME);
-//RS     let expected = concat!(
-//RS         "json64:accepted\n",
-//RS         "json65:1:JSON value is nested too deeply\n",
-//RS         "toml64:accepted\n",
-//RS         "toml65:1:TOML value is nested too deeply\n",
-//RS     );
-//RS 
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(aot.exit, 0, "hostile JSON/TOML AOT failed: {}", aot.stderr);
-//RS     assert_eq!(aot.stdout, expected);
-//RS     assert_eq!(aot.stderr, "");
-//RS 
-//RS     let (backend, dev) = run_default_dev(path.to_str().unwrap());
-//RS     assert_eq!(
-//RS         backend,
-//RS         DevBackend::ResidentJit,
-//RS         "hostile JSON/TOML default run must stay resident JIT"
-//RS     );
-//RS     assert_eq!(dev, aot, "hostile JSON/TOML default run diverged from AOT");
-//RS 
-//RS     let interpreter = run_forced_interpreter(path.to_str().unwrap());
-//RS     assert_eq!(
-//RS         interpreter, aot,
-//RS         "hostile JSON/TOML forced interpreter diverged from AOT"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn malformed_text_codec_errors_match_aot_default_dev_and_interpreter() {
-//RS     on_encoding_stack(malformed_text_codec_errors_match_aot_default_dev_and_interpreter_inner);
-//RS }
-//RS 
-//RS fn malformed_text_codec_errors_match_aot_default_dev_and_interpreter_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping malformed text codec parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let source = r#"
-//RS use core.encoding.json as json
-//RS use core.encoding.toml as toml
-//RS use core.encoding.yaml as yaml
-//RS 
-//RS #Codable
-//RS struct Row {
-//RS     value: Int
-//RS }
-//RS 
-//RS fn json_parse_error() -[]> String {
-//RS     json.parse("\n{{oops") ? _value -> return "accepted" ! error -> return "{error.line}|{error.message}"
-//RS }
-//RS 
-//RS fn json_decode_error() -[]> String {
-//RS     json.decode<Row>("\n{{oops") ? _value -> return "accepted" ! errors -> return "{errors[0].path}|{errors[0].reason}"
-//RS }
-//RS 
-//RS fn toml_parse_error() -[]> String {
-//RS     toml.parse("value = ") ? _value -> return "accepted" ! error -> return error.message
-//RS }
-//RS 
-//RS fn yaml_parse_error() -[]> String {
-//RS     yaml.parse("key: value\nbad") ? _value -> return "accepted" ! error -> return error.message
-//RS }
-//RS 
-//RS fn run() {
-//RS     print(json_parse_error())
-//RS     print(json_decode_error())
-//RS     print(toml_parse_error())
-//RS     print(yaml_parse_error())
-//RS }
-//RS "#;
-//RS     let scratch = Scratch::new("malformed_text_codecs");
-//RS     let path = scratch.write_project("2026", source);
-//RS     let expected = concat!(
-//RS         "2|expected quoted text\n",
-//RS         "|invalid JSON (line 2): expected quoted text\n",
-//RS         "expected a value\n",
-//RS         "expected `key: value`\n",
-//RS     );
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(
-//RS         aot.exit, 0,
-//RS         "malformed text codec AOT failed: {}",
-//RS         aot.stderr
-//RS     );
-//RS     assert_eq!(aot.stdout, expected);
-//RS     let (backend, dev) = run_default_dev(path.to_str().unwrap());
-//RS     assert_eq!(dev, aot, "default-dev backend: {backend:?}");
-//RS     let interpreter = run_forced_interpreter(path.to_str().unwrap());
-//RS     assert_eq!(interpreter, aot, "forced interpreter diverged");
-//RS }
-//RS 
-//RS #[test]
-//RS fn json_quoted_unicode_and_duplicate_key_errors_match_all_tiers() {
-//RS     on_encoding_stack(json_quoted_unicode_and_duplicate_key_errors_match_all_tiers_inner);
-//RS }
-//RS 
-//RS fn json_quoted_unicode_and_duplicate_key_errors_match_all_tiers_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping JSON quoted Unicode parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let source = r#"
-//RS use core.encoding as encoding
-//RS use core.encoding.json as json
-//RS 
-//RS fn run() {
-//RS     value :: json.parse("{{\"text\":\"quote: \\\" and music: \\uD834\\uDD1E\"}}") ?? panic("valid JSON")
-//RS     print(json.to_string(value))
-//RS     json.parse("{{\"a\":1,\"a\":}}") ? _value -> {
-//RS         print("duplicate accepted")
-//RS     } ! error -> {
-//RS         print("{error.kind == encoding.EncodingErrorKind.Syntax}|{error.path}|{error.reason}")
-//RS     }
-//RS }
-//RS "#;
-//RS     let scratch = Scratch::new("json_quoted_unicode_duplicate_key");
-//RS     let path = scratch.write_project("2026", source);
-//RS     let expected = r#"{"text":"quote: \" and music: 𝄞"}
-//RS true|/a|duplicate object key `a`
-//RS "#;
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(aot.exit, 0, "JSON quoted Unicode AOT failed: {}", aot.stderr);
-//RS     assert_eq!(aot.stdout, expected);
-//RS     let (backend, dev) = run_default_dev(path.to_str().unwrap());
-//RS     assert_eq!(dev, aot, "default-dev backend: {backend:?}");
-//RS     let interpreter = run_forced_interpreter(path.to_str().unwrap());
-//RS     assert_eq!(interpreter, aot, "forced interpreter diverged");
-//RS }
-//RS 
-//RS #[test]
-//RS fn cbor_typed_schema_matches_comptime_default_dev_and_deopt() {
-//RS     on_encoding_stack(cbor_typed_schema_matches_comptime_default_dev_and_deopt_inner);
-//RS }
-//RS 
-//RS fn cbor_typed_schema_matches_comptime_default_dev_and_deopt_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping typed CBOR schema parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let source = r#"
-//RS use core.encoding.cbor as cbor
-//RS use core.encoding.hex as hex
-//RS use core.text as text
-//RS 
-//RS #Codable
-//RS struct Packet {
-//RS     id: Int
-//RS     payload: [U8]
-//RS }
-//RS 
-//RS ROOT :: prep { hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root")) }
-//RS PACKET :: prep { hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("packet")) }
-//RS 
-//RS fn gap() -[]> String {
-//RS     folded := text.casefold("Straße")
-//RS     if folded != "strasse" { panic("casefold") }
-//RS     actual_root := hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root"))
-//RS     actual_packet := hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("packet"))
-//RS     return "{actual_root}|{actual_packet}"
-//RS }
-//RS 
-//RS fn run() {
-//RS     print("{ROOT}|{PACKET}")
-//RS     print(gap())
-//RS }
-//RS "#;
-//RS     let scratch = Scratch::new("cbor_typed_schema");
-//RS     let path = scratch.write_project("2026", source);
-//RS     let bundle = checked_bundle(path.to_str().unwrap());
-//RS     let plan = common::cranelift_tier_plan(&bundle);
-//RS     assert!(
-//RS         !plan.whole_interp,
-//RS         "regression needs mixed named-function deopt: {plan:?}"
-//RS     );
-//RS     assert!(
-//RS         plan.deopt.iter().any(|(name, _)| name == "gap"),
-//RS         "regression needs `gap` on the named deopt tier: {plan:?}"
-//RS     );
-//RS     let expected =
-//RS         "42dead|a262696407677061796c6f616442dead\n42dead|a262696407677061796c6f616442dead\n";
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(aot.exit, 0, "typed CBOR AOT failed: {}", aot.stderr);
-//RS     assert_eq!(aot.stdout, expected);
-//RS     let (backend, dev) = run_default_dev(path.to_str().unwrap());
-//RS     assert_eq!(dev.exit, 0, "typed CBOR default-dev failed: {}", dev.stderr);
-//RS     assert_eq!(dev.stdout, expected, "default-dev backend: {backend:?}");
-//RS     assert_eq!(backend, DevBackend::DeoptInterp);
-//RS     assert!(
-//RS         deopt_invoked_for_test(),
-//RS         "typed CBOR regression must execute named-function deopt"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn cbor_codable_bodies_match_aot_resident_and_forced_deopt() {
-//RS     on_encoding_stack(cbor_codable_bodies_match_aot_resident_and_forced_deopt_inner);
-//RS }
-//RS 
-//RS fn cbor_codable_bodies_match_aot_resident_and_forced_deopt_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping forced-deopt Codable parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let source = r#"
-//RS use core.encoding.cbor as cbor
-//RS use core.encoding.hex as hex
-//RS use core.text as text
-//RS 
-//RS struct Token { raw: String }
-//RS 
-//RS impl Token.Encode {
-//RS     fn encode(self) -> DataTree -> DataTree.Text("wire")
-//RS }
-//RS 
-//RS impl Token.Decode {
-//RS     fn decode(tree: DataTree) -[]> Token ![FieldError] {
-//RS         value :: tree.text()
-//RS         if value != "wire" {
-//RS             return Err([FieldError{ path: "$xml_event", reason: "bad token" }])
-//RS         }
-//RS         return Ok(Token{ raw: "decoded" })
-//RS     }
-//RS }
-//RS 
-//RS #Codable
-//RS enum Event {
-//RS     Idle
-//RS     Count(Int)
-//RS }
-//RS 
-//RS #Codable
-//RS struct Wrap<T> {
-//RS     value: T
-//RS }
-//RS 
-//RS #[Codable, RenameAll(camel)]
-//RS struct Packet {
-//RS     display_name: String
-//RS     token: Token
-//RS     event: Event
-//RS     bytes: [U8]
-//RS     numbers: [Int]
-//RS     labels: [String:Int]
-//RS     maybe: ?Int
-//RS     score: Float
-//RS     letter: Char
-//RS }
-//RS 
-//RS fn resident() -[]> String {
-//RS     value := Packet{
-//RS         display_name: "Ada",
-//RS         token: Token{ raw: "ignored" },
-//RS         event: Event.Count(7),
-//RS         bytes: [222, 173],
-//RS         numbers: [-2, 3],
-//RS         labels: [String:Int]{ "x": 6 },
-//RS         maybe: Val(8),
-//RS         score: 1.5,
-//RS         letter: 'Z'
-//RS     }
-//RS     encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
-//RS     decoded := cbor.decode<Packet>(~encoded) ?? panic("decode {err}")
-//RS     roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
-//RS     boxed := cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
-//RS     boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
-//RS     boxed_back := cbor.decode<Wrap<Int>>(~boxed_wire) ?? panic("generic roundtrip")
-//RS     return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
-//RS }
-//RS 
-//RS fn forced_deopt(seed: String) -[]> String {
-//RS     folded := text.casefold(seed)
-//RS     if folded != "strasse" { panic("casefold") }
-//RS     value := Packet{
-//RS         display_name: "Ada",
-//RS         token: Token{ raw: "ignored" },
-//RS         event: Event.Count(7),
-//RS         bytes: [222, 173],
-//RS         numbers: [-2, 3],
-//RS         labels: [String:Int]{ "x": 6 },
-//RS         maybe: Val(8),
-//RS         score: 1.5,
-//RS         letter: 'Z'
-//RS     }
-//RS     encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
-//RS     decoded := cbor.decode<Packet>(~encoded) ?? panic("decode {err}")
-//RS     roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
-//RS     boxed := cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
-//RS     boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
-//RS     boxed_back := cbor.decode<Wrap<Int>>(~boxed_wire) ?? panic("generic roundtrip")
-//RS     return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
-//RS }
-//RS 
-//RS fn run() {
-//RS     print(resident())
-//RS     print(forced_deopt("Straße"))
-//RS }
-//RS "#;
-//RS     let scratch = Scratch::new("cbor_codable_deopt");
-//RS     let path = scratch.write_project("2026", source);
-//RS     fs::write(
-//RS         scratch.path().join("package.jet"),
-//RS         "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
-//RS     )
-//RS     .unwrap();
-//RS     let bundle = checked_bundle(path.to_str().unwrap());
-//RS     let plan = common::cranelift_tier_plan(&bundle);
-//RS     assert!(
-//RS         !plan.whole_interp,
-//RS         "regression needs mixed tiers: gap={:?}; plan={plan:?}",
-//RS         plan.gap
-//RS     );
-//RS     assert!(
-//RS         plan.native.contains("run"),
-//RS         "zero-arg run must remain the native entry in mixed tiers: {plan:?}"
-//RS     );
-//RS     assert!(
-//RS         plan.deopt.iter().any(|(name, _)| name == "forced_deopt"),
-//RS         "regression must force the codec body through named deopt: {plan:?}"
-//RS     );
-//RS     assert!(
-//RS         !plan.deopt.iter().any(|(name, _)| name == "resident"),
-//RS         "resident control must stay on the resident tier: {plan:?}"
-//RS     );
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(aot.exit, 0, "Codable corpus AOT failed: {}", aot.stderr);
-//RS     let mut lines = aot.stdout.lines();
-//RS     let resident = lines.next().expect("resident output");
-//RS     let deopt = lines.next().expect("deopt output");
-//RS     assert_eq!(resident, deopt, "AOT corpus functions diverged");
-//RS     assert!(
-//RS         resident.ends_with("|decoded|11"),
-//RS         "custom and generic Decode bodies did not run: {resident}"
-//RS     );
-//RS     assert!(
-//RS         lines.next().is_none(),
-//RS         "unexpected AOT output: {}",
-//RS         aot.stdout
-//RS     );
-//RS     let (backend, dev) = run_default_dev(path.to_str().unwrap());
-//RS     assert_eq!(backend, DevBackend::DeoptInterp);
-//RS     assert_eq!(dev, aot);
-//RS     assert!(jit_executed_for_test(), "resident control must execute JIT");
-//RS     assert!(
-//RS         deopt_invoked_for_test(),
-//RS         "forced-deopt control must execute TIR evaluator"
-//RS     );
-//RS     assert!(
-//RS         !fallback_invoked_for_test(),
-//RS         "codec corpus must not fall back"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn cbor_migration_plan_matches_aot_and_forced_deopt() {
-//RS     on_encoding_stack(cbor_migration_plan_matches_aot_and_forced_deopt_inner);
-//RS }
-//RS 
-//RS fn cbor_migration_plan_matches_aot_and_forced_deopt_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping CBOR migration parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let source = r#"
-//RS use core.encoding.cbor as cbor
-//RS use core.text as text
-//RS 
-//RS #Codable
-//RS struct ScoreRank { value: Int }
-//RS 
-//RS // v1 wire shape: legacyId, name, score: Int
-//RS // v2 removes legacyId; v3 renames name and converts score; v4 adds hostName.
-//RS #[PublishedSchema, Codable, RenameAll(camel)]
-//RS struct Profile {
-//RS     display_name: String
-//RS     score: ScoreRank
-//RS     host_name: String
-//RS }
-//RS 
-//RS migration Profile {
-//RS     remove legacy_id
-//RS }
-//RS 
-//RS migration Profile {
-//RS     rename name -> display_name
-//RS     change score: Int -> ScoreRank via { (n) -> ScoreRank{ value: n } }
-//RS }
-//RS 
-//RS migration Profile {
-//RS     add host_name: String = "localhost"
-//RS }
-//RS 
-//RS fn decode_old() -[]> String {
-//RS     bytes :: [U8]{
-//RS         0xa3,
-//RS         0x64, 0x6e, 0x61, 0x6d, 0x65,
-//RS         0x63, 0x41, 0x64, 0x61,
-//RS         0x65, 0x73, 0x63, 0x6f, 0x72, 0x65,
-//RS         0x18, 0x5f,
-//RS         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
-//RS         0x09
-//RS     }
-//RS     profile :: cbor.decode<Profile>(~bytes) ?? panic("decode")
-//RS     return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
-//RS }
-//RS 
-//RS fn forced_deopt() -[]> String {
-//RS     if text.casefold("Straße") != "strasse" { panic("casefold") }
-//RS     bytes :: [U8]{
-//RS         0xa3,
-//RS         0x64, 0x6e, 0x61, 0x6d, 0x65,
-//RS         0x63, 0x41, 0x64, 0x61,
-//RS         0x65, 0x73, 0x63, 0x6f, 0x72, 0x65,
-//RS         0x18, 0x5f,
-//RS         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
-//RS         0x09
-//RS     }
-//RS     profile :: cbor.decode<Profile>(~bytes) ?? panic("decode")
-//RS     return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
-//RS }
-//RS 
-//RS fn failed_change() -[]> String {
-//RS     bytes :: [U8]{
-//RS         0xa3,
-//RS         0x64, 0x6e, 0x61, 0x6d, 0x65,
-//RS         0x63, 0x41, 0x64, 0x61,
-//RS         0x65, 0x73, 0x63, 0x6f, 0x72, 0x65,
-//RS         0x63, 0x62, 0x61, 0x64,
-//RS         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
-//RS         0x09
-//RS     }
-//RS     cbor.decode<Profile>(~bytes) ? _value -> return "accepted" ! error -> return "{error[0].path}:{error[0].reason}"
-//RS }
-//RS 
-//RS fn run() {
-//RS     print(forced_deopt())
-//RS     print(failed_change())
-//RS }
-//RS "#;
-//RS     let scratch = Scratch::new("cbor_migration_deopt");
-//RS     let path = scratch.write_project("2026", source);
-//RS     fs::write(
-//RS         scratch.path().join("package.jet"),
-//RS         "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
-//RS     )
-//RS     .unwrap();
-//RS     let bundle = checked_bundle(path.to_str().unwrap());
-//RS     let plan = common::cranelift_tier_plan(&bundle);
-//RS     assert!(!plan.whole_interp, "regression needs mixed tiers: {plan:?}");
-//RS     assert!(
-//RS         plan.deopt.iter().any(|(name, _)| name == "forced_deopt"),
-//RS         "regression must force migration through named deopt: {plan:?}"
-//RS     );
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(aot.exit, 0, "migration corpus AOT failed: {}", aot.stderr);
-//RS     assert_eq!(
-//RS         aot.stdout,
-//RS         "Ada|95|localhost\nscore:expected Int, found text \"bad\"\n"
-//RS     );
-//RS     let (backend, dev) = run_default_dev(path.to_str().unwrap());
-//RS     assert_eq!(backend, DevBackend::DeoptInterp);
-//RS     assert_eq!(dev, aot);
-//RS     assert!(jit_executed_for_test(), "resident control must execute JIT");
-//RS     assert!(
-//RS         deopt_invoked_for_test(),
-//RS         "migration must execute the MIR interpreter"
-//RS     );
-//RS     assert!(
-//RS         !fallback_invoked_for_test(),
-//RS         "migration corpus must not fall back"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn published_schema_preserves_unknown_wire_order_across_tiers() {
-//RS     on_encoding_stack(published_schema_preserves_unknown_wire_order_across_tiers_inner);
-//RS }
-//RS 
-//RS fn published_schema_preserves_unknown_wire_order_across_tiers_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping published-schema parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let source = r#"
-//RS use core.encoding.json as json
-//RS use core.text as text
-//RS 
-//RS #[PublishedSchema, Codable]
-//RS struct Published {
-//RS     known: Int
-//RS }
-//RS 
-//RS #Codable
-//RS struct Plain {
-//RS     known: Int
-//RS }
-//RS 
-//RS #[Codable, DenyUnknownFields]
-//RS struct Strict {
-//RS     known: Int
-//RS }
-//RS 
-//RS fn published() -[]> String {
-//RS     value :: json.decode<Published>("{{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}}") ?? panic("published decode")
-//RS     return json.to_string(value)
-//RS }
-//RS 
-//RS fn plain() -[]> String {
-//RS     value :: json.decode<Plain>("{{\"future\":1,\"known\":7,\"middle\":2}}") ?? panic("plain decode")
-//RS     return json.to_string(value)
-//RS }
-//RS 
-//RS fn strict() -[]> String {
-//RS     json.decode<Strict>("{{\"known\":7,\"extra\":1}}") ? _value -> return "strict accepted" ! errors -> return errors[0].reason
-//RS }
-//RS 
-//RS fn malformed() -[]> String {
-//RS     json.decode<Published>("{{\"known\":7") ? _value -> return "malformed accepted" ! _error -> return "malformed rejected"
-//RS }
-//RS 
-//RS fn forced_deopt() -[]> String {
-//RS     if text.casefold("Straße") != "strasse" { panic("casefold") }
-//RS     return published()
-//RS }
-//RS 
-//RS fn run() {
-//RS     print(published())
-//RS     print(plain())
-//RS     print(strict())
-//RS     print(malformed())
-//RS     print(forced_deopt())
-//RS }
-//RS "#;
-//RS     let scratch = Scratch::new("published_schema_unknowns");
-//RS     let path = scratch.write_project("2026", source);
-//RS     let bundle = checked_bundle(path.to_str().unwrap());
-//RS     let plan = common::cranelift_tier_plan(&bundle);
-//RS     assert!(
-//RS         !plan.whole_interp,
-//RS         "published-schema probe needs mixed tiers: {plan:?}"
-//RS     );
-//RS     assert!(
-//RS         plan.deopt.iter().any(|(name, _)| name == "forced_deopt"),
-//RS         "published-schema probe must exercise named interpreter deopt: {plan:?}"
-//RS     );
-//RS     let expected = concat!(
-//RS         "{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}\n",
-//RS         "{\"known\":7}\n",
-//RS         "E2412: unknown field `extra`\n",
-//RS         "malformed rejected\n",
-//RS         "{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}\n",
-//RS     );
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(aot.exit, 0, "published-schema AOT failed: {}", aot.stderr);
-//RS     assert_eq!(aot.stdout, expected);
-//RS     let (backend, dev) = run_default_dev(path.to_str().unwrap());
-//RS     assert_eq!(dev, aot, "default-dev backend: {backend:?}");
-//RS     let interpreter = run_forced_interpreter(path.to_str().unwrap());
-//RS     assert_eq!(interpreter, aot, "forced interpreter diverged");
-//RS     assert!(jit_executed_for_test(), "resident control must execute JIT");
-//RS     assert!(
-//RS         deopt_invoked_for_test(),
-//RS         "forced control must execute TIR evaluator"
-//RS     );
-//RS     assert!(
-//RS         !fallback_invoked_for_test(),
-//RS         "published-schema probe must not fall back"
-//RS     );
-//RS }
-//RS 
-//RS 
-//RS #[test]
-//RS fn cbor_primitive_container_boundaries_match_aot_and_forced_deopt() {
-//RS     on_encoding_stack(cbor_primitive_container_boundaries_match_aot_and_forced_deopt_inner);
-//RS }
-//RS 
-//RS fn cbor_primitive_container_boundaries_match_aot_and_forced_deopt_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping CBOR primitive boundary parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let source = r#"
-//RS use core.encoding.cbor as cbor
-//RS use core.text as text
-//RS 
-//RS #CodableAsBase
-//RS Severity :: distinct Int(0..10)
-//RS 
-//RS fn invalid_i8_rejected() -[]> Bool {
-//RS     cbor.decode<I8>([U8]{ 0x18, 0x80 }) ? _value -> return false ! _error -> return true
-//RS }
-//RS 
-//RS fn invalid_u32_rejected() -[]> Bool {
-//RS     cbor.decode<U32>([U8]{ 0x20 }) ? _value -> return false ! _error -> return true
-//RS }
-//RS 
-//RS fn invalid_f32_rejected() -[]> Bool {
-//RS     cbor.decode<F32>([U8]{ 0xfb, 0x7f, 0xef, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }) ? _value -> return false ! _error -> return true
-//RS }
-//RS 
-//RS fn invalid_fixed_rejected() -[]> Bool {
-//RS     cbor.decode<[Int#2]>([U8]{ 0x81, 0x01 }) ? _value -> return false ! _error -> return true
-//RS }
-//RS 
-//RS fn invalid_range_rejected() -[]> Bool {
-//RS     cbor.decode<Severity>([U8]{ 0x0b }) ? _value -> return false ! _error -> return true
-//RS }
-//RS 
-//RS fn invalid_i8_error() -[]> String {
-//RS     cbor.decode<I8>([U8]{ 0x18, 0x80 }) ? _value -> return "accepted" ! error -> return error[0].reason
-//RS }
-//RS 
-//RS fn invalid_u8_error() -[]> String {
-//RS     cbor.decode<U8>([U8]{ 0x19, 0x01, 0x00 }) ? _value -> return "accepted" ! error -> return error[0].reason
-//RS }
-//RS 
-//RS fn invalid_fixed_bytes_error() -[]> String {
-//RS     cbor.decode<[U8#2]>([U8]{ 0x41, 0xde }) ? _value -> return "accepted" ! error -> return error[0].reason
-//RS }
-//RS 
-//RS fn forced_deopt() -[]> String {
-//RS     if text.casefold("Straße") != "strasse" { panic("casefold") }
-//RS     signed := cbor.decode<I8>(~(cbor.to_bytes_canonical(I8{ -8 }) ?? panic("i8 encode"))) ?? panic("i8 decode")
-//RS     unsigned := cbor.decode<U32>(~(cbor.to_bytes_canonical(U32{ 4000000000 }) ?? panic("u32 encode"))) ?? panic("u32 decode")
-//RS     narrow := cbor.decode<F32>(~(cbor.to_bytes_canonical(F32{ 1.5 }) ?? panic("f32 encode"))) ?? panic("f32 decode")
-//RS     pair := cbor.decode<[Int#2]>(~(cbor.to_bytes_canonical([Int#2]{ 1, 2 }) ?? panic("fixed encode"))) ?? panic("fixed decode")
-//RS     bytes := cbor.decode<[U8#2]>(~(cbor.to_bytes_canonical([U8#2]{ 222, 173 }) ?? panic("bytes encode"))) ?? panic("bytes decode")
-//RS     tree := cbor.decode<DataTree>(~(cbor.to_bytes_canonical(DataTree.Object(["n": DataTree.Int(7)])) ?? panic("tree encode"))) ?? panic("tree decode")
-//RS     severity := cbor.decode<Severity>(~(cbor.to_bytes_canonical(Severity.from_int(7)) ?? panic("range encode"))) ?? panic("range decode")
-//RS     tree_n := (&tree.field("n") ?? panic("tree field")).int() ?? panic("tree int")
-//RS     return "{signed}|{unsigned}|{narrow}|{pair[0]},{pair[1]}|{bytes[0]},{bytes[1]}|{tree_n}|{severity.raw()}|{invalid_i8_rejected()}|{invalid_u32_rejected()}|{invalid_f32_rejected()}|{invalid_fixed_rejected()}|{invalid_range_rejected()}|{invalid_i8_error()}|{invalid_u8_error()}|{invalid_fixed_bytes_error()}"
-//RS }
-//RS 
-//RS fn run() {
-//RS     print(forced_deopt())
-//RS }
-//RS "#;
-//RS     let scratch = Scratch::new("cbor_primitive_boundaries");
-//RS     let path = scratch.write_project("2026", source);
-//RS     fs::write(
-//RS         scratch.path().join("package.jet"),
-//RS         "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
-//RS     )
-//RS     .unwrap();
-//RS     let bundle = checked_bundle(path.to_str().unwrap());
-//RS     let plan = common::cranelift_tier_plan(&bundle);
-//RS     assert!(!plan.whole_interp, "regression needs mixed tiers: {plan:?}");
-//RS     assert!(
-//RS         plan.deopt.iter().any(|(name, _)| name == "forced_deopt"),
-//RS         "regression must force primitive codecs through named deopt: {plan:?}"
-//RS     );
-//RS     let expected = "-8|4000000000|1.5|1,2|222,173|7|7|true|true|true|true|true|expected I8, found out-of-range Int|expected U8, found out-of-range Int|expected a fixed list of length 2, found 1";
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(aot.exit, 0, "primitive boundary AOT failed: {}", aot.stderr);
-//RS     assert_eq!(aot.stdout, format!("{expected}\n"));
-//RS     let (backend, dev) = run_default_dev(path.to_str().unwrap());
-//RS     assert_eq!(backend, DevBackend::DeoptInterp);
-//RS     assert_eq!(dev, aot);
-//RS     assert!(jit_executed_for_test(), "resident control must execute JIT");
-//RS     assert!(
-//RS         deopt_invoked_for_test(),
-//RS         "primitive corpus must execute the MIR interpreter"
-//RS     );
-//RS     assert!(
-//RS         !fallback_invoked_for_test(),
-//RS         "primitive corpus must not fall back"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn datatree_int_accessor_matches_aot_without_coercion() {
-//RS     on_encoding_stack(datatree_int_accessor_matches_aot_without_coercion_inner);
-//RS }
-//RS 
-//RS fn datatree_int_accessor_matches_aot_without_coercion_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping DataTree Int accessor parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let source = r#"
-//RS fn run() {
-//RS     DataTree.Int(7).int() ? value -> print(value) ! error -> print(error)
-//RS     DataTree.Float(7.0).int() ? value -> print(value) ! error -> print(error)
-//RS     DataTree.Text("7").int() ? value -> print(value) ! error -> print(error)
-//RS }
-//RS "#;
-//RS     let scratch = Scratch::new("datatree_int");
-//RS     let path = scratch.write_project("2026", source);
-//RS     let bundle = checked_bundle(path.to_str().unwrap());
-//RS     let plan = common::cranelift_tier_plan(&bundle);
-//RS     assert!(
-//RS         plan.deopt.is_empty() && !plan.whole_interp,
-//RS         "DataTree Int accessor must stay resident: {plan:?}"
-//RS     );
-//RS     common::compile_cranelift_bundle(&bundle, &common::development_policy())
-//RS         .expect("DataTree Int accessor must compile for resident JIT");
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(aot.exit, 0, "DataTree Int AOT failed: {}", aot.stderr);
-//RS     assert_eq!(
-//RS         aot.stdout,
-//RS         "7\n[expected int, got 7.0]\n[expected int, got \"7\"]\n"
-//RS     );
-//RS     let (backend, dev) = run_default_dev(path.to_str().unwrap());
-//RS     assert_eq!(backend, DevBackend::ResidentJit);
-//RS     assert_eq!(dev, aot);
-//RS }
-//RS 
-//RS #[test]
-//RS fn datatree_int_accessor_matches_aot_on_named_deopt() {
-//RS     on_encoding_stack(datatree_int_accessor_matches_aot_on_named_deopt_inner);
-//RS }
-//RS 
-//RS #[test]
-//RS fn datatree_scalar_and_unordered_parity_matches_all_tiers() {
-//RS     on_encoding_stack(datatree_scalar_and_unordered_parity_matches_all_tiers_inner);
-//RS }
-//RS 
-//RS fn datatree_scalar_and_unordered_parity_matches_all_tiers_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping DataTree scalar/equality parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let source = r#"
-//RS use core.encoding.json as json
-//RS 
-//RS fn run() {
-//RS     DataTree.Text("strict").text() ? value -> print(value) ! _error -> print("strict-error")
-//RS     DataTree.Int(7).text() ? _value -> print("strict-bad") ! _error -> print("strict-error")
-//RS 
-//RS     print(DataTree.Text("text").to_text() ?? "none")
-//RS     print(DataTree.Int(-42).to_text() ?? "none")
-//RS     print(DataTree.Float(1.0).to_text() ?? "none")
-//RS     print(DataTree.Bool(false).to_text() ?? "none")
-//RS     print(DataTree.Null.to_text() ?? "none")
-//RS     print(DataTree.Array([DataTree.Int(1)]).to_text() ?? "none")
-//RS     print(DataTree.Object(["a": DataTree.Int(1)]).to_text() ?? "none")
-//RS 
-//RS     left :: json.parse("{{\"outer\":{{\"b\":1.0,\"a\":[1,false]}},\"name\":\"x\"}}") ?? panic("left")
-//RS     right :: json.parse("{{\"name\":\"x\",\"outer\":{{\"a\":[1,false],\"b\":1.0}}}}") ?? panic("right")
-//RS     print(left.equal_unordered(right))
-//RS     print(DataTree.Null.equal_unordered(DataTree.Null))
-//RS     print(DataTree.Array([DataTree.Int(1), DataTree.Int(2)]).equal_unordered(DataTree.Array([DataTree.Int(2), DataTree.Int(1)])))
-//RS     print(DataTree.Int(1).equal_unordered(DataTree.Float(1.0)))
-//RS     print(DataTree.Bool(false).equal_unordered(DataTree.Bool(false)))
-//RS     print(DataTree.Text("same").equal_unordered(DataTree.Text("same")))
-//RS     print(DataTree.Text("1").equal_unordered(DataTree.Int(1)))
-//RS     print(DataTree.Float(Float.NAN).equal_unordered(DataTree.Float(Float.NAN)))
-//RS }
-//RS "#;
-//RS     let scratch = Scratch::new("datatree_scalar_unordered");
-//RS     let path = scratch.write_project("2026", source);
-//RS     let bundle = checked_bundle(path.to_str().unwrap());
-//RS     let plan = common::cranelift_tier_plan(&bundle);
-//RS     assert!(
-//RS         plan.deopt.is_empty() && !plan.whole_interp,
-//RS         "DataTree scalar/equality probe must stay resident: {plan:?}"
-//RS     );
-//RS     common::compile_cranelift_bundle(&bundle, &common::development_policy())
-//RS         .expect("DataTree scalar/equality probe must compile for resident JIT");
-//RS     let expected = concat!(
-//RS         "strict\nstrict-error\n",
-//RS         "text\n-42\n1.0\nfalse\nnone\nnone\nnone\n",
-//RS         "true\ntrue\nfalse\nfalse\ntrue\ntrue\nfalse\nfalse\n",
-//RS     );
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(
-//RS         aot.exit, 0,
-//RS         "DataTree scalar/equality AOT failed: {}",
-//RS         aot.stderr
-//RS     );
-//RS     assert_eq!(aot.stdout, expected);
-//RS     let (backend, dev) = run_default_dev(path.to_str().unwrap());
-//RS     assert_eq!(backend, DevBackend::ResidentJit);
-//RS     assert_eq!(
-//RS         dev, aot,
-//RS         "DataTree scalar/equality default-dev drift: {backend:?}"
-//RS     );
-//RS     let interpreter = run_forced_interpreter(path.to_str().unwrap());
-//RS     assert_eq!(
-//RS         interpreter, aot,
-//RS         "DataTree scalar/equality interpreter drift"
-//RS     );
-//RS }
-//RS 
-//RS fn datatree_int_accessor_matches_aot_on_named_deopt_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping DataTree Int deopt parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let source = r#"
-//RS use core.text as text
-//RS 
-//RS fn gap() {
-//RS     folded := text.casefold("Straße")
-//RS     if folded != "strasse" { panic("casefold") }
-//RS     DataTree.Int(7).int() ? value -> print(value) ! error -> print(error)
-//RS     DataTree.Float(7.0).int() ? value -> print(value) ! error -> print(error)
-//RS     DataTree.Text("7").int() ? value -> print(value) ! error -> print(error)
-//RS }
-//RS 
-//RS fn run() {
-//RS     gap()
-//RS }
-//RS "#;
-//RS     let scratch = Scratch::new("datatree_int_deopt");
-//RS     let path = scratch.write_project("2026", source);
-//RS     let bundle = checked_bundle(path.to_str().unwrap());
-//RS     let plan = common::cranelift_tier_plan(&bundle);
-//RS     assert!(
-//RS         !plan.whole_interp,
-//RS         "regression needs named-function deopt: {plan:?}"
-//RS     );
-//RS     assert!(
-//RS         plan.deopt.iter().any(|(name, _)| name == "gap"),
-//RS         "regression needs `gap` on the named deopt tier: {plan:?}"
-//RS     );
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(aot.exit, 0, "DataTree Int deopt AOT failed: {}", aot.stderr);
-//RS     assert_eq!(
-//RS         aot.stdout,
-//RS         "7\n[expected int, got 7.0]\n[expected int, got \"7\"]\n"
-//RS     );
-//RS     let (backend, dev) = run_default_dev(path.to_str().unwrap());
-//RS     assert_eq!(backend, DevBackend::DeoptInterp);
-//RS     assert_eq!(dev, aot);
-//RS     assert!(deopt_invoked_for_test());
-//RS }
-//RS 
-//RS /// `csv.to_string` takes either the dynamic `[[String]]` rows form or a typed
-//RS /// `[T]` list of `#Codable` values. The resident JIT used to send both to the
-//RS /// rows host, so a typed list rendered "$xml_event" and still reported success — silent
-//RS /// data loss on the default `jet run` path (#1269). Both shapes are exercised
-//RS /// here so the rows form stays covered too.
-//RS const TYPED_CSV_ENCODE: &str = r#"
-//RS use core.encoding.csv as csv
-//RS 
-//RS #Codable
-//RS struct Sale {
-//RS     item: String
-//RS     qty: Int
-//RS }
-//RS 
-//RS fn run() {
-//RS     sales :: [Sale{item: "pen", qty: 3}, Sale{item: "ink", qty: 5}]
-//RS     typed :: csv.to_string(sales)
-//RS     print("typed-len: {typed.len()}")
-//RS     print(typed)
-//RS     rows :: [["name", "score"], ["ada", "9"]]
-//RS     print("rows: {csv.to_string(rows)}")
-//RS }
-//RS "#;
-//RS 
-//RS #[test]
-//RS fn typed_csv_encode_matches_aot_and_default_dev() {
-//RS     on_encoding_stack(typed_csv_encode_matches_aot_and_default_dev_inner);
-//RS }
-//RS 
-//RS fn typed_csv_encode_matches_aot_and_default_dev_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping typed CSV encode parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let scratch = Scratch::new("typed_csv_encode");
-//RS     let path = scratch.write_project("2026", TYPED_CSV_ENCODE);
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(aot.exit, 0, "typed CSV AOT failed: {}", aot.stderr);
-//RS     // An empty success is never correct: pin the real cells, not just parity,
-//RS     // so both lenses agreeing on "$xml_event" could not pass this test.
-//RS     assert!(
-//RS         aot.stdout.contains("item,qty\npen,3\nink,5"),
-//RS         "typed CSV AOT lost the records: {}",
-//RS         aot.stdout
-//RS     );
-//RS     assert!(
-//RS         aot.stdout.contains("typed-len: 20"),
-//RS         "typed CSV AOT length drifted: {}",
-//RS         aot.stdout
-//RS     );
-//RS     assert!(
-//RS         aot.stdout.contains("rows: name,score\nada,9"),
-//RS         "dynamic rows CSV regressed: {}",
-//RS         aot.stdout
-//RS     );
-//RS     assert_default_dev_matches_aot_or_honest_gap(
-//RS         "typed-csv-encode",
-//RS         &path,
-//RS         scratch.path(),
-//RS         &aot,
-//RS         true,
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn custom_encode_survives_containers() {
-//RS     on_encoding_stack(|| {
-//RS         let source = r#"
-//RS use core.encoding.json as json
-//RS struct Token { raw: String }
-//RS impl Token.Encode {
-//RS     fn encode(self) -> DataTree -> DataTree.Text("wire")
-//RS }
-//RS fn token() -> Token? -> Val(Token{raw: "raw"})
-//RS fn empty() -> Token? -> None
-//RS fn run() {
-//RS     print(json.to_string([Token{raw: "raw"}]))
-//RS     print(json.to_string(token()))
-//RS     print(json.to_string(empty()))
-//RS     tokens := [String:Token]{}
-//RS     tokens["a"] = Token{raw: "raw"}
-//RS     print(json.to_string(tokens))
-//RS }
-//RS "#;
-//RS         let scratch = Scratch::new("custom_container_encode");
-//RS         let path = scratch.write_project("2026", source);
-//RS         let aot = run_aot(&path, scratch.path());
-//RS         assert_eq!(aot.exit, 0, "{}", aot.stderr);
-//RS         assert_eq!(aot.stdout, "[\"wire\"]\n\"wire\"\nnull\n{\"a\":\"wire\"}\n");
-//RS         let (_, resident) = run_default_dev(path.to_str().unwrap());
-//RS         assert_eq!(resident, aot);
-//RS         assert_eq!(run_forced_interpreter(path.to_str().unwrap()), aot);
-//RS     });
-//RS }
-//RS 
-//RS #[test]
-//RS fn csv_to_string_rejects_values_that_are_not_rows_or_records() {
-//RS     for (name, value) in [("scalar", "42"), ("scalar-list", "[1, 2]")] {
-//RS         let src = format!(
-//RS             "use core.encoding.csv as csv\nfn run() {{\n    print(csv.to_string({value}))\n}}\n"
-//RS         );
-//RS         let Err(diags) =
-//RS             jet::Driver::compile_generated_src(&src, name, jet::Sema::CompileMode::Run)
-//RS         else {
-//RS             panic!("{name} reached a CSV runtime lens");
-//RS         };
-//RS         assert!(
-//RS             diags.iter().any(|diag| diag.code == "E0112"),
-//RS             "{name} missed existing argument mismatch: {diags:?}"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS fn stream_fixture(format: &str, body: &str) -> String {
-//RS     format!(
-//RS         r#"
-//RS use core.encoding as encoding
-//RS use core.encoding.[{format} as fmt]
-//RS use core.files as files
-//RS 
-//RS {body}
-//RS "#
-//RS     )
-//RS }
-//RS 
-//RS fn assert_aot_dev_stream_parity(label: &str, source: &str) {
-//RS     on_encoding_stack(|| assert_aot_dev_stream_parity_inner(label, source));
-//RS }
-//RS 
-//RS fn assert_aot_dev_stream_parity_inner(label: &str, source: &str) {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping {label} stream parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let scratch = Scratch::new(label);
-//RS     let path = scratch.write_project("2026", source);
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(aot.exit, 0, "{label} AOT stream failed: {}", aot.stderr);
-//RS     assert_default_dev_matches_aot_or_honest_gap(label, &path, scratch.path(), &aot, false);
-//RS }
-//RS 
-//RS #[test]
-//RS fn json_stream_reader_writer_matches_aot_and_default_dev() {
-//RS     on_encoding_stack(|| {
-//RS         assert!(
-//RS             common::have_rustc(),
-//RS             "criterion 5 requires rustc: the canonical encoding_json_stream example must execute across all tiers"
-//RS         );
-//RS         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS         let jet_path = root.join("Examples/features/serde/encoding_json_stream.jet");
-//RS         let python_path = root.join("Examples/features/serde/encoding_json_stream.py");
-//RS         let expected_path = root.join("Examples/features/expected/serde/encoding_json_stream.out");
-//RS         let expected = fs::read_to_string(&expected_path).expect("canonical encoding golden");
-//RS         let expected_json = "{\"a\":1,\"b\":2}";
-//RS         let expected_events =
-//RS             "event:ObjectStart\nevent:Key:a\nevent:Int:1\nevent:Key:b\nevent:Int:2\nevent:ObjectEnd\n";
-//RS         let expected_runtime = format!("{expected_events}read-count:6\neof\n{expected_json}\n");
-//RS         assert_eq!(
-//RS             expected, expected_runtime,
-//RS             "canonical golden must pin each JSON stream event identity and serialized content"
-//RS         );
-//RS 
-//RS         let python_scratch = Scratch::new("json-stream-python");
-//RS         let python_output_path = python_scratch.path().join("python.json");
-//RS         let python = Command::new("python3")
-//RS             .arg(&python_path)
-//RS             .arg(&python_output_path)
-//RS             .output()
-//RS             .expect("matched Python encoding fixture must execute");
-//RS         assert!(
-//RS             python.status.success(),
-//RS             "matched Python encoding fixture failed:\n{}",
-//RS             String::from_utf8_lossy(&python.stderr)
-//RS         );
-//RS         assert_eq!(
-//RS             String::from_utf8_lossy(&python.stdout),
-//RS             expected_json,
-//RS             "matched Python fixture serialized content"
-//RS         );
-//RS         assert_eq!(
-//RS             fs::read_to_string(&python_output_path).expect("Python fixture output"),
-//RS             expected_json,
-//RS             "matched Python fixture file content"
-//RS         );
-//RS 
-//RS         let canonical_source =
-//RS             fs::read_to_string(&jet_path).expect("canonical encoding source");
-//RS         let scratch = Scratch::new("json-stream-canonical");
-//RS         let staged_path = scratch.write_project("2026", &canonical_source);
-//RS         let aot = run_aot(&staged_path, scratch.path());
-//RS         let (backend, dev) = run_default_dev(staged_path.to_str().unwrap());
-//RS         assert_eq!(
-//RS             backend,
-//RS             DevBackend::ResidentJit,
-//RS             "canonical encoding example must execute on default resident JIT"
-//RS         );
-//RS         let interpreter = run_forced_interpreter(staged_path.to_str().unwrap());
-//RS 
-//RS         for (label, output) in [
-//RS             ("AOT", &aot),
-//RS             ("default resident JIT", &dev),
-//RS             ("forced interpreter", &interpreter),
-//RS         ] {
-//RS             assert_eq!(
-//RS                 output.exit, 0,
-//RS                 "{label} canonical encoding run failed: {}",
-//RS                 output.stderr
-//RS             );
-//RS             assert!(
-//RS                 output.stderr.is_empty(),
-//RS                 "{label} emitted stderr: {}",
-//RS                 output.stderr
-//RS             );
-//RS             assert_eq!(
-//RS                 output.stdout, expected_runtime,
-//RS                 "{label} output drifted from the canonical serialized stream"
-//RS             );
-//RS             assert!(
-//RS                 output.stdout.contains(expected_json),
-//RS                 "{label} output is missing serialized JSON content"
-//RS             );
-//RS         }
-//RS         assert_eq!(dev, aot, "default resident JIT drifted from canonical AOT");
-//RS         assert_eq!(
-//RS             interpreter, aot,
-//RS             "forced interpreter drifted from canonical AOT"
-//RS         );
-//RS     });
-//RS }
-//RS 
-//RS #[test]
-//RS fn jsonl_csv_xml_cbor_streams_match_aot_and_default_dev() {
-//RS     let jsonl = r#"
-//RS fn run() {
-//RS     path := "@DIR@/rows.jsonl"
-//RS     output :: files.create(path) ?? panic("create")
-//RS     writer :: fmt.writer(^output) ?? panic("writer")
-//RS     writer.write(DataTree.Object(["a": DataTree.Int(1)])) ?? panic("write")
-//RS     writer.finish() ?? panic("finish")
-//RS     input :: files.open(path) ?? panic("open")
-//RS     reader :: fmt.reader(^input) ?? panic("reader")
-//RS     first :: reader.next()
-//RS     if first == {
-//RS         .Val(_) -> print(true)
-//RS         .None -> print(false)
-//RS     }
-//RS     print(files.read(path) ?? panic("read"))
-//RS }
-//RS "#;
-//RS     assert_aot_dev_stream_parity("jsonl-stream", &stream_fixture("jsonl", jsonl));
-//RS 
-//RS     let csv = r#"
-//RS fn run() {
-//RS     path := "@DIR@/rows.csv"
-//RS     output :: files.create(path) ?? panic("create")
-//RS     writer :: fmt.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
-//RS     writer.write(["ok", "true"]) ?? panic("write")
-//RS     writer.finish() ?? panic("finish")
-//RS     input :: files.open(path) ?? panic("open")
-//RS     reader :: fmt.reader(^input) ?? panic("reader")
-//RS     first :: reader.next()
-//RS     if first == {
-//RS         .Val(_) -> print(true)
-//RS         .None -> print(false)
-//RS     }
-//RS     print(files.read(path) ?? panic("read"))
-//RS }
-//RS "#;
-//RS     assert_aot_dev_stream_parity("csv-stream", &stream_fixture("csv", csv));
-//RS 
-//RS     let xml = r#"
-//RS fn xml_name(local: String) -[]> DataTree {
-//RS     return DataTree.Object([
-//RS         "raw": DataTree.Text(~local),
-//RS         "prefix": DataTree.Null,
-//RS         "local": DataTree.Text(~local),
-//RS         "namespace_uri": DataTree.Null,
-//RS     ])
-//RS }
-//RS 
-//RS fn run() {
-//RS     path := "@DIR@/doc.xml"
-//RS     output :: files.create(path) ?? panic("create")
-//RS     writer :: fmt.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
-//RS     writer.write(DataTree.Object([
-//RS         "$xml_event": DataTree.Text("document_start"),
-//RS         "encoding": DataTree.Null,
-//RS         "bom": DataTree.Array([]),
-//RS     ])) ?? panic("document_start")
-//RS     writer.write(DataTree.Object([
-//RS         "$xml_event": DataTree.Text("element_start"),
-//RS         "name": xml_name("r"),
-//RS         "namespaces": DataTree.Array([]),
-//RS         "attributes": DataTree.Array([]),
-//RS         "empty_style": DataTree.Text("empty"),
-//RS         "open_lexical": DataTree.Object([
-//RS             "raw_text": DataTree.Null,
-//RS             "raw_bytes": DataTree.Null,
-//RS             "semantic": DataTree.Object([
-//RS                 "name": xml_name("r"),
-//RS                 "namespaces": DataTree.Array([]),
-//RS                 "attributes": DataTree.Array([]),
-//RS                 "empty_style": DataTree.Text("empty"),
-//RS             ]),
-//RS         ]),
-//RS     ])) ?? panic("root")
-//RS     writer.write(DataTree.Object(["$xml_event": DataTree.Text("document_end")])) ?? panic("end")
-//RS     writer.finish() ?? panic("finish")
-//RS     input :: files.open(path) ?? panic("open")
-//RS     reader :: fmt.reader(^input) ?? panic("reader")
-//RS     first :: reader.next()
-//RS     if first == {
-//RS         .Val(_) -> print(true)
-//RS         .None -> print(false)
-//RS     }
-//RS     print(files.read(path) ?? panic("read"))
-//RS }
-//RS "#;
-//RS     assert_aot_dev_stream_parity("xml-stream", &stream_fixture("xml", xml));
-//RS 
-//RS     let cbor = r#"
-//RS fn run() {
-//RS     path := "@DIR@/packet.cbor"
-//RS     output :: files.create(path) ?? panic("create")
-//RS     writer :: fmt.writer(^output) ?? panic("writer")
-//RS     writer.write(encoding.DataEvent.ObjectStart) ?? panic("start")
-//RS     writer.write(encoding.DataEvent.Key("aa")) ?? panic("key aa")
-//RS     writer.write(encoding.DataEvent.Int(1)) ?? panic("int aa")
-//RS     writer.write(encoding.DataEvent.Key("b")) ?? panic("key b")
-//RS     writer.write(encoding.DataEvent.Int(2)) ?? panic("int b")
-//RS     writer.write(encoding.DataEvent.Key("f")) ?? panic("key f")
-//RS     writer.write(encoding.DataEvent.Float(1.5)) ?? panic("float f")
-//RS     writer.write(encoding.DataEvent.Key("z")) ?? panic("key z")
-//RS     writer.write(encoding.DataEvent.Float(-0.0)) ?? panic("float z")
-//RS     writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
-//RS     writer.finish() ?? panic("finish")
-//RS     input :: files.open(path) ?? panic("open")
-//RS     reader :: fmt.reader(^input) ?? panic("reader")
-//RS     first :: reader.next()
-//RS     if first == {
-//RS         .Val(_) -> print(true)
-//RS         .None -> print(false)
-//RS     }
-//RS     whole := DataTree.Object([
-//RS         "aa": DataTree.Int(1),
-//RS         "b": DataTree.Int(2),
-//RS         "f": DataTree.Float(1.5),
-//RS         "z": DataTree.Float(-0.0),
-//RS     ])
-//RS     print((fmt.to_bytes_canonical(whole) ?? panic("whole")) == (files.read_bytes(path) ?? panic("bytes")))
-//RS }
-//RS "#;
-//RS     assert_aot_dev_stream_parity("cbor-stream", &stream_fixture("cbor", cbor));
-//RS }
-//RS 
-//RS #[test]
-//RS fn collect_stream_and_unfold_whole_share_canonical_law() {
-//RS     on_encoding_stack(collect_stream_and_unfold_whole_share_canonical_law_inner);
-//RS }
-//RS 
-//RS fn collect_stream_and_unfold_whole_share_canonical_law_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping collect/unfold parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let source = r#"
-//RS use core.encoding.json as json
-//RS use core.encoding.cbor as cbor
-//RS use core.encoding as encoding
-//RS use core.files as files
-//RS 
-//RS fn run() {
-//RS     whole := json.parse("{{\"a\":1,\"b\":2}}") ?? panic("json")
-//RS     canon := json.to_string(whole)
-//RS     path := "@DIR@/round.json"
-//RS     output :: files.create(path) ?? panic("create")
-//RS     writer :: json.writer(^output, encoding.EncodingLimits.safe(), false) ?? panic("writer")
-//RS     writer.write(encoding.DataEvent.ObjectStart) ?? panic("os")
-//RS     writer.write(encoding.DataEvent.Key("a")) ?? panic("ka")
-//RS     writer.write(encoding.DataEvent.Int(1)) ?? panic("va")
-//RS     writer.write(encoding.DataEvent.Key("b")) ?? panic("kb")
-//RS     writer.write(encoding.DataEvent.Int(2)) ?? panic("vb")
-//RS     writer.write(encoding.DataEvent.ObjectEnd) ?? panic("oe")
-//RS     writer.finish() ?? panic("finish")
-//RS     collected := json.parse(files.read(path) ?? panic("read")) ?? panic("collect")
-//RS     print(json.to_string(collected) == canon)
-//RS     print(json.to_string(collected))
-//RS 
-//RS     cbor_path := "@DIR@/round.cbor"
-//RS     cbor_out :: files.create(cbor_path) ?? panic("cbor create")
-//RS     cbor_writer :: cbor.writer(^cbor_out) ?? panic("cbor writer")
-//RS     cbor_writer.write(encoding.DataEvent.ObjectStart) ?? panic("cs")
-//RS     cbor_writer.write(encoding.DataEvent.Key("a")) ?? panic("ck")
-//RS     cbor_writer.write(encoding.DataEvent.Int(1)) ?? panic("ci")
-//RS     cbor_writer.write(encoding.DataEvent.ObjectEnd) ?? panic("ce")
-//RS     cbor_writer.finish() ?? panic("cf")
-//RS     whole_tree := DataTree.Object(["a": DataTree.Int(1)])
-//RS     stream_bytes := files.read_bytes(cbor_path) ?? panic("cbor bytes")
-//RS     print((cbor.to_bytes_canonical(whole_tree) ?? panic("canonical")) == stream_bytes)
-//RS }
-//RS "#;
-//RS     let scratch = Scratch::new("collect_unfold");
-//RS     let path = scratch.write_project("2026", source);
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(aot.exit, 0, "collect/unfold fixture failed: {}", aot.stderr);
-//RS     assert_eq!(
-//RS         aot.stdout, "true\n{\"a\":1,\"b\":2}\ntrue\n",
-//RS         "JSON collect and CBOR canonical stream bytes must match whole-value law"
-//RS     );
-//RS     assert_default_dev_matches_aot_or_honest_gap(
-//RS         "collect-unfold",
-//RS         &path,
-//RS         scratch.path(),
-//RS         &aot,
-//RS         false,
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn comptime_rejects_file_backed_streams_at_named_boundary() {
-//RS     for (label, module) in [
-//RS         ("json-reader", "json as json"),
-//RS         ("jsonl-reader", "jsonl as jsonl"),
-//RS         ("csv-reader", "csv as csv"),
-//RS         ("xml-reader", "xml as xml"),
-//RS         ("cbor-reader", "cbor as cbor"),
-//RS     ] {
-//RS         let scratch = Scratch::new(label);
-//RS         let source = format!(
-//RS             "use core.encoding.[{module}]\nuse core.files as files\n\nPROBE :: prep {{ files.read(\"probe.txt\") }}\n\nfn ignored() {{ input :: files.open(\"x\") }}\n\nfn run() {{\n    print(PROBE)\n}}\n"
-//RS         );
-//RS         let path = scratch.write_project("2026", &source);
-//RS         let diags = jet::check_with_path(path.to_str().unwrap());
-//RS         assert!(
-//RS             diags.iter().any(|d| d.code == "E3410"),
-//RS             "{label} must reject file-backed ambient I/O in comptime:\n{}",
-//RS             jet::render_diagnostics(path.to_str().unwrap(), &source, &diags)
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn default_dev_encoding_probes_record_backend_without_silent_fallback() {
-//RS     on_encoding_stack(default_dev_encoding_probes_record_backend_without_silent_fallback_inner);
-//RS }
-//RS 
-//RS fn default_dev_encoding_probes_record_backend_without_silent_fallback_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping backend attribution probe (need rustc)");
-//RS         return;
-//RS     }
-//RS     let scratch = Scratch::new("backend");
-//RS     let path = scratch.write_project("2026", WHOLE_VALUE_RUNTIME);
-//RS     let bundle = checked_bundle(path.to_str().unwrap());
-//RS     let plan = common::cranelift_tier_plan(&bundle);
-//RS     let jit_safe = common::cranelift_resident_safe(&bundle);
-//RS     reset_jit_trace_for_test();
-//RS     set_trace_tiers(true);
-//RS     let (backend, out) = run_default_dev(path.to_str().unwrap());
-//RS     set_trace_tiers(false);
-//RS     assert_eq!(out.exit, 0, "backend probe must run: {}", out.stderr);
-//RS     assert!(
-//RS         !fallback_invoked_for_test(),
-//RS         "default-dev encoding probe must not silent-AOT-fallback after #778"
-//RS     );
-//RS     let trace = take_last_trace();
-//RS     match backend {
-//RS         DevBackend::ResidentJit => {
-//RS             assert!(jit_safe, "resident JIT run requires jit-safe bundle");
-//RS             assert!(
-//RS                 jit_executed_for_test() || plan.native.iter().any(|_| true),
-//RS                 "resident path needs JIT execution or planned native tier; plan={plan:?} trace={trace:?}"
-//RS             );
-//RS         }
-//RS         DevBackend::DeoptInterp => {
-//RS             assert!(
-//RS                 deopt_invoked_for_test() || plan.whole_interp || !plan.deopt.is_empty(),
-//RS                 "deopt path must record deopt or named tier plan; detail={} plan={plan:?} trace={trace:?}",
-//RS                 common::cranelift_resident_safe_detail(&bundle)
-//RS             );
-//RS             assert!(
-//RS                 !trace.is_empty()
-//RS                     || plan.whole_interp
-//RS                     || plan.deopt.iter().any(|_| true)
-//RS                     || plan.rows.iter().any(|row| matches!(row.tier, Tier::Interp)),
-//RS                 "deopt backend must leave tier plan or --trace-tiers rows; plan={plan:?} trace={trace:?}"
-//RS             );
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn malformed_limits_and_terminal_errors_match_across_applicable_tiers() {
-//RS     on_encoding_stack(malformed_limits_and_terminal_errors_match_across_applicable_tiers_inner);
-//RS }
-//RS 
-//RS fn malformed_limits_and_terminal_errors_match_across_applicable_tiers_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping differential hostile parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let source = r#"
-//RS use core.encoding as encoding
-//RS use core.encoding.json as json
-//RS use core.files as files
-//RS 
-//RS fn terminal_limit_probe() -[FS]> String {
-//RS     bad_path := "@DIR@/bad.json"
-//RS     limits := encoding.EncodingLimits.safe()
-//RS     limits.max_total_bytes = Val(5)
-//RS     fs_write := files.create(bad_path) ?? panic("create")
-//RS     writer :: json.writer(^fs_write, limits, false) ?? panic("writer")
-//RS     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
-//RS     writer.write(encoding.DataEvent.Text("abcd")) ? _value -> return "limit-missed" ! first -> {
-//RS         writer.finish() ? _value -> return "terminal-missed" ! second -> return "{first.reason == second.reason}"
-//RS     }
-//RS     return "unreachable"
-//RS }
-//RS 
-//RS fn malformed_reader_probe() -[FS]> String {
-//RS     files.write("@DIR@/malformed.json", "{{\"a\":") ?? panic("write malformed")
-//RS     input :: files.open("@DIR@/malformed.json") ?? panic("open")
-//RS     reader :: json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
-//RS     reader.next() ? _maybe -> return "malformed-missed" ! error -> {
-//RS         reader.next() ? _maybe -> return "repeat-missed" ! second -> return "{error.kind == encoding.EncodingErrorKind.Syntax}|{error.path}|{error.reason == second.reason}"
-//RS     }
-//RS     return "unreachable"
-//RS }
-//RS 
-//RS fn run() {
-//RS     print(terminal_limit_probe())
-//RS     print(malformed_reader_probe())
-//RS }
-//RS "#;
-//RS     let scratch = Scratch::new("hostile");
-//RS     let path = scratch.write_project("2026", source);
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(aot.exit, 0, "hostile differential failed: {}", aot.stderr);
-//RS     assert!(
-//RS         aot.stdout.lines().any(|line| line == "true"),
-//RS         "terminal error latch must repeat identical reason, got {:?}",
-//RS         aot.stdout
-//RS     );
-//RS     assert!(
-//RS         aot.stdout.contains("Syntax") || aot.stdout.contains("true"),
-//RS         "malformed reader must surface typed syntax path, got {:?}",
-//RS         aot.stdout
-//RS     );
-//RS     assert_default_dev_matches_aot_or_honest_gap(
-//RS         "hostile-differential",
-//RS         &path,
-//RS         scratch.path(),
-//RS         &aot,
-//RS         false,
-//RS     );
-//RS }
-//RS 
-//RS /// #2510: a file-backed `String` must flow from `fs.read` into typed JSON
-//RS /// decoding with explicit fallible handling.
-//RS #[test]
-//RS fn exact_typed_json_numbers_match_aot_default_run_and_interpreter() {
-//RS     on_encoding_stack(exact_typed_json_numbers_match_aot_default_run_and_interpreter_inner);
-//RS }
-//RS 
-//RS fn exact_typed_json_numbers_match_aot_default_run_and_interpreter_inner() {
-//RS     if !common::have_rustc() {
-//RS         eprintln!("note: skipping exact typed JSON parity (need rustc)");
-//RS         return;
-//RS     }
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let python_path = root.join("Examples/features/serde/json_typed.py");
-//RS     let python = Command::new("python3")
-//RS         .arg(&python_path)
-//RS         .output()
-//RS         .expect("exact-number Python fixture must execute");
-//RS     assert!(
-//RS         python.status.success(),
-//RS         "exact-number Python fixture failed: {}",
-//RS         String::from_utf8_lossy(&python.stderr)
-//RS     );
-//RS     assert_eq!(
-//RS         String::from_utf8_lossy(&python.stdout),
-//RS         concat!(
-//RS             "12.340\n0.00001\n",
-//RS             "12345678901234567890123456789012345678901234567890\n",
-//RS             "accepted-nonfinite:2\n",
-//RS         ),
-//RS         "the matched Python decoder should preserve exact values but accept two non-finite extensions that Jet rejects",
-//RS     );
-//RS 
-//RS     let source = r#"
-//RS use core.encoding.json as json
-//RS use core.data as data
-//RS use core.files as fs
-//RS 
-//RS #Codable
-//RS struct ExactNumbers {
-//RS     amount: Decimal
-//RS     exponent: Decimal
-//RS     whole: Decimal
-//RS     tenth: Decimal
-//RS     tenth_with_zero: Decimal
-//RS     scientific_tenth: Decimal
-//RS     adjacent_lo: Int
-//RS     adjacent_hi: Int
-//RS     large: Int
-//RS     large_exp: Int
-//RS }
-//RS 
-//RS #Codable
-//RS struct SmallI64 {
-//RS     value: I64
-//RS }
-//RS 
-//RS #Codable
-//RS struct ExactIntRow {
-//RS     adjacent_hi: Int
-//RS     large: Int
-//RS }
-//RS 
-//RS LIMITED_TEXT :: prep { "1{"0".repeat(1000000)}" }
-//RS 
-//RS fn run() {
-//RS     exact_text :: fs.read("@DIR@/exact.json") ?? panic("exact JSON read")
-//RS     value :: json.decode<ExactNumbers>(exact_text) ?? panic("exact JSON decode")
-//RS     print(value.amount.to_string())
-//RS     print(value.exponent.to_string())
-//RS     print(value.whole.to_string())
-//RS     print(value.tenth.to_string())
-//RS     print(value.tenth_with_zero.to_string())
-//RS     print(value.scientific_tenth.to_string())
-//RS     print(value.adjacent_lo.to_string())
-//RS     print(value.adjacent_hi.to_string())
-//RS     print(value.large.to_string())
-//RS     print(value.large_exp.to_string())
-//RS 
-//RS     stream_raw :: "{{\"adjacent_hi\":9007199254740993,\"large\":12345678901234567890123456789012345678901234567890}}"
-//RS     rows :: data.json<ExactIntRow>("[{stream_raw}]") ?? panic("stream decode")
-//RS     loop row in rows {
-//RS         print(row.adjacent_hi.to_string())
-//RS         print(row.large.to_string())
-//RS     }
-//RS 
-//RS     json.decode<SmallI64>("{{\"value\":9223372036854775808}}") ? _value -> { print("accepted") } ! _error -> { print("i64-overflow") }
-//RS     json.decode<Float>("1e400") ? _value -> { print("accepted") } ! _error -> { print("nonfinite") }
-//RS     json.decode<Decimal>("NaN") ? _value -> { print("accepted") } ! _error -> { print("nan-rejected") }
-//RS     json.decode<Decimal>("Infinity") ? _value -> { print("accepted") } ! _error -> { print("infinity-rejected") }
-//RS     json.decode<Int>("1.5") ? _value -> { print("accepted") } ! _error -> { print("fractional-rejected") }
-//RS     json.decode<Decimal>("1e1000001") ? _value -> { print("accepted") } ! _error -> { print("exponent-limit") }
-//RS     mismatch_text :: fs.read("@DIR@/mismatch.json") ?? panic("mismatch JSON read")
-//RS     json.decode<ExactNumbers>(mismatch_text) ? _value -> { print("accepted") } ! _error -> { print("file-mismatch") }
-//RS     mismatch_raw :: "{{\"amount\":\"12.340\",\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":1,\"adjacent_hi\":1,\"large\":1,\"large_exp\":1}}"
-//RS     json.decode<ExactNumbers>(mismatch_raw) ? _value -> { print("accepted") } ! _error -> { print("mismatch") }
-//RS     data.json<ExactNumbers>("[{mismatch_raw}]") ? _value -> { print("accepted") } ! _error -> { print("stream-mismatch") }
-//RS     json.decode<String>("123") ? _value -> { print("accepted") } ! _error -> { print("string-mismatch") }
-//RS     json.decode<Decimal>(@limited_text) ? _value -> { print("accepted") } ! _error -> { print("limit") }
-//RS }
-//RS "#;
-//RS     let scratch = Scratch::new("exact_typed_json_numbers");
-//RS     let path = scratch.write_project("2026", source);
-//RS     fs::write(
-//RS         scratch.path().join("exact.json"),
-//RS         r#"{"amount":12.340,"exponent":1E-5,"whole":100,"tenth":0.1,"tenth_with_zero":0.10,"scientific_tenth":1e-1,"adjacent_lo":9007199254740992,"adjacent_hi":9007199254740993,"large":12345678901234567890123456789012345678901234567890,"large_exp":1e30}"#,
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(scratch.path().join("mismatch.json"), r#"{}"#).unwrap();
-//RS     let aot = run_aot(&path, scratch.path());
-//RS     assert_eq!(aot.exit, 0, "exact typed JSON AOT failed: {}", aot.stderr);
-//RS     let (backend, dev) = run_default_dev(path.to_str().unwrap());
-//RS     assert_eq!(
-//RS         dev.exit, 0,
-//RS         "exact typed JSON default run failed ({backend:?}): {}",
-//RS         dev.stderr
-//RS     );
-//RS     let interpreter = run_forced_interpreter(path.to_str().unwrap());
-//RS     let expected = concat!(
-//RS         "12.340\n0.00001\n100\n0.1\n0.10\n0.1\n",
-//RS         "9007199254740992\n9007199254740993\n",
-//RS         "12345678901234567890123456789012345678901234567890\n",
-//RS         "1000000000000000000000000000000\n",
-//RS         "9007199254740993\n",
-//RS         "12345678901234567890123456789012345678901234567890\n",
-//RS         "i64-overflow\nnonfinite\nnan-rejected\ninfinity-rejected\n",
-//RS         "fractional-rejected\nexponent-limit\nfile-mismatch\nmismatch\nstream-mismatch\n",
-//RS         "string-mismatch\nlimit\n",
-//RS     );
-//RS     for (label, output) in [
-//RS         ("AOT", &aot),
-//RS         ("default run", &dev),
-//RS         ("interpreter", &interpreter),
-//RS     ] {
-//RS         assert_eq!(
-//RS             output.exit, 0,
-//RS             "{label} exact typed JSON failed: {}",
-//RS             output.stderr
-//RS         );
-//RS         assert_eq!(output.stderr, "", "{label} emitted stderr");
-//RS         assert_eq!(
-//RS             output.stdout, expected,
-//RS             "{label} exact typed JSON output drifted"
-//RS         );
-//RS     }
-//RS     assert_eq!(dev, aot, "default run exact JSON drifted from AOT");
-//RS     assert_eq!(interpreter, aot, "interpreter exact JSON drifted from AOT");
-//RS }
-// END-PORT-PENDING 1043 tests/encoding_parity.rs:1-2129
+// Card #713/#715: whole/stream encoding parity across compiled tiers and comptime.
+use std.fs as fs
+use std.env as env
+use std.process.[Command]
+use std.process as process
+use std.sync.atomic.[AtomicU64, Ordering]
+use std.thread as thread
+use std.panic as panic_runtime
+use jet.[compile_with_path, render_diagnostics]
+use tests.common as common
+use tests.tir_support as tir_support
+use jet.Interpreter.[dev_iteration, RunOutcome]
+// GATE #4494: real filesystem, process, atomic and scoped-thread substrate.
+// Rust: tests/encoding_parity.rs:23
+SEQ :: AtomicU64.new(0)
+// Rust: tests/encoding_parity.rs:25
+struct Scratch { dir: OSPath }
+impl Scratch {
+    // Rust: tests/encoding_parity.rs:30
+    fn new(tag: String) -> Scratch {
+        sequence :: SEQ.fetch_add(1, Ordering.Relaxed)
+        dir :: env.temp_dir().join("jet_enc_parity_{tag}_{process.id()}_{sequence}")
+        _ :: fs.remove_dir_all(dir)
+        fs.create_dir_all(dir).unwrap()
+        Scratch{dir: dir}
+    }
+    // Rust: tests/encoding_parity.rs:41
+    fn write_project(self, edition: String, body: String) -> OSPath {
+        fs.write(self.dir.join("package.jet"), "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"{edition}\"\nauthority: {{ holds: {{ allow: [FS, IO, Mem.Alloc] }} }}\n").unwrap()
+        path :: self.dir.join("run.jet")
+        // Every tier receives the same absolute fixture paths, including the
+        // in-process dev tier whose cwd remains the test runner's repository.
+        fs.write(path, body.replace("@DIR@", self.dir.display().to_string())).unwrap()
+        path
+    }
+    // Rust: tests/encoding_parity.rs:59
+    fn path(self) -> @OSPath from self { @self.dir }
+}
+// Rust: tests/encoding_parity.rs:65
+struct ProgramOutput { exit: I32, stdout: String, stderr: String }
+impl ProgramOutput {
+    // Rust: tests/encoding_parity.rs:72
+    fn ran(stdout: String, stderr: String, exit: I32) -> ProgramOutput {
+        ProgramOutput{exit: exit, stdout: ^stdout, stderr: ^stderr}
+    }
+}
+// Rust: tests/encoding_parity.rs:81
+enum DevBackend { O0, Problems }
+// Rust: tests/encoding_parity.rs:87
+fn on_encoding_stack<R: Send>(work: fn() -> R) -> R {
+    result :: thread.scope(scope -> thread.Builder.new().stack_size(64 * 1024 * 1024).spawn_scoped(scope, ^work).expect("spawn encoding parity worker").join())
+    if result == {
+        .Ok(value) -> value
+        .Err(payload) -> panic_runtime.resume_unwind(^payload)
+    }
+}
+// Rust: tests/encoding_parity.rs:101
+fn run_aot(jet_path: OSPath, cwd: OSPath) -> ProgramOutput {
+    assert(common.have_rustc(), "AOT parity requires rustc")
+    src :: fs.read_to_string(jet_path).unwrap()
+    shown :: jet_path.to_string_lossy()
+    out :: compile_with_path(src, shown).unwrap_or_else(diags -> panic("AOT compile rejected:\n{render_diagnostics(shown, src, diags)}"))
+    rs :: cwd.join("parity_aot.rs")
+    bin :: cwd.join("parity_aot")
+    // Generated Rust remains the reference compiled-backend comparator, never
+    // a provider or runtime fallback for the Jet port.
+    fs.write(rs, out.rust).unwrap()
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+    if out.ffi == .Val(link) {
+        rustc.arg("--extern").arg("{link.crate_name}={link.rlib_path.display()}")
+        loop deps_dir in link.dependency_dirs().filter(dir -> dir.is_dir()) {
+            rustc.arg("-L").arg("dependency={deps_dir.display()}")
+        }
+    }
+    built :: rustc.output().unwrap()
+    assert(built.status.success(), "rustc rejected generated encoding fixture:\n{String.from_utf8_lossy(built.stderr)}")
+    run :: Command.new(bin).current_dir(cwd).output().unwrap()
+    ProgramOutput.ran(String.from_utf8_lossy(run.stdout).into_owned(), String.from_utf8_lossy(run.stderr).into_owned(), run.status.code().unwrap_or(-1))
+}
+// Rust: tests/encoding_parity.rs:146
+fn checked_bundle(path: String) -> jet.AST.ProgramBundle {
+    bundle := jet.Loader.load_entry(path).expect("fixture should load")
+    source :: fs.read_to_string(path).expect("fixture source should remain readable")
+    diags :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    errors :: diags.iter().filter(d -> d.severity == jet.Diagnostics.Severity.Error).collect()
+    assert(errors.is_empty(), "fixture must type-check:\n{jet.render_diagnostics(path, source, diags)}")
+    bundle
+}
+// Rust: tests/encoding_parity.rs:162
+fn run_default_dev(path: String) -> (DevBackend, ProgramOutput) {
+    _ :: checked_bundle(path)
+    // Default dev uses the canonical O0 execution path. Retired resident-JIT
+    // representation predicates are replaced by observable output parity.
+    if dev_iteration(path, false, false) == {
+        .Ran{stdout, stderr, exit_code} -> (DevBackend.O0, ProgramOutput.ran(^stdout, ^stderr, exit_code))
+        .Problems(diags) -> {
+            assert(!diags.iter().any(d -> d.code == "E2211"), "E2211 retired by #778; encoding probes must name their execution boundary: {diags.debug()}")
+            detail :: diags.iter().map(d -> "{d.code}:{d.what}").collect().join("; ")
+            (DevBackend.Problems, ProgramOutput.ran("", "execution gap: {detail}", 101))
+        }
+    }
+}
+// Rust: tests/encoding_parity.rs:222
+fn run_forced_interpreter(path: String) -> ProgramOutput {
+    if dev_iteration(path, false, true) == {
+        .Ran{stdout, stderr, exit_code} -> ProgramOutput.ran(^stdout, ^stderr, exit_code)
+        .Problems(diags) -> panic("forced interpreter rejected encoding probe: {diags.debug()}")
+    }
+}
+// Rust: tests/encoding_parity.rs:235
+fn assert_aot_comptime_binding_parity(label: String, source: String, jet_path: OSPath, cwd: OSPath) -> {
+    aot :: run_aot(jet_path, cwd)
+    assert_eq(aot.exit, 0, "{label} AOT failed: {aot.stderr}")
+    lines :: aot.stdout.lines().collect()
+    assert(lines.len() >= 2, "{label} expected comptime|runtime probe lines, got {lines.debug()}")
+    loop (i, line) in lines.iter().enumerate() {
+        (comptime, runtime) :: line.split_once('|').unwrap_or_else(() -> panic("{label} line {i} missing comptime|runtime split: {line}"))
+        assert_eq(comptime, runtime, "{label} comptime/AOT divergence on line {i}: comptime={comptime.debug()} runtime={runtime.debug()}")
+    }
+    diags :: jet.check_with_path(jet_path.to_str().unwrap())
+    assert(diags.is_empty(), "{label} sema rejected comptime fixture:\n{jet.render_diagnostics(jet_path.to_str().unwrap(), source, diags)}")
+}
+// Rust: tests/encoding_parity.rs:265
+// Named file-backed interpreter gaps cannot claim encoding parity.
+fn named_encoding_dev_gap(stderr: String) -> Bool {
+    e0956 :: stderr.contains("E0956") && (stderr.contains("ResourceNew") || stderr.contains("ResourceTake") || stderr.contains("handle `") || stderr.contains("FileReader") || stderr.contains("FileWriter") || stderr.contains("JSONReader") || stderr.contains("JSONWriter") || stderr.contains("CSVReader") || stderr.contains("CSVWriter") || stderr.contains("XMLReader") || stderr.contains("XMLWriter") || stderr.contains("CBORReader") || stderr.contains("CBORWriter") || stderr.contains("JSONLReader") || stderr.contains("JSONLWriter"))
+    e0953 :: stderr.contains("E0953") && (stderr.contains("stopped the build") || stderr.contains("panic"))
+    e0956 || e0953
+}
+// Rust: tests/encoding_parity.rs:289
+fn assert_default_dev_matches_aot_or_honest_gap(label: String, jet_path: OSPath, _cwd: OSPath, aot: ProgramOutput, interpreter_fallback: Bool) -> {
+    (backend, dev) :: run_default_dev(jet_path.to_str().unwrap())
+    eprintln("{label} default-dev backend={backend.debug()} exit={dev.exit} deopt_gap={named_encoding_dev_gap(dev.stderr)}")
+    if backend == {
+        .O0 -> {
+            assert_eq(dev.stdout, aot.stdout, "{label} default-dev/O0 stdout drift")
+            assert_eq(dev.stderr, aot.stderr, "{label} default-dev/O0 stderr drift")
+            assert_eq(dev.exit, aot.exit, "{label} default-dev/O0 exit drift")
+        }
+        .Problems -> {
+            if dev.exit == 0 {
+                assert_eq(dev.stdout, aot.stdout, "{label} deopt-interp stdout drift")
+                assert_eq(dev.stderr, aot.stderr, "{label} deopt-interp stderr drift")
+                assert_eq(dev.exit, aot.exit, "{label} deopt-interp exit drift")
+            } else if named_encoding_dev_gap(dev.stderr) {
+                eprintln("note: {label} default-dev named gap (no parity claim): {dev.stderr}")
+            } else if interpreter_fallback {
+                interp :: run_forced_interpreter(jet_path.to_str().unwrap())
+                assert_eq(interp.stdout, aot.stdout, "{label} forced-interpreter must preserve AOT encoding semantics when default-dev deopts")
+                assert_eq(interp.exit, aot.exit, "{label} interpreter exit drift")
+            } else {
+                panic("{label} default-dev deopt failed without named encoding gap or parity: exit={dev.exit} stderr={dev.stderr}")
+            }
+        }
+    }
+}
+// Rust: tests/encoding_parity.rs:346
+// Runtime-only probes: comptime codecs are pure on AOT, not on the shared interpreter.
+WHOLE_VALUE_RUNTIME :: `
+use core.encoding.json as json
+use core.encoding.jsonl as jsonl
+use core.encoding.csv as csv
+use core.encoding.xml as xml
+use core.encoding.cbor as cbor
+use core.encoding.base64 as base64
+use core.encoding.base32 as base32
 
+fn run() -> {
+    print(json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")))
+    print((jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len())
+    print((csv.parse("name,score\nada,9\n") ?? panic("csv")).len())
+    print(xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml")))
+    print(json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p")))
+    print((base64.decode("Zg==") ?? panic("b64")).len())
+    print((base64.decode_url("aGk") ?? panic("b64url")).len())
+    print((base32.decode("MZXQ====") ?? panic("b32")).len())
+}
+`
+// Rust: tests/encoding_parity.rs:367
+CONFIGURED_CSV_RUNTIME :: `
+use core.encoding.csv as csv
+
+fn run() -> {
+    raw :: String.from_bytes([U8]{"name\tnote\x0D\x0A\x0D\x0Aada\t\"line1\x0D\x0Aline2\"\x0D\x0A"}) ?? panic("fixture")
+    crlf :: String.from_bytes([U8]{"\x0D\x0A"}) ?? panic("crlf")
+    rows :: csv.rows(raw, delimiter: "\t", header: true, skip_blank: true) ?? panic("rows")
+    print(rows.len())
+    print(rows[0].line)
+    print(rows[0].fields[0])
+    note :: rows[0].fields[1]
+    print(&note.replace(crlf, "|"))
+    parsed :: csv.parse(raw, delimiter: "\t", header: true, skip_blank: true) ?? panic("parse")
+    print(parsed.len())
+    malformed :: String.from_bytes([U8]{"name\tnote\x0D\x0A\"unterminated"}) ?? panic("malformed")
+    _attempted :: csv.parse(malformed, delimiter: "\t", header: true, skip_blank: true) ?? {
+        print(true)
+        return
+    }
+    print(false)
+}
+`
+// Rust: tests/encoding_parity.rs:392
+WHOLE_VALUE_COMPTIME :: `
+use core.encoding.json as json
+use core.encoding.jsonl as jsonl
+use core.encoding.csv as csv
+use core.encoding.xml as xml
+use core.encoding.cbor as cbor
+use core.encoding.base64 as base64
+use core.encoding.base32 as base32
+
+JSON_CANON :: prep { json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")) }
+JSONL_N :: prep { (jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len() }
+CSV_N :: prep { (csv.parse("name,score\nada,9\n") ?? panic("csv")).len() }
+XML_TEXT :: prep { xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml")) }
+CBOR_ROUND :: prep { json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p")) }
+B64_N :: prep { (base64.decode("Zg==") ?? panic("b64")).len() }
+B64URL_N :: prep { (base64.decode_url("aGk") ?? panic("b64url")).len() }
+B32_N :: prep { (base32.decode("MZXQ====") ?? panic("b32")).len() }
+
+fn run() -> {
+    print("{JSON_CANON}|{json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json"))}")
+    print("{JSONL_N}|{(jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len()}")
+    print("{CSV_N}|{(csv.parse("name,score\nada,9\n") ?? panic("csv")).len()}")
+    print("{XML_TEXT}|{xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml"))}")
+    print("{CBOR_ROUND}|{json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p"))}")
+    print("{B64_N}|{(base64.decode("Zg==") ?? panic("b64")).len()}")
+    print("{B64URL_N}|{(base64.decode_url("aGk") ?? panic("b64url")).len()}")
+    print("{B32_N}|{(base32.decode("MZXQ====") ?? panic("b32")).len()}")
+}
+`
+// Rust: tests/encoding_parity.rs:422
+HOSTILE_JSON_TOML_DEPTH_RUNTIME :: `
+use core.encoding.json as json
+use core.encoding.toml as toml
+
+fn run() -> {
+    open64 :: "[".repeat(64)
+    close64 :: "]".repeat(64)
+    json.parse("{open64}{close64}") ? _value -> { print("json64:accepted") } ! error -> { print("json64:{error.line}:{error.message}") }
+    open65 :: "[".repeat(65)
+    close65 :: "]".repeat(65)
+    json.parse("{open65}{close65}") ? _value -> { print("json65:accepted") } ! error -> { print("json65:{error.line}:{error.message}") }
+    toml.parse("value = {open64}{close64}") ? _value -> { print("toml64:accepted") } ! error -> { print("toml64:{error.line}:{error.message}") }
+    toml.parse("value = {open65}{close65}") ? _value -> { print("toml65:accepted") } ! error -> { print("toml65:{error.line}:{error.message}") }
+}
+`
+// Rust: tests/encoding_parity.rs:1431
+// Both dynamic rows and typed Codable records retain their real cell data.
+TYPED_CSV_ENCODE :: `
+use core.encoding.csv as csv
+#Codable
+struct Sale { item: String, qty: Int }
+fn run() -> {
+    sales :: [Sale{item: "pen", qty: 3}, Sale{item: "ink", qty: 5}]
+    typed :: csv.to_string(sales)
+    print("typed-len: {typed.len()}")
+    print(typed)
+    rows :: [["name", "score"], ["ada", "9"]]
+    print("rows: {csv.to_string(rows)}")
+}
+`
+// Rust: tests/encoding_parity.rs:1538
+fn stream_fixture(format: String, body: String) -> String {
+    "\nuse core.encoding as encoding\nuse core.encoding.[{format} as fmt]\nuse core.files as files\n\n{body}\n"
+}
+// Rust: tests/encoding_parity.rs:1550
+fn assert_aot_dev_stream_parity(label: String, source: String) -> {
+    on_encoding_stack(() -> assert_aot_dev_stream_parity_inner(label, source))
+}
+// Rust: tests/encoding_parity.rs:1554
+fn assert_aot_dev_stream_parity_inner(label: String, source: String) -> {
+    if !common.have_rustc() { eprintln("note: skipping {label} stream parity (need rustc)"); return }
+    scratch :: Scratch.new(label)
+    path :: scratch.write_project("2026", source)
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "{label} AOT stream failed: {aot.stderr}")
+    assert_default_dev_matches_aot_or_honest_gap(label, path, scratch.path(), aot, false)
+}

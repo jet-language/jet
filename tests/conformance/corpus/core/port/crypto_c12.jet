@@ -1,0 +1,14 @@
+use tests.common
+use jet.Diagnostics.Severity
+use jet.[compile, render_diagnostics]
+// Rust: tests/crypto_c12.rs:9
+fn assert_single_type_error(source: String, expected: [String]) -> {
+    diagnostics :: compile(source).expect_err("wrong crypto role must fail in sema")
+    errors :: diagnostics.iter().filter(diagnostic -> diagnostic.severity == Severity.Error).collect()
+    assert_eq(errors.len(), 1, "expected one type error: {diagnostics:Debug}")
+    assert_eq(errors[0].code, "E0112")
+    rendered :: render_diagnostics("crypto_wrong_role.jet", source, diagnostics)
+    for text in expected {
+        assert(rendered.contains(text), "missing {text:Debug} in wrong-role diagnostic:\n{rendered}")
+    }
+}

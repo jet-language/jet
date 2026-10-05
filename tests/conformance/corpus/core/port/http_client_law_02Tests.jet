@@ -1,0 +1,820 @@
+use tests.common as common
+use tests.conformance.corpus.core.port.http_client_law.[request_head, read_h2_frame, write_h2_frame]
+use std.net.[TcpListener, TcpStream]
+use std.io.[Read, Write, ErrorKind]
+use std.sync.Arc
+use std.sync.atomic.[AtomicBool, AtomicUsize, Ordering]
+use std.time.[Duration, Instant]
+use std.thread
+use std.fs as fs
+use std.process.[Command, Stdio]
+use std.env as env
+use std.process as process
+use jet
+use jet_http_bridge as bridge
+use rustls
+// GATE #4494: TLS server connection/certificate/key native bindings retain the real provider.
+// GATE #4494: real sockets, FIFO files, atomic synchronization, subprocesses and TLS providers.
+// GATE #4409: preserve WouldBlock separately from other accept failures.
+
+// Rust: tests/http_client_law.rs:1803
+#Test("unknown_length_upload_uses_h1_chunked_transfer_encoding") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    dir :: env.temp_dir().join("jet_http_client_upload_chunked_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    fifo :: dir.join("upload.fifo")
+    assert(Command.new("mkfifo").arg(&fifo).status().unwrap().success(), "mkfifo failed")
+    accepted :: Arc.new(AtomicBool.new(false))
+    accepted_flag :: accepted.clone()
+    seen_chunked :: Arc.new(AtomicBool.new(false))
+    seen_flag :: seen_chunked.clone()
+    body_len :: 96 * 1024
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        accepted_flag.store(true, Ordering.SeqCst)
+        head :: request_head(&stream)
+        assert(head.starts_with(b"POST /chunked HTTP/1.1\r\n"))
+        head_text :: String.from_utf8_lossy(head).to_ascii_lowercase()
+        assert(head_text.contains("transfer-encoding: chunked"), "missing chunked transfer: {head_text}")
+        assert(!head_text.contains("content-length:"), "unexpected content-length: {head_text}")
+        got := 0
+        buf := [U8].repeat(0, 4096)
+        pending := [U8]{}
+        loop {
+            read :: stream.read(&buf).unwrap()
+            assert_ne(read, 0, "chunked upload ended early at {got}")
+            pending.extend_from_slice(buf[..read])
+            loop {
+                line_end :: pending.windows(2).position(window -> window == b"\r\n")
+                if line_end == None { break }
+                end :: line_end.unwrap()
+                line :: String.from_utf8_lossy(pending[..end]).to_string()
+                _ :: pending.drain(..end + 2)
+                trimmed := line.trim() // #4303
+                size :: USize.from_str_radix(trimmed, 16).expect("chunk size")
+                if size == 0 {
+                    assert(pending.starts_with(b"\r\n") || pending.is_empty() || pending == b"\r\n")
+                    stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok").unwrap()
+                    return got
+                }
+                loop pending.len() < size + 2 {
+                    read :: stream.read(&buf).unwrap()
+                    assert_ne(read, 0, "chunked body truncated at {got}")
+                    pending.extend_from_slice(buf[..read])
+                }
+                assert_eq(pending[size..size + 2], b"\r\n")
+                got += size
+                _ :: pending.drain(..size + 2)
+                if got >= 64 * 1024 { seen_flag.store(true, Ordering.SeqCst) }
+            }
+        }
+    })
+    fifo_writer :: fifo.clone()
+    writer :: thread.spawn(() -> {
+        file := fs.OpenOptions.new().write(true).open(&fifo_writer).unwrap()
+        first :: [U8].repeat(b'a', 32 * 1024)
+        file.write_all(first).unwrap()
+        deadline :: Instant.now() + Duration.from_secs(5)
+        loop !accepted.load(Ordering.SeqCst) {
+            assert(Instant.now() < deadline, "client buffered the chunked upload before connecting")
+            thread.yield_now()
+        }
+        rest :: [U8].repeat(b'b', body_len - first.len())
+        file.write_all(rest).unwrap()
+    })
+    fifo_path :: fifo.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"")
+    src :: """
+use core.http.client as http
+use core.http as message
+use core.files as files
+fn run() {
+    input :: files.open("{fifo_path}") ?? panic("open")
+    body :: message.Body.reader(^input) ?? panic("reader")
+    req :: http.request("POST", "http://{addr}/chunked").body(body).redirects(0)
+    resp :: req.send() ?? panic("send")
+    print(resp.body().text(8) ?? panic("body"))
+}
+"""
+    (code, stdout, stderr) :: common.build_and_run("jet_http_client_law", "upload_chunked", src)
+    got :: server.join().unwrap()
+    writer.join().unwrap()
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "ok\n")
+    assert_eq(got, body_len)
+    assert(seen_chunked.load(Ordering.SeqCst), "server never saw a streamed chunked upload boundary")
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/http_client_law.rs:1930
+#Test("h2_upload_streams_data_frames_before_body_eof") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    dir :: env.temp_dir().join("jet_http_client_upload_h2_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    fifo :: dir.join("upload.fifo")
+    assert(Command.new("mkfifo").arg(&fifo).status().unwrap().success(), "mkfifo failed")
+    accepted :: Arc.new(AtomicBool.new(false))
+    accepted_flag :: accepted.clone()
+    seen_data :: Arc.new(AtomicBool.new(false))
+    seen_flag :: seen_data.clone()
+    body_len :: 40 * 1024
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        accepted_flag.store(true, Ordering.SeqCst)
+        stream.set_read_timeout(Some(Duration.from_secs(5))).unwrap()
+        preface := [U8].repeat(0, 24)
+        stream.read_exact(&preface).unwrap()
+        assert_eq(preface, b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+        assert_eq(read_h2_frame(&stream).0, 4)
+        write_h2_frame(&stream, 4, 0, 0, [])
+        got := 0
+        end := false
+        loop !end {
+            frame :: read_h2_frame(&stream)
+            if frame.0 == 6 && frame.1 & 1 == 0 {
+                write_h2_frame(&stream, 6, 1, 0, frame.3)
+                next
+            }
+            if frame.0 == 1 { next }
+            if frame.0 == 0 {
+                got += frame.3.len()
+                if got >= 16 * 1024 { seen_flag.store(true, Ordering.SeqCst) }
+                if frame.1 & 1 != 0 { end = true }
+            }
+        }
+        assert_eq(got, body_len)
+        write_h2_frame(&stream, 1, 4, 1, [U8]{0x88, 0x0f, 0x0d, 0x01, b'2'})
+        write_h2_frame(&stream, 0, 1, 1, b"ok")
+        _ :: read_h2_frame(&stream)
+        got
+    })
+    fifo_writer :: fifo.clone()
+    writer :: thread.spawn(() -> {
+        file := fs.OpenOptions.new().write(true).open(&fifo_writer).unwrap()
+        first :: [U8].repeat(b'x', 8 * 1024)
+        file.write_all(first).unwrap()
+        deadline :: Instant.now() + Duration.from_secs(5)
+        loop !accepted.load(Ordering.SeqCst) {
+            assert(Instant.now() < deadline, "H2 client buffered the upload before connecting")
+            thread.yield_now()
+        }
+        rest :: [U8].repeat(b'y', body_len - first.len())
+        file.write_all(rest).unwrap()
+    })
+    fifo_path :: fifo.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"")
+    // Rust: tests/http_client_law.rs:2025-2088; the native harness is Jet, not a Rust callback.
+    src :: """
+use jet_http_bridge as bridge
+use std.fs as fs
+use std.io.Read
+fn run() {
+    root :: bridge.jet_http_client_new_impl()
+    client :: bridge.jet_http_client_protocols_impl(root, true, false, true).unwrap()
+    file := fs.File.open("{fifo_path}").unwrap()
+    offset := 0
+    total :: {body_len}
+    body_read := () -> {
+        if offset >= total { return .Ok(None) }
+        want :: (64 * 1024).min(total - offset)
+        chunk := [U8].repeat(0, want)
+        filled := 0
+        loop filled < want {
+            read :: file.read(&chunk[filled..]).map_err(_ -> bridge.JetHTTPBridgeError.IO)?
+            if read == 0 { break }
+            filled += read
+        }
+        if filled == 0 { return .Ok(None) }
+        chunk.truncate(filled)
+        offset += filled
+        .Ok(Some(^chunk))
+    }
+    response :: bridge.jet_http_client_send_with_stream_parts_impl(
+        client, "POST", "http://{addr}/h2", [], Some(I64{total}), true, &body_read,
+        None, None, None, None, None, None, None, None, Some(0), None, [], [], []
+    ).unwrap()
+    assert_eq(bridge.jet_http_client_body_read_impl(response.body_handle, 8).unwrap(), Some(b"ok".to_vec()))
+    assert_eq(response.context.protocol, "HTTP/2")
+}
+"""
+    (code, _, stderr) :: common.build_and_run("jet_http_client_law", "h2_upload", src)
+    got :: server.join().unwrap()
+    writer.join().unwrap()
+    assert_eq(code, 0, "bridge H2 upload harness failed:\n{stderr}")
+    assert_eq(got, body_len)
+    assert(seen_data.load(Ordering.SeqCst), "server never saw streamed H2 DATA before EOF")
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/http_client_law.rs:2109
+#Test("public_client_proxy_none_ignores_environment_proxy") {
+    origin :: TcpListener.bind("127.0.0.1:0").unwrap()
+    origin_addr :: origin.local_addr().unwrap()
+    proxy :: TcpListener.bind("127.0.0.1:0").unwrap()
+    proxy_addr :: proxy.local_addr().unwrap()
+    origin_server :: thread.spawn(() -> {
+        (stream, _) := origin.accept().unwrap()
+        head :: request_head(&stream)
+        assert(String.from_utf8_lossy(head).starts_with("GET /direct HTTP/1.1\r\n"),
+            "expected direct origin request, got {String.from_utf8_lossy(head)}")
+        stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\ndirect").unwrap()
+    })
+    proxy_server :: thread.spawn(() -> {
+        proxy.set_nonblocking(true).unwrap()
+        deadline :: Instant.now() + Duration.from_millis(400)
+        loop {
+            if proxy.accept() == {
+                .Ok(_) -> panic("environment proxy should not receive traffic")
+                .Err(error) -> {
+                    if error.kind() != ErrorKind.WouldBlock { panic("proxy accept failed: {error}") }
+                    if Instant.now() >= deadline { break }
+                    thread.yield_now()
+                }
+            }
+        }
+    })
+    src :: """
+use core.http.client as http
+fn run() {
+    client :: http.Client.new().proxy(.None)
+    resp :: client.send(http.request("GET", "http://{origin_addr}/direct")) ?? panic("send")
+    print(resp.body().text(16) ?? panic("body"))
+}
+"""
+    dir :: common.unique_tmp("jet_http_client_law")
+    fs.create_dir_all(&dir).unwrap()
+    jet_path :: dir.join("public_proxy_none.jet")
+    fs.write(&jet_path, src).unwrap()
+    shown :: jet_path.to_string_lossy().into_owned()
+    out :: jet.compile_with_path(src, shown).unwrap_or_else(diags -> {
+        panic("front end rejected:\n{jet.render_diagnostics(shown, src, diags)}")
+    })
+    rs :: dir.join("public_proxy_none.rs")
+    bin :: dir.join("public_proxy_none")
+    fs.write(&rs, out.rust).unwrap()
+    rustc_cmd := Command.new("rustc")
+    rustc_cmd.args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+    if out.ffi != None {
+        link :: out.ffi.unwrap()
+        rustc_cmd.arg("--extern").arg("{link.crate_name}={link.rlib_path.display()}")
+        loop deps_dir in link.dependency_dirs().filter(dir -> dir.is_dir()) {
+            rustc_cmd.arg("-L").arg("dependency={deps_dir.display()}")
+        }
+    }
+    rustc :: rustc_cmd.output().unwrap()
+    assert(rustc.status.success(), "rustc rejected generated code (I2 violation):\n{String.from_utf8_lossy(rustc.stderr)}")
+    run :: Command.new(&bin)
+        .env("http_proxy", "http://{proxy_addr}").env("HTTP_PROXY", "http://{proxy_addr}")
+        .env("all_proxy", "http://{proxy_addr}").env("ALL_PROXY", "http://{proxy_addr}")
+        .env_remove("no_proxy").env_remove("NO_PROXY").output().unwrap()
+    origin_server.join().unwrap()
+    proxy_server.join().unwrap()
+    _ :: fs.remove_dir_all(&dir)
+    assert_eq(run.status.code().unwrap_or(0), 0, "stderr:\n{String.from_utf8_lossy(run.stderr)}")
+    assert_eq(String.from_utf8_lossy(run.stdout), "direct\n")
+}
+
+// Rust: tests/http_client_law.rs:2212
+#Test("public_client_proxy_url_sends_absolute_form") {
+    proxy :: TcpListener.bind("127.0.0.1:0").unwrap()
+    proxy_addr :: proxy.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (stream, _) := proxy.accept().unwrap()
+        head :: request_head(&stream)
+        text :: String.from_utf8_lossy(head)
+        assert(text.starts_with("GET http://example.invalid/via-proxy HTTP/1.1\r\n"), "expected absolute-form proxy request, got {text}")
+        stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nproxy").unwrap()
+    })
+    src :: """
+use core.http.client as http
+fn run() {
+    client :: http.Client.new().proxy(.URL("http://{proxy_addr}"))
+    resp :: client.send(http.request("GET", "http://example.invalid/via-proxy")) ?? panic("send")
+    print(resp.body().text(16) ?? panic("body"))
+}
+"""
+    (code, stdout, stderr) :: common.build_and_run("jet_http_client_law", "public_proxy_url", src)
+    server.join().unwrap()
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "proxy\n")
+}
+
+// Rust: tests/http_client_law.rs:2245
+#Test("public_client_tls_custom_only_trust") {
+    probe :: TcpListener.bind("127.0.0.1:0").unwrap()
+    port :: probe.local_addr().unwrap().port()
+    drop(^probe)
+    root :: OSPath.from(env.manifest_dir())
+    ca :: root.join("tests/fixtures/tls/smtp.ca.cert.pem")
+    wrong_ca :: root.join("tests/fixtures/tls/localhost.cert.pem")
+    cert :: root.join("tests/fixtures/tls/smtp.server.cert.pem")
+    key :: root.join("tests/fixtures/tls/smtp.server.key.pem")
+    server := Command.new("openssl")
+        .args(["s_server", "-quiet", "-www", "-accept", port.to_string(), "-cert"])
+        .arg(&cert).arg("-key").arg(&key).arg("-CAfile").arg(&ca)
+        .stdout(Stdio.null()).stderr(Stdio.null()).spawn().expect("openssl s_server")
+    thread.sleep(Duration.from_millis(250))
+    empty_src :: """
+use core.net.tls as tls
+fn run() {
+    empty :: [U8]{}
+    if tls.RootCertificates.from_pem(empty) == {
+        .Ok(_) -> print("empty-ok")
+        .Err(_) -> print("empty-fail")
+    }
+}
+"""
+    (empty_code, empty_out, empty_err) :: common.build_and_run("jet_http_client_law", "public_tls_empty_root", empty_src)
+    assert_eq(empty_code, 0, "stderr:\n{empty_err}")
+    assert_eq(empty_out, "empty-fail\n")
+    wrong :: wrong_ca.display()
+    wrong_src :: """
+use core.http.client as http
+use core.net.tls as tls
+use core.files as fs
+fn run() {
+    pem :: fs.read_bytes("{wrong}") ?? panic("wrong ca")
+    roots :: tls.RootCertificates.from_pem(pem) ?? panic("roots")
+    cfg :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("cfg")
+    client :: http.Client.new().tls(cfg).protocols(false, true, false)
+    if client.send(http.request("GET", "https://localhost:{port}/")) == {
+        .Ok(_) -> print("ok")
+        .Err(_) -> print("tls-fail")
+    }
+}
+"""
+    (wrong_code, wrong_out, wrong_err) :: common.build_and_run("jet_http_client_law", "public_tls_wrong_root", wrong_src)
+    assert_eq(wrong_code, 0, "stderr:\n{wrong_err}")
+    assert_eq(wrong_out, "tls-fail\n")
+    pass_src :: """
+use core.http.client as http
+use core.net.tls as tls
+use core.files as fs
+fn run() {
+    pem :: fs.read_bytes("{ca.display()}") ?? panic("ca")
+    roots :: tls.RootCertificates.from_pem(pem) ?? panic("roots")
+    cfg :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("cfg")
+    client :: http.Client.new().tls(cfg).protocols(false, true, false)
+    resp :: client.send(http.request("GET", "https://localhost:{port}/")) ?? panic("send")
+    print(resp.status())
+}
+"""
+    (pass_code, pass_out, pass_err) :: common.build_and_run("jet_http_client_law", "public_tls_custom_only", pass_src)
+    _ :: server.kill()
+    _ :: server.wait()
+    assert_eq(pass_code, 0, "stderr:\n{pass_err}")
+    assert_eq(pass_out, "200\n")
+}
+
+// Rust: tests/http_client_law.rs:2341
+#Test("public_client_tls_identity_and_version_bounds") {
+    dir :: env.temp_dir().join("jet_http_client_tls_policy_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    ca_key :: dir.join("ca.key.pem")
+    ca_cert :: dir.join("ca.cert.pem")
+    ca :: Command.new("openssl")
+        .args(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=jet-http-ca", "-keyout"])
+        .arg(&ca_key).arg("-out").arg(&ca_cert).output().expect("openssl ca")
+    assert(ca.status.success(), "{String.from_utf8_lossy(ca.stderr)}")
+    // Rust: tests/http_client_law.rs:2375
+    make_cert :: (name: String, usage: String) -> {
+        key :: dir.join("{name}.key.pem")
+        csr :: dir.join("{name}.csr.pem")
+        cert :: dir.join("{name}.cert.pem")
+        ext :: dir.join("{name}.ext")
+        serial :: dir.join("{name}.srl")
+        fs.write(&ext, "subjectAltName=DNS:localhost\nextendedKeyUsage={usage}\n").unwrap()
+        req :: Command.new("openssl")
+            .args(["req", "-new", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN={name}", "-keyout"])
+            .arg(&key).arg("-out").arg(&csr).output().unwrap()
+        assert(req.status.success(), "{String.from_utf8_lossy(req.stderr)}")
+        sign :: Command.new("openssl")
+            .args(["x509", "-req", "-days", "1", "-CAcreateserial", "-CAserial"])
+            .arg(&serial).arg("-CA").arg(&ca_cert).arg("-CAkey").arg(&ca_key)
+            .arg("-extfile").arg(&ext).arg("-in").arg(&csr).arg("-out").arg(&cert).output().unwrap()
+        assert(sign.status.success(), "{String.from_utf8_lossy(sign.stderr)}")
+        (cert, key)
+    }
+    (server_cert, server_key) :: make_cert("localhost", "serverAuth")
+    (client_cert, client_key) :: make_cert("jet-client", "clientAuth")
+    probe :: TcpListener.bind("127.0.0.1:0").unwrap()
+    version_port :: probe.local_addr().unwrap().port()
+    drop(^probe)
+    tls12_server := Command.new("openssl")
+        .args(["s_server", "-quiet", "-www", "-tls1_2", "-accept", version_port.to_string(), "-CAfile"])
+        .arg(&ca_cert).arg("-cert").arg(&server_cert).arg("-key").arg(&server_key)
+        .stdout(Stdio.null()).stderr(Stdio.null()).spawn().expect("openssl tls1_2 s_server")
+    thread.sleep(Duration.from_millis(250))
+    version_src :: """
+use core.http.client as http
+use core.net.tls as tls
+use core.files as fs
+fn run() {
+    pem :: fs.read_bytes("{ca_cert.display()}") ?? panic("ca")
+    roots :: tls.RootCertificates.from_pem(pem) ?? panic("roots")
+    base :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("trust")
+    only13 :: base.with_version_bounds(min: .TLS13, max: .TLS13) ?? panic("tls13")
+    client13 :: http.Client.new().tls(only13).protocols(false, true, false)
+    if client13.send(http.request("GET", "https://localhost:{version_port}/")) == {
+        .Ok(_) -> print("tls13-ok")
+        .Err(_) -> print("tls13-fail")
+    }
+    only12 :: base.with_version_bounds(min: .TLS12, max: .TLS12) ?? panic("tls12")
+    client12 :: http.Client.new().tls(only12).protocols(false, true, false)
+    resp :: client12.send(http.request("GET", "https://localhost:{version_port}/")) ?? panic("tls12 send")
+    print(resp.status())
+}
+"""
+    (version_code, version_out, version_err) :: common.build_and_run("jet_http_client_law", "public_tls_version_bounds", version_src)
+    _ :: tls12_server.kill()
+    _ :: tls12_server.wait()
+    assert_eq(version_code, 0, "stderr:\n{version_err}")
+    assert_eq(version_out, "tls13-fail\n200\n")
+    probe2 :: TcpListener.bind("127.0.0.1:0").unwrap()
+    mtls_port :: probe2.local_addr().unwrap().port()
+    drop(^probe2)
+    mtls_server := Command.new("openssl")
+        .args(["s_server", "-quiet", "-www", "-Verify", "1", "-verify_return_error", "-accept", mtls_port.to_string(), "-CAfile"])
+        .arg(&ca_cert).arg("-cert").arg(&server_cert).arg("-key").arg(&server_key)
+        .stdout(Stdio.null()).stderr(Stdio.null()).spawn().expect("openssl mtls s_server")
+    thread.sleep(Duration.from_millis(250))
+    mtls_src :: """
+use core.http.client as http
+use core.net.tls as tls
+use core.files as fs
+fn run() {
+    ca :: fs.read_bytes("{ca_cert.display()}") ?? panic("ca")
+    cert :: fs.read_bytes("{client_cert.display()}") ?? panic("cert")
+    key :: fs.read_bytes("{client_key.display()}") ?? panic("key")
+    roots :: tls.RootCertificates.from_pem(ca) ?? panic("roots")
+    identity :: tls.ClientIdentity.from_pem(cert_chain: cert, private_key: key) ?? panic("identity")
+    bare :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("bare")
+    client_bare :: http.Client.new().tls(bare).protocols(false, true, false)
+    if client_bare.send(http.request("GET", "https://localhost:{mtls_port}/")) == {
+        .Ok(_) -> print("bare-ok")
+        .Err(_) -> print("bare-fail")
+    }
+    cfg :: bare.with_client_identity(identity) ?? panic("with identity")
+    client :: http.Client.new().tls(cfg).protocols(false, true, false)
+    resp :: client.send(http.request("GET", "https://localhost:{mtls_port}/")) ?? panic("mtls send")
+    print(resp.status())
+}
+"""
+    (mtls_code, mtls_out, mtls_err) :: common.build_and_run("jet_http_client_law", "public_tls_client_identity", mtls_src)
+    _ :: mtls_server.kill()
+    _ :: mtls_server.wait()
+    _ :: fs.remove_dir_all(&dir)
+    assert_eq(mtls_code, 0, "stderr:\n{mtls_err}")
+    assert_eq(mtls_out, "bare-fail\n200\n")
+}
+
+// Rust: tests/http_client_law.rs:2557
+#Test("https_to_http_redirect_denied_unless_allow_http_downgrade") {
+    // Rust: tests/http_client_law.rs:2583 (native harness helper)
+    fn pem(path: OSPath) -> [U8] {
+        text :: fs.read_to_string(path).unwrap()
+        encoded :: text.lines().filter(line -> !line.starts_with("-----")).collect::<String>()
+        out := [U8]{}
+        bits := 0u32
+        count := 0u8
+        loop byte in encoded.bytes() {
+            value :: if byte == {
+                b'A'..=b'Z' -> byte - b'A'
+                b'a'..=b'z' -> byte - b'a' + 26
+                b'0'..=b'9' -> byte - b'0' + 52
+                b'+' -> 62
+                b'/' -> 63
+                b'=' -> break
+                _ -> next
+            }
+            bits = bits << 6 | U32.from(value)
+            count += 6
+            if count >= 8 {
+                count -= 8
+                out.push(U8{bits >> count})
+                bits &= (1u32 << count).wrapping_sub(1)
+            }
+        }
+        ^out
+    }
+    // Rust: tests/http_client_law.rs:2610 (native harness helper)
+    fn request_head(stream: &Read) -> [U8] {
+        out := [U8]{}
+        chunk := [U8].repeat(0, 512)
+        loop !out.windows(4).any(window -> window == b"\r\n\r\n") {
+            read :: stream.read(&chunk).unwrap()
+            assert_ne(read, 0)
+            out.extend_from_slice(chunk[..read])
+        }
+        ^out
+    }
+    // Rust: tests/http_client_law.rs:2621 (harness entry, now inside this test)
+    cert :: pem(fs.canonicalize("tests/fixtures/tls/smtp.server.cert.pem").unwrap())
+    key :: pem(fs.canonicalize("tests/fixtures/tls/smtp.server.key.pem").unwrap())
+    root_cert :: pem(fs.canonicalize("tests/fixtures/tls/smtp.ca.cert.pem").unwrap())
+    _ :: rustls.crypto.ring.default_provider().install_default()
+    http :: TcpListener.bind("127.0.0.1:0").unwrap()
+    http_addr :: http.local_addr().unwrap()
+    http_server :: thread.spawn(() -> {
+        (stream, _) := http.accept().unwrap()
+        _ :: request_head(&stream)
+        stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok").unwrap()
+    })
+    server := rustls.ServerConfig.builder().with_no_client_auth().with_single_cert(
+        [rustls.pki_types.CertificateDer.from(^cert)],
+        rustls.pki_types.PrivateKeyDer.Pkcs8(rustls.pki_types.PrivatePkcs8KeyDer.from(^key))
+    ).unwrap()
+    server.alpn_protocols = [b"http/1.1".to_vec()]
+    shared_server :: Arc.new(^server)
+    https :: TcpListener.bind("127.0.0.1:0").unwrap()
+    https_addr :: https.local_addr().unwrap()
+    location :: "http://{http_addr}/ok"
+    redirect_tls :: shared_server.clone()
+    https_server :: thread.spawn(() -> {
+        loop _ in 0..2 {
+            (socket, _) :: https.accept().unwrap()
+            socket.set_read_timeout(Some(Duration.from_secs(5))).unwrap()
+            connection :: rustls.ServerConnection.new(redirect_tls.clone()).unwrap()
+            stream := rustls.StreamOwned.new(^connection, ^socket)
+            _ :: request_head(&stream)
+            body :: "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            stream.write_all(body.as_bytes()).unwrap()
+            stream.flush().unwrap()
+        }
+    })
+    root :: bridge.jet_http_client_new_impl()
+    rooted :: bridge.jet_http_client_root_certificate_impl(root, root_cert, false).unwrap()
+    client :: bridge.jet_http_client_protocols_impl(rooted, false, true, false).unwrap()
+    url :: "https://localhost:{https_addr.port()}/from"
+    denied :: bridge.jet_http_client_send_with_impl(
+        client, "GET", url, [], None, None, None, None, None, None, None, None, None, None, None, [], [], []
+    ).unwrap_err()
+    assert(denied == bridge.JetHTTPBridgeError.Redirect)
+    assert_eq(bridge.jet_http_client_open_body_count_impl(), 0, "HTTPS→HTTP deny must close the redirect response body")
+    allowed_root :: bridge.jet_http_client_new_impl()
+    allowed_rooted :: bridge.jet_http_client_root_certificate_impl(allowed_root, root_cert, false).unwrap()
+    allowed_proto :: bridge.jet_http_client_protocols_impl(allowed_rooted, false, true, false).unwrap()
+    allowed :: bridge.jet_http_client_allow_http_downgrade_impl(allowed_proto, true).unwrap()
+    response :: bridge.jet_http_client_send_with_impl(
+        allowed, "GET", url, [], None, None, None, None, None, None, None, None, None, None, None, [], [], []
+    ).unwrap()
+    assert_eq(response.status, 200)
+    assert_eq(bridge.jet_http_client_body_read_impl(response.body_handle, 8).unwrap(), Some(b"ok".to_vec()))
+    https_server.join().unwrap()
+    http_server.join().unwrap()
+    cookie_http :: TcpListener.bind("127.0.0.1:0").unwrap()
+    cookie_http_addr :: cookie_http.local_addr().unwrap()
+    cookie_http_server :: thread.spawn(() -> {
+        (stream, _) := cookie_http.accept().unwrap()
+        head :: String.from_utf8(request_head(&stream)).unwrap().to_ascii_lowercase()
+        assert(!head.contains("\r\ncookie:"), "Secure cookie leaked over HTTP: {head}")
+        stream.write_all(b"HTTP/1.1 200 OK\r\nSet-Cookie: session=insecure; Path=/\r\nSet-Cookie: injected=bad; Path=/; Secure\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap()
+    })
+    cookie_https :: TcpListener.bind("127.0.0.1:0").unwrap()
+    cookie_https_addr :: cookie_https.local_addr().unwrap()
+    cookie_https_server :: thread.spawn(() -> {
+        loop request in 0..3 {
+            (socket, _) :: cookie_https.accept().unwrap()
+            connection :: rustls.ServerConnection.new(shared_server.clone()).unwrap()
+            stream := rustls.StreamOwned.new(^connection, ^socket)
+            head :: String.from_utf8(request_head(&stream)).unwrap().to_ascii_lowercase()
+            if request == 0 {
+                assert(!head.contains("\r\ncookie:"), "unexpected seed cookie: {head}")
+                stream.write_all(b"HTTP/1.1 200 OK\r\nSet-Cookie: session=secure; Path=/; Secure\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap()
+            } else if request == 1 {
+                assert(head.contains("\r\ncookie: session=secure\r\n"), "insecure overwrite won: {head}")
+                assert(!head.contains("injected="), "HTTP set a Secure cookie: {head}")
+                stream.write_all(b"HTTP/1.1 200 OK\r\nSet-Cookie: session=https-plain; Path=/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap()
+            } else {
+                assert(head.contains("\r\ncookie: session=https-plain\r\n"), "HTTPS replacement lost: {head}")
+                stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap()
+            }
+            stream.flush().unwrap()
+        }
+    })
+    cookie_root :: bridge.jet_http_client_new_impl()
+    cookie_rooted :: bridge.jet_http_client_root_certificate_impl(cookie_root, root_cert, false).unwrap()
+    cookie_proto :: bridge.jet_http_client_protocols_impl(cookie_rooted, false, true, false).unwrap()
+    cookie_client :: bridge.jet_http_client_cookies_impl(cookie_proto, true).unwrap()
+    secure_url :: "https://localhost:{cookie_https_addr.port()}/cookie"
+    insecure_url :: "http://localhost:{cookie_http_addr.port()}/cookie"
+    loop cookie_url in [&secure_url, &insecure_url, &secure_url, &secure_url] {
+        response :: bridge.jet_http_client_send_with_impl(
+            cookie_client, "GET", cookie_url, [], None, None, None, None, None, None, None, None, None, None, None, [], [], []
+        ).unwrap()
+        assert_eq(bridge.jet_http_client_body_read_impl(response.body_handle, 1).unwrap(), None)
+    }
+    cookie_https_server.join().unwrap()
+    cookie_http_server.join().unwrap()
+}
+
+// Rust: tests/http_client_law.rs:2814
+#Test("ambient_context_deadline_upper_bounds_client_total_timeout") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        _ :: request_head(&stream)
+        thread.sleep(Duration.from_millis(250))
+        _ :: stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nlate")
+    })
+    src :: """
+use core.http.client as http
+use core.time as time
+fn run() {
+    client :: http.Client.new().timeouts(5000, 5000, 5000, 5000, 5000, 5000, 5000)
+    #Context(deadline: time.now() + 40) {
+        if client.send(http.request("GET", "http://{addr}/slow")) == {
+            .Ok(_) -> print("ok")
+            .Err(_) -> print("timeout")
+        }
+    }
+}
+"""
+    (code, stdout, stderr) :: common.build_and_run("jet_http_client_law", "ambient_deadline", src)
+    server.join().unwrap()
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "timeout\n")
+}
+
+// Rust: tests/http_client_law.rs:2847
+#Test("http_get_expired_ambient_deadline_fails_closed") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    hits :: Arc.new(AtomicUsize.new(0))
+    server_hits :: hits.clone()
+    server :: thread.spawn(() -> {
+        accepted :: listener.accept()
+        if accepted.is_err() { return }
+        (stream, _) := accepted.unwrap()
+        _ :: stream.set_read_timeout(Some(Duration.from_millis(100))).ok()
+        buf := [U8].repeat(0, 1)
+        // Only count a real dial that sent at least one request byte.
+        if stream.read(&buf).ok().filter(n -> n > 0).is_some() {
+            _ :: server_hits.fetch_add(1, Ordering.SeqCst)
+            _ :: stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+        }
+    })
+    src :: """
+use core.http.client as http
+use core.time as time
+fn run() {
+    #Context(deadline: time.now()) {
+        if http.get("http://{addr}/expired") == {
+            .Ok(_) -> print("ok")
+            .Err(_) -> print("timeout")
+        }
+    }
+}
+"""
+    (code, stdout, stderr) :: common.build_and_run("jet_http_client_law", "get_ambient_expired", src)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "timeout\n")
+    assert_eq(hits.load(Ordering.SeqCst), 0, "expired ambient must fail before dialing http.get")
+    _ :: TcpStream.connect(addr)
+    _ :: server.join()
+}
+
+// Rust: tests/http_client_law.rs:2895
+#Test("http_post_expired_ambient_deadline_fails_closed") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    hits :: Arc.new(AtomicUsize.new(0))
+    server_hits :: hits.clone()
+    server :: thread.spawn(() -> {
+        accepted :: listener.accept()
+        if accepted.is_err() { return }
+        (stream, _) := accepted.unwrap()
+        _ :: stream.set_read_timeout(Some(Duration.from_millis(100))).ok()
+        buf := [U8].repeat(0, 1)
+        if stream.read(&buf).ok().filter(n -> n > 0).is_some() {
+            _ :: server_hits.fetch_add(1, Ordering.SeqCst)
+            _ :: stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+        }
+    })
+    src :: """
+use core.http.client as http
+use core.time as time
+fn run() {
+    #Context(deadline: time.now()) {
+        if http.post("http://{addr}/expired", "body") == {
+            .Ok(_) -> print("ok")
+            .Err(_) -> print("timeout")
+        }
+    }
+}
+"""
+    (code, stdout, stderr) :: common.build_and_run("jet_http_client_law", "post_ambient_expired", src)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "timeout\n")
+    assert_eq(hits.load(Ordering.SeqCst), 0, "expired ambient must fail before dialing http.post")
+    _ :: TcpStream.connect(addr)
+    _ :: server.join()
+}
+
+// Rust: tests/http_client_law.rs:2942
+#Test("unreplayable_307_closes_redirect_body") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        _ :: request_head(&stream)
+        stream.write_all(b"HTTP/1.1 307 Temporary Redirect\r\nLocation: /to\r\nContent-Length: 5\r\nConnection: close\r\n\r\nleak!").unwrap()
+    })
+    src :: """
+use jet_http_bridge as bridge
+fn run() {
+    client :: bridge.jet_http_client_new_impl()
+    // POST with no buffered body: 307/308 cannot replay; Redirect must close body.
+    err :: bridge.jet_http_client_send_with_impl(
+        client, "POST", "http://{addr}/from", [], None,
+        None, None, None, None, None, None, None, None, Some(2), None, [], [], []
+    ).unwrap_err()
+    assert(err == bridge.JetHTTPBridgeError.Redirect, "{err}")
+    assert_eq(bridge.jet_http_client_open_body_count_impl(), 0, "unreplayable 307 must close the redirect response body")
+}
+"""
+    (code, _, stderr) :: common.build_and_run("jet_http_client_law", "unreplayable_307", src)
+    server.join().unwrap()
+    assert_eq(code, 0, "unreplayable 307 harness failed:\n{stderr}")
+}
+
+// Rust: tests/http_client_law.rs:3029
+#Test("ambient_deadline_absolute_instant_survives_prep_delay") {
+    // Residual-ms storage revives now()+budget after prep; absolute deadline must fail before dial.
+    src :: """
+use jet_http_bridge as bridge
+use std.thread
+use std.time.Duration
+fn run() {
+    client :: bridge.jet_http_client_new_impl()
+    guard :: bridge.JetHTTPAmbientDeadline.push(Some(60)).expect("ambient push")
+    thread.sleep(Duration.from_millis(80))
+    err :: bridge.jet_http_client_send_with_impl(
+        client, "GET", "http://127.0.0.1:9/slow", [], None,
+        Some(5000), Some(5000), Some(5000), Some(5000), None, None, None, None, None, None, [], [], []
+    ).unwrap_err()
+    assert(err == bridge.JetHTTPBridgeError.Timeout, "expected Timeout after prep delay past absolute ambient deadline, got {err}")
+}
+"""
+    (code, _, stderr) :: common.build_and_run("jet_http_client_law", "bridge_ambient_abs", src)
+    assert_eq(code, 0, "ambient absolute harness failed:\n{stderr}")
+}
+
+// Rust: tests/http_client_law.rs:3110
+#Test("public_client_allow_http_downgrade_method_typechecks") {
+    src :: """
+use core.http.client as http
+fn run() {
+    _ :: http.Client.new().allow_http_downgrade(true).allow_http_downgrade(false)
+}
+"""
+    (code, _, stderr) :: common.build_and_run("jet_http_client_law", "allow_http_downgrade_type", src)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+}
+
+// Rust: tests/http_client_law.rs:3123
+#Test("follow_same_origin_credentials_strips_authorization_on_redirect") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        loop expected_auth in [true, false] {
+            (stream, _) := listener.accept().unwrap()
+            first :: String.from_utf8_lossy(request_head(&stream)).to_ascii_lowercase()
+            assert(first.contains("authorization: bearer secret\r\n"))
+            assert(first.starts_with("get /start "))
+            stream.write_all(b"HTTP/1.1 302 Found\r\nLocation: /next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap()
+            drop(^stream)
+            (next_stream, _) := listener.accept().unwrap()
+            second :: String.from_utf8_lossy(request_head(&next_stream)).to_ascii_lowercase()
+            assert(second.starts_with("get /next "))
+            if expected_auth {
+                assert(second.contains("authorization: bearer secret\r\n"), "same_origin_credentials:true must keep Authorization on same-origin hop: {second}")
+            } else {
+                assert(!second.contains("authorization:"), "same_origin_credentials:false must strip Authorization on same-origin hop: {second}")
+            }
+            next_stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok").unwrap()
+        }
+    })
+    loop (label, keep) in [("keep", true), ("strip", false)] {
+        src :: """
+use core.http.client as http
+fn run() {
+    client :: http.Client.new()
+        .redirects(.Follow{ max: 2, same_origin_credentials: {keep} })
+        .protocols(false, true, false)
+    req :: http.request("GET", "http://{addr}/start").header("Authorization", "Bearer secret")
+    resp :: client.send(req) ?? panic("send")
+    print(resp.body().text(8) ?? panic("body"))
+    print(resp.redirect_history().len())
+}
+"""
+        (code, stdout, stderr) :: common.build_and_run("jet_http_client_law", "follow_creds_{label}", src)
+        assert_eq(code, 0, "{label} stderr:\n{stderr}")
+        assert_eq(stdout, "ok\n1\n", label)
+    }
+    server.join().unwrap()
+}

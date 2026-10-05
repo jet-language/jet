@@ -1,1661 +1,212 @@
-// PORT-PENDING 1005 tests-comptime-cli-parity: tests/comptime_cli_parity.rs:1-1657
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS mod common;
-//RS 
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::{Command, Output};
-//RS 
-//RS // The tooling example exercises the ordinary nominal type plus its
-//RS // `CheckedText` implementation through the same AOT and `jet run` paths.
-//RS const TIER_PARITY_STEMS: [&str; 7] = [
-//RS     "cli/subcommands",
-//RS     "concurrency/freeze_capture",
-//RS     "comptime/embed",
-//RS     "comptime/embed_bytes",
-//RS     "comptime/find",
-//RS     "comptime/find_empty",
-//RS     "tooling/checked_text_type",
-//RS ];
-//RS 
-//RS fn copy_comptime_fixture(root: &Path, destination: &Path, stem: &str) -> String {
-//RS     let file_name = stem
-//RS         .rsplit('/')
-//RS         .next()
-//RS         .expect("comptime stem has a file name");
-//RS     fs::copy(
-//RS         root.join("Examples/features").join(format!("{stem}.jet")),
-//RS         destination.join(format!("{file_name}.jet")),
-//RS     )
-//RS     .unwrap_or_else(|error| panic!("copy `{stem}` fixture: {error}"));
-//RS 
-//RS     let assets: &[&str] = match stem {
-//RS         "comptime/embed" => &["motd.txt"],
-//RS         "comptime/embed_bytes" => &["logo.bin"],
-//RS         "comptime/find" | "comptime/find_empty" => &[
-//RS             "find_inputs/alpha-1.txt",
-//RS             "find_inputs/nested/beta-2.txt",
-//RS             "find_inputs/nested/gamma-3.txt",
-//RS         ],
-//RS         _ => &[],
-//RS     };
-//RS     for relative in assets {
-//RS         let target = destination.join(relative);
-//RS         if let Some(parent) = target.parent() {
-//RS             fs::create_dir_all(parent).expect("create comptime fixture asset directory");
-//RS         }
-//RS         fs::copy(
-//RS             root.join("Examples/features/comptime").join(relative),
-//RS             &target,
-//RS         )
-//RS         .unwrap_or_else(|error| panic!("copy `{relative}` for `{stem}`: {error}"));
-//RS     }
-//RS     format!("{file_name}.jet")
-//RS }
-//RS 
-//RS fn copy_build_stamp_fixture(root: &Path, destination: &Path) {
-//RS     fs::copy(
-//RS         root.join("Examples/features/comptime/build_stamp.jet"),
-//RS         destination.join("build_stamp.jet"),
-//RS     )
-//RS     .expect("copy build stamp example");
-//RS     let lock_dir = destination.join(".jet");
-//RS     fs::create_dir_all(&lock_dir).expect("create build stamp lock directory");
-//RS     fs::copy(
-//RS         root.join("tests/fixtures/build_stamp.lock"),
-//RS         lock_dir.join("lock"),
-//RS     )
-//RS     .expect("copy build stamp lock fixture");
-//RS }
-//RS 
-//RS fn run_jet(args: &[&str], project: &Path, cache: &Path) -> Output {
-//RS     fs::create_dir_all(cache).expect("create isolated Jet cache");
-//RS     Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(args)
-//RS         .current_dir(project)
-//RS         .env("JET_STORE_DIR", cache.join("build"))
-//RS         .env("JET_RUN_CACHE_DIR", cache.join("run"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap_or_else(|error| panic!("spawn `{}`: {error}", args.join(" ")))
-//RS }
-//RS 
-//RS fn assert_tier_parity_case(root: &Path, scratch: &common::Scratch, stem: &str) {
-//RS     let case_dir = scratch.join(&stem.replace('/', "_"));
-//RS     fs::create_dir_all(&case_dir).expect("create comptime parity case directory");
-//RS     let file_name = copy_comptime_fixture(root, &case_dir, stem);
-//RS     let expected_path = root.join(format!("Examples/features/expected/{stem}.out"));
-//RS     let expected = fs::read(&expected_path)
-//RS         .unwrap_or_else(|error| panic!("missing golden for `{stem}`: {error}"));
-//RS     let cache = case_dir.join("cache");
-//RS 
-//RS     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["build", &file_name])
-//RS         .current_dir(&case_dir)
-//RS         .env("JET_STORE_DIR", cache.join("aot"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap_or_else(|error| panic!("failed to spawn AOT build for `{stem}`: {error}"));
-//RS     assert!(
-//RS         build.status.success(),
-//RS         "AOT build failed for `{stem}`:\nstdout:\n{}\nstderr:\n{}",
-//RS         String::from_utf8_lossy(&build.stdout),
-//RS         String::from_utf8_lossy(&build.stderr)
-//RS     );
-//RS     let binary_name = file_name
-//RS         .strip_suffix(".jet")
-//RS         .expect("Jet fixture extension");
-//RS     let aot = Command::new(case_dir.join(".jet").join("build").join(binary_name))
-//RS         .current_dir(&case_dir)
-//RS         .output()
-//RS         .unwrap_or_else(|error| panic!("failed to run AOT binary for `{stem}`: {error}"));
-//RS     assert!(
-//RS         aot.status.success(),
-//RS         "AOT run failed for `{stem}`:\n{}",
-//RS         String::from_utf8_lossy(&aot.stderr)
-//RS     );
-//RS     assert_eq!(
-//RS         aot.stdout, expected,
-//RS         "AOT output differs from the checked-in golden for `{stem}`"
-//RS     );
-//RS 
-//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["run", &file_name, "--trace-tiers"])
-//RS         .current_dir(&case_dir)
-//RS         .env("JET_RUN_CACHE_DIR", cache.join("run"))
-//RS         .env("JET_STORE_DIR", cache.join("build"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap_or_else(|error| panic!("failed to spawn `jet run` for `{stem}`: {error}"));
-//RS     let trace = String::from_utf8_lossy(&output.stderr);
-//RS 
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "default `jet run` failed for `{stem}`:\nstdout:\n{}\nstderr:\n{trace}",
-//RS         String::from_utf8_lossy(&output.stdout)
-//RS     );
-//RS     assert!(
-//RS         trace
-//RS             .lines()
-//RS             .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-//RS         "default `jet run` did not report resident native execution for `{stem}`:\n{trace}"
-//RS     );
-//RS     assert!(
-//RS         !trace.contains("tier0 interp"),
-//RS         "default `jet run` deopted to the interpreter for `{stem}`:\n{trace}"
-//RS     );
-//RS     assert_eq!(
-//RS         output.stdout, expected,
-//RS         "default `jet run` output differs from the checked-in golden for `{stem}`"
-//RS     );
-//RS 
-//RS     let interpreted_cache = cache.join("interpret");
-//RS     let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["run", "--interpret", &file_name, "--trace-tiers"])
-//RS         .current_dir(&case_dir)
-//RS         .env("JET_RUN_CACHE_DIR", interpreted_cache.join("run"))
-//RS         .env("JET_STORE_DIR", interpreted_cache.join("build"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap_or_else(|error| {
-//RS             panic!("failed to spawn interpreted `jet run` for `{stem}`: {error}")
-//RS         });
-//RS     let interpreted_trace = String::from_utf8_lossy(&interpreted.stderr);
-//RS 
-//RS     assert!(
-//RS         interpreted.status.success(),
-//RS         "interpreted `jet run` failed for `{stem}`:\nstdout:\n{}\nstderr:\n{interpreted_trace}",
-//RS         String::from_utf8_lossy(&interpreted.stdout)
-//RS     );
-//RS     assert!(
-//RS         interpreted_trace.contains("tier0 interp"),
-//RS         "forced interpreter did not report interpreter execution for `{stem}`:\n{interpreted_trace}"
-//RS     );
-//RS     assert!(
-//RS         !interpreted_trace.contains("E2201"),
-//RS         "forced interpreter deopted for `{stem}`:\n{interpreted_trace}"
-//RS     );
-//RS     assert_eq!(
-//RS         interpreted.stdout, expected,
-//RS         "interpreter output differs from the checked-in golden for `{stem}`"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn tier_parity_examples_run_through_aot_jit_and_interpreter() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let scratch = common::Scratch::new("comptime_effect_parity");
-//RS 
-//RS     for stem in TIER_PARITY_STEMS {
-//RS         assert_tier_parity_case(&root, &scratch, stem);
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn build_entry_workspace_matches_release_default_and_dev_interpreter() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let source = root.join("Examples/features/tooling/build_entry_discovery");
-//RS     let scratch = common::Scratch::new("build_entry_discovery_parity");
-//RS     for relative in [
-//RS         "workspace.jet",
-//RS         "package.jet",
-//RS         "run.jet",
-//RS         "tools/build_entry.jet",
-//RS         "packages/foundation/package.jet",
-//RS         "packages/foundation/run.jet",
-//RS         "packages/foundation/tools/build.jet",
-//RS         "packages/app/package.jet",
-//RS         "packages/app/run.jet",
-//RS     ] {
-//RS         let destination = scratch.join(relative);
-//RS         fs::create_dir_all(destination.parent().unwrap())
-//RS             .expect("create build-entry fixture directory");
-//RS         fs::copy(source.join(relative), destination)
-//RS             .unwrap_or_else(|error| panic!("copy build-entry fixture `{relative}`: {error}"));
-//RS     }
-//RS     let expected =
-//RS         fs::read(root.join("Examples/features/expected/tooling/build_entry_discovery.out"))
-//RS             .expect("read build-entry golden");
-//RS 
-//RS     let named = run_jet(
-//RS         &["build", "foundation"],
-//RS         &scratch.path,
-//RS         &scratch.join("cache/named"),
-//RS     );
-//RS     assert!(
-//RS         named.status.success(),
-//RS         "`jet build foundation` failed:\n{}",
-//RS         String::from_utf8_lossy(&named.stderr)
-//RS     );
-//RS     assert!(
-//RS         scratch
-//RS             .join("packages/foundation/.jet/generated/foundation/foundation_marker.jet")
-//RS             .is_file(),
-//RS         "the named depth-one member build did not run"
-//RS     );
-//RS 
-//RS     let workspace = run_jet(&["build"], &scratch.path, &scratch.join("cache/workspace"));
-//RS     assert!(
-//RS         workspace.status.success(),
-//RS         "workspace build failed:\n{}",
-//RS         String::from_utf8_lossy(&workspace.stderr)
-//RS     );
-//RS 
-//RS     let release = run_jet(
-//RS         &["run", "--release", "run.jet"],
-//RS         &scratch.path,
-//RS         &scratch.join("cache/release"),
-//RS     );
-//RS     let default = run_jet(
-//RS         &["run", "run.jet"],
-//RS         &scratch.path,
-//RS         &scratch.join("cache/default"),
-//RS     );
-//RS     let interpreted = run_jet(
-//RS         &["dev", "run.jet", "--interpret", "--watch=off"],
-//RS         &scratch.path,
-//RS         &scratch.join("cache/interpreted"),
-//RS     );
-//RS     for (tier, output) in [
-//RS         ("release", &release),
-//RS         ("default", &default),
-//RS         ("dev interpreter", &interpreted),
-//RS     ] {
-//RS         assert_eq!(
-//RS             output.status.code(),
-//RS             Some(0),
-//RS             "{tier} build-entry example failed:\n{}",
-//RS             String::from_utf8_lossy(&output.stderr)
-//RS         );
-//RS         assert_eq!(
-//RS             output.stdout, expected,
-//RS             "{tier} build-entry output differs from the checked-in golden"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn fact_plane_runs_through_aot_jit_and_interpreter() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let scratch = common::Scratch::new("fact_plane_parity");
-//RS 
-//RS     assert_tier_parity_case(&root, &scratch, "comptime/fact_plane");
-//RS }
-//RS 
-//RS #[test]
-//RS fn build_fact_precedence_example_matches_release_default_and_dev() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let scratch = common::Scratch::new("build_fact_precedence_parity");
-//RS     fs::copy(
-//RS         root.join("Examples/features/comptime/build_fact_precedence.jet"),
-//RS         scratch.path.join("build_fact_precedence.jet"),
-//RS     )
-//RS     .expect("copy build fact precedence example");
-//RS     let expected =
-//RS         fs::read(root.join("Examples/features/expected/comptime/build_fact_precedence.out"))
-//RS             .expect("read build fact precedence golden");
-//RS 
-//RS     let release = run_jet(
-//RS         &["run", "--release", "build_fact_precedence.jet"],
-//RS         &scratch.path,
-//RS         &scratch.join("cache/release"),
-//RS     );
-//RS     let default = run_jet(
-//RS         &["run", "build_fact_precedence.jet"],
-//RS         &scratch.path,
-//RS         &scratch.join("cache/default"),
-//RS     );
-//RS     let dev = run_jet(
-//RS         &[
-//RS             "dev",
-//RS             "build_fact_precedence.jet",
-//RS             "--interpret",
-//RS             "--watch=off",
-//RS         ],
-//RS         &scratch.path,
-//RS         &scratch.join("cache/dev"),
-//RS     );
-//RS 
-//RS     for (tier, output) in [("release", &release), ("default", &default), ("dev", &dev)] {
-//RS         assert_eq!(
-//RS             output.status.code(),
-//RS             Some(0),
-//RS             "{tier} build-fact example failed:\n{}",
-//RS             String::from_utf8_lossy(&output.stderr)
-//RS         );
-//RS         assert_eq!(output.stdout, expected, "{tier} build-fact output differs");
-//RS     }
-//RS     assert_eq!(release.status.code(), default.status.code());
-//RS     assert_eq!(release.status.code(), dev.status.code());
-//RS }
-//RS 
-//RS #[test]
-//RS fn computed_constants_match_aot_default_and_interpreter() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let scratch = common::Scratch::new("computed_constants_parity");
-//RS     let source = scratch.join("computed_constants.jet");
-//RS     fs::copy(
-//RS         root.join("Examples/features/comptime/computed_constants.jet"),
-//RS         &source,
-//RS     )
-//RS     .expect("copy computed constants example");
-//RS     let source_text = fs::read_to_string(&source).expect("read computed constants source");
-//RS     let compiled = jet::compile_with_path(&source_text, &source.to_string_lossy())
-//RS         .unwrap_or_else(|diags| panic!("computed constants front end rejected: {diags:#?}"));
-//RS     assert!(
-//RS         compiled.rust.contains("__jet_First = 41"),
-//RS         "computed enum discriminant did not reach generated Rust:\n{}",
-//RS         compiled.rust
-//RS     );
-//RS     let expected =
-//RS         fs::read(root.join("Examples/features/expected/comptime/computed_constants.out"))
-//RS             .expect("read computed constants golden");
-//RS     let cache = scratch.join("cache");
-//RS 
-//RS     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["build", "computed_constants.jet"])
-//RS         .current_dir(&scratch.path)
-//RS         .env("JET_STORE_DIR", cache.join("build"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .expect("build computed constants example");
-//RS     assert!(
-//RS         build.status.success(),
-//RS         "AOT computed constants build failed:\n{}",
-//RS         String::from_utf8_lossy(&build.stderr)
-//RS     );
-//RS 
-//RS     let aot = Command::new(scratch.join(".jet/build/computed_constants"))
-//RS         .current_dir(&scratch.path)
-//RS         .output()
-//RS         .expect("run AOT computed constants example");
-//RS     assert!(
-//RS         aot.status.success(),
-//RS         "AOT computed constants run failed:\n{}",
-//RS         String::from_utf8_lossy(&aot.stderr)
-//RS     );
-//RS 
-//RS     let default = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["run", "computed_constants.jet"])
-//RS         .current_dir(&scratch.path)
-//RS         .env("JET_RUN_CACHE_DIR", cache.join("run"))
-//RS         .env("JET_STORE_DIR", cache.join("default"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .expect("run computed constants through default jet run");
-//RS     assert!(
-//RS         default.status.success(),
-//RS         "default computed constants run failed:\n{}",
-//RS         String::from_utf8_lossy(&default.stderr)
-//RS     );
-//RS 
-//RS     let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["run", "--interpret", "computed_constants.jet"])
-//RS         .current_dir(&scratch.path)
-//RS         .env("JET_RUN_CACHE_DIR", cache.join("interpret-run"))
-//RS         .env("JET_STORE_DIR", cache.join("interpret-build"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .expect("run computed constants through the interpreter");
-//RS     assert!(
-//RS         interpreted.status.success(),
-//RS         "interpreter computed constants run failed:\n{}",
-//RS         String::from_utf8_lossy(&interpreted.stderr)
-//RS     );
-//RS 
-//RS     assert_eq!(aot.stdout, expected, "AOT output differs from the golden");
-//RS     assert_eq!(
-//RS         default.stdout, expected,
-//RS         "default `jet run` output differs from the golden"
-//RS     );
-//RS     assert_eq!(
-//RS         interpreted.stdout, expected,
-//RS         "interpreter output differs from the golden"
-//RS     );
-//RS }
-//RS 
-//RS const ENUM_DISCRIMINANT_SOURCE: &str = r#"
-//RS BASE :: prep { 7 }
-//RS STEP :: prep { 3 }
-//RS 
-//RS #Layout(c)
-//RS enum WireCode {
-//RS     Explicit = 0
-//RS     Sparse = 9
-//RS     Negative = -7
-//RS     Named = BASE
-//RS     Arithmetic = BASE + STEP * 2
-//RS     Shifted = 1 << 4
-//RS     ShiftedRight = 32 >> 3
-//RS     Implicit
-//RS }
-//RS 
-//RS fn run() {}
-//RS "#;
-//RS 
-//RS const ENUM_DISCRIMINANT_SOURCE_IMPLICIT_FIRST: &str = r#"
-//RS BASE :: prep { 7 }
-//RS STEP :: prep { 3 }
-//RS 
-//RS #Layout(c)
-//RS enum WireCode {
-//RS     Implicit
-//RS     Explicit = 0
-//RS     Sparse = 9
-//RS     Negative = -7
-//RS     Named = BASE
-//RS     Arithmetic = BASE + STEP * 2
-//RS     Shifted = 1 << 4
-//RS     ShiftedRight = 32 >> 3
-//RS }
-//RS 
-//RS fn run() {}
-//RS "#;
-//RS 
-//RS const ENUM_DISCRIMINANTS: &[(&str, Option<i64>)] = &[
-//RS     ("Explicit", Some(0)),
-//RS     ("Sparse", Some(9)),
-//RS     ("Negative", Some(-7)),
-//RS     ("Named", Some(7)),
-//RS     ("Arithmetic", Some(13)),
-//RS     ("Shifted", Some(16)),
-//RS     ("ShiftedRight", Some(4)),
-//RS     // An omitted discriminant remains declaration-order-dependent at the
-//RS     // runtime boundary; it is deliberately not rewritten as prior + 1 here.
-//RS     ("Implicit", None),
-//RS ];
-//RS 
-//RS const ENUM_DISCRIMINANTS_IMPLICIT_FIRST: &[(&str, Option<i64>)] = &[
-//RS     ("Implicit", None),
-//RS     ("Explicit", Some(0)),
-//RS     ("Sparse", Some(9)),
-//RS     ("Negative", Some(-7)),
-//RS     ("Named", Some(7)),
-//RS     ("Arithmetic", Some(13)),
-//RS     ("Shifted", Some(16)),
-//RS     ("ShiftedRight", Some(4)),
-//RS ];
-//RS 
-//RS const DUPLICATE_ENUM_DISCRIMINANT_SOURCE: &str = r#"
-//RS enum DuplicateCode {
-//RS     First = 7
-//RS     Second = 7
-//RS }
-//RS 
-//RS fn run() {}
-//RS "#;
-//RS 
-//RS const ENUM_DISCRIMINANT_DIAGNOSTICS: &[(&str, &str, &str, &str)] = &[
-//RS     (
-//RS         "overflow",
-//RS         r#"
-//RS MAX :: prep { 9223372036854775807 }
-//RS 
-//RS enum Bad {
-//RS     TooWide = MAX + 1
-//RS }
-//RS 
-//RS fn run() {}
-//RS "#,
-//RS         "@max + 1",
-//RS         "An enum discriminant is outside the signed integer range",
-//RS     ),
-//RS     (
-//RS         "noninteger",
-//RS         r#"
-//RS enum Bad {
-//RS     Fractional = 1.5
-//RS }
-//RS 
-//RS fn run() {}
-//RS "#,
-//RS         "1.5",
-//RS         "An enum discriminant must be an integer, got Float (an approximate binary number)",
-//RS     ),
-//RS     (
-//RS         "unknown",
-//RS         r#"
-//RS enum Bad {
-//RS     Missing = missing
-//RS }
-//RS 
-//RS fn run() {}
-//RS "#,
-//RS         "missing",
-//RS         "An enum discriminant must be computable at compile time",
-//RS     ),
-//RS ];
-//RS 
-//RS fn checked_enum_discriminants(path: &Path, enum_name: &str) -> Vec<(String, Option<i64>)> {
-//RS     let mut bundle = jet::Loader::load_entry(
-//RS         path.to_str()
-//RS             .expect("enum discriminant fixture path is valid UTF-8"),
-//RS     )
-//RS     .unwrap_or_else(|diagnostics| panic!("enum discriminant fixture failed to load: {diagnostics:#?}"));
-//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS     let errors: Vec<_> = diagnostics
-//RS         .iter()
-//RS         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
-//RS         .collect();
-//RS     assert!(
-//RS         errors.is_empty(),
-//RS         "enum discriminant fixture failed sema: {errors:#?}"
-//RS     );
-//RS 
-//RS     bundle.modules[bundle.entry]
-//RS         .items
-//RS         .iter()
-//RS         .find_map(|item| match item {
-//RS             jet::AST::Item::Enum(definition) if definition.name == enum_name => Some(
-//RS                 definition
-//RS                     .variants
-//RS                     .iter()
-//RS                     .map(|variant| (variant.name.clone(), variant.discriminant))
-//RS                     .collect(),
-//RS             ),
-//RS             _ => None,
-//RS         })
-//RS         .unwrap_or_else(|| panic!("enum `{enum_name}` was not registered"))
-//RS }
-//RS 
-//RS fn assert_enum_discriminants(
-//RS     path: &Path,
-//RS     enum_name: &str,
-//RS     expected: &[(&str, Option<i64>)],
-//RS ) {
-//RS     let observed = checked_enum_discriminants(path, enum_name);
-//RS     assert_eq!(
-//RS         observed.len(),
-//RS         expected.len(),
-//RS         "enum `{enum_name}` variant count changed: {observed:#?}"
-//RS     );
-//RS     for (observed, &(expected_name, expected_value)) in observed.iter().zip(expected.iter()) {
-//RS         assert_eq!(observed.0.as_str(), expected_name);
-//RS         assert_eq!(
-//RS             observed.1, expected_value,
-//RS             "enum `{enum_name}` code for `{expected_name}` changed"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS fn assert_enum_discriminant_error(path: &Path, source: &str, expression: &str, expected_what: &str) {
-//RS     let mut bundle = jet::Loader::load_entry(
-//RS         path.to_str()
-//RS             .expect("enum discriminant diagnostic path is valid UTF-8"),
-//RS     )
-//RS     .unwrap_or_else(|diagnostics| panic!("enum diagnostic fixture failed to load: {diagnostics:#?}"));
-//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS     let diagnostic = diagnostics
-//RS         .iter()
-//RS         .find(|diagnostic| diagnostic.code == "E0035")
-//RS         .unwrap_or_else(|| panic!("missing E0035 for `{expression}`: {diagnostics:#?}"));
-//RS     let start = source
-//RS         .find(expression)
-//RS         .unwrap_or_else(|| panic!("expression `{expression}` is absent from fixture"));
-//RS     assert_eq!(diagnostic.what, expected_what);
-//RS     assert_eq!(
-//RS         diagnostic.span,
-//RS         Some(jet::Diagnostics::Span::new(start, start + expression.len())),
-//RS         "diagnostic span changed for `{expression}`"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn comptime_enum_discriminants_keep_explicit_codes_when_implicit_case_moves() {
-//RS     let scratch = common::Scratch::new("enum_discriminant_codes");
-//RS     for (stem, source, expected) in [
-//RS         (
-//RS             "wire_code",
-//RS             ENUM_DISCRIMINANT_SOURCE,
-//RS             ENUM_DISCRIMINANTS,
-//RS         ),
-//RS         (
-//RS             "wire_code_implicit_first",
-//RS             ENUM_DISCRIMINANT_SOURCE_IMPLICIT_FIRST,
-//RS             ENUM_DISCRIMINANTS_IMPLICIT_FIRST,
-//RS         ),
-//RS     ] {
-//RS         let filename = format!("{stem}.jet");
-//RS         let path = scratch.join(&filename);
-//RS         fs::write(&path, source).expect("write enum discriminant fixture");
-//RS         let shown = path.to_string_lossy();
-//RS         let _compiled = jet::compile_with_path(source, &shown)
-//RS             .unwrap_or_else(|diagnostics| panic!("enum discriminant codegen failed: {diagnostics:#?}"));
-//RS         assert_enum_discriminants(&path, "WireCode", expected);
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn comptime_enum_discriminants_keep_duplicates_and_report_invalid_expressions() {
-//RS     let duplicate_scratch = common::Scratch::new("enum_discriminant_duplicates");
-//RS     let duplicate_path = duplicate_scratch.join("duplicate_codes.jet");
-//RS     fs::write(&duplicate_path, DUPLICATE_ENUM_DISCRIMINANT_SOURCE)
-//RS         .expect("write duplicate enum discriminant fixture");
-//RS     let shown = duplicate_path.to_string_lossy();
-//RS     let _compiled = jet::compile_with_path(DUPLICATE_ENUM_DISCRIMINANT_SOURCE, &shown)
-//RS         .unwrap_or_else(|diagnostics| panic!("duplicate enum codes failed to compile: {diagnostics:#?}"));
-//RS     assert_enum_discriminants(
-//RS         &duplicate_path,
-//RS         "DuplicateCode",
-//RS         &[("First", Some(7)), ("Second", Some(7))],
-//RS     );
-//RS 
-//RS     for &(name, source, expression, expected_what) in ENUM_DISCRIMINANT_DIAGNOSTICS {
-//RS         let scratch = common::Scratch::new(&format!("enum_discriminant_{name}"));
-//RS         let path = scratch.join("invalid.jet");
-//RS         fs::write(&path, source).expect("write enum diagnostic fixture");
-//RS         assert_enum_discriminant_error(&path, source, expression, expected_what);
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let scratch = common::Scratch::new("job_runner_cli_parity");
-//RS     let source = scratch.join("job_runner.jet");
-//RS     fs::write(
-//RS         scratch.join("package.jet"),
-//RS         "name: \"job_runner\"\nversion: \"0.1.0\"\n",
-//RS     )
-//RS     .expect("write job runner package manifest");
-//RS     fs::copy(
-//RS         root.join("Examples/features/devloop/job_runner.jet"),
-//RS         &source,
-//RS     )
-//RS     .expect("copy job runner example");
-//RS     let help_expected = fs::read(root.join("Examples/features/expected/devloop/job_runner.out"))
-//RS         .expect("read job runner help golden");
-//RS     let cache = scratch.join("cache");
-//RS 
-//RS     let default_help = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["run", "job_runner.jet"])
-//RS         .current_dir(&scratch.path)
-//RS         .env("JET_RUN_CACHE_DIR", cache.join("default-run"))
-//RS         .env("JET_STORE_DIR", cache.join("default-build"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .expect("run job runner through default jet run");
-//RS     assert!(
-//RS         default_help.status.success(),
-//RS         "default job runner help failed:\n{}",
-//RS         String::from_utf8_lossy(&default_help.stderr)
-//RS     );
-//RS     assert_eq!(default_help.stdout, help_expected);
-//RS 
-//RS     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["build", "job_runner.jet"])
-//RS         .current_dir(&scratch.path)
-//RS         .env("JET_STORE_DIR", cache.join("aot-build"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .expect("build job runner example");
-//RS     assert!(
-//RS         build.status.success(),
-//RS         "AOT job runner build failed:\n{}",
-//RS         String::from_utf8_lossy(&build.stderr)
-//RS     );
-//RS     let aot_help = Command::new(scratch.join(".jet/build/job_runner"))
-//RS         .current_dir(&scratch.path)
-//RS         .output()
-//RS         .expect("run AOT job runner help");
-//RS     assert!(
-//RS         aot_help.status.success(),
-//RS         "AOT job runner help failed:\n{}",
-//RS         String::from_utf8_lossy(&aot_help.stderr)
-//RS     );
-//RS     assert_eq!(aot_help.stdout, help_expected);
-//RS     assert_eq!(default_help.stdout, aot_help.stdout);
-//RS 
-//RS     let default_jobs_help = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["run", "job_runner.jet", "--", "--help"])
-//RS         .current_dir(&scratch.path)
-//RS         .env("JET_RUN_CACHE_DIR", cache.join("job-help-run"))
-//RS         .env("JET_STORE_DIR", cache.join("job-help-build"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .expect("show default job subcommand help");
-//RS     let aot_jobs_help = Command::new(scratch.join(".jet/build/job_runner"))
-//RS         .arg("--help")
-//RS         .current_dir(&scratch.path)
-//RS         .output()
-//RS         .expect("show AOT job subcommand help");
-//RS     assert!(default_jobs_help.status.success());
-//RS     assert!(aot_jobs_help.status.success());
-//RS     assert!(String::from_utf8_lossy(&default_jobs_help.stdout).contains("greet"));
-//RS     assert!(String::from_utf8_lossy(&aot_jobs_help.stdout).contains("greet"));
-//RS     assert!(!String::from_utf8_lossy(&default_jobs_help.stdout).contains("inspect"));
-//RS     assert!(!String::from_utf8_lossy(&aot_jobs_help.stdout).contains("inspect"));
-//RS 
-//RS     for (job, golden_name) in [
-//RS         ("greet", "job_runner.greet.out"),
-//RS         ("seed_data", "job_runner.seed_data.out"),
-//RS     ] {
-//RS         let expected = fs::read(
-//RS             root.join("Examples/features/expected/devloop")
-//RS                 .join(golden_name),
-//RS         )
-//RS         .unwrap_or_else(|error| panic!("read named job golden `{golden_name}`: {error}"));
-//RS         let default_job = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS             .args(["run", "job_runner.jet", "--", job])
-//RS             .current_dir(&scratch.path)
-//RS             .env("JET_RUN_CACHE_DIR", cache.join(format!("{job}-run")))
-//RS             .env("JET_STORE_DIR", cache.join(format!("{job}-build")))
-//RS             .env("NO_COLOR", "1")
-//RS             .output()
-//RS             .unwrap_or_else(|error| panic!("run named job `{job}`: {error}"));
-//RS         assert!(
-//RS             default_job.status.success(),
-//RS             "default named job `{job}` failed:\n{}",
-//RS             String::from_utf8_lossy(&default_job.stderr)
-//RS         );
-//RS         assert_eq!(
-//RS             default_job.stdout, expected,
-//RS             "default job `{job}` differs from golden"
-//RS         );
-//RS 
-//RS         let aot_job = Command::new(scratch.join(".jet/build/job_runner"))
-//RS             .arg(job)
-//RS             .current_dir(&scratch.path)
-//RS             .output()
-//RS             .unwrap_or_else(|error| panic!("run AOT named job `{job}`: {error}"));
-//RS         assert!(
-//RS             aot_job.status.success(),
-//RS             "AOT named job `{job}` failed:\n{}",
-//RS             String::from_utf8_lossy(&aot_job.stderr)
-//RS         );
-//RS         assert_eq!(
-//RS             aot_job.stdout, expected,
-//RS             "AOT job `{job}` differs from golden"
-//RS         );
-//RS         assert_eq!(default_job.stdout, aot_job.stdout);
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let scratch = common::Scratch::new("cli_docs_parity");
-//RS     let source = scratch.join("subcommands.jet");
-//RS     fs::copy(root.join("Examples/features/cli/subcommands.jet"), &source)
-//RS         .expect("copy CLI example");
-//RS     let cache = scratch.join("cache");
-//RS 
-//RS     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["build", "subcommands.jet"])
-//RS         .current_dir(&scratch.path)
-//RS         .output()
-//RS         .expect("build CLI example");
-//RS     assert!(
-//RS         build.status.success(),
-//RS         "AOT CLI build failed:\n{}",
-//RS         String::from_utf8_lossy(&build.stderr)
-//RS     );
-//RS     let binary = scratch.join(".jet/build/subcommands");
-//RS 
-//RS     for args in [["--help"].as_slice(), ["serve", "--help"].as_slice()] {
-//RS         let aot = Command::new(&binary)
-//RS             .args(args)
-//RS             .current_dir(&scratch.path)
-//RS             .output()
-//RS             .expect("run AOT CLI help");
-//RS         let mut run_args = vec!["run", "subcommands.jet", "--"];
-//RS         run_args.extend_from_slice(args);
-//RS         let jit = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS             .args(&run_args)
-//RS             .current_dir(&scratch.path)
-//RS             .output()
-//RS             .expect("run default CLI help");
-//RS         assert!(
-//RS             aot.status.success(),
-//RS             "AOT help failed: {}",
-//RS             String::from_utf8_lossy(&aot.stderr)
-//RS         );
-//RS         assert!(
-//RS             jit.status.success(),
-//RS             "default `jet run` help failed: {}",
-//RS             String::from_utf8_lossy(&jit.stderr)
-//RS         );
-//RS         assert_eq!(
-//RS             aot.stdout, jit.stdout,
-//RS             "AOT and default `jet run` help differ for {args:?}"
-//RS         );
-//RS         let help = String::from_utf8_lossy(&aot.stdout);
-//RS         if args == ["--help"] {
-//RS             for fact in [
-//RS                 "-v, --verbose",
-//RS                 "--config CONFIG",
-//RS                 "plan                     preview changes",
-//RS                 "serve                    Start the service and listen for requests",
-//RS                 "import                   Import one data file",
-//RS             ] {
-//RS                 assert!(help.contains(fact), "root help omitted {fact}: {help}");
-//RS             }
-//RS             assert_eq!(
-//RS                 help.matches("--config").count(),
-//RS                 1,
-//RS                 "root help repeated shared config: {help}"
-//RS             );
-//RS         } else {
-//RS             // #3733: `<command> --help` prints the command's own options, not
-//RS             // the root help, on AOT and default `jet run` alike.
-//RS             let expected = fs::read_to_string(
-//RS                 root.join("Examples/features/expected/cli/subcommands.serve_help.out"),
-//RS             )
-//RS             .expect("read command help golden");
-//RS             assert_eq!(help, expected, "command help differs from golden");
-//RS             assert!(
-//RS                 help.contains("--port PORT") && help.contains("[default: 3000]"),
-//RS                 "command help omitted serve's --port: {help}"
-//RS             );
-//RS             assert!(
-//RS                 !help.contains("--config"),
-//RS                 "command help repeated the shared config: {help}"
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     for (args, golden_name) in [
-//RS         (
-//RS             ["--config", "prod", "serve", "--port", "8080"].as_slice(),
-//RS             "subcommands.serve.out",
-//RS         ),
-//RS         (
-//RS             ["plan", "--config", "prod"].as_slice(),
-//RS             "subcommands.plan.out",
-//RS         ),
-//RS     ] {
-//RS         let expected = fs::read(
-//RS             root.join("Examples/features/expected/cli")
-//RS                 .join(golden_name),
-//RS         )
-//RS         .unwrap_or_else(|error| panic!("read CLI command golden `{golden_name}`: {error}"));
-//RS         let aot = Command::new(&binary)
-//RS             .args(args)
-//RS             .current_dir(&scratch.path)
-//RS             .output()
-//RS             .expect("run AOT CLI command");
-//RS         let mut run_args = vec!["run", "subcommands.jet", "--"];
-//RS         run_args.extend_from_slice(args);
-//RS         let default = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS             .args(&run_args)
-//RS             .current_dir(&scratch.path)
-//RS             .env(
-//RS                 "JET_RUN_CACHE_DIR",
-//RS                 cache.join(format!("{golden_name}-run")),
-//RS             )
-//RS             .env("JET_STORE_DIR", cache.join(format!("{golden_name}-build")))
-//RS             .env("NO_COLOR", "1")
-//RS             .output()
-//RS             .expect("run default CLI command");
-//RS         for (label, output) in [("AOT", &aot), ("default `jet run`", &default)] {
-//RS             assert!(
-//RS                 output.status.success(),
-//RS                 "{label} CLI command {args:?} failed:\n{}",
-//RS                 String::from_utf8_lossy(&output.stderr)
-//RS             );
-//RS             assert_eq!(
-//RS                 output.stdout, expected,
-//RS                 "{label} CLI command {args:?} differs from golden"
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     let unknown = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["run", "subcommands.jet", "--", "--confg", "prod"])
-//RS         .current_dir(&scratch.path)
-//RS         .env("JET_RUN_CACHE_DIR", cache.join("unknown-run"))
-//RS         .env("JET_STORE_DIR", cache.join("unknown-build"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .expect("run CLI with an unknown flag");
-//RS     assert!(!unknown.status.success(), "unknown CLI flag was accepted");
-//RS     let unknown_stderr = String::from_utf8_lossy(&unknown.stderr);
-//RS     assert!(
-//RS         unknown_stderr.contains("--config"),
-//RS         "unknown CLI flag lost its suggestion:\n{unknown_stderr}"
-//RS     );
-//RS }
-//RS 
-//RS /// #3729: an optional `String?` value flag decodes on default `jet run`
-//RS /// exactly as on AOT; `Present`/`Absent` share one carrier with compiled reads.
-//RS #[test]
-//RS fn typed_entry_optional_value_flag_matches_aot_and_default_run() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let scratch = common::Scratch::new("typed_entry_optional_flag");
-//RS     fs::copy(
-//RS         root.join("Examples/features/cli/typed_entry_args.jet"),
-//RS         scratch.join("typed_entry_args.jet"),
-//RS     )
-//RS     .expect("copy typed entry example");
-//RS     let cache = scratch.join("cache");
-//RS     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["build", "typed_entry_args.jet"])
-//RS         .current_dir(&scratch.path)
-//RS         .output()
-//RS         .expect("build typed entry example");
-//RS     assert!(
-//RS         build.status.success(),
-//RS         "AOT typed entry build failed:\n{}",
-//RS         String::from_utf8_lossy(&build.stderr)
-//RS     );
-//RS     let binary = scratch.join(".jet/build/typed_entry_args");
-//RS     for (argv, expected) in [
-//RS         (["-v", "--config", "prod.toml"].as_slice(), "3000\ntrue\nprod.toml\n"),
-//RS         ([].as_slice(), "3000\nfalse\n(none)\n"),
-//RS     ] {
-//RS         let aot = Command::new(&binary)
-//RS             .args(argv)
-//RS             .current_dir(&scratch.path)
-//RS             .env_remove("PORT")
-//RS             .output()
-//RS             .expect("run AOT typed entry");
-//RS         let mut run_args = vec!["run", "typed_entry_args.jet", "--"];
-//RS         run_args.extend_from_slice(argv);
-//RS         let default = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS             .args(&run_args)
-//RS             .current_dir(&scratch.path)
-//RS             .env_remove("PORT")
-//RS             .env("JET_RUN_CACHE_DIR", cache.join("run"))
-//RS             .env("JET_STORE_DIR", cache.join("run-build"))
-//RS             .env("NO_COLOR", "1")
-//RS             .output()
-//RS             .expect("run default typed entry");
-//RS         for (label, output) in [("AOT", &aot), ("default `jet run`", &default)] {
-//RS             assert!(
-//RS                 output.status.success(),
-//RS                 "{label} typed entry {argv:?} failed:\n{}",
-//RS                 String::from_utf8_lossy(&output.stderr)
-//RS             );
-//RS             assert_eq!(
-//RS                 String::from_utf8_lossy(&output.stdout),
-//RS                 expected,
-//RS                 "{label} typed entry {argv:?} decoded the wrong values"
-//RS             );
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn assert_cli_rejection(output: Output, label: &str, expected: &[&str]) {
-//RS     let stderr = String::from_utf8_lossy(&output.stderr);
-//RS     assert_eq!(
-//RS         output.status.code(),
-//RS         Some(2),
-//RS         "{label} returned the wrong exit status:\n{stderr}"
-//RS     );
-//RS     assert!(output.stdout.is_empty(), "{label} wrote to stdout");
-//RS     for text in expected {
-//RS         assert!(stderr.contains(text), "{label} omitted `{text}`:\n{stderr}");
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn canonical_cli_recipe_rejects_bad_argv_and_matches_native_tiers() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let scratch = common::Scratch::new("canonical_cli_recipe");
-//RS     let fixtures = [
-//RS         ("Examples/features/cli/typed_entry_args.jet", "typed.jet"),
-//RS         ("Examples/features/io/args_spec.jet", "builder.jet"),
-//RS         ("Examples/features/cli/positionals.jet", "positionals.jet"),
-//RS     ];
-//RS 
-//RS     for (source, name) in fixtures {
-//RS         fs::copy(root.join(source), scratch.join(name))
-//RS             .unwrap_or_else(|error| panic!("copy `{source}`: {error}"));
-//RS     }
-//RS 
-//RS     let mut binaries = Vec::new();
-//RS     for (_, name) in fixtures {
-//RS         let build = run_jet(
-//RS             &["build", name],
-//RS             &scratch.path,
-//RS             &scratch.join(&format!("cache/build-{name}")),
-//RS         );
-//RS         assert!(
-//RS             build.status.success(),
-//RS             "AOT build of `{name}` failed:\n{}",
-//RS             String::from_utf8_lossy(&build.stderr)
-//RS         );
-//RS         let stem = name.strip_suffix(".jet").expect("fixture extension");
-//RS         binaries.push((name, scratch.join(".jet").join("build").join(stem)));
-//RS     }
-//RS 
-//RS     for (name, binary) in &binaries {
-//RS         let aot_help = Command::new(binary)
-//RS             .arg("--help")
-//RS             .current_dir(&scratch.path)
-//RS             .output()
-//RS             .unwrap_or_else(|error| panic!("run AOT `{name} --help`: {error}"));
-//RS         let default_help = run_jet(
-//RS             &["run", *name, "--", "--help"],
-//RS             &scratch.path,
-//RS             &scratch.join(&format!("cache/help-default-{name}")),
-//RS         );
-//RS         let interpreted_help = run_jet(
-//RS             &["run", "--interpret", *name, "--", "--help"],
-//RS             &scratch.path,
-//RS             &scratch.join(&format!("cache/help-interpreter-{name}")),
-//RS         );
-//RS         for (tier, output) in [
-//RS             ("AOT", &aot_help),
-//RS             ("default `jet run`", &default_help),
-//RS             ("interpreter", &interpreted_help),
-//RS         ] {
-//RS             assert_eq!(
-//RS                 output.status.code(),
-//RS                 Some(0),
-//RS                 "{tier} `{name} --help` failed:\n{}",
-//RS                 String::from_utf8_lossy(&output.stderr)
-//RS             );
-//RS             assert!(
-//RS                 String::from_utf8_lossy(&output.stdout).contains("Usage:"),
-//RS                 "{tier} `{name} --help` omitted Usage"
-//RS             );
-//RS         }
-//RS         assert_eq!(
-//RS             help_body(&aot_help.stdout),
-//RS             help_body(&default_help.stdout),
-//RS             "AOT and default help body differs for `{name}`"
-//RS         );
-//RS         assert_eq!(
-//RS             help_body(&aot_help.stdout),
-//RS             help_body(&interpreted_help.stdout),
-//RS             "AOT and interpreter help body differs for `{name}`"
-//RS         );
-//RS 
-//RS         let bad_cases = if *name == "positionals.jet" {
-//RS             vec![
-//RS                 (
-//RS                     "unknown",
-//RS                     vec!["add", "--not-a-real-option"],
-//RS                     vec!["unknown option", "Usage:"],
-//RS                 ),
-//RS                 (
-//RS                     "surplus",
-//RS                     vec!["add", "accepted", "surplus-a", "surplus-b"],
-//RS                     vec![
-//RS                         "unexpected arguments",
-//RS                         "`surplus-a`",
-//RS                         "`surplus-b`",
-//RS                         "Usage:",
-//RS                     ],
-//RS                 ),
-//RS             ]
-//RS         } else {
-//RS             vec![
-//RS                 (
-//RS                     "unknown",
-//RS                     vec!["--not-a-real-option"],
-//RS                     vec!["unknown option", "Usage:"],
-//RS                 ),
-//RS                 (
-//RS                     "surplus",
-//RS                     vec!["surplus-a", "surplus-b"],
-//RS                     vec!["unexpected arguments", "`surplus-a`", "`surplus-b`", "Usage:"],
-//RS                 ),
-//RS             ]
-//RS         };
-//RS 
-//RS         for (case, args, expected) in bad_cases {
-//RS             let aot = Command::new(binary)
-//RS                 .args(&args)
-//RS                 .current_dir(&scratch.path)
-//RS                 .output()
-//RS                 .unwrap_or_else(|error| panic!("run AOT `{name}` {case}: {error}"));
-//RS             assert_cli_rejection(aot, &format!("AOT `{name}` {case}"), &expected);
-//RS 
-//RS             let default = run_jet(
-//RS                 &{
-//RS                     let mut run_args = vec!["run", *name, "--"];
-//RS                     run_args.extend(args.iter().copied());
-//RS                     run_args
-//RS                 },
-//RS                 &scratch.path,
-//RS                 &scratch.join(&format!("cache/{case}-default-{name}")),
-//RS             );
-//RS             assert_cli_rejection(
-//RS                 default,
-//RS                 &format!("default `jet run` `{name}` {case}"),
-//RS                 &expected,
-//RS             );
-//RS 
-//RS             let interpreted = run_jet(
-//RS                 &{
-//RS                     let mut run_args = vec!["run", "--interpret", *name, "--"];
-//RS                     run_args.extend(args.iter().copied());
-//RS                     run_args
-//RS                 },
-//RS                 &scratch.path,
-//RS                 &scratch.join(&format!("cache/{case}-interpreter-{name}")),
-//RS             );
-//RS             assert_cli_rejection(
-//RS                 interpreted,
-//RS                 &format!("interpreter `{name}` {case}"),
-//RS                 &expected,
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     let (_, positionals) = binaries
-//RS         .iter()
-//RS         .find(|(name, _)| *name == "positionals.jet")
-//RS         .expect("positionals fixture binary");
-//RS     let args = ["add", "bare-loses", "--text", "named-wins"];
-//RS     let aot = Command::new(positionals)
-//RS         .args(args)
-//RS         .current_dir(&scratch.path)
-//RS         .output()
-//RS         .expect("run AOT named-over-positional CLI");
-//RS     let default = run_jet(
-//RS         &[
-//RS             "run",
-//RS             "positionals.jet",
-//RS             "--",
-//RS             "add",
-//RS             "bare-loses",
-//RS             "--text",
-//RS             "named-wins",
-//RS         ],
-//RS         &scratch.path,
-//RS         &scratch.join("cache/named-default"),
-//RS     );
-//RS     let interpreted = run_jet(
-//RS         &[
-//RS             "run",
-//RS             "--interpret",
-//RS             "positionals.jet",
-//RS             "--",
-//RS             "add",
-//RS             "bare-loses",
-//RS             "--text",
-//RS             "named-wins",
-//RS         ],
-//RS         &scratch.path,
-//RS         &scratch.join("cache/named-interpreter"),
-//RS     );
-//RS     for (tier, output) in [
-//RS         ("AOT", &aot),
-//RS         ("default `jet run`", &default),
-//RS         ("interpreter", &interpreted),
-//RS     ] {
-//RS         assert!(
-//RS             output.status.success(),
-//RS             "{tier} named-over-positional CLI failed:\n{}",
-//RS             String::from_utf8_lossy(&output.stderr)
-//RS         );
-//RS         let stdout = String::from_utf8_lossy(&output.stdout);
-//RS         assert!(stdout.contains("named-wins"), "{tier} lost named value: {stdout}");
-//RS         assert!(!stdout.contains("bare-loses"), "{tier} kept bare value: {stdout}");
-//RS     }
-//RS     assert_eq!(aot.stdout, default.stdout);
-//RS     assert_eq!(aot.stdout, interpreted.stdout);
-//RS }
-//RS 
-//RS fn help_body(output: &[u8]) -> &[u8] {
-//RS     output
-//RS         .iter()
-//RS         .position(|byte| *byte == b'\n')
-//RS         .map(|newline| &output[newline + 1..])
-//RS         .expect("generated CLI help must have a Usage line")
-//RS }
-//RS 
-//RS #[test]
-//RS fn builder_cli_named_value_overrides_positional_on_all_native_tiers() {
-//RS     let scratch = common::Scratch::new("builder_cli_named_precedence");
-//RS     fs::write(
-//RS         scratch.join("builder_named.jet"),
-//RS         r#"use core.args as args
-//RS use core.process as process
-//RS 
-//RS fn run() {
-//RS     spec :: args.spec()
-//RS         .option("name", "display name", "NAME")
-//RS         .positional("name", "display name")
-//RS     parsed :: spec.parse_or_exit(process.argv())
-//RS     print(parsed.option("name") ?? "none")
-//RS }
-//RS "#,
-//RS     )
-//RS     .expect("write builder precedence fixture");
-//RS 
-//RS     let build = run_jet(
-//RS         &["build", "builder_named.jet"],
-//RS         &scratch.path,
-//RS         &scratch.join("cache/build"),
-//RS     );
-//RS     assert!(
-//RS         build.status.success(),
-//RS         "AOT build failed:\n{}",
-//RS         String::from_utf8_lossy(&build.stderr)
-//RS     );
-//RS     let binary = scratch.join(".jet/build/builder_named");
-//RS     let args = ["bare-loses", "--name", "named-wins"];
-//RS     let aot = Command::new(&binary)
-//RS         .args(args)
-//RS         .current_dir(&scratch.path)
-//RS         .output()
-//RS         .expect("run AOT builder precedence fixture");
-//RS     let default = run_jet(
-//RS         &[
-//RS             "run",
-//RS             "builder_named.jet",
-//RS             "--",
-//RS             "bare-loses",
-//RS             "--name",
-//RS             "named-wins",
-//RS         ],
-//RS         &scratch.path,
-//RS         &scratch.join("cache/named-default"),
-//RS     );
-//RS     let interpreted = run_jet(
-//RS         &[
-//RS             "run",
-//RS             "--interpret",
-//RS             "builder_named.jet",
-//RS             "--",
-//RS             "bare-loses",
-//RS             "--name",
-//RS             "named-wins",
-//RS         ],
-//RS         &scratch.path,
-//RS         &scratch.join("cache/named-interpreter"),
-//RS     );
-//RS 
-//RS     for (tier, output) in [
-//RS         ("AOT", &aot),
-//RS         ("default `jet run`", &default),
-//RS         ("interpreter", &interpreted),
-//RS     ] {
-//RS         assert_eq!(
-//RS             output.status.code(),
-//RS             Some(0),
-//RS             "{tier} builder precedence failed:\n{}",
-//RS             String::from_utf8_lossy(&output.stderr)
-//RS         );
-//RS         assert_eq!(
-//RS             String::from_utf8_lossy(&output.stdout),
-//RS             "named-wins\n",
-//RS             "{tier} did not prefer the named value"
-//RS         );
-//RS     }
-//RS     assert_eq!(aot.stdout, default.stdout);
-//RS     assert_eq!(aot.stdout, interpreted.stdout);
-//RS }
-//RS 
-//RS #[test]
-//RS fn measured_test_cli_and_selected_claim_keep_aot_golden_contract() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let source = root.join("Examples/features/tooling/test_target/run.jet");
-//RS     let golden = fs::read(root.join("Examples/features/expected/tooling/test_target.out"))
-//RS         .expect("read measured test target golden");
-//RS     let scratch = common::Scratch::new("test_cli_parity");
-//RS     fs::copy(&source, scratch.join("main.jet")).expect("copy measured test target source");
-//RS     fs::copy(
-//RS         root.join("Examples/features/tooling/test_target/package.jet"),
-//RS         scratch.join("package.jet"),
-//RS     )
-//RS     .expect("copy measured test target package");
-//RS     fs::copy(
-//RS         root.join("Examples/features/tooling/test_target/test_perf.jet"),
-//RS         scratch.join("test_perf.jet"),
-//RS     )
-//RS     .expect("copy measured test target module");
-//RS 
-//RS     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["build", "main.jet"])
-//RS         .current_dir(&scratch.path)
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .expect("build measured test target");
-//RS     assert!(
-//RS         build.status.success(),
-//RS         "AOT measured test target build failed: {}",
-//RS         String::from_utf8_lossy(&build.stderr)
-//RS     );
-//RS     let aot = Command::new(scratch.join(".jet/build/main"))
-//RS         .current_dir(&scratch.path)
-//RS         .output()
-//RS         .expect("run AOT measured test target");
-//RS     assert!(
-//RS         aot.status.success(),
-//RS         "AOT measured test target failed: {}",
-//RS         String::from_utf8_lossy(&aot.stderr)
-//RS     );
-//RS     assert_eq!(
-//RS         aot.stdout, golden,
-//RS         "AOT measured test target changed its named golden"
-//RS     );
-//RS 
-//RS     let help = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["test", "--help"])
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .expect("show test help");
-//RS     assert!(
-//RS         help.status.success(),
-//RS         "test help failed: {}",
-//RS         String::from_utf8_lossy(&help.stderr)
-//RS     );
-//RS     let help = String::from_utf8_lossy(&help.stdout);
-//RS     assert!(help.contains("--filter"));
-//RS     assert!(help.contains("--measure"));
-//RS 
-//RS     let measured = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["test", "main.jet", "--measure", "--filter=sum_to(1000)"])
-//RS         .current_dir(&scratch.path)
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .expect("run selected measured claim");
-//RS     assert!(
-//RS         measured.status.success(),
-//RS         "selected measured claim failed: {}",
-//RS         String::from_utf8_lossy(&measured.stderr)
-//RS     );
-//RS     let selected = String::from_utf8_lossy(&measured.stdout);
-//RS     assert!(
-//RS         selected.contains("sum_to(1000)"),
-//RS         "selected measurement lost claim name: {selected}"
-//RS     );
-//RS     assert!(
-//RS         selected.contains("ns"),
-//RS         "selected measurement lost timing: {selected}"
-//RS     );
-//RS 
-//RS     let bench = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args([
-//RS             "test",
-//RS             "Examples/features/tooling/bench.jet",
-//RS             "--measure",
-//RS             "--json",
-//RS         ])
-//RS         .current_dir(&root)
-//RS         .env("JET_STORE_DIR", scratch.join("bench-cache"))
-//RS         .env("JET_RUN_CACHE_DIR", scratch.join("bench-run-cache"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .expect("measure keep sink benchmark");
-//RS     assert!(
-//RS         bench.status.success(),
-//RS         "keep sink benchmark failed: {}",
-//RS         String::from_utf8_lossy(&bench.stderr)
-//RS     );
-//RS     let bench_stdout = String::from_utf8_lossy(&bench.stdout);
-//RS     let mean_ns = |name: &str| -> f64 {
-//RS         let needle = format!("\"name\":\"{name}\"");
-//RS         let row = bench_stdout
-//RS             .lines()
-//RS             .find(|line| line.contains(&needle))
-//RS             .unwrap_or_else(|| panic!("missing measured benchmark `{name}`: {bench_stdout}"));
-//RS         row.split_once("\"mean_ns\":")
-//RS             .and_then(|(_, rest)| {
-//RS                 rest.split(|character: char| character == ',' || character == '}')
-//RS                     .next()
-//RS             })
-//RS             .and_then(|value| value.parse::<f64>().ok())
-//RS             .unwrap_or_else(|| panic!("missing mean for measured benchmark `{name}`: {row}"))
-//RS     };
-//RS     let elided_ns = mean_ns("elided baseline");
-//RS     let kept_ns = mean_ns("keep loop");
-//RS     // The same-run elided loop is the control; avoid an absolute wall-clock
-//RS     // threshold while still requiring keep() to preserve observable work.
-//RS     assert!(
-//RS         kept_ns > elided_ns,
-//RS         "keep loop must remain slower than the elided control: keep={kept_ns:.3} ns/iter, elided={elided_ns:.3} ns/iter"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn command_override_examples_match_aot_default_run_and_interpreter() {
-//RS     if !common::have_rustc() {
-//RS         return;
-//RS     }
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let scratch = common::Scratch::new("command_override_parity");
-//RS     let cases = [
-//RS         ("test_override", "test_override.jet"),
-//RS         ("bench_override", "bench_override.jet"),
-//RS     ];
-//RS 
-//RS     for (stem, file_name) in cases {
-//RS         fs::copy(
-//RS             root.join("Examples/features/devloop").join(file_name),
-//RS             scratch.join(file_name),
-//RS         )
-//RS         .unwrap_or_else(|error| panic!("copy command override `{file_name}`: {error}"));
-//RS         let expected = fs::read(
-//RS             root.join("Examples/features/expected/devloop")
-//RS                 .join(format!("{stem}.out")),
-//RS         )
-//RS         .unwrap_or_else(|error| panic!("read command override golden `{stem}`: {error}"));
-//RS 
-//RS         let release = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS             .args(["run", "--release", file_name])
-//RS             .current_dir(&scratch.path)
-//RS             .env("NO_COLOR", "1")
-//RS             .output()
-//RS             .unwrap_or_else(|error| panic!("run release command override `{stem}`: {error}"));
-//RS         assert!(
-//RS             release.status.success(),
-//RS             "release `{stem}` failed: {}",
-//RS             String::from_utf8_lossy(&release.stderr)
-//RS         );
-//RS         assert_eq!(
-//RS             release.stdout, expected,
-//RS             "release `{stem}` differs from golden"
-//RS         );
-//RS 
-//RS         let default_run = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS             .args(["run", file_name])
-//RS             .current_dir(&scratch.path)
-//RS             .env("NO_COLOR", "1")
-//RS             .output()
-//RS             .unwrap_or_else(|error| panic!("run default command override `{stem}`: {error}"));
-//RS         assert!(
-//RS             default_run.status.success(),
-//RS             "default run `{stem}` failed: {}",
-//RS             String::from_utf8_lossy(&default_run.stderr)
-//RS         );
-//RS         assert_eq!(
-//RS             default_run.stdout, expected,
-//RS             "default run `{stem}` differs from golden"
-//RS         );
-//RS 
-//RS         let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS             .args(["dev", file_name, "--interpret", "--watch=off"])
-//RS             .current_dir(&scratch.path)
-//RS             .env("NO_COLOR", "1")
-//RS             .output()
-//RS             .unwrap_or_else(|error| panic!("run interpreted command override `{stem}`: {error}"));
-//RS         assert!(
-//RS             interpreted.status.success(),
-//RS             "interpreted `{stem}` failed: {}",
-//RS             String::from_utf8_lossy(&interpreted.stderr)
-//RS         );
-//RS         assert_eq!(
-//RS             interpreted.stdout, expected,
-//RS             "interpreted `{stem}` differs from golden"
-//RS         );
-//RS     }
-//RS 
-//RS     let override_run = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["test", "test_override.jet", "--serial"])
-//RS         .current_dir(&scratch.path)
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .expect("run test command override");
-//RS     assert!(
-//RS         override_run.status.success(),
-//RS         "test override failed: {}",
-//RS         String::from_utf8_lossy(&override_run.stderr)
-//RS     );
-//RS     assert!(
-//RS         String::from_utf8_lossy(&override_run.stderr).contains("jet test: using fn test override")
-//RS     );
-//RS 
-//RS     for command in ["test"] {
-//RS         let help = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS             .args([command, "--help"])
-//RS             .env("NO_COLOR", "1")
-//RS             .output()
-//RS             .unwrap_or_else(|error| panic!("show `{command}` help: {error}"));
-//RS         assert!(
-//RS             help.status.success(),
-//RS             "{command} help failed: {}",
-//RS             String::from_utf8_lossy(&help.stderr)
-//RS         );
-//RS         assert!(
-//RS             String::from_utf8_lossy(&help.stdout).contains("--show-default"),
-//RS             "{command} help omitted --show-default"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn package_build_entry_discovery_matches_committed_golden_across_tiers() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let example = root.join("Examples/features/tooling/build_entry_discovery");
-//RS     let entry = example.join("run.jet");
-//RS     let expected =
-//RS         fs::read(root.join("Examples/features/expected/tooling/build_entry_discovery.out"))
-//RS             .expect("read build-entry discovery golden");
-//RS     let scratch = common::Scratch::new("package_build_entry_discovery_parity");
-//RS 
-//RS     let release = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args([
-//RS             "run",
-//RS             "--release",
-//RS             entry.to_str().expect("entry path is utf8"),
-//RS         ])
-//RS         .current_dir(&example)
-//RS         .env("JET_RUN_CACHE_DIR", scratch.join("cache/release-run"))
-//RS         .env("JET_STORE_DIR", scratch.join("cache/release-build"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .expect("run committed package entry through release jet run");
-//RS     assert!(
-//RS         release.status.success(),
-//RS         "release jet run failed:\n{}",
-//RS         String::from_utf8_lossy(&release.stderr)
-//RS     );
-//RS     assert_eq!(release.stdout, expected);
-//RS 
-//RS     let default = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["run", entry.to_str().expect("entry path is utf8")])
-//RS         .current_dir(&example)
-//RS         .env("JET_RUN_CACHE_DIR", scratch.join("cache/run"))
-//RS         .env("JET_STORE_DIR", scratch.join("cache/default"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .expect("run committed package entry through default jet run");
-//RS     assert!(
-//RS         default.status.success(),
-//RS         "default jet run failed:\n{}",
-//RS         String::from_utf8_lossy(&default.stderr)
-//RS     );
-//RS     assert_eq!(default.stdout, expected);
-//RS 
-//RS     let dev = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args([
-//RS             "dev",
-//RS             entry.to_str().expect("entry path is utf8"),
-//RS             "--interpret",
-//RS             "--watch=off",
-//RS         ])
-//RS         .current_dir(&example)
-//RS         .env("JET_RUN_CACHE_DIR", scratch.join("cache/dev-run"))
-//RS         .env("JET_STORE_DIR", scratch.join("cache/dev-build"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .expect("run committed package entry through interpreted jet dev");
-//RS     assert!(
-//RS         dev.status.success(),
-//RS         "interpreted jet dev failed:\n{}",
-//RS         String::from_utf8_lossy(&dev.stderr)
-//RS     );
-//RS     assert_eq!(dev.stdout, expected);
-//RS     assert_eq!(release.status.code(), default.status.code());
-//RS     assert_eq!(release.status.code(), dev.status.code());
-//RS }
-//RS 
-//RS #[test]
-//RS fn build_stamp_release_rebuilds_have_identical_binary_bytes() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let scratch = common::Scratch::new("build_stamp_reproducibility");
-//RS     let project = scratch.join("project");
-//RS     fs::create_dir_all(&project).expect("create build stamp project");
-//RS     copy_build_stamp_fixture(&root, &project);
-//RS     let lock_path = project.join(".jet/lock");
-//RS     let lock_bytes = fs::read(&lock_path).expect("read build stamp lock fixture");
-//RS 
-//RS     let build_clean = |cache: &Path| {
-//RS         let output = run_jet(
-//RS             &["build", "--release", "--locked", "build_stamp.jet"],
-//RS             &project,
-//RS             cache,
-//RS         );
-//RS         assert_eq!(
-//RS             output.status.code(),
-//RS             Some(0),
-//RS             "clean release build failed:\n{}",
-//RS             String::from_utf8_lossy(&output.stderr)
-//RS         );
-//RS         let binary = fs::read(project.join(".jet/build/build_stamp"))
-//RS             .expect("clean release build must publish .jet/build/build_stamp");
-//RS         assert_eq!(
-//RS             fs::read(&lock_path).expect("read lock after clean release build"),
-//RS             lock_bytes,
-//RS             "locked release build changed the checked-in lock bytes"
-//RS         );
-//RS         fs::remove_dir_all(project.join(".jet/build")).expect("remove first clean build output");
-//RS         binary
-//RS     };
-//RS 
-//RS     let first = build_clean(&scratch.join("cache/first"));
-//RS     let second = build_clean(&scratch.join("cache/second"));
-//RS     assert_eq!(first, second, "clean release rebuild binary bytes differ");
-//RS }
-//RS 
-//RS #[test]
-//RS fn build_stamp_example_matches_release_jit_and_interpreter_tiers() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let scratch = common::Scratch::new("build_stamp_tier_parity");
-//RS     copy_build_stamp_fixture(&root, &scratch.path);
-//RS     let expected = fs::read(root.join("Examples/features/expected/comptime/build_stamp.out"))
-//RS         .expect("read build stamp golden");
-//RS 
-//RS     let release = run_jet(
-//RS         &["run", "--release", "build_stamp.jet"],
-//RS         &scratch.path,
-//RS         &scratch.join("cache/release"),
-//RS     );
-//RS     let default = run_jet(
-//RS         &["run", "build_stamp.jet"],
-//RS         &scratch.path,
-//RS         &scratch.join("cache/default"),
-//RS     );
-//RS     let interpreter = run_jet(
-//RS         &["dev", "build_stamp.jet", "--interpret", "--watch=off"],
-//RS         &scratch.path,
-//RS         &scratch.join("cache/interpreter"),
-//RS     );
-//RS 
-//RS     for (tier, output) in [
-//RS         ("AOT release", &release),
-//RS         ("default JIT", &default),
-//RS         ("interpreter", &interpreter),
-//RS     ] {
-//RS         assert_eq!(
-//RS             output.status.code(),
-//RS             Some(0),
-//RS             "{tier} build stamp run failed:\nstderr:\n{}",
-//RS             String::from_utf8_lossy(&output.stderr)
-//RS         );
-//RS         assert_eq!(
-//RS             output.stdout, expected,
-//RS             "{tier} build stamp stdout differs from the committed golden"
-//RS         );
-//RS     }
-//RS     assert_eq!(release.status.code(), default.status.code());
-//RS     assert_eq!(release.status.code(), interpreter.status.code());
-//RS }
-// END-PORT-PENDING 1005 tests/comptime_cli_parity.rs:1-1657
+// Rust: tests/comptime_cli_parity.rs:1
+use tests.common as common
+use std.fs as fs
+use std.env as env
+use std.process.[Command, Output]
+use jet.[compile_with_path]
+use jet.Loader as Loader
+use jet.Sema as Sema
+use jet.Diagnostics as Diagnostics
+use jet.AST as AST
 
+// Rust: tests/comptime_cli_parity.rs:9
+// Ordinary nominal types and CheckedText use the same native/run paths.
+TIER_PARITY_STEMS :: ["cli/subcommands", "concurrency/freeze_capture", "comptime/embed", "comptime/embed_bytes", "comptime/find", "comptime/find_empty", "tooling/checked_text_type"]
+
+// Rust: tests/comptime_cli_parity.rs:19
+// GATE #4494: native filesystem operations.
+fn copy_comptime_fixture(root: OSPath, destination: OSPath, stem: String) -> String {
+    file_name :: stem.rsplit('/').next().expect("comptime stem has a file name")
+    fs.copy(root.join("Examples/features").join("{stem}.jet"), destination.join("{file_name}.jet"))
+        .unwrap_or_else(|error| -> panic("copy `{stem}` fixture: {error}"))
+    assets :: match stem {
+        "comptime/embed" -> ["motd.txt"]
+        "comptime/embed_bytes" -> ["logo.bin"]
+        "comptime/find" | "comptime/find_empty" -> ["find_inputs/alpha-1.txt", "find_inputs/nested/beta-2.txt", "find_inputs/nested/gamma-3.txt"]
+        _ -> []
+    }
+    loop relative in assets {
+        target :: destination.join(relative)
+        if parent :: target.parent() { fs.create_dir_all(parent).expect("create comptime fixture asset directory") }
+        fs.copy(root.join("Examples/features/comptime").join(relative), target)
+            .unwrap_or_else(|error| -> panic("copy `{relative}` for `{stem}`: {error}"))
+    }
+    "{file_name}.jet"
+}
+
+// Rust: tests/comptime_cli_parity.rs:54
+fn copy_build_stamp_fixture(root: OSPath, destination: OSPath) -> {
+    fs.copy(root.join("Examples/features/comptime/build_stamp.jet"), destination.join("build_stamp.jet")).expect("copy build stamp example")
+    lock_dir :: destination.join(".jet")
+    fs.create_dir_all(lock_dir).expect("create build stamp lock directory")
+    fs.copy(root.join("tests/fixtures/build_stamp.lock"), lock_dir.join("lock")).expect("copy build stamp lock fixture")
+}
+
+// Rust: tests/comptime_cli_parity.rs:69
+// GATE #4494: actual native subprocess provider and retained output/status.
+fn run_jet(args: [String], project: OSPath, cache: OSPath) -> Output {
+    fs.create_dir_all(cache).expect("create isolated Jet cache")
+    Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(args).current_dir(project)
+        .env("JET_STORE_DIR", cache.join("build")).env("JET_RUN_CACHE_DIR", cache.join("run"))
+        .env("NO_COLOR", "1").output().unwrap_or_else(|error| -> panic("spawn `{args.join(" ")}`: {error}"))
+}
+
+// Rust: tests/comptime_cli_parity.rs:81
+fn assert_tier_parity_case(root: OSPath, scratch: common.Scratch, stem: String) -> {
+    case_dir :: scratch.join(stem.replace('/', "_"))
+    fs.create_dir_all(case_dir).expect("create comptime parity case directory")
+    file_name :: copy_comptime_fixture(root, case_dir, stem)
+    expected_path :: root.join("Examples/features/expected/{stem}.out")
+    expected :: fs.read(expected_path).unwrap_or_else(|error| -> panic("missing golden for `{stem}`: {error}"))
+    cache :: case_dir.join("cache")
+    build :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["build", file_name]).current_dir(case_dir)
+        .env("JET_STORE_DIR", cache.join("aot")).env("NO_COLOR", "1").output()
+        .unwrap_or_else(|error| -> panic("failed to spawn AOT build for `{stem}`: {error}"))
+    assert(build.status.success(), "AOT build failed for `{stem}`:\nstdout:\n{String.from_utf8_lossy(build.stdout)}\nstderr:\n{String.from_utf8_lossy(build.stderr)}")
+    binary_name :: file_name.strip_suffix(".jet").expect("Jet fixture extension")
+    aot :: Command.new(case_dir.join(".jet").join("build").join(binary_name)).current_dir(case_dir).output()
+        .unwrap_or_else(|error| -> panic("failed to run AOT binary for `{stem}`: {error}"))
+    assert(aot.status.success(), "AOT run failed for `{stem}`:\n{String.from_utf8_lossy(aot.stderr)}")
+    assert_eq(aot.stdout, expected, "AOT output differs from the checked-in golden for `{stem}`")
+    output :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", file_name, "--trace-tiers"]).current_dir(case_dir)
+        .env("JET_RUN_CACHE_DIR", cache.join("run")).env("JET_STORE_DIR", cache.join("build")).env("NO_COLOR", "1").output()
+        .unwrap_or_else(|error| -> panic("failed to spawn `jet run` for `{stem}`: {error}"))
+    trace :: String.from_utf8_lossy(output.stderr)
+    assert(output.status.success(), "default `jet run` failed for `{stem}`:\nstdout:\n{String.from_utf8_lossy(output.stdout)}\nstderr:\n{trace}")
+    assert(trace.lines().any(|line| -> line.starts_with("run") && line.contains("tier1 native")), "default `jet run` did not report resident native execution for `{stem}`:\n{trace}")
+    assert(!trace.contains("tier0 interp"), "default `jet run` deopted to the interpreter for `{stem}`:\n{trace}")
+    assert_eq(output.stdout, expected, "default `jet run` output differs from the checked-in golden for `{stem}`")
+    interpreted_cache :: cache.join("interpret")
+    interpreted :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", "--interpret", file_name, "--trace-tiers"]).current_dir(case_dir)
+        .env("JET_RUN_CACHE_DIR", interpreted_cache.join("run")).env("JET_STORE_DIR", interpreted_cache.join("build")).env("NO_COLOR", "1").output()
+        .unwrap_or_else(|error| -> panic("failed to spawn interpreted `jet run` for `{stem}`: {error}"))
+    interpreted_trace :: String.from_utf8_lossy(interpreted.stderr)
+    assert(interpreted.status.success(), "interpreted `jet run` failed for `{stem}`:\nstdout:\n{String.from_utf8_lossy(interpreted.stdout)}\nstderr:\n{interpreted_trace}")
+    assert(interpreted_trace.contains("tier0 interp"), "forced interpreter did not report interpreter execution for `{stem}`:\n{interpreted_trace}")
+    assert(!interpreted_trace.contains("E2201"), "forced interpreter deopted for `{stem}`:\n{interpreted_trace}")
+    assert_eq(interpreted.stdout, expected, "interpreter output differs from the checked-in golden for `{stem}`")
+}
+
+// Rust: tests/comptime_cli_parity.rs:415
+ENUM_DISCRIMINANT_SOURCE :: """
+BASE :: prep { 7 }
+STEP :: prep { 3 }
+
+#Layout(c)
+enum WireCode {
+    Explicit = 0
+    Sparse = 9
+    Negative = -7
+    Named = BASE
+    Arithmetic = BASE + STEP * 2
+    Shifted = 1 << 4
+    ShiftedRight = 32 >> 3
+    Implicit
+}
+
+fn run() {}
+"""
+// Rust: tests/comptime_cli_parity.rs:434
+ENUM_DISCRIMINANT_SOURCE_IMPLICIT_FIRST :: """
+BASE :: prep { 7 }
+STEP :: prep { 3 }
+
+#Layout(c)
+enum WireCode {
+    Implicit
+    Explicit = 0
+    Sparse = 9
+    Negative = -7
+    Named = BASE
+    Arithmetic = BASE + STEP * 2
+    Shifted = 1 << 4
+    ShiftedRight = 32 >> 3
+}
+
+fn run() {}
+"""
+// Rust: tests/comptime_cli_parity.rs:453
+// Omitted discriminants stay declaration-order-dependent, not prior + 1.
+ENUM_DISCRIMINANTS :: [("Explicit", Val(0i64)), ("Sparse", Val(9i64)), ("Negative", Val(-7i64)), ("Named", Val(7i64)), ("Arithmetic", Val(13i64)), ("Shifted", Val(16i64)), ("ShiftedRight", Val(4i64)), ("Implicit", None)]
+// Rust: tests/comptime_cli_parity.rs:466
+ENUM_DISCRIMINANTS_IMPLICIT_FIRST :: [("Implicit", None), ("Explicit", Val(0i64)), ("Sparse", Val(9i64)), ("Negative", Val(-7i64)), ("Named", Val(7i64)), ("Arithmetic", Val(13i64)), ("Shifted", Val(16i64)), ("ShiftedRight", Val(4i64))]
+// Rust: tests/comptime_cli_parity.rs:477
+DUPLICATE_ENUM_DISCRIMINANT_SOURCE :: """
+enum DuplicateCode {
+    First = 7
+    Second = 7
+}
+
+fn run() {}
+"""
+// Rust: tests/comptime_cli_parity.rs:486
+ENUM_DISCRIMINANT_DIAGNOSTICS :: [
+    ("overflow", """
+MAX :: prep { 9223372036854775807 }
+
+enum Bad {
+    TooWide = MAX + 1
+}
+
+fn run() {}
+""", "@max + 1", "An enum discriminant is outside the signed integer range"),
+    ("noninteger", """
+enum Bad {
+    Fractional = 1.5
+}
+
+fn run() {}
+""", "1.5", "An enum discriminant must be an integer, got Float (an approximate binary number)"),
+    ("unknown", """
+enum Bad {
+    Missing = missing
+}
+
+fn run() {}
+""", "missing", "An enum discriminant must be computable at compile time")
+]
+
+// Rust: tests/comptime_cli_parity.rs:527
+fn checked_enum_discriminants(path: OSPath, enum_name: String) -> [(String, i64?)] {
+    bundle := Loader.load_entry(path.to_str().expect("enum discriminant fixture path is valid UTF-8"))
+        .unwrap_or_else(|diagnostics| -> panic("enum discriminant fixture failed to load: {diagnostics.debug()}"))
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    errors :: diagnostics.iter().filter(|diagnostic| -> diagnostic.severity == Diagnostics.Severity.Error).collect()
+    assert(errors.is_empty(), "enum discriminant fixture failed sema: {errors.debug()}")
+    bundle.modules[bundle.entry].items.iter().find_map(|item| -> match item {
+        AST.Item.Enum(definition) if definition.name == enum_name -> Val(definition.variants.iter().map(|variant| -> (variant.name.clone(), variant.discriminant)).collect())
+        _ -> None
+    }).unwrap_or_else(|| -> panic("enum `{enum_name}` was not registered"))
+}
+// Rust: tests/comptime_cli_parity.rs:559
+fn assert_enum_discriminants(path: OSPath, enum_name: String, expected: [(String, i64?)]) -> {
+    observed :: checked_enum_discriminants(path, enum_name)
+    assert_eq(observed.len(), expected.len(), "enum `{enum_name}` variant count changed: {observed.debug()}")
+    loop (actual, (expected_name, expected_value)) in observed.iter().zip(expected.iter()) {
+        assert_eq(actual.0.as_str(), expected_name)
+        assert_eq(actual.1, expected_value, "enum `{enum_name}` code for `{expected_name}` changed")
+    }
+}
+// Rust: tests/comptime_cli_parity.rs:579
+fn assert_enum_discriminant_error(path: OSPath, source: String, expression: String, expected_what: String) -> {
+    bundle := Loader.load_entry(path.to_str().expect("enum discriminant diagnostic path is valid UTF-8"))
+        .unwrap_or_else(|diagnostics| -> panic("enum diagnostic fixture failed to load: {diagnostics.debug()}"))
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    diagnostic :: diagnostics.iter().find(|diagnostic| -> diagnostic.code == "E0035")
+        .unwrap_or_else(|| -> panic("missing E0035 for `{expression}`: {diagnostics.debug()}"))
+    start :: source.find(expression).unwrap_or_else(|| -> panic("expression `{expression}` is absent from fixture"))
+    assert_eq(diagnostic.what, expected_what)
+    assert_eq(diagnostic.span, Val(Diagnostics.Span.new(start, start + expression.len())), "diagnostic span changed for `{expression}`")
+}
+// Rust: tests/comptime_cli_parity.rs:976
+fn assert_cli_rejection(output: Output, label: String, expected: [String]) -> {
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert_eq(output.status.code(), Val(2), "{label} returned the wrong exit status:\n{stderr}")
+    assert(output.stdout.is_empty(), "{label} wrote to stdout")
+    loop text in expected { assert(stderr.contains(text), "{label} omitted `{text}`:\n{stderr}") }
+}
+// Rust: tests/comptime_cli_parity.rs:1191
+fn help_body(output: [u8]) -> &[u8] {
+    newline :: output.iter().position(|byte| -> byte == 10u8).expect("generated CLI help must have a Usage line")
+    &output[newline + 1..]
+}

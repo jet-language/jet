@@ -1,0 +1,409 @@
+use tests.conformance.corpus.core.port.core_math_numeric as fixtures
+use tests.tir_support as tir_support
+
+// Rust: tests/core_math_numeric.rs:7
+#Test("core_math_constants_and_rounding_match_across_tiers") {
+    tir_support.assert_tiers_agree("core_math_numeric_boundaries", """
+use core.math as math
+fn run() -> {
+    print(math.pi())
+    print(math.round(1.4))
+    print(math.round(1.5))
+    print(math.round(-1.4))
+    print(math.round(-1.5))
+    print(math.round(0.5))
+    print(math.round(-0.5))
+}
+""", "3.141592653589793\n1\n2\n-1\n-2\n1\n-1\n")
+}
+
+// Rust: tests/core_math_numeric.rs:28
+#Test("core_math_exact_int_crosses_native_width_on_every_tier") {
+    tir_support.assert_tiers_agree("core_math_exact_int_boundaries", """
+use core.math as math
+fn run() -> {
+    print(math.checked_abs(-9223372036854775808) ?? -1)
+    print(math.checked_neg(-9223372036854775808) ?? -1)
+    print(math.checked_add(9223372036854775807, 1) ?? -1)
+    print(math.checked_sub(-9223372036854775808, 1) ?? 0)
+    print(math.checked_mul(9223372036854775808, 2) ?? -1)
+    print(math.checked_div(-9223372036854775808, -1) ?? -1)
+    print(math.checked_rem(-9223372036854775808, -1) ?? -1)
+    print(math.checked_pow(2, 100) ?? -1)
+    print(math.saturating_add(9223372036854775807, 1))
+    print(math.saturating_mul(9223372036854775808, 2))
+    print(math.int_pow(2, 100))
+    print(math.sum_int([Int]{9223372036854775807, 1}))
+    print(math.prod_int([Int]{9223372036854775808, 2}))
+    print(math.abs_diff(-9223372036854775808, 9223372036854775808))
+    print(math.checked_div(1, 0) == None)
+    print(math.checked_pow(2, -1) == None)
+    print(math.checked_div(-7, 3) ?? 0)
+    print(math.checked_rem(-7, 3) ?? 0)
+    floored :: math.div_mod(-7, 3)
+    print(floored.quot)
+    print(floored.rem)
+    euclidean :: math.div_mod(-7, -3)
+    print(euclidean.quot)
+    print(euclidean.rem)
+    truncated :: math.div_rem(-7, 3)
+    print(truncated.quot)
+    print(truncated.rem)
+    wide :: math.div_mod(18446744073709551616, 3)
+    print(wide.quot)
+}
+""", "9223372036854775808\n9223372036854775808\n9223372036854775808\n-9223372036854775809\n18446744073709551616\n9223372036854775808\n0\n1267650600228229401496703205376\n9223372036854775808\n18446744073709551616\n1267650600228229401496703205376\n9223372036854775808\n18446744073709551616\n18446744073709551616\ntrue\ntrue\n-2\n-1\n-3\n2\n3\n2\n-2\n-1\n6148914691236517205\n")
+}
+
+// Rust: tests/core_memory_foundations.rs:11
+#Test("allocator_reset_close_and_scope_cleanup_keep_one_lifetime_contract") {
+    tir_support.assert_tiers_agree("core_memory_foundations", """
+use core.mem
+use core.mem.scope as scope
+fn run() -> {
+    arena :: mem.Arena.new(capacity: 32)
+    first :: arena.alloc(7)
+    print(first)
+    &arena.reset()
+    second :: arena.alloc(11)
+    print(second)
+    fixed :: mem.Fixed.new(size: 40)
+    fixed.try_alloc(7) ? value -> { print("success {value}") }
+    ! error -> { print("unexpected failure {error.requested_bytes} {error.allocator}") }
+    fixed.try_alloc(9) ? value -> { print("unexpected success {value}") }
+    ! error -> { print("failure {error.requested_bytes} {error.allocator}") }
+    close(^fixed)
+    _outer :: scope.guard(() -> print("outer cleanup"))
+    _inner :: scope.guard(() -> print("inner cleanup"))
+    print("live")
+    close(^arena)
+}
+""", "7\n11\nsuccess 7\nfailure 8 Fixed\nlive\ninner cleanup\nouter cleanup\n")
+}
+
+// Rust: tests/core_net_tls.rs:13
+// GATE #4494 native tier providers; #4409 preserves exact invalid-input classification.
+#Test("tls_rejects_empty_dns_labels_before_transport_on_all_tiers") {
+    expected_error :: "invalid input during connect `bad..example`: host is empty or contains invalid endpoint syntax"
+    tiers :: [
+        ("default run", tir_support.jit_run("core_net_tls_invalid_dns_label", fixtures.INVALID_DNS_LABEL_SOURCE)),
+        ("forced interpreter", tir_support.interpreter_run("core_net_tls_invalid_dns_label", fixtures.INVALID_DNS_LABEL_SOURCE)),
+        ("AOT", tir_support.build_and_run_full("jet_core_net_tls_invalid_dns_label", "core_net_tls_invalid_dns_label", fixtures.INVALID_DNS_LABEL_SOURCE))
+    ]
+    baseline :: tiers[0].1
+    loop (tier, result) in tiers {
+        assert_eq(result, baseline, "{tier} disagreed on the TLS error")
+        assert_eq(result.0, 1, "{tier} must report the invalid server name")
+        assert(result.1.is_empty(), "{tier} wrote stdout: {result.1.debug()}")
+        assert(result.2.contains(expected_error), "{tier} lost TLS error classification or context:\n{result.2}")
+    }
+}
+
+// Rust: tests/core_net_tls.rs:51
+#Test("tcp_stream_and_listener_reject_public_fields_and_forged_records") {
+    source :: """
+use core.net as net
+fn run() -> {
+    stream :: net.tcp_connect("127.0.0.1:1") ?? panic("connect")
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    print(stream.fd)
+    print(stream.host)
+    print(stream.port)
+    print(listener.fd)
+    print(listener.host)
+    print(listener.port)
+    _ :: net.TCPStream{fd: 0, host: "forged", port: 1}
+    _ :: net.TCPListener{fd: 0, host: "forged", port: 1}
+}
+"""
+    diagnostics :: tir_support.compile_source("private_tcp_handles", source).expect_err("public TCP fields and fabricated handles must be rejected")
+    assert_eq(diagnostics.iter().filter(|diagnostic| -> diagnostic.code == "E0605").count(), 12,
+        "all six private TCP field reads and six forged record fields must be rejected: {diagnostics.debug()}")
+}
+
+// Rust: tests/core_path_foundations.rs:7
+#Test("core_path_containment_normalizes_and_rejects_traversal") {
+    tir_support.assert_tiers_agree("core_path_foundations", """
+use core.files.path as api
+fn run() -> {
+    print(api.is_relative_to("/srv/root/./a/../file", "/srv/root"))
+    print(api.is_relative_to("srv\\root\\file", "srv/root"))
+    print(api.is_relative_to("srv/root/link/../file", "srv/root"))
+    print(api.is_relative_to("/srv/rooted/file", "/srv/root"))
+    print(api.is_relative_to("/srv/root/../outside", "/srv/root"))
+    print(api.is_relative_to("child/file", "."))
+    print(api.is_relative_to("../outside", "."))
+    print(api.is_relative_to("..foo/file", "."))
+    print(api.is_relative_to("C:\\root\\child", "C:/root"))
+    print(api.is_relative_to("/srv/root", "srv/root"))
+}
+""", "true\ntrue\ntrue\nfalse\nfalse\ntrue\nfalse\ntrue\ntrue\nfalse\n")
+}
+
+// Rust: tests/core_reflect_value.rs:7
+#Test("reflect_of_preserves_typed_integer_and_text_values") {
+    tir_support.assert_tiers_agree("reflect_of_typed_integer_and_text", """
+use core.reflect as reflect
+fn run() -> {
+    integer :: reflect.of(7)
+    print(integer.type_name())
+    print(integer.display())
+    text :: reflect.of("jet")
+    print(text.type_name())
+    print(text.display())
+}
+""", "Int\n7\nString\njet\n")
+}
+
+// Rust: tests/core_regex_foundations.rs:7
+#Test("core_regex_rejects_hostile_quantifiers_and_keeps_class_boundaries") {
+    tir_support.assert_tiers_agree("core_regex_foundations", """
+use core.regex as re
+fn rejected(pattern: String) -> Bool {
+    compiled :: re.compile(pattern) ?? { return true }
+    false
+}
+fn run() -> {
+    print(rejected("a{{4097}}"))
+    print(rejected("a{{999999999999999999999999999999999999}}"))
+    print(rejected("["))
+    classed :: re.compile("[^]]+") ?? panic("class pattern rejected")
+    print(re.find(classed, "a]bc") ?? "none")
+    digits :: re.compile("[\\d]+") ?? panic("digit class rejected")
+    print(re.find(digits, "id=42") ?? "none")
+    named :: re.compile("(?<word>(?:[a-z]+))") ?? panic("named group rejected")
+    print(re.find(named, "123jet") ?? "none")
+}
+""", "true\ntrue\ntrue\na\n42\njet\n")
+}
+
+// Rust: tests/core_set_foundations.rs:7
+#Test("core_set_order_ownership_and_algebra_match_across_tiers") {
+    tir_support.assert_tiers_agree("core_set_foundations", """
+use core.collections.set as api
+fn run() -> {
+    seeded :: api.from_list([String]{"b", "a", "b", "c"})
+    print(api.to_list(seeded))
+    print(api.len(seeded))
+    print(api.is_empty(api.new()))
+    print(api.to_list(api.add(seeded, "a")))
+    print(api.to_list(api.add(seeded, "d")))
+    print(api.to_list(seeded))
+    print(api.to_list(api.discard(seeded, "a")))
+    print(api.to_list(api.remove(seeded, "b") ?? api.new()))
+    print(api.to_list(api.remove(seeded, "missing") ?? api.new()))
+    other :: api.from_list([String]{"c", "e", "b"})
+    print(api.to_list(api.union(seeded, other)))
+    print(api.to_list(api.intersection(seeded, other)))
+    print(api.to_list(api.difference(seeded, other)))
+    print(api.to_list(api.symmetric_difference(seeded, other)))
+    print(api.issubset(seeded, api.union(seeded, other)))
+    print(api.issuperset(api.union(seeded, other), seeded))
+    print(api.isdisjoint(seeded, api.from_list([String]{"z"})))
+    cloned_list := api.to_list(api.clone_set(seeded))
+    &cloned_list.push("tail")
+    print(api.to_list(seeded))
+    print(cloned_list)
+    exported_list := api.to_list(seeded)
+    &exported_list.push("tail")
+    print(api.to_list(seeded))
+    print(exported_list)
+}
+""", "[b, a, c]\n3\ntrue\n[b, a, c]\n[b, a, c, d]\n[b, a, c]\n[b, c]\n[a, c]\n[]\n[b, a, c, e]\n[b, c]\n[a]\n[a, e]\ntrue\ntrue\ntrue\n[b, a, c]\n[b, a, c, tail]\n[b, a, c]\n[b, a, c, tail]\n")
+}
+
+// Rust: tests/core_set_foundations.rs:50
+#Test("core_set_public_carrier_keeps_backend_order_on_all_tiers") {
+    tir_support.assert_tiers_agree("core_set_public_carrier", """
+use core.collections.set as api
+fn run() -> {
+    raw :: api.StringSet{items: [String]{"a", "a", "b"}}
+    print(api.to_list(api.discard(raw, "missing")))
+    print(api.to_list(api.intersection(raw, api.from_list([String]{"a", "b"}))))
+    print(api.to_list(api.difference(raw, api.from_list([String]{"b"}))))
+    print(api.to_list(api.symmetric_difference(raw, api.from_list([String]{"b"}))))
+    print(api.to_list(api.remove(raw, "b") ?? api.new()))
+}
+""", "[a, a, b]\n[a, a, b]\n[a, a]\n[a, a]\n[a, a]\n")
+}
+
+// Rust: tests/core_surface_ledger.rs:110
+#Test("core_surface_ledger_matches_its_sources") {
+    (ok, stdout, stderr) :: fixtures.run("--check")
+    assert(ok, "core surface ledger rejected:\nstdout:\n{stdout}\nstderr:\n{stderr}")
+    assert(stdout.contains("11 recorded competitor surfaces"), "the ledger must compare against all eleven languages the owner named:\n{stdout}")
+    assert(stdout.contains("accepted-jet-wins=9389"), "every Core workflow must carry an accepted machine Jet win:\n{stdout}")
+    assert(stdout.contains("core API fixture execution: deterministic; pinned-tools; cold-warm; exact-stdout; input-unchanged; scratch-closed"), "Core API fixtures must report deterministic pinned execution:\n{stdout}")
+    assert(stdout.contains("core API fixtures: independent acceptance verified tasks=29"), "every frozen Core API fixture must have an accepted independent review:\n{stdout}")
+    assert(stdout.contains("core API fresh review: fresh-context-release-check; checks=workflow-closure,construct-classifications,reasoning-evidence,syntax-coverage,fixture-selection"), "Core API release check must name every fresh-review check:\n{stdout}")
+    fixtures.assert_layering_contract_is_taught()
+}
+
+// Rust: tests/core_surface_ledger.rs:144
+#Test("core_surface_ledger_uses_only_canonical_core_module_spellings") {
+    dispatcher :: fixtures.source("crates/jet-foundation/src/Syntax/core_calls.rs")
+    assert(dispatcher.contains("\"core.service\""), "public dispatcher lost the canonical core.service spelling")
+    assert(dispatcher.contains("\"core.tasks\""), "public dispatcher lost the canonical core.tasks spelling")
+    assert(!dispatcher.contains("\"core.task\"") && !dispatcher.contains("\"core.services\""), "retired Core module spelling leaked into the public dispatcher")
+}
+
+// Rust: tests/core_surface_ledger.rs:164
+#Test("core_surface_ledger_checker_rejects_hostile_fixtures") {
+    (ok, stdout, stderr) :: fixtures.run("--hostile-fixtures")
+    assert(ok, "a hostile core-surface-ledger fixture was accepted:\nstdout:\n{stdout}\nstderr:\n{stderr}")
+}
+
+// Rust: tests/core_surface_ledger.rs:173
+#Test("core_api_syntax_is_taught_by_reference_editor_and_diagnostic_surfaces") {
+    syntax :: fixtures.source("Docs/spec/reference/syntax-surface.jet")
+    loop marker in ["values: ...String", "[...tags", "user.[name, email]", "Stream<Int>", "yield i", "delay: Int", "pub policy audit", "wrap(call)", "#Policy("] {
+        assert(syntax.contains(marker), "syntax reference lost `{marker}`")
+    }
+    lsp :: fixtures.source("tests/lsp.rs")
+    loop marker in ["lsp_completion_returns_items", "lsp_signature_help_returns_active_parameter", "rest: ...String", "lsp_hover_returns_signature", "fn connect(host: String, /"] {
+        assert(lsp.contains(marker), "editor coverage lost `{marker}`")
+    }
+    hover :: fixtures.source("tests/lsp/02_hover.json")
+    assert(hover.contains("-[IO]>") && !hover.contains("=>"))
+    loop (path, markers) in [
+        ("tests/ui/variadic_not_last.stderr", ["E1310", "variadic parameter"]),
+        ("tests/ui/spread_bad_call.stderr", ["E1312", "call spread"]),
+        ("tests/ui/yield_type_mismatch.stderr", ["E0807", "Stream<Int"]),
+        ("tests/ui/user_policy_bad_args.stderr", ["policy `audit`", "Fix:"])
+    ] {
+        diagnostics :: fixtures.source(path)
+        loop marker in markers { assert(diagnostics.contains(marker), "diagnostic teaching lost `{marker}` from {path}") }
+    }
+}
+
+// Rust: tests/core_testing_history.rs:89
+#Test("core_testing_histories_error_is_stable_across_i9_tiers") {
+    expected_error :: "history seed is invalid"
+    tiers :: [
+        ("default run", tir_support.jit_run("core_testing_histories_invalid_seed", fixtures.INVALID_SEED_SOURCE)),
+        ("forced interpreter", tir_support.interpreter_run("core_testing_histories_invalid_seed", fixtures.INVALID_SEED_SOURCE)),
+        ("AOT", tir_support.build_and_run_full("jet_core_testing_histories_invalid_seed", "core_testing_histories_invalid_seed", fixtures.INVALID_SEED_SOURCE))
+    ]
+    baseline :: tiers[0].1
+    loop (tier, result) in tiers {
+        assert_eq(result, baseline, "{tier} disagreed on the history seed error")
+        assert_eq(result.0, 1, "{tier} must report the invalid history seed")
+        assert(result.1.is_empty(), "{tier} wrote stdout: {result.1.debug()}")
+        assert(result.2.contains(expected_error), "{tier} lost the exact seed error:\n{result.2}")
+    }
+}
+
+// Rust: tests/core_testing_history.rs:126
+#Test("core_testing_histories_generated_int_commands_are_checked_across_i9_tiers") {
+    tiers :: [
+        ("default run", tir_support.jit_run("core_testing_histories_int_command", fixtures.INTEGER_COMMAND_SOURCE)),
+        ("forced interpreter", tir_support.interpreter_run("core_testing_histories_int_command", fixtures.INTEGER_COMMAND_SOURCE)),
+        ("AOT", tir_support.build_and_run_full("jet_core_testing_histories_int_command", "core_testing_histories_int_command", fixtures.INTEGER_COMMAND_SOURCE))
+    ]
+    baseline :: tiers[0].1
+    loop (tier, result) in tiers {
+        assert_eq(result, baseline, "{tier} disagreed on generated integer history")
+        assert_eq(result.0, 0, "{tier} failed:\n{result.2}")
+        assert_eq(result.1, "matched\n", "{tier} changed history output")
+        assert(result.2.is_empty(), "{tier} wrote stderr: {result.2.debug()}")
+    }
+}
+
+// Rust: tests/core_testing_history.rs:158
+#Test("core_testing_histories_callback_failure_becomes_unavailable_across_i9_tiers") {
+    tiers :: [
+        ("default run", tir_support.jit_run("core_testing_histories_callback_failure", fixtures.CALLBACK_FAILURE_SOURCE)),
+        ("forced interpreter", tir_support.interpreter_run("core_testing_histories_callback_failure", fixtures.CALLBACK_FAILURE_SOURCE)),
+        ("AOT", tir_support.build_and_run_full("jet_core_testing_histories_callback_failure", "core_testing_histories_callback_failure", fixtures.CALLBACK_FAILURE_SOURCE))
+    ]
+    baseline :: tiers[0].1
+    loop (tier, result) in tiers {
+        assert_eq(result, baseline, "{tier} disagreed on callback failure")
+        assert_eq(result.0, 0, "{tier} failed:\n{result.2}")
+        assert(result.1.starts_with("unavailable\n"), "{tier} did not preserve the unavailable comparison:\n{result.1}")
+        assert(result.1.contains("history callback marker"), "{tier} lost the typed callback failure:\n{result.1}")
+        assert(result.2.is_empty(), "{tier} wrote stderr: {result.2.debug()}")
+    }
+}
+
+// Rust: tests/core_time_foundations.rs:7
+#Test("core_time_epoch_splits_and_rejects_integer_overflow_across_tiers") {
+    tir_support.assert_tiers_agree("core_time_epoch_foundations", """
+use core.time as time
+fn run() -> {
+    print(time.from_unix_nanoseconds(-1).format_rfc3339())
+    print(time.from_unix_microseconds(-1).format_rfc3339())
+    print(time.from_unix_ms(-1).format_rfc3339())
+    print(time.from_unix_seconds(-1).format_rfc3339())
+    if time.parse("2024-02-29") == {
+        .Ok(date) -> print("leap:{date}")
+        .Err(_) -> print("leap:rejected")
+    }
+    if time.parse("2023-02-29") == {
+        .Ok(_) -> print("bad-leap:accepted")
+        .Err(_) -> print("bad-leap:rejected")
+    }
+    if time.parse("9223372036854775808-01-01") == {
+        .Ok(_) -> print("wide-year:accepted")
+        .Err(_) -> print("wide-year:rejected")
+    }
+}
+""", "1969-12-31T23:59:59.999999999Z\n1969-12-31T23:59:59.999999000Z\n1969-12-31T23:59:59.999000000Z\n1969-12-31T23:59:59Z\nleap:2024-02-29\nbad-leap:rejected\nwide-year:rejected\n")
+}
+
+// Rust: tests/core_time_foundations.rs:38
+#Test("core_time_root_date_and_duration_carriers_match_across_tiers") {
+    tir_support.assert_tiers_agree("core_time_root_carriers", """
+use core.time as time
+fn run() -> {
+    date :: Date{year: 2024, month: 2, day: 29}
+    span :: Duration{ns: 1500000000}
+    print(date)
+    print(date.year())
+    print(date.month())
+    print(date.day())
+    print(span.ns)
+    print(time.duration_as_ms(span))
+}
+""", "2024-02-29\n2024\n2\n29\n1500000000\n1500\n")
+}
+
+// Rust: tests/core_time_foundations.rs:60
+#Test("core_calendar_leap_and_epoch_boundaries_match_across_tiers") {
+    tir_support.assert_tiers_agree("core_time_calendar_foundations", """
+use core.time.calendar as calendar
+fn run() -> {
+    print(calendar.isleap(1900))
+    print(calendar.isleap(2000))
+    print(calendar.leapdays(1996, 2005))
+    print(calendar.leapdays(2005, 1996))
+    range :: calendar.monthrange(2024, 2)
+    print(range.days)
+    print(range.weekday)
+    month :: calendar.monthcalendar_start(2024, 2, -1)
+    print(month[0][0])
+    print(month[0][4])
+    print(month[0][6])
+    print(month.len())
+    print(calendar.timegm(1970, 1, 1, 0, 0, 0))
+    print(calendar.timegm(1969, 12, 31, 23, 59, 59))
+}
+""", "false\ntrue\n3\n3\n29\n3\n0\n1\n3\n5\n0\n-1\n")
+}
+
+// Rust: tests/core_time_foundations.rs:89
+#Test("core_expiring_deadline_boundaries_are_strict_and_saturating_across_tiers") {
+    tir_support.assert_tiers_agree("core_time_expiring_foundations", """
+use core.time.expiring as expiring
+fn run() -> {
+    print(expiring.expired(10, 10))
+    print(expiring.expired(10, 11))
+    print(expiring.expired(-1, 0))
+    print(expiring.remaining_ms(10, 10))
+    print(expiring.remaining_ms(10, 9))
+    print(expiring.remaining_ms(9223372036854775807, Int.MIN))
+    print(expiring.remaining_ms(Int.MIN, Int.MIN))
+    print(expiring.remaining_ms(Int.MIN, Int.MAX))
+}
+""", "false\ntrue\ntrue\n0\n1\n9223372036854775807\n0\n0\n")
+}

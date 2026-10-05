@@ -1,0 +1,1219 @@
+use std.env
+use std.process
+use std.fs as fs
+use std.thread
+use std.time.[Instant, Duration]
+use std.net.[UdpSocket]
+use core.sys.target as target
+use tests.corelib_parts.support.[build_and_run, bind_dns_dual_protocol_fixture, dns_fixture_response, dns_truncated_response, dns_cname_additional_response, dns_question_end, jet_string_path]
+use tests.common as common
+use tests.tir_support as tir_support
+use jet.Interpreter as Interpreter
+use core.net.runtime.top_dns_resolver_policy as dns_resolver_policy
+// Native fixture sockets, threads, clock and FS are real providers: GATE #4494.
+// Selected OS/family dispatch: GATE #4483. IO error identity: GATE #4409.
+
+// Rust: tests/corelib_parts/net.rs:2
+#Test("core_net_dns_txt_and_srv_are_real_udp_queries") {
+    socket := UdpSocket.bind("127.0.0.1:0").unwrap()
+    addr := socket.local_addr().unwrap()
+    server := thread.spawn(() -> {
+        loop _ in 0..2 {
+            buf := [U8].repeat(0, 512)
+            (n, peer) := socket.recv_from(&buf).unwrap()
+            resp := dns_fixture_response(buf[..n])
+            socket.send_to(&resp, peer).unwrap()
+        }
+    })
+    dir := env.temp_dir().join("jet_core_net_dns_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    src := """
+use core.net as net
+fn run() -> {
+    txts :: net.dns_txt_at("$ADDR", "service.example.test", 1000) ?? panic("txt")
+    print(txts[0])
+    srvs :: net.dns_srv_at("$ADDR", "_jet._tcp.example.test", 1000) ?? panic("srv")
+    print("{net.dns_srv_target(srvs[0])}:{net.dns_srv_port(srvs[0])}")
+}
+""".replace("$ADDR", addr.to_string())
+    (code, stdout, stderr) := build_and_run(&dir, "dns_fixture", &src, [], None)
+    server.join().unwrap()
+    assert(code == 0, stderr)
+    assert(stdout == "jet\nsrv.example.test:443\n")
+}
+
+// Rust: tests/corelib_parts/net.rs:35
+#Test("core_net_dns_udp_truncation_retries_tcp_and_reads_cname_additional") {
+    (tcp, udp, addr) := bind_dns_dual_protocol_fixture()
+    server := thread.spawn(() -> {
+        udp_query := [U8].repeat(0, 512)
+        (n, peer) := udp.recv_from(&udp_query).unwrap()
+        udp.send_to(&dns_truncated_response(udp_query[..n]), peer).unwrap()
+        (stream, _) := tcp.accept().unwrap()
+        prefix := [U8].repeat(0, 2)
+        stream.read_exact(&prefix).unwrap()
+        tcp_query := [U8].repeat(0, USize{U16.from_be_bytes(prefix)})
+        stream.read_exact(&tcp_query).unwrap()
+        response := dns_cname_additional_response(&tcp_query)
+        stream.write_all(&U16{response.len()}.to_be_bytes()).unwrap()
+        stream.write_all(&response).unwrap()
+    })
+    dir := env.temp_dir().join("jet_core_net_dns_tcp_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    src := """
+use core.net as net
+fn run() -> {
+    ips :: net.dns_a_at("$ADDR", "service.example.test", 1000) ?? panic("dns")
+    print(net.ip_to_string(ips[0]))
+}
+""".replace("$ADDR", addr.to_string())
+    (code, stdout, stderr) := build_and_run(&dir, "dns_tcp_cname", &src, [], None)
+    server.join().unwrap()
+    assert(code == 0, stderr)
+    assert(stdout == "192.0.2.42\n")
+}
+
+// Rust: tests/corelib_parts/net.rs:77
+#Test("core_net_dns_timeout_is_one_budget_across_udp_and_tcp") {
+    (tcp, udp, addr) := bind_dns_dual_protocol_fixture()
+    server := thread.spawn(() -> {
+        query := [U8].repeat(0, 512)
+        (n, peer) := udp.recv_from(&query).unwrap()
+        started := Instant.now()
+        thread.sleep(Duration.from_millis(70))
+        udp.send_to(&dns_truncated_response(query[..n]), peer).unwrap()
+        (stream, _) := tcp.accept().unwrap()
+        stream.set_read_timeout(Val(Duration.from_millis(500))).unwrap()
+        prefix := [U8].repeat(0, 2)
+        stream.read_exact(&prefix).unwrap()
+        request := [U8].repeat(0, USize{U16.from_be_bytes(prefix)})
+        stream.read_exact(&request).unwrap()
+        closed := [U8].repeat(0, 1)
+        _ :: stream.read(&closed)
+        started.elapsed()
+    })
+    dir := env.temp_dir().join("jet_core_net_dns_budget_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    src := """
+use core.net as net
+fn run() -> {
+    _ :: net.dns_a_at("$ADDR", "service.example.test", 120) ?? panic("dns total timeout")
+}
+""".replace("$ADDR", addr.to_string())
+    (code, _stdout, stderr) := build_and_run(&dir, "dns_total_budget", &src, [], None)
+    elapsed := server.join().unwrap()
+    assert(code != 0, "stalled DNS TCP fallback unexpectedly succeeded")
+    assert(stderr.contains("dns total timeout"), stderr)
+    assert(elapsed < Duration.from_millis(190), "UDP and TCP each received a fresh timeout: {elapsed:?}")
+}
+
+// Rust: tests/corelib_parts/net.rs:114
+#Test("core_net_dns_platform_resolver_policy_uses_native_sources") {
+    // Native source oracle replaces inspection of the retired Rust prelude.
+    net := fs.read_to_string(common.repo_root().join("Core/net/runtime/top_net_http_02.jet")).unwrap()
+    assert(net.contains("selected_os()") && net.contains(".Linux"))
+    assert(net.contains("/etc/resolv.conf"))
+    assert(net.contains(".MacOS") && net.contains("scutil") && net.contains("--dns"))
+    assert(net.contains(".Windows") && net.contains("Get-DNSClientServerAddress"))
+    assert(net.contains("$_.ServerAddresses"))
+    assert(!net.contains("ipconfig"))
+    assert(!net.contains("1.1.1.1"))
+}
+
+// Rust: tests/corelib_parts/net.rs:128
+#Test("core_net_dns_platform_resolver_parsers_accept_native_fixtures") {
+    assert(dns_resolver_policy.jet_net_dns_parse_resolv_conf("# generated\nnameserver 192.0.2.53 # vpn\nnameserver 2001:db8::53\nsearch example.test\n") == ["192.0.2.53:53", "[2001:db8::53]:53"])
+    assert(dns_resolver_policy.jet_net_dns_parse_scutil("resolver #1\n  nameserver[0] : 192.0.2.54\n  nameserver[1] : 2001:db8::54\n  search domain[0] : example.test\n") == ["192.0.2.54:53", "[2001:db8::54]:53"])
+    assert(dns_resolver_policy.jet_net_dns_parse_windows_addresses("{192.0.2.55, 2001:db8::55}\r\n\r\n") == ["192.0.2.55:53", "[2001:db8::55]:53"])
+}
+
+// Rust: tests/corelib_parts/net.rs:148
+#Test("core_net_dns_platform_resolver_parsers_reject_noise_and_malformed_entries") {
+    assert(dns_resolver_policy.jet_net_dns_parse_resolv_conf("nameserver nope\nnot-nameserver 192.0.2.1\nnameserver [broken\n").is_empty())
+    assert(dns_resolver_policy.jet_net_dns_parse_scutil("nameserver[x] : 192.0.2.1\nnameserver[0 : 192.0.2.2\nnameserver[] : 192.0.2.3\n").is_empty())
+    assert(dns_resolver_policy.jet_net_dns_parse_windows_addresses("InterfaceAlias Ethernet\nServerAddresses nope, 999.1.1.1\n").is_empty())
+}
+
+// Rust: tests/corelib_parts/net.rs:164
+#Test("core_net_dns_rejects_wrong_transaction_id") {
+    socket := UdpSocket.bind("127.0.0.1:0").unwrap()
+    addr := socket.local_addr().unwrap()
+    server := thread.spawn(() -> {
+        query := [U8].repeat(0, 512)
+        (n, peer) := socket.recv_from(&query).unwrap()
+        response := dns_fixture_response(query[..n])
+        wrong := U16.from_be_bytes([response[0], response[1]]).wrapping_add(1)
+        response[0..2].copy_from_slice(&wrong.to_be_bytes())
+        socket.send_to(&response, peer).unwrap()
+    })
+    dir := env.temp_dir().join("jet_core_net_dns_bad_id_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    src := """
+use core.net as net
+fn run() -> { _ :: net.dns_txt_at("$ADDR", "service.example.test", 1000) ?? panic("forged DNS accepted") }
+""".replace("$ADDR", addr.to_string())
+    (code, _stdout, stderr) := build_and_run(&dir, "dns_bad_id", &src, [], None)
+    server.join().unwrap()
+    assert(code != 0, "forged transaction ID was accepted")
+    assert(stderr.contains("forged DNS accepted"), stderr)
+}
+
+// Rust: tests/corelib_parts/net.rs:195
+#Test("core_net_dns_transaction_ids_are_not_a_fixed_sequence") {
+    socket := UdpSocket.bind("127.0.0.1:0").unwrap()
+    addr := socket.local_addr().unwrap()
+    server := thread.spawn(() -> {
+        ids := [U16: Bool]{}
+        loop _ in 0..9 {
+            query := [U8].repeat(0, 512)
+            (n, peer) := socket.recv_from(&query).unwrap()
+            ids[U16.from_be_bytes([query[0], query[1]])] = true
+            socket.send_to(&dns_fixture_response(query[..n]), peer).unwrap()
+        }
+        ids
+    })
+    dir := env.temp_dir().join("jet_core_net_dns_ids_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    src := """
+use core.net as net
+fn run() -> {
+    loop _i in 0..8 { _ :: net.dns_txt_at("$ADDR", "service.example.test", 1000) ?? panic("dns") }
+}
+""".replace("$ADDR", addr.to_string())
+    (code, _stdout, stderr) := build_and_run(&dir, "dns_ids", &src, [], None)
+    ids := server.join().unwrap()
+    assert(code == 0, stderr)
+    assert(ids.len() > 1, "all nine DNS queries reused one transaction ID")
+}
+
+// Rust: tests/corelib_parts/net.rs:231
+fn run_rejected_dns_response(tag: String, make_response: fn(&[U8]) -> [U8]) -> String {
+    socket := UdpSocket.bind("127.0.0.1:0").unwrap()
+    addr := socket.local_addr().unwrap()
+    server := thread.spawn(() -> {
+        query := [U8].repeat(0, 512)
+        (n, peer) := socket.recv_from(&query).unwrap()
+        socket.send_to(&make_response(query[..n]), peer).unwrap()
+    })
+    dir := env.temp_dir().join("jet_core_net_dns_reject_{tag}_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    src := """
+use core.net as net
+fn run() -> { _ :: net.dns_a_at("$ADDR", "service.example.test", 1000) ?? panic("invalid DNS accepted") }
+""".replace("$ADDR", addr.to_string())
+    (code, _stdout, stderr) := build_and_run(&dir, tag, &src, [], None)
+    server.join().unwrap()
+    assert(code != 0, "invalid DNS response was accepted: {tag}")
+    stderr
+}
+
+// Rust: tests/corelib_parts/net.rs:264
+#Test("core_net_dns_rejects_non_response_and_cyclic_compression") {
+    // Rust: tests/corelib_parts/net.rs:265
+    fn non_response(query: &[U8]) -> [U8] {
+        response := dns_fixture_response(query)
+        response[2] &= 0x7f
+        response
+    }
+    // Rust: tests/corelib_parts/net.rs:270
+    fn cyclic_compression(query: &[U8]) -> [U8] {
+        end := dns_question_end(query)
+        record_start := end
+        response := [U8]{}
+        response.extend_from_slice(query[0..2])
+        response.extend_from_slice(&U16{0x8180}.to_be_bytes())
+        response.extend_from_slice(&U16{1}.to_be_bytes())
+        response.extend_from_slice(&U16{1}.to_be_bytes())
+        response.extend_from_slice(&U16{0}.to_be_bytes())
+        response.extend_from_slice(&U16{0}.to_be_bytes())
+        response.extend_from_slice(query[12..end])
+        response.push(0xc0 | (U8{record_start >> 8} & 0x3f))
+        response.push(U8{record_start})
+        response.extend_from_slice(&U16{1}.to_be_bytes())
+        response.extend_from_slice(&U16{1}.to_be_bytes())
+        response.extend_from_slice(&U32{0}.to_be_bytes())
+        response.extend_from_slice(&U16{4}.to_be_bytes())
+        response.extend_from_slice([192, 0, 2, 1])
+        response
+    }
+    qr := run_rejected_dns_response("dns_not_response", non_response)
+    assert(qr.contains("invalid DNS accepted"), qr)
+    cycle := run_rejected_dns_response("dns_pointer_cycle", cyclic_compression)
+    assert(cycle.contains("invalid DNS accepted"), cycle)
+}
+
+// Rust: tests/corelib_parts/net.rs:298
+#Test("core_net_dns_rejects_reserved_header_forward_pointer_and_impossible_counts") {
+    // Rust: tests/corelib_parts/net.rs:299
+    fn reserved_header(query: &[U8]) -> [U8] {
+        response := dns_cname_additional_response(query)
+        response[3] |= 0x40
+        response
+    }
+    // Rust: tests/corelib_parts/net.rs:304
+    fn forward_pointer(query: &[U8]) -> [U8] {
+        end := dns_question_end(query)
+        record_start := end
+        pointer_target := record_start + 6
+        response := [U8]{}
+        response.extend_from_slice(query[0..2])
+        response.extend_from_slice(&U16{0x8180}.to_be_bytes())
+        response.extend_from_slice(&U16{1}.to_be_bytes())
+        response.extend_from_slice(&U16{1}.to_be_bytes())
+        response.extend_from_slice(&U16{0}.to_be_bytes())
+        response.extend_from_slice(&U16{0}.to_be_bytes())
+        response.extend_from_slice(query[12..end])
+        response.push(0xc0 | (U8{pointer_target >> 8} & 0x3f))
+        response.push(U8{pointer_target})
+        response.extend_from_slice(&U16{1}.to_be_bytes())
+        response.extend_from_slice(&U16{1}.to_be_bytes())
+        response.extend_from_slice(&U32{0}.to_be_bytes())
+        response.extend_from_slice(&U16{4}.to_be_bytes())
+        response.extend_from_slice([192, 0, 2, 1])
+        response
+    }
+    // Rust: tests/corelib_parts/net.rs:325
+    fn impossible_counts(query: &[U8]) -> [U8] {
+        end := dns_question_end(query)
+        response := [U8]{}
+        response.extend_from_slice(query[0..2])
+        response.extend_from_slice(&U16{0x8180}.to_be_bytes())
+        response.extend_from_slice(&U16{1}.to_be_bytes())
+        response.extend_from_slice(&U16.MAX.to_be_bytes())
+        response.extend_from_slice(&U16.MAX.to_be_bytes())
+        response.extend_from_slice(&U16.MAX.to_be_bytes())
+        response.extend_from_slice(query[12..end])
+        response
+    }
+    socket := UdpSocket.bind("127.0.0.1:0").unwrap()
+    addr := socket.local_addr().unwrap()
+    server := thread.spawn(() -> {
+        responses: [fn(&[U8]) -> [U8]] := [reserved_header, forward_pointer, impossible_counts]
+        loop response in responses {
+            query := [U8].repeat(0, 512)
+            (n, peer) := socket.recv_from(&query).unwrap()
+            socket.send_to(&response(query[..n]), peer).unwrap()
+        }
+    })
+    dir := env.temp_dir().join("jet_core_net_dns_hostile_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    src := """
+use core.net as net
+fn run() -> {
+    if net.dns_a_at("$ADDR", "service.example.test", 1000) == {
+        .Ok(_) -> panic("reserved DNS header accepted")
+        .Err(_) -> print("rejected")
+    }
+    if net.dns_a_at("$ADDR", "service.example.test", 1000) == {
+        .Ok(_) -> panic("forward DNS pointer accepted")
+        .Err(_) -> print("rejected")
+    }
+    if net.dns_a_at("$ADDR", "service.example.test", 1000) == {
+        .Ok(_) -> panic("impossible DNS counts accepted")
+        .Err(_) -> print("rejected")
+    }
+}
+""".replace("$ADDR", addr.to_string())
+    (code, stdout, stderr) := build_and_run(&dir, "dns_hostile_bounds", &src, [], None)
+    server.join().unwrap()
+    assert(code == 0, stderr)
+    assert(stdout == "rejected\nrejected\nrejected\n")
+}
+
+// Rust: tests/corelib_parts/net.rs:382
+#Test("core_net_dns_wire_lookup_observes_task_cancellation") {
+    socket := UdpSocket.bind("127.0.0.1:0").unwrap()
+    addr := socket.local_addr().unwrap()
+    dir := env.temp_dir().join("jet_core_net_dns_cancel_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    src := """
+use core.net as net
+use core.tasks as tasks
+use core.time as time
+fn run() -> {
+    (ready_tx, ready_rx) :: channel<Int>()
+    lookup :: task {
+        ready_tx.send(1)
+        if net.dns_a_at("$ADDR", "service.example.test", 5000) == {
+            .Ok(_) -> print("unexpected DNS response")
+            .Err(error) -> print(net.error_message(error))
+        }
+    }
+    _ready :: ready_rx.receive() ?? panic("ready")
+    time.sleep(50ms)
+    lookup.cancel()
+    lookup.join() ?? panic("lookup task failed")
+}
+""".replace("$ADDR", addr.to_string())
+    (code, stdout, stderr) := build_and_run(&dir, "dns_task_cancel", &src, [], None)
+    drop(socket)
+    assert(code == 0, stderr)
+    assert(stdout == "network operation cancelled during DNS lookup for `service.example.test`\n")
+}
+
+// Rust: tests/corelib_parts/net.rs:420
+#Test("core_net_dns_nxdomain_is_an_error") {
+    // Rust: tests/corelib_parts/net.rs:421
+    fn nxdomain(query: &[U8]) -> [U8] {
+        end := dns_question_end(query)
+        response := [U8]{}
+        response.extend_from_slice(query[0..2])
+        response.extend_from_slice(&U16{0x8183}.to_be_bytes())
+        response.extend_from_slice(&U16{1}.to_be_bytes())
+        response.extend_from_slice(&U16{0}.to_be_bytes())
+        response.extend_from_slice(&U16{0}.to_be_bytes())
+        response.extend_from_slice(&U16{0}.to_be_bytes())
+        response.extend_from_slice(query[12..end])
+        response
+    }
+    stderr := run_rejected_dns_response("dns_nxdomain", nxdomain)
+    assert(stderr.contains("invalid DNS accepted"), stderr)
+}
+
+// Rust: tests/corelib_parts/net.rs:439
+#Test("core_net_ratified_named_forms_require_exact_labels") {
+    cases := [
+        ("tcp accept", "fn check(listener: TcpListener, d: Duration) -> { result :: listener.accept(d) }", "deadline:"),
+        ("tcp read", "fn check(stream: TcpStream, d: Duration) -> { result :: stream.read(1, banana: d) }", "deadline"),
+        ("tcp read text", "fn check(stream: TcpStream, d: Duration) -> { result :: stream.read_text(1, d) }", "deadline:"),
+        ("tcp write", "fn check(stream: TcpStream, d: Duration) -> { result :: stream.write([1], potato: d) }", "deadline"),
+        ("tcp write all", "fn check(stream: TcpStream, d: Duration) -> { result :: stream.write_all([1], d) }", "deadline:"),
+        ("tcp write text", "fn check(stream: TcpStream, d: Duration) -> { result :: stream.write_text(\"x\", turnip: d) }", "deadline"),
+        ("tcp ready", "fn check(stream: TcpStream, d: Duration) -> { result :: stream.ready(.Read, d) }", "deadline:"),
+        ("udp send", "fn check(socket: UdpSocket, address: SocketAddr, d: Duration) -> { result :: socket.send_to([1], address, banana: d) }", "deadline"),
+        ("udp receive", "fn check(socket: UdpSocket, d: Duration) -> { result :: socket.receive(1, d) }", "deadline:"),
+        ("udp ready", "fn check(socket: UdpSocket, d: Duration) -> { result :: socket.ready(.Read, potato: d) }", "deadline"),
+        ("unix connect", "fn check(d: Duration) -> { result :: net.unix_connect(\"/tmp/jet-label-test\", d) }", "deadline:"),
+        ("unix accept", "fn check(listener: UnixListener, d: Duration) -> { result :: listener.accept(banana: d) }", "deadline"),
+        ("unix read", "fn check(stream: UnixStream, d: Duration) -> { result :: stream.read(1, d) }", "deadline:"),
+        ("unix write", "fn check(stream: UnixStream, d: Duration) -> { result :: stream.write_all([1], potato: d) }", "deadline"),
+        ("unix ready", "fn check(stream: UnixStream, d: Duration) -> { result :: stream.ready(.Write, d) }", "deadline:"),
+        ("tls read", "fn check(stream: TLSStream, d: Int) -> { result :: tls.read(stream, banana: d) }", "n:"),
+        ("tls write", "fn check(stream: TLSStream) -> { result :: tls.write(stream, [U8]{}, potato: 1) }", "bytes:"),
+        ("tls client", "fn check() -> { result :: tls.client(server_name: \"localhost\", banana: 443) }", "host:"),
+    ]
+    loop (name, body, expected_fix) in cases {
+        source := "use core.net as net\nuse core.net.tls as tls\n{body}\n"
+        diags := jet.compile(&source).expect_err(name)
+        assert(diags.iter().any((diag) -> (diag.code == "E0764" || diag.code == "E0769") && diag.fix.contains(expected_fix)),
+            "{name} did not reject its missing/wrong label precisely: {diags:?}")
+    }
+}
+
+// Rust: tests/corelib_parts/net.rs:475
+#Test("core_net_tcp_read_uses_scheduler_and_returns_typed_cancellation") {
+    dir := env.temp_dir().join("jet_core_net_task_cancel_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) := build_and_run(&dir, "net_task_cancel", """
+use core.net as net
+use core.tasks as tasks
+fn run() -> {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    address :: net.socket_to_string(typed_address)
+    (ready_tx, ready_rx) :: channel<Int>()
+    server :: task {
+        stream := net.tcp_accept(listener) ?? panic("accept")
+        ready_tx.send(1)
+        if stream.read(1) == {
+            .Ok(_) -> print("unexpected read")
+            .Err(error) -> print(net.error_message(error))
+        }
+    }
+    _client :: net.tcp_connect(address) ?? panic("connect")
+    _ready :: ready_rx.receive() ?? panic("ready")
+    server.cancel()
+    server.join() ?? panic("server task failed")
+}
+""", [], None)
+    assert(code == 0, stderr)
+    assert(stdout == "tcp read cancelled\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/corelib_parts/net.rs:518
+#Test("core_net_tcp_accept_and_ready_are_scheduler_interrupt_points") {
+    dir := env.temp_dir().join("jet_core_net_accept_ready_interrupts_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) := build_and_run(&dir, "net_accept_ready_interrupts", """
+use core.net as net
+use core.tasks as tasks
+use core.time as time
+fn run() -> {
+    cancelled_listener :: net.tcp_listen("127.0.0.1:0") ?? panic("cancel listen")
+    cancelled_address :: net.socket_to_string(net.listener_local_socket_addr(cancelled_listener) ?? panic("cancel address"))
+    (accept_tx, accept_rx) :: channel<Int>()
+    cancelled_accept :: task {
+        accept_tx.send(1)
+        if &cancelled_listener.accept() == {
+            .Ok(_) -> print("accept unexpectedly succeeded")
+            .Err(error) -> print(net.error_message(error))
+        }
+    }
+    _accept_ready :: accept_rx.receive() ?? panic("accept ready")
+    time.sleep(10ms)
+    cancelled_accept.cancel()
+    time.sleep(10ms)
+    release_accept :: net.tcp_connect(cancelled_address) ?? panic("release accept")
+    release_accept.close() ?? panic("release close")
+    cancelled_accept.join() ?? panic("cancelled accept task failed")
+    ready_listener :: net.tcp_listen("127.0.0.1:0") ?? panic("ready listen")
+    ready_address :: net.socket_to_string(net.listener_local_socket_addr(ready_listener) ?? panic("ready address"))
+    ready_client :: net.tcp_connect(ready_address) ?? panic("ready connect")
+    ready_server := net.tcp_accept(ready_listener) ?? panic("ready accept")
+    write_interest :: NetReadyInterest.Write
+    write_ready :: ready_server.ready(write_interest, deadline: Duration.milliseconds(1000) ?? panic("write ready deadline")) ?? panic("write ready")
+    print(net.ready_readable(write_ready))
+    print(net.ready_writable(write_ready))
+    interest :: NetReadyInterest.Read
+    (wait_tx, wait_rx) :: channel<Int>()
+    ready_wait :: task ^ready_server {
+        wait_tx.send(1)
+        if ready_server.ready(interest, deadline: Duration.milliseconds(1000) ?? panic("ready deadline")) == {
+            .Ok(_) -> print("ready unexpectedly succeeded")
+            .Err(error) -> print(net.error_message(error))
+        }
+    }
+    _wait_ready :: wait_rx.receive() ?? panic("wait ready")
+    time.sleep(10ms)
+    ready_wait.cancel()
+    ready_wait.join() ?? panic("ready wait task failed")
+    ready_client.close() ?? panic("ready client close")
+}
+""", [], None)
+    assert(code == 0, stderr)
+    assert(stdout == "tcp accept cancelled\nfalse\ntrue\ntcp ready cancelled\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/corelib_parts/net.rs:585
+#Test("core_net_udp_loopback_preserves_datagram_truncation_metadata") {
+    dir := env.temp_dir().join("jet_core_net_udp_truncation_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) := build_and_run(&dir, "net_udp_truncation", """
+use core.net as net
+fn run() -> {
+    server :: net.udp_bind("127.0.0.1:0") ?? panic("server bind")
+    client :: net.udp_bind("127.0.0.1:0") ?? panic("client bind")
+    address :: net.udp_local_addr(server) ?? panic("server address")
+    budget :: Duration.seconds(1) ?? panic("deadline")
+    payload :: [U8]{ 0, 255, 1, 2, 3 }
+    sent :: client.send_to(payload, address, deadline: budget) ?? panic("send")
+    packet :: server.receive(3, deadline: budget) ?? panic("receive")
+    print("{sent}:{net.udp_packet_bytes(packet)}:{net.udp_packet_original_len(packet)}:{net.udp_packet_truncated(packet)}")
+}
+""", [], None)
+    assert(code == 0, stderr)
+    assert(stdout == "5:[0, 255, 1]:5:true\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/corelib_parts/net.rs:619
+#Test("core_net_udp_same_handle_readiness_cancels_and_close_is_idempotent") {
+    if target.selected_family() == .Unix {
+        dir := env.temp_dir().join("jet_core_net_udp_ready_close_{process.id()}")
+        _ :: fs.remove_dir_all(&dir)
+        fs.create_dir_all(&dir).unwrap()
+        (code, stdout, stderr) := build_and_run(&dir, "net_udp_ready_close", """
+use core.net as net
+use core.tasks as tasks
+use core.time as time
+fn run() -> {
+    socket :: net.udp_bind("127.0.0.1:0") ?? panic("bind")
+    interest :: NetReadyInterest.Read
+    (ready_tx, ready_rx) :: channel<Int>()
+    waiter :: task {
+        ready_tx.send(1)
+        if socket.ready(interest, deadline: Duration.seconds(1) ?? panic("deadline")) == {
+            .Ok(_) -> panic("udp unexpectedly ready")
+            .Err(error) -> print(net.error_message(error))
+        }
+    }
+    _ready :: ready_rx.receive() ?? panic("ready")
+    time.sleep(10ms)
+    waiter.cancel()
+    waiter.join() ?? panic("udp readiness task failed")
+    closed :: net.udp_bind("127.0.0.1:0") ?? panic("closed bind")
+    closed.close() ?? panic("close")
+    closed.close() ?? panic("second close")
+    if net.udp_receive(closed, 1) == {
+        .Ok(_) -> panic("closed receive succeeded")
+        .Err(error) -> print(net.error_message(error))
+    }
+}
+""", [], None)
+        assert(code == 0, stderr)
+        assert(stdout == "udp ready cancelled\nudp receive failed: socket is closed\n")
+        _ :: fs.remove_dir_all(dir)
+    }
+}
+
+// Rust: tests/corelib_parts/net.rs:668
+#Test("core_net_happy_eyeballs_uses_one_deadline_and_live_loopback") {
+    dir := env.temp_dir().join("jet_core_net_happy_eyeballs_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) := build_and_run(&dir, "net_happy_eyeballs", """
+use core.net as net
+fn run() -> {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    if net.tcp_connect_timeout(address, 0) == {
+        .Ok(_) -> panic("expired connect succeeded")
+        .Err(error) -> print(net.error_operation(error))
+    }
+    client :: net.tcp_connect_happy("localhost", net.socket_port(address), 1000) ?? panic("happy connect")
+    server := &listener.accept() ?? panic("accept")
+    client.write_text("happy") ?? panic("write")
+    print(server.read_text(5) ?? panic("read"))
+}
+""", [], None)
+    assert(code == 0, stderr)
+    assert(stdout == "tcp connect\nhappy\n")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/corelib_parts/net.rs:703
+#Test("core_net_tcp_per_call_deadlines_bound_accept_read_and_write") {
+    dir := env.temp_dir().join("jet_core_net_per_call_deadlines_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) := build_and_run(&dir, "net_per_call_deadlines", """
+use core.net as net
+fn run() -> {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    expired :: Duration.milliseconds(0) ?? panic("duration")
+    if &listener.accept(deadline: expired) == {
+        .Ok(_) -> panic("expired accept succeeded")
+        .Err(error) -> print(net.error_operation(error))
+    }
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    client := net.tcp_connect(address) ?? panic("connect")
+    server := &listener.accept() ?? panic("accept")
+    if server.read(1, deadline: expired) == {
+        .Ok(_) -> panic("expired read succeeded")
+        .Err(error) -> print(net.error_operation(error))
+    }
+    byte :: [U8]{ 1 }
+    if client.write(byte, deadline: expired) == {
+        .Ok(_) -> panic("expired write succeeded")
+        .Err(error) -> print(net.error_operation(error))
+    }
+}
+""", [], None)
+    assert(code == 0, stderr)
+    assert(stdout == "tcp accept\ntcp read\ntcp write\n")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/corelib_parts/net.rs:746
+#Test("core_net_tcp_implements_nominal_io_reader_writer") {
+    dir := env.temp_dir().join("jet_core_net_io_contract_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) := build_and_run(&dir, "net_io_contract", """
+use core.net as net
+use core.tasks as tasks
+fn receive<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] IOError! { return stream.read(limit) }
+fn send_four<T: Writer>(&stream: T) -[IO]> Int IOError! {
+    stream.write_all([1, 2, 3, 4])
+    return Ok(4)
+}
+fn run() -> {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    address :: net.socket_to_string(typed_address)
+    server :: task {
+        stream := net.tcp_accept(listener) ?? panic("accept")
+        if receive(&stream, 0) == { .Ok(_) -> panic("zero limit looked like EOF"); .Err(_) -> print("invalid") }
+        bytes :: receive(&stream, 4) ?? panic("read")
+        print("read:{bytes.len()}")
+        eof :: receive(&stream, 4) ?? panic("eof")
+        if eof.len() == 0 { print("eof") }
+    }
+    client := net.tcp_connect(address) ?? panic("connect")
+    _count :: send_four(&client) ?? panic("write")
+    client.close() ?? panic("close")
+    server.join() ?? panic("server task failed")
+}
+""", [], None)
+    assert(code == 0, stderr)
+    assert(stdout == "invalid\nread:4\neof\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/corelib_parts/net.rs:800
+#Test("core_net_unix_stream_implements_nominal_io_reader_writer") {
+    if target.selected_family() == .Unix {
+        dir := env.temp_dir().join("jet_core_unix_io_contract_{process.id()}")
+        _ :: fs.remove_dir_all(&dir)
+        fs.create_dir_all(&dir).unwrap()
+        socket := jet_string_path(&dir.join("stream.sock"))
+        source := """
+use core.net as net
+use core.tasks as tasks
+fn receive<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] IOError! { return stream.read(limit) }
+fn send_four<T: Writer>(&stream: T) -[IO]> Int IOError! {
+    first :: stream.write([1, 2])
+    stream.write_all([3, 4])
+    return Ok(first)
+}
+fn run() -> {
+    listener :: net.unix_listen("$SOCKET") ?? panic("listen")
+    server :: task {
+        stream := net.unix_accept(listener) ?? panic("accept")
+        if receive(&stream, 0) == {
+            .Ok(_) -> panic("zero limit looked like EOF")
+            .Err(error) -> {
+                if error == {
+                    .InvalidInput(context) -> print(if context.operation == .Read -> "invalid" else -> "wrong-operation")
+                    else -> { print("wrong-error") }
+                }
+            }
+        }
+        first :: receive(&stream, 2) ?? panic("first read")
+        second :: receive(&stream, 2) ?? panic("second read")
+        print("read:{first.len()}+{second.len()}")
+        eof :: receive(&stream, 2) ?? panic("eof")
+        if eof.len() == 0 { print("eof") }
+        net.unix_write_all_bytes(&stream, [9]) ?? panic("reply")
+        net.unix_close(&stream) ?? panic("server close")
+    }
+    client := net.unix_connect("$SOCKET") ?? panic("connect")
+    first_count :: send_four(&client) ?? panic("write")
+    print("wrote:{first_count}")
+    net.unix_shutdown(&client, .Write) ?? panic("half close")
+    reply :: receive(&client, 1) ?? panic("reply")
+    print("reply:{reply.len()}")
+    if net.unix_write_all_bytes(&client, [5]) == {
+        .Ok(_) -> panic("write after half-close succeeded")
+        .Err(error) -> print(if net.error_operation(error) == "unix write" -> "half-closed" else -> "wrong-half-close")
+    }
+    net.unix_close(&client) ?? panic("close")
+    net.unix_close(&client) ?? panic("second close")
+    if receive(&client, 1) == {
+        .Ok(_) -> panic("closed read succeeded")
+        .Err(error) -> {
+            if error == {
+                .Closed(context) -> print(if context.operation == .Read -> "closed" else -> "wrong-close-operation")
+                else -> { print("wrong-close-error") }
+            }
+        }
+    }
+    server.join() ?? panic("server task failed")
+}
+""".replace("$SOCKET", socket)
+        (code, stdout, stderr) := build_and_run(&dir, "unix_io_contract", &source, [], None)
+        assert(code == 0, stderr)
+        lines := stdout.lines().collect()
+        lines.sort_unstable()
+        assert(lines == ["closed", "eof", "half-closed", "invalid", "read:2+2", "reply:1", "wrote:2"])
+        _ :: fs.remove_dir_all(&dir)
+    }
+}
+
+// Rust: tests/corelib_parts/net.rs:879
+#Test("core_net_unix_same_handle_deadline_readiness_and_close") {
+    if target.selected_family() == .Unix {
+        dir := env.temp_dir().join("jet_core_unix_same_handle_{process.id()}")
+        _ :: fs.remove_dir_all(&dir)
+        fs.create_dir_all(&dir).unwrap()
+        socket := jet_string_path(&dir.join("same-handle.sock"))
+        source := """
+use core.net as net
+fn run() -> {
+    listener :: net.unix_listen("$SOCKET") ?? panic("listen")
+    budget :: Duration.seconds(1) ?? panic("budget")
+    client := net.unix_connect("$SOCKET", deadline: budget) ?? panic("connect")
+    server := &listener.accept(deadline: budget) ?? panic("accept")
+    client.set_timeout(budget) ?? panic("persistent timeout")
+    both :: NetReadyInterest.ReadWrite
+    observed :: client.ready(both, deadline: budget) ?? panic("read-write readiness")
+    print(net.ready_readable(observed))
+    print(net.ready_writable(observed))
+    interest :: NetReadyInterest.Read
+    expired :: Duration.milliseconds(0) ?? panic("expired")
+    if client.ready(interest, deadline: expired) == {
+        .Ok(_) -> panic("expired readiness succeeded")
+        .Err(error) -> print(net.error_operation(error))
+    }
+    payload :: [U8]{ 7 }
+    client.write_all(payload, deadline: budget) ?? panic("write")
+    print(server.read(1, deadline: budget) ?? panic("read"))
+    client.close() ?? panic("close")
+    client.close() ?? panic("second close")
+}
+""".replace("$SOCKET", socket)
+        (code, stdout, stderr) := build_and_run(&dir, "unix_same_handle", &source, [], None)
+        assert(code == 0, stderr)
+        assert(stdout == "false\ntrue\nunix ready\n[7]\n")
+        _ :: fs.remove_dir_all(dir)
+    }
+}
+
+// Rust: tests/corelib_parts/net.rs:923
+#Test("core_net_udp_and_unix_waits_use_typed_scheduler_interrupts") {
+    if target.selected_family() == .Unix {
+        dir := env.temp_dir().join("jet_core_net_datagram_unix_interrupts_{process.id()}")
+        _ :: fs.remove_dir_all(&dir)
+        fs.create_dir_all(&dir).unwrap()
+        socket := jet_string_path(&dir.join("i.sock"))
+        source := """
+use core.net as net
+use core.tasks as tasks
+fn run() -> {
+    udp_timeout :: net.udp_bind("127.0.0.1:0") ?? panic("udp timeout bind")
+    net.udp_set_timeout(udp_timeout, 20) ?? panic("udp timeout")
+    if net.udp_receive(udp_timeout, 8) == {
+        .Ok(_) -> panic("udp timeout returned data")
+        .Err(error) -> print(net.error_message(error))
+    }
+    udp :: net.udp_bind("127.0.0.1:0") ?? panic("udp bind")
+    (udp_ready_tx, udp_ready_rx) :: channel<Int>()
+    udp_wait :: task {
+        udp_ready_tx.send(1)
+        if net.udp_receive(udp, 8) == {
+            .Ok(_) -> panic("udp cancel returned data")
+            .Err(error) -> print(net.error_message(error))
+        }
+    }
+    _udp_ready :: udp_ready_rx.receive() ?? panic("udp ready")
+    udp_wait.cancel()
+    udp_wait.join() ?? panic("udp wait task failed")
+    listener :: net.unix_listen("$SOCKET") ?? panic("unix listen")
+    (unix_ready_tx, unix_ready_rx) :: channel<Int>()
+    unix_wait :: task {
+        unix_ready_tx.send(1)
+        if net.unix_accept(listener) == {
+            .Ok(_) -> panic("unix cancel accepted stream")
+            .Err(error) -> print(net.error_message(error))
+        }
+    }
+    _unix_ready :: unix_ready_rx.receive() ?? panic("unix ready")
+    unix_wait.cancel()
+    unix_wait.join() ?? panic("udp wait task failed")
+}
+""".replace("$SOCKET", socket)
+        (code, stdout, stderr) := build_and_run(&dir, "net_datagram_unix_interrupts", &source, [], None)
+        assert(code == 0, stderr)
+        lines := stdout.lines().collect()
+        lines.sort_unstable()
+        assert(lines == ["deadline exceeded while waiting in udp receive", "udp receive cancelled", "unix accept cancelled"])
+        _ :: fs.remove_dir_all(&dir)
+    }
+}
+
+// Rust: tests/corelib_parts/net.rs:985
+#Test("core_ioerror_preserves_kind_operation_and_resource") {
+    scratch := common.Scratch.new("jet_core_ioerror_tree")
+    dir := scratch.path.clone()
+    tir_support.write_test_package(&dir, tir_support.TIR_TEST_PACKAGE)
+    source := """
+use core.files as fs
+use core.net as net
+use core.process as process
+fn receive<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] IOError! { return stream.read(limit) }
+fn operation_name(operation: IOOperation) -[]> String {
+    if operation == {
+        .Read -> return "read"
+        .Write -> return "write"
+        .Flush -> return "flush"
+        .Connect -> return "connect"
+        .Accept -> return "accept"
+        .Close -> return "close"
+        .Resolve -> return "resolve"
+        .Codec -> return "codec"
+    }
+}
+fn run() -[Exec, FS, IO, Net, Time.Wait]> {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    client := net.tcp_connect(address) ?? panic("connect")
+    if receive(&client, 0) == {
+        .Ok(_) -> panic("zero read succeeded")
+        .Err(error) -> {
+            if error == {
+                .InvalidInput(context) -> print(if operation_name(context.operation) == "read" -> "invalid-read" else -> "invalid-other")
+                else -> { print("other") }
+            }
+        }
+    }
+    if fs.read("definitely-missing/ioerror-tree") == {
+        .Ok(_) -> panic("missing file read succeeded")
+        .Err(error) -> {
+            if error == {
+                .NotFound(context) -> print(context.resource ?? "missing-resource")
+                else -> { print("other") }
+            }
+        }
+    }
+    if fs.write(".", "cannot replace directory") == {
+        .Ok(_) -> panic("directory write succeeded")
+        .Err(error) -> {
+            if error == {
+                .Other(context) -> print(if operation_name(context.operation) == "write" -> "write" else -> "wrong-write-operation")
+                else -> { print("wrong-write-kind") }
+            }
+        }
+    }
+    if process.run_spec(process.cmd([])) == {
+        .Ok(_) -> panic("empty command succeeded")
+        .Err(error) -> {
+            if error == {
+                .InvalidInput(context) -> print(if operation_name(context.operation) == "resolve" -> "empty-command" else -> "wrong-command-operation")
+                else -> { print("wrong-command-kind") }
+            }
+        }
+    }
+    if process.pipeline([]) == {
+        .Ok(_) -> panic("empty pipeline succeeded")
+        .Err(error) -> {
+            if error == {
+                .InvalidInput(context) -> print(if operation_name(context.operation) == "resolve" -> "empty-pipeline" else -> "wrong-pipeline-operation")
+                else -> { print("wrong-pipeline-kind") }
+            }
+        }
+    }
+    if process.run_spec(process.cmd(["unused"]).env("BAD=NAME", "value")) == {
+        .Ok(_) -> panic("invalid environment succeeded")
+        .Err(error) -> {
+            if error == {
+                .InvalidInput(context) -> print(if operation_name(context.operation) == "resolve" -> context.resource ?? "missing-env-resource" else -> "wrong-env-operation")
+                else -> { print("wrong-env-kind") }
+            }
+        }
+    }
+}
+"""
+    (code, stdout, stderr) := build_and_run(&dir, "ioerror_tree", source, [], None)
+    assert(code == 0, stderr)
+    expected := "invalid-read\ndefinitely-missing/ioerror-tree\nwrite\nempty-command\nempty-pipeline\nBAD=NAME\n"
+    assert(stdout == expected)
+    file := dir.join("ioerror_tree.jet")
+    fs.write(&file, source).unwrap()
+    if Interpreter.dev_iteration(file.to_str().unwrap(), false, false) == {
+        .Ran { stdout, stderr, exit_code } -> assert((exit_code, stdout, stderr) == (0, expected, ""))
+        other -> panic("IOError tree did not run in default dev: {other:?}")
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/corelib_parts/net.rs:1093
+#Test("core_ioerror_debug_renders_in_aot_and_dev") {
+    scratch := common.Scratch.new("jet_core_ioerror_debug")
+    dir := scratch.path.clone()
+    tir_support.write_test_package(&dir, tir_support.TIR_TEST_PACKAGE)
+    source := """
+fn activate_core() -[IO]> String { return input() ?? "" }
+fn fail() -[]> Int IOError! {
+    return Err(IOError.InvalidInput(IOContext{
+        operation: .Read, resource: None, os_code: None, cause: Val("debug"),
+    }))
+}
+fn fail_other() -[]> Int IOError! {
+    return Err(IOError.Other(IOContext{
+        cause: Val("denied"), os_code: Val(13), resource: Val("out.txt"), operation: .Write,
+    }))
+}
+fn run() -> {
+    print("{42:Debug}")
+    debug :: "debug"
+    print("{debug:Debug}")
+    print("{[1, 2, 3]:Debug}")
+    if fail() == {
+        .Ok(_) -> panic("failure succeeded")
+        .Err(error) -> { print("{error:Debug}"); print("{error}") }
+    }
+    if fail_other() == {
+        .Ok(_) -> panic("other failure succeeded")
+        .Err(error) -> { print("{error:Debug}"); print("{error}") }
+    }
+}
+"""
+    expected := "42\n\"debug\"\n[1, 2, 3]\n"
+        + "InvalidInput(IOContext { operation: Read, resource: None, os_code: None, cause: Val(\"debug\") })\n"
+        + "invalid input during read: debug\n"
+        + "Other(IOContext { operation: Write, resource: Val(\"out.txt\"), os_code: Val(13), cause: Val(\"denied\") })\n"
+        + "I/O error during write `out.txt`: denied\n"
+    (code, aot_stdout, stderr) := build_and_run(&dir, "ioerror_debug", source, [], None)
+    assert(code == 0, stderr)
+    assert(aot_stdout == expected)
+    assert(!aot_stdout.contains("<enum IOOperation>"))
+    file := dir.join("ioerror_debug.jet")
+    fs.write(&file, source).unwrap()
+    default_dev_stdout := if Interpreter.dev_iteration(file.to_str().unwrap(), false, false) == {
+        .Ran { stdout, stderr, exit_code } -> {
+            assert((exit_code, stdout, stderr) == (0, expected, ""))
+            stdout
+        }
+        other -> panic("IOError Show/Debug did not run in default dev: {other:?}")
+    }
+    // Retired resident-JIT/deopt/fallback flags become cross-tier behavior.
+    tir_support.assert_tiers_agree(&source, expected)
+    forced_interpreter_stdout := if Interpreter.dev_iteration(file.to_str().unwrap(), false, true) == {
+        .Ran { stdout, stderr, exit_code } -> {
+            assert((exit_code, stdout, stderr) == (0, expected, ""))
+            stdout
+        }
+        other -> panic("IOError Show/Debug did not run in forced interpreter: {other:?}")
+    }
+    assert(default_dev_stdout == aot_stdout)
+    assert(forced_interpreter_stdout == aot_stdout)
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/corelib_parts/net.rs:1197
+#Test("card_2417_ioerror_fixture_matches_aot_default_jit_and_interpreter") {
+    root := common.repo_root()
+    fixture := root.join("tests/ui/ioerror_display_migration.jet")
+    source := fs.read_to_string(&fixture).expect("Card #2417 IOError fixture")
+    assert(source.contains("IOError.Other(IOContext"), "Card #2417 fixture must exercise ordinary IOError, not BuildError")
+    assert(source.contains("print(\"{error}\")"), "Card #2417 fixture must exercise bare Display interpolation")
+    shown := fixture.to_string_lossy()
+    checked := jet.compile_with_path(&source, &shown) ?? {
+        panic("Card #2417 IOError fixture was rejected:\n{jet.render_diagnostics(&shown, &source, &err)}")
+    }
+    assert(checked.lints.iter().filter((diagnostic) -> diagnostic.code == "L0520").count() == 1,
+        "Card #2417 fixture must retain exactly one L0520 witness")
+    snapshot := fs.read_to_string(root.join("tests/ui/ioerror_display_migration.stderr")).expect("Card #2417 IOError snapshot")
+    loop expected in [
+        "Warning [L0520] (display_migration): `IOError` has no `Display` impl",
+        "Why: Display is the user-facing interpolation hook; Debug is for `{value:Debug}`",
+        "Fix: add `impl IOError.Display { fn display(self) -> String { … } }`",
+    ] {
+        assert(snapshot.contains(expected), "Card #2417 snapshot lost {expected:?}")
+    }
+    build_snapshot := fs.read_to_string(root.join("tests/ui_lint/build_entry_liveness.warn")).expect("BuildError exclusion snapshot")
+    assert(build_snapshot.contains("MissingDisplay"), "BuildError exclusion snapshot lost its ordinary neighboring L0520 witness")
+    assert(!build_snapshot.contains("BuildError"), "BuildError must remain excluded from the display migration snapshot")
+    dir := env.temp_dir().join("jet_card_2417_ioerror_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    expected := "I/O error during read: missing input\n"
+    (code, aot_stdout, stderr) := build_and_run(&dir, "ioerror_display_migration", &source, [], None)
+    assert(code == 0, stderr)
+    assert(aot_stdout == expected)
+    file := dir.join("ioerror_display_migration.jet")
+    fs.write(&file, &source).unwrap()
+    default_dev_stdout := if Interpreter.dev_iteration(file.to_str().unwrap(), false, false) == {
+        .Ran { stdout, stderr, exit_code } -> { assert((exit_code, stderr) == (0, "")); stdout }
+        other -> panic("Card #2417 IOError fixture failed in default dev: {other:?}")
+    }
+    forced_interpreter_stdout := if Interpreter.dev_iteration(file.to_str().unwrap(), false, true) == {
+        .Ran { stdout, stderr, exit_code } -> { assert((exit_code, stderr) == (0, "")); stdout }
+        other -> panic("Card #2417 IOError fixture failed in forced interpreter: {other:?}")
+    }
+    assert(default_dev_stdout == aot_stdout)
+    assert(forced_interpreter_stdout == aot_stdout)
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/corelib_parts/net.rs:1295
+#Test("core_ioerror_native_flush_preserves_operation") {
+    if target.selected_os() == .Linux {
+        dir := env.temp_dir().join("jet_core_ioerror_flush_{process.id()}")
+        _ :: fs.remove_dir_all(&dir)
+        fs.create_dir_all(&dir).unwrap()
+        (code, stdout, stderr) := build_and_run(&dir, "ioerror_flush", """
+use core.files as files
+fn run() -> {
+    output := files.create("/dev/full") ?? panic("open")
+    output.write_line("buffered") ?? panic("buffer")
+    if &output.flush() == {
+        .Ok(_) -> panic("flush succeeded")
+        .Err(error) -> {
+            if error == {
+                .Other(context) -> print(if context.operation == .Flush -> "flush" else -> "wrong-flush-operation")
+                else -> { print("wrong-flush-kind") }
+            }
+        }
+    }
+}
+""", [], None)
+        assert(code == 0, stderr)
+        assert(stdout == "flush\n")
+        _ :: fs.remove_dir_all(&dir)
+    }
+}
+
+// Rust: tests/corelib_parts/net.rs:1331
+#Test("core_net_tcp_read_persistent_timeout_uses_scheduler_budget") {
+    dir := env.temp_dir().join("jet_core_net_task_timeout_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) := build_and_run(&dir, "net_task_timeout", """
+use core.net as net
+use core.tasks as tasks
+use core.time as time
+fn run() -> {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    address :: net.socket_to_string(typed_address)
+    client :: task {
+        stream := net.tcp_connect(address) ?? panic("connect")
+        time.sleep(100ms)
+        stream.close() ?? panic("close")
+    }
+    stream := net.tcp_accept(listener) ?? panic("accept")
+    net.set_read_timeout(&stream, 20) ?? panic("timeout")
+    if stream.read(1) == { .Ok(_) -> print("unexpected read"); .Err(error) -> print(net.error_message(error)) }
+    client.join() ?? panic("client task failed")
+}
+""", [], None)
+    assert(code == 0, stderr)
+    assert(stdout.contains("deadline exceeded while waiting in tcp read"), stdout)
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/corelib_parts/net.rs:1373
+#Test("core_net_tcp_expired_deadlines_return_typed_timeouts") {
+    dir := env.temp_dir().join("jet_core_net_expired_deadlines_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) := build_and_run(&dir, "net_expired_deadlines", """
+use core.net as net
+use core.tasks as tasks
+use core.time as time
+fn run() -> {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    address :: net.socket_to_string(typed_address)
+    server :: task {
+        first := net.tcp_accept(listener) ?? return
+        time.sleep(100ms)
+        first.close() ?? return
+        second := net.tcp_accept(listener) ?? return
+        time.sleep(100ms)
+        second.close() ?? return
+    }
+    first := net.tcp_connect(address) ?? panic("first connect")
+    net.set_read_timeout(&first, 0) ?? panic("zero timeout")
+    if first.read(1) == { .Ok(_) -> print("unexpected first read"); .Err(error) -> print(net.error_message(error)) }
+    first.close() ?? panic("first close")
+    second := net.tcp_connect(address) ?? panic("second connect")
+    #Context(deadline: time.now() - 1) {
+        if second.read(1) == { .Ok(_) -> print("unexpected second read"); .Err(error) -> print(net.error_message(error)) }
+    }
+    second.close() ?? panic("second close")
+    server.join() ?? panic("server task failed")
+}
+""", [], None)
+    assert(code == 0, stderr)
+    assert(stdout == "deadline exceeded while waiting in tcp read\ndeadline exceeded while waiting in tcp read\n")
+    assert(!stderr.contains("E3003"), "typed timeout escaped as runtime deadline: {stderr}")
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/corelib_parts/net.rs:1433
+#Test("core_net_tcp_write_all_uses_one_absolute_deadline") {
+    dir := env.temp_dir().join("jet_core_net_write_deadline_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) := build_and_run(&dir, "net_write_deadline", """
+use core.net as net
+use core.tasks as tasks
+use core.time as time
+fn run() -> {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    address :: net.socket_to_string(typed_address)
+    server :: task {
+        stream := net.tcp_accept(listener) ?? return
+        loop {
+            chunk := stream.read(65536) ?? return
+            if chunk.len() == 0 { return }
+            time.sleep(15ms)
+        }
+    }
+    client := net.tcp_connect(address) ?? panic("connect")
+    net.set_write_timeout(&client, 80) ?? panic("timeout")
+    started := time.now()
+    if client.write_text("x".repeat(16000000)) == {
+        .Ok(_) -> print("unexpected write")
+        .Err(error) -> print(net.error_message(error))
+    }
+    elapsed := time.now() - started
+    print(elapsed < 300)
+    client.close() ?? panic("close")
+    server.join() ?? panic("server task failed")
+}
+""", [], None)
+    assert(code == 0, stderr)
+    assert(stdout == "deadline exceeded while waiting in tcp write\ntrue\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/corelib_parts/net.rs:1484
+#Test("core_tls_public_client_and_stream_errors_are_typed") {
+    dir := env.temp_dir().join("jet_core_tls_surface_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    source := """
+use core.net.tls as tls
+fn run() -[Net]> {
+    print(tls.client("localhost", 0) == .Err(_))
+    print(tls.read(TLSStream{}, 0) == .Err(_))
+}
+"""
+    (code, stdout, stderr) := build_and_run(&dir, "tls_surface", source, [], None)
+    assert(code == 0, stderr)
+    assert(stdout == "true\ntrue\n")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/corelib_parts/net.rs:1502
+#Test("core_tls_configuration_carriers_preserve_policy") {
+    dir := env.temp_dir().join("jet_core_tls_config_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    source := """
+use core.net.tls as tls
+fn run() -[Net]> {
+    cfg :: tls.with_alpn(tls.config("example.test"), "h2")
+    print(tls.has_alpn(cfg, "h2"))
+    print(tls.flags(cfg).len() == 1)
+    print(tls.connect_host(cfg, 0) == .Err(_))
+}
+"""
+    (code, stdout, stderr) := build_and_run(&dir, "tls_config", source, [], None)
+    assert(code == 0, stderr)
+    assert(stdout == "true\ntrue\ntrue\n")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/corelib_parts/net.rs:1522
+#Test("core_tls_identity_and_version_carriers_are_typed") {
+    dir := env.temp_dir().join("jet_core_tls_carriers_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    source := """
+use core.net.tls as tls
+fn run() -> {
+    identity :: tls.identity("cert", "key")
+    roots :: tls.roots("roots")
+    print(identity.cert == "cert")
+    print(identity.key == "key")
+    print(roots.path == "roots")
+    print(tls.version_name(TLSVersion.TLS13) == "TLSv1.3")
+    print(tls.is_tls12(TLSVersion.TLS12))
+}
+"""
+    (code, stdout, stderr) := build_and_run(&dir, "tls_carriers", source, [], None)
+    assert(code == 0, stderr)
+    assert(stdout == "true\ntrue\ntrue\ntrue\ntrue\n")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/corelib_parts/net.rs:1545
+#Test("core_tls_client_rejects_invalid_port_without_connecting") {
+    dir := env.temp_dir().join("jet_core_tls_invalid_port_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    source := """
+use core.net.tls as tls
+fn run() -[Net]> { print(tls.client("localhost", 0) == .Err(_)) }
+"""
+    (code, stdout, stderr) := build_and_run(&dir, "tls_invalid_port", source, [], None)
+    assert(code == 0, stderr)
+    assert(stdout == "true\n")
+    _ :: fs.remove_dir_all(dir)
+}

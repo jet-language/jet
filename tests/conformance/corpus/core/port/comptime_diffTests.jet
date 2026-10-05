@@ -1,0 +1,507 @@
+use tests.conformance.corpus.core.port.comptime_diff.[CASES, F32_VALUE_FLOW, MODULE_CASES, LOADABLE_CASES, check_comptime_case, check_comptime_src, compile_and_run, test_parity_frame, parse_parity_output, assert_parity_output]
+use tests.common as common
+use jet.[Loader, Sema]
+use std.thread as thread
+use std.panic as panic_control
+use std.sync.[Arc, Mutex]
+use std.sync.atomic.[AtomicUsize, Ordering]
+
+// Rust: tests/comptime_diff.rs:242
+#Test("comptime_loadable_matches_runtime") {
+    loop (i, src) in LOADABLE_CASES.iter().enumerate() {
+        if payload :: panic_control.catch_unwind(|| -> check_comptime_src(10000 + i, "core.reactive.loadable", src)).err() {
+            panic("Loadable case {i} failed: {common.panic_message(payload)}")
+        }
+    }
+}
+
+// Rust: tests/comptime_diff.rs:257
+#Test("loadable_incompatible_defaults_stop_before_rustc") {
+    loop (name, expression) in [("idle", "loadable.idle().or_else(7)"), ("loading", "loadable.loading().or_else(7)"), ("failed", "loadable.failed(\"offline\").or_else(7)"), ("loaded", "loadable.loaded(7).or_else(\"bad\")")] {
+        src :: "use core.reactive.loadable as loadable\n\nfn run() -> {{\n    print({expression})\n}}\n"
+        bundle := Loader.load_source_program(src, "loadable_default.jet").expect("load Loadable fixture")
+        diags :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+        assert(!diags.is_empty(), "{name} incompatible fallback reached codegen")
+        assert(diags.iter().any(|diag| -> diag.code == "E0112"), "{name} fallback missed the type mismatch: {diags.debug()}")
+    }
+}
+
+// Rust: tests/comptime_diff.rs:284
+// GATE #4494: shared atomics, mutex, panic capture and native worker threads.
+#Test("comptime_matches_runtime") {
+    next :: Arc.new(AtomicUsize.new(0))
+    failures :: Arc.new(Mutex.new([String]{}))
+    workers :: common.test_worker_count(16).min(CASES.len().max(1))
+    handles := []
+    loop _ in 0..<workers {
+        next :: Arc.clone(next)
+        failures :: Arc.clone(failures)
+        &handles.push(thread.spawn(|| -> {
+            loop {
+                i :: next.fetch_add(1, Ordering.Relaxed)
+                if i >= CASES.len() { break }
+                if payload :: panic_control.catch_unwind(|| -> check_comptime_case(i, CASES[i])).err() {
+                    &failures.lock().unwrap().push(common.panic_message(payload))
+                }
+            }
+        }))
+    }
+    loop handle in handles { handle.join().unwrap() }
+    failures :: failures.lock().unwrap()
+    if !failures.is_empty() { panic(failures.join("\n\n")) }
+}
+
+// Rust: tests/comptime_diff.rs:317
+#Test("yielding_loop_matches_comptime_and_runtime") {
+    check_comptime_case(0, "loop value in [1, 2, 3] -> value * 2")
+    check_comptime_case(1, "loop value in [1, 2, 3, 4] -> { if value > 2 { break }; value * 2 }")
+}
+
+// Rust: tests/comptime_diff.rs:329
+#Test("stream_generator_break_matches_comptime_and_runtime") {
+    check_comptime_src(35000, "Stream generator early break", """
+fn stop_after_two() -> Stream<Int> {
+    yield 1
+    yield 2
+    yield 3
+}
+fn first() -> [Int] {
+    return loop value in stop_after_two() -> {
+        if value == 2 { break }
+        value
+    }
+}
+EXPECTED :: prep { first() }
+fn run() -> {
+    actual :: first()
+    print("{EXPECTED}")
+    print("{actual}")
+}
+""")
+}
+
+// Rust: tests/comptime_diff.rs:362
+#Test("comptime_f32_width_survives_value_flow_and_matches_aot") {
+    check_comptime_src(32000, "F32 value-flow width", F32_VALUE_FLOW)
+}
+
+// Rust: tests/comptime_diff.rs:371
+#Test("gzip_golden_and_hostile_inputs_match_comptime_and_aot") {
+    src :: """
+use core.archive.gzip as gzip
+fn codec_probe() -> String {
+    bytes :: [U8]{ 72, 101, 108, 108, 111 }
+    encoded :: gzip.compress(bytes) ?? [U8]{}
+    gz :: gzip.decompress(encoded) ?? [U8]{}
+    golden :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? [U8]{}
+    bad_size :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [U8]{ 255 }
+    h :: U8{ 72 }
+    lower_h :: U8{ 104 }
+    o :: U8{ 111 }
+    max :: U8{ 255 }
+    return "{gz.len() == 5}|{gz[0] == h}|{golden.len() == 5}|{golden[0] == lower_h}|{golden[4] == o}|{bad_size[0] == max}"
+}
+EXPECTED :: prep { codec_probe() }
+fn run() -> {
+    actual :: codec_probe()
+    print("{EXPECTED}")
+    print("{actual}")
+}
+"""
+    check_comptime_src(32001, "gzip independent golden and ISIZE corruption", src)
+}
+
+// Rust: tests/comptime_diff.rs:403
+#Test("zstd_comptime_codec_round_trips_through_resident_and_aot_decoders") {
+    check_comptime_src(32002, "zstd resident encoder accepted by AOT decoder", """
+use core.archive.zstd as zstd
+BYTES :: prep { [U8]{ 72, 101, 108, 108, 111 } }
+ENCODED :: prep { zstd.compress(BYTES) ?? [U8]{} }
+EXPECTED :: prep { zstd.decompress(ENCODED) ?? [U8]{} }
+fn run() -> {
+    restored :: zstd.decompress(ENCODED) ?? [U8]{}
+    print("{EXPECTED}")
+    print("{restored}")
+}
+""")
+}
+
+// Rust: tests/comptime_diff.rs:424
+#Test("zstd_72_mib_advertised_window_matches_resident_and_aot") {
+    check_comptime_src(32003, "zstd 72 MiB advertised window", """
+use core.archive.zstd as zstd
+EXPECTED :: prep { zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [U8]{ 255 } }
+fn run() -> {
+    actual :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [U8]{ 255 }
+    print("{EXPECTED}")
+    print("{actual}")
+}
+""")
+}
+
+// Rust: tests/comptime_diff.rs:443
+#Test("comptime_exact_int_matches_runtime") {
+    exact :: ["(9223372036854775807 + 1).to_string()", "(999999999999999999999999999999 + 999999999999999999999999999999).to_string()", "(100 - 1).to_string()", "(7 * 6).to_string()", "(2 ^ 200).to_string()", "(0 - 3).to_string()"]
+    cases :: CASES.iter().enumerate().filter(|(_, expr)| -> exact.contains(expr)).to_list()
+    assert_eq(cases.iter().map(|(_, expr)| -> expr).to_list(), exact, "exact Int differential cases must stay exact")
+    loop (i, expr) in cases { check_comptime_case(i, expr) }
+}
+
+// Rust: tests/comptime_diff.rs:481
+#Test("comptime_generic_alias_matches_runtime") {
+    check_comptime_src(32005, "generic alias resident and AOT agreement", """
+alias Answer<T> :: T
+fn answer() -> Answer<Int> { return 42 }
+EXPECTED :: prep { answer() }
+fn run() -> {
+    actual :: answer()
+    print("{EXPECTED}")
+    print("{actual}")
+}
+""")
+}
+
+// Rust: tests/comptime_diff.rs:512
+#Test("reusable_regex_matches_across_comptime_tir_and_runtime") {
+    check_comptime_src(34000, "typed Regex methods and canonical grammar", """
+CT_REGEX :: prep { Regex{"(?<word>\p{{Alphabetic}}+)_(\d{{2,4}})"} }
+CT_MATCH :: prep { CT_REGEX.match("xx Jet_2026 yy") ?? panic("missing comptime match") }
+COMPTIME_VALUE :: prep { "{CT_MATCH.group(2) ?? "none"}|{CT_MATCH.name("word") ?? "none"}|{CT_MATCH.start()}|{CT_MATCH.end()}|{CT_MATCH.group_start(1) ?? -1}|{CT_MATCH.group_end(1) ?? -1}|{CT_REGEX.replace("Jet_2026 Rust_2025", "${{word}}:$2")}|{CT_REGEX.replace_all_with("Jet_2026 Rust_2025", (m: Match) -> m.name("word") ?? "none")}" }
+fn run() -> {
+    rt_regex :: Regex{"(?<word>\p{{Alphabetic}}+)_(\d{{2,4}})"}
+    rt_match :: rt_regex.match("xx Jet_2026 yy") ?? panic("missing runtime match")
+    runtime_value :: "{rt_match.group(2) ?? "none"}|{rt_match.name("word") ?? "none"}|{rt_match.start()}|{rt_match.end()}|{rt_match.group_start(1) ?? -1}|{rt_match.group_end(1) ?? -1}|{rt_regex.replace("Jet_2026 Rust_2025", "${{word}}:$2")}|{rt_regex.replace_all_with("Jet_2026 Rust_2025", (m: Match) -> m.name("word") ?? "none")}" 
+    print("{COMPTIME_VALUE}")
+    print("{runtime_value}")
+}
+""")
+}
+
+// Rust: tests/comptime_diff.rs:535
+#Test("typed_datetime_head_matches_comptime_and_runtime") {
+    check_comptime_src(34002, "typed DateTime head", """
+STAMP :: prep { DateTime{"2026-08-07T12:00:00Z"} }
+EXPECTED :: prep { STAMP.to_string() }
+fn run() -> {
+    runtime :: DateTime{"2026-08-07T12:00:00Z"}
+    print("{EXPECTED}")
+    print("{runtime.to_string()}")
+}
+""")
+}
+
+// Rust: tests/comptime_diff.rs:557
+#Test("sequential_comptime_reads_advance_the_shared_reader") {
+    check_comptime_src(34001, "sequential compile-time reader reads", """
+fn run() -> {
+    ct :: prep { Reader.over([U8]{7, 9, 11}) }
+    ct_a :: prep { ct.read_u8() ?? panic("ct a") }
+    ct_b :: prep { ct.read_u8() ?? panic("ct b") }
+    comptime_value :: prep { "{ct_a}|{ct_b}|{ct.remaining()}" }
+    rt :: Reader.over([U8]{7, 9, 11})
+    rt_a :: rt.read_u8() ?? panic("rt a")
+    rt_b :: rt.read_u8() ?? panic("rt b")
+    runtime_value :: "{rt_a}|{rt_b}|{rt.remaining()}"
+    print("{comptime_value}")
+    print("{runtime_value}")
+}
+""")
+}
+
+// Rust: tests/comptime_diff.rs:779
+#Test("parity_frame_preserves_newlines_and_delimiter_like_bytes") {
+    comptime :: "3\n__comptime_diff_frame(999)\n0\n".bytes()
+    runtime :: "\n3\n__comptime_diff_frame(999)\n0".bytes()
+    frame :: test_parity_frame(comptime, runtime)
+    (decoded_comptime, decoded_runtime) :: parse_parity_output(frame).unwrap()
+    assert_eq(decoded_comptime, comptime)
+    assert_eq(decoded_runtime, runtime)
+}
+
+// Rust: tests/comptime_diff.rs:789
+#Test("parity_frame_rejects_unequal_same_length_multiline_values") {
+    frame :: test_parity_frame("alpha\nbeta".bytes(), "alpha\nzeta".bytes())
+    failure :: panic_control.catch_unwind(|| -> assert_parity_output("adversarial", frame)).expect_err("unequal parity values must fail")
+    message :: common.panic_message(failure)
+    assert(message.contains("DIVERGENCE for `adversarial`"), message)
+    assert(message.contains("beta") && message.contains("zeta"), message)
+}
+
+// Rust: tests/comptime_diff.rs:805
+#Test("comptime_grouped_core_use_list_matches_runtime") {
+    check_comptime_src(1000, "grouped Core use list", MODULE_CASES[0])
+}
+
+// Rust: tests/comptime_diff.rs:814
+#Test("comptime_module_calls_match_runtime") {
+    loop (i, src) in MODULE_CASES.iter().enumerate() { check_comptime_src(1000 + i, src, src) }
+}
+
+// Rust: tests/comptime_diff.rs:825
+#Test("xml_rich_whole_value_matches_comptime_and_runtime") {
+    check_comptime_src(2004, "rich lossless XML whole-value round-trip", MODULE_CASES.iter().find(|src| -> src.starts_with("use core.encoding.xml as xml")).expect("rich XML module fixture"))
+}
+
+// Rust: tests/comptime_diff.rs:835
+#Test("xml_parse_options_match_comptime_and_runtime") {
+    check_comptime_src(2005, "typed XML options", """
+use core.encoding.xml as xml
+COMPTIME_VALUE :: prep { xml.to_string(xml.parse_with("<r><a/></r>", xml.XMLParseOptions.safe()) ?? panic("bad")) }
+fn run() -> {
+    r :: xml.to_string(xml.parse_with("<r><a/></r>", xml.XMLParseOptions.safe()) ?? panic("bad"))
+    print("{COMPTIME_VALUE}")
+    print("{r}")
+}
+""")
+}
+
+// Rust: tests/comptime_diff.rs:849
+#Test("data_empty_input_error_matches_comptime_and_runtime") {
+    loop (index, method) in ["sum", "mean", "min", "max", "median", "variance", "stddev"].iter().enumerate() {
+        src :: "use core.data as data\n\nfn show(result: Float DataError!) -> String {{\n    if result == {{\n        .Ok(value) -> return \"ok {{value}}\"\n        .Err(e) -> return \"{{e.operation}}|{{e.reason}}\"\n    }}\n    return \"unreachable\"\n}}\n\nfn empty() -> [Float] {{ return [] }}\nEXPECTED_EMPTY :: prep {{ show(data.{method}(empty())) }}\nfn run() -> {{\n    actual_empty :: show(data.{method}(empty()))\n    print(\"{{EXPECTED_EMPTY}}\")\n    print(\"{{actual_empty}}\")\n}}\n"
+        check_comptime_src(2100 + index, "empty core.data {method}", src)
+    }
+}
+
+// Rust: tests/comptime_diff.rs:887
+#Test("xml_hostile_error_matches_comptime_and_runtime") {
+    check_comptime_src(2006, "typed hostile XML mismatch error", """
+use core.encoding.xml as xml
+fn show(result: DataTree XMLError!) -> String {
+    if result == {
+        .Ok(_) -> return "ok"
+        .Err(e) -> { return "{e.byte_offset}|{e.line}|{e.column}|{e.path}|{e.reason}" }
+    }
+    return "unreachable"
+}
+EXPECTED_MISMATCH :: prep { show(xml.parse("<root>\n<a></root>")) }
+fn run() -> {
+    actual_mismatch :: show(xml.parse("<root>\n<a></root>"))
+    print("{EXPECTED_MISMATCH}")
+    print("{actual_mismatch}")
+}
+""")
+}
+
+// Rust: tests/comptime_diff.rs:916
+#Test("cbor_generic_whole_decode_matches_comptime_and_aot") {
+    check_comptime_src(2000, "generic CBOR indefinite Float16 decode", """
+use core.encoding.cbor as cbor
+COMPTIME_VALUE :: prep { cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic("bad") }
+fn run() -> {
+    r :: cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic("bad")
+    print("{COMPTIME_VALUE}")
+    print("{r}")
+}
+""")
+}
+
+// Rust: tests/comptime_diff.rs:930
+#Test("cbor_current_whole_encode_parse_matches_comptime_and_aot") {
+    check_comptime_src(2001, "current CBOR to_bytes and parse", """
+use core.encoding.json as json
+use core.encoding.cbor as cbor
+use core.encoding.hex as hex
+ENCODED :: prep { hex.encode(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3],\"c\":-7}}") ?? panic("bad json")) ?? panic("bad cbor")) }
+PARSED :: prep { json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3]}}") ?? panic("bad json")) ?? panic("bad cbor")) ?? panic("bad parse")) }
+fn run() -> {
+    r :: hex.encode(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3],\"c\":-7}}") ?? panic("bad json")) ?? panic("bad cbor"))
+    p :: json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3]}}") ?? panic("bad json")) ?? panic("bad cbor")) ?? panic("bad parse"))
+    print("{ENCODED}|{PARSED}")
+    print("{r}|{p}")
+}
+""")
+}
+
+// Rust: tests/comptime_diff.rs:940
+#Test("cbor_canonical_typed_corpus_matches_comptime_and_aot") {
+    check_comptime_src(2002, "canonical CBOR map/float/typed corpus", """
+use core.encoding.json as json
+use core.encoding.cbor as cbor
+use core.encoding.hex as hex
+#Codable
+struct Packet { id: Int, payload: [U8] }
+EXPECTED_MAP :: prep { hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical")) }
+EXPECTED_FLOATS :: prep { hex.encode(cbor.to_bytes_canonical([Float]{ 1.5, 100000.0, -0.0 }) ?? panic("canonical")) }
+EXPECTED_NAN :: prep { hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical")) }
+EXPECTED_TYPED :: prep { hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("canonical")) }
+fn run() -> {
+    actual_map := hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
+    actual_floats := hex.encode(cbor.to_bytes_canonical([Float]{ 1.5, 100000.0, -0.0 }) ?? panic("canonical"))
+    actual_nan := hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
+    actual_typed := hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
+    if actual_map != "a261620262616101" { panic("canonical encoded-key order drift") }
+    if actual_floats != "83f93e00fa47c35000f98000" { panic("preferred Float width drift") }
+    if actual_nan != "f97e00" { panic("canonical NaN drift") }
+    if actual_typed != "a262696407677061796c6f616442dead" { panic("typed byte-string drift") }
+    print("{EXPECTED_MAP}|{EXPECTED_FLOATS}|{EXPECTED_NAN}|{EXPECTED_TYPED}")
+    print("{actual_map}|{actual_floats}|{actual_nan}|{actual_typed}")
+}
+""")
+}
+
+// Rust: tests/comptime_diff.rs:974
+#Test("cbor_options_and_hostile_errors_match_comptime_and_aot") {
+    check_comptime_src(2003, "CBOR options and hostile error projection", """
+use core.encoding.cbor as cbor
+fn safe() -> cbor.CBOROptions {
+    return cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }
+}
+fn show(bytes: [U8]) -> String {
+    if cbor.parse(bytes, safe()) == {
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+fn show_strict(bytes: [U8]) -> String {
+    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }) == {
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+fn show_depth(bytes: [U8]) -> String {
+    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 1, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }) == {
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+fn show_items(bytes: [U8]) -> String {
+    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 2, max_bytes: 1073741824, require_canonical: false }) == {
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+fn show_bytes(bytes: [U8]) -> String {
+    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 2, require_canonical: false }) == {
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+fn show_alloc(bytes: [U8]) -> String {
+    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }) == {
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+fn show_ints(bytes: [U8]) -> String {
+    if cbor.decode<[Int]>(bytes, safe()) == {
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e[0].path}|{e[0].reason}"
+    }
+    return "unreachable"
+}
+EXPECTED_MALFORMED :: prep { show([255]) }
+EXPECTED_TRUNCATED :: prep { show([129]) }
+EXPECTED_NONCANONICAL :: prep { show_strict([24, 1]) }
+EXPECTED_UNSUPPORTED :: prep { show([192, 1]) }
+EXPECTED_MISMATCH :: prep { show_ints([129, 97, 120]) }
+EXPECTED_DEPTH :: prep { show_depth([129, 129, 1]) }
+EXPECTED_ITEMS :: prep { show_items([130, 1, 2]) }
+EXPECTED_BYTES :: prep { show_bytes([130, 1, 2]) }
+EXPECTED_ALLOC :: prep { show_alloc([130, 1, 2]) }
+fn run() -> {
+    malformed_wire := [U8]{ 255 }
+    truncated_wire := [U8]{ 129 }
+    noncanonical_wire := [U8]{ 24, 1 }
+    unsupported_wire := [U8]{ 192, 1 }
+    mismatch_wire := [U8]{ 129, 97, 120 }
+    depth_wire := [U8]{ 129, 129, 1 }
+    items_wire := [U8]{ 130, 1, 2 }
+    actual_malformed := show(malformed_wire)
+    actual_truncated := show(truncated_wire)
+    actual_noncanonical := show_strict(noncanonical_wire)
+    actual_unsupported := show(unsupported_wire)
+    actual_mismatch := show_ints(mismatch_wire)
+    actual_depth := show_depth(depth_wire)
+    actual_items := show_items(items_wire)
+    actual_bytes := show_bytes(items_wire)
+    actual_alloc := show_alloc(items_wire)
+    print("{EXPECTED_MALFORMED}~{EXPECTED_TRUNCATED}~{EXPECTED_NONCANONICAL}~{EXPECTED_UNSUPPORTED}~{EXPECTED_MISMATCH}~{EXPECTED_DEPTH}~{EXPECTED_ITEMS}~{EXPECTED_BYTES}~{EXPECTED_ALLOC}")
+    print("{actual_malformed}~{actual_truncated}~{actual_noncanonical}~{actual_unsupported}~{actual_mismatch}~{actual_depth}~{actual_items}~{actual_bytes}~{actual_alloc}")
+}
+""")
+}
+
+// Rust: tests/comptime_diff.rs:1071
+#Test("local_comptime_is_literal_data") {
+    stdout :: compile_and_run("""
+fn build() -> [Int] {
+    xs := [Int]{}
+    loop i in 1..5, 2 {
+        if i == 3 { next }
+        &xs.push(i * 10)
+    }
+    loop cursor in 0..<3 {
+        if cursor == 1 { next }
+        &xs.push(cursor)
+    }
+    return xs
+}
+fn run() -> {
+    built :: prep { build() }
+    runtime :: build()
+    print("{built}")
+    print("{runtime}")
+}
+""")
+    assert_eq(stdout.lines().to_list(), ["[10, 50, 0, 2]", "[10, 50, 0, 2]"])
+}
+
+// Rust: tests/comptime_diff.rs:1102
+#Test("struct_and_enum_comptime_values_round_trip") {
+    stdout :: compile_and_run("""
+struct Pair { left: Int, right: String }
+enum Light { Red, Green }
+PAIR_VALUE :: prep { Pair{left: 7, right: "seven"} }
+LIGHT_VALUE :: prep { Light.Green }
+fn run() -> {
+    p :: Pair{left: 7, right: "seven"}
+    l :: Light.Green
+    print("{PAIR_VALUE.left}")
+    print("{p.left}")
+    print("{PAIR_VALUE.right}")
+    print("{p.right}")
+    print("{LIGHT_VALUE == Light.Green}")
+    print("{l == Light.Green}")
+}
+""")
+    assert_eq(stdout.lines().to_list(), ["7", "7", "seven", "seven", "true", "true"])
+}
+
+// Rust: tests/comptime_diff.rs:1137
+#Test("if_expr_comptime_matches_runtime") {
+    stdout :: compile_and_run("""
+TRUE_VALUE :: prep { if 3 > 2 -> 10 else -> 20 }
+FALSE_VALUE :: prep { if 1 > 2 -> 10 else -> 20 }
+fn run() -> {
+    c :: if 3 > 2 -> 10 else -> 20
+    d :: if 1 > 2 -> 10 else -> 20
+    print("{TRUE_VALUE}")
+    print("{c}")
+    print("{FALSE_VALUE}")
+    print("{d}")
+}
+""")
+    assert_eq(stdout.lines().to_list(), ["10", "10", "20", "20"])
+}
+
+// Rust: tests/comptime_diff.rs:1160
+#Test("ordinary_bindings_fold_when_possible_and_silently_fall_back") {
+    // Observe folding and the runtime-dependent fallback without inspecting a retired backend representation.
+    src :: """
+fn show(n: Int) -> {
+    folded :: 40 + 2
+    runtime :: n + 1
+    print(folded)
+    print(runtime)
+}
+fn run() -> { show(4) }
+"""
+    assert_eq(compile_and_run(src), "42\n5\n")
+}

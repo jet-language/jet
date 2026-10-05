@@ -1,0 +1,520 @@
+// Rust: tests/cli_parts/core.rs:1
+use tests.cli.*
+use std.fs as fs
+use std.env as env
+use std.process.[Command, Stdio]
+use std.time.[Instant, Duration]
+use std.thread as thread
+use std.io as io
+use core.sys.target as target
+use jet_foundation.PerformanceBudget.[CanonicalJson, verify_budget_report]
+use jet.Syntax.ENV_ORG_UNSAFE_POLICY
+use jet.SHA256.sha256_file_hex
+// GATE #4494: actual filesystem, subprocess, stdin, clock and thread primitives.
+// GATE #4483: selected target dispatch preserves Unix/Linux-only tests.
+
+// Rust: tests/cli_parts/core.rs:5
+#Test("epoch3_string_and_set_surface_runs_on_default_tier") {
+    dir :: isolated_cwd("epoch3_string_set_default")
+    fs.write(dir.join("main.jet"), """
+fn run() {
+    print("  jet".trim_start())
+    print("jet  ".trim_end())
+    print("jet".pad_start(5, "."))
+    print("jet".pad_end(5, "."))
+    print("hello jet".index_of("jet"))
+    print("banana".count("an"))
+    print("hELLO jet".to_title())
+    print("Hello".is_alphabetic())
+    print("123".is_numeric())
+    print(" \t".is_whitespace())
+    print("Jet lang".is_ascii())
+    pair :: "left:right".split_once(":") ?? panic("split")
+    print(pair.before)
+    print(pair.after)
+    print(Set.from([1, 2, 3]).intersection(Set.from([2, 3, 4])).len())
+    print(Set.from([1, 2, 3]).symmetric_difference(Set.from([2, 3, 4])).len())
+    print(Set.from([1, 2, 3]).is_subset(Set.from([1, 2, 3, 4])))
+    print(Set.from([1, 2, 3]).is_superset(Set.from([1, 2])))
+    print(Set.from([1, 2, 3]).is_disjoint(Set.from([8])))
+    print(Rank.from([1, 2, 3]).union(Rank.from([3, 4])).len())
+    print(Rank.from([1, 2, 3]).difference(Rank.from([2, 3, 4])).len())
+    print(Set.from(["left", "right"]).intersection(Set.from(["right", "other"])).len())
+    print(Rank.from(["left", "right"]).is_subset(Rank.from(["left", "right", "other"])))
+    print(Set.from(["a", "a"]).len())
+    print(Rank.from(["z", "z", "a"]).len())
+    print(Rank.from(["z", "a"]).first() ?? "none")
+    print(Rank.from(["z", "a"]).last() ?? "none")
+    typed_words := Rank<String>{Rank.new()}
+    print(typed_words.add("z"))
+    print(typed_words.add("z"))
+    print(typed_words.first() ?? "none")
+}
+""").unwrap()
+    output :: Command.new(jet()).args(["run", "main.jet"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), Val(0), "{String.from_utf8_lossy(output.stderr)}")
+    assert_eq(String.from_utf8(output.stdout).unwrap(), "jet\njet\n..jet\njet..\n6\n2\nHello Jet\ntrue\ntrue\ntrue\ntrue\nleft\nright\n2\n2\ntrue\ntrue\ntrue\n4\n1\n1\ntrue\n1\n2\na\nz\ntrue\nfalse\nz\n")
+}
+
+// Rust: tests/cli_parts/core.rs:64
+#Test("configured_organization_unsafe_policy_fails_closed_and_keeps_path") {
+    dir :: isolated_cwd("organization_unsafe")
+    fs.write(dir.join("main.jet"), "fn run() {}\n").unwrap()
+    configured :: dir.join("org-policy.jet")
+    output :: Command.new(jet()).args(["check", "main.jet"]).current_dir(dir).env(ENV_ORG_UNSAFE_POLICY, configured).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), Val(1))
+    stderr :: String.from_utf8(output.stderr).unwrap()
+    assert(stderr.contains("E3109") and stderr.contains(configured.to_str().unwrap()), "{stderr}")
+    check_snapshot("unsafe_org_policy.txt", stderr.replace(configured.to_str().unwrap(), "ORG_POLICY"))
+}
+
+// Rust: tests/cli_parts/core.rs:88
+#Test("organization_gate_policy_refuses_each_audited_invocation_gate") {
+    dir :: isolated_cwd("organization_gate_ladder")
+    fs.write(dir.join("main.jet"), "fn run() {\n    #Unsafe(\"org refusal\") {}\n    #Impure(\"org refusal\") {}\n    #Nondeterministic(\"org refusal\") {}\n}\n").unwrap()
+    configured :: dir.join("org-policy.jet")
+    fs.write(configured, "policy: { unsafe: .Forbid, impure: .Forbid, nondeterministic: .Forbid }\n").unwrap()
+    output :: Command.new(jet()).args(["run", "--gate", "unsafe=allow", "--gate", "impure=allow", "--gate", "nondeterministic=allow", "main.jet"]).current_dir(dir).env(ENV_ORG_UNSAFE_POLICY, configured).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), Val(1))
+    stderr :: String.from_utf8(output.stderr).unwrap()
+    check_snapshot("audited_gate_policy.txt", scrub(stderr, dir.join("main.jet")))
+}
+
+// Rust: tests/cli_parts/core.rs:126
+#Test("lua_bind_runs_embedded_vm_and_recovers_after_hostile_calls") {
+    if Command.new("lua").arg("-v").output().is_err() { return }
+    dir :: isolated_cwd("lua_bind_e2e")
+    root :: OSPath.from(env.manifest_dir())
+    example :: root.join("Examples/interop/lua")
+    fs.copy(example.join("ops.lua"), dir.join("ops.lua")).unwrap()
+    fs.copy(example.join("main.jet"), dir.join("main.jet")).unwrap()
+    bind :: Command.new(jet()).args(["inspect", "bind", "lua", "ops.lua", "--pkg", "ops"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(bind.status.success(), "Lua bind failed:\n{String.from_utf8_lossy(bind.stderr)}")
+    cache :: dir.join(".jet/bindings/lua")
+    assert(cache.join("libjet_lua_ops.a").is_file())
+    provenance :: fs.read_to_string(cache.join("ops.provenance")).unwrap()
+    assert(provenance.contains("state=per-session\ntransport=datatree+table-view\ntable-view=zero-copy\nhook=instructions\n"))
+    generated :: fs.read_to_string(cache.join("ops.jet")).unwrap()
+    assert(generated.contains("pub struct TableView") and generated.contains("pub fn counters_view(session: Session, deadline_ms: Int) -> TableView LuaError! {") and generated.contains("pub fn view_get_int(view: TableView, key: String) -> Int LuaError! {") and generated.contains("pub fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! {"))
+    run :: Command.new(jet()).args(["run", "--profile=debug", "main.jet"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(run.status.success(), "embedded Lua binding did not run:\n{String.from_utf8_lossy(run.stderr)}")
+    assert_eq(String.from_utf8_lossy(run.stdout), fs.read_to_string(example.join("expected.out")).unwrap())
+    fs.copy(root.join("tests/fixtures/lua_lifecycle.c"), dir.join("lifecycle.c")).unwrap()
+    lua_path :: fs.read_to_string(cache.join("ops.lua-path")).unwrap()
+    lua_dir := lua_path.trim() // #4303
+    link_dir :: "-L{lua_dir}"
+    rpath :: "-Wl,-rpath,{lua_dir}"
+    cc :: Command.new("cc").arg("lifecycle.c").args(["-L.jet/bindings/lua", "-l:libjet_lua_ops.a"]).arg(link_dir).arg(rpath).args(["-llua", "-lpthread", "-ldl", "-lm", "-o", "lifecycle"]).current_dir(dir).output().unwrap()
+    assert(cc.status.success(), "Lua lifecycle probe link failed:\n{String.from_utf8_lossy(cc.stderr)}")
+    lifecycle :: Command.new(dir.join("lifecycle")).current_dir(dir).output().unwrap()
+    assert(lifecycle.status.success(), "Lua lifecycle probe failed: {lifecycle.status.code().debug()}")
+}
+
+// Rust: tests/cli_parts/core.rs:212
+#Test("lua_bind_discovers_without_executing_and_launders_parse_errors") {
+    if Command.new("luac").arg("-v").output().is_err() { return }
+    dir :: isolated_cwd("lua_bind_static")
+    script :: dir.join("static.lua")
+    fs.write(script, "error('discovery executed source')\n-- function fake(input) end\nlocal function hidden(input) return input end\nfunction visible(input) return input end\n").unwrap()
+    bind :: Command.new(jet()).args(["inspect", "bind", "lua"]).arg(script).args(["--pkg", "static_ops"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(bind.status.success(), "static Lua discovery failed:\n{String.from_utf8_lossy(bind.stderr)}")
+    generated :: fs.read_to_string(dir.join(".jet/bindings/lua/static_ops.jet")).unwrap()
+    assert(generated.contains("pub fn visible("))
+    assert(not generated.contains("pub fn fake(") and not generated.contains("pub fn hidden("))
+    invalid :: dir.join("invalid.lua")
+    fs.write(invalid, "function broken(input)\n  return {\nend\n").unwrap()
+    failed :: Command.new(jet()).args(["inspect", "bind", "lua"]).arg(invalid).args(["--pkg", "bad"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(failed.status.code(), Val(1))
+    stderr :: String.from_utf8_lossy(failed.stderr)
+    assert(stderr.contains("Error [E3208]"))
+    assert(not stderr.contains("invalid.lua:") and not stderr.contains("near 'end'"), "raw Lua parser detail escaped: {stderr}")
+}
+
+// Rust: tests/cli_parts/core.rs:255
+#Test("lua_bind_rejects_generated_fixed_abi_names") {
+    if Command.new("luac").arg("-v").output().is_err() { return }
+    dir :: isolated_cwd("lua_bind_reserved_helpers")
+    loop name in ["take_error", "view_release"] {
+        script :: dir.join("{name}.lua")
+        fs.write(script, "function {name}(input) return input end\n").unwrap()
+        package :: "reserved_{name}"
+        failed :: Command.new(jet()).args(["inspect", "bind", "lua"]).arg(script).args(["--pkg", package]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+        assert_eq(failed.status.code(), Val(1))
+        stderr :: String.from_utf8_lossy(failed.stderr)
+        assert(stderr.contains("Error [E3208]") and stderr.contains("`{name}` cannot be exported"), "{stderr}")
+        assert(not stderr.contains("E0105"), "duplicate generated extern escaped binder validation: {stderr}")
+        assert(not dir.join(".jet/bindings/lua/{package}.jet").exists())
+    }
+}
+
+// Rust: tests/cli_parts/core.rs:294
+#Test("jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects") {
+    project :: isolated_cwd("jobs_project")
+    fs.write(project.join("package.jet"), "name: \"job_runner\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(project.join("run.jet"), read("Examples/features/devloop/job_runner.jet")).unwrap()
+    listed :: Command.new(jet()).arg("jobs").current_dir(project).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(listed.status.code(), Val(0), "{String.from_utf8_lossy(listed.stderr)}")
+    assert_eq(String.from_utf8(listed.stdout).unwrap(), "{"greet".pad_end(11, " ")}  [ship] Say hello from a shipped project job\n{"seed_data".pad_end(11, " ")}  [dev] Seed local data (every 5min)\n{"inspect_job".pad_end(11, " ")}  [internal]\n")
+    unknown :: Command.new(jet()).args(["run", "run.jet", "--", "missing"]).current_dir(project).env("NO_COLOR", "1").output().unwrap()
+    unknown_stderr :: String.from_utf8_lossy(unknown.stderr)
+    assert(not unknown.status.success(), "{unknown_stderr}")
+    assert(unknown_stderr.contains("E1294"), "{unknown_stderr}")
+    assert(unknown_stderr.contains("declared jobs: greet, seed_data, inspect_job"), "{unknown_stderr}")
+    release :: Command.new(jet()).args(["build", "--release", "run.jet"]).current_dir(project).env("NO_COLOR", "1").output().unwrap()
+    assert(release.status.success(), "{String.from_utf8_lossy(release.stderr)}")
+    assert(String.from_utf8_lossy(release.stdout).contains("stripped 2 dev job(s): seed_data, inspect_job (mark #Job(.Ship) to include)"), "{String.from_utf8_lossy(release.stdout)}")
+    shipped :: Command.new(project.join(".jet/build/run")).arg("greet").current_dir(project).output().unwrap()
+    assert(shipped.status.success(), "{String.from_utf8_lossy(shipped.stderr)}")
+    assert(String.from_utf8_lossy(shipped.stdout).contains("hello from job"))
+    stripped :: Command.new(project.join(".jet/build/run")).arg("seed_data").current_dir(project).output().unwrap()
+    assert(not stripped.status.success())
+    // Built binary refuses stripped jobs with registered E1294 and only advertises dispatchable jobs.
+    stripped_stderr :: String.from_utf8_lossy(stripped.stderr)
+    assert(stripped_stderr.contains("E1294"), "{stripped_stderr}")
+    assert(stripped_stderr.contains("no job named `seed_data`"), "{stripped_stderr}")
+    assert(stripped_stderr.contains("declared jobs: greet"), "{stripped_stderr}")
+    assert(not stripped_stderr.contains("seed_data, inspect_job"), "a release binary must not advertise stripped jobs: {stripped_stderr}")
+    help :: Command.new(jet()).arg("help").output().unwrap()
+    assert(help.status.success())
+    assert(String.from_utf8_lossy(help.stdout).contains("jet jobs"), "jet help must list job discovery")
+    outside :: isolated_cwd("jobs_outside_project")
+    jobs_error :: Command.new(jet()).arg("jobs").current_dir(outside).env("NO_COLOR", "1").output().unwrap()
+    run_error :: Command.new(jet()).arg("run").current_dir(outside).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(jobs_error.status.code(), run_error.status.code())
+    assert_eq(jobs_error.stderr, run_error.stderr)
+    fixture :: OSPath.from(env.manifest_dir()).join("Examples/features/packages/monorepo")
+    workspace :: isolated_cwd("jobs_workspace")
+    fs.remove_dir_all(workspace).unwrap()
+    copy_dir_all(fixture, workspace)
+    hello :: workspace.join("packages/hello/hello.jet")
+    hello_source := fs.read_to_string(hello).unwrap()
+    &hello_source.push_str("\n#[Job, Doc(\"Say hello from this workspace member\")] fn greet() {}\n")
+    fs.write(hello, hello_source).unwrap()
+    ambiguous :: Command.new(jet()).arg("jobs").current_dir(workspace).env("NO_COLOR", "1").output().unwrap()
+    ambiguous_stderr :: String.from_utf8_lossy(ambiguous.stderr)
+    assert_eq(ambiguous.status.code(), Val(2), "{ambiguous_stderr}")
+    assert(ambiguous_stderr.contains("`jet jobs` is ambiguous"), "{ambiguous_stderr}")
+    assert(ambiguous_stderr.contains("hello") and ambiguous_stderr.contains("ranker"), "{ambiguous_stderr}")
+    assert(ambiguous_stderr.contains("jet jobs -p <member>") and not ambiguous_stderr.contains("jet run"), "{ambiguous_stderr}")
+    selected :: Command.new(jet()).args(["jobs", "-p", "hello"]).current_dir(workspace).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(selected.status.code(), Val(0), "{String.from_utf8_lossy(selected.stderr)}")
+    // A bare #Job is .Dev; every listing includes its scope.
+    assert_eq(String.from_utf8(selected.stdout).unwrap(), "greet  [dev] Say hello from this workspace member\n")
+}
+
+// Rust: tests/cli_parts/core.rs:469
+#Test("project_parts_lists_skipped_explicit_and_conflicting_modules") {
+    dir :: isolated_cwd("project_parts")
+    fs.write(dir.join("main.jet"), "module app { }\nfn run() {}\n").unwrap()
+    fs.write(dir.join("bench.jet"), "module _bench { }\n").unwrap()
+    skipped :: Command.new(jet()).args(["project", "parts", "--skipped"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(skipped.status.code(), Val(0))
+    stdout :: String.from_utf8(skipped.stdout).unwrap()
+    assert(stdout.contains("skipped") and stdout.contains("_bench"), "{stdout}")
+    assert(not stdout.contains("app"), "{stdout}")
+    fs.write(dir.join("main.jet"), "use project._bench\nmodule app { }\nfn run() {}\n").unwrap()
+    explicit :: Command.new(jet()).args(["project", "parts", "--json"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(explicit.status.code(), Val(0))
+    explicit_stdout :: String.from_utf8(explicit.stdout).unwrap()
+    assert(explicit_stdout.contains("\"name\":\"project._bench\"") and explicit_stdout.contains("\"state\":\"explicit\""), "{explicit_stdout}")
+    fs.write(dir.join("other.jet"), "module _bench { }\n").unwrap()
+    conflict :: Command.new(jet()).args(["project", "parts"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(conflict.status.code(), Val(1))
+    stderr :: String.from_utf8_lossy(conflict.stderr)
+    assert(stderr.contains("Error [E0606]:"), "{stderr}")
+    assert(stderr.contains(" Why:"), "{stderr}")
+    assert(stderr.contains(" Fix:"), "{stderr}")
+}
+
+// Rust: tests/cli_parts/core.rs:521
+#Test("project_parts_lists_plain_source_files") {
+    dir :: isolated_cwd("project_parts_plain_files")
+    loop name in ["one", "two", "three", "four", "five"] { fs.write(dir.join("{name}.jet"), "fn run() {}\n").unwrap() }
+    listed :: Command.new(jet()).args(["project", "parts"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(listed.status.code(), Val(0))
+    stdout :: String.from_utf8(listed.stdout).unwrap()
+    assert_eq(stdout.lines().count(), 5, "{stdout}")
+    loop name in ["one", "two", "three", "four", "five"] {
+        assert(stdout.contains("project.{name}"), "{stdout}")
+        assert(stdout.contains("{name}.jet"), "{stdout}")
+    }
+    skipped :: Command.new(jet()).args(["project", "parts", "--skipped"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(skipped.status.code(), Val(0))
+    assert(skipped.stdout.is_empty(), "unexpected stdout: {skipped.stdout.debug()}")
+    json :: Command.new(jet()).args(["project", "parts", "--json"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(json.status.code(), Val(0))
+    text :: String.from_utf8(json.stdout).unwrap()
+    assert(parse_json(text).is_ok(), "project parts JSON must parse: {text}")
+    assert(text.contains("\"name\":\"project.one\"") and text.contains("\"path\":\"five.jet\""), "{text}")
+}
+
+// Rust: tests/cli_parts/core.rs:574
+#Test("project_parts_reports_authority_scan_failures") {
+    if target.selected_family() != "unix" { return }
+    dir :: isolated_cwd("project_parts_authority_failure")
+    loop (name, source) in [("one.jet", "module one { }\n"), ("two.jet", "module two { }\n"), ("three.jet", "module three { }\n"), ("four.jet", "module four { }\n"), ("five.jet", "module five { }\n")] { fs.write(dir.join(name), source).unwrap() }
+    std.os.unix.fs.symlink("missing-target", dir.join("result")).unwrap() // GATE #4494
+    loop args in [["project", "parts"], ["project", "parts", "--skipped"]] {
+        output :: Command.new(jet()).args(args).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+        assert_eq(output.status.code(), Val(1))
+        assert(output.stdout.is_empty(), "unexpected stdout: {output.stdout.debug()}")
+        stderr :: String.from_utf8(output.stderr).unwrap()
+        assert(stderr.contains("Error [E1334]:") and stderr.contains("result"), "{stderr}")
+        assert(stderr.contains(" Why:") and stderr.contains(" Fix:"), "{stderr}")
+    }
+}
+
+// Rust: tests/cli_parts/core.rs:619
+#Test("isolated_cwd_child_holds_executable") {
+    if target.selected_os() != "linux" { return }
+    ready :: env.var_os("JET_CLI_EXECUTABLE_HOLDER_READY") ?? return
+    fs.write(ready, "ready").unwrap()
+    release := [U8]{0}
+    io.stdin().read_exact(&release).unwrap()
+}
+
+// Rust: tests/cli_parts/core.rs:630
+#Test("isolated_cwd_never_reuses_executing_fixture_path") {
+    if target.selected_os() != "linux" { return }
+    first :: isolated_cwd("executing_fixture_collision")
+    executable :: first.join("cli-test-holder")
+    fs.copy(env.current_exe().unwrap(), executable).unwrap()
+    ready :: first.join("ready")
+    // Derive the full test path, preserving exact-filter selection after module moves.
+    child_test :: match module_path().split_once("::") {
+        Val(pair) -> "{pair.after}::isolated_cwd_child_holds_executable",
+        None -> "isolated_cwd_child_holds_executable"
+    }
+    child := Command.new(executable).args(["--exact", child_test]).env("JET_CLI_EXECUTABLE_HOLDER_READY", ready).stdin(Stdio.piped()).stdout(Stdio.null()).stderr(Stdio.piped()).spawn().unwrap()
+    deadline :: Instant.now() + Duration.from_secs(10)
+    ready_seen :: loop {
+        if ready.is_file() { break true }
+        if child.try_wait().unwrap().is_some() or Instant.now() >= deadline { break false }
+        thread.sleep(Duration.from_millis(1))
+    }
+    second :: if ready_seen { Val(isolated_cwd("executing_fixture_collision")) } else { None }
+    copy_result :: second.as_ref().map(|dir| -> fs.copy(env.current_exe().unwrap(), dir.join("cli-test-holder")))
+    release_result :: child.stdin.as_mut().unwrap().write_all([U8]{1})
+    drop(child.stdin.take())
+    output :: child.wait_with_output().unwrap()
+    _ :: fs.remove_dir_all(first)
+    if second is Val(path) { _ :: fs.remove_dir_all(path) }
+    assert(ready_seen, "holder exited or timed out: {String.from_utf8_lossy(output.stderr)}")
+    assert(output.status.success(), "holder failed: {String.from_utf8_lossy(output.stderr)}")
+    release_result.unwrap()
+    second_path :: second.unwrap()
+    assert_ne(first, second_path, "fixture path reused while stale executable was running")
+    copy_result.unwrap().unwrap()
+}
+
+// Rust: tests/cli_parts/core.rs:699
+#Test("budget_usage_and_preflight_fail_without_artifacts") {
+    dir :: budget_project("budget_no_artifact", 10)
+    loop argv in [
+        ["budget", "check", "--unknown"],
+        ["budget", "update", "--baseline", "ci/linux", "--reason", "no gate"],
+        ["budget", "report"],
+        ["budget", "check", "--json", "--unknown"],
+        ["budget", "check", "--unknown", "--json"],
+        ["budget", "check", "--json", "--json"],
+        ["budget", "check", "--annotations", "gitlab"],
+        ["budget", "update", "--baseline", "CI/Linux"],
+        ["budget", "update", "--baseline", "ci/linux", "--bootstrap", "--accept-regression", "--reason", "invalid"],
+        ["budget", "update", "--baseline", "ci/linux", "--yes", "-y"]
+    ] {
+        out :: Command.new(jet()).args(argv).current_dir(dir).output().unwrap()
+        assert_eq(out.status.code(), Val(2))
+        assert(out.stdout.is_empty())
+        assert(not dir.join(".jet").exists(), "usage failure created an artifact")
+    }
+    fs.write(dir.join("src/run.jet"), "fn run( {\n").unwrap()
+    out :: Command.new(jet()).args(["budget", "check"]).current_dir(dir).output().unwrap()
+    assert_eq(out.status.code(), Val(1))
+    assert(not dir.join(".jet").exists(), "compiler preflight created an artifact")
+}
+
+// Rust: tests/cli_parts/core.rs:755
+#Test("budget_check_uses_real_compiler_fact_and_writes_verified_report") {
+    dir :: budget_project("budget_check", 10)
+    out :: Command.new(jet()).args(["budget", "check", "--json"]).current_dir(dir).output().unwrap()
+    assert_eq(out.status.code(), Val(0), "{String.from_utf8_lossy(out.stderr)}")
+    assert(out.stderr.is_empty())
+    value :: CanonicalJson.parse_canonical(out.stdout).unwrap()
+    text :: String.from_utf8(out.stdout).unwrap()
+    assert(text.contains("\"schema\":\"jet.status/v1\""))
+    assert(text.contains("\"budget\":{"))
+    assert(text.contains("\"budget_id\":\"package:public-api\""))
+    assert(text.contains("\"num\":1"), "public API count must be measured: {text}")
+    reports :: fs.read_dir(dir.join(".jet/perf/reports")).unwrap().collect_results().unwrap()
+    assert_eq(reports.len(), 1)
+    bytes :: fs.read(reports[0].path()).unwrap()
+    verify_budget_report(bytes).unwrap()
+    command :: match value { .Object(v) -> v, _ -> panic("command JSON is not an object") }
+    report :: match canonical_field(command["budget"], "report") { .Object(v) -> v, _ -> panic("report is not an object") }
+    content :: match report["content"] { .Object(v) -> v, _ -> panic("content is not an object") }
+    tool :: match content["toolchain"] { .Object(v) -> v, _ -> panic("toolchain is not an object") }
+    loop key in ["compiler_build_id", "stdlib_id", "runner_id"] {
+        id :: match tool[key] { .String(v) -> v, _ -> panic("{key} is not text") }
+        assert_eq(id.len(), 64, "{key} must identify real executable bytes")
+        assert(id.bytes().all(|byte| -> byte.is_ascii_hexdigit()))
+        assert(id != "jet" and id != "stdlib" and id != "compiler")
+    }
+    subject :: match content["subject"] { .Object(v) -> v, _ -> panic("subject is not an object") }
+    triple :: match subject["target_triple"] { .String(v) -> v, _ -> panic("target triple is not text") }
+    assert(triple.split("-").count() >= 3, "target triple must be canonical: {triple}")
+    measured_start :: match subject["measured_start"] { .String(v) -> v, _ -> panic("measurement start is not text") }
+    measured_end :: match subject["measured_end"] { .String(v) -> v, _ -> panic("measurement end is not text") }
+    assert(measured_start < measured_end, "measurement must cover preflight and evidence: {measured_start}..{measured_end}")
+    measurements :: match content["measurements"] { .Array(v) -> v, _ -> panic("measurements is not an array") }
+    measurement :: match measurements[0] { .Object(v) -> v, _ -> panic("measurement is not an object") }
+    provider :: match measurement["provider"] { .Object(v) -> v, _ -> panic("provider is not an object") }
+    loop key in ["cpu_model", "kernel", "power_governor"] {
+        value :: match provider[key] { .String(v) -> v, _ -> panic("{key} is not text") }
+        assert(not value.is_empty() and value != "compiler" and value != "unknown")
+    }
+}
+
+// Rust: tests/cli_parts/core.rs:857
+// budget_check_measures_typed_compile_workloads_and_records_provenance moved to
+// tests/cli_parts/compile_latency.rs (own target): its pinned 128 child compiles
+// consumed this suite's entire 900s guard and aborted unrelated CLI cases.
+
+// Rust: tests/cli_parts/core.rs:863
+#Test("budget_build_artifact_measures_real_selected_binary") {
+    dir :: artifact_budget_project("budget_build_artifact", 100_000_000)
+    out :: Command.new(jet()).args(["budget", "check", "--json"]).current_dir(dir).output().unwrap()
+    assert_eq(out.status.code(), Val(0), "stdout: {String.from_utf8_lossy(out.stdout)}\nstderr: {String.from_utf8_lossy(out.stderr)}")
+    assert(out.stderr.is_empty())
+    command :: match CanonicalJson.parse_canonical(out.stdout).unwrap() { .Object(v) -> v, _ -> panic("command object") }
+    report :: match canonical_field(command["budget"], "report") { .Object(v) -> v, _ -> panic("report object") }
+    content :: match report["content"] { .Object(v) -> v, _ -> panic("content object") }
+    subject :: match content["subject"] { .Object(v) -> v, _ -> panic("subject object") }
+    artifact :: match subject["artifact"] { .Object(v) -> v, _ -> panic("artifact identity") }
+    bytes :: match artifact["bytes"] { .Integer(v) -> v, _ -> panic("artifact byte count") }
+    digest :: match artifact["sha256"] { .String(v) -> v, _ -> panic("artifact digest") }
+    artifact_path :: dir.join(".jet/build/run")
+    metadata :: fs.metadata(artifact_path).unwrap()
+    assert_eq(bytes, metadata.len().to_string())
+    assert_eq(digest, sha256_file_hex(artifact_path).unwrap())
+    measurements :: match content["measurements"] { .Array(v) -> v, _ -> panic("measurements") }
+    measurement :: match measurements[0] { .Object(v) -> v, _ -> panic("measurement") }
+    samples :: match measurement["samples"] { .Array(v) -> v, _ -> panic("samples") }
+    sample :: match samples[0] { .Object(v) -> v, _ -> panic("sample") }
+    assert_eq(sample["num"], CanonicalJson.Integer(metadata.len().to_string()))
+    provider :: match measurement["provider"] { .Object(v) -> v, _ -> panic("provider") }
+    assert_eq(provider["kind"], CanonicalJson.String("BuildArtifact"))
+    assert_eq(measurement["unit"], CanonicalJson.String("Bytes"))
+}
+
+// Rust: tests/cli_parts/core.rs:935
+#Test("budget_report_collects_mixed_providers_measurement_locally") {
+    dir :: mixed_budget_project("budget_mixed_providers")
+    out :: Command.new(jet()).args(["budget", "check", "--json"]).current_dir(dir).output().unwrap()
+    assert_eq(out.status.code(), Val(0), "stdout: {String.from_utf8_lossy(out.stdout)}\nstderr: {String.from_utf8_lossy(out.stderr)}")
+    assert(out.stderr.is_empty())
+    command :: match CanonicalJson.parse_canonical(out.stdout).unwrap() { .Object(v) -> v, _ -> panic("command object") }
+    report :: match canonical_field(command["budget"], "report") { .Object(v) -> v, _ -> panic("report object") }
+    content :: match report["content"] { .Object(v) -> v, _ -> panic("content object") }
+    measurements :: match content["measurements"] { .Array(v) -> v, _ -> panic("measurements") }
+    assert_eq(measurements.len(), 2)
+    providers := [String:String]{}
+    loop item in measurements {
+        measurement :: match item { .Object(v) -> v, _ -> panic("measurement object") }
+        id :: match measurement["budget_id"] { .String(v) -> v, _ -> panic("budget id") }
+        provider :: match measurement["provider"] { .Object(v) -> v, _ -> panic("provider") }
+        kind :: match provider["kind"] { .String(v) -> v, _ -> panic("provider kind") }
+        samples :: match measurement["samples"] { .Array(v) -> v, _ -> panic("samples") }
+        assert_eq(samples.len(), 1, "{id} must own its provider sample")
+        &providers.insert(id.clone(), kind.clone())
+    }
+    assert_eq(providers.get("package:binary"), Val("BuildArtifact"))
+    assert_eq(providers.get("package:public-api"), Val("CompilerFacts"))
+    subject :: match content["subject"] { .Object(v) -> v, _ -> panic("subject") }
+    artifact :: match subject["artifact"] { .Object(v) -> v, _ -> panic("shared artifact provenance") }
+    bytes :: match artifact["bytes"] { .Integer(v) -> v, _ -> panic("artifact bytes") }
+    assert_eq(bytes, fs.metadata(dir.join(".jet/build/run")).unwrap().len().to_string())
+    report_path :: fs.read_dir(dir.join(".jet/perf/reports")).unwrap().next().unwrap().unwrap().path()
+    verify_budget_report(fs.read(report_path).unwrap()).unwrap()
+}
+
+// Rust: tests/cli_parts/core.rs:1020
+#Test("build_enforces_deterministic_fail_budgets_and_reuses_relevant_identity") {
+    dir :: mixed_budget_project("build_budget_gates")
+    source_path :: dir.join("src/run.jet")
+    passing :: fs.read_to_string(source_path).unwrap()
+    failing :: passing.replace(".AtMost(10)", ".AtMost(0)")
+    fs.write(source_path, failing).unwrap()
+    failed :: Command.new(jet()).args(["build", "src/run.jet"]).current_dir(dir).output().unwrap()
+    assert_eq(failed.status.code(), Val(1), "stdout: {String.from_utf8_lossy(failed.stdout)}\nstderr: {String.from_utf8_lossy(failed.stderr)}")
+    assert(not String.from_utf8_lossy(failed.stdout).contains("built:"), "failed budget claimed build success")
+    assert(String.from_utf8_lossy(failed.stderr).contains("Error [E2907]: performance budget public-api regressed"), "{String.from_utf8_lossy(failed.stderr)}")
+    report_dir :: dir.join(".jet/perf/reports")
+    assert_eq(fs.read_dir(report_dir).unwrap().count(), 1)
+    fs.write(source_path, passing).unwrap()
+    passed :: Command.new(jet()).args(["build", "src/run.jet"]).current_dir(dir).output().unwrap()
+    assert_eq(passed.status.code(), Val(0), "stdout: {String.from_utf8_lossy(passed.stdout)}\nstderr: {String.from_utf8_lossy(passed.stderr)}")
+    assert(String.from_utf8_lossy(passed.stderr).contains("budgets: 2 budgets passed · report "))
+    assert_eq(fs.read_dir(report_dir).unwrap().count(), 2, "source/spec change must refresh evidence")
+    reused :: Command.new(jet()).args(["build", "src/run.jet"]).current_dir(dir).output().unwrap()
+    assert_eq(reused.status.code(), Val(0), "{String.from_utf8_lossy(reused.stderr)}")
+    assert_eq(fs.read_dir(report_dir).unwrap().count(), 2, "unchanged relevant identity must reuse canonical report")
+    ci :: Command.new(jet()).args(["build", "src/run.jet", "--profile=ci"]).current_dir(dir).output().unwrap()
+    assert_eq(ci.status.code(), Val(0), "stdout: {String.from_utf8_lossy(ci.stdout)}\nstderr: {String.from_utf8_lossy(ci.stderr)}")
+    assert_eq(fs.read_dir(report_dir).unwrap().count(), 3, "CI profile identity must refresh evidence")
+    profiles := [String]{}
+    loop entry in fs.read_dir(report_dir).unwrap() {
+        value :: CanonicalJson.parse_canonical(fs.read(entry.unwrap().path()).unwrap()).unwrap()
+        report :: match value { .Object(v) -> v, _ -> panic("report") }
+        content :: match report["content"] { .Object(v) -> v, _ -> panic("content") }
+        subject :: match content["subject"] { .Object(v) -> v, _ -> panic("subject") }
+        profile :: match subject["profile"] { .String(v) -> v, _ -> panic("profile") }
+        &profiles.push(profile.clone())
+    }
+    assert(profiles.iter().any(|profile| -> profile == "dev"))
+    assert(profiles.iter().any(|profile| -> profile == "ci"))
+}
+
+// Rust: tests/cli_parts/core.rs:1130
+#Test("budget_bench_measurement_bootstraps_then_consumes_compatible_history") {
+    dir :: benchmark_budget_project("budget_bench_measurement")
+    bootstrap :: Command.new(jet()).args(["budget", "update", "--baseline", "ci/linux", "--bootstrap", "--reason", "initial benchmark", "--yes", "--json"]).current_dir(dir).output().unwrap()
+    assert_eq(bootstrap.status.code(), Val(0), "stdout: {String.from_utf8_lossy(bootstrap.stdout)}\nstderr: {String.from_utf8_lossy(bootstrap.stderr)}")
+    first :: match CanonicalJson.parse_canonical(bootstrap.stdout).unwrap() { .Object(v) -> v, _ -> panic("command") }
+    first_report :: match canonical_field(first["budget"], "report") { .Object(v) -> v, _ -> panic("report") }
+    first_content :: match first_report["content"] { .Object(v) -> v, _ -> panic("content") }
+    first_measurements :: match first_content["measurements"] { .Array(v) -> v, _ -> panic("measurements") }
+    first_measurement :: match first_measurements[0] { .Object(v) -> v, _ -> panic("measurement") }
+    samples :: match first_measurement["samples"] { .Array(v) -> v, _ -> panic("samples") }
+    assert_eq(samples.len(), 20)
+    assert(first_measurement["statistics"] is .Object(_))
+    assert(first_measurement["policy"] is .Object(_))
+    assert_eq(first_measurement["history"], CanonicalJson.Null)
+    assert_eq(first_measurement["baseline"], CanonicalJson.Null)
+    provider :: match first_measurement["provider"] { .Object(v) -> v, _ -> panic("provider") }
+    assert_eq(provider["kind"], CanonicalJson.String("BenchMeasurement"))
+    assert_eq(provider["identity"], CanonicalJson.String("parse"))
+    first_id :: match first_report["report_id"] { .String(v) -> v.clone(), _ -> panic("report id") }
+    check :: Command.new(jet()).args(["budget", "check", "--json"]).current_dir(dir).output().unwrap()
+    assert(check.status.code() == Val(0) or check.status.code() == Val(1), "stdout: {String.from_utf8_lossy(check.stdout)}\nstderr: {String.from_utf8_lossy(check.stderr)}")
+    second :: match CanonicalJson.parse_canonical(check.stdout).unwrap() { .Object(v) -> v, _ -> panic("command") }
+    report :: match canonical_field(second["budget"], "report") { .Object(v) -> v, _ -> panic("report") }
+    content :: match report["content"] { .Object(v) -> v, _ -> panic("content") }
+    measurements :: match content["measurements"] { .Array(v) -> v, _ -> panic("measurements") }
+    measurement :: match measurements[0] { .Object(v) -> v, _ -> panic("measurement") }
+    history :: match measurement["history"] { .Object(v) -> v, _ -> panic("history") }
+    ids :: match history["report_ids"] { .Array(v) -> v, _ -> panic("ids") }
+    assert_eq(ids, [CanonicalJson.String(first_id.clone())])
+    baseline :: match measurement["baseline"] { .Object(v) -> v, _ -> panic("baseline") }
+    pooled :: match baseline["pooled_samples"] { .Array(v) -> v, _ -> panic("pooled") }
+    assert_eq(pooled.len(), 20)
+    decision :: match measurement["decision"] { .Object(v) -> v, _ -> panic("decision") }
+    assert_ne(decision["evidence"], CanonicalJson.String("unavailable"))
+    results :: match canonical_field(second["budget"], "results") { .Array(v) -> v, _ -> panic("results") }
+    result :: match results[0] { .Object(v) -> v, _ -> panic("result") }
+    assert_eq(result["baseline_report_ids"], CanonicalJson.Array([CanonicalJson.String(first_id)]))
+    assert_eq(result["metric"], measurement["metric"])
+    assert_eq(result["lower95"], decision["lower95"])
+    assert_eq(result["upper95"], decision["upper95"])
+    assert_eq(result["trend"], decision["trend"])
+    assert_eq(result["reason"], decision["reason"])
+}

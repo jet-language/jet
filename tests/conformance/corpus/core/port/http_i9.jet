@@ -1,273 +1,197 @@
-// PORT-PENDING 1071 tests-http-i9: tests/http_i9.rs:1-1573
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use std::fs;
-//RS use std::io::{Read, Write};
-//RS 
-//RS use jet::Interpreter::dev_iteration;
-//RS use jet_foundation::JitBackend::RunOutcome;
-//RS 
-//RS mod common;
-//RS 
-//RS struct Output {
-//RS     stdout: String,
-//RS     stderr: String,
-//RS     exit_code: i32,
-//RS }
-//RS 
-//RS fn on_large_stack(work: impl FnOnce() + Send) {
-//RS     std::thread::scope(|scope| {
-//RS         std::thread::Builder::new()
-//RS             .stack_size(64 * 1024 * 1024)
-//RS             .spawn_scoped(scope, work)
-//RS             .unwrap()
-//RS             .join()
-//RS             .unwrap();
-//RS     });
-//RS }
-//RS 
-//RS fn skip_if_cranelift_host_unsupported() -> bool {
-//RS     if jet_jit::cranelift_host_supported() {
-//RS         false
-//RS     } else if std::env::var("JET_REQUIRE_CRANELIFT_HOST").as_deref() == Ok("1") {
-//RS         panic!("Cranelift host required but unavailable");
-//RS     } else {
-//RS         true
-//RS     }
-//RS }
-//RS 
-//RS fn run(source: &str, name: &str) -> Output {
-//RS     run_with_mode(source, name, false)
-//RS }
-//RS 
-//RS fn run_with_mode(source: &str, name: &str, use_interpreter: bool) -> Output {
-//RS     let dir = common::unique_tmp(name);
-//RS     fs::create_dir_all(&dir).unwrap();
-//RS     fs::write(
-//RS         dir.join("package.jet"),
-//RS         "name: \"http_i9\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS, IO, Mem.Alloc, Mem.Rc, Net, Time.Wait] } }\n",
-//RS     )
-//RS     .unwrap();
-//RS     let file = dir.join("main.jet");
-//RS     fs::write(&file, source).unwrap();
-//RS     jet_jit::reset_jit_trace_for_test();
-//RS     let outcome = dev_iteration(file.to_str().unwrap(), false, use_interpreter);
-//RS     let output = match outcome {
-//RS         RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => Output {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         },
-//RS         RunOutcome::Problems(diags) => panic!("{name} failed: {diags:#?}"),
-//RS     };
-//RS     let _ = fs::remove_dir_all(dir);
-//RS     output
-//RS }
-//RS fn read_http_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
-//RS     stream
-//RS         .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-//RS         .unwrap();
-//RS     let mut request = Vec::new();
-//RS     let mut chunk = [0u8; 512];
-//RS     while !request.windows(4).any(|window| window == b"\r\n\r\n") {
-//RS         let read = stream.read(&mut chunk).unwrap();
-//RS         if read == 0 {
-//RS             break;
-//RS         }
-//RS         request.extend_from_slice(&chunk[..read]);
-//RS     }
-//RS     request
-//RS }
-//RS const HTTP_RESPONSE_BODY_LIMIT: usize = 64 * 1024 * 1024;
-//RS const GZIP_RESPONSE_BODY_LIMIT: usize = 8 * 1024 * 1024;
-//RS 
-//RS fn write_repeated_http_body(stream: &mut std::net::TcpStream, mut remaining: usize) {
-//RS     const BLOCK: [u8; 64 * 1024] = [b'x'; 64 * 1024];
-//RS     while remaining > 0 {
-//RS         let count = remaining.min(BLOCK.len());
-//RS         if stream.write_all(&BLOCK[..count]).is_err() {
-//RS             return;
-//RS         }
-//RS         remaining -= count;
-//RS     }
-//RS }
-//RS 
-//RS fn write_chunked_http_body(stream: &mut std::net::TcpStream, mut remaining: usize) {
-//RS     const BLOCK: [u8; 64 * 1024] = [b'x'; 64 * 1024];
-//RS     while remaining > 0 {
-//RS         let count = remaining.min(BLOCK.len());
-//RS         if write!(stream, "{count:x}\r\n").is_err()
-//RS             || stream.write_all(&BLOCK[..count]).is_err()
-//RS             || stream.write_all(b"\r\n").is_err()
-//RS         {
-//RS             return;
-//RS         }
-//RS         remaining -= count;
-//RS     }
-//RS     let _ = stream.write_all(b"0\r\n\r\n");
-//RS }
-//RS 
-//RS struct GzipBits {
-//RS     bytes: Vec<u8>,
-//RS     bit: u8,
-//RS }
-//RS 
-//RS impl GzipBits {
-//RS     fn write(&mut self, value: u32, bits: u8) {
-//RS         for offset in 0..bits {
-//RS             if self.bit == 0 {
-//RS                 self.bytes.push(0);
-//RS             }
-//RS             if value & (1 << offset) != 0 {
-//RS                 let last = self.bytes.len() - 1;
-//RS                 self.bytes[last] |= 1 << self.bit;
-//RS             }
-//RS             self.bit = (self.bit + 1) % 8;
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn gzip_reverse_bits(mut code: u32, bits: u8) -> u32 {
-//RS     let mut reversed = 0;
-//RS     for _ in 0..bits {
-//RS         reversed = (reversed << 1) | (code & 1);
-//RS         code >>= 1;
-//RS     }
-//RS     reversed
-//RS }
-//RS 
-//RS fn gzip_fixed_code(symbol: usize) -> (u32, u8) {
-//RS     let (code, bits) = match symbol {
-//RS         0..=143 => (0x30 + symbol as u32, 8),
-//RS         144..=255 => (0x190 + (symbol - 144) as u32, 9),
-//RS         256..=279 => ((symbol - 256) as u32, 7),
-//RS         280..=287 => (0xc0 + (symbol - 280) as u32, 8),
-//RS         _ => unreachable!("fixed DEFLATE symbol"),
-//RS     };
-//RS     (gzip_reverse_bits(code, bits), bits)
-//RS }
-//RS 
-//RS fn gzip_length_code(length: usize) -> (usize, u32, u8) {
-//RS     const BASE: [usize; 29] = [
-//RS         3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83,
-//RS         99, 115, 131, 163, 195, 227, 258,
-//RS     ];
-//RS     const EXTRA: [u8; 29] = [
-//RS         0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5,
-//RS         5, 0,
-//RS     ];
-//RS     for (index, (&base, &extra)) in BASE.iter().zip(EXTRA.iter()).enumerate() {
-//RS         let max = base + ((1usize << extra) - 1);
-//RS         if length <= max {
-//RS             return (257 + index, (length - base) as u32, extra);
-//RS         }
-//RS     }
-//RS     unreachable!("DEFLATE match length")
-//RS }
-//RS 
-//RS fn gzip_crc32_repeated(byte: u8, length: usize) -> u32 {
-//RS     let mut table = [0u32; 256];
-//RS     for (index, slot) in table.iter_mut().enumerate() {
-//RS         let mut crc = index as u32;
-//RS         for _ in 0..8 {
-//RS             crc = if crc & 1 != 0 {
-//RS                 (crc >> 1) ^ 0xedb8_8320
-//RS             } else {
-//RS                 crc >> 1
-//RS             };
-//RS         }
-//RS         *slot = crc;
-//RS     }
-//RS 
-//RS     let mut crc = !0u32;
-//RS     for _ in 0..length {
-//RS         crc = (crc >> 8) ^ table[((crc as u8) ^ byte) as usize];
-//RS     }
-//RS     !crc
-//RS }
-//RS 
-//RS /// Build a valid, compact gzip body that expands past the HTTP decoder budget.
-//RS fn gzip_fixed_repeat_bomb(output_len: usize, byte: u8) -> Vec<u8> {
-//RS     assert!(output_len > 0);
-//RS     let mut frame = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
-//RS     let mut bits = GzipBits {
-//RS         bytes: Vec::new(),
-//RS         bit: 0,
-//RS     };
-//RS     bits.write(1, 1);
-//RS     bits.write(1, 2);
-//RS 
-//RS     let (literal, literal_bits) = gzip_fixed_code(byte as usize);
-//RS     bits.write(literal, literal_bits);
-//RS     let mut remaining = output_len - 1;
-//RS     while remaining >= 3 {
-//RS         let length = remaining.min(258);
-//RS         let (symbol, extra, extra_bits) = gzip_length_code(length);
-//RS         let (code, code_bits) = gzip_fixed_code(symbol);
-//RS         bits.write(code, code_bits);
-//RS         bits.write(extra, extra_bits);
-//RS         bits.write(0, 5);
-//RS         remaining -= length;
-//RS     }
-//RS     for _ in 0..remaining {
-//RS         bits.write(literal, literal_bits);
-//RS     }
-//RS     let (end, end_bits) = gzip_fixed_code(256);
-//RS     bits.write(end, end_bits);
-//RS     frame.extend_from_slice(&bits.bytes);
-//RS     frame.extend_from_slice(&gzip_crc32_repeated(byte, output_len).to_le_bytes());
-//RS     frame.extend_from_slice(&(output_len as u32).to_le_bytes());
-//RS     frame
-//RS }
-//RS 
-//RS fn serve_hostile_http_response(
-//RS     stream: &mut std::net::TcpStream,
-//RS     request: &[u8],
-//RS     gzip_body: &[u8],
-//RS ) {
-//RS     if request
-//RS         .windows(b"/close-get".len())
-//RS         .any(|window| window == b"/close-get")
-//RS         || request
-//RS             .windows(b"/close-request".len())
-//RS             .any(|window| window == b"/close-request")
-//RS     {
-//RS         let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n");
-//RS         write_repeated_http_body(stream, HTTP_RESPONSE_BODY_LIMIT + 1);
-//RS     } else if request
-//RS         .windows(b"/chunked-get".len())
-//RS         .any(|window| window == b"/chunked-get")
-//RS         || request
-//RS             .windows(b"/chunked-request".len())
-//RS             .any(|window| window == b"/chunked-request")
-//RS     {
-//RS         let _ = stream.write_all(
-//RS             b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
-//RS         );
-//RS         write_chunked_http_body(stream, HTTP_RESPONSE_BODY_LIMIT + 1);
-//RS     } else if request
-//RS         .windows(b"/gzip-get".len())
-//RS         .any(|window| window == b"/gzip-get")
-//RS         || request
-//RS             .windows(b"/gzip-request".len())
-//RS             .any(|window| window == b"/gzip-request")
-//RS     {
-//RS         let header = format!(
-//RS             "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-//RS             gzip_body.len()
-//RS         );
-//RS         let _ = stream.write_all(header.as_bytes());
-//RS         let _ = stream.write_all(gzip_body);
-//RS     } else {
-//RS         panic!("unknown hostile HTTP request: {:?}", String::from_utf8_lossy(request));
-//RS     }
-//RS     let _ = stream.flush();
-//RS }
-//RS 
-//RS 
+use std.fs as fs
+use std.net.[TcpStream, TcpListener]
+use std.thread
+use std.time.[Duration, Instant]
+use std.io.[ErrorKind]
+use jet.Interpreter.[dev_iteration]
+use jet_foundation.JitBackend.[RunOutcome]
+use tests.common as common
+use tests.tir_support as tir_support
+// Rust: tests/http_i9.rs:15 — same scoped 64 MiB stack helper.
+use tests.conformance.corpus.core.port.http.[on_large_stack]
+// GATE #4494: native sockets, scoped threads, timeout and process execution.
+// GATE #4409: preserve WouldBlock and ConnectionReset kinds in the paired tests.
+// #4483 / #4499: not applicable; no target cfg arms or composite map keys.
+
+// Rust: tests/http_i9.rs:9
+struct Output {
+    stdout: String
+    stderr: String
+    exit_code: I32
+}
+
+// Rust: tests/http_i9.rs:26
+// The retired Cranelift-only skip is removed; shared dev tiers execute below.
+// Rust: tests/http_i9.rs:36
+fn run(source: String, name: String) -> Output {
+    run_with_mode(source, name, false)
+}
+// Rust: tests/http_i9.rs:40
+fn run_with_mode(source: String, name: String, use_interpreter: Bool) -> Output {
+    dir :: common.unique_tmp(name)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"http_i9\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS, IO, Mem.Alloc, Mem.Rc, Net, Time.Wait] } }\n").unwrap()
+    file :: dir.join("main.jet")
+    fs.write(file, source).unwrap()
+    outcome :: dev_iteration(file.to_str().unwrap(), false, use_interpreter)
+    output :: match outcome {
+        .Ran{stdout, stderr, exit_code} -> Output{stdout: ^stdout, stderr: ^stderr, exit_code}
+        .Problems(diags) -> panic("{name} failed: {diags:#?}")
+    }
+    _ :: fs.remove_dir_all(^dir)
+    output
+}
+// Rust: tests/http_i9.rs:67
+fn read_http_request(stream: &TcpStream) -> [U8] {
+    stream.set_read_timeout(Duration.from_secs(5)).unwrap()
+    request := [U8]{}
+    chunk := [U8; 512]{0}
+    loop !request.windows(4).any(window -> window == "\r\n\r\n".bytes()) {
+        read :: stream.read(&chunk).unwrap()
+        if read == 0 { break }
+        request.extend_from_slice(chunk[..read])
+    }
+    request
+}
+// Rust: tests/http_i9.rs:82
+HTTP_RESPONSE_BODY_LIMIT: USize :: 64 * 1024 * 1024
+// Rust: tests/http_i9.rs:83
+GZIP_RESPONSE_BODY_LIMIT: USize :: 8 * 1024 * 1024
+
+// Rust: tests/http_i9.rs:85
+fn write_repeated_http_body(stream: &TcpStream, remaining: USize) -> {
+    BLOCK :: [U8; 65536]{120}
+    left := remaining
+    loop left > 0 {
+        count :: left.min(BLOCK.len())
+        if stream.write_all(BLOCK[..count]).is_err() { return }
+        left -= count
+    }
+}
+// Rust: tests/http_i9.rs:96
+fn write_chunked_http_body(stream: &TcpStream, remaining: USize) -> {
+    BLOCK :: [U8; 65536]{120}
+    left := remaining
+    loop left > 0 {
+        count :: left.min(BLOCK.len())
+        if stream.write_all("{count:x}\r\n".bytes()).is_err() ||
+           stream.write_all(BLOCK[..count]).is_err() ||
+           stream.write_all("\r\n".bytes()).is_err() { return }
+        left -= count
+    }
+    _ :: stream.write_all("0\r\n\r\n".bytes())
+}
+
+// Rust: tests/http_i9.rs:111
+struct GzipBits { bytes: [U8], bit: U8 }
+impl GzipBits {
+    // Rust: tests/http_i9.rs:117
+    fn write(&self, value: U32, bits: U8) -> {
+        loop offset in 0..bits {
+            if self.bit == 0 { self.bytes.push(0) }
+            if value & (U32{1} << offset) != 0 {
+                last :: self.bytes.len() - 1
+                self.bytes[last] |= U8{1} << self.bit
+            }
+            self.bit = (self.bit + 1) % 8
+        }
+    }
+}
+// Rust: tests/http_i9.rs:131
+fn gzip_reverse_bits(code: U32, bits: U8) -> U32 {
+    current := code
+    reversed := U32{0}
+    loop _ in 0..bits {
+        reversed = (reversed << 1) | (current & 1)
+        current >>= 1
+    }
+    reversed
+}
+// Rust: tests/http_i9.rs:140
+fn gzip_fixed_code(symbol: USize) -> (U32, U8) {
+    (code, bits) :: match symbol {
+        0..=143 -> (0x30 + U32{symbol}, U8{8})
+        144..=255 -> (0x190 + U32{symbol - 144}, U8{9})
+        256..=279 -> (U32{symbol - 256}, U8{7})
+        280..=287 -> (0xc0 + U32{symbol - 280}, U8{8})
+        _ -> panic("fixed DEFLATE symbol")
+    }
+    (gzip_reverse_bits(code, bits), bits)
+}
+// Rust: tests/http_i9.rs:151
+fn gzip_length_code(length: USize) -> (USize, U32, U8) {
+    BASE: [USize] :: [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258]
+    EXTRA: [U8] :: [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0]
+    loop (index, base) in BASE.iter().enumerate() {
+        extra :: EXTRA[index]
+        max :: base + ((USize{1} << extra) - 1)
+        if length <= max { return (257 + index, U32{length - base}, extra) }
+    }
+    panic("DEFLATE match length")
+}
+// Rust: tests/http_i9.rs:169
+fn gzip_crc32_repeated(byte: U8, length: USize) -> U32 {
+    table := [U32; 256]{0}
+    loop index in 0..256 {
+        crc := U32{index}
+        loop _ in 0..8 {
+            crc = if crc & 1 != 0 -> (crc >> 1) ^ 0xedb8_8320 else -> crc >> 1
+        }
+        table[index] = crc
+    }
+    crc := ~U32{0}
+    loop _ in 0..length { crc = (crc >> 8) ^ table[USize{U8{crc} ^ byte}] }
+    ~crc
+}
+// Rust: tests/http_i9.rs:191
+// Build a valid compact gzip body that expands past the decoder budget.
+fn gzip_fixed_repeat_bomb(output_len: USize, byte: U8) -> [U8] {
+    assert(output_len > 0)
+    frame: [U8] := [0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255]
+    bits := GzipBits{bytes: [], bit: 0}
+    bits.write(1, 1)
+    bits.write(1, 2)
+    (literal, literal_bits) :: gzip_fixed_code(USize{byte})
+    bits.write(literal, literal_bits)
+    remaining := output_len - 1
+    loop remaining >= 3 {
+        length :: remaining.min(258)
+        (symbol, extra, extra_bits) :: gzip_length_code(length)
+        (code, code_bits) :: gzip_fixed_code(symbol)
+        bits.write(code, code_bits)
+        bits.write(extra, extra_bits)
+        bits.write(0, 5)
+        remaining -= length
+    }
+    loop _ in 0..remaining { bits.write(literal, literal_bits) }
+    (end, end_bits) :: gzip_fixed_code(256)
+    bits.write(end, end_bits)
+    frame.extend_from_slice(bits.bytes)
+    frame.extend_from_slice(gzip_crc32_repeated(byte, output_len).to_le_bytes())
+    frame.extend_from_slice(U32{output_len}.to_le_bytes())
+    frame
+}
+// Rust: tests/http_i9.rs:224
+fn serve_hostile_http_response(stream: &TcpStream, request: [U8], gzip_body: [U8]) -> {
+    if request.windows(10).any(window -> window == "/close-get".bytes()) ||
+       request.windows(14).any(window -> window == "/close-request".bytes()) {
+        _ :: stream.write_all("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n".bytes())
+        write_repeated_http_body(stream, HTTP_RESPONSE_BODY_LIMIT + 1)
+    } else if request.windows(12).any(window -> window == "/chunked-get".bytes()) ||
+              request.windows(16).any(window -> window == "/chunked-request".bytes()) {
+        _ :: stream.write_all("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n".bytes())
+        write_chunked_http_body(stream, HTTP_RESPONSE_BODY_LIMIT + 1)
+    } else if request.windows(9).any(window -> window == "/gzip-get".bytes()) ||
+              request.windows(13).any(window -> window == "/gzip-request".bytes()) {
+        header :: "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: {gzip_body.len()}\r\nConnection: close\r\n\r\n"
+        _ :: stream.write_all(header.bytes())
+        _ :: stream.write_all(gzip_body)
+    } else {
+        panic("unknown hostile HTTP request: {String.from_utf8_lossy(request):?}")
+    }
+    _ :: stream.flush()
+}
+
 //RS 
 //RS const FORCED_DEOPT: &str = r#"
 //RS use core.http.client as http_client

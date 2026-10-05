@@ -1,0 +1,69 @@
+use std.fs as fs
+use std.env as env
+// Rust: tests/core_call_table.rs:9
+fn read(path: String) -> String {
+    // GATE #4494: real repository source reads, not compiler runtime callbacks.
+    fs.read_to_string(OSPath.from(env.manifest_dir()).join(path)).unwrap_or_else(error -> panic("read {path}: {error}"))
+}
+// Rust: tests/core_call_table.rs:14
+fn quoted(text: String) -> [String] {
+    values := [String]{}
+    rest := text
+    loop {
+        open :: rest.split_once('"')
+        if open.is_none() { break }
+        after_open :: open.unwrap().1
+        close :: after_open.split_once('"')
+        if close.is_none() { break }
+        (value, after_close) :: close.unwrap()
+        values.push(value)
+        rest = after_close
+    }
+    values
+}
+// Rust: tests/core_call_table.rs:27
+fn listed_pairs(source: String, marker: String) -> [(String, String)] {
+    body :: source.split_once(marker).map(pair -> pair.1).and_then(body -> body.split_once("];")).map(pair -> pair.0)
+        .unwrap_or_else(() -> panic("missing pair list {marker}"))
+    body.lines().filter_map(line -> {
+        values :: quoted(line)
+        if values.len() == 2 { Val((values[0].to_string(), values[1].to_string())) } else { None }
+    }).collect()
+}
+// Rust: tests/core_call_table.rs:42
+fn arm_pairs(source: String) -> [(String, String)] {
+    pairs := [(String, String)]{}
+    pattern := String.new()
+    for line in source.lines() {
+        if pattern.is_empty() && !line.trim_start().starts_with("(\"") { continue }
+        pattern.push_str(line)
+        if !line.contains("=>") { continue }
+        tuple := pattern.split_once("=>").map(pair -> pair.0).unwrap_or(pattern).trim_start()
+            .trim_start_matches('(').split_once(')').map(pair -> pair.0).unwrap_or_default() // #4303
+        split :: tuple.split_once(',')
+        if split is Val((modules, members)) {
+            for module in quoted(modules) {
+                for member in quoted(members) { pairs.push((module.to_string(), member.to_string())) }
+            }
+        }
+        pattern.clear()
+    }
+    pairs
+}
+// Rust: tests/core_call_table.rs:74
+fn pure_route_pairs(source: String) -> [(String, String)] {
+    pairs := [(String, String)]{}
+    for line in source.lines() {
+        split :: line.split_once("=>")
+        if split.is_none() { continue }
+        head :: split.unwrap().0
+        route_split :: head.split_once("CoreCallPureRoute::")
+        if route_split.is_none() { continue }
+        route_and_member :: route_split.unwrap().1
+        route :: route_and_member.split(character -> character == ',' || character == ')' || character == ' ').next().unwrap_or_default()
+        member_split :: head.split_once(',')
+        if member_split.is_none() { continue }
+        for member in quoted(member_split.unwrap().1) { pairs.push((route.to_string(), member.to_string())) }
+    }
+    pairs
+}

@@ -1,0 +1,636 @@
+// Rust: tests/concurrency_boundaries.rs:1
+use tests.conformance.corpus.core.port.concurrency_boundaries.[error_codes, assert_rejected, assert_accepted, PARTICLES, assert_native_crossing]
+use jet.[compile]
+use jet_foundation.Syntax.[MARKER_LOCAL, MARKER_SHARED]
+use std.fs as fs
+use std.env as env
+
+// Rust: tests/concurrency_boundaries.rs:12
+#Test("architecture_states_datarace1_c_guarantee") {
+    architecture :: fs.read_to_string(OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Docs/spec/architecture.md")).unwrap()
+    assert(architecture.contains("D-DATARACE1=C is law"), "architecture must state the ratified D-DATARACE1=C guarantee")
+    assert(architecture.contains("lock-ordered `Arc` storage") || architecture.contains("lock-ordered Arc storage"), "architecture must state synchronized reactive storage")
+    assert(!architecture.contains("own the open choice"), "architecture must not treat D-DATARACE1 as an open choice after ratification")
+    assert(!architecture.contains("leans on rustc"), "architecture must not leave reactive crossings on a rustc Send backstop")
+    assert_eq(MARKER_LOCAL, "Local", "#Local must be registered in Syntax.rs (D-DATARACE1=C / I7)")
+    assert_eq(MARKER_SHARED, "Shared", "#Shared must be registered in Syntax.rs (D-DATARACE1=C / I7)")
+}
+// Rust: tests/concurrency_boundaries.rs:52
+#Test("shared_guard_cannot_cross_a_task_boundary") {
+    assert_rejected("""
+fn run() {
+    cell := shared 1
+    guard :: cell.guard_read()
+    worker :: task print(guard.value)
+    worker.join() ?? panic("task failed")
+}
+""", "E1102")
+}
+// Rust: tests/concurrency_boundaries.rs:67
+#Test("local_cell_rejects_task_channel_shared_and_parallel_crossings") {
+    assert_rejected("""
+fn cross(cell: Cell<Int>) {
+    worker :: task {
+        _ :: cell
+    }
+    worker.join() ?? panic("task failed")
+}
+fn run() {}
+""", "E1102")
+    assert_rejected("""
+use core.tasks as tasks
+fn cross(cell: Cell<Int>) {
+    (tx, rx) :: channel<Cell<Int>>()
+    tx.send(^cell)
+}
+fn run() {}
+""", "E1102")
+    assert_rejected("""
+fn cross(cell: Cell<Int>) {
+    values :: [1, 2, 3]
+    _ :: values.para_map((n: Int) -> {
+        _ :: cell
+        return n
+    })
+}
+fn run() {}
+""", "E1102")
+}
+// Rust: tests/concurrency_boundaries.rs:109
+#Test("shared_constructor_rejects_local_cell_at_the_constructor") {
+    source :: """
+fn cross(cell: Cell<Int>) {
+    _ :: shared cell
+}
+fn run() {}
+"""
+    diagnostics :: compile(source).expect_err("`shared cell` must fail in sema")
+    error :: diagnostics.iter().find(|diagnostic| -> diagnostic.code == "E1102" && diagnostic.what.contains("cannot be stored in `Shared<T>`"))
+        .expect("E1102 must point at the `shared` construction instead of a later task use")
+    start :: error.span.expect("E1102 must have a source span").start
+    assert(source[start..].starts_with("cell"), "E1102 must point at the constructed Cell value: {error.debug()}")
+}
+// Rust: tests/concurrency_boundaries.rs:132
+#Test("shared_constructor_rejects_cell_nested_in_a_struct") {
+    source :: """
+struct Holder { value: Cell<Int> }
+fn cross(holder: Holder) {
+    _ :: shared holder
+}
+fn run() {}
+"""
+    diagnostics :: compile(source).expect_err("`shared` on a struct containing a Cell must fail in sema")
+    assert(diagnostics.iter().any(|diagnostic| -> diagnostic.code == "E1102" && diagnostic.what.contains("cannot be stored in `Shared<T>`")), "{diagnostics.debug()}")
+}
+// Rust: tests/concurrency_boundaries.rs:152
+#Test("task_capture_rejects_cell_nested_in_a_struct") {
+    source :: """
+struct Cache { value: Cell<Int> }
+fn cross(cache: Cache) {
+    worker :: task {
+        _ :: cache
+    }
+    worker.join() ?? panic("task failed")
+}
+fn run() {}
+"""
+    assert_rejected(source, "E1102")
+}
+// Rust: tests/concurrency_boundaries.rs:167
+#Test("local_cell_guard_types_are_not_sendable") {
+    loop guard in ["CellReadGuard<Int>", "CellEditGuard<Int>"] {
+        source :: """
+fn cross(guard: {guard}) {
+    worker :: task {
+        _ :: guard
+    }
+    worker.join() ?? panic("task failed")
+}
+fn run() {}
+"""
+        codes :: error_codes(source)
+        assert(codes.iter().any(|code| -> code == "E1102"), "task capture must keep the task-boundary diagnostic: {codes.debug()}")
+        assert(codes.iter().all(|code| -> code != "E0217"), "aggregate-storage E0217 must not shadow task-boundary E1102: {codes.debug()}")
+    }
+}
+// Rust: tests/concurrency_boundaries.rs:193
+#Test("signal_crosses_task_and_channel_without_rustc_send_ice") {
+    task_source :: """
+use core.reactive as reactive
+fn run() {
+    pending := reactive.signal(0)
+    worker :: task {
+        &pending.set(1)
+    }
+    worker.join() ?? panic("task failed")
+    print(pending.get())
+}
+"""
+    assert_native_crossing("signal_task", task_source, "1\n")
+    channel_source :: """
+use core.reactive as reactive
+use core.tasks as tasks
+fn run() {
+    pending := reactive.signal(0)
+    (tx, rx) :: channel<Signal<Int>>()
+    tx.send(~pending)
+    got :: rx.receive() ?? panic("recv")
+    print(got.get())
+}
+"""
+    assert_native_crossing("signal_channel", channel_source, "0\n")
+}
+// Rust: tests/concurrency_boundaries.rs:243
+#Test("parallel_adapter_allows_synchronized_reactive_capture") {
+    source :: """
+use core.reactive as reactive
+fn run() {
+    pending := reactive.signal(0)
+    values :: [1, 2, 3]
+    _ :: values.para_map((n: Int) -> pending.get() + n)
+}
+"""
+    assert_native_crossing("signal_parallel", source, "")
+}
+// Rust: tests/concurrency_boundaries.rs:264
+#Test("derived_and_computed_cross_task_without_rustc_send_ice") {
+    derived_source :: """
+use core.reactive as reactive
+fn run() {
+    base := reactive.signal(1)
+    twice := reactive.derived(() -> (base.get() * 2))
+    worker :: task {
+        print(twice.get())
+    }
+    worker.join() ?? panic("task failed")
+}
+"""
+    assert_native_crossing("derived_task", derived_source, "2\n")
+    computed_source :: """
+use core.reactive as reactive
+use core.tasks as tasks
+fn run() {
+    base := reactive.signal(1)
+    twice := reactive.computed(() -> (base.get() * 2))
+    (tx, rx) :: channel<Computed<Int>>()
+    tx.send(~twice)
+    got :: rx.receive() ?? panic("recv")
+    print(got.get())
+}
+"""
+    assert_native_crossing("computed_channel", computed_source, "2\n")
+}
+// Rust: tests/concurrency_boundaries.rs:311
+#Test("local_pin_rejects_reactive_task_crossing") {
+    assert_rejected("""
+use core.reactive as reactive
+fn run() {
+    #Local pending := reactive.signal(0)
+    worker :: task {
+        &pending.set(1)
+    }
+    worker.join() ?? panic("task failed")
+}
+""", "E1102")
+}
+// Rust: tests/concurrency_boundaries.rs:328
+#Test("mutable_state_cannot_cross_task_or_taskgroup_boundaries") {
+    assert_rejected("""
+fn run() {
+    count := 0
+    handle :: task {
+        count += 1
+    }
+    handle.join() ?? panic("task failed")
+}
+""", "E1101")
+    assert_rejected("""
+fn run() {
+    count := 0
+    task.group group {
+        handle :: task {
+            count += 1
+        }
+        handle.join() ?? panic("task failed")
+    }
+}
+""", "E1101")
+}
+// Rust: tests/concurrency_boundaries.rs:359
+#Test("task_and_parallel_writes_use_one_registered_rejection_shape") {
+    task :: compile("""
+fn run() {
+    count := 0
+    worker :: task { count += 1 }
+    worker.join() ?? panic("task failed")
+}
+""").expect_err("task write must be rejected").into_iter().find(|diagnostic| -> diagnostic.code == "E1101").expect("task write must use E1101")
+    parallel :: compile("""
+fn run() {
+    seen := [Int]{}
+    values :: [1, 2, 3]
+    values.para_map((n: Int) -> { &seen.push(n) })
+}
+""").expect_err("parallel write must be rejected").into_iter().find(|diagnostic| -> diagnostic.code == "E1101").expect("parallel write must use E1101")
+    assert_eq(task.why, parallel.why)
+    assert_eq(task.fix, parallel.fix)
+    assert(task.what.contains("task capture"))
+    assert(parallel.what.contains("parallel worker"))
+}
+// Rust: tests/concurrency_boundaries.rs:394
+#Test("mutable_view_cannot_cross_a_channel_boundary") {
+    assert_rejected("""
+use core.tasks
+fn run() {
+    values := [1, 2, 3]
+    edit :: &values[0..1]
+    (sender, receiver) :: channel<ViewMut<Int>>()
+    sender.send(edit)
+}
+""", "E1102")
+}
+// Rust: tests/concurrency_boundaries.rs:410
+#Test("every_parallel_adapter_rejects_mutable_captures") {
+    cases :: [
+        ("para_map", """
+fn run() {
+    seen := [Int]{}
+    values :: [1, 2, 3]
+    values.para_map((n: Int) -> {
+        &seen.push(n)
+    })
+}
+"""),
+        ("para_filter", """
+fn run() {
+    seen := [Int]{}
+    values :: [1, 2, 3]
+    values.para_filter((n: Int) -> {
+        seen.push(n)
+    })
+}
+"""),
+        ("para_partition", """
+fn run() {
+    seen := [Int]{}
+    values :: [1, 2, 3]
+    values.para_partition((n: Int) -> {
+        &seen.push(n)
+    })
+}
+"""),
+        ("para_fold", """
+fn run() {
+    seen := [Int]{}
+    values :: [1, 2, 3]
+    values.para_fold(
+        () -> 0,
+        (total: Int, n: Int) -> {
+            &seen.push(n)
+        },
+        (left: Int, right: Int) -> left + right
+    )
+}
+""")]
+    loop (method, source) in cases {
+        codes :: error_codes(source)
+        assert(codes.iter().any(|code| -> code == "E1101"), "{method} must reject mutable captures with E1101, got {codes.debug()}")
+    }
+}
+// Rust: tests/concurrency_boundaries.rs:476
+#Test("shared_is_the_safe_mutation_control_case") {
+    source :: """
+struct Counter { value: Int }
+fn run() {
+    counter := shared Counter{ value: 0 }
+    handle :: task {
+        counter.value += 1
+    }
+    handle.join() ?? panic("task failed")
+    print(counter.value)
+}
+"""
+    assert_native_crossing("shared_mutation", source, "1\n")
+}
+// Rust: tests/concurrency_boundaries.rs:519
+#Test("taskgroup_child_reads_borrowed_stack_data") {
+    source :: """{PARTICLES}
+fn run() {
+    particles := [Particle]{ {position: 10, velocity: 2}, {position: 20, velocity: 3} }
+        task.group g {
+        window :: particles[0..1]
+        a :: task window[0].position
+    }
+}
+"""
+    _ :: assert_accepted(source)
+}
+// Rust: tests/concurrency_boundaries.rs:535
+#Test("taskgroup_children_borrow_disjoint_write_places") {
+    source :: """{PARTICLES}
+fn run() {
+    particles := [Particle]{ {position: 10, velocity: 2}, {position: 20, velocity: 3}, {position: 30, velocity: 4} }
+        task.group g {
+        left :: &particles[0]
+        right :: &particles[2]
+        a :: task {
+            left.position += left.velocity
+            left.position
+        }
+        b :: task {
+            right.position += right.velocity
+            right.position
+        }
+    }
+}
+"""
+    // Behavior verifies the group spawn loan is closed by join, not emitted Rust text.
+    _ :: assert_accepted(source)
+    observed :: source.replace("\n}\n", "\n    print(particles[0].position)\n    print(particles[2].position)\n}\n")
+    assert_native_crossing("disjoint_group", observed, "12\n34\n")
+}
+// Rust: tests/concurrency_boundaries.rs:563
+#Test("taskgroup_children_writing_one_place_are_rejected") {
+    source :: """{PARTICLES}
+fn run() {
+    particles := [Particle]{ {position: 10, velocity: 2}, {position: 20, velocity: 3} }
+        task.group g {
+        one :: &particles[0]
+        two :: &particles[0]
+        a :: task {
+            one.position += 1
+            one.position
+        }
+        b :: task {
+            two.position += 1
+            two.position
+        }
+    }
+}
+"""
+    assert_rejected(source, "E1101")
+}
+// Rust: tests/concurrency_boundaries.rs:587
+#Test("taskgroup_read_and_write_of_one_place_are_rejected") {
+    source :: """{PARTICLES}
+fn run() {
+    particles := [Particle]{ {position: 10, velocity: 2}, {position: 20, velocity: 3} }
+        task.group g {
+        writer :: &particles[0]
+        reader :: particles[0..1]
+        a :: task {
+            writer.position += 1
+            writer.position
+        }
+        b :: task reader[0].position
+    }
+}
+"""
+    assert_rejected(source, "E1101")
+}
+// Rust: tests/concurrency_boundaries.rs:608
+#Test("detached_task_still_rejects_a_borrowed_capture") {
+    source :: """
+{PARTICLES}
+fn run() {
+    particles := [Particle]{ {position: 10, velocity: 2}, {position: 20, velocity: 3} }
+    left :: &particles[0]
+    worker :: task left.position
+    print(worker.join() ?? panic("task failed"))
+}
+"""
+    assert_rejected(source, "E1102")
+}
+// Rust: tests/concurrency_boundaries.rs:624
+#Test("nested_taskgroups_track_their_own_borrows") {
+    source :: """{PARTICLES}
+fn run() {
+    particles := [Particle]{ {position: 10, velocity: 2}, {position: 20, velocity: 3}, {position: 30, velocity: 4} }
+        task.group outer {
+        left :: &particles[0]
+        a :: task {
+            left.position += 1
+            left.position
+        }
+        task.group inner {
+            right :: &particles[2]
+            b :: task {
+                right.position += 1
+                right.position
+            }
+        }
+    }
+}
+"""
+    _ :: assert_accepted(source)
+}
+// Rust: tests/concurrency_boundaries.rs:650
+#Test("a_group_cannot_lend_an_owner_declared_inside_its_own_block") {
+    // Owner drops before group joins, so loan could outlive it.
+    source :: """{PARTICLES}
+fn run() {
+        task.group g {
+        particles := [Particle]{ {position: 10, velocity: 2}, {position: 20, velocity: 3} }
+        left :: &particles[0]
+        a :: task {
+            left.position += 1
+            left.position
+        }
+    }
+}
+"""
+    assert_rejected(source, "E1102")
+}
+// Rust: tests/concurrency_boundaries.rs:670
+#Test("a_lent_owner_cannot_be_moved_before_the_group_joins") {
+    // Spawn is the last lexical view use, but the running child's loan stays live.
+    source :: """{PARTICLES}
+fn eat(ps: ^[Particle]) -> Int { ps.len() }
+fn run() {
+    particles := [Particle]{ {position: 10, velocity: 2}, {position: 20, velocity: 3} }
+        task.group g {
+        left :: &particles[0]
+        a :: task {
+            left.position += left.velocity
+            left.position
+        }
+        n :: eat(^particles)
+        print(n)
+    }
+}
+"""
+    assert_rejected(source, "E1101")
+}
+// Rust: tests/concurrency_boundaries.rs:695
+#Test("a_lent_place_cannot_be_written_by_the_parent_before_the_group_joins") {
+    // Parent write races child write through the same place.
+    source :: """{PARTICLES}
+fn run() {
+    particles := [Particle]{ {position: 10, velocity: 2}, {position: 20, velocity: 3} }
+        task.group g {
+        left :: &particles[0]
+        a :: task {
+            left.position += left.velocity
+            left.position
+        }
+        particles[0].position = 99
+    }
+}
+"""
+    assert_rejected(source, "E1101")
+}
+// Rust: tests/concurrency_boundaries.rs:716
+#Test("a_write_lent_place_cannot_be_read_by_the_parent_before_the_group_joins") {
+    // Sequential reads beside a write view are legal; concurrent reads race it.
+    source :: """{PARTICLES}
+fn run() {
+    particles := [Particle]{ {position: 10, velocity: 2}, {position: 20, velocity: 3} }
+        task.group g {
+        left :: &particles[0]
+        a :: task {
+            left.position += left.velocity
+            left.position
+        }
+        print(particles[0].position)
+    }
+}
+"""
+    assert_rejected(source, "E1101")
+}
+// Rust: tests/concurrency_boundaries.rs:738
+#Test("a_read_lent_place_stays_readable_by_the_parent") {
+    // Shared reads do not race each other.
+    source :: """{PARTICLES}
+fn run() {
+    particles := [Particle]{ {position: 10, velocity: 2}, {position: 20, velocity: 3} }
+        task.group g {
+        window :: particles[0..1]
+        a :: task window[0].position
+        print(particles[0].position)
+    }
+}
+"""
+    _ :: assert_accepted(source)
+}
+// Rust: tests/concurrency_boundaries.rs:756
+#Test("a_place_the_group_never_lent_stays_writable") {
+    // Loan covers [0]; [1] is proven disjoint.
+    source :: """{PARTICLES}
+fn run() {
+    particles := [Particle]{ {position: 10, velocity: 2}, {position: 20, velocity: 3} }
+    task.group g {
+        left :: &particles[0]
+        a :: task {
+            left.position += left.velocity
+            left.position
+        }
+        particles[1].position = 99
+    }
+}
+"""
+    _ :: assert_accepted(source)
+}
+// Rust: tests/concurrency_boundaries.rs:778
+#Test("a_taskgroup_parameter_cannot_lend_a_borrow") {
+    // Join runs in caller's frame; this frame cannot prove owner lifetime.
+    source :: """
+fn spawn_view(group: Group, values: View<Int>) {
+    handle :: task values[0]
+    print(handle.join() ?? panic("task failed"))
+}
+fn run() {}
+"""
+    assert_rejected(source, "E1102")
+}
+// Rust: tests/concurrency_boundaries.rs:792
+#Test("crossing_prover_keeps_the_ratified_before_after_matrix") {
+    // D-PARCAPTURE1=D: prover/voice changes cannot alter the safe crossing set.
+    cases :: [
+        ("task capture", """
+fn run() {
+    frozen :: freeze(41)
+    worker :: task frozen
+    print(worker.join() ?? 0)
+}
+""", None),
+        ("parallel adapter", """
+fn run() {
+    values :: [1, 2, 3]
+    doubled :: values.para_map((n: Int) -> n * 2)
+    print(doubled)
+}
+""", None),
+        ("parallel local cell", """
+fn cross(cell: Cell<Int>) {
+    values :: [1, 2, 3]
+    _ :: values.para_map((n: Int) -> {
+        _ :: cell
+        return n
+    })
+}
+fn run() {}
+""", Val("E1102")),
+        ("parallel fixed backing", """
+use core.mem
+fn run() {
+    fixed :: mem.Fixed.new(size: 128)
+    values :: [1, 2, 3]
+    _ :: values.para_map((n: Int) -> {
+        _ :: fixed
+        return n
+    })
+}
+""", Val("E1102")),
+        ("safe kernel", """
+#Kernel(.parallel) fn add(left: Int, right: Int) -> Int { left + right }
+fn run() { print(add(20, 22)) }
+""", None),
+        ("task mutable capture", """
+fn run() {
+    count := 0
+    worker :: task { count += 1 }
+    worker.join() ?? panic("task failed")
+}
+""", Val("E1101")),
+        ("parallel mutable capture", """
+fn run() {
+    seen := [Int]{}
+    values :: [1, 2, 3]
+    values.para_map((n: Int) -> { &seen.push(n) })
+}
+""", Val("E1101")),
+        ("kernel effect", """
+#Kernel(.parallel) fn noisy(value: Int) -> Int {
+    print(value)
+    return value
+}
+fn run() { print(noisy(1)) }
+""", Val("E1102")),
+        ("kernel local cell", """
+#Kernel(.parallel) fn blocked(cell: Cell<Int>) -> Int { 0 }
+fn run() {}
+""", Val("E1102")),
+        ("local cell", """
+fn cross(cell: Cell<Int>) {
+    worker :: task { _ :: cell }
+    worker.join() ?? panic("task failed")
+}
+fn run() {}
+""", Val("E1102")),
+        ("fixed backing", """
+use core.mem
+fn run() {
+    fixed :: mem.Fixed.new(size: 128)
+    worker :: task { _ :: fixed }
+    worker.join() ?? panic("task failed")
+}
+""", Val("E1102"))]
+    loop (name, source, expected_code) in cases {
+        match (expected_code, compile(source)) {
+            (None, Ok(_)) -> {}
+            (None, Err(diagnostics)) -> panic("{name} changed from accepted: {diagnostics.debug()}")
+            (Val(code), Ok(_)) -> panic("{name} changed from rejected: expected {code}")
+            (Val(code), Err(diagnostics)) -> assert(diagnostics.iter().any(|diagnostic| -> diagnostic.code == code), "{name} lost {code}: {diagnostics.debug()}")
+        }
+    }
+}

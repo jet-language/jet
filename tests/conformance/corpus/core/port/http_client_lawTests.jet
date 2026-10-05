@@ -1,0 +1,650 @@
+use tests.conformance.corpus.core.port.http_client_law.*
+use tests.common as common
+use std.io.ErrorKind
+use std.net.[TcpListener, TcpStream]
+use std.sync.atomic.[AtomicUsize, Ordering]
+use std.sync.Arc
+use std.time.[Duration, Instant]
+use std.thread
+use std.fs as fs
+use std.process.Command
+// GATE #4494: real native sockets, byte I/O, threads, atomics and subprocesses.
+
+// Rust: tests/http_client_law.rs:48
+#Test("pooled_h1_reuses_only_after_drain_and_decodes_gzip_natively") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    accepts :: Arc.new(AtomicUsize.new(0))
+    observed :: accepts.clone()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        _ :: observed.fetch_add(1, Ordering.Relaxed)
+        first :: request_head(&stream)
+        assert(first.starts_with("GET /first HTTP/1.1\r\n".as_bytes()))
+        stream.write_all("HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: keep-alive\r\n\r\none".as_bytes()).unwrap()
+        second :: request_head(&stream)
+        assert(second.starts_with("GET /second HTTP/1.1\r\n".as_bytes()))
+        assert(String.from_utf8_lossy(second).to_ascii_lowercase().contains("accept-encoding: gzip"))
+        // Rust: tests/http_client_law.rs:66
+        GZIP_HELLO :: [U8]{0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0xcb, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00, 0x86, 0xa6, 0x10, 0x36, 0x05, 0x00, 0x00, 0x00}
+        stream.write_all("HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: {GZIP_HELLO.len()}\r\nConnection: close\r\n\r\n".as_bytes()).unwrap()
+        stream.write_all(GZIP_HELLO).unwrap()
+    })
+    src :: "use core.http.client as http\nfn run() -> {{\n    first :: http.get(\"http://{addr}/first\") ?? panic(\"first\")\n    print(first.body().text(16) ?? panic(\"first body\"))\n    second :: http.get(\"http://{addr}/second\") ?? panic(\"second\")\n    print(second.body().text(16) ?? panic(\"gzip body\"))\n    print(&second.header(\"content-encoding\") ?? \"missing\")\n    print(&second.header(\"content-length\") ?? \"missing\")\n}}\n"
+    (code, stdout, stderr) :: common.build_and_run("jet_http_client_law", "pool_gzip", src)
+    server.join().unwrap()
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "one\nhello\nmissing\nmissing\n")
+    assert_eq(accepts.load(Ordering.Relaxed), 1, "drained response did not reuse one connection")
+}
+// Rust: tests/http_client_law.rs:98
+#Test("h1_rejects_request_target_controls_before_connecting") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    listener.set_nonblocking(true).unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        deadline :: Instant.now() + Duration.from_secs(1)
+        loop {
+            match listener.accept() {
+                Ok(_) -> return true,
+                Err(error) -> {
+                    if error.kind() == ErrorKind.WouldBlock {
+                        if Instant.now() >= deadline { return false }
+                        thread.yield_now()
+                    } else { return false }
+                }
+            }
+        }
+    })
+    src :: "use core.http.client as http\nfn run() -> {{\n    if http.get(\"http://{addr}/safe\\nInjected: yes\") == {{\n        .Ok(_) -> print(\"accepted\")\n        .Err(error) -> {{\n            if error == .InvalidURL -> print(\"rejected\")\n            else -> print(\"wrong error\")\n        }}\n        else -> print(\"unexpected\")\n    }}\n}}\n"
+    (code, stdout, stderr) :: common.build_and_run("jet_http_client_law", "target_controls", src)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "rejected\n")
+    assert(!server.join().unwrap(), "malformed request target reached the socket")
+}
+// Rust: tests/http_client_law.rs:139
+#Test("session_request_rejects_invalid_proxy_before_transport") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    listener.set_nonblocking(true).unwrap()
+    addr :: listener.local_addr().unwrap()
+    src :: "use core.http.client as http\nfn run() -[Net, Time.Wait]> {{\n    session :: http.session_proxy(http.session(), \"not a proxy URL\")\n    if http.session_request(session, \"GET\", \"http://{addr}/\", \"\") == {{\n        .Ok(_) -> print(\"accepted\")\n        .Err(error) -> {{\n            if error == {{\n                .Proxy(stage) -> if stage == \"invalid proxy\" -> print(\"proxy rejected\") else -> print(\"wrong error\")\n                else -> print(\"wrong error\")\n            }}\n        }}\n        else -> print(\"unexpected\")\n    }}\n}}\n"
+    (code, stdout, stderr) :: common.build_and_run("jet_http_client_law", "session_invalid_proxy", src)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "proxy rejected\n")
+    match listener.accept() {
+        Err(error) -> assert(error.kind() == ErrorKind.WouldBlock, "invalid session proxy must be rejected before dialing the origin"),
+        Ok(_) -> panic("invalid session proxy must be rejected before dialing the origin")
+    }
+}
+// Rust: tests/http_client_law.rs:175
+#Test("h1_rejects_user_framing_headers_before_connecting") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    listener.set_nonblocking(true).unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        deadline :: Instant.now() + Duration.from_secs(1)
+        loop {
+            match listener.accept() {
+                Ok(_) -> return true,
+                Err(error) -> {
+                    if error.kind() == ErrorKind.WouldBlock {
+                        if Instant.now() >= deadline { return false }
+                        thread.yield_now()
+                    } else { return false }
+                }
+            }
+        }
+    })
+    src :: `
+use core.http.client as http
+fn run() -> {
+    method :: http.request("GET\nInjected", "http://{addr}/method")
+    if method.send() == {
+        .Ok(_) -> print("method accepted")
+        .Err(error) -> {
+            if error == .InvalidHeader -> print("method rejected")
+            else -> print("method wrong")
+        }
+        else -> print("method unexpected")
+    }
+    name :: http.request("POST", "http://{addr}/name")
+        .header("x-bad\nname", "value")
+        .body("body")
+    if name.send() == {
+        .Ok(_) -> print("header name accepted")
+        .Err(error) -> {
+            if error == .InvalidHeader -> print("header name rejected")
+            else -> print("header name wrong")
+        }
+        else -> print("header name unexpected")
+    }
+    value :: http.request("POST", "http://{addr}/value")
+        .header("x-safe", "bad\nvalue")
+        .body("body")
+    if value.send() == {
+        .Ok(_) -> print("header value accepted")
+        .Err(error) -> {
+            if error == .InvalidHeader -> print("header value rejected")
+            else -> print("header value wrong")
+        }
+        else -> print("header value unexpected")
+    }
+    length :: http.request("POST", "http://{addr}/length")
+        .header("Content-Length", "0")
+        .body("body")
+    if length.send() == {
+        .Ok(_) -> print("length accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("length rejected")
+            else -> print("length wrong")
+        }
+        else -> print("length unexpected")
+    }
+    transfer :: http.request("POST", "http://{addr}/transfer")
+        .header("Transfer-Encoding", "chunked")
+        .body("body")
+    if transfer.send() == {
+        .Ok(_) -> print("transfer accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("transfer rejected")
+            else -> print("transfer wrong")
+        }
+        else -> print("transfer unexpected")
+    }
+    duplicate_host :: http.request("GET", "http://{addr}/duplicate-host")
+        .header("Host", "one")
+        .header("hOsT", "two")
+    if duplicate_host.send() == {
+        .Ok(_) -> print("duplicate host accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("duplicate host rejected")
+            else -> print("duplicate host wrong")
+        }
+        else -> print("duplicate host unexpected")
+    }
+    connection_host :: http.request("GET", "http://{addr}/connection-host")
+        .header("cOnNeCtIoN", "hOsT")
+    if connection_host.send() == {
+        .Ok(_) -> print("connection host accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("connection host rejected")
+            else -> print("connection host wrong")
+        }
+        else -> print("connection host unexpected")
+    }
+    connection_length :: http.request("POST", "http://{addr}/connection-length")
+        .header("Connection", "Content-Length")
+        .body("body")
+    if connection_length.send() == {
+        .Ok(_) -> print("connection length accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("connection length rejected")
+            else -> print("connection length wrong")
+        }
+        else -> print("connection length unexpected")
+    }
+    connection_transfer :: http.request("POST", "http://{addr}/connection-transfer")
+        .header("Connection", "tRaNsFeR-EnCoDiNg")
+        .body("body")
+    if connection_transfer.send() == {
+        .Ok(_) -> print("connection transfer accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("connection transfer rejected")
+            else -> print("connection transfer wrong")
+        }
+        else -> print("connection transfer unexpected")
+    }
+    proxy_connection :: http.request("GET", "http://{addr}/proxy-connection")
+        .header("pRoXy-CoNnEcTiOn", "keep-alive")
+    if proxy_connection.send() == {
+        .Ok(_) -> print("proxy connection accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("proxy connection rejected")
+            else -> print("proxy connection wrong")
+        }
+        else -> print("proxy connection unexpected")
+    }
+    keep_alive :: http.request("GET", "http://{addr}/keep-alive")
+        .header("Keep-Alive", "timeout=5")
+    if keep_alive.send() == {
+        .Ok(_) -> print("keep-alive accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("keep-alive rejected")
+            else -> print("keep-alive wrong")
+        }
+        else -> print("keep-alive unexpected")
+    }
+    te :: http.request("GET", "http://{addr}/te")
+        .header("TE", "trailers")
+    if te.send() == {
+        .Ok(_) -> print("te accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("te rejected")
+            else -> print("te wrong")
+        }
+        else -> print("te unexpected")
+    }
+    trailer :: http.request("GET", "http://{addr}/trailer")
+        .header("Trailer", "x-trailer")
+    if trailer.send() == {
+        .Ok(_) -> print("trailer accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("trailer rejected")
+            else -> print("trailer wrong")
+        }
+        else -> print("trailer unexpected")
+    }
+    upgrade :: http.request("GET", "http://{addr}/upgrade")
+        .header("Upgrade", "websocket")
+    if upgrade.send() == {
+        .Ok(_) -> print("upgrade accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("upgrade rejected")
+            else -> print("upgrade wrong")
+        }
+        else -> print("upgrade unexpected")
+    }
+    proxy_authenticate :: http.request("GET", "http://{addr}/proxy-authenticate")
+        .header("Proxy-Authenticate", "Basic")
+    if proxy_authenticate.send() == {
+        .Ok(_) -> print("proxy authenticate accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("proxy authenticate rejected")
+            else -> print("proxy authenticate wrong")
+        }
+        else -> print("proxy authenticate unexpected")
+    }
+    proxy_authorization :: http.request("GET", "http://{addr}/proxy-authorization")
+        .header("pRoXy-AuThOrIzAtIoN", "Basic secret")
+    if proxy_authorization.send() == {
+        .Ok(_) -> print("proxy authorization accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("proxy authorization rejected")
+            else -> print("proxy authorization wrong")
+        }
+        else -> print("proxy authorization unexpected")
+    }
+}
+`.replace("{addr}", addr.to_string())
+    (code, stdout, stderr) :: common.build_and_run("jet_http_client_law", "user_framing_headers", src)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "method rejected\nheader name rejected\nheader value rejected\nlength rejected\ntransfer rejected\nduplicate host rejected\nconnection host rejected\nconnection length rejected\nconnection transfer rejected\nproxy connection rejected\nkeep-alive rejected\nte rejected\ntrailer rejected\nupgrade rejected\nproxy authenticate rejected\nproxy authorization rejected\n")
+    assert(!server.join().unwrap(), "user-controlled framing reached the socket")
+}
+// Rust: tests/http_client_law.rs:378
+#Test("h1_skips_early_hints_reuses_final_response_and_rejects_upgrade") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        assert(request_head(&stream).starts_with("GET /early HTTP/1.1\r\n".as_bytes()))
+        stream.write_all("HTTP/1.1 103 Early Hints\r\nLink: </style.css>; rel=preload\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: keep-alive\r\n\r\none".as_bytes()).unwrap()
+        assert(request_head(&stream).starts_with("GET /reuse HTTP/1.1\r\n".as_bytes()))
+        stream.write_all("HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\ntwo".as_bytes()).unwrap()
+    })
+    upgrade_listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    upgrade_addr :: upgrade_listener.local_addr().unwrap()
+    upgrade_server :: thread.spawn(() -> {
+        (stream, _) := upgrade_listener.accept().unwrap()
+        _ :: request_head(&stream)
+        stream.write_all("HTTP/1.1 101 Switching Protocols\r\nConnection: upgrade\r\nUpgrade: websocket\r\n\r\n".as_bytes()).unwrap()
+    })
+    src :: `
+use core.http.client as http
+fn run() -> {
+    first :: http.get("http://{addr}/early") ?? panic("early")
+    print(first.body().text(8) ?? panic("first body"))
+    second :: http.get("http://{addr}/reuse") ?? panic("reuse")
+    print(second.body().text(8) ?? panic("second body"))
+    if http.get("http://{upgrade_addr}/upgrade") == {
+        .Ok(_) -> { print("accepted") }
+        .Err(error) -> { print(error) }
+    }
+}
+`.replace("{addr}", addr.to_string()).replace("{upgrade_addr}", upgrade_addr.to_string())
+    (code, stdout, stderr) :: common.build_and_run("jet_http_client_law", "interim", src)
+    server.join().unwrap()
+    upgrade_server.join().unwrap()
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "one\ntwo\nunsupported HTTP protocol unsupported\n")
+}
+// Rust: tests/http_client_law.rs:428
+#Test("gzip_decoding_streams_before_the_response_finishes") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    signal :: TcpListener.bind("127.0.0.1:0").unwrap()
+    signal_addr :: signal.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        _ :: request_head(&stream)
+        prefix :: [U8]{0x1f, 0x8b, 0x08, 0x00, 0, 0, 0, 0, 0, 0, 0x00, 0x05, 0x00, 0xfa, 0xff, 104, 101, 108, 108, 111}
+        suffix :: [U8]{0x01, 0x05, 0x00, 0xfa, 0xff, 119, 111, 114, 108, 100, 0xad, 0x20, 0xeb, 0xf9, 0x0a, 0, 0, 0}
+        stream.write_all("HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: {prefix.len() + suffix.len()}\r\nConnection: close\r\n\r\n".as_bytes()).unwrap()
+        stream.write_all(prefix).unwrap()
+        stream.flush().unwrap()
+        signal.set_nonblocking(true).unwrap()
+        deadline :: Instant.now() + Duration.from_secs(2)
+        loop {
+            match signal.accept() {
+                Ok(_) -> break,
+                Err(error) -> {
+                    if error.kind() == ErrorKind.WouldBlock {
+                        assert(Instant.now() < deadline, "decoder buffered the unfinished gzip response")
+                        thread.yield_now()
+                    } else { panic("gzip signal accept failed: {error}") }
+                }
+            }
+        }
+        stream.write_all(suffix).unwrap()
+        drop(^stream)
+        (stream, _) := listener.accept().unwrap()
+        _ :: request_head(&stream)
+        stream.write_all("HTTP/1.1 200 OK\r\nContent-Encoding: br\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".as_bytes()).unwrap()
+    })
+    dir :: std.env.temp_dir().join("jet_http_client_gzip_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    shown :: dir.join("seed.jet")
+    source :: "use core.http.client as http\nfn run() -> { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n"
+    fs.write(shown, source).unwrap()
+    link :: jet.compile_with_path(source, shown.to_str().unwrap()).unwrap().ffi.expect("HTTP client bridge")
+    harness :: dir.join("gzip_stream.rs")
+    bin :: dir.join("gzip_stream")
+    // Retained Rust peer harness: exercises the real shared provider ABI,
+    // not a Rust implementation behind a Jet production wrapper.
+    fs.write(harness, `
+fn main() {
+    let url = std::env::args().nth(1).unwrap();
+    let signal = std::env::args().nth(2).unwrap();
+    let root = bridge::jet_http_client_new_impl();
+    let response = bridge::jet_http_client_send_with_impl(
+        root, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
+    ).unwrap();
+    assert_eq!(bridge::jet_http_client_body_read_impl(response.body_handle, 5).unwrap(), Some(b"hello".to_vec()));
+    std::net::TcpStream::connect(signal).unwrap();
+    assert_eq!(bridge::jet_http_client_body_read_impl(response.body_handle, 5).unwrap(), Some(b"world".to_vec()));
+    assert_eq!(bridge::jet_http_client_body_read_impl(response.body_handle, 5).unwrap(), None);
+    assert_eq!(bridge::jet_http_client_send_with_impl(
+        root, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
+    ).unwrap_err(), bridge::JetHTTPBridgeError::UnsupportedEncoding);
+}
+`).unwrap()
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021", harness.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+    rustc.arg("--extern").arg("bridge={link.rlib_path.display()}")
+    loop dependency in link.dependency_dirs().filter(path -> path.is_dir()) {
+        rustc.arg("-L").arg("dependency={dependency.display()}")
+    }
+    built :: rustc.output().unwrap()
+    assert(built.status.success(), "bridge gzip harness compile failed:\n{String.from_utf8_lossy(built.stderr)}")
+    output :: Command.new(bin).arg("http://{addr}/gzip").arg(signal_addr.to_string()).output().unwrap()
+    server_result :: server.join()
+    assert(output.status.success(), "bridge gzip harness failed:\n{String.from_utf8_lossy(output.stderr)}")
+    server_result.unwrap()
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/http_client_law.rs:550
+#Test("unread_body_is_not_reused") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (first, _) := listener.accept().unwrap()
+        _ :: request_head(&first)
+        first.write_all("HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: keep-alive\r\n\r\none".as_bytes()).unwrap()
+        (second, _) := listener.accept().unwrap()
+        _ :: request_head(&second)
+        second.write_all("HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\ntwo".as_bytes()).unwrap()
+    })
+    src :: `
+use core.http.client as http
+fn run() -> {
+    first :: http.get("http://{addr}/first") ?? panic("first")
+    second :: http.get("http://{addr}/second") ?? panic("second")
+    print(second.body().text(16) ?? panic("second body"))
+    print(first.status())
+}
+`.replace("{addr}", addr.to_string())
+    (code, stdout, stderr) :: common.build_and_run("jet_http_client_law", "unread", src)
+    server.join().unwrap()
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "two\n200\n")
+}
+// Rust: tests/http_client_law.rs:583
+#Test("native_bridge_removes_ureq_from_generated_dependency_graph") {
+    source :: fs.read_to_string("crates/jet-pkg-model/src/FFI.rs").unwrap()
+    assert(!source.contains("HTTP_CLIENT_CRATE_SPEC"))
+    assert(!source.contains("\"ureq\","), "HTTP client still emits ureq")
+    runtime :: fs.read_to_string("crates/jet-pkg-model/src/Prelude/HTTP.rs").unwrap()
+    assert(!runtime.contains("ureq::"), "native runtime still calls ureq")
+}
+// Rust: tests/http_client_law.rs:598
+#Test("vendored_public_suffix_snapshot_is_compact_and_keeps_rule_kinds") {
+    data :: fs.read_to_string("crates/jet-pkg-model/src/Prelude/public_suffix_list.dat").unwrap()
+    assert_eq(data.len(), 144039)
+    assert_eq(data.lines().count(), 1)
+    assert(data.is_ascii())
+    rules :: data.split_whitespace().collect::<std.collections.HashSet<String>>()
+    loop required in ["com", "co.uk", "*.ck", "!www.ck", "github.io", "xn--55qx5d.cn"] {
+        assert(rules.contains(required), "PSL snapshot lost {required}")
+    }
+}
+// Rust: tests/http_client_law.rs:620
+#Test("custom_client_clones_share_pool_cookie_jar_and_transport_facts") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        first :: request_head(&stream)
+        assert(!String.from_utf8_lossy(first).to_ascii_lowercase().contains("cookie:"))
+        stream.write_all("HTTP/1.1 200 OK\r\nSet-Cookie: session=abc; Path=/; Max-Age=60\r\nSet-Cookie: expired=gone; Expires=Wed, 21 Oct 2015 07:28:00 GMT\r\nSet-Cookie: none=bad; SameSite=None\r\nSet-Cookie: __Host-bad=value; Path=/\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n".as_bytes()).unwrap()
+        second_head :: request_head(&stream)
+        second :: String.from_utf8_lossy(second_head).to_ascii_lowercase()
+        assert(second.contains("cookie: session=abc\r\n"))
+        assert(!second.contains("expired=") && !second.contains("none=") && !second.contains("__host-bad="))
+        stream.write_all("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".as_bytes()).unwrap()
+    })
+    dir :: std.env.temp_dir().join("jet_http_client_policy_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    shown :: dir.join("seed.jet")
+    source :: "use core.http.client as http\nfn run() -> { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n"
+    fs.write(shown, source).unwrap()
+    compiled :: jet.compile_with_path(source, shown.to_str().unwrap()).unwrap()
+    link :: compiled.ffi.expect("HTTP client bridge")
+    harness :: dir.join("policy.rs")
+    bin :: dir.join("policy")
+    fs.write(harness, `
+fn send(client: i64, url: &String) -> bridge::JetHTTPResponseParts {
+    bridge::jet_http_client_send_with_impl(
+        client, "GET", url, &[], None, None, None, None, None, None, None, None, None, None, None,
+        &[], &[], &[],
+    ).unwrap()
+}
+
+fn main() {
+    let url = std::env::args().nth(1).unwrap();
+    let root = bridge::jet_http_client_new_impl();
+    let client = bridge::jet_http_client_cookies_impl(root, true).unwrap();
+    bridge::jet_http_client_drop_impl(root);
+    let first = send(client, &url);
+    assert_eq!(bridge::jet_http_client_body_read_impl(first.body_handle, 64).unwrap(), None);
+    let second = send(client, &url);
+    assert_eq!(bridge::jet_http_client_body_read_impl(second.body_handle, 64).unwrap(), Some(b"ok".to_vec()));
+    assert_eq!(bridge::jet_http_client_body_read_impl(second.body_handle, 64).unwrap(), None);
+    assert_eq!(second.context.protocol, "HTTP/1.1");
+    assert!(!second.context.remote_address.is_empty());
+    assert!(second.context.redirect_history.is_empty());
+    assert_eq!(second.context.timings_ms.len(), 7);
+    assert!(second.context.reused_connection);
+    bridge::jet_http_client_drop_impl(client);
+}
+`).unwrap()
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021", harness.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+    rustc.arg("--extern").arg("bridge={link.rlib_path.display()}")
+    loop dependency in link.dependency_dirs().filter(path -> path.is_dir()) {
+        rustc.arg("-L").arg("dependency={dependency.display()}")
+    }
+    built :: rustc.output().unwrap()
+    assert(built.status.success(), "bridge harness compile failed:\n{String.from_utf8_lossy(built.stderr)}")
+    output :: Command.new(bin).arg("http://{addr}/cookie").output().unwrap()
+    server.join().unwrap()
+    assert(output.status.success(), "bridge harness failed:\n{String.from_utf8_lossy(output.stderr)}")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/http_client_law.rs:721
+#Test("public_client_policy_exposes_pool_cookie_timeouts_and_facts") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        first :: request_head(&stream)
+        assert(!String.from_utf8_lossy(first).to_ascii_lowercase().contains("cookie:"))
+        stream.write_all("HTTP/1.1 200 OK\r\nSet-Cookie: session=abc; Path=/; Max-Age=60\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n".as_bytes()).unwrap()
+        second :: request_head(&stream)
+        assert(String.from_utf8_lossy(second).to_ascii_lowercase().contains("cookie: session=abc\r\n"))
+        stream.write_all("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".as_bytes()).unwrap()
+    })
+    src :: `
+use core.http.client as http
+fn run() -> {
+    client :: http.Client.new()
+        .cookies(.Memory)
+        .redirects(.Follow{ max: 2, same_origin_credentials: true })
+        .protocols(false, true, false)
+        .timeouts(1000, 1000, 1000, 1000, 1000, 1000, 5000)
+        .raw_encoding()
+    first :: client.send(http.request("GET", "http://{addr}/first")) ?? panic("first")
+    _ :: first.body().bytes(8) ?? panic("first body")
+    second :: client.send(http.request("GET", "http://{addr}/second")) ?? panic("second")
+    print(second.body().text(8) ?? panic("second body"))
+    print(second.protocol())
+    print(second.redirect_history().len())
+    print(second.timings().len())
+    print(second.reused_connection())
+    print(second.raw_content_encoding() ?? "none")
+}
+`.replace("{addr}", addr.to_string())
+    (code, stdout, stderr) :: common.build_and_run("jet_http_client_law", "public_client", src)
+    server.join().unwrap()
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "ok\nHTTP/1.1\n0\n7\ntrue\nnone\n")
+}
+// Rust: tests/http_client_law.rs:773
+#Test("cookie_jar_uses_schemeful_registrable_sites_and_rejects_public_suffixes") {
+    proxy :: TcpListener.bind("127.0.0.1:0").unwrap()
+    proxy_addr :: proxy.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        expected :: [
+            ("http://shop.example.co.uk/dir/seed", None),
+            ("http://other.example.co.uk/dir/start", Some("cookie: deep=one; root=one; alpha=one; beta=one\r\n")),
+            ("http://api.example.co.uk/dir/next", Some("cookie: deep=one; root=one; alpha=two; beta=one\r\n")),
+            ("http://evil.co.uk/start", None),
+            ("http://api.example.co.uk/cross-site", None),
+            ("http://seed.b.xn--55qx5d.cn/seed", None),
+            ("http://a.xn--55qx5d.cn/start", None),
+            ("http://target.b.xn--55qx5d.cn/next", None)
+        ]
+        loop (index, (target, cookie)) in expected.into_iter().enumerate() {
+            (stream, _) := proxy.accept().unwrap()
+            head :: String.from_utf8(request_head(&stream)).unwrap()
+            assert(head.starts_with("GET {target} HTTP/1.1\r\n"), "request {index}: {head}")
+            lower :: head.to_ascii_lowercase()
+            match cookie {
+                Some(cookie) -> assert(lower.contains(cookie), "request {index}: {head}"),
+                None -> assert(!lower.contains("\r\ncookie:"), "request {index}: {head}")
+            }
+            response :: match index {
+                0 -> "HTTP/1.1 200 OK\r\nSet-Cookie: root=one; Domain=example.co.uk; Path=/; SameSite=Strict\r\nSet-Cookie: deep=one; Domain=example.co.uk; Path=/dir; SameSite=Strict\r\nSet-Cookie: alpha=one; Domain=example.co.uk; Path=/; SameSite=Strict\r\nSet-Cookie: beta=one; Domain=example.co.uk; Path=/; SameSite=Strict\r\nSet-Cookie: public=bad; Domain=co.uk; Path=/\r\nSet-Cookie: secure=bad; Domain=example.co.uk; Path=/; Secure\r\nSet-Cookie: expired=bad; Domain=example.co.uk; Path=/; Max-Age=0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                1 -> "HTTP/1.1 302 Found\r\nLocation: http://api.example.co.uk/dir/next\r\nSet-Cookie: alpha=two; Domain=example.co.uk; Path=/; SameSite=Strict\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                3 -> "HTTP/1.1 302 Found\r\nLocation: http://api.example.co.uk/cross-site\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                5 -> "HTTP/1.1 200 OK\r\nSet-Cookie: idn_public=bad; Domain=xn--55qx5d.cn; Path=/\r\nSet-Cookie: idn_strict=good; Domain=b.xn--55qx5d.cn; Path=/; SameSite=Strict\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                6 -> "HTTP/1.1 302 Found\r\nLocation: http://target.b.xn--55qx5d.cn/next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                _ -> "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            }
+            stream.write_all(response.as_bytes()).unwrap()
+        }
+    })
+    src :: `
+use core.http.client as http
+fn run() -> {
+    client :: http.Client.new()
+        .cookies(.Memory)
+        .proxy(.URL("http://{proxy_addr}"))
+        .protocols(false, true, false)
+    seed :: client.send(http.request("GET", "http://shop.example.co.uk/dir/seed")) ?? panic("seed")
+    same :: client.send(http.request("GET", "http://other.example.co.uk/dir/start")) ?? panic("same site")
+    cross :: client.send(http.request("GET", "http://evil.co.uk/start")) ?? panic("cross site")
+    idn_seed :: client.send(http.request("GET", "http://seed.b.xn--55qx5d.cn/seed")) ?? panic("idn seed")
+    idn_cross :: client.send(http.request("GET", "http://a.xn--55qx5d.cn/start")) ?? panic("idn site")
+}
+`.replace("{proxy_addr}", proxy_addr.to_string())
+    (code, _, stderr) :: common.build_and_run("jet_http_client_law", "cookie_site", src)
+    server.join().unwrap()
+    assert_eq(code, 0, "stderr:\n{stderr}")
+}
+// Rust: tests/http_client_law.rs:866
+#Test("cookie_jar_rejects_domain_attributes_on_ip_hosts") {
+    proxy :: TcpListener.bind("127.0.0.1:0").unwrap()
+    proxy_addr :: proxy.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        loop request in 0..2 {
+            (stream, _) := proxy.accept().unwrap()
+            head :: String.from_utf8(request_head(&stream)).unwrap().to_ascii_lowercase()
+            if request == 0 {
+                assert(!head.contains("\r\ncookie:"), "unexpected seed cookie: {head}")
+                stream.write_all("HTTP/1.1 200 OK\r\nSet-Cookie: host=ok; Path=/\r\nSet-Cookie: suffix=bad; Domain=0.0.1; Path=/\r\nSet-Cookie: exact=bad; Domain=127.0.0.1; Path=/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".as_bytes()).unwrap()
+            } else {
+                assert(head.contains("\r\ncookie: host=ok\r\n"), "host-only IP cookie missing: {head}")
+                assert(!head.contains("suffix=") && !head.contains("exact="), "IP Domain cookie escaped: {head}")
+                stream.write_all("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".as_bytes()).unwrap()
+            }
+        }
+    })
+    src :: "use core.http.client as http\nfn run() -> {{\n    client :: http.Client.new().cookies(.Memory).proxy(.URL(\"http://{proxy_addr}\")).protocols(false, true, false)\n    seed :: client.send(http.request(\"GET\", \"http://127.0.0.1/seed\")) ?? panic(\"seed\")\n    check :: client.send(http.request(\"GET\", \"http://127.0.0.1/check\")) ?? panic(\"check\")\n}}\n"
+    (code, _, stderr) :: common.build_and_run("jet_http_client_law", "cookie_ip_domain", src)
+    server.join().unwrap()
+    assert_eq(code, 0, "stderr:\n{stderr}")
+}
+// Rust: tests/http_client_law.rs:916
+#Test("cookie_jar_enforces_per_domain_and_global_count_bounds") {
+    proxy :: TcpListener.bind("127.0.0.1:0").unwrap()
+    proxy_addr :: proxy.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        loop domain in 0..23 {
+            count :: if domain == 0 -> 181 else -> 180
+            loop (batch, start) in (0..count).step_by(90).enumerate() {
+                (stream, _) := proxy.accept().unwrap()
+                head :: String.from_utf8(request_head(&stream)).unwrap()
+                assert(head.starts_with("GET http://d{domain}.xn--55qx5d.cn/seed{batch} HTTP/1.1\r\n"), "seed {domain}/{batch}: {head}")
+                response := String.from("HTTP/1.1 200 OK\r\n")
+                loop cookie in start..count.min(start + 90) {
+                    response.push_str("Set-Cookie: c{domain}_{cookie}=v; Path=/; SameSite=Lax\r\n")
+                }
+                response.push_str("Content-Length: 0\r\nConnection: close\r\n\r\n")
+                stream.write_all(response.as_bytes()).unwrap()
+            }
+        }
+        (stream, _) := proxy.accept().unwrap()
+        head :: String.from_utf8(request_head(&stream)).unwrap()
+        cookies :: head.lines().find_map(line -> line.to_ascii_lowercase().strip_prefix("cookie: ").map(value -> value.to_string())).expect("bounded jar must retain newest d0 cookies")
+        assert_eq(cookies.split("; ").count(), 136, "{cookies}")
+        assert(!cookies.contains("c0_44=v"), "{cookies}")
+        assert(cookies.contains("c0_45=v"), "{cookies}")
+        assert(cookies.contains("c0_180=v"), "{cookies}")
+        stream.write_all("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".as_bytes()).unwrap()
+    })
+    sends := String.new()
+    request := 0
+    loop domain in 0..23 {
+        count :: if domain == 0 -> 181 else -> 180
+        loop (batch, _) in (0..count).step_by(90).enumerate() {
+            sends.push_str("    r{request} :: client.send(http.request(\"GET\", \"http://d{domain}.xn--55qx5d.cn/seed{batch}\")) ?? panic(\"seed\")\n    b{request} :: r{request}.body().bytes(1) ?? panic(\"drain\")\n")
+            request += 1
+        }
+    }
+    src :: "use core.http.client as http\nfn run() -> {{\n    client :: http.Client.new().cookies(.Memory).proxy(.URL(\"http://{proxy_addr}\")).protocols(false, true, false)\n{sends}    verify :: client.send(http.request(\"GET\", \"http://d0.xn--55qx5d.cn/verify\")) ?? panic(\"verify\")\n}}\n"
+    (code, _, stderr) :: common.build_and_run("jet_http_client_law", "cookie_bounds", src)
+    server.join().unwrap()
+    assert_eq(code, 0, "stderr:\n{stderr}")
+}
