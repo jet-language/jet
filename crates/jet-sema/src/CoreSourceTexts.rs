@@ -113,3 +113,9 @@ const CORE_SOURCE_TEXTS: &[(&str, &str)] = &[
     ("core.web.table", include_str!("../../../Core/web/table.jet")),
     ("core.web.virtual", include_str!("../../../Core/web/virtual.jet")),
 ];
+
+// Body text of every runtime unit in
+// `jet_foundation::CoreSourceParts::CORE_RUNTIME_PARTS`, keyed by its module.
+const CORE_RUNTIME_SOURCE_TEXTS: &[(&str, &str)] = &[
+    ("core.math.runtime.top_math_lib_pure", include_str!("../../../Core/math/runtime/top_math_lib_pure.jet")),
+];

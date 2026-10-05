@@ -1478,7 +1478,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 0a86db9f137d7f3fe3d4aeb36b8eace763327ec1a2ee55c73cf46d8d575f7060
+// Source SHA-256: f4de98b5b1707ad959ae9dfca07464ab89a0be507417a5dd0f3edf658616f75d
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2113,7 +2113,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math", "ilogb", "jet_std_math_ilogb", true, &[false]) .with_native_int_result(),
     CoreCallRecord::new( "core.math", "leading_ones", "jet_std_math_leading_ones", true, &[false], ) .with_native_int_result(),
     CoreCallRecord::new( "core.math", "trailing_ones", "jet_std_math_trailing_ones", true, &[false], ) .with_native_int_result(),
-    CoreCallRecord::new("core.math", "digits", "jet_std_math_digits", true, &[false]) .with_native_int_result(),
     CoreCallRecord::new( "core.math", "binomial", "jet_std_math_binomial", true, &[false, false], ) .with_native_int_result(),
     CoreCallRecord::new( "core.math", "comb", "jet_std_math_binomial", true, &[false, false], ) .with_jit_symbol("jet_jit_math_binomial") .with_pure_route(CoreCallPureRoute::Math) .with_native_int_result(),
     CoreCallRecord::new( "core.math", "perm", "jet_std_math_perm", true, &[false, false], ) .with_jit_symbol("jet_jit_math_perm") .with_pure_route(CoreCallPureRoute::Math) .with_native_int_result(),

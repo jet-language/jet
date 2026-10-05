@@ -1052,9 +1052,6 @@ fn jet_jit_math_isclose(a: f64, b: f64, rel: f64, abs_tol: f64) -> i8 {
 fn jet_jit_math_dist(left: i64, right: i64) -> f64 {
     math_rt::jet_std_math_dist(list_f64s(left), list_f64s(right))
 }
-fn jet_jit_math_digits(v: i64) -> i64 {
-    math_rt::jet_std_math_digits(v)
-}
 fn jet_jit_math_leading_ones(v: i64) -> i64 {
     math_rt::jet_std_math_leading_ones(v)
 }
@@ -1415,7 +1412,6 @@ host_fns! {
     remainder: "jet_jit_math_remainder" => jet_jit_math_remainder: f64_f64_f64;
     isclose: "jet_jit_math_isclose" => jet_jit_math_isclose: f64_f64_f64_f64_i8;
     dist: "jet_jit_math_dist" => jet_jit_math_dist: i64_i64_f64;
-    digits: "jet_jit_math_digits" => jet_jit_math_digits: i64_i64;
     leading_ones: "jet_jit_math_leading_ones" => jet_jit_math_leading_ones: i64_i64;
     trailing_ones: "jet_jit_math_trailing_ones" => jet_jit_math_trailing_ones: i64_i64;
     asinh: "jet_jit_math_asinh" => jet_jit_math_asinh: f64_f64;

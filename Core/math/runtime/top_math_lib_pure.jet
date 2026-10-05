@@ -1,0 +1,25 @@
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1480
+// Decimal digit count of an Int; zero has one digit and the sign is not a
+// digit. Counting on the non-positive side gives Int's minimum a magnitude.
+pub fn jet_std_math_digits(value: Int) -> Int Never! {
+    magnitude :: if value < 0 -> value else -> -value
+    count := 1
+    bound := -10
+    loop magnitude <= bound {
+        count += 1
+        if count == 19 -> return count
+        bound = bound * 10
+    }
+    count
+}
+
+#Test("digits counts decimal digits of every Int") {
+    assert_eq(jet_std_math_digits(0), 1)
+    assert_eq(jet_std_math_digits(7), 1)
+    assert_eq(jet_std_math_digits(-7), 1)
+    assert_eq(jet_std_math_digits(10), 2)
+    assert_eq(jet_std_math_digits(-99), 2)
+    assert_eq(jet_std_math_digits(1000000000000000000), 19)
+    assert_eq(jet_std_math_digits(9223372036854775807), 19)
+    assert_eq(jet_std_math_digits(-9223372036854775807 - 1), 19)
+}

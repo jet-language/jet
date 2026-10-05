@@ -2667,10 +2667,37 @@ fn load_entry_with_overlays_mode_on_stack(
             }
         }
     }
+    // Queue position `i` becomes module `core_module_base + i`: each queued
+    // Core source pushes exactly one loaded module, in queue order.
+    let core_module_base = bundle.modules.len();
+    // Runtime unit identity -> the module index that carries it. A `jet test`
+    // or `jet check` of a runtime unit file itself (byte-identical to the
+    // embedded unit) makes the entry that unit, so the Core closure that
+    // reaches back to it binds the entry instead of loading a second copy.
+    let mut runtime_targets = HashMap::<&'static str, usize>::new();
+    if let Some(part) =
+        core_runtime_entry(&bundle.modules[entry_idx].path, &bundle.modules[entry_idx].source)
+    {
+        scheduled_core_source_modules.insert(part.module);
+        runtime_targets.insert(part.module, entry_idx);
+        let mut imports = std::mem::take(&mut bundle.modules[entry_idx].imports);
+        bind_core_runtime_imports(
+            &mut imports,
+            entry_idx,
+            core_module_base,
+            &mut core_source_modules,
+            &mut scheduled_core_source_modules,
+            &mut runtime_targets,
+            &mut bundle.name_ledger,
+        );
+        bundle.modules[entry_idx].imports = imports;
+    }
     let mut core_source_module_index = 0;
     while core_source_module_index < core_source_modules.len() {
         let source_module = core_source_modules[core_source_module_index];
         core_source_module_index += 1;
+        let runtime_unit =
+            jet_foundation::CoreSourceParts::core_runtime_part(source_module.module).is_some();
         let source = jet_sema::CoreSources::core_source_text(source_module.module)
             .unwrap_or_else(|| panic!("Core source module `{}` has no body text", source_module.module))
             .to_string();
@@ -2727,15 +2754,28 @@ fn load_entry_with_overlays_mode_on_stack(
                 }
             }
         }
+        // A runtime unit a Core source names joins the closure here, lazily,
+        // and its import becomes an ordinary module edge to that unit.
+        bind_core_runtime_imports(
+            &mut program.imports,
+            bundle.modules.len(),
+            core_module_base,
+            &mut core_source_modules,
+            &mut scheduled_core_source_modules,
+            &mut runtime_targets,
+            &mut bundle.name_ledger,
+        );
         // Source metadata selects the public members that have crossed the
         // Core cutover. Keep private helpers and declarations needed by those
         // members, but do not compile legacy public wrappers that still use
-        // their compiler-owned routes.
+        // their compiler-owned routes. A runtime unit keeps every item; its
+        // `#Test` controls run only when the unit itself is the test entry.
         program.items.retain(|item| match item {
-            Item::Func(function) if function.is_pub => source_module
+            Item::Func(function) if function.is_pub && !runtime_unit => source_module
                 .owned_members
                 .iter()
                 .any(|member| *member == function.name),
+            Item::Test(_) => false,
             _ => true,
         });
         // Core is library source, not the user's program: its parser
@@ -4426,10 +4466,13 @@ fn load_file_located(
         })
         .expect("one source reader must provide the module text");
 
+    // A runtime unit entry is the embedded Core unit itself; it lexes as Core
+    // and keeps its runtime imports (see `core_runtime_entry`).
+    let core_entry = path_to_idx.is_empty() && core_runtime_entry(&norm, &source).is_some();
     let prepared = prepared_frontend
         .as_deref_mut()
         .and_then(|cache| cache.remove(&norm))
-        .filter(|entry| entry.source == source)
+        .filter(|entry| entry.source == source && !core_entry)
         .map(|entry| entry.module);
     let (mut prog, teaching) = match prepared {
         Some(PreparedFrontendModule::Parsed(program, teaching)) => (program, teaching),
@@ -4444,7 +4487,11 @@ fn load_file_located(
                 crate::Package::mask_inline_package_source(&source)
                     .map_err(|error| LoaderError::at(display, &source, vec![error.diagnostic()]))?
                     .0;
-            let (tokens, lex_diags) = Lexer::lex(&source_for_parse);
+            let (tokens, lex_diags) = if core_entry {
+                Lexer::lex_generated(&source_for_parse)
+            } else {
+                Lexer::lex(&source_for_parse)
+            };
             if !lex_diags.is_empty() {
                 return Err(LoaderError::at(display, &source, lex_diags));
             }
@@ -4621,6 +4668,9 @@ fn load_file_located(
         // D-MOD3: `use alias.Item` / `use alias.[A,B]` forms don't load new files;
         // sema resolves them against already-loaded modules (E0609–E0611).
         if matches!(imp.kind, ImportKind::Unqualified { .. }) {
+            continue;
+        }
+        if core_entry && core_runtime_import_target(imp).is_some() {
             continue;
         }
         if let Err(d) = check_reserved_import(imp) {
@@ -5032,6 +5082,132 @@ pub fn e1241_ring_platform_miss(ring: &str) -> Diagnostic {
     )
 }
 
+/// The runtime unit an entry file is, when the file sits at that unit's
+/// `Core/<area>/runtime/<unit>.jet` path and is byte-identical to the
+/// embedded unit. Only that exact text earns the Core-source privileges
+/// (`__` names, runtime imports), so `jet test` over a unit runs its controls
+/// through the real loader path and grants nothing Core does not already run.
+fn core_runtime_entry(
+    path: &Path,
+    source: &str,
+) -> Option<&'static jet_foundation::CoreModuleExports::CoreSourceModule> {
+    jet_foundation::CoreSourceParts::CORE_RUNTIME_PARTS
+        .iter()
+        .find(|part| {
+            path.ends_with(part.path)
+                && jet_sema::CoreSources::core_source_text(part.module) == Some(source)
+        })
+}
+
+/// The runtime unit (and selected member) a `use` names, if any.
+fn core_runtime_import_target(
+    imp: &ImportDecl,
+) -> Option<(&'static jet_foundation::CoreModuleExports::CoreSourceModule, Option<String>)> {
+    let path = match &imp.kind {
+        ImportKind::Module(name, _) => name,
+        ImportKind::Unqualified { module_alias, .. } => module_alias,
+        ImportKind::File(..) => return None,
+    };
+    let (part, item) = jet_foundation::CoreSourceParts::core_runtime_import(path)?;
+    // `use core.a.runtime.u.[...]` names the unit; a dotted member path
+    // inside a member list is not a unit binding.
+    if item.is_some() && matches!(imp.kind, ImportKind::Unqualified { .. }) {
+        return None;
+    }
+    Some((part, item.map(str::to_string)))
+}
+
+/// Bind every runtime-unit import of one Core source (or of a runtime unit
+/// entry) to the loaded unit: schedule the unit on first use, rewrite the
+/// import to the unit's reserved module alias, and record the module edge in
+/// the name ledger so sema and every tier read an ordinary module import.
+/// `use core.a.runtime.u [as x]` binds the unit; `use core.a.runtime.u.[f]`
+/// and `use core.a.runtime.u.f [as g]` bind members through one reserved
+/// binding of the unit per importing module.
+#[allow(clippy::too_many_arguments)]
+fn bind_core_runtime_imports(
+    imports: &mut Vec<ImportDecl>,
+    module_idx: usize,
+    core_module_base: usize,
+    core_source_modules: &mut Vec<jet_foundation::CoreModuleExports::CoreSourceModule>,
+    scheduled: &mut HashSet<&'static str>,
+    runtime_targets: &mut HashMap<&'static str, usize>,
+    name_ledger: &mut crate::AST::NameLedger,
+) {
+    let mut bindings = Vec::new();
+    let mut bound_units = HashSet::new();
+    for imp in imports.iter_mut() {
+        let Some((part, item)) = core_runtime_import_target(imp) else {
+            continue;
+        };
+        let target = *runtime_targets.entry(part.module).or_insert_with(|| {
+            scheduled.insert(part.module);
+            core_source_modules.push(*part);
+            core_module_base + core_source_modules.len() - 1
+        });
+        let module_span = match &imp.kind {
+            ImportKind::Module(_, span) => *span,
+            ImportKind::Unqualified {
+                module_alias_span, ..
+            } => *module_alias_span,
+            ImportKind::File(..) => unreachable!("runtime imports are module paths"),
+        };
+        let binding_span = match (matches!(imp.kind, ImportKind::Module(..)), item) {
+            (true, None) => {
+                imp.kind = ImportKind::Module(part.alias.to_string(), module_span);
+                name_ledger.record_import_target(module_idx, imp.span, target);
+                continue;
+            }
+            (true, Some(item)) => {
+                // `use core.a.runtime.u.f [as g]` is the one-member list
+                // `use core.a.runtime.u.[f as g]`.
+                let unit_span =
+                    Span::new(module_span.start, module_span.start + part.module.len());
+                let member_span = Span::new(unit_span.end + 1, module_span.end);
+                let local_span = if imp.alias_span.start == imp.span.start {
+                    member_span
+                } else {
+                    imp.alias_span
+                };
+                let local = (imp.alias != item).then(|| imp.alias.clone());
+                imp.kind = ImportKind::Unqualified {
+                    module_alias: part.alias.to_string(),
+                    module_alias_span: unit_span,
+                    items: vec![(item, local)],
+                    items_span: member_span,
+                    span: imp.span,
+                };
+                imp.item_spans = vec![member_span];
+                imp.local_spans = vec![local_span];
+                unit_span
+            }
+            (false, _) => {
+                if let ImportKind::Unqualified { module_alias, .. } = &mut imp.kind {
+                    *module_alias = part.alias.to_string();
+                }
+                module_span
+            }
+        };
+        if bound_units.insert(part.alias) {
+            bindings.push((part.alias, binding_span, target));
+        }
+    }
+    for (alias, span, target) in bindings {
+        name_ledger.record_import_target(module_idx, span, target);
+        imports.push(ImportDecl {
+            kind: ImportKind::Module(alias.to_string(), span),
+            alias: alias.to_string(),
+            alias_span: span,
+            span,
+            item_spans: Vec::new(),
+            local_spans: Vec::new(),
+            is_pub: false,
+            is_package_pub: false,
+            inline_version: None,
+        });
+    }
+}
+
 fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
     if crate::AST::target_profile_path(imp).is_some() {
         return Ok(());
@@ -5043,6 +5219,11 @@ fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
                 ImportKind::File(_, _) | ImportKind::Unqualified { .. } => imp.span,
             };
             if let Some(diagnostic) = Syntax::retired_core_module_diagnostic(&module, span) {
+                return Err(diagnostic);
+            }
+            if let Some(diagnostic) =
+                jet_foundation::CoreSourceParts::core_private_unit_diagnostic(&module, span)
+            {
                 return Err(diagnostic);
             }
             return Err(Diagnostic::error(
