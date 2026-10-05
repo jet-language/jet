@@ -1986,6 +1986,14 @@ fn jet_driver_comptime_reads_batch(keys: [String:Bool], waiting: [String], unset
     false
 }
 
+// Whether one of `keys` has a value now.
+fn jet_driver_comptime_any_available(available: SemaComptimeAvailableConstants, keys: [String]) -> Bool Never! {
+    loop key in keys {
+        if available.keys.get(key) != None -> return true
+    }
+    false
+}
+
 fn jet_driver_comptime_hardware_empty(hardware: MIRTargetHardwareUse) -> Bool Never! {
     hardware.register_accesses.len() == 0 && hardware.interrupt_handlers.len() == 0 && hardware.dma_operations.len() == 0 && hardware.unresolved_references.len() == 0
 }
@@ -2480,6 +2488,13 @@ fn jet_driver_comptime_run(
     // empty, so an item starts over at most once. Any other item flushes the
     // batch before it is evaluated alone.
     batch := jet_driver_comptime_batch_new()
+    // The waits of each pending item (`module\nkey`) whose last check, with
+    // its closure, reported nothing: until one of those keys has a value or
+    // joins the batch, checking it again gives the same waits (it names no
+    // other unvalued constant), so the run reuses them instead of checking it
+    // once per pass; a dependency chain declared in reverse order would
+    // otherwise check every waiting item on every pass.
+    settled_waits := [String:[String]]{}
     loop pending.len() > 0 {
         next_pending := [SemaComptimeItemSource]{}
         wait_rows := [JetDriverComptimeWaitRow]{}
@@ -2491,6 +2506,20 @@ fn jet_driver_comptime_run(
                 if values.len() > resolved_count {
                     if !jet_driver_comptime_apply_landed(&environment, &available, values, resolved_count) -> return jet_driver_comptime_lost_graph(values, checked_functions, trace)
                     resolved_count = values.len()
+                }
+                source_key :: "{source.module_identity}\n{source.key}"
+                if settled_waits.get(source_key) == .Val(previous_waits) {
+                    if !jet_driver_comptime_any_available(available, previous_waits) && !jet_driver_comptime_reads_batch(batch.keys, previous_waits, false) {
+                        &wait_rows.push(JetDriverComptimeWaitRow{
+                            key: source.key,
+                            name: source.name,
+                            module_identity: source.module_identity,
+                            span: source.span,
+                            dependencies: previous_waits,
+                        })
+                        &next_pending.push(source)
+                        next
+                    }
                 }
                 checked_item := sema_check_comptime_item(&environment, &probe, available, source, values)
                 counters.items_checked += 1
@@ -2520,6 +2549,11 @@ fn jet_driver_comptime_run(
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                 }
                 if checked_item.waiting_dependencies.len() > 0 {
+                    if checked_item.diagnostics.len() == 0 {
+                        settled_waits[source_key] = checked_item.waiting_dependencies
+                    } else {
+                        _ := &settled_waits.remove(source_key)
+                    }
                     &wait_rows.push(JetDriverComptimeWaitRow{
                         key: source.key,
                         name: source.name,
@@ -2596,6 +2630,11 @@ fn jet_driver_comptime_run(
                     dependencies := [String]{}
                     loop dependency in checked_item.waiting_dependencies -> jet_driver_comptime_wait_add(&dependencies, dependency)
                     loop dependency in closure.waiting_dependencies -> jet_driver_comptime_wait_add(&dependencies, dependency)
+                    if checked_item.diagnostics.len() == 0 && diagnostics.len() == item_diagnostic_start {
+                        settled_waits[source_key] = dependencies
+                    } else {
+                        _ := &settled_waits.remove(source_key)
+                    }
                     &wait_rows.push(JetDriverComptimeWaitRow{
                         key: source.key,
                         name: source.name,
