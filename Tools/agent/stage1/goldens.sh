@@ -33,7 +33,8 @@ STAGE1_TOOLS="$JET_AGENT_TOOLS/stage1"
 #                   image is restored once); a case that kills the process is recorded
 #                   and the batch resumes after it. off: one process per case
 #   --ref MODE      release (default, rustc) | dev (Cranelift AOT) | none
-#   --ref-jet BIN   reference jet (default $GOLDENS_REF_JET, else jet-release-night11)
+#   --ref-jet BIN   reference jet (default $GOLDENS_REF_JET, else the release `jet`
+#                   beside the retained host4 build, $L/host4.path: target-rel4/release/jet)
 #   --compile-only  stop after the generated-compiler pass (no backend builds or runs)
 #   --resume        keep the finished per-case results already in DIR
 #   --report-only   only regenerate DIR/report.md and DIR/results.tsv
@@ -52,7 +53,8 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/lib.sh"
 
-out=""; batch=auto; ref=release; ref_jet=${GOLDENS_REF_JET:-$SCRATCH/jet-release-night11/jet}
+out=""; batch=auto; ref=release; ref_jet=${GOLDENS_REF_JET:-}
+[ -n "$ref_jet" ] || { [ -r "$L/host4.path" ] && ref_jet=$(dirname "$(dirname "$(< "$L/host4.path")")")/jet; }
 compile_only=0; resume=0; report_only=0; args=()
 while [ $# -gt 0 ]; do
   case $1 in
