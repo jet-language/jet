@@ -77,6 +77,13 @@ advance it, a `tower question answer` when the owner asked something. The
 board (and the live SSE UI) is how the owner finds out — there is no
 side channel.
 
+Post Now-page context with
+`tower briefing post --file report.md --title "…" --by me` and
+`tower status post --file snapshot.json --by me`. Status snapshots
+contain milestone progress and workstreams, not an owner task queue.
+The removed `ownerActions` field is rejected with `E_INVALID`; omit it.
+Use ballots, owner verification, messages, and card closures for owner work.
+
 Cards may carry free-form **`tags[]`** (triage roles like `needs-triage` /
 `ready-for-agent`, wayfinder labels like `wayfinder:map`) and an optional
 **`parentId`** (child of a wayfinder map). These are orthogonal to `phase`

@@ -561,18 +561,6 @@ function viewNow() {
       if (cardId) showDetail(cardId);
     });
   });
-  reports.querySelectorAll('[data-report-action-done]').forEach(button => {
-    button.addEventListener('click', async () => {
-      button.disabled = true;
-      try {
-        await api('status/action-done', {
-          snapshotId: button.dataset.reportSnapshot, id: button.dataset.reportActionDone,
-        }, { 'x-tower-owner-action': 'done' });
-      } catch {
-        button.disabled = false;
-      }
-    });
-  });
   v.appendChild(reports);
 
   const queue = doneMessageBlock();
