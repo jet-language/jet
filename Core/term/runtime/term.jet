@@ -260,7 +260,7 @@ pub fn jet_term_choose_with_io<E>(prompt: &String, items: &[String], write: fn(&
     for _ in 0..JET_TERM_CHOOSE_RETRY_LIMIT {
         answer :: match write("> ").and_then(fn(_) { read() })? { .Line(answer) -> answer, .EndOfInput -> return Err(stop(jet_term_choose_closed_error())) }
         if Ok(index) :: answer.trim().parse<Usize>() {
-            if Val(item) :: index.checked_sub(1).and_then(fn(index) { items.get(index) }) { return Ok(item.clone()) }
+            if index.checked_sub(1).and_then(fn(index) { items.get(index) }) == .Val(item) { return Ok(item.clone()) }
         }
         write(&jet_term_choose_invalid(items.len()))?
     }
@@ -413,7 +413,7 @@ module jet_term_mode {
         // GATE #4565: kernel primitive
         #Unsafe("consume latest saved stdin termios and restore it; reference ignores restoration failure") {
             SAVED.with(fn(saved) {
-                if Val(mode) :: saved.borrow_mut().pop() { _ :: tcsetattr(0, TCSANOW, ptr.from_ref(&mode).cast<U8>()) }
+                if saved.borrow_mut().pop() == .Val(mode) { _ :: tcsetattr(0, TCSANOW, ptr.from_ref(&mode).cast<U8>()) }
             })
         }
     }
@@ -458,7 +458,7 @@ module jet_term_mode {
         // GATE #4565: kernel primitive
         #Unsafe("consume latest saved console mode and restore Windows stdin; reference ignores failure") {
             handle :: GetStdHandle(STD_INPUT_HANDLE)
-            SAVED.with(fn(saved) { if Val(mode) :: saved.borrow_mut().pop() { _ :: SetConsoleMode(handle, mode) } })
+            SAVED.with(fn(saved) { if saved.borrow_mut().pop() == .Val(mode) { _ :: SetConsoleMode(handle, mode) } })
         }
     }
 }
