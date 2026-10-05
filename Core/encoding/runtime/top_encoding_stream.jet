@@ -16,15 +16,21 @@ fn jet_encoding_reader_iter<T>(next: fn() -> JetOutcome<T, JetAbsent> EncodingEr
         if finished -> return None
         match next() {
             Ok(Ok(item)) -> Val(Ok(^item)),
-            Ok(Err(JetAbsent)) -> { finished = true; None },
-            Err(error) -> { finished = true; Val(Err(^error)) },
+            Ok(Err(JetAbsent)) -> {
+                finished = true
+                None
+            },
+            Err(error) -> {
+                finished = true
+                Val(Err(^error))
+            },
         }
     })
 }
 // First error wins; later calls receive an equal snapshot.
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:35
 fn jet_encoding_fail<T>(terminal: &EncodingError?, error: EncodingError) -> T EncodingError! {
-    if terminal is Val(first) -> return Err(first.clone())
+    if terminal == .Val(first) -> return Err(first.clone())
     terminal = Val(error.clone())
     Err(^error)
 }
@@ -224,7 +230,7 @@ fn jet_encoding_validate_limits(limits: &EncodingLimits) -> EncodingError! {
         Val(format!("max_depth {} is outside 1..4096", limits.max_depth))
     } else if limits.max_item_bytes < 1 || limits.max_item_bytes > 1073741824 {
         Val(format!("max_item_bytes {} is outside 1..1073741824", limits.max_item_bytes))
-    } else if limits.max_total_bytes is Val(value) {
+    } else if limits.max_total_bytes == .Val(value) {
         if value < 0 { Val(format!("max_total_bytes {value} is outside 0..Int.max")) } else { None }
     } else if limits.max_expansion_depth < 0 || limits.max_expansion_depth > 256 {
         Val(format!("max_expansion_depth {} is outside 0..256", limits.max_expansion_depth))
@@ -251,47 +257,71 @@ fn jet_encoding_reserve_vec<T>(budget: (&JetEncodingAllocationBudget)?, values: 
     slot :: mem.size_of<T>()
     old_bytes :: match values.capacity().checked_mul(slot) {
         Val(bytes) -> bytes,
-        None -> { old :: mem.take(&values); drop(^old); return false },
+        None -> {
+            old :: mem.take(&values)
+            drop(^old)
+            return false
+        },
     }
     requested_capacity :: match values.len().checked_add(additional) {
         Val(capacity) -> capacity,
-        None -> { old :: mem.take(&values); drop(^old); if budget is Val(b) -> b.release(old_bytes); return false },
+        None -> {
+            old :: mem.take(&values)
+            drop(^old)
+            if budget == .Val(b) -> b.release(old_bytes)
+            return false
+        },
     }
     requested_bytes :: match requested_capacity.checked_mul(slot) {
         Val(bytes) -> bytes,
-        None -> { old :: mem.take(&values); drop(^old); if budget is Val(b) -> b.release(old_bytes); return false },
+        None -> {
+            old :: mem.take(&values)
+            drop(^old)
+            if budget == .Val(b) -> b.release(old_bytes)
+            return false
+        },
     }
     requested_growth :: requested_bytes.saturating_sub(old_bytes)
-    if budget is Val(b) {
+    if budget == .Val(b) {
         if !b.charge(requested_growth) {
-            old :: mem.take(&values); drop(^old); b.release(old_bytes); return false
+            old :: mem.take(&values)
+            drop(^old)
+            b.release(old_bytes)
+            return false
         }
     }
     // GATE #4565: kernel primitive
     reserved :: #Unsafe("fallible exact backing growth leaves initialized elements owned by values") { values.try_reserve_exact(additional) }
     if reserved.is_err() {
-        if budget is Val(b) -> b.release(requested_growth)
+        if budget == .Val(b) -> b.release(requested_growth)
         old :: mem.take(&values)
         actual_bytes :: old.capacity().saturating_mul(slot)
         drop(^old)
-        if budget is Val(b) -> b.release(actual_bytes)
+        if budget == .Val(b) -> b.release(actual_bytes)
         return false
     }
     actual_bytes :: match values.capacity().checked_mul(slot) {
         Val(bytes) -> bytes,
         None -> {
-            if budget is Val(b) -> b.release(requested_bytes)
-            old :: mem.take(&values); drop(^old); return false
+            if budget == .Val(b) -> b.release(requested_bytes)
+            old :: mem.take(&values)
+            drop(^old)
+            return false
         },
     }
     if actual_bytes < old_bytes {
-        if budget is Val(b) -> b.release(requested_bytes)
-        old :: mem.take(&values); drop(^old); return false
+        if budget == .Val(b) -> b.release(requested_bytes)
+        old :: mem.take(&values)
+        drop(^old)
+        return false
     }
-    if budget is Val(b) {
+    if budget == .Val(b) {
         if actual_bytes > requested_bytes {
             if !b.charge(actual_bytes - requested_bytes) {
-                old :: mem.take(&values); drop(^old); b.release(requested_bytes); return false
+                old :: mem.take(&values)
+                drop(^old)
+                b.release(requested_bytes)
+                return false
             }
         } else { b.release(requested_bytes - actual_bytes) }
     }
@@ -304,30 +334,45 @@ fn jet_encoding_reserve_string(budget: (&JetEncodingAllocationBudget)?, value: &
     old_bytes :: value.capacity()
     requested_bytes :: match value.len().checked_add(additional) {
         Val(bytes) -> bytes,
-        None -> { old :: mem.take(&value); drop(^old); if budget is Val(b) -> b.release(old_bytes); return false },
+        None -> {
+            old :: mem.take(&value)
+            drop(^old)
+            if budget == .Val(b) -> b.release(old_bytes)
+            return false
+        },
     }
     requested_growth :: requested_bytes.saturating_sub(old_bytes)
-    if budget is Val(b) {
+    if budget == .Val(b) {
         if !b.charge(requested_growth) {
-            old :: mem.take(&value); drop(^old); b.release(old_bytes); return false
+            old :: mem.take(&value)
+            drop(^old)
+            b.release(old_bytes)
+            return false
         }
     }
     // GATE #4565: kernel primitive
     reserved :: #Unsafe("fallible exact string backing growth preserves initialized UTF-8") { value.try_reserve_exact(additional) }
     if reserved.is_err() {
-        if budget is Val(b) -> b.release(requested_growth)
-        old :: mem.take(&value); drop(^old)
-        if budget is Val(b) -> b.release(old_bytes)
+        if budget == .Val(b) -> b.release(requested_growth)
+        old :: mem.take(&value)
+        drop(^old)
+        if budget == .Val(b) -> b.release(old_bytes)
         return false
     }
     actual_bytes :: value.capacity()
-    if budget is Val(b) {
+    if budget == .Val(b) {
         if actual_bytes < old_bytes {
-            b.release(requested_bytes); old :: mem.take(&value); drop(^old); return false
+            b.release(requested_bytes)
+            old :: mem.take(&value)
+            drop(^old)
+            return false
         }
         if actual_bytes > requested_bytes {
             if !b.charge(actual_bytes - requested_bytes) {
-                old :: mem.take(&value); drop(^old); b.release(requested_bytes); return false
+                old :: mem.take(&value)
+                drop(^old)
+                b.release(requested_bytes)
+                return false
             }
         } else { b.release(requested_bytes - actual_bytes) }
     }
@@ -355,10 +400,14 @@ impl JSONReader {
         for frame in &self.frames {
             match frame {
                 .ArrayValueOrEnd(_, index) | .ArrayCommaOrEnd(index) -> {
-                    path.push('['); path.push_str(&index.to_string()); path.push(']')
+                    path.push('[')
+                    path.push_str(&index.to_string())
+                    path.push(']')
                 },
                 .ObjectColonValue(key, _) | .ObjectCommaOrEnd(key, _) -> {
-                    path.push('['); path.push_str(&format!("{:?}", key)); path.push(']')
+                    path.push('[')
+                    path.push_str(&format!("{:?}", key))
+                    path.push(']')
                 },
                 .ObjectKeyOrEnd(_) -> {},
             }
@@ -379,7 +428,7 @@ impl JSONReader {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:621
     fn fail<T>(self: &JSONReader, error: EncodingError) -> T EncodingError! {
-        if self.terminal is Val(first) -> return Err(first.clone())
+        if self.terminal == .Val(first) -> return Err(first.clone())
         if error.path.is_empty() -> error.path = self.path()
         self.discard_codec_state()
         jet_encoding_fail(&self.terminal, ^error)
@@ -411,7 +460,7 @@ impl JSONReader {
         Ok((cloned, capacity))
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:672
-    fn release_item_heap(self, bytes: USize) -> { if self.allocation_budget is Val(budget) -> budget.release(bytes) }
+    fn release_item_heap(self, bytes: USize) -> { if self.allocation_budget == .Val(budget) -> budget.release(bytes) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:676
     fn frame_allocation_error(self) -> EncodingError {
         jet_encoding_error(.Limit, self.offset, self.line, self.column, "JSON reader frame allocation exceeded the bounded codec heap ceiling")
@@ -427,11 +476,14 @@ impl JSONReader {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:703
     fn fill(self: &JSONReader) -> U8? EncodingError! {
-        if self.lookahead is Val(byte) -> return Ok(Val(byte))
+        if self.lookahead == .Val(byte) -> return Ok(Val(byte))
         byte := [U8{0}]
         match jet_encoding_file_read(&self.input, &byte) {
             Ok(0) -> Ok(None),
-            Ok(_) -> { self.lookahead = Val(byte[0]); Ok(Val(byte[0])) },
+            Ok(_) -> {
+                self.lookahead = Val(byte[0])
+                Ok(Val(byte[0]))
+            },
             Err(error) -> Err(jet_encoding_io_error(self.offset, self.line, self.column, error)),
         }
     }
@@ -441,8 +493,13 @@ impl JSONReader {
         if self.limits.max_total_bytes.is_some_and(fn(max) { self.total >= max }) {
             return Err(jet_encoding_error(.Limit, self.offset, self.line, self.column, format!("max_total_bytes {} exceeded", self.limits.max_total_bytes.unwrap_or(0))))
         }
-        self.lookahead = None; self.total += 1; self.offset += 1
-        if byte == U8{10} { self.line += 1; self.column = 1 } else { self.column += 1 }
+        self.lookahead = None
+        self.total += 1
+        self.offset += 1
+        if byte == U8{10} {
+            self.line += 1
+            self.column = 1
+        } else { self.column += 1 }
         Ok(Val(byte))
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:741
@@ -519,10 +576,16 @@ impl JSONReader {
             }
             Ok(())
         })()
-        if result is Err(error) { self.release_item_heap(bytes.capacity()); return Err(error) }
+        if result == .Err(error) {
+            self.release_item_heap(bytes.capacity())
+            return Err(error)
+        }
         capacity :: bytes.capacity()
         match String.from_utf8(^bytes) {
-            Ok(text) -> { self.output_heap = if self.allocation_budget.is_some() { capacity } else { 0 }; Ok(text) },
+            Ok(text) -> {
+                self.output_heap = if self.allocation_budget.is_some() { capacity } else { 0 }
+                Ok(text)
+            },
             Err(error) -> {
                 invalid :: error.into_bytes()
                 self.release_item_heap(invalid.capacity())
@@ -551,25 +614,33 @@ impl JSONReader {
             }
             Ok(())
         })()
-        if result is Err(error) { self.release_item_heap(bytes.capacity()); return Err(error) }
+        if result == .Err(error) {
+            self.release_item_heap(bytes.capacity())
+            return Err(error)
+        }
         start :: self.offset - bytes.len() as I64
         text := match std.str.from_utf8(&bytes) {
             Ok(text) -> text,
             Err(_) -> {
-                self.release_item_heap(bytes.capacity()); drop(^bytes)
+                self.release_item_heap(bytes.capacity())
+                drop(^bytes)
                 return Err(jet_encoding_error(.Syntax, start, self.line, self.column, "JSON number is not valid UTF-8"))
             },
         }
         valid :: {
             b :: text.as_bytes()
             i := if b.first() == Val(U8{45}) { USize{1} } else { USize{0} }
-            int_ok :: if b.get(i) == Val(U8{48}) { i += 1; true } else if b.get(i).is_some_and(fn(c) { c >= 49 && c <= 57 }) {
+            int_ok :: if b.get(i) == Val(U8{48}) {
+                i += 1
+                true
+            } else if b.get(i).is_some_and(fn(c) { c >= 49 && c <= 57 }) {
                 i += 1
                 while b.get(i).is_some_and(fn(c) { c >= 48 && c <= 57 }) { i += 1 }
                 true
             } else { false }
             if int_ok && b.get(i) == Val(U8{46}) {
-                i += 1; fraction_start :: i
+                i += 1
+                fraction_start :: i
                 while b.get(i).is_some_and(fn(c) { c >= 48 && c <= 57 }) { i += 1 }
                 if i == fraction_start -> i = USize.MAX
             }
@@ -583,25 +654,31 @@ impl JSONReader {
             i == b.len()
         }
         if !valid {
-            self.release_item_heap(bytes.capacity()); drop(^bytes)
+            self.release_item_heap(bytes.capacity())
+            drop(^bytes)
             return Err(jet_encoding_error(.Syntax, start, self.line, self.column, "invalid JSON number"))
         }
         if self.typed_numbers {
-            if jet_std.validate_json_number(text) is Err(message) {
-                self.release_item_heap(bytes.capacity()); drop(^bytes)
+            if jet_std.validate_json_number(text) == .Err(message) {
+                self.release_item_heap(bytes.capacity())
+                drop(^bytes)
                 return Err(jet_encoding_error(.Limit, start, self.line, self.column, message))
             }
             number :: text.to_string()
-            self.release_item_heap(bytes.capacity()); drop(^bytes)
+            self.release_item_heap(bytes.capacity())
+            drop(^bytes)
             return Ok(.Number(number))
         }
         if !text.contains(['.', 'e', 'E']) {
             if text.parse<I64>() is Ok(value) {
-                self.release_item_heap(bytes.capacity()); drop(^bytes); return Ok(.Int(value))
+                self.release_item_heap(bytes.capacity())
+                drop(^bytes)
+                return Ok(.Int(value))
             }
         }
         value :: text.parse<F64>()
-        self.release_item_heap(bytes.capacity()); drop(^bytes)
+        self.release_item_heap(bytes.capacity())
+        drop(^bytes)
         match value {
             Ok(value) if value.is_finite() -> Ok(.Float(value)),
             _ -> Err(jet_encoding_error(.Unsupported, start, self.line, self.column, "JSON number is outside the DataTree numeric range")),
@@ -616,7 +693,10 @@ impl JSONReader {
             116 -> self.read_literal("rue".as_bytes(), .Bool(true)),
             102 -> self.read_literal("alse".as_bytes(), .Bool(false)),
             34 -> {
-                self.lookahead = Val(U8{34}); self.offset -= 1; self.total -= 1; self.column -= 1
+                self.lookahead = Val(U8{34})
+                self.offset -= 1
+                self.total -= 1
+                self.column -= 1
                 Ok(.Text(self.read_string()?))
             },
             91 -> {
@@ -637,15 +717,17 @@ impl JSONReader {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:971
     fn next_event(self: &JSONReader) -> DataEvent? EncodingError! {
-        if self.terminal is Val(error) -> return Err(error.clone())
+        if self.terminal == .Val(error) -> return Err(error.clone())
         match self.next_event_inner() {
             Ok(event) -> {
-                output_heap :: mem.take(&self.output_heap); self.release_item_heap(output_heap)
+                output_heap :: mem.take(&self.output_heap)
+                self.release_item_heap(output_heap)
                 if event.is_none() && self.eof -> self.discard_codec_state()
                 Ok(event)
             },
             Err(error) -> {
-                output_heap :: mem.take(&self.output_heap); self.release_item_heap(output_heap)
+                output_heap :: mem.take(&self.output_heap)
+                self.release_item_heap(output_heap)
                 self.fail(error)
             },
         }
@@ -668,22 +750,33 @@ impl JSONReader {
                 Val(.ArrayValueOrEnd(first, index)) -> {
                     if self.fill()? == Val(U8{93}) {
                         if !first -> return self.fail(jet_encoding_error(.Syntax, self.offset, self.line, self.column, "expected a JSON value after `,`"))
-                        _ :: self.take()?; _ :: self.frames.pop(); return Ok(Val(.ArrayEnd))
+                        _ :: self.take()?
+                        _ :: self.frames.pop()
+                        return Ok(Val(.ArrayEnd))
                     }
                     if !first && self.fill()?.is_none() -> return self.fail(jet_encoding_error(.Truncated, self.offset, self.line, self.column, "unterminated JSON array"))
                     self.frames.last_mut().unwrap() = .ArrayCommaOrEnd(index)
                     return self.parse_value().map(Val).or_else(fn(e) { self.fail(e) })
                 },
                 Val(.ArrayCommaOrEnd(index)) -> match self.fill()? {
-                    Val(44) -> { _ :: self.take()?; self.frames.last_mut().unwrap() = .ArrayValueOrEnd(false, index + 1) },
-                    Val(93) -> { _ :: self.take()?; _ :: self.frames.pop(); return Ok(Val(.ArrayEnd)) },
+                    Val(44) -> {
+                        _ :: self.take()?
+                        self.frames.last_mut().unwrap() = .ArrayValueOrEnd(false, index + 1)
+                    },
+                    Val(93) -> {
+                        _ :: self.take()?
+                        _ :: self.frames.pop()
+                        return Ok(Val(.ArrayEnd))
+                    },
                     Val(_) -> return self.fail(jet_encoding_error(.Syntax, self.offset, self.line, self.column, "expected `,` or `]` after array value")),
                     None -> return self.fail(jet_encoding_error(.Truncated, self.offset, self.line, self.column, "unterminated JSON array")),
                 },
                 Val(.ObjectKeyOrEnd(first)) -> {
                     if self.fill()? == Val(U8{125}) {
                         if !first -> return self.fail(jet_encoding_error(.Syntax, self.offset, self.line, self.column, "expected an object key after `,`"))
-                        _ :: self.take()?; _ :: self.frames.pop(); return Ok(Val(.ObjectEnd))
+                        _ :: self.take()?
+                        _ :: self.frames.pop()
+                        return Ok(Val(.ObjectEnd))
                     }
                     if !first && self.fill()?.is_none() -> return self.fail(jet_encoding_error(.Truncated, self.offset, self.line, self.column, "unterminated JSON object"))
                     if self.fill()? != Val(U8{34}) -> return self.fail(jet_encoding_error(.Syntax, self.offset, self.line, self.column, "expected a quoted object key"))
@@ -693,7 +786,7 @@ impl JSONReader {
                     return Ok(Val(.Key(key)))
                 },
                 Val(.ObjectColonValue) -> {
-                    if self.expect_byte(58, "`:` after object key") is Err(e) -> return self.fail(e)
+                    if self.expect_byte(58, "`:` after object key") == .Err(e) -> return self.fail(e)
                     frame :: self.frames.last_mut().unwrap()
                     previous :: mem.replace(frame, JetJSONReadFrame.ObjectKeyOrEnd(false))
                     match previous {
@@ -717,23 +810,36 @@ impl JSONReader {
                     None -> return self.fail(jet_encoding_error(.Truncated, self.offset, self.line, self.column, "unterminated JSON object")),
                 },
                 None if !self.root_started -> {
-                    self.root_started = true; self.root_done = true
+                    self.root_started = true
+                    self.root_done = true
                     return self.parse_value().map(Val).or_else(fn(e) { self.fail(e) })
                 },
                 None if self.record_mode -> match self.fill()? {
                     Val(10) -> {
-                        _ :: self.take()?; self.root_started = false; self.root_done = false; return Ok(None)
+                        _ :: self.take()?
+                        self.root_started = false
+                        self.root_done = false
+                        return Ok(None)
                     },
                     Val(13) -> {
                         _ :: self.take()?
                         if self.fill()? != Val(U8{10}) -> return self.fail(jet_encoding_error(.Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), "JSONL records use LF or CRLF; bare CR is not a record ending"))
-                        _ :: self.take()?; self.root_started = false; self.root_done = false; return Ok(None)
+                        _ :: self.take()?
+                        self.root_started = false
+                        self.root_done = false
+                        return Ok(None)
                     },
-                    None -> { self.eof = true; return Ok(None) },
+                    None -> {
+                        self.eof = true
+                        return Ok(None)
+                    },
                     Val(_) -> return self.fail(jet_encoding_error(.Syntax, self.offset, self.line, self.column, "trailing input after JSONL record value")),
                 },
                 None -> match self.fill()? {
-                    None -> { self.eof = true; return Ok(None) },
+                    None -> {
+                        self.eof = true
+                        return Ok(None)
+                    },
                     Val(_) -> return self.fail(jet_encoding_error(.Syntax, self.offset, self.line, self.column, "trailing input after JSON root")),
                 },
             }
@@ -748,11 +854,13 @@ fn jet_enc_json_reader_next(reader: &JSONReader) -> JetOutcome<DataEvent, JetAbs
 impl JSONWriter {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:1094
     fn discard_codec_state(self: &JSONWriter) -> {
-        self.frames = []; self.canonical_frames = []; self.canonical_retained = 0
+        self.frames = []
+        self.canonical_frames = []
+        self.canonical_retained = 0
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:1100
     fn fail<T>(self: &JSONWriter, error: EncodingError) -> T EncodingError! {
-        if self.terminal is Val(first) -> return Err(first.clone())
+        if self.terminal == .Val(first) -> return Err(first.clone())
         self.discard_codec_state()
         jet_encoding_fail(&self.terminal, ^error)
     }
@@ -822,7 +930,10 @@ impl JSONWriter {
                 if !first -> self.write_bytes(",".as_bytes())?
                 self.frames.last_mut().unwrap() = .Array(false)
             },
-            Val(.ObjectValue) -> { len :: self.frames.len(); self.frames[len - 1] = .ObjectKey(false) },
+            Val(.ObjectValue) -> {
+                len :: self.frames.len()
+                self.frames[len - 1] = .ObjectKey(false)
+            },
             Val(.ObjectKey(_)) -> return Err(self.state_error("JSON object expects Key before a value")),
             None if self.root_written -> return Err(self.state_error("JSON writer accepts exactly one root")),
             None -> self.root_written = true,
@@ -841,7 +952,7 @@ impl JSONWriter {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:1179
     fn write_event(self: &JSONWriter, event: DataEvent) -> EncodingError! {
-        if self.terminal is Val(error) -> return Err(error.clone())
+        if self.terminal == .Val(error) -> return Err(error.clone())
         result :: if self.canonical { self.write_canonical_event_inner(^event) } else { self.write_event_inner(^event) }
         match result { Ok(()) -> Ok(()), Err(error) -> self.fail(error) }
     }
@@ -868,7 +979,7 @@ impl JSONWriter {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:1222
     fn canonical_emit(self: &JSONWriter, bytes: View<U8>) -> EncodingError! {
-        if self.canonical_object_sink() is Val(frame) {
+        if self.canonical_object_sink() == .Val(frame) {
             current_len :: match &self.canonical_frames[frame] { .Object(_, _, value, _) -> value.len(), _ -> unreachable() }
             next_len :: current_len.checked_add(bytes.len()) ?? return Err(jet_encoding_error(.Limit, self.total, 1, self.total + 1, "canonical JSON object size overflow"))
             if next_len > self.limits.max_item_bytes as USize -> return Err(jet_encoding_error(.Limit, self.total, 1, self.total + 1, format!("max_item_bytes {} exceeded by canonical object", self.limits.max_item_bytes)))
@@ -944,7 +1055,10 @@ impl JSONWriter {
     fn canonical_complete_value(self: &JSONWriter) -> EncodingError! {
         frame :: self.canonical_frames.len().checked_sub(1) ?? return Ok(())
         (key, value) :: match &self.canonical_frames[frame] {
-            .Object(_, key, value, _) -> { k :: key.take() ?? return Ok(()); (k, mem.take(value)) },
+            .Object(_, key, value, _) -> {
+                k :: key.take() ?? return Ok(())
+                (k, mem.take(value))
+            },
             .Array(_) -> return Ok(()),
         }
         old_capacity :: value.capacity()
@@ -1006,7 +1120,9 @@ impl JSONWriter {
         out.push(123)
         for (index, ((_, value), key)) in entries.into_iter().zip(^quoted).enumerate() {
             if index > 0 -> out.push(44)
-            out.extend_from_slice(&key); out.push(58); out.extend_from_slice(&value)
+            out.extend_from_slice(&key)
+            out.push(58)
+            out.extend_from_slice(&value)
         }
         out.push(125)
         self.canonical_retained = self.canonical_retained.saturating_sub(retained)
@@ -1064,9 +1180,19 @@ impl JSONWriter {
                 }
                 self.canonical_before_value()?
                 match value {
-                    .ArrayStart -> { self.canonical_emit("[".as_bytes())?; self.canonical_frames.push(.Array(true)); Ok(()) },
-                    .ObjectStart -> { self.canonical_frames.push(.Object([], None, [], 0)); Ok(()) },
-                    _ -> { self.canonical_emit(encoded.as_deref().unwrap())?; self.canonical_complete_value() },
+                    .ArrayStart -> {
+                        self.canonical_emit("[".as_bytes())?
+                        self.canonical_frames.push(.Array(true))
+                        Ok(())
+                    },
+                    .ObjectStart -> {
+                        self.canonical_frames.push(.Object([], None, [], 0))
+                        Ok(())
+                    },
+                    _ -> {
+                        self.canonical_emit(encoded.as_deref().unwrap())?
+                        self.canonical_complete_value()
+                    },
                 }
             },
         }
@@ -1084,16 +1210,27 @@ impl JSONWriter {
                     .ok_or_else(fn() { jet_encoding_error(.Limit, self.total, 1, self.total + 1, format!("max_item_bytes {} exceeded", self.limits.max_item_bytes)) })?
                 self.ensure_total(key_len)?
                 if !first -> self.write_bytes(",".as_bytes())?
-                self.write_quoted(&key)?; self.write_bytes(":".as_bytes())?
+                self.write_quoted(&key)?
+                self.write_bytes(":".as_bytes())?
                 self.frames.last_mut().unwrap() = .ObjectValue
                 Ok(())
             },
             .ArrayEnd -> match self.frames.last().copied() {
-                Val(.Array(_)) -> { self.ensure_total(1)?; self.write_bytes("]".as_bytes())?; _ :: self.frames.pop(); Ok(()) },
+                Val(.Array(_)) -> {
+                    self.ensure_total(1)?
+                    self.write_bytes("]".as_bytes())?
+                    _ :: self.frames.pop()
+                    Ok(())
+                },
                 _ -> Err(self.state_error("ArrayEnd does not match an open array")),
             },
             .ObjectEnd -> match self.frames.last().copied() {
-                Val(.ObjectKey(_)) -> { self.ensure_total(1)?; self.write_bytes("}".as_bytes())?; _ :: self.frames.pop(); Ok(()) },
+                Val(.ObjectKey(_)) -> {
+                    self.ensure_total(1)?
+                    self.write_bytes("}".as_bytes())?
+                    _ :: self.frames.pop()
+                    Ok(())
+                },
                 Val(.ObjectValue) -> Err(self.state_error("object key has no value")),
                 _ -> Err(self.state_error("ObjectEnd does not match an open object")),
             },
@@ -1121,7 +1258,11 @@ impl JSONWriter {
                     .Int(v) -> self.write_bytes(v.to_string().as_bytes()),
                     .Float(v) -> self.write_bytes(v.to_string().as_bytes()),
                     .Text(v) -> self.write_quoted(&v),
-                    .ArrayStart -> { self.write_bytes("[".as_bytes())?; self.frames.push(.Array(true)); Ok(()) },
+                    .ArrayStart -> {
+                        self.write_bytes("[".as_bytes())?
+                        self.frames.push(.Array(true))
+                        Ok(())
+                    },
                     .ObjectStart -> { self.write_bytes("{".as_bytes())?; self.frames.push(.ObjectKey(true)); Ok(()) },
                     _ -> unreachable(),
                 }

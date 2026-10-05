@@ -61,12 +61,16 @@ pub fn jet_codec_date_decode(value: String) -> (I64, I64, I64) Err! {
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:85
 pub fn jet_codec_local_time_encode(hour: I64, minute: I64, second: I64) -> String {
-    h :: hour.clamp(0, 23); m :: minute.clamp(0, 59); s :: second.clamp(0, 59)
+    h :: hour.clamp(0, 23)
+    m :: minute.clamp(0, 59)
+    s :: second.clamp(0, 59)
     format!("{h:02}:{m:02}:{s:02}")
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:91
 fn jet_codec_datetime_time_encode(hour: I64, minute: I64, second: I64) -> String {
-    h :: hour.clamp(0, 23); m :: minute.clamp(0, 59); s :: second.clamp(0, 60)
+    h :: hour.clamp(0, 23)
+    m :: minute.clamp(0, 59)
+    s :: second.clamp(0, 60)
     format!("{h:02}:{m:02}:{s:02}")
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:99
@@ -115,7 +119,7 @@ pub fn jet_codec_datetime_decode(value: String) -> (I64, U32, Bool) Err! {
     }
     (hour, minute, second, leap_second) :: jet_codec_local_time_decode_parts(clean_time, true)?
     nanos := U32{0}
-    if frac is Val(fraction) {
+    if frac == .Val(fraction) {
         digits :: fraction.chars().take(9).filter(fn(ch) { ch.is_ascii_digit() }).collect<String>()
         if !digits.is_empty() {
             padded :: format!("{digits:0<9}")

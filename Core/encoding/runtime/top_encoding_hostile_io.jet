@@ -116,7 +116,7 @@ fn jet_encoding_hostile_io_with<R>(f: fn(&JetEncodingHostileIoState) -> R) -> R 
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:168
 fn jet_encoding_hostile_io_plan() -> JetEncodingHostileIoPlan? {
     jet_encoding_hostile_io_with(state -> {
-        if state.active_plan() is Val(plan) -> return Val(plan)
+        if state.active_plan() == .Val(plan) -> return Val(plan)
         (plan, read_plan, write_plan) :: jet_encoding_hostile_io_plan_from_env()?
         state.plan = Val(plan)
         state.read_plan = ^read_plan
@@ -155,7 +155,7 @@ fn jet_encoding_file_read(reader: &JetFileReader, buf: &[U8]) -> Int io.Error! {
     jet_encoding_hostile_io_with(state -> {
         state.stats.read_calls += U64{1}
         jet_encoding_hostile_io_apply_interrupt(state, plan, true)?
-        if plan.fail_read_after is Val(limit) {
+        if plan.fail_read_after == .Val(limit) {
             if state.read_total >= limit -> return Err(jet_encoding_hostile_io_fail_io())
         }
         want :: state.next_read_cap(plan, buf.len())
@@ -166,7 +166,7 @@ fn jet_encoding_file_read(reader: &JetFileReader, buf: &[U8]) -> Int io.Error! {
         if count == 0 -> return 0
         state.read_total += U64{count}
         state.stats.bytes_read += U64{count}
-        if plan.fail_read_after is Val(limit) {
+        if plan.fail_read_after == .Val(limit) {
             if state.read_total > limit -> return Err(jet_encoding_hostile_io_fail_io())
         }
         count
@@ -185,7 +185,7 @@ fn jet_encoding_file_write_all(writer: &JetFileWriter, bytes: &[U8]) -> io.Error
     jet_encoding_hostile_io_with(state -> {
         state.stats.write_calls += U64{1}
         jet_encoding_hostile_io_apply_interrupt(state, plan, false)?
-        if plan.fail_write_after is Val(limit) {
+        if plan.fail_write_after == .Val(limit) {
             if state.write_total >= limit -> return Err(jet_encoding_hostile_io_fail_io())
         }
         offset := 0
@@ -193,7 +193,7 @@ fn jet_encoding_file_write_all(writer: &JetFileWriter, bytes: &[U8]) -> io.Error
             chunk :: state.next_write_chunk(plan, bytes.len() - offset)
             end :: offset + chunk
             slice :: &bytes[offset..end]
-            if plan.fail_write_after is Val(limit) {
+            if plan.fail_write_after == .Val(limit) {
                 next :: state.write_total.saturating_add(U64{slice.len()})
                 if next > limit {
                     allowed :: Int{limit.saturating_sub(state.write_total)}

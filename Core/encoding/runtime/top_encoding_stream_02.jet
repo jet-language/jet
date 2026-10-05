@@ -4,10 +4,10 @@ use jet_std.[JSONReader, JSONWriter, JSONLReader, JSONLWriter, DataEvent, DataTr
 fn jet_json_fold_from_event(reader: &JSONReader, first: DataEvent, heap: &JetJsonlHeapBudget) -> DataTree EncodingError! {
     root: DataTree? := None
     frames: [JetJsonlFoldFrame] := []
-    pending := Some(^first)
+    pending := Val(^first)
     loop {
         event :: if pending.take() == {
-            Some(value) -> ^value
+            .Val(value) -> ^value
             None -> {
                 value :: reader.next_event() ?? return Err(^err)
                 if value == Some(event) -> ^event
@@ -46,25 +46,34 @@ fn jet_json_fold_from_event(reader: &JSONReader, first: DataEvent, heap: &JetJso
             .ArrayStart -> {
                 if !heap.charge_decoded(1) -> Err(jet_json_fold_limit_error(reader, false))
                 else if !jet_jsonl_reserve_push(heap, &frames) -> Err(jet_json_fold_limit_error(reader, true))
-                else { frames.push(.Array([])); Ok(()) }
+                else {
+                    frames.push(.Array([]))
+                    Ok(())
+                }
             }
             .ObjectStart -> {
                 if !heap.charge_decoded(1) -> Err(jet_json_fold_limit_error(reader, false))
                 else if !jet_jsonl_reserve_push(heap, &frames) -> Err(jet_json_fold_limit_error(reader, true))
-                else { frames.push(.Object{entries: [], key: None}); Ok(()) }
+                else {
+                    frames.push(.Object{entries: [], key: None})
+                    Ok(())
+                }
             }
             .Key(value) -> {
-                if frames.last_mut() == Some(.Object{key, ..}) && key.is_none() {
+                if frames.last_mut() == .Val(.Object{key, ..}) && key.is_none() {
                     if !heap.charge_decoded(value.len()) -> Err(jet_json_fold_limit_error(reader, false))
-                    else { key = Some(^value); Ok(()) }
+                    else {
+                        key = Val(^value)
+                        Ok(())
+                    }
                 } else -> Err(jet_encoding_error(.State, reader.offset, reader.line, reader.column, "JSON event stream produced a key outside an object"))
             }
             .ArrayEnd -> {
-                if frames.pop() == Some(.Array(items)) -> jet_json_fold_push_value(reader, heap, &root, &frames, .Array(^items))
+                if frames.pop() == .Val(.Array(items)) -> jet_json_fold_push_value(reader, heap, &root, &frames, .Array(^items))
                 else -> Err(jet_encoding_error(.State, reader.offset, reader.line, reader.column, "JSON event stream closed the wrong container"))
             }
             .ObjectEnd -> {
-                if frames.pop() == Some(.Object{entries, key: None}) -> jet_json_fold_push_value(reader, heap, &root, &frames, .Object(^entries))
+                if frames.pop() == .Val(.Object{entries, key: None}) -> jet_json_fold_push_value(reader, heap, &root, &frames, .Object(^entries))
                 else -> Err(jet_encoding_error(.State, reader.offset, reader.line, reader.column, "JSON event stream closed an incomplete object"))
             }
         }
@@ -79,7 +88,7 @@ fn jet_json_fold_from_event(reader: &JSONReader, first: DataEvent, heap: &JetJso
 impl JSONLReader {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:1950
     fn fail<T>(self: &JSONLReader, error: EncodingError) -> T EncodingError! {
-        projected :: jet_jsonl_project_error(^error, Some(self.record_index))
+        projected :: jet_jsonl_project_error(^error, Val(self.record_index))
         if self.terminal.is_none() -> self.json.discard_codec_state()
         jet_encoding_fail(&self.terminal, ^projected)
     }
@@ -93,26 +102,30 @@ impl JSONLReader {
                 Some(13) -> {
                     _ :: self.json.take() ?? return Err(^err)
                     next :: self.json.fill() ?? return Err(^err)
-                    if next != Some(10) -> return Err(jet_encoding_error(.Syntax, self.json.offset - 1, self.json.line, self.json.column.saturating_sub(1), "JSONL records use LF or CRLF; bare CR is not a record ending"))
+                    if next != 10 -> return Err(jet_encoding_error(.Syntax, self.json.offset - 1, self.json.line, self.json.column.saturating_sub(1), "JSONL records use LF or CRLF; bare CR is not a record ending"))
                     _ :: self.json.take() ?? return Err(^err)
                 }
-                None -> { self.json.eof = true; self.json.discard_codec_state(); return Ok(()) }
+                None -> {
+                    self.json.eof = true
+                    self.json.discard_codec_state()
+                    return Ok(())
+                }
                 else -> return Ok(())
             }
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:1988
     fn next_record(self: &JSONLReader) -> DataTree? EncodingError! {
-        if self.terminal == Some(error) -> return Err(error.clone())
+        if self.terminal == .Val(error) -> return Err(error.clone())
         if self.json.eof -> return Ok(None)
         _ :: self.skip_blank_records() ?? return self.fail(^err)
         if self.json.eof -> return Ok(None)
         allocation :: JetEncodingAllocationBudget.new(jet_encoding_codec_heap_ceiling(self.json.limits))
-        self.json.allocation_budget = Some(^allocation)
+        self.json.allocation_budget = Val(^allocation)
         heap := jet_json_fold_budget(self.json) ?? return self.fail(^err)
         first :: self.json.next_event() ?? return self.fail(^err)
         event :: if first == {
-            Some(event) -> ^event
+            .Val(event) -> ^event
             None -> return self.fail(jet_encoding_error(.Truncated, self.json.offset, self.json.line, self.json.column, "JSONL record ended before a complete value"))
         }
         value :: jet_json_fold_from_event(&self.json, ^event, &heap) ?? return self.fail(^err)
@@ -125,9 +138,9 @@ impl JSONLReader {
                 drop(^parser_frames)
                 heap.allocation.release(bytes)
                 self.record_index += 1
-                Ok(Some(^value))
+                Ok(Val(^value))
             }
-            Some(_) -> self.fail(jet_encoding_error(.State, self.json.offset, self.json.line, self.json.column, "JSONL record did not end at a record boundary"))
+            .Val(_) -> self.fail(jet_encoding_error(.State, self.json.offset, self.json.line, self.json.column, "JSONL record did not end at a record boundary"))
         }
     }
 }
@@ -145,7 +158,10 @@ fn jet_enc_jsonl_writer(output: JetFileWriter, limits: EncodingLimits) -> JSONLW
 
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:2071
 fn jet_jsonl_tree_size(value: DataTree, depth: I64, path: String, limits: EncodingLimits) -> USize EncodingError! {
-    is_container :: if value == { .Array(_), .Object(_) -> true; else -> false }
+    is_container :: if value == {
+        .Array(_), .Object(_) -> true
+        else -> false
+    }
     if is_container && depth >= limits.max_depth {
         error := jet_encoding_error(.Limit, 0, 1, 1, "max_depth {limits.max_depth} exceeded")
         error.path = path.to_string()
@@ -268,13 +284,13 @@ fn jet_jsonl_write_tree(writer: &JSONWriter, value: DataTree) -> () EncodingErro
 impl JSONLWriter {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:2266
     fn fail<T>(self: &JSONLWriter, error: EncodingError) -> T EncodingError! {
-        projected :: jet_jsonl_project_error(^error, Some(self.record_index))
+        projected :: jet_jsonl_project_error(^error, Val(self.record_index))
         if self.terminal.is_none() -> self.json.discard_codec_state()
         jet_encoding_fail(&self.terminal, ^projected)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:2274
     fn write_record(self: &JSONLWriter, value: DataTree) -> () EncodingError! {
-        if self.terminal == Some(error) -> return Err(error.clone())
+        if self.terminal == .Val(error) -> return Err(error.clone())
         if self.finished -> return self.fail(self.json.state_error("write called after finish"))
         if self.pending_lf {
             _ :: self.json.ensure_total(1) ?? return self.fail(^err)
@@ -300,13 +316,13 @@ impl JSONLWriter {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:2330
     fn flush_output(self: &JSONLWriter) -> () EncodingError! {
-        if self.terminal == Some(error) -> return Err(error.clone())
+        if self.terminal == .Val(error) -> return Err(error.clone())
         _ :: self.json.flush_output() ?? return self.fail(^err)
         Ok(())
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:2340
     fn finish_output(self: &JSONLWriter) -> () EncodingError! {
-        if self.terminal == Some(error) -> return Err(error.clone())
+        if self.terminal == .Val(error) -> return Err(error.clone())
         if self.finished -> return Ok(())
         if self.pending_lf {
             _ :: self.json.ensure_total(1) ?? return self.fail(^err)
@@ -347,7 +363,10 @@ fn jet_csv_options(delimiter: String, header: Bool, skip_blank: Bool) -> CsvOpti
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:2422
 fn jet_enc_csv_reader(input: JetFileReader, limits: EncodingLimits, delimiter: String, header: Bool, skip_blank: Bool) -> CSVReader EncodingError! {
-    _ :: jet_encoding_validate_limits(limits) ?? { err.format = .CSV; return Err(^err) }
+    _ :: jet_encoding_validate_limits(limits) ?? {
+        err.format = .CSV
+        return Err(^err)
+    }
     options :: jet_csv_options(delimiter, header, skip_blank) ?? return Err(jet_csv_error(.Syntax, 0, 1, 1, "", ^err))
     character :: options.delimiter
     parser :: CsvParser.new(^options) ?? return Err(jet_csv_error(.Syntax, 0, 1, 1, "", ^err))
@@ -365,15 +384,18 @@ impl CSVReader {
         if self.limits.max_total_bytes == Ok(limit) && self.total >= limit -> return Err(jet_csv_error(.Limit, self.offset, self.line, self.column, jet_csv_path(self.record_index, field), "max_total_bytes {limit} exceeded"))
         self.total += 1
         self.offset += 1
-        if one[0] == 10 { self.line += 1; self.column = 1 }
+        if one[0] == 10 {
+            self.line += 1
+            self.column = 1
+        }
         else { self.column += 1 }
-        Ok(Some(one[0]))
+        Ok(Val(one[0]))
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:2518
     fn next_char(self: &CSVReader, field: USize) -> Char? EncodingError! {
         self.utf8_len = 0
         byte :: self.byte(field) ?? return Err(^err)
-        first :: if byte == Some(value) -> value else -> return Ok(None)
+        first :: if byte == .Val(value) -> value else -> return Ok(None)
         self.utf8[0] = first
         self.utf8_len = 1
         expected :: if first == {
@@ -395,7 +417,10 @@ impl CSVReader {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:2575
     fn parser_error(self: CSVReader, error: CsvError) -> EncodingError {
         record :: I64.try_from(error.record.saturating_sub(1)).unwrap_or(I64.MAX)
-        kind :: if error.kind == { .Syntax -> EncodingErrorKind.Syntax; .Truncated -> EncodingErrorKind.Truncated }
+        kind :: if error.kind == {
+            .Syntax -> EncodingErrorKind.Syntax
+            .Truncated -> EncodingErrorKind.Truncated
+        }
         jet_csv_error(kind, self.offset.saturating_sub(1), error.line, error.column, jet_csv_path(record, error.field), ^error.reason)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:2592
@@ -422,20 +447,20 @@ impl CSVReader {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:2648
     fn next_record(self: &CSVReader) -> CSVRow? EncodingError! {
-        if self.terminal == Some(error) -> return Err(error.clone())
+        if self.terminal == .Val(error) -> return Err(error.clone())
         if self.eof -> return Ok(None)
         loop {
             field :: self.parser.current_field()
             self.record_index = I64.try_from(self.parser.current_record().saturating_sub(1)).unwrap_or(I64.MAX)
             next :: self.next_char(field) ?? return self.fail(^err)
             character :: if next == {
-                Some(character) -> character
+                .Val(character) -> character
                 None -> {
                     self.eof = true
                     before :: self.parser.capacity_bytes()
                     record :: self.parser.finish() ?? return self.fail(self.parser_error(^err))
                     self.release_finished_capacity(before)
-                    if record == Some(record) -> return Ok(Some(CSVRow{fields: ^record.fields, line: record.line}))
+                    if record == Some(record) -> return Ok(Val(CSVRow{fields: ^record.fields, line: record.line}))
                     return Ok(None)
                 }
             }
@@ -446,7 +471,7 @@ impl CSVReader {
             record :: result ?? return self.fail(self.parser_error(^err))
             if record == Some(record) {
                 self.record_index = I64.try_from(self.parser.current_record().saturating_sub(1)).unwrap_or(I64.MAX)
-                return Ok(Some(CSVRow{fields: ^record.fields, line: record.line}))
+                return Ok(Val(CSVRow{fields: ^record.fields, line: record.line}))
             }
         }
     }
@@ -458,7 +483,10 @@ fn jet_enc_csv_reader_next(reader: &CSVReader) -> JetOutcome<CSVRow, JetAbsent> 
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:2716
 fn jet_enc_csv_writer(output: JetFileWriter, limits: EncodingLimits) -> CSVWriter EncodingError! {
-    _ :: jet_encoding_validate_limits(limits) ?? { err.format = .CSV; return Err(^err) }
+    _ :: jet_encoding_validate_limits(limits) ?? {
+        err.format = .CSV
+        return Err(^err)
+    }
     Ok(CSVWriter{output: ^output, limits: ^limits, terminal: None, total: 0, record_index: 0, finished: false, pending_crlf: false})
 }
 impl CSVWriter {
@@ -466,7 +494,7 @@ impl CSVWriter {
     fn fail<T>(self: &CSVWriter, error: EncodingError) -> T EncodingError! { jet_encoding_fail(&self.terminal, ^error) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:2723
     fn write_record(self: &CSVWriter, row: [String]) -> () EncodingError! {
-        if self.terminal == Some(error) -> return Err(error.clone())
+        if self.terminal == .Val(error) -> return Err(error.clone())
         if self.finished -> return self.fail(jet_csv_error(.State, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, 0), "write called after finish"))
         if self.pending_crlf {
             if self.limits.max_total_bytes == Ok(limit) && self.total.saturating_add(2) > limit -> return self.fail(jet_csv_error(.Limit, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, 0), "max_total_bytes {limit} exceeded"))
@@ -510,13 +538,13 @@ impl CSVWriter {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:2772
     fn flush_output(self: &CSVWriter) -> () EncodingError! {
-        if self.terminal == Some(error) -> return Err(error.clone())
+        if self.terminal == .Val(error) -> return Err(error.clone())
         _ :: jet_encoding_file_flush(&self.output) ?? return self.fail(jet_csv_io_error(^err, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, 0)))
         Ok(())
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:2773
     fn finish_output(self: &CSVWriter) -> () EncodingError! {
-        if self.terminal == Some(error) -> return Err(error.clone())
+        if self.terminal == .Val(error) -> return Err(error.clone())
         if self.finished -> return Ok(())
         if self.pending_crlf {
             if self.limits.max_total_bytes == Ok(limit) && self.total.saturating_add(2) > limit -> return self.fail(jet_csv_error(.Limit, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, 0), "max_total_bytes {limit} exceeded"))
@@ -569,7 +597,8 @@ fn jet_cbor_reserve_vec<T>(budget: JetEncodingAllocationBudget, values: &[T], ad
     requested_bytes :: needed.checked_mul(slot) ?? return Err(jet_cbor_heap_error(offset, path.clone()))
     requested_growth :: requested_bytes.checked_sub(old_bytes) ?? return Err(jet_cbor_heap_error(offset, path.clone()))
     if !budget.charge(requested_growth) {
-        old :: std.mem.take(values); drop(^old)
+        old :: std.mem.take(values)
+        drop(^old)
         budget.release(old_bytes)
         return Err(jet_cbor_heap_error(offset, ^path))
     }
@@ -577,25 +606,29 @@ fn jet_cbor_reserve_vec<T>(budget: JetEncodingAllocationBudget, values: &[T], ad
     reserved :: #Unsafe("fallible exact backing growth preserves the initialized values") { values.try_reserve_exact(additional) }
     if reserved.is_err() {
         budget.release(requested_growth)
-        old :: std.mem.take(values); drop(^old)
+        old :: std.mem.take(values)
+        drop(^old)
         budget.release(old_bytes)
         return Err(jet_cbor_stream_error(.Limit, offset, ^path, ^allocation_error))
     }
     actual_bytes :: values.capacity().checked_mul(slot) ?? {
         budget.release(requested_bytes)
-        old :: std.mem.take(values); drop(^old)
+        old :: std.mem.take(values)
+        drop(^old)
         return Err(jet_cbor_heap_error(offset, path.clone()))
     }
     if actual_bytes < old_bytes {
         budget.release(requested_bytes)
-        old :: std.mem.take(values); drop(^old)
+        old :: std.mem.take(values)
+        drop(^old)
         return Err(jet_cbor_heap_error(offset, ^path))
     }
     if actual_bytes > requested_bytes {
         extra :: actual_bytes - requested_bytes
         if !budget.charge(extra) {
             budget.release(requested_bytes)
-            old :: std.mem.take(values); drop(^old)
+            old :: std.mem.take(values)
+            drop(^old)
             return Err(jet_cbor_heap_error(offset, ^path))
         }
     } else { budget.release(requested_bytes - actual_bytes) }
@@ -609,42 +642,49 @@ fn jet_cbor_replace_vec<T>(budget: JetEncodingAllocationBudget, values: &[T], ta
     slot :: std.mem.size_of<T>()
     old_bytes :: values.capacity().checked_mul(slot) ?? return Err(jet_cbor_heap_error(offset, path.clone()))
     target_bytes :: target_capacity.checked_mul(slot) ?? {
-        old :: std.mem.take(values); drop(^old)
+        old :: std.mem.take(values)
+        drop(^old)
         budget.release(old_bytes)
         return Err(jet_cbor_heap_error(offset, ^path))
     }
     additional :: target_capacity.checked_sub(values.len()) ?? {
-        old :: std.mem.take(values); drop(^old)
+        old :: std.mem.take(values)
+        drop(^old)
         budget.release(old_bytes)
         return Err(jet_cbor_heap_error(offset, ^path))
     }
     budget.release(old_bytes)
     if !budget.charge(target_bytes) {
-        old :: std.mem.take(values); drop(^old)
+        old :: std.mem.take(values)
+        drop(^old)
         return Err(jet_cbor_heap_error(offset, ^path))
     }
     // GATE #4565: kernel primitive
     reserved :: #Unsafe("fallible exact payload replacement retains its initialized prefix") { values.try_reserve_exact(additional) }
     if reserved.is_err() {
         budget.release(target_bytes)
-        old :: std.mem.take(values); drop(^old)
+        old :: std.mem.take(values)
+        drop(^old)
         return Err(jet_cbor_stream_error(.Limit, offset, ^path, ^allocation_error))
     }
     actual_bytes :: values.capacity().checked_mul(slot) ?? {
         budget.release(target_bytes)
-        old :: std.mem.take(values); drop(^old)
+        old :: std.mem.take(values)
+        drop(^old)
         return Err(jet_cbor_heap_error(offset, ^path))
     }
     if actual_bytes < old_bytes {
         budget.release(target_bytes)
-        old :: std.mem.take(values); drop(^old)
+        old :: std.mem.take(values)
+        drop(^old)
         return Err(jet_cbor_heap_error(offset, ^path))
     }
     if actual_bytes > target_bytes {
         extra :: actual_bytes - target_bytes
         if !budget.charge(extra) {
             budget.release(target_bytes)
-            old :: std.mem.take(values); drop(^old)
+            old :: std.mem.take(values)
+            drop(^old)
             return Err(jet_cbor_heap_error(offset, ^path))
         }
     } else { budget.release(target_bytes - actual_bytes) }
@@ -669,7 +709,12 @@ fn jet_xml_io_error(offset: I64, error: std.io.Error) -> EncodingError {
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3027
 fn jet_enc_xml_reader(input: JetFileReader, limits: EncodingLimits, xml: XMLParseOptions) -> XMLReader EncodingError! {
-    _ :: jet_encoding_validate_limits(limits) ?? { err.format = .XML; err.line = Err(JetAbsent); err.column = Err(JetAbsent); return Err(^err) }
+    _ :: jet_encoding_validate_limits(limits) ?? {
+        err.format = .XML
+        err.line = Err(JetAbsent)
+        err.column = Err(JetAbsent)
+        return Err(^err)
+    }
     options := jet_xml_options(xml)
     _ :: options.limits.validate() ?? return Err(jet_xml_stream_error(^err))
     options.limits.max_depth = options.limits.max_depth.min(USize.from_i64(limits.max_depth))
@@ -707,7 +752,7 @@ fn jet_enc_xml_reader_next(reader: &XMLReader) -> JetOutcome<DataTree, JetAbsent
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3109
 fn jet_enc_xml_reader_scan(reader: &XMLReader) -> DataTree? EncodingError! {
-    if reader.terminal == Some(error) -> return Err(error.clone())
+    if reader.terminal == .Val(error) -> return Err(error.clone())
     loop {
         event :: reader.scanner.next() ?? return jet_encoding_fail(&reader.terminal, jet_xml_stream_error(^err))
         if event == Some(event) {
@@ -723,7 +768,7 @@ fn jet_enc_xml_reader_scan(reader: &XMLReader) -> DataTree? EncodingError! {
             }
             tree :: jet_xml_to_data_tree(^value)
             reader.allocation.release(prospective.saturating_add(extra))
-            return Ok(Some(^tree))
+            return Ok(Val(^tree))
         }
         if reader.eof -> return Ok(None)
         read_bytes :: if reader.limits.max_total_bytes == {
@@ -731,7 +776,7 @@ fn jet_enc_xml_reader_scan(reader: &XMLReader) -> DataTree? EncodingError! {
             Err(JetAbsent) -> reader.limits.buffer_bytes
         }
         bytes: [U8] := []
-        if !jet_encoding_reserve_vec(Some(reader.allocation), &bytes, USize.from_i64(read_bytes)) -> return jet_encoding_fail(&reader.terminal, jet_xml_heap_error(reader.total))
+        if !jet_encoding_reserve_vec(Val(reader.allocation), &bytes, USize.from_i64(read_bytes)) -> return jet_encoding_fail(&reader.terminal, jet_xml_heap_error(reader.total))
         capacity :: bytes.capacity()
         bytes.resize(USize.from_i64(read_bytes), 0)
         // GATE #4565: kernel primitive
@@ -761,15 +806,28 @@ fn jet_enc_xml_reader_scan(reader: &XMLReader) -> DataTree? EncodingError! {
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3213
 fn jet_xml_render_encoding(value: XMLEncoding) -> jet_xml_pull.RenderEncoding {
-    if value == { .UTF8 -> .UTF8; .UTF8BOM -> .UTF8Bom; .UTF16LE -> .Utf16Le; .UTF16BE -> .Utf16Be }
+    if value == {
+        .UTF8 -> .UTF8
+        .UTF8BOM -> .UTF8Bom
+        .UTF16LE -> .Utf16Le
+        .UTF16BE -> .Utf16Be
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3222
 fn jet_xml_lexical_policy(value: XMLLexicalPolicy) -> jet_xml_pull.LexicalPolicy {
-    if value == { .PreserveValid -> .PreserveValid; .Deterministic -> .Deterministic }
+    if value == {
+        .PreserveValid -> .PreserveValid
+        .Deterministic -> .Deterministic
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3229
 fn jet_enc_xml_writer(output: JetFileWriter, limits: EncodingLimits, xml: XMLRenderOptions) -> XMLWriter EncodingError! {
-    _ :: jet_encoding_validate_limits(limits) ?? { err.format = .XML; err.line = Err(JetAbsent); err.column = Err(JetAbsent); return Err(^err) }
+    _ :: jet_encoding_validate_limits(limits) ?? {
+        err.format = .XML
+        err.line = Err(JetAbsent)
+        err.column = Err(JetAbsent)
+        return Err(^err)
+    }
     renderer :: jet_xml_pull.StreamWriter.new(jet_xml_render_encoding(xml.encoding), jet_xml_lexical_policy(xml.lexical))
     allocation :: JetEncodingAllocationBudget.new(jet_encoding_codec_heap_ceiling(limits))
     Ok(XMLWriter{output: ^output, limits: ^limits, renderer: ^renderer, buffer: [], terminal: None, total: 0, finished: false, allocation: ^allocation})
@@ -784,7 +842,7 @@ impl XMLWriter {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3265
     fn fail<T>(self: &XMLWriter, error: EncodingError) -> T EncodingError! {
-        if self.terminal == Some(first) -> return Err(first.clone())
+        if self.terminal == .Val(first) -> return Err(first.clone())
         self.discard_codec_state()
         jet_encoding_fail(&self.terminal, ^error)
     }
@@ -800,7 +858,7 @@ impl XMLWriter {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3285
     fn write_event(self: &XMLWriter, event: DataTree) -> () EncodingError! {
-        if self.terminal == Some(error) -> return Err(error.clone())
+        if self.terminal == .Val(error) -> return Err(error.clone())
         if self.finished -> return self.fail(EncodingError{format: .XML, kind: .State, byte_offset: self.total, line: Err(JetAbsent), column: Err(JetAbsent), path: "", reason: "write called after finish", cause: Err(JetAbsent)})
         value :: jet_xml_from_data_tree(event) ?? return self.fail(EncodingError{format: .XML, kind: .Syntax, byte_offset: self.total, line: Err(JetAbsent), column: Err(JetAbsent), path: "", reason: ^err, cause: Err(JetAbsent)})
         bytes :: self.renderer.write(value) ?? {
@@ -828,7 +886,10 @@ impl XMLWriter {
         }
         capacity :: USize.from_i64(self.limits.buffer_bytes)
         if self.buffer.len().saturating_add(bytes.len()) > capacity {
-            _ :: self.flush_buffer() ?? { self.allocation.release(rendered_capacity); return Err(^err) }
+            _ :: self.flush_buffer() ?? {
+                self.allocation.release(rendered_capacity)
+                return Err(^err)
+            }
         }
         if bytes.len() > capacity {
             // GATE #4565: kernel primitive
@@ -838,7 +899,7 @@ impl XMLWriter {
             }
         } else {
             additional :: bytes.len()
-            if !jet_encoding_reserve_vec(Some(self.allocation), &self.buffer, additional) {
+            if !jet_encoding_reserve_vec(Val(self.allocation), &self.buffer, additional) {
                 self.allocation.release(rendered_capacity)
                 return self.fail(jet_xml_heap_error(self.total))
             }
@@ -850,7 +911,7 @@ impl XMLWriter {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3353
     fn flush_output(self: &XMLWriter) -> () EncodingError! {
-        if self.terminal == Some(error) -> return Err(error.clone())
+        if self.terminal == .Val(error) -> return Err(error.clone())
         _ :: self.flush_buffer() ?? return Err(^err)
         // GATE #4565: kernel primitive
         _ :: #Unsafe("flush retained output descriptor through its actual provider") { std.io.Write.flush(&self.output.inner) } ?? return self.fail(self.io_error(^err))
@@ -858,7 +919,7 @@ impl XMLWriter {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3363
     fn finish_output(self: &XMLWriter) -> () EncodingError! {
-        if self.terminal == Some(error) -> return Err(error.clone())
+        if self.terminal == .Val(error) -> return Err(error.clone())
         if self.finished -> return Ok(())
         if !self.renderer.is_finished() -> return self.fail(EncodingError{format: .XML, kind: .State, byte_offset: self.total, line: Err(JetAbsent), column: Err(JetAbsent), path: "", reason: "finish requires document_end", cause: Err(JetAbsent)})
         _ :: self.flush_output() ?? return Err(^err)
@@ -876,7 +937,12 @@ fn jet_enc_xml_writer_finish(writer: &XMLWriter) -> () EncodingError! { writer.f
 use jet_std.CBORReader
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3379
 fn jet_enc_cbor_reader(input: JetFileReader, limits: EncodingLimits) -> CBORReader EncodingError! {
-    _ :: jet_encoding_validate_limits(limits) ?? { err.format = .CBOR; err.line = Err(JetAbsent); err.column = Err(JetAbsent); return Err(^err) }
+    _ :: jet_encoding_validate_limits(limits) ?? {
+        err.format = .CBOR
+        err.line = Err(JetAbsent)
+        err.column = Err(JetAbsent)
+        return Err(^err)
+    }
     allocation :: JetEncodingAllocationBudget.new(jet_encoding_codec_heap_ceiling(limits))
     Ok(CBORReader{input: ^input, limits: ^limits, total: 0, terminal: None, eof: false, root_done: false, lookahead: None, frames: [], retained: 0, workspace: 0, allocation: ^allocation})
 }
@@ -904,7 +970,7 @@ impl CBORReader {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3422
     fn fail<T>(self: &CBORReader, error: EncodingError) -> T EncodingError! {
-        if self.terminal == Some(first) -> return Err(first.clone())
+        if self.terminal == .Val(first) -> return Err(first.clone())
         self.discard_codec_state()
         jet_encoding_fail(&self.terminal, ^error)
     }
@@ -914,7 +980,7 @@ impl CBORReader {
         loop frame in self.frames {
             if frame == {
                 .Array{index, ..} -> path.push_str("[{index}]")
-                .Object{key: Some(key), keys, expecting_key: false, ..} -> path.push_str("[{keys[key].debug()}]")
+                .Object{key: Val(key), keys, expecting_key: false, ..} -> path.push_str("[{keys[key].debug()}]")
                 else -> {}
             }
         }
@@ -922,13 +988,13 @@ impl CBORReader {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3438
     fn raw(self: &CBORReader) -> U8? EncodingError! {
-        if self.lookahead.take() == Some(byte) -> return Ok(Some(byte))
+        if self.lookahead.take() == .Val(byte) -> return Ok(Val(byte))
         byte := [U8{0}]
         count :: jet_encoding_file_read(&self.input, &byte) ?? return Err(jet_cbor_stream_io(^err, self.total, self.path()))
         if count == 0 -> return Ok(None)
         if self.limits.max_total_bytes == Ok(n) && self.total >= n -> return Err(jet_cbor_stream_error(.Limit, self.total, self.path(), "max_total_bytes {n} exceeded"))
         self.total += 1
-        Ok(Some(byte[0]))
+        Ok(Val(byte[0]))
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3455
     fn required(self: &CBORReader, start: I64, reason: String) -> U8 EncodingError! {
@@ -939,7 +1005,7 @@ impl CBORReader {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3458
     fn arg(self: &CBORReader, add: U8, start: I64) -> U64? EncodingError! {
         need :: if add == {
-            0..=23 -> return Ok(Some(U64.from_u8(add)))
+            0..=23 -> return Ok(Val(U64.from_u8(add)))
             24 -> 1
             25 -> 2
             26 -> 4
@@ -952,7 +1018,7 @@ impl CBORReader {
             byte :: self.required(start, "CBOR argument ended before all bytes were present") ?? return Err(^err)
             value = (value << 8) | U64.from_u8(byte)
         }
-        Ok(Some(value))
+        Ok(Val(value))
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3464
     fn payload(self: &CBORReader, len: U64, start: I64) -> [U8] EncodingError! {
@@ -977,7 +1043,7 @@ impl CBORReader {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3494
     fn string(self: &CBORReader, major: U8, add: U8, start: I64) -> [U8] EncodingError! {
         length :: self.arg(add, start) ?? return Err(^err)
-        if length == Some(len) -> return self.payload(len, start)
+        if length == .Val(len) -> return self.payload(len, start)
         if self.frames.len() + 1 > USize.from_i64(self.limits.max_depth) -> return Err(jet_cbor_stream_error(.Limit, start, self.path(), "max_depth {self.limits.max_depth} exceeded"))
         out: [U8] := []
         loop {

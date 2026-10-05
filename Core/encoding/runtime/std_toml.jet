@@ -34,8 +34,8 @@ pub fn parse_to_tree(raw: String) -> DataTree ParseError! {
     loop {
         p.skip_between_statements()
         if p.peek() == None -> break
-        if p.statement()? is Val(item) {
-            if item is .Header(path, _) -> p.current_path_len = path.len()
+        if p.statement()? == .Val(item) {
+            if item == .Header(path, _) -> p.current_path_len = path.len()
             items.push(^item)
         }
     }
@@ -87,7 +87,7 @@ fn child_table_mut(node: &DataTree, seg: String) -> &DataTree from node {
 fn push_array_table(root: &DataTree, path: View<String>) -> {
     (parent_path, last) :: path.split_at(path.len() - 1)
     parent := table_at(root, parent_path)
-    if parent is .Object(entries) {
+    if parent == .Object(entries) {
         idx :: match entries.iter().position((k, _) -> k == last[0]) {
             Val(i) -> i
             None -> {
@@ -95,7 +95,7 @@ fn push_array_table(root: &DataTree, path: View<String>) -> {
                 entries.len() - 1
             }
         }
-        if &entries[idx].1 is .Array(arr) -> arr.push(DataTree.Object([]))
+        if &entries[idx].1 == .Array(arr) -> arr.push(DataTree.Object([]))
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:135
@@ -104,8 +104,8 @@ fn set_key(root: &DataTree, current: View<String>, key_path: View<String>, value
     full.extend_from_slice(key_path[0..<key_path.len() - 1])
     table := table_at(root, full)
     fk :: key_path[key_path.len() - 1]
-    if table is .Object(entries) {
-        if entries.iter_mut().find((k, _) -> k == fk) is Val(slot) { slot.1 = ^value }
+    if table == .Object(entries) {
+        if entries.iter_mut().find((k, _) -> k == fk) == .Val(slot) { slot.1 = ^value }
         else { entries.push((fk.clone(), ^value)) }
     }
 }
@@ -129,14 +129,14 @@ pub fn render(t: DataTree) -> String {
     trimmed.to_string()
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:170
-fn is_table(v: DataTree) -> Bool { v is .Object(_) }
+fn is_table(v: DataTree) -> Bool { v == .Object(_) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:173
 fn is_array_of_tables(v: DataTree) -> Bool {
-    match v { .Array(arr) -> !arr.is_empty() && arr.iter().all(e -> e is .Object(_)), _ -> false }
+    match v { .Array(arr) -> !arr.is_empty() && arr.iter().all(e -> e == .Object(_)), _ -> false }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:178
 fn render_table(t: DataTree, path: View<String>, out: &String) -> {
-    if t is .Object(entries) {
+    if t == .Object(entries) {
         loop (k, v) in entries {
             if !is_table(v) && !is_array_of_tables(v) -> out.push_str("{k} = {render_value(v)}\n")
         }
@@ -149,7 +149,7 @@ fn render_table(t: DataTree, path: View<String>, out: &String) -> {
             } else if is_array_of_tables(v) {
                 p := path.to_vec()
                 p.push(k.clone())
-                if v is .Array(arr) {
+                if v == .Array(arr) {
                     loop elem in arr {
                         out.push_str("\n[[{p.join(".")}]]\n")
                         render_table(elem, p, out)
@@ -200,7 +200,7 @@ impl Parser {
     fn err<M: Into<String>>(self, message: M) -> ParseError { ParseError{line: self.line, message: message.into()} }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:262
     fn skip_inline_ws(self: &Parser) -> {
-        loop self.peek() is Val(' ' | '\t') -> self.pos += 1
+        loop self.peek() == .Val(' ' | '\t') -> self.pos += 1
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:267
     fn skip_between_statements(self: &Parser) -> {
@@ -214,7 +214,7 @@ impl Parser {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:278
     fn skip_comment(self: &Parser) -> {
-        loop self.peek() is Val(c) {
+        loop self.peek() == .Val(c) {
             if c == '\n' -> break
             self.pos += 1
         }
@@ -284,8 +284,11 @@ impl Parser {
             Val('\'') -> self.literal_string()
             Val(c) if is_bare_key_char(c) -> {
                 s := String.new()
-                loop self.peek() is Val(c) {
-                    if is_bare_key_char(c) { s.push(c); self.pos += 1 } else { break }
+                loop self.peek() == .Val(c) {
+                    if is_bare_key_char(c) {
+                        s.push(c)
+                        self.pos += 1
+                    } else { break }
                 }
                 Ok(^s)
             }
@@ -319,7 +322,7 @@ impl Parser {
         loop (i, c) in chars.iter().enumerate() {
             if self.peek_at(i) != Val(c) -> return false
         }
-        if self.peek_at(chars.len()) is Val(after) {
+        if self.peek_at(chars.len()) == .Val(after) {
             if is_bare_key_char(after) || after == '.' -> return false
         }
         loop _ in 0..<chars.len() -> _ :: self.bump()
@@ -344,23 +347,27 @@ impl Parser {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:454
     fn multiline_basic_string(self: &Parser) -> String ParseError! {
-        _ :: self.bump(); _ :: self.bump(); _ :: self.bump()
+        _ :: self.bump()
+        _ :: self.bump()
+        _ :: self.bump()
         if self.peek() == Val('\r') -> _ :: self.bump()
         if self.peek() == Val('\n') -> _ :: self.bump()
         out := String.new()
         loop {
             if self.peek() == Val('"') && self.peek_at(1) == Val('"') && self.peek_at(2) == Val('"') {
-                _ :: self.bump(); _ :: self.bump(); _ :: self.bump()
+                _ :: self.bump()
+                _ :: self.bump()
+                _ :: self.bump()
                 return Ok(^out)
             }
             match self.bump() {
                 None -> return Err(self.err(errors.TOML_UNTERMINATED_MULTILINE_STRING))
                 Val('\\') -> {
-                    if self.peek() is Val('\n' | '\r' | ' ' | '\t') {
+                    if self.peek() == .Val('\n' | '\r' | ' ' | '\t') {
                         sawline := false
                         save :: self.pos
                         saveline :: self.line
-                        loop self.peek() is Val(' ' | '\t' | '\r' | '\n') {
+                        loop self.peek() == .Val(' ' | '\t' | '\r' | '\n') {
                             if self.peek() == Val('\n') -> sawline = true
                             _ :: self.bump()
                         }
@@ -419,13 +426,17 @@ impl Parser {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:561
     fn multiline_literal_string(self: &Parser) -> String ParseError! {
-        _ :: self.bump(); _ :: self.bump(); _ :: self.bump()
+        _ :: self.bump()
+        _ :: self.bump()
+        _ :: self.bump()
         if self.peek() == Val('\r') -> _ :: self.bump()
         if self.peek() == Val('\n') -> _ :: self.bump()
         out := String.new()
         loop {
             if self.peek() == Val('\'') && self.peek_at(1) == Val('\'') && self.peek_at(2) == Val('\'') {
-                _ :: self.bump(); _ :: self.bump(); _ :: self.bump()
+                _ :: self.bump()
+                _ :: self.bump()
+                _ :: self.bump()
                 return Ok(^out)
             }
             match self.bump() {
@@ -441,7 +452,10 @@ impl Parser {
         loop {
             self.skip_ws_newlines_comments()
             match self.peek() {
-                Val(']') -> { _ :: self.bump(); return Ok(Value.Array(^items)) }
+                Val(']') -> {
+                    _ :: self.bump()
+                    return Ok(Value.Array(^items))
+                }
                 None -> return Err(self.err(errors.TOML_UNTERMINATED_ARRAY))
                 _ -> {}
             }
@@ -449,7 +463,10 @@ impl Parser {
             self.skip_ws_newlines_comments()
             match self.peek() {
                 Val(',') -> { _ :: self.bump() }
-                Val(']') -> { _ :: self.bump(); return Ok(Value.Array(^items)) }
+                Val(']') -> {
+                    _ :: self.bump()
+                    return Ok(Value.Array(^items))
+                }
                 Val(c) -> return Err(self.err(errors.toml_expected_array_separator(c)))
                 None -> return Err(self.err(errors.TOML_UNTERMINATED_ARRAY))
             }
@@ -470,7 +487,10 @@ impl Parser {
         _ :: self.bump()
         entries := [(String, Value)]{}
         self.skip_inline_ws()
-        if self.peek() == Val('}') { _ :: self.bump(); return Ok(Value.InlineTable(^entries)) }
+        if self.peek() == Val('}') {
+            _ :: self.bump()
+            return Ok(Value.InlineTable(^entries))
+        }
         loop {
             self.skip_inline_ws()
             path :: self.key_path()?
@@ -507,9 +527,12 @@ impl Parser {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:691
     fn datetime(self: &Parser) -> Value ParseError! {
         s := String.new()
-        is_dt :: c -> c.is_ascii_alphanumeric() || c is ('-' | ':' | '.' | '+')
-        loop self.peek() is Val(c) {
-            if is_dt(c) { s.push(c); self.pos += 1 }
+        is_dt :: c -> c.is_ascii_alphanumeric() || c == ('-' | ':' | '.' | '+')
+        loop self.peek() == .Val(c) {
+            if is_dt(c) {
+                s.push(c)
+                self.pos += 1
+            }
             else if c == ' ' && self.peek_at(1).map_or(false, n -> n.is_ascii_digit()) && self.peek_at(3) == Val(':') {
                 s.push(' ')
                 self.pos += 1
@@ -522,22 +545,29 @@ impl Parser {
         if self.try_keyword("inf") -> return Ok(Value.Float(F64.INFINITY))
         if self.try_keyword("nan") -> return Ok(Value.Float(F64.NAN))
         tok := String.new()
-        if self.peek() is Val('+' | '-') {
+        if self.peek() == .Val('+' | '-') {
             sign :: self.bump().unwrap()
             tok.push(sign)
             if self.try_keyword("inf") -> return Ok(Value.Float(if sign == '-' { F64.NEG_INFINITY } else { F64.INFINITY }))
             if self.try_keyword("nan") -> return Ok(Value.Float(F64.NAN))
         }
         if self.peek() == Val('0') {
-            if self.peek_at(1) is Val(r) {
-                if r is ('x' | 'o' | 'b') && tok.is_empty() -> return self.radix_integer()
+            if self.peek_at(1) == .Val(r) {
+                if r == ('x' | 'o' | 'b') && tok.is_empty() -> return self.radix_integer()
             }
         }
         is_float := false
-        loop self.peek() is Val(c) {
+        loop self.peek() == .Val(c) {
             match c {
-                '0'..='9' | '_' -> { tok.push(c); self.pos += 1 }
-                '.' | 'e' | 'E' | '+' | '-' -> { is_float = true; tok.push(c); self.pos += 1 }
+                '0'..='9' | '_' -> {
+                    tok.push(c)
+                    self.pos += 1
+                }
+                '.' | 'e' | 'E' | '+' | '-' -> {
+                    is_float = true
+                    tok.push(c)
+                    self.pos += 1
+                }
                 _ -> break
             }
         }
@@ -554,9 +584,12 @@ impl Parser {
         prefix :: self.bump().unwrap()
         radix :: match prefix { 'x' -> 16, 'o' -> 8, 'b' -> 2, _ -> 16 }
         tok := String.new()
-        loop self.peek() is Val(c) {
+        loop self.peek() == .Val(c) {
             if c == '_' { self.pos += 1 }
-            else if c.is_digit(radix) { tok.push(c); self.pos += 1 }
+            else if c.is_digit(radix) {
+                tok.push(c)
+                self.pos += 1
+            }
             else { break }
         }
         if tok.is_empty() -> return Err(self.err(errors.TOML_EXPECTED_RADIX_DIGITS))

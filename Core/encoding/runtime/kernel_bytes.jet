@@ -85,7 +85,10 @@ impl JetByteBuffer {
     // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:107
     pub fn is_empty(self) -> Bool Never! { self.bytes.is_empty() }
     // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:110
-    pub fn clear(self: &JetByteBuffer) Never! { self.bytes.clear(); self.pos = 0 }
+    pub fn clear(self: &JetByteBuffer) Never! {
+        self.bytes.clear()
+        self.pos = 0
+    }
     // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:114
     pub fn position(self) -> Int Never! { self.pos }
     // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:117
@@ -94,7 +97,10 @@ impl JetByteBuffer {
     pub fn rewind(self: &JetByteBuffer) Never! { self.pos = 0 }
     // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:123
     pub fn seek(self: &JetByteBuffer, index: Int) Never! {
-        if index <= 0 { self.pos = 0; return }
+        if index <= 0 {
+            self.pos = 0
+            return
+        }
         // GATE #4483: preserve the selected target's usize cast.
         at :: index & Int.from_u64(target.usize_max())
         self.pos = at.min(self.bytes.len())
@@ -162,11 +168,20 @@ impl JetByteBuffer {
     // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:201
     pub fn ends_with(self, suffix: String) -> Bool Never! { self.as_text().ends_with(suffix) }
     // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:204
-    pub fn trim(self) -> JetByteBuffer Never! { text := unicode.trim(self.as_text()); from_owned(text.bytes()) }
+    pub fn trim(self) -> JetByteBuffer Never! {
+        text := unicode.trim(self.as_text())
+        from_owned(text.bytes())
+    }
     // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:207
-    pub fn trim_start(self) -> JetByteBuffer Never! { text := unicode.trim_start(self.as_text()); from_owned(text.bytes()) }
+    pub fn trim_start(self) -> JetByteBuffer Never! {
+        text := unicode.trim_start(self.as_text())
+        from_owned(text.bytes())
+    }
     // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:210
-    pub fn trim_end(self) -> JetByteBuffer Never! { text := unicode.trim_end(self.as_text()); from_owned(text.bytes()) }
+    pub fn trim_end(self) -> JetByteBuffer Never! {
+        text := unicode.trim_end(self.as_text())
+        from_owned(text.bytes())
+    }
     // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:213
     pub fn to_lower(self) -> JetByteBuffer Never! { from_owned(unicode.lower(self.as_text()).bytes()) }
     // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:216
@@ -257,7 +272,10 @@ impl JetByteBuffer {
     // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:297
     pub fn copy(self) -> JetByteBuffer Never! { self.clone() }
     // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:300
-    pub fn copy_to(self, other: &JetByteBuffer) Never! { other.bytes = self.bytes.clone(); other.pos = 0 }
+    pub fn copy_to(self, other: &JetByteBuffer) Never! {
+        other.bytes = self.bytes.clone()
+        other.pos = 0
+    }
     // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:304
     pub fn equal(self, other: JetByteBuffer) -> Bool Never! { self.bytes == other.bytes }
     // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:307
@@ -274,7 +292,10 @@ impl JetByteBuffer {
     pub fn parse(self) -> Int Err! {
         text := unicode.trim(self.as_text()) // #4303
         // GATE #4494: fixed-width i64 parsing retains the std error message.
-        if I64.from_str(text) == { .Ok(value) -> Ok(Int.from_i64(value)); .Err(error) -> Err(error.to_string()) }
+        if I64.from_str(text) == {
+            .Ok(value) -> Ok(Int.from_i64(value))
+            .Err(error) -> Err(error.to_string())
+        }
     }
     // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:320
     pub fn flush(self: &JetByteBuffer) Never! {} // In-memory buffer: Rust operation is empty.

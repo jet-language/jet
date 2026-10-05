@@ -29,7 +29,7 @@ impl __jet_Encode for I64 {
 impl __jet_Encode for JetInt {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs:43
     fn jet_encode(self) -> DataTree Never! {
-        if self.to_i64() is Val(value) -> return jet_datatree_encode_i64(value)
+        if self.to_i64() == .Val(value) -> return jet_datatree_encode_i64(value)
         .Number(self.to_string_rep())
     }
 }
@@ -393,7 +393,10 @@ fn jet_decode_object_field<T: __jet_Decode>(tree: DataTree, key: String, errors:
     field :: tree.field(key).unwrap_or(.Null)
     match T.jet_decode(field) {
         Ok(value) -> Val(^value)
-        Err(failures) -> { errors.extend(FieldError.under_errors(key, ^failures)); None }
+        Err(failures) -> {
+            errors.extend(FieldError.under_errors(key, ^failures))
+            None
+        }
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs:617
@@ -403,13 +406,19 @@ fn jet_decode_required_field<T: __jet_Decode>(tree: DataTree, key: String, error
         Err(_) -> {
             return match T.jet_decode(.Null) {
                 Ok(value) -> Val(^value)
-                Err(_) -> { errors.push(FieldError{path: key.clone(), reason: "E2410: missing required field `{key}`"}); None }
+                Err(_) -> {
+                    errors.push(FieldError{path: key.clone(), reason: "E2410: missing required field `{key}`"})
+                    None
+                }
             }
         }
     }
     match T.jet_decode(field) {
         Ok(value) -> Val(^value)
-        Err(failures) -> { errors.extend(FieldError.under_errors(key, ^failures)); None }
+        Err(failures) -> {
+            errors.extend(FieldError.under_errors(key, ^failures))
+            None
+        }
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs:645

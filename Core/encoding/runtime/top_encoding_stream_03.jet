@@ -40,13 +40,19 @@ impl CBORReader {
             Val(.Object{keys, ..}) -> {
                 table_growth :: match jet_cbor_reserve_vec(allocation, &keys, 1, start, path.clone(), "CBOR map key table allocation failed") {
                     Ok(growth) -> growth
-                    Err(error) -> { allocation.release(stored_capacity); return Err(^error) }
+                    Err(error) -> {
+                        allocation.release(stored_capacity)
+                        return Err(^error)
+                    }
                 }
                 index :: keys.len()
                 keys.push(^stored)
                 (index, table_growth)
             }
-            _ -> { allocation.release(stored_capacity); return Err(jet_cbor_stream_error(.State, start, path, "CBOR map key outside object")) }
+            _ -> {
+                allocation.release(stored_capacity)
+                return Err(jet_cbor_stream_error(.State, start, path, "CBOR map key outside object"))
+            }
         }
         self.workspace = self.workspace.saturating_add(stored_capacity).saturating_add(table_growth)
         Ok(index)
@@ -58,15 +64,21 @@ impl CBORReader {
             Val(.Object{remaining: Val(0), expecting_key: true, ..}) -> Val(true)
             Val(.Array{remaining: None, ..}) -> {
                 b :: self.raw()?
-                if b == Val(0xff) -> Val(false) else -> { self.lookahead = b; None }
+                if b == Val(0xff) -> Val(false) else -> {
+                    self.lookahead = b
+                    None
+                }
             }
             Val(.Object{remaining: None, expecting_key: true, ..}) -> {
                 b :: self.raw()?
-                if b == Val(0xff) -> Val(true) else -> { self.lookahead = b; None }
+                if b == Val(0xff) -> Val(true) else -> {
+                    self.lookahead = b
+                    None
+                }
             }
             _ -> None
         }
-        if close is Val(object) {
+        if close == .Val(object) {
             match self.frames.pop() {
                 Val(.Object{keys, ..}) -> {
                     released :: keys.capacity().saturating_mul(mem.size_of<String>()).saturating_add(keys.iter().map(String.capacity).sum())
@@ -84,11 +96,14 @@ impl CBORReader {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3642
     fn complete_parent(self: &CBORReader) -> Never! {
-        if self.frames.last_mut() is Val(frame) {
+        if self.frames.last_mut() == .Val(frame) {
             match frame {
-                .Array{remaining, index} -> { if remaining is Val(n) -> remaining = Val(n.saturating_sub(1)); index += 1 }
+                .Array{remaining, index} -> {
+                    if remaining == .Val(n) -> remaining = Val(n.saturating_sub(1))
+                    index += 1
+                }
                 .Object{remaining, expecting_key, key, ..} if not expecting_key -> {
-                    if remaining is Val(n) -> remaining = Val(n.saturating_sub(1))
+                    if remaining == .Val(n) -> remaining = Val(n.saturating_sub(1))
                     expecting_key = true
                     key = None
                 }
@@ -98,12 +113,15 @@ impl CBORReader {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3651
     fn next_event_inner(self: &CBORReader) -> DataEvent? EncodingError! {
-        if self.terminal is Val(error) -> return Err(error.clone())
+        if self.terminal == .Val(error) -> return Err(error.clone())
         if self.eof -> return Ok(None)
-        if self.close_event()? is Val(event) -> return Ok(Val(^event))
+        if self.close_event()? == .Val(event) -> return Ok(Val(^event))
         if self.root_done {
             match self.raw() {
-                Ok(None) -> { self.eof = true; return Ok(None) }
+                Ok(None) -> {
+                    self.eof = true
+                    return Ok(None)
+                }
                 Ok(Val(_)) -> return self.fail(jet_cbor_stream_error(.Syntax, self.total - 1, "$", "trailing CBOR data after root value"))
                 Err(e) -> return self.fail(^e)
             }
@@ -111,7 +129,10 @@ impl CBORReader {
         start :: if self.lookahead.is_some() -> self.total.saturating_sub(1) else -> self.total
         head :: match self.raw() {
             Ok(Val(b)) -> b
-            Ok(None) if self.frames.is_empty() -> { self.eof = true; return Ok(None) }
+            Ok(None) if self.frames.is_empty() -> {
+                self.eof = true
+                return Ok(None)
+            }
             Ok(None) -> return self.fail(jet_cbor_stream_error(.Truncated, self.total, self.path(), "CBOR container ended before all items were present"))
             Err(e) -> return self.fail(^e)
         }
@@ -136,7 +157,10 @@ impl CBORReader {
                         if prospective.is_none_or(fn(n) -> n > self.limits.max_item_bytes as Int) -> return self.fail(jet_cbor_stream_error(.Limit, start, self.path(), "max_item_bytes {self.limits.max_item_bytes} exceeded"))
                         index :: match self.retain_key(text, start) { Ok(index) -> index, Err(error) -> return self.fail(^error) }
                         self.retained = self.retained.saturating_add(text.len())
-                        if self.frames.last_mut() is Val(.Object{expecting_key, key, ..}) { key = Val(index); expecting_key = false }
+                        if self.frames.last_mut() == .Val(.Object{expecting_key, key, ..}) {
+                            key = Val(index)
+                            expecting_key = false
+                        }
                         return Ok(Val(DataEvent.Key(^text)))
                     }
                     DataEvent.Text(^text)
@@ -145,9 +169,15 @@ impl CBORReader {
             4 | 5 -> {
                 if self.frames.len() + 1 > self.limits.max_depth as Int -> return self.fail(jet_cbor_stream_error(.Limit, start, self.path(), "max_depth {self.limits.max_depth} exceeded"))
                 count :: match self.arg(add, start) { Ok(v) -> v, Err(e) -> return self.fail(^e) }
-                if self.reserve_frame(start) is Err(error) -> return self.fail(^error)
-                if major == 4 -> { self.frames.push(.Array{remaining: count, index: 0}); DataEvent.ArrayStart }
-                else -> { self.frames.push(.Object{remaining: count, expecting_key: true, key: None, keys: []}); DataEvent.ObjectStart }
+                if self.reserve_frame(start) == .Err(error) -> return self.fail(^error)
+                if major == 4 -> {
+                    self.frames.push(.Array{remaining: count, index: 0})
+                    DataEvent.ArrayStart
+                }
+                else -> {
+                    self.frames.push(.Object{remaining: count, expecting_key: true, key: None, keys: []})
+                    DataEvent.ObjectStart
+                }
             }
             6 -> return self.fail(jet_cbor_stream_error(.Unsupported, start, self.path(), "CBOR tags are outside DataEvent"))
             7 -> match add {
@@ -158,23 +188,37 @@ impl CBORReader {
                     bits :: U16.from_be_bytes([self.required(start,"truncated CBOR Float16")?, self.required(start,"truncated CBOR Float16")?])
                     DataEvent.Float(jet_cbor_half_to_f64(bits))
                 }
-                26 -> { b := [U8#4].filled(0); loop i in 0..<4 -> b[i] = self.required(start,"truncated CBOR Float32")?; DataEvent.Float(F32.from_be_bytes(b) as Float) }
-                27 -> { b := [U8#8].filled(0); loop i in 0..<8 -> b[i] = self.required(start,"truncated CBOR Float64")?; DataEvent.Float(Float.from_be_bytes(b)) }
+                26 -> {
+                    b := [U8#4].filled(0)
+                    loop i in 0..<4 -> b[i] = self.required(start,"truncated CBOR Float32")?
+                    DataEvent.Float(F32.from_be_bytes(b) as Float)
+                }
+                27 -> {
+                    b := [U8#8].filled(0)
+                    loop i in 0..<8 -> b[i] = self.required(start,"truncated CBOR Float64")?
+                    DataEvent.Float(Float.from_be_bytes(b))
+                }
                 _ -> return self.fail(jet_cbor_stream_error(.Unsupported, start, self.path(), "unsupported CBOR simple value {add}"))
             }
             _ -> unreachable()
         }
         match event {
             .ArrayStart | .ObjectStart -> {}
-            _ -> { self.complete_parent(); if self.frames.is_empty() -> self.root_done = true }
+            _ -> {
+                self.complete_parent()
+                if self.frames.is_empty() -> self.root_done = true
+            }
         }
         Ok(Val(^event))
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3675
     fn next_event(self: &CBORReader) -> DataEvent? EncodingError! {
-        if self.terminal is Val(error) -> return Err(error.clone())
+        if self.terminal == .Val(error) -> return Err(error.clone())
         match self.next_event_inner() {
-            Ok(event) -> { if event.is_none() and self.eof -> self.discard_codec_state(); Ok(^event) }
+            Ok(event) -> {
+                if event.is_none() and self.eof -> self.discard_codec_state()
+                Ok(^event)
+            }
             Err(error) -> self.fail(^error)
         }
     }
@@ -185,9 +229,18 @@ fn jet_enc_cbor_reader_next(reader: &CBORReader) -> DataEvent? EncodingError! { 
 fn jet_cbor_stream_len(out: &[U8], major: U8, n: U64) -> Never! {
     if n < 24 -> out.push((major << 5) | n as U8)
     else if n <= 255 -> out.extend_from_slice([(major << 5) | 24, n as U8])
-    else if n <= 65535 -> { out.push((major << 5) | 25); out.extend_from_slice((n as U16).to_be_bytes()) }
-    else if n <= U32.MAX as U64 -> { out.push((major << 5) | 26); out.extend_from_slice((n as U32).to_be_bytes()) }
-    else -> { out.push((major << 5) | 27); out.extend_from_slice(n.to_be_bytes()) }
+    else if n <= 65535 -> {
+        out.push((major << 5) | 25)
+        out.extend_from_slice((n as U16).to_be_bytes())
+    }
+    else if n <= U32.MAX as U64 -> {
+        out.push((major << 5) | 26)
+        out.extend_from_slice((n as U32).to_be_bytes())
+    }
+    else -> {
+        out.push((major << 5) | 27)
+        out.extend_from_slice(n.to_be_bytes())
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3692
 fn jet_cbor_stream_len_size(n: U64) -> Int Never! {
@@ -204,7 +257,10 @@ fn jet_cbor_half_to_f64(bits: U16) -> Float Never! {
         if frac == 0 -> return Float.from_bits(sign)
         mant := frac as U64
         exponent := I32{-14}
-        while mant & 1024 == 0 { mant <<= 1; exponent -= 1 }
+        while mant & 1024 == 0 {
+            mant <<= 1
+            exponent -= 1
+        }
         mant &= 1023
         Float.from_bits(sign | (((exponent + 1023) as U64) << 52) | (mant << 42))
     } else if exp == 31 -> Float.from_bits(sign | (U64{0x7ff} << 52) | ((frac as U64) << 42))
@@ -245,13 +301,27 @@ fn jet_cbor_half_exact(value: Float) -> U16? Never! {
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3698
 fn jet_cbor_push_preferred_float(out: &[U8], value: Float) -> Never! {
-    if jet_cbor_half_exact(value) is Val(bits) { out.push(0xf9); out.extend_from_slice(bits.to_be_bytes()) }
-    else if ((value as F32) as Float).to_bits() == value.to_bits() { out.push(0xfa); out.extend_from_slice((value as F32).to_bits().to_be_bytes()) }
-    else { out.push(0xfb); out.extend_from_slice(value.to_bits().to_be_bytes()) }
+    if jet_cbor_half_exact(value) == .Val(bits) {
+        out.push(0xf9)
+        out.extend_from_slice(bits.to_be_bytes())
+    }
+    else if ((value as F32) as Float).to_bits() == value.to_bits() {
+        out.push(0xfa)
+        out.extend_from_slice((value as F32).to_bits().to_be_bytes())
+    }
+    else {
+        out.push(0xfb)
+        out.extend_from_slice(value.to_bits().to_be_bytes())
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3700
 fn jet_enc_cbor_writer(output: JetFileWriter, limits: EncodingLimits) -> CBORWriter EncodingError! {
-    jet_encoding_validate_limits(limits).map_err(fn(e) -> { e.format = .CBOR; e.line = None; e.column = None; e })?
+    jet_encoding_validate_limits(limits).map_err(fn(e) -> {
+        e.format = .CBOR
+        e.line = None
+        e.column = None
+        e
+    })?
     allocation :: JetEncodingAllocationBudget.new(jet_encoding_codec_heap_ceiling(limits))
     Ok(CBORWriter{output: ^output, limits: limits, terminal: None, total: 0, frames: [], root_written: false, finished: false, retained: 0, workspace: 0, allocation: ^allocation})
 }
@@ -277,7 +347,7 @@ impl CBORWriter {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3762
     fn fail<T>(self: &CBORWriter, e: EncodingError) -> T EncodingError! {
-        if self.terminal is Val(first) -> return Err(first.clone())
+        if self.terminal == .Val(first) -> return Err(first.clone())
         self.discard_codec_state()
         jet_encoding_fail(&self.terminal, ^e)
     }
@@ -325,8 +395,14 @@ impl CBORWriter {
             .Int(n) if n >= 0 -> jet_cbor_stream_len(&out, 0, n as U64)
             .Int(n) -> jet_cbor_stream_len(&out, 1, jet_cbor_negative_magnitude(n))
             .Float(f) -> jet_cbor_push_preferred_float(&out, f)
-            .Text(s) -> { jet_cbor_stream_len(&out, 3, s.len() as U64); out.extend_from_slice(s.as_bytes()) }
-            .Bytes(b) -> { jet_cbor_stream_len(&out, 2, b.len() as U64); out.extend_from_slice(b) }
+            .Text(s) -> {
+                jet_cbor_stream_len(&out, 3, s.len() as U64)
+                out.extend_from_slice(s.as_bytes())
+            }
+            .Bytes(b) -> {
+                jet_cbor_stream_len(&out, 2, b.len() as U64)
+                out.extend_from_slice(b)
+            }
             _ -> unreachable()
         }
         Ok(^out)
@@ -346,7 +422,7 @@ impl CBORWriter {
     fn accept(self: &CBORWriter, bytes: [U8]) -> EncodingError! {
         size :: bytes.len()
         capacity :: bytes.capacity()
-        if self.check_replacement(0, size) is Err(error) -> return self.fail_buffer(^bytes, ^error)
+        if self.check_replacement(0, size) == .Err(error) -> return self.fail_buffer(^bytes, ^error)
         if self.frames.last().is_some() {
             allocation :: self.allocation.clone()
             offset :: self.total
@@ -358,7 +434,10 @@ impl CBORWriter {
             table_growth :: match table_growth { Ok(growth) -> growth, Err(error) -> return self.fail_buffer(^bytes, ^error) }
             match self.frames.last_mut().expect("CBOR frame checked") {
                 .Array{items} -> items.push(^bytes)
-                .Object{entries, key} -> { key :: key.take().expect("CBOR object key checked"); entries.push((^key, ^bytes)) }
+                .Object{entries, key} -> {
+                    key :: key.take().expect("CBOR object key checked")
+                    entries.push((^key, ^bytes))
+                }
             }
             self.workspace = self.workspace.saturating_add(capacity).saturating_add(table_growth)
             self.retained = self.retained.saturating_add(size)
@@ -366,7 +445,7 @@ impl CBORWriter {
         }
         if self.root_written -> return self.fail_buffer(^bytes, jet_cbor_stream_error(.State, self.total, "$", "CBOR writer accepts exactly one root"))
         if self.limits.max_total_bytes.is_some_and(fn(limit) -> self.total.saturating_add(size as I64) > limit) -> return self.fail_buffer(^bytes, jet_cbor_stream_error(.Limit, self.total, "$", "max_total_bytes {self.limits.max_total_bytes.expect("limit checked")} exceeded"))
-        if jet_encoding_file_write_all(&self.output, bytes) is Err(error) -> return self.fail_buffer(^bytes, jet_cbor_stream_io(^error, self.total, "$"))
+        if jet_encoding_file_write_all(&self.output, bytes) == .Err(error) -> return self.fail_buffer(^bytes, jet_cbor_stream_io(^error, self.total, "$"))
         self.total += size as I64
         self.root_written = true
         self.release_buffer(^bytes)
@@ -377,12 +456,12 @@ impl CBORWriter {
         valid :: match self.frames.last() { Val(.Object{key: None, ..}) -> true, _ -> false }
         if not valid -> return self.fail(jet_cbor_stream_error(.State, self.total, "$", "Key outside CBOR object or before prior value"))
         size :: jet_cbor_stream_len_size(key_text.len() as U64).checked_add(key_text.len()) ?? return Err(jet_cbor_stream_error(.Limit, self.total, "$", "CBOR key size overflow"))
-        if self.check_replacement(0, size) is Err(error) -> return self.fail(^error)
+        if self.check_replacement(0, size) == .Err(error) -> return self.fail(^error)
         encoded := match self.allocate(size) { Ok(value) -> value, Err(error) -> return self.fail(^error) }
         jet_cbor_stream_len(&encoded, 3, key_text.len() as U64)
         encoded.extend_from_slice(key_text.as_bytes())
         capacity :: encoded.capacity()
-        if self.frames.last_mut() is Val(.Object{key, entries}) {
+        if self.frames.last_mut() == .Val(.Object{key, entries}) {
             if entries.iter().any(fn((old,_)) -> old == encoded) -> return self.fail_buffer(^encoded, jet_cbor_stream_error(.Unsupported, self.total, "$", "duplicate CBOR text map key"))
             key = Val(^encoded)
             self.retained = self.retained.saturating_add(size)
@@ -401,16 +480,32 @@ impl CBORWriter {
         old_workspace :: items.capacity().saturating_mul(mem.size_of<[U8]>()).saturating_add(items.iter().fold(0, fn(total,item) -> total.saturating_add(item.capacity())))
         old :: match items.iter().try_fold(0, fn(total,item) -> total.checked_add(item.len())) {
             Val(value) -> value
-            None -> { mem.drop(^items); self.release_replaced(0, old_workspace); return self.fail(jet_cbor_stream_error(.Limit, self.total, "$", "CBOR array size overflow")) }
+            None -> {
+                mem.drop(^items)
+                self.release_replaced(0, old_workspace)
+                return self.fail(jet_cbor_stream_error(.Limit, self.total, "$", "CBOR array size overflow"))
+            }
         }
         size :: match jet_cbor_stream_len_size(items.len() as U64).checked_add(old) {
             Val(value) -> value
-            None -> { mem.drop(^items); self.release_replaced(old, old_workspace); return self.fail(jet_cbor_stream_error(.Limit, self.total, "$", "CBOR array size overflow")) }
+            None -> {
+                mem.drop(^items)
+                self.release_replaced(old, old_workspace)
+                return self.fail(jet_cbor_stream_error(.Limit, self.total, "$", "CBOR array size overflow"))
+            }
         }
-        if self.check_replacement(old, size) is Err(error) { mem.drop(^items); self.release_replaced(old, old_workspace); return self.fail(^error) }
+        if self.check_replacement(old, size) == .Err(error) {
+            mem.drop(^items)
+            self.release_replaced(old, old_workspace)
+            return self.fail(^error)
+        }
         out := match self.allocate(size) {
             Ok(value) -> value
-            Err(error) -> { mem.drop(^items); self.release_replaced(old, old_workspace); return self.fail(^error) }
+            Err(error) -> {
+                mem.drop(^items)
+                self.release_replaced(old, old_workspace)
+                return self.fail(^error)
+            }
         }
         jet_cbor_stream_len(&out, 4, items.len() as U64)
         loop item in items -> out.extend_from_slice(item)
@@ -423,38 +518,57 @@ impl CBORWriter {
         old_workspace :: entries.capacity().saturating_mul(mem.size_of<([U8],[U8])>()).saturating_add(entries.iter().fold(0, fn(total,(key,value)) -> total.saturating_add(key.capacity()).saturating_add(value.capacity())))
         old :: match entries.iter().try_fold(0, fn(total,(key,value)) -> total.checked_add(key.len())?.checked_add(value.len())) {
             Val(value) -> value
-            None -> { mem.drop(^entries); self.release_replaced(0, old_workspace); return self.fail(jet_cbor_stream_error(.Limit, self.total, "$", "CBOR object size overflow")) }
+            None -> {
+                mem.drop(^entries)
+                self.release_replaced(0, old_workspace)
+                return self.fail(jet_cbor_stream_error(.Limit, self.total, "$", "CBOR object size overflow"))
+            }
         }
         size :: match jet_cbor_stream_len_size(entries.len() as U64).checked_add(old) {
             Val(value) -> value
-            None -> { mem.drop(^entries); self.release_replaced(old, old_workspace); return self.fail(jet_cbor_stream_error(.Limit, self.total, "$", "CBOR object size overflow")) }
+            None -> {
+                mem.drop(^entries)
+                self.release_replaced(old, old_workspace)
+                return self.fail(jet_cbor_stream_error(.Limit, self.total, "$", "CBOR object size overflow"))
+            }
         }
-        if self.check_replacement(old, size) is Err(error) { mem.drop(^entries); self.release_replaced(old, old_workspace); return self.fail(^error) }
+        if self.check_replacement(old, size) == .Err(error) {
+            mem.drop(^entries)
+            self.release_replaced(old, old_workspace)
+            return self.fail(^error)
+        }
         entries.sort_unstable_by(fn(a,b) -> a.0.cmp(b.0))
         out := match self.allocate(size) {
             Ok(value) -> value
-            Err(error) -> { mem.drop(^entries); self.release_replaced(old, old_workspace); return self.fail(^error) }
+            Err(error) -> {
+                mem.drop(^entries)
+                self.release_replaced(old, old_workspace)
+                return self.fail(^error)
+            }
         }
         jet_cbor_stream_len(&out, 5, entries.len() as U64)
-        loop (key,value) in entries { out.extend_from_slice(key); out.extend_from_slice(value) }
+        loop (key,value) in entries {
+            out.extend_from_slice(key)
+            out.extend_from_slice(value)
+        }
         mem.drop(^entries)
         self.release_replaced(old, old_workspace)
         self.accept(^out)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:4079
     fn write_event(self: &CBORWriter, event: DataEvent) -> EncodingError! {
-        if self.terminal is Val(e) -> return Err(e.clone())
+        if self.terminal == .Val(e) -> return Err(e.clone())
         if self.finished -> return self.fail(jet_cbor_stream_error(.State, self.total, "$", "write called after finish"))
         match event {
             .ArrayStart -> {
                 if self.frames.len() + 1 > self.limits.max_depth as Int -> return self.fail(jet_cbor_stream_error(.Limit, self.total, "$", "max_depth {self.limits.max_depth} exceeded"))
-                if self.reserve_frame() is Err(error) -> return self.fail(^error)
+                if self.reserve_frame() == .Err(error) -> return self.fail(^error)
                 self.frames.push(.Array{items: []})
                 Ok(())
             }
             .ObjectStart -> {
                 if self.frames.len() + 1 > self.limits.max_depth as Int -> return self.fail(jet_cbor_stream_error(.Limit, self.total, "$", "max_depth {self.limits.max_depth} exceeded"))
-                if self.reserve_frame() is Err(error) -> return self.fail(^error)
+                if self.reserve_frame() == .Err(error) -> return self.fail(^error)
                 self.frames.push(.Object{entries: [], key: None})
                 Ok(())
             }
@@ -474,13 +588,13 @@ impl CBORWriter {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:4080
     fn flush_output(self: &CBORWriter) -> EncodingError! {
-        if self.terminal is Val(e) -> return Err(e.clone())
-        if jet_encoding_file_flush(&self.output) is Err(e) -> return self.fail(jet_cbor_stream_io(^e, self.total, "$"))
+        if self.terminal == .Val(e) -> return Err(e.clone())
+        if jet_encoding_file_flush(&self.output) == .Err(e) -> return self.fail(jet_cbor_stream_io(^e, self.total, "$"))
         Ok(())
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:4081
     fn finish_output(self: &CBORWriter) -> EncodingError! {
-        if self.terminal is Val(e) -> return Err(e.clone())
+        if self.terminal == .Val(e) -> return Err(e.clone())
         if self.finished -> return Ok(())
         if not self.frames.is_empty() or not self.root_written -> return self.fail(jet_cbor_stream_error(.State, self.total, "$", "finish requires one complete CBOR root"))
         self.flush_output()?
@@ -513,7 +627,10 @@ fn jet_json_canonical_quote_text(text: String) -> [U8] Never! {
                 value :: c as Int
                 out.extend_from_slice([92,117,HEX[(value >> 12) & 15],HEX[(value >> 8) & 15],HEX[(value >> 4) & 15],HEX[value & 15]])
             }
-            c -> { encoded := [U8#4].filled(0); out.extend_from_slice(c.encode_utf8(&encoded).as_bytes()) }
+            c -> {
+                encoded := [U8#4].filled(0)
+                out.extend_from_slice(c.encode_utf8(&encoded).as_bytes())
+            }
         }
     }
     out.push(34)
