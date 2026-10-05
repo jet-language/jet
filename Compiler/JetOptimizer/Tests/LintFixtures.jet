@@ -12,20 +12,37 @@ use jet_foundation.[
     MIRBlockID,
     MIRCallArg,
     MIRCallee,
+    MIRCaptureFacts,
+    MIRCaptureOperand,
+    MIRCaptureParam,
     MIRConstant,
     MIRCopyFact,
+    MIRCoreClosureKind,
     MIRDropKind,
     MIREnumArg,
     MIRField,
     MIRFieldValue,
     MIRFunction,
     MIRFunctionID,
+    MIRFunctionSignature,
+    MIRIndexKind,
+    MIRLoopSourceKind,
     MIROperation,
+    MIRPanicLoc,
+    MIRPreludeTypeArg,
     MIRPlace,
+    MIRPlaceBase,
     MIRPlaceID,
+    MIRPreludeABI,
+    MIRPreludeFamily,
     MIRProgram,
     MIRProjection,
+    MIRScope,
+    MIRScopeFact,
+    MIRScopeID,
+    MIRScopeKind,
     MIRSemanticOp,
+    MIRSiteID,
     MIRTerminator,
     MIRType,
     MIRTypeDef,
@@ -37,9 +54,12 @@ use jet_foundation.[
     mir_copy_ownership,
     mir_field_id,
     mir_function_id,
+    mir_nominal_ref,
     mir_owned_ownership,
+    mir_ownership_from_access,
     mir_type_from_kind,
     mir_type_id,
+    mir_type_with_identity,
 ]
 use jet_optimizer.[MIRLintRule, mir_lint_error_text, mir_lint_program, mir_lint_rule_name]
 
@@ -249,6 +269,283 @@ fn lf_effect_row(caller_has_effect: Bool) -> MIRProgram Never! {
     fx_program([MIRFunction]{callee, caller}, [MIRTypeDef]{})
 }
 
+fn lf_list() -> MIRType Never! { mir_type_from_kind(MIRTypeKind.List{inner: fx_int()}) }
+
+// A one-argument nominal type such as `View<Int>` or `Cell<Int>`.
+fn lf_generic(name: String, inner: MIRType) -> MIRType Never! {
+    mir_type_with_identity(mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref(name), args: [MIRType]{inner}}), mir_type_id(name))
+}
+
+fn lf_send_fn() -> MIRType Never! {
+    mir_type_from_kind(MIRTypeKind.SendFn{params: [MIRType]{}, ret: Val(fx_unit()), conventions: [MIRAccess]{}})
+}
+
+fn lf_fn() -> MIRType Never! {
+    mir_type_from_kind(MIRTypeKind.Fn{signature: MIRFunctionSignature{params: [MIRType]{}, ret: Val(fx_unit()), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}})
+}
+
+// A closure body whose capture slot 0 has `access`.
+fn lf_lambda(name: String, ty: MIRType, access: MIRAccess) -> MIRFunction Never! {
+    b := fx_builder()
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    lambda := fx_function(name, b, fx_unit())
+    lambda.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "captured", span: fx_span(), ty: ty, access: access, ownership: mir_owned_ownership()}}
+    lambda
+}
+
+fn lf_closure(b: &FxBuilder, ty: MIRType, lambda: String, capture: MIRCaptureOperand) -> MIRValueID Never! {
+    facts :: MIRCaptureFacts{escapes: false, needs_fn_mut: false, mutable: [String]{}, cloned: [String]{}, frozen: [String]{}, materialized: [String]{}, moved: [String]{}}
+    fx_owned(&b, ty, MIROperation.Closure{function: mir_function_id(lambda), captures: [MIRCaptureOperand]{capture}, facts: facts})
+}
+
+// `task { … }`, or a task-group child when `group` is present.
+fn lf_spawn(b: &FxBuilder, closure: MIRValueID, group: MIRValueID?) -> MIRValueID Never! {
+    values := [MIRValueID]{}
+    if group == .Val(value) -> &values.push(value)
+    &values.push(fx_int_const(&b, 0))
+    &values.push(fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: ""}}))
+    fx_owned(&b, fx_named("Task"), MIROperation.Semantic{operation: MIRSemanticOp.CoreClosureCall{call: fx_prelude_id("core.tasks", "spawn"), kind: MIRCoreClosureKind.Spawn, values: values, closure: Val(closure), site: MIRSiteID{value: U64{1}}, label: ""}})
+}
+
+fn lf_fill(b: &FxBuilder, place: MIRPlaceID) Never! {
+    list :: fx_owned(&b, lf_list(), MIROperation.BuildList{values: [MIRValueID]{}, trait_coercion: None})
+    fx_do(&b, MIROperation.WritePlace{place: place, value: list})
+}
+
+fn lf_len(b: &FxBuilder, place: MIRPlaceID, ty: MIRType) Never! {
+    source :: fx_owned(&b, ty, MIROperation.ReadPlace{place: place})
+    _ := fx_copy(&b, fx_int(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "list_len"), receiver: source, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
+}
+
+// `&place.push(4)`: a write window as the receiver of a resizing builtin.
+fn lf_push(b: &FxBuilder, place: MIRPlaceID) Never! {
+    pointer :: fx_value(&b, lf_list(), mir_ownership_from_access(MIRAccess.Write), MIROperation.AddressOf{place: place, access: MIRAccess.Write})
+    four :: fx_int_const(&b, 4)
+    fx_do(&b, MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "list_push"), receiver: pointer, receiver_place: Val(place), args: [MIRValueID]{four}, aggregate_fields: None}})
+}
+
+// The element `root[index]`.
+fn lf_index_place(b: &FxBuilder, root: MIRPlaceID, index: MIRValueID, ty: MIRType) -> MIRPlaceID Never! {
+    base := MIRPlaceBase.Static{name: ""}
+    loop row in b.places {
+        if row.id == root -> base = row.base
+    }
+    place :: MIRPlaceID{value: fx_word(U64{500}, b.places.len())}
+    projection :: MIRProjection.Index{kind: MIRIndexKind.FixedListProof, index: index, call: fx_prelude_id("core.list", "index"), write_call: None, location: MIRPanicLoc{file: fx_source_file(), line: 1, column: 0}, context: None, span: fx_span()}
+    &b.places.push(MIRPlace{id: place, span: fx_span(), ty: ty, base: base, projections: [MIRProjection]{projection}, access: MIRAccess.Write, persist_key: None})
+    place
+}
+
+// `consume(^place)`: the argument moves the place.
+fn lf_consume(b: &FxBuilder, place: MIRPlaceID, ty: MIRType) Never! {
+    moved :: fx_owned(&b, ty, MIROperation.MovePlace{place: place})
+    arg := fx_arg(moved, MIRAccess.Move)
+    arg.place = Val(place)
+    arg.owned_last_use = true
+    _ := fx_copy(&b, fx_unit(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("consume")}, args: [MIRCallArg]{arg}, type_args: [MIRType]{}})
+}
+
+fn lf_consumer(ty: MIRType) -> MIRFunction Never! {
+    c := fx_builder()
+    _ := fx_param(&c, "taken", ty, mir_owned_ownership())
+    fx_block(&c, 0, MIRTerminator.Return{value: None})
+    fx_function("consume", c, fx_unit())
+}
+
+// alias.exclusive (E0204, tests/ui/projected_write_window_overlap.jet):
+// `merge(&node, node)` writes a place another argument reads.
+fn lf_call_alias(planted: Bool) -> MIRProgram Never! {
+    c := fx_builder()
+    _ := fx_param(&c, "a", lf_list(), mir_ownership_from_access(MIRAccess.Write))
+    _ := fx_param(&c, "b", lf_list(), mir_ownership_from_access(MIRAccess.Read))
+    fx_block(&c, 0, MIRTerminator.Return{value: None})
+    r := fx_builder()
+    node :: fx_local(&r, "node", lf_list(), mir_owned_ownership())
+    other :: fx_local(&r, "other", lf_list(), mir_owned_ownership())
+    lf_fill(&r, node)
+    lf_fill(&r, other)
+    second :: if planted -> node else -> other
+    write_arg := fx_arg(fx_owned(&r, lf_list(), MIROperation.ReadPlace{place: node}), MIRAccess.Write)
+    write_arg.place = Val(node)
+    read_arg := fx_arg(fx_owned(&r, lf_list(), MIROperation.ReadPlace{place: second}), MIRAccess.Read)
+    read_arg.place = Val(second)
+    _ := fx_copy(&r, fx_unit(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("merge")}, args: [MIRCallArg]{write_arg, read_arg}, type_args: [MIRType]{}})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("merge", c, fx_unit()), fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}
+
+// alias.exclusive (#4621, memcorpus case 36): `add :: () -> { &v.push(2) }`
+// keeps a write of `v` live; reading `v` before `add()` bypasses it.
+fn lf_closure_alias(planted: Bool) -> MIRProgram Never! {
+    r := fx_builder()
+    v :: fx_local(&r, "v", lf_list(), mir_owned_ownership())
+    add :: fx_local(&r, "add", lf_fn(), mir_owned_ownership())
+    lf_fill(&r, v)
+    closure :: lf_closure(&r, lf_fn(), "add_body", MIRCaptureOperand.Place{place: v})
+    fx_do(&r, MIROperation.WritePlace{place: add, value: closure})
+    if planted -> lf_len(&r, v, lf_list())
+    callee :: fx_owned(&r, lf_fn(), MIROperation.ReadPlace{place: add})
+    _ := fx_copy(&r, fx_unit(), MIROperation.IndirectCall{callee: callee, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    lf_len(&r, v, lf_list())
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{lf_lambda("add_body", lf_list(), MIRAccess.Write), fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}
+
+// alias.exclusive (#4621, memcorpus case 62): `loop x in v { grow(x) }`
+// where `grow` pushes into `v`; the clean program iterates another list.
+fn lf_closure_loop(planted: Bool) -> MIRProgram Never! {
+    r := fx_builder()
+    v :: fx_local(&r, "v", lf_list(), mir_owned_ownership())
+    other :: fx_local(&r, "other", lf_list(), mir_owned_ownership())
+    grow :: fx_local(&r, "grow", lf_fn(), mir_owned_ownership())
+    lf_fill(&r, v)
+    lf_fill(&r, other)
+    closure :: lf_closure(&r, lf_fn(), "grow_body", MIRCaptureOperand.Place{place: v})
+    fx_do(&r, MIROperation.WritePlace{place: grow, value: closure})
+    source :: fx_owned(&r, lf_list(), MIROperation.ReadPlace{place: if planted -> v else -> other})
+    cursor :: fx_owned(&r, fx_named("Iter"), MIROperation.LoopIterInit{call: fx_prelude_id("core.loop", "loop_iter_init"), collection: source, step: None, by_value: false, source_kind: MIRLoopSourceKind.Plain})
+    fx_block(&r, 0, MIRTerminator.Jump{target: MIRBlockID{value: 1}})
+    more :: fx_copy(&r, fx_bool(), MIROperation.LoopIterHasNext{call: fx_prelude_id("core.loop", "loop_iter_has_next"), cursor: cursor})
+    fx_block(&r, 1, MIRTerminator.Branch{condition: more, then_target: MIRBlockID{value: 2}, else_target: MIRBlockID{value: 3}})
+    callee :: fx_owned(&r, lf_fn(), MIROperation.ReadPlace{place: grow})
+    _ := fx_copy(&r, fx_unit(), MIROperation.IndirectCall{callee: callee, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    fx_do(&r, MIROperation.LoopIterAdvance{call: fx_prelude_id("core.loop", "loop_iter_advance"), cursor: cursor})
+    fx_block(&r, 2, MIRTerminator.Jump{target: MIRBlockID{value: 1}})
+    fx_block(&r, 3, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{lf_lambda("grow_body", lf_list(), MIRAccess.Write), fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}
+
+fn lf_group_scope() -> MIRScopeID Never! { MIRScopeID{value: U64{7}} }
+
+// A task group whose children each lend `particles[index]` for writing
+// (`-1` spawns no child). `owner_move` 1 moves the owner inside the group,
+// 2 after it joins. alias.exclusive and view.valid (E1101,
+// tests/ui/taskgroup_overlapping_write_borrows.jet and
+// taskgroup_lent_owner_moved.jet; Examples/features/concurrency/scoped_borrow_bands.jet).
+fn lf_group_lend(first: Int, second: Int, owner_move: Int) -> MIRProgram Never! {
+    r := fx_builder()
+    particles :: fx_local(&r, "particles", lf_list(), mir_owned_ownership())
+    group :: fx_local(&r, "g", fx_named("Group"), mir_owned_ownership())
+    lf_fill(&r, particles)
+    fx_do(&r, MIROperation.ScopeEnter{scope: lf_group_scope(), test_member: None})
+    made :: fx_owned(&r, fx_named("Group"), MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("core.tasks", "group"), args: [MIRCallArg]{}, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
+    fx_do(&r, MIROperation.WritePlace{place: group, value: made})
+    loop index in [Int]{first, second} {
+        if index < 0 -> next
+        at :: fx_int_const(&r, index)
+        element :: lf_index_place(&r, particles, at, fx_named("Particle"))
+        handle :: fx_owned(&r, fx_named("Particle"), MIROperation.ReadPlace{place: element})
+        closure :: lf_closure(&r, lf_send_fn(), "child_body", MIRCaptureOperand.Value{value: handle})
+        owner :: fx_owned(&r, fx_named("Group"), MIROperation.ReadPlace{place: group})
+        _ := lf_spawn(&r, closure, Val(owner))
+    }
+    if owner_move == 1 -> lf_consume(&r, particles, lf_list())
+    fx_do(&r, MIROperation.ScopeExit{scope: lf_group_scope()})
+    if owner_move == 2 -> lf_consume(&r, particles, lf_list())
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    run := fx_function("run", r, fx_unit())
+    run.scopes = [MIRScope]{MIRScope{id: lf_group_scope(), kind: MIRScopeKind.TaskGroup, span: fx_span(), name: None, deadline: None, facts: [MIRScopeFact]{}}}
+    fx_program([MIRFunction]{lf_lambda("child_body", fx_named("Particle"), MIRAccess.Write), lf_consumer(lf_list()), run}, [MIRTypeDef]{})
+}
+
+// view.valid (E0212, tests/ui/view_owner_changed.jet): `window ::
+// values[0..1]`, then `&values.push(4)`, then `window.len()`.
+fn lf_view_owner_changed(planted: Bool) -> MIRProgram Never! {
+    r := fx_builder()
+    view_type :: lf_generic("View", fx_int())
+    values :: fx_local(&r, "values", lf_list(), mir_owned_ownership())
+    window :: fx_local(&r, "window", view_type, mir_owned_ownership())
+    lf_fill(&r, values)
+    source :: fx_owned(&r, lf_list(), MIROperation.ReadPlace{place: values})
+    view :: fx_owned(&r, view_type, MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "list_view"), receiver: source, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
+    fx_do(&r, MIROperation.WritePlace{place: window, value: view})
+    if planted -> lf_push(&r, values)
+    lf_len(&r, window, view_type)
+    if !planted -> lf_push(&r, values)
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    lf_single(r)
+}
+
+// view.valid (E2305, tests/ui/view_outlives_owner.jet): `return
+// incidents[0..2]` from a local list; the clean program views a parameter.
+fn lf_view_escape(planted: Bool) -> MIRProgram Never! {
+    r := fx_builder()
+    view_type :: lf_generic("View", fx_int())
+    owner := MIRPlaceID{value: U64{0}}
+    if planted {
+        owner = fx_local(&r, "incidents", lf_list(), mir_owned_ownership())
+        lf_fill(&r, owner)
+    } else {
+        parameter :: fx_param(&r, "values", lf_list(), mir_ownership_from_access(MIRAccess.Read))
+        owner = MIRPlaceID{value: fx_word(U64{500}, r.places.len())}
+        &r.places.push(MIRPlace{id: owner, span: fx_span(), ty: lf_list(), base: MIRPlaceBase.Parameter{value: parameter}, projections: [MIRProjection]{}, access: MIRAccess.Read, persist_key: None})
+    }
+    source :: fx_owned(&r, lf_list(), MIROperation.ReadPlace{place: owner})
+    view :: fx_owned(&r, view_type, MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "list_view"), receiver: source, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
+    fx_block(&r, 0, MIRTerminator.Return{value: Val(view)})
+    fx_program([MIRFunction]{fx_function("make", r, view_type)}, [MIRTypeDef]{})
+}
+
+// send.boundary (E1101, tests/ui/task_capture.jet): `task { count += 1 }`
+// borrows `count` for writing into a task nothing joins before the owner
+// continues; the clean program copies `count` into the task.
+fn lf_task_capture(planted: Bool) -> MIRProgram Never! {
+    r := fx_builder()
+    count :: fx_local(&r, "count", fx_int(), mir_copy_ownership())
+    zero :: fx_int_const(&r, 0)
+    fx_do(&r, MIROperation.WritePlace{place: count, value: zero})
+    capture := MIRCaptureOperand.Place{place: count}
+    if !planted {
+        read :: fx_copy(&r, fx_int(), MIROperation.ReadPlace{place: count})
+        capture = MIRCaptureOperand.Value{value: fx_owned(&r, fx_int(), MIROperation.Copy{value: read, fact: MIRCopyFact.Materialize})}
+    }
+    closure :: lf_closure(&r, lf_send_fn(), "task_body", capture)
+    _ := lf_spawn(&r, closure, None)
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    access :: if planted -> MIRAccess.Write else -> MIRAccess.Read
+    fx_program([MIRFunction]{lf_lambda("task_body", fx_int(), access), fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}
+
+// send.boundary (E1102, tests/ui/local_cell_crossing.jet and
+// string_view_task_capture.jet): a task captures a value of type `ty`.
+fn lf_crossing(ty: MIRType) -> MIRProgram Never! {
+    r := fx_builder()
+    value :: fx_param(&r, "value", ty, mir_ownership_from_access(MIRAccess.Read))
+    copied :: fx_owned(&r, ty, MIROperation.Copy{value: value, fact: MIRCopyFact.Materialize})
+    closure :: lf_closure(&r, lf_send_fn(), "worker_body", MIRCaptureOperand.Value{value: copied})
+    _ := lf_spawn(&r, closure, None)
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{lf_lambda("worker_body", ty, MIRAccess.Read), fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}
+
+// send.boundary (E1102, tests/ui/unsendable_send.jet): `sender.send(value)`.
+fn lf_channel_send(ty: MIRType) -> MIRProgram Never! {
+    r := fx_builder()
+    sender :: fx_param(&r, "sender", lf_generic("Sender", ty), mir_ownership_from_access(MIRAccess.Read))
+    value :: fx_param(&r, "value", ty, mir_ownership_from_access(MIRAccess.Read))
+    fx_do(&r, MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: fx_prelude_id("core.channels", "sender.send"), receiver: sender, args: [MIRValueID]{value}, frame_schedule: None, frame_schedule_derivation: None}})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    program := lf_single(r)
+    &program.prelude_calls.push(fx_prelude(MIRPreludeFamily.HandleMethod, "core.channels", "sender.send", "jet_channel_send", 2, MIRPreludeABI.Effect))
+    program
+}
+
+// ownership.move (E0121, tests/ui/ownership_call_consume_provenance.jet):
+// `consume(^value)` then `print(value)`.
+fn lf_consume_reuse(planted: Bool) -> MIRProgram Never! {
+    r := fx_builder()
+    value :: fx_local(&r, "value", fx_string(), mir_owned_ownership())
+    text :: fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "owned"}})
+    fx_do(&r, MIROperation.WritePlace{place: value, value: text})
+    lf_consume(&r, value, fx_string())
+    if planted {
+        reused :: fx_owned(&r, fx_string(), MIROperation.ReadPlace{place: value})
+        fx_print(&r, reused)
+    }
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{lf_consumer(fx_string()), fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}
+
 fn run() {
     passed := 0
     failed := 0
@@ -282,6 +579,32 @@ fn run() {
         lf_expect("ownership.move one-branch move", lf_one_branch_move(), None),
         lf_expect("effect.row clean", lf_effect_row(true), None),
         lf_expect("effect.row planted", lf_effect_row(false), Val(MIRLintRule.EffectRow)),
+        // The safety families, and the mutation proof: each program below is
+        // what lowering emits for a tests/ui program once the named sema
+        // check is deleted, and MIR Lint must reject it on its own.
+        lf_expect("alias.exclusive call clean", lf_call_alias(false), None),
+        lf_expect("alias.exclusive call planted (E0204 projected_write_window_overlap)", lf_call_alias(true), Val(MIRLintRule.AliasExclusive)),
+        lf_expect("alias.exclusive closure clean", lf_closure_alias(false), None),
+        lf_expect("alias.exclusive closure planted (#4621 memcorpus case 36)", lf_closure_alias(true), Val(MIRLintRule.AliasExclusive)),
+        lf_expect("alias.exclusive closure loop clean", lf_closure_loop(false), None),
+        lf_expect("alias.exclusive closure loop planted (#4621 memcorpus case 62)", lf_closure_loop(true), Val(MIRLintRule.AliasExclusive)),
+        lf_expect("alias.exclusive task group disjoint lends (scoped_borrow_bands)", lf_group_lend(0, 2, 0), None),
+        lf_expect("alias.exclusive task group overlapping lends (E1101 taskgroup_overlapping_write_borrows)", lf_group_lend(0, 0, 0), Val(MIRLintRule.AliasExclusive)),
+        lf_expect("view.valid lent owner moved after join", lf_group_lend(0, -1, 2), None),
+        lf_expect("view.valid lent owner moved (E1101 taskgroup_lent_owner_moved)", lf_group_lend(0, -1, 1), Val(MIRLintRule.ViewValid)),
+        lf_expect("view.valid owner changed after last use", lf_view_owner_changed(false), None),
+        lf_expect("view.valid owner changed (E0212 view_owner_changed)", lf_view_owner_changed(true), Val(MIRLintRule.ViewValid)),
+        lf_expect("view.valid return from parameter", lf_view_escape(false), None),
+        lf_expect("view.valid return from local (E2305 view_outlives_owner)", lf_view_escape(true), Val(MIRLintRule.ViewValid)),
+        lf_expect("send.boundary copied capture", lf_task_capture(false), None),
+        lf_expect("send.boundary write capture (E1101 task_capture)", lf_task_capture(true), Val(MIRLintRule.SendBoundary)),
+        lf_expect("send.boundary Int crossing", lf_crossing(fx_int()), None),
+        lf_expect("send.boundary Cell crossing (E1102 local_cell_crossing)", lf_crossing(lf_generic("Cell", fx_int())), Val(MIRLintRule.SendBoundary)),
+        lf_expect("send.boundary view crossing (E1102 string_view_task_capture)", lf_crossing(lf_generic("View", fx_string())), Val(MIRLintRule.SendBoundary)),
+        lf_expect("send.boundary channel send clean", lf_channel_send(fx_int()), None),
+        lf_expect("send.boundary channel send planted (E1102 unsendable_send)", lf_channel_send(lf_fn()), Val(MIRLintRule.SendBoundary)),
+        lf_expect("ownership.move consume clean", lf_consume_reuse(false), None),
+        lf_expect("ownership.move consume planted (E0121 ownership_call_consume_provenance)", lf_consume_reuse(true), Val(MIRLintRule.OwnershipMove)),
     }
     loop ok in results {
         if {
