@@ -106,7 +106,7 @@ fn jet_web_form_dev_panel() -> String {
     #Unsafe("snapshot opt-in dev form facts while holding the sole panel registry mutex") {
         locked :: JET_WEB_FORM_PANEL_FACTS.lock()
         if locked.is_err() -> return ""
-        facts :: locked.unwrap()
+        facts :: locked ?? panic("unwrap failed")
         rows := [String].new()
         loop fact in facts.iter() {
             state :: fact.state.get()
@@ -335,7 +335,7 @@ impl JetWebForm {
             names: [String] := pending.fields.keys().cloned().collect()
             names.sort()
             loop name in names {
-                field :: pending.fields.get_mut(&name).unwrap()
+                field :: pending.fields.get_mut(&name) ?? panic("unwrap failed")
                 field_errors :: jet_web_form_validate_field(field, rules.validators.get(&field.name))
                 if !field_errors.is_empty() -> sync_errors.insert(field.name.clone(), field_errors.clone())
                 if rules.async_validators.get(&field.name).is_some_and(fn(validators) { !validators.is_empty() }) {
@@ -536,7 +536,7 @@ impl JetWebForm {
         names: [String] := field_errors.keys().cloned().collect()
         names.sort()
         loop name in names {
-            errors :: field_errors.remove(&name).unwrap()
+            errors :: field_errors.remove(&name) ?? panic("unwrap failed")
             if state.fields.get_mut(&name) == .Val(field) {
                 field.errors = errors.into_iter().map(jet_web_form_bound_error).collect()
                 field.touched = true

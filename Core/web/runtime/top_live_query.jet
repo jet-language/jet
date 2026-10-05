@@ -145,7 +145,7 @@ fn jet_app_live_keyed(key: String, footprint: String, initial: String, rerun: Je
     state := jet_live_registry().lock() ?? return jet_live_error_query(0, ^footprint, "live registry unavailable")
     ids :: state.queries.keys()
     loop id in ids {
-        record :: state.queries.get(&id).unwrap()
+        record :: state.queries.get(&id) ?? panic("unwrap failed")
         if record.lifecycle.active && record.key == key {
             record := state.queries.get_mut(&id) ?? return jet_live_error_query(0, ^footprint, "live registry entry disappeared")
             if record.footprint != footprint -> return jet_live_conflict_query(id, ^key, ^footprint, &record.footprint)
@@ -345,7 +345,7 @@ fn jet_live_schedule_latest(state: &JetLiveRegistry, id: U64, reruns: &[(U64, U6
 fn jet_live_mark_footprint(state: &JetLiveRegistry, footprint: &JetLiveFootprint, cause: String, reruns: &[(U64, U64, JetLiveRerun)]) -> U64 {
     hit: U64 := 0
     ids := state.queries.keys().filter(fn(id) {
-        query :: state.queries.get(id).unwrap()
+        query :: state.queries.get(id) ?? panic("unwrap failed")
         query.lifecycle.active && query.footprint.intersects(footprint)
     }).collect<[U64]>()
     &ids.sort()
@@ -365,7 +365,7 @@ fn jet_live_mark_footprint(state: &JetLiveRegistry, footprint: &JetLiveFootprint
 fn jet_live_mark_key(state: &JetLiveRegistry, key: String, cause: String, reruns: &[(U64, U64, JetLiveRerun)]) -> U64 {
     hit: U64 := 0
     ids := state.queries.keys().filter(fn(id) {
-        query :: state.queries.get(id).unwrap()
+        query :: state.queries.get(id) ?? panic("unwrap failed")
         query.lifecycle.active && query.key == key
     }).collect<[U64]>()
     &ids.sort()

@@ -174,7 +174,7 @@ fn jet_web_query_queue_persist(queue: &JetWebQueryQueueState) -> () Err! {
 fn jet_web_query_json(value: String) -> String {
     bytes: [U8] := []
     debug_str_into(&bytes, value)
-    String.from_utf8(bytes).unwrap()
+    String.from_utf8(bytes) ?? panic("unwrap failed")
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebQuery.rs:233
 fn jet_web_query_bound_error(error: String) -> String {
@@ -722,7 +722,7 @@ impl JetWebQuery {
         before :: self.state.get()
         self.set_state(JetWebQueryState{status: WebQueryStatus.Fetching, error: "", ..before}, "refresh-start")
         if self.live.is_some() {
-            _ :: jet_app_live_refresh(self.live.as_ref().unwrap())
+            _ :: jet_app_live_refresh(self.live.as_ref() ?? panic("unwrap failed"))
             state :: self.state()
             if state.status == WebQueryStatus.Error -> return Err(state.error)
             return Ok(())

@@ -214,7 +214,7 @@ impl<T: Clone> JetWebStoreLedger<T> {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs:344
     fn reserve_sequence(self: &Self) -> U64 {
-        self.next_event_sequence = self.next_event_sequence.checked_add(1).expect("Store event sequence exhausted")
+        self.next_event_sequence = self.next_event_sequence.checked_add(1) ?? panic("Store event sequence exhausted")
         self.next_event_sequence
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs:352

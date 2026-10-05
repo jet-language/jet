@@ -199,7 +199,7 @@ fn jet_web_router_parse_value(field: &JetWebRouterField,raw: (&String)?) -> Stri
         if field.required { return Err("missing required parameter `{field.name}`") }
         return Ok(None)
     }
-    raw :: raw.unwrap()
+    raw :: raw ?? panic("unwrap failed")
     normalized :: match field.value_type {
         WebRouterValueType.String -> raw.clone(),
         WebRouterValueType.Int -> raw.parse::<I64>().map(fn(value) { value.to_string() }).map_err(fn(_) { "parameter `{field.name}` expects Int, got `{raw}`" })?,
@@ -460,7 +460,7 @@ impl JetWebRouter {
     pub fn abort(self: &Self) -> Bool {
         aborted :: self.start_navigation_abort()
         if aborted.is_none() -> return false
-        (_, token, signal, current) := aborted.unwrap()
+        (_, token, signal, current) := aborted ?? panic("unwrap failed")
         // GATE #4565: kernel primitive
         #Unsafe("release navigation cancellation flag") { token.store(true, Ordering.Release) }
         current.status = WebNavigationStatus.Aborted

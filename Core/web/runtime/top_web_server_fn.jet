@@ -91,7 +91,7 @@ fn jet_web_server_fn_origin_matches_host(origin: &String, host: (&String)?) -> B
     if host.is_none() -> return false
     authority := origin.strip_prefix("https://").or_else(fn() { origin.strip_prefix("http://") })
         .unwrap_or(origin).split('/').next().unwrap_or_default() // #4303
-    !authority.is_empty() && authority.eq_ignore_ascii_case(host.unwrap())
+    !authority.is_empty() && authority.eq_ignore_ascii_case(host ?? panic("unwrap failed"))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:115
 #Derive(Clone, Copy, Debug, Eq, PartialEq)

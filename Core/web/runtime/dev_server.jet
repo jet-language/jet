@@ -296,7 +296,7 @@ fn jet_devserver_command_output_bounded(command: &Command, limit: USize) -> Outp
         (stdout, stderr) -> {
             _ :: child.kill()
             _ :: child.wait()
-            return Err(stdout.err().or_else(fn() { stderr.err() }).expect("missing build pipe error"))
+            return Err(stdout.err().or_else(fn() { stderr.err() }) ?? panic("missing build pipe error"))
         }
     }
     budget :: Arc.new(AtomicUsize.new(0))

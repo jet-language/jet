@@ -889,7 +889,7 @@ impl JetApp {
     pub fn router(self) -> JetWebRouter Never! {
         state := self.lock()
         if state.router.is_none() -> state.router = Val(JetApp.build_router(state))
-        state.router.map(router -> ~router).expect("app router is built above")
+        state.router.map(router -> ~router) ?? panic("app router is built above")
     }
     // Rust: crates/jet-codegen/src/Prelude/App.rs:1537
     pub fn respond(self, url: String) -> JetAppResponse Never! {
