@@ -399,7 +399,7 @@ fn jet_testing_histories_result_with_strategy<Command: HistoryCommand, Strategy:
         record :: ComparisonRecord.terminal(relation, .Unavailable, "history provenance is unavailable")
         return Ok(jet_testing_history_record(^record, [], [], [], Val(checked_seed as I64), None))
     }
-    provenance :: provenance.unwrap()
+    provenance :: provenance ?? panic("unwrap failed")
     if strategy.unsupported_reason() == Val(reason) {
         record :: ComparisonRecord.terminal(relation.clone(), .Unsupported, reason)
         return Ok(jet_testing_history_record(^record, [], [], [], Val(checked_seed as I64), Val(&provenance)))
