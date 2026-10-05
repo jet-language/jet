@@ -83,17 +83,17 @@ pub fn jet_std_raw_to_exact(value: I64) -> CtBigInt Never! {
 pub fn jet_std_exact_to_raw(value: CtBigInt) -> I64 Never! { JetInt.from_big(^value).into_raw() }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5574
 pub fn jet_std_decimal_to_exact(value: JetDecimal) -> CtDecimal Never! {
-    CtDecimal.from_str(value.to_string_rep()).expect("canonical Decimal carrier must parse")
+    CtDecimal.from_str(value.to_string_rep()) ?? panic("canonical Decimal carrier must parse")
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5581
 pub fn jet_std_decimal_from_exact(value: CtDecimal) -> JetDecimal Never! {
-    JetDecimal.from_str(value.to_string_rep()).expect("canonical Decimal carrier must parse")
+    JetDecimal.from_str(value.to_string_rep()) ?? panic("canonical Decimal carrier must parse")
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5588
 pub fn jet_std_fraction_to_exact(value: JetFraction) -> CtFraction Never! {
     numerator := CtBigInt{negative: value.numerator.negative, limbs: value.numerator.limbs.clone()}
     denominator := CtBigInt{negative: value.denominator.negative, limbs: value.denominator.limbs.clone()}
-    CtFraction.from_bigints(^numerator, ^denominator).expect("canonical Fraction carrier must have a nonzero denominator")
+    CtFraction.from_bigints(^numerator, ^denominator) ?? panic("canonical Fraction carrier must have a nonzero denominator")
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5603
 pub fn jet_std_fraction_from_exact(value: CtFraction) -> JetFraction Never! {
@@ -284,7 +284,7 @@ impl JetDecimal {
     // Every binary denominator is a power of two; a power of five gives an exact decimal.
     pub fn from_float(value: F64) -> JetDecimal? Never! {
         if !value.is_finite() -> return .None
-        if value == 0.0 -> return .Val(JetDecimal.from_int(0).expect("zero is a valid Decimal"))
+        if value == 0.0 -> return .Val(JetDecimal.from_int(0) ?? panic("zero is a valid Decimal"))
         bits := value.to_bits()
         negative := (bits >> 63) != 0
         exponent := ((bits >> 52) & 0x7ff) as I32
@@ -485,7 +485,7 @@ impl JetDecimal {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6208
     fn quotient_remainder(self) -> (JetBigInt, JetBigInt, JetBigInt) Never! {
         denominator := JetDecimal.scale_factor(self.scale)
-        (quotient, remainder) := self.signed_bigint().div_rem(denominator).expect("Decimal scale denominator is nonzero")
+        (quotient, remainder) := self.signed_bigint().div_rem(denominator) ?? panic("Decimal scale denominator is nonzero")
         (^quotient, ^remainder, ^denominator)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6217

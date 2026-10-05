@@ -615,7 +615,7 @@ fn jet_jit_decimal_compare(a: I64,b: I64) -> I64 Never! {
     variant := "Equal"
     if order < I8{0} -> variant = "Less"
     if order > I8{0} -> variant = "Greater"
-    types_meta.prelude_enum_variant_index(Syntax.TYPE_ORDERING,variant).expect("Prelude Ordering variants must be registered")
+    types_meta.prelude_enum_variant_index(Syntax.TYPE_ORDERING,variant) ?? panic("Prelude Ordering variants must be registered")
 }
 // Rust: crates/jet-jit/src/Numeric.rs:785
 fn jet_jit_decimal_to_string(a: I64) -> I64 Never! {
@@ -1658,7 +1658,7 @@ pub fn register_numeric_symbols(builder: &JITBuilder) Never! {
         builder.symbol(symbol, address())
         #If(test) { audit.record_registered(symbol) }
         Ok(())
-    }).expect("numeric symbol registration is infallible")
+    }) ?? panic("numeric symbol registration is infallible")
 }
 // Rust: crates/jet-jit/src/Numeric.rs:1115-1146
 pub fn declare_numeric_host_fns<M: Module>(module: &M) -> NumericHostFns Err! {

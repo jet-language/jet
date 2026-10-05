@@ -5,7 +5,7 @@ use std.cmp.[Ordering]
 pub fn decimal_from_str(value: String) -> ExactDecimal ()! { ExactDecimal.from_str(value).map_err(fn(_) { () }) }
 // Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:11
 pub fn decimal_from_int(value: ExactBigInt) -> ExactDecimal Never! {
-    ExactDecimal.from_str(value.to_string_rep()).expect("exact Int must fit Decimal")
+    ExactDecimal.from_str(value.to_string_rep()) ?? panic("exact Int must fit Decimal")
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:15
 pub fn decimal_from_float(value: F64) -> ExactDecimal? Never! { ExactDecimal.from_float(value) }

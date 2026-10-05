@@ -34,7 +34,7 @@ impl<T> JetPersistCell<T> {
         self.guard().as_ref().expect("MIR persistent value is uninitialized").clone()
     }
     // Rust: crates/jet-codegen/src/Prelude/Core.rs:41
-    pub fn take(self) -> T { self.guard().take().expect("MIR persistent value is uninitialized") }
+    pub fn take(self) -> T { self.guard().take() ?? panic("MIR persistent value is uninitialized") }
     // Rust: crates/jet-codegen/src/Prelude/Core.rs:47
     pub fn set(self, value: T) -> { self.guard().set(Val(^value)) }
 }
@@ -243,7 +243,7 @@ fn jet_list_para_fold<T: Sync, U: Send>(xs: [T], seed: fn() -> U, step: fn(&U, &
 // D-FRED1=A: reject extents outside the selected wasm32 address space.
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:533
 fn jet_web_d_fred_checked_len(len: U32, element_size: Int) -> Int {
-    bytes :: (Int{len}).checked_mul(element_size).expect("Web D-FRED input byte size overflow")
+    bytes :: (Int{len}).checked_mul(element_size) ?? panic("Web D-FRED input byte size overflow")
     assert(bytes <= Int{U32.MAX}, "Web D-FRED input exceeds wasm32 address space")
     Int{len}
 }

@@ -89,8 +89,8 @@ impl TerminalSession {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:127
     pub fn eq(self, other: TerminalSession) -> Bool Never! {
         match selected_family() {
-            .Unix => Rc.ptr_eq(self.master.unwrap(), other.master.unwrap()),
-            .Windows => Rc.ptr_eq(self.control.unwrap(), other.control.unwrap()),
+            .Unix => Rc.ptr_eq(self.master ?? panic("unwrap failed"), other.master ?? panic("unwrap failed")),
+            .Windows => Rc.ptr_eq(self.control ?? panic("unwrap failed"), other.control ?? panic("unwrap failed")),
             _ => false,
         }
     }
@@ -826,7 +826,7 @@ impl DataQueryRows<T> {
         })
         row_type :: schema.row_type.clone()
         callable :: JetTableCallable.new("data.query.filter", row_type, JetTableTypeId.boolean())
-        plan.append_filter(schema, callable).expect("typed query filter plan must remain valid")
+        plan.append_filter(schema, callable) ?? panic("typed query filter plan must remain valid")
         DataQueryRows{root: Arc.new(DataQueryPlan.Filter{input: self.root.clone(), predicate: Arc.new(predicate)}),
             missing: self.missing, plan: ^plan}
     }
@@ -838,7 +838,7 @@ impl DataQueryRows<T> {
         })
         row_type :: schema.row_type.clone()
         callable :: JetTableCallable.new("data.query.sort_by", row_type, JetTableTypeId.string())
-        plan.append_sort(schema, callable).expect("typed query sort plan must remain valid")
+        plan.append_sort(schema, callable) ?? panic("typed query sort plan must remain valid")
         DataQueryRows{root: Arc.new(DataQueryPlan.SortBy{input: self.root.clone(), key: Arc.new(key)}),
             missing: self.missing, plan: ^plan}
     }

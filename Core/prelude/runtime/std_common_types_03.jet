@@ -116,7 +116,7 @@ impl JetBigInt {
         a := left.abs()
         b := right.abs()
         while !b.is_zero() {
-            (_, remainder) :: a.div_rem(b).expect("gcd divisor is nonzero")
+            (_, remainder) :: a.div_rem(b) ?? panic("gcd divisor is nonzero")
             a = ^b
             b = remainder.abs()
         }
@@ -126,7 +126,7 @@ impl JetBigInt {
     pub fn lcm(left: JetBigInt, right: JetBigInt) -> JetBigInt Never! {
         if left.is_zero() || right.is_zero() -> return JetBigInt.from_int(0)
         divisor :: JetBigInt.gcd(left, right)
-        quotient :: left.abs().div_rem(divisor).expect("lcm gcd is nonzero").0
+        quotient :: (left.abs().div_rem(divisor) ?? panic("lcm gcd is nonzero")).0
         quotient.mul(right.abs())
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3741
@@ -283,7 +283,7 @@ impl JetBigInt {
         digits := [Char]{}
         while !value.is_zero() {
             (next, digit) :: value.div_rem_small(radix)
-            &digits.push(from_digit(digit, radix).expect("div_rem_small remainder is below the radix"))
+            &digits.push(from_digit(digit, radix) ?? panic("div_rem_small remainder is below the radix"))
             value = ^next
         }
         if digits.is_empty() { &digits.push('0') } else { &digits.reverse() }
@@ -293,7 +293,7 @@ impl JetBigInt {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3995
     pub fn to_string_rep(self) -> String Never! {
         if self.limbs.len() == 1 && self.limbs[0] == 0 -> return "0"
-        s := self.limbs.last().unwrap().to_string()
+        s := (self.limbs.last() ?? panic("unwrap failed")).to_string()
         index := self.limbs.len() - 1
         while index > 0 {
             index -= 1

@@ -463,7 +463,7 @@ impl DataQueryCursor<T> {
                     keyed.sort_by(fn(left, right) { left.0.cmp(right.0) })
                     rows = Val(keyed.into_iter().map(fn(pair) { pair.1 }).collect())
                 }
-                sorted :: rows.as_ref().expect("sort rows initialized")
+                sorted :: rows.as_ref() ?? panic("sort rows initialized")
                 if index >= sorted.len() -> return None
                 row :: sorted[index].clone()
                 index += 1
@@ -845,7 +845,7 @@ impl JetBigInt {
             else if Val(rest) = t.strip_prefix('+') { (false, rest) } else { (false, t) }
         if body.is_empty() || !body.chars().all(fn(c) { c.is_ascii_digit() }) -> return Err("invalid exact Int string `{s}`")
         acc := Self{negative: false, limbs: [0]}
-        for ch in body.chars() -> acc = acc.mul_small(10).add_small(ch.to_digit(10).unwrap() as U32)
+        for ch in body.chars() -> acc = acc.mul_small(10).add_small((ch.to_digit(10) ?? panic("unwrap failed")) as U32)
         acc.negative = negative && !(acc.limbs.len() == 1 && acc.limbs[0] == 0)
         acc
     }
@@ -866,7 +866,7 @@ impl JetBigInt {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3294
     fn normalize(self) -> JetBigInt Never! {
-        while self.limbs.len() > 1 && self.limbs.last().unwrap() == 0 -> _ :: self.limbs.pop()
+        while self.limbs.len() > 1 && (self.limbs.last() ?? panic("unwrap failed")) == 0 -> _ :: self.limbs.pop()
         if self.limbs.len() == 1 && self.limbs[0] == 0 -> self.negative = false
         self
     }

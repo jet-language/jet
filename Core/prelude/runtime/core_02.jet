@@ -828,7 +828,7 @@ fn jet_checked_range_bounds(len: I64, range: JetRange, action: String, file: Str
         kind :: if range.exclusive { "exclusive" } else { "inclusive" }
         jet_panic(file, line, "can't {action} {len} items from {range.start} to {range.end} ({kind})")
     }
-    (start, end) :: bounds.unwrap()
+    (start, end) :: bounds ?? panic("unwrap failed")
     start as Int..<end as Int
 }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:2430
@@ -936,8 +936,8 @@ fn jet_get_disjoint_write<T>(xs: &ViewMut<T>, indices: View<I64>) -> [ViewMut<T>
 fn jet_edit_disjoint<T>(xs: &ViewMut<T>, indices: View<I64>, edit: fn(ViewMut<T>, ViewMut<T>) -> ()) -> () Err! {
     if indices.len() != 2 -> return Err("edit_disjoint needs exactly two indexes")
     views := jet_get_disjoint_write(&xs, indices)?
-    right :: views.pop().expect("two disjoint views")
-    left :: views.pop().expect("two disjoint views")
+    right :: views.pop() ?? panic("two disjoint views")
+    left :: views.pop() ?? panic("two disjoint views")
     edit(^left, ^right)
     Ok(())
 }
@@ -1112,7 +1112,7 @@ impl JetStringCountBuilder {
     fn short_string(key: U64) -> String {
         len :: (key >> 56) as Int
         bytes :: (0..<len).map(index -> ((key >> (index * 8)) & U64{0xff}) as U8).collect()
-        String.from_utf8(bytes).expect("JetStringCountBuilder stores only valid UTF-8 keys")
+        String.from_utf8(bytes) ?? panic("JetStringCountBuilder stores only valid UTF-8 keys")
     }
     // Rust: crates/jet-codegen/src/Prelude/Core.rs:3042
     fn new(target: &[String:I64]) -> JetStringCountBuilder from target { JetStringCountBuilder.with_source_capacity(&target, 0) }
@@ -1152,7 +1152,7 @@ impl Drop for JetStringCountBuilder {
     fn drop(self: &JetStringCountBuilder) -> {
         // Hash entries are committed to the canonical ordered map, not observed in hash order.
         self.target.extend(mem.take(&self.short_counts).into_iter().map((key, value) -> (JetStringCountBuilder.short_string(key), value)))
-        self.target.extend(mem.take(&self.long_counts).into_iter().map((bytes, value) -> (String.from_utf8(^bytes).expect("JetStringCountBuilder stores only valid UTF-8 keys"), value)))
+        self.target.extend(mem.take(&self.long_counts).into_iter().map((bytes, value) -> (String.from_utf8(^bytes) ?? panic("JetStringCountBuilder stores only valid UTF-8 keys"), value)))
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:3119

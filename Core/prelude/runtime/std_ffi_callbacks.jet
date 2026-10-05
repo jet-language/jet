@@ -703,7 +703,7 @@ pub fn jet_ffi_callback_registration_unsubscribe(handle: *c_void) -> *c_void {
             mem.forget(^raw)
             return ptr.null_mut<c_void>()
         }
-        registration :: registration.unwrap()
+        registration :: registration ?? panic("unwrap failed")
         retained_state :: registration.state.clone()
         task :: registration.unsubscribe()
         Box.into_raw(Box.new(JetFfiRawStopTask{task: Val(^task),
