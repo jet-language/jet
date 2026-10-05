@@ -461,7 +461,7 @@ impl JetDataPlotLayer {
     pub fn encode(self: Self, channel: JetDataPlotChannel, field: JetDataPlotField, aggregate: JetDataPlotAggregate) -> Self {
         self := ^self
         encoding :: JetDataPlotEncoding.new(channel, ^field, aggregate)
-        if Val(existing) :: self.encodings.iter_mut().find(fn(existing) { existing.channel == channel }) {
+        if self.encodings.iter_mut().find(fn(existing) { existing.channel == channel }) == .Val(existing) {
             *existing = ^encoding
         } else { self.encodings.push(^encoding) }
         ^self
@@ -628,11 +628,11 @@ impl JetDataPlotError {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:1323
     fn message(self: &Self) -> String {
         out := self.reason.clone()
-        if Val(field) :: &self.field { out.push_str("; field={field}") }
-        if Val(channel) :: &self.channel { out.push_str("; channel={channel}") }
-        if Val(mark) :: &self.mark { out.push_str("; mark={mark}") }
-        if Val(expected) :: &self.expected { out.push_str("; expected={expected}") }
-        if Val(actual) :: &self.actual { out.push_str("; actual={actual}") }
+        if (&self.field) == .Val(field) { out.push_str("; field={field}") }
+        if (&self.channel) == .Val(channel) { out.push_str("; channel={channel}") }
+        if (&self.mark) == .Val(mark) { out.push_str("; mark={mark}") }
+        if (&self.expected) == .Val(expected) { out.push_str("; expected={expected}") }
+        if (&self.actual) == .Val(actual) { out.push_str("; actual={actual}") }
         ^out
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:1343
@@ -652,7 +652,7 @@ impl Display for JetDataPlotError {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:1365
     fn fmt(self: &Self, formatter: &Formatter) -> () Err! {
         formatter.write_fmt("{self.kind:?} {self.operation}: {self.message()}")?
-        if Val(index) :: self.index { formatter.write_fmt(", index {index}")? }
+        if self.index == .Val(index) { formatter.write_fmt(", index {index}")? }
         ()
     }
 }
@@ -701,7 +701,7 @@ impl JetDataPlotPlan {
                 .with_field(^field.name).with_channel(channel).with_expected("numeric").with_actual(^field.type_name))
         }
         encoding :: JetDataPlotEncoding.new(channel, ^field, aggregate)
-        if Val(existing) :: self.encodings.iter_mut().find(fn(existing) { existing.channel == channel }) {
+        if self.encodings.iter_mut().find(fn(existing) { existing.channel == channel }) == .Val(existing) {
             *existing = ^encoding
         } else { self.encodings.push(^encoding) }
         ()
@@ -715,7 +715,7 @@ impl JetDataPlotPlan {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:1506
     pub fn add_scale(self: &Self, scale: JetDataPlotScale) -> () JetDataPlotError! {
         self.validate_scale(&scale)?
-        if Val(existing) :: self.scales.iter_mut().find(fn(existing) { existing.channel == scale.channel }) {
+        if self.scales.iter_mut().find(fn(existing) { existing.channel == scale.channel }) == .Val(existing) {
             *existing = ^scale
         } else { self.scales.push(^scale) }
         ()
@@ -725,7 +725,7 @@ impl JetDataPlotPlan {
         if !matches(axis.channel, .X | .Y) -> return Err(JetDataPlotError.invalid("plot.axis", "axes can only describe x or y channels").with_channel(axis.channel))
         if axis.ticks < 0 -> return Err(JetDataPlotError.invalid("plot.axis", "axis tick count must not be negative").with_channel(axis.channel))
         if axis.title.chars().any(fn(c) { c.is_control() }) -> return Err(JetDataPlotError.invalid("plot.axis", "axis title must not contain control characters").with_channel(axis.channel))
-        if Val(existing) :: self.axes.iter_mut().find(fn(existing) { existing.channel == axis.channel }) {
+        if self.axes.iter_mut().find(fn(existing) { existing.channel == axis.channel }) == .Val(existing) {
             *existing = ^axis
         } else { self.axes.push(^axis) }
         ()

@@ -96,7 +96,7 @@ impl JetTablePlan {
                 input :: self.unary_input(node)?
                 if node.source.is_some() { return Err(JetTablePlanError.UnexpectedSource(node.id)) }
                 if node.callable.is_some() { return Err(JetTablePlanError.UnexpectedCallable(node.id)) }
-                if Val(columns) :: node.selected_columns.as_ref() {
+                if node.selected_columns.as_ref() == .Val(columns) {
                     if node.schema.columns.len() != columns.len() { return Err(JetTablePlanError.SelectionSchemaMismatch(node.id)) }
                     for (output, column) in node.schema.columns.iter().zip(columns) {
                         input_column :: input.schema.column(column).ok_or(JetTablePlanError.UnknownSelectedColumn(node: node.id, column: column.clone()))?
@@ -226,8 +226,8 @@ impl JetTablePlanInspection {
 fn jet_table_detect_cycle(nodes: &[JetTableNode]) -> () JetTablePlanError! {
     colors := [].with_capacity(nodes.len())
     colors.resize(nodes.len(), 0 as U8)
-    for start in 0..<nodes.len() {
-        if colors[start] != 0 { continue }
+    loop start in 0..<nodes.len() {
+        if colors[start] != 0 { next }
         colors[start] = 1
         stack := [(start, 0 as Usize)]
         loop {
@@ -238,12 +238,12 @@ fn jet_table_detect_cycle(nodes: &[JetTableNode]) -> () JetTablePlanError! {
             if next_input >= nodes[node].inputs.len() {
                 colors[node] = 2
                 _ :: stack.pop()
-                continue
+                next
             }
             input :: nodes[node].inputs[next_input]
             stack[top].1 += 1
             input_index :: input.index()
-            if input_index >= nodes.len() { continue }
+            if input_index >= nodes.len() { next }
             match colors[input_index] {
                 0 -> {
                     colors[input_index] = 1
@@ -373,13 +373,13 @@ impl JetTableBatchState {
         }
         accepted := rows
         dropped := 0 as U128
-        if Val(max_batch_rows) :: self.max_batch_rows {
+        if self.max_batch_rows == .Val(max_batch_rows) {
             if accepted > max_batch_rows {
                 dropped = accepted - max_batch_rows
                 accepted = max_batch_rows
             }
         }
-        if Val(max_rows) :: self.max_rows {
+        if self.max_rows == .Val(max_rows) {
             if self.accepted_rows > max_rows { return JetTableBatchOffer.ArithmeticOverflow }
             remaining :: max_rows - self.accepted_rows
             if accepted > remaining {

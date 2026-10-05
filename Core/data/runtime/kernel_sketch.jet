@@ -4,7 +4,7 @@ use std.sync.[Arc, Mutex]
 // Rust: crates/jet-codegen/src/Prelude/Core/Sketch.rs:3
 fn fnv1a(data: &[U8]) -> U64 {
     hash := 14695981039346656037 as U64
-    for byte in data {
+    loop byte in data {
         hash ^= byte as U64
         hash = hash.wrapping_mul(1099511628211)
     }
@@ -13,7 +13,7 @@ fn fnv1a(data: &[U8]) -> U64 {
 // Rust: crates/jet-codegen/src/Prelude/Core/Sketch.rs:12
 fn fnv1a_h2(data: &[U8]) -> U64 {
     hash := (0xcbf29ce484222325 as U64).wrapping_add(0xdeadbeef)
-    for byte in data {
+    loop byte in data {
         hash ^= byte as U64
         hash = hash.wrapping_mul(1099511628211)
     }
@@ -97,7 +97,7 @@ impl JetTDigest {
                 if merged.is_empty() {
                     merged.push((mean, weight))
                     cumulative += weight
-                    continue
+                    next
                 }
                 last := merged.last_mut().unwrap()
                 quantile :: cumulative / total
@@ -157,7 +157,7 @@ impl JetCountMinSketch {
         // GATE #4565: kernel primitive
         #Unsafe("exclusive saturating counter update; preserve poison panic") {
             rows := self.state.lock().unwrap()
-            for row in 0..<4 {
+            loop row in 0..<4 {
                 column :: (first.wrapping_add(second.wrapping_mul(row as U64 + 1)) & 0xff) as Usize
                 rows[row][column] = rows[row][column].saturating_add(1)
             }

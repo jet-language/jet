@@ -198,7 +198,7 @@ fn jet_data_plot_render_svg(plan: &JetDataPlotPlan, rows: [JetDataPlotDatum], ca
         while layer_index < layer_count {
             layer :: if layer_index == 0 { None } else { plan.layers.get(layer_index - 1) }
             effective :: layer.map(fn(layer) { jet_data_plot_effective_encodings(&plan.encodings, &layer.encodings) }).unwrap_or_else(fn() { plan.encodings.clone() })
-            layer_rows :: if Val(layer) :: layer { jet_data_plot_layer_rows(rows, plan, Val(layer))? } else { rows.to_vec() }
+            layer_rows :: if layer == .Val(layer) { jet_data_plot_layer_rows(rows, plan, Val(layer))? } else { rows.to_vec() }
             layer_rows :: if plan.facets.is_empty() { ^layer_rows } else {
                 jet_data_plot_facet_buckets(layer_rows, &plan.facets).into_iter()
                     .find(fn(bucket) { bucket.0 == facet_row && bucket.1 == facet_column })
@@ -225,8 +225,8 @@ fn jet_data_plot_svg_draw_legends(out: &String, plan: &JetDataPlotPlan, rows: [J
     right_y := plan.layout.margin_top
     left_y := plan.layout.margin_top
     loop legend in plan.legends {
-        if !legend.visible -> continue
-        encoding :: jet_data_plot_channel_encoding(plan.encodings, legend.channel) ?? continue
+        if !legend.visible -> next
+        encoding :: jet_data_plot_channel_encoding(plan.encodings, legend.channel) ?? next
         categories :: jet_data_plot_categories(rows, &encoding.field, None)
         (x, y, vertical) :: match legend.position {
             .Top -> {
@@ -284,11 +284,11 @@ fn jet_data_plot_channel_axis(plan: &JetDataPlotPlan, channel: JetDataPlotChanne
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:4301
 fn jet_data_plot_numeric_bounds(rows: [JetDataPlotDatum], field: &JetDataPlotField, scale: &JetDataPlotScale?) -> (F64, F64) JetDataPlotError! {
-    if Val(scale) :: scale {
-        if .Numeric(min, max) :: scale.domain {
+    if scale == .Val(scale) {
+        if scale.domain == .Numeric(min, max) {
             if scale.kind == JetDataPlotScaleKind.Log {
                 loop row in rows {
-                    value :: jet_data_plot_datum_value(row, field).and_then(JetDataPlotValue.number) ?? continue
+                    value :: jet_data_plot_datum_value(row, field).and_then(JetDataPlotValue.number) ?? next
                     if !value.is_finite() || value <= 0.0 {
                         return Err(JetDataPlotError.invalid("plot.scale", "log plot scale needs strictly positive finite data").with_field(field.name.clone()).with_index(row.ordinal))
                     }
@@ -300,7 +300,7 @@ fn jet_data_plot_numeric_bounds(rows: [JetDataPlotDatum], field: &JetDataPlotFie
     minimum := F64.INFINITY
     maximum := F64.NEG_INFINITY
     loop row in rows {
-        value :: jet_data_plot_datum_value(row, field).and_then(JetDataPlotValue.number) ?? continue
+        value :: jet_data_plot_datum_value(row, field).and_then(JetDataPlotValue.number) ?? next
         if !value.is_finite() {
             return Err(JetDataPlotError.non_finite("plot.scale", "plot scale received a non-finite value").with_field(field.name.clone()).with_index(row.ordinal))
         }
@@ -320,12 +320,12 @@ fn jet_data_plot_numeric_bounds(rows: [JetDataPlotDatum], field: &JetDataPlotFie
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:4368
 fn jet_data_plot_categories(rows: [JetDataPlotDatum], field: &JetDataPlotField, scale: &JetDataPlotScale?) -> [String] {
-    if Val(scale) :: scale {
-        if .Categories(values) :: scale.domain -> return values.clone()
+    if scale == .Val(scale) {
+        if scale.domain == .Categories(values) -> return values.clone()
     }
     categories := [String:Bool]{}
     loop row in rows {
-        if Val(value) :: jet_data_plot_datum_value(row, field) { categories.insert(value.display_text(), true) }
+        if jet_data_plot_datum_value(row, field) == .Val(value) { categories.insert(value.display_text(), true) }
     }
     keys := categories.keys().cloned().collect<[String]>()
     keys.sort()
@@ -416,12 +416,12 @@ fn jet_data_plot_svg_draw_axes(out: &String, plan: &JetDataPlotPlan, encodings: 
             out.push_str("<text class=\"tick x\" x=\"{jet_data_plot_number(position)}\" y=\"{jet_data_plot_number(top + height + 18.0)}\">{jet_data_plot_svg_escape(&category)}</text>")
         }
     }
-    if Val(axis) :: x_axis {
+    if x_axis == .Val(axis) {
         if !axis.title.is_empty() {
             out.push_str("<text class=\"axis-title x\" x=\"{jet_data_plot_number(left + width * 0.5)}\" y=\"{jet_data_plot_number(top + height + 38.0)}\">{jet_data_plot_svg_escape(&axis.title)}</text>")
         }
     }
-    if Val(axis) :: y_axis {
+    if y_axis == .Val(axis) {
         if !axis.title.is_empty() {
             out.push_str("<text class=\"axis-title y\" x=\"{jet_data_plot_number(left - 46.0)}\" y=\"{jet_data_plot_number(top + height * 0.5)}\" transform=\"rotate(-90 {jet_data_plot_number(left - 46.0)} {jet_data_plot_number(top + height * 0.5)})\">{jet_data_plot_svg_escape(&axis.title)}</text>")
         }
@@ -447,11 +447,11 @@ fn jet_data_plot_svg_draw_marks(out: &String, plan: &JetDataPlotPlan, encodings:
         .Line -> {
             paths := [String:[(F64, F64)]]{}
             loop row in rows {
-                x_value :: jet_data_plot_datum_value(row, &x_encoding.field) ?? continue
-                y_value :: jet_data_plot_datum_value(row, &y_encoding.field) ?? continue
-                y_number :: y_value.number() ?? continue
+                x_value :: jet_data_plot_datum_value(row, &x_encoding.field) ?? next
+                y_value :: jet_data_plot_datum_value(row, &y_encoding.field) ?? next
+                y_number :: y_value.number() ?? next
                 group :: color_encoding.and_then(fn(encoding) { jet_data_plot_datum_value(row, &encoding.field) }).map(JetDataPlotValue.canonical_key).unwrap_or_else(fn() { "default" })
-                group :: if Val(encoding) :: jet_data_plot_channel_encoding(encodings, JetDataPlotChannel.Detail) {
+                group :: if jet_data_plot_channel_encoding(encodings, JetDataPlotChannel.Detail) == .Val(encoding) {
                     detail :: jet_data_plot_datum_value(row, &encoding.field).map(JetDataPlotValue.canonical_key).unwrap_or_else(fn() { "null" })
                     "{group}|{detail}"
                 } else { ^group }
@@ -463,18 +463,18 @@ fn jet_data_plot_svg_draw_marks(out: &String, plan: &JetDataPlotPlan, encodings:
             groups.sort()
             loop group in groups {
                 points :: paths.get(&group) ?? panic("plot series key disappeared")
-                if points.is_empty() -> continue
+                if points.is_empty() -> next
                 text :: points.iter().map(fn(point) { "{jet_data_plot_number(point.0)} {jet_data_plot_number(point.1)}" }).collect<[String]>().join(" ")
                 out.push_str("<polyline class=\"mark line\" data-series=\"{jet_data_plot_svg_escape(&group)}\" points=\"{text}\" fill=\"none\" stroke=\"{jet_data_plot_palette_color(&group)}\"/>")
             }
-            if Val(encoding) :: text_encoding {
+            if text_encoding == .Val(encoding) {
                 loop row in rows {
-                    x_value :: jet_data_plot_datum_value(row, &x_encoding.field) ?? continue
-                    y_value :: jet_data_plot_datum_value(row, &y_encoding.field) ?? continue
-                    if y_value.number().is_none() -> continue
+                    x_value :: jet_data_plot_datum_value(row, &x_encoding.field) ?? next
+                    y_value :: jet_data_plot_datum_value(row, &y_encoding.field) ?? next
+                    if y_value.number().is_none() -> next
                     x :: jet_data_plot_svg_x(x_value, x_scale, categories, x_minimum, x_maximum, left, width)
                     y :: jet_data_plot_svg_y(y_value, y_scale, y_minimum, y_maximum, top, height)
-                    if Val(value) :: jet_data_plot_datum_value(row, &encoding.field) {
+                    if jet_data_plot_datum_value(row, &encoding.field) == .Val(value) {
                         label :: value.display_text()
                         out.push_str("<text class=\"mark-label\" x=\"{jet_data_plot_number(x + 2.0)}\" y=\"{jet_data_plot_number(y - 4.0)}\">{jet_data_plot_svg_escape(&label)}</text>")
                     }
@@ -486,9 +486,9 @@ fn jet_data_plot_svg_draw_marks(out: &String, plan: &JetDataPlotPlan, encodings:
             band_width :: width / count * 0.78
             baseline :: jet_data_plot_svg_y(&JetDataPlotValue.Number(0.0), y_scale, y_minimum, y_maximum, top, height)
             loop (position, row) in rows.iter().enumerate() {
-                x_value :: jet_data_plot_datum_value(row, &x_encoding.field) ?? continue
-                y_value :: jet_data_plot_datum_value(row, &y_encoding.field) ?? continue
-                if y_value.number().is_none() -> continue
+                x_value :: jet_data_plot_datum_value(row, &x_encoding.field) ?? next
+                y_value :: jet_data_plot_datum_value(row, &y_encoding.field) ?? next
+                if y_value.number().is_none() -> next
                 x :: if x_numeric {
                     jet_data_plot_svg_x(x_value, x_scale, categories, x_minimum, x_maximum, left, width) - band_width * 0.5
                 } else { left + (position as F64 + 0.5) * width / count - band_width * 0.5 }
@@ -497,8 +497,8 @@ fn jet_data_plot_svg_draw_marks(out: &String, plan: &JetDataPlotPlan, encodings:
                 bar_height :: (y - baseline).abs().max(1.0)
                 color_key :: color_encoding.and_then(fn(encoding) { jet_data_plot_datum_value(row, &encoding.field) }).map(JetDataPlotValue.canonical_key).unwrap_or_else(fn() { "default" })
                 out.push_str("<rect class=\"mark bar\" x=\"{jet_data_plot_number(x)}\" y=\"{jet_data_plot_number(top_edge)}\" width=\"{jet_data_plot_number(band_width)}\" height=\"{jet_data_plot_number(bar_height)}\" fill=\"{jet_data_plot_palette_color(&color_key)}\"/>")
-                if Val(encoding) :: text_encoding {
-                    if Val(value) :: jet_data_plot_datum_value(row, &encoding.field) {
+                if text_encoding == .Val(encoding) {
+                    if jet_data_plot_datum_value(row, &encoding.field) == .Val(value) {
                         label :: value.display_text()
                         out.push_str("<text class=\"mark-label\" x=\"{jet_data_plot_number(x + band_width * 0.5)}\" y=\"{jet_data_plot_number(top_edge - 4.0)}\">{jet_data_plot_svg_escape(&label)}</text>")
                     }
@@ -507,16 +507,16 @@ fn jet_data_plot_svg_draw_marks(out: &String, plan: &JetDataPlotPlan, encodings:
         }
         .Point -> {
             loop row in rows {
-                x_value :: jet_data_plot_datum_value(row, &x_encoding.field) ?? continue
-                y_value :: jet_data_plot_datum_value(row, &y_encoding.field) ?? continue
-                if y_value.number().is_none() -> continue
+                x_value :: jet_data_plot_datum_value(row, &x_encoding.field) ?? next
+                y_value :: jet_data_plot_datum_value(row, &y_encoding.field) ?? next
+                if y_value.number().is_none() -> next
                 x :: jet_data_plot_svg_x(x_value, x_scale, categories, x_minimum, x_maximum, left, width)
                 y :: jet_data_plot_svg_y(y_value, y_scale, y_minimum, y_maximum, top, height)
                 radius :: size_encoding.and_then(fn(encoding) { jet_data_plot_datum_value(row, &encoding.field) }).and_then(JetDataPlotValue.number).map(fn(value) { 2.0 + value.abs().sqrt().min(7.0) }).unwrap_or(4.0)
                 color_key :: color_encoding.and_then(fn(encoding) { jet_data_plot_datum_value(row, &encoding.field) }).map(JetDataPlotValue.canonical_key).unwrap_or_else(fn() { "default" })
                 out.push_str("<circle class=\"mark point\" cx=\"{jet_data_plot_number(x)}\" cy=\"{jet_data_plot_number(y)}\" r=\"{jet_data_plot_number(radius)}\" fill=\"{jet_data_plot_palette_color(&color_key)}\"/>")
-                if Val(encoding) :: text_encoding {
-                    if Val(value) :: jet_data_plot_datum_value(row, &encoding.field) {
+                if text_encoding == .Val(encoding) {
+                    if jet_data_plot_datum_value(row, &encoding.field) == .Val(value) {
                         label :: value.display_text()
                         out.push_str("<text class=\"mark-label\" x=\"{jet_data_plot_number(x + radius + 2.0)}\" y=\"{jet_data_plot_number(y - radius - 2.0)}\">{jet_data_plot_svg_escape(&label)}</text>")
                     }

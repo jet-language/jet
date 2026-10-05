@@ -54,7 +54,7 @@ fn jet_data_join_indices(left_keys: &[String], right_keys: &[String], left_join:
     for (left, key) in left_keys.iter().enumerate() {
         match right_rows.get(key) {
             Val(matches) -> {
-                for right in matches {
+                loop right in matches {
                     if (joined.len() as I64) >= limits.max_join_rows { return Err(jet_data_error(DataErrorKind.Limit, operation, "max_join_rows {limits.max_join_rows} exceeded")) }
                     joined.push(JetDataJoinIndex{left: left, right: Val(*right)})
                 }
@@ -198,7 +198,7 @@ fn jet_data_rolling_mean_checked(values: &[F64], width: I64) -> Result<[F64], Da
     jet_data_reject_nonfinite("rolling_mean", values)?
     width :: width as USize
     out := [F64].with_capacity(values.len())
-    for i in 0..<values.len() {
+    loop i in 0..<values.len() {
         start :: i.saturating_add(1).saturating_sub(width)
         window :: &values[start..i]
         mean :: jet_data_neumaier_sum(window)? / (window.len() as F64)
@@ -308,7 +308,7 @@ fn jet_data_require_bridge(provider: &String) -> Result<(), DataError> {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:643
 fn jet_data_bar_text<K: JetShow, V: Clone + Ord + From<I64> + TryInto<I64> + Display>(groups: &[GroupValue<K, V>]) -> String {
     lines := [String]{}
-    for group in groups {
+    loop group in groups {
         n :: group.value.clone().clamp(V.from(0), V.from(40)).try_into().ok().expect("plot width is clamped to 0..40") as I64
         bars :: "#".repeat(n as USize)
         lines.push("{group.key.jet_show()} | {bars} {group.value}")

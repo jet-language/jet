@@ -810,7 +810,7 @@ fn jet_data_loader_jsonl_tree(text: &String, limits: &DataLimits) -> Result<Data
     values := []
     loop (line_index, line) in text.lines().enumerate() {
         line := line.trim() // #4303
-        if line.is_empty() -> continue
+        if line.is_empty() -> next
         if values.len() as I64 >= limits.max_output_rows {
             return Err(jet_data_loader_error(DataErrorKind.Limit, "data.loader.jsonl",
                 "max_output_rows {limits.max_output_rows} exceeded"))

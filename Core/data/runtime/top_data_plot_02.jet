@@ -74,12 +74,12 @@ impl JetDataPlotPlan {
         match transform {
             .Filter{field, value, ..} -> {
                 field :: self.schema.resolve(field)?
-                if .Number(number) :: value {
+                if value == .Number(number) {
                     if !number.is_finite() {
                         return Err(JetDataPlotError.non_finite("plot.transform", "filter literal must be finite").with_field(field.name.clone()))
                     }
                 }
-                if .Text(text) :: value {
+                if value == .Text(text) {
                     if text.chars().any(fn(c) { c.is_control() }) {
                         return Err(JetDataPlotError.invalid("plot.transform", "filter text must not contain control characters").with_field(field.name.clone()))
                     }
@@ -562,10 +562,10 @@ impl<T> JetDataPlot<T> {
         }
         selected := [JetDataPlotSelectedRow]{}
         loop index in &selected_indices {
-            if Val(row) :: rows.iter().find(fn(row) { row.ordinal == index as USize }) {
+            if rows.iter().find(fn(row) { row.ordinal == index as USize }) == .Val(row) {
                 values := [(JetDataPlotField, JetDataPlotValue)]{}
                 loop field in &fields {
-                    if Val(value) :: jet_data_plot_datum_value(row, field) -> &values.push((field.clone(), value.clone()))
+                    if jet_data_plot_datum_value(row, field) == .Val(value) -> &values.push((field.clone(), value.clone()))
                 }
                 &selected.push(JetDataPlotSelectedRow{index, values: ^values})
             }
@@ -598,7 +598,7 @@ impl<T> JetDataPlot<T> {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:2978
     fn bind_column_mut(self: &Self, column: JetDataPlotColumn<T>) -> JetDataPlotError! {
         field :: self.plan.schema.resolve(&column.field)?
-        if Val(existing) :: self.bindings.iter_mut().find(fn(existing) { existing.field.id == field.id }) {
+        if self.bindings.iter_mut().find(fn(existing) { existing.field.id == field.id }) == .Val(existing) {
             existing = JetDataPlotColumn{field: ^field, accessor: ^column.accessor}
         } else {
             &self.bindings.push(JetDataPlotColumn{field: ^field, accessor: ^column.accessor})
@@ -616,13 +616,13 @@ impl<T> JetDataPlot<T> {
                 binding :: self.bindings.iter().find(fn(binding) { binding.field.id == field.id })
                     .ok_or_else(fn() { JetDataPlotError.invalid("plot.data", "plot plan has no typed accessor for a selected column").with_field(field.name.clone()) })?
                 value :: binding.value(row)
-                if .Number(number) :: &value {
+                if (&value) == .Number(number) {
                     if !number.is_finite() {
                         return Err(JetDataPlotError.non_finite("plot.data", "plot column contains a non-finite number")
                             .with_field(field.name.clone()).with_index(ordinal))
                     }
                 }
-                if .Text(text) :: &value {
+                if (&value) == .Text(text) {
                     if text.chars().any(fn(c) { c.is_control() }) {
                         return Err(JetDataPlotError.invalid("plot.data", "plot text value must not contain control characters")
                             .with_field(field.name.clone()).with_index(ordinal))
@@ -692,7 +692,7 @@ fn jet_data_plot_numeric_type(type_name: String) -> Bool {
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3155
 fn jet_data_plot_value_matches_type(value: &JetDataPlotValue, type_name: String) -> Bool {
-    if .Null :: value -> return true
+    if value == .Null -> return true
     lower := type_name.trim().to_ascii_lowercase()
     lower := lower.strip_prefix("option<").and_then(fn(value) { value.strip_suffix(">") }).unwrap_or(&lower)
     match value {
@@ -722,7 +722,7 @@ fn jet_data_plot_compare_values(left: &JetDataPlotValue, right: &JetDataPlotValu
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3206
 fn jet_data_plot_filter_matches(value: (&JetDataPlotValue)?, op: JetDataPlotFilterOp, expected: &JetDataPlotValue) -> Bool {
-    if Val(value) :: value {
+    if value == .Val(value) {
         ordering :: jet_data_plot_compare_values(value, expected)
         return match op {
             .Equal -> ordering == .Equal
@@ -773,8 +773,8 @@ fn jet_data_plot_apply_transforms(rows: &[JetDataPlotDatum], transforms: [JetDat
             .Bin{field, step} -> {
                 loop row in rows.iter_mut() {
                     ordinal :: row.ordinal
-                    if Val(value) :: jet_data_plot_datum_value_mut(row, field) {
-                        if Val(number) :: value.number() {
+                    if jet_data_plot_datum_value_mut(row, field) == .Val(value) {
+                        if value.number() == .Val(number) {
                             if !number.is_finite() {
                                 return Err(JetDataPlotError.non_finite("plot.transform", "bin transform received a non-finite value")
                                     .with_field(field.name.clone()).with_index(ordinal))
@@ -815,7 +815,7 @@ fn jet_data_plot_aggregate_rows(rows: &[JetDataPlotDatum], group_by: [JetDataPlo
         }
         entry := groups.entry(^key).or_insert_with(fn() { (row.clone(), 0, 0.0, None, None) })
         entry.1 = entry.1.saturating_add(1)
-        if Val(value) :: value {
+        if value == .Val(value) {
             if !value.is_finite() {
                 return Err(JetDataPlotError.non_finite("plot.aggregate", "aggregate received a non-finite value")
                     .with_field(field.name.clone()).with_index(entry.0.ordinal))
@@ -842,7 +842,7 @@ fn jet_data_plot_aggregate_rows(rows: &[JetDataPlotDatum], group_by: [JetDataPlo
             .Max -> maximum.map(fn(v) { JetDataPlotValue.Number(jet_data_plot_normalize_zero(v)) }).unwrap_or(.Null)
             .None -> panic("validated above")
         }
-        if Val(existing) :: jet_data_plot_datum_value_mut(&row, field) { existing = ^value }
+        if jet_data_plot_datum_value_mut(&row, field) == .Val(existing) { existing = ^value }
         else { &row.values.push((field.id.clone(), ^value)) }
         &aggregated.push(^row)
     }
@@ -852,7 +852,7 @@ fn jet_data_plot_aggregate_rows(rows: &[JetDataPlotDatum], group_by: [JetDataPlo
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3433
 fn jet_data_plot_apply_encoding_aggregates(rows: &[JetDataPlotDatum], plan: &JetDataPlotPlan, encodings: [JetDataPlotEncoding], limits: &DataLimits) -> JetDataPlotError! {
     loop encoding in encodings {
-        if encoding.aggregate == .None -> continue
+        if encoding.aggregate == .None -> next
         group_by :: encodings.iter().filter(fn(candidate) {
             candidate.channel != encoding.channel && candidate.aggregate == .None
         }).map(fn(candidate) { candidate.field.clone() }).collect<[JetDataPlotField]>()
@@ -866,7 +866,7 @@ fn jet_data_plot_apply_encoding_aggregates(rows: &[JetDataPlotDatum], plan: &Jet
 fn jet_data_plot_effective_encodings(root: [JetDataPlotEncoding], layer: [JetDataPlotEncoding]) -> [JetDataPlotEncoding] {
     effective := root.to_vec()
     loop encoding in layer {
-        if Val(existing) :: effective.iter_mut().find(fn(existing) { existing.channel == encoding.channel }) {
+        if effective.iter_mut().find(fn(existing) { existing.channel == encoding.channel }) == .Val(existing) {
             existing = encoding.clone()
         } else { &effective.push(encoding.clone()) }
     }
@@ -874,7 +874,7 @@ fn jet_data_plot_effective_encodings(root: [JetDataPlotEncoding], layer: [JetDat
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3484
 fn jet_data_plot_layer_rows(source_rows: [JetDataPlotDatum], plan: &JetDataPlotPlan, layer: (&JetDataPlotLayer)?) -> [JetDataPlotDatum] JetDataPlotError! {
-    if Val(layer) :: layer {
+    if layer == .Val(layer) {
         rows := source_rows.to_vec()
         jet_data_plot_apply_transforms(&rows, &layer.transforms, &plan.limits)?
         effective :: jet_data_plot_effective_encodings(&plan.encodings, &layer.encodings)

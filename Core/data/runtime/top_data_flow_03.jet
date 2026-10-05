@@ -66,7 +66,7 @@ fn jet_data_loader_stream<R: __jet_Decode, T>(loader: &DataLoader<T>) -> DataStr
         Ok(None) -> None
         Err(error) -> return Err(jet_data_loader_fail(loader, jet_data_loader_kernel_error(^error)))
     }
-    if Val(payload) :: payload { return jet_data_loader_stream_from_payload(loader, ^payload) }
+    if payload == .Val(payload) { return jet_data_loader_stream_from_payload(loader, ^payload) }
     if loader.format == DataFormat.Parquet {
         payload :: match jet_data_loader_payload(loader) {
             Ok((payload, _offline)) -> ^payload
@@ -177,7 +177,7 @@ fn jet_data_query_arrow<T: ArrowRow + Clone>(batch: DataArrowBatch<T>) -> DataQu
     max_rows :: USize.try_from(limits.max_output_rows).map_err(fn(_) { jet_data_error(DataErrorKind.Limit, "data.query_arrow", "max_output_rows cannot be represented by this target") })?
     if batch.row_count() > max_rows { return Err(jet_data_error(DataErrorKind.Limit, "data.query_arrow", "max_output_rows {limits.max_output_rows} exceeded")) }
     rows := [T].with_capacity(batch.row_count())
-    for index in 0..<batch.row_count() {
+    loop index in 0..<batch.row_count() {
         row :: batch.row(index).map_err(fn(error) { DataError{kind: DataErrorKind.Bridge, operation: "data.query_arrow", row: Ok(I64{index}), column: Err(JetAbsent), index: Err(JetAbsent), reason: error.to_string(), cause: Err(JetAbsent)} })?
         rows.push(^row)
     }
@@ -384,7 +384,7 @@ module jet_data_web {
         result.encoding.max_expansion_depth = number("max_expansion_depth", result.encoding.max_expansion_depth)
         result.encoding.max_expansion_bytes = number("max_expansion_bytes", result.encoding.max_expansion_bytes)
         for (name, target) in [("max_groups", &result.max_groups), ("max_sort_rows", &result.max_sort_rows), ("max_join_rows", &result.max_join_rows), ("max_output_rows", &result.max_output_rows)] {
-            if Val(value) :: field(value, name) { *target = integer(value, "data.limits")? }
+            if field(value, name) == .Val(value) { *target = integer(value, "data.limits")? }
         }
         Ok(^result)
     }
@@ -963,7 +963,7 @@ module jet_data_web {
                 index :: handle(value(0)?, &operation)?
                 // GATE #4565: kernel primitive
                 #Unsafe("drop the owned handle in this thread's slot; an absent slot is already released") {
-                    HANDLES.with(fn(cell) { if Val(slot) :: cell.borrow_mut().get_mut(index) { *slot = None } })
+                    HANDLES.with(fn(cell) { if cell.borrow_mut().get_mut(index) == .Val(slot) { *slot = None } })
                 }
                 Ok(DataTree.Null)
             }
@@ -997,7 +997,7 @@ module jet_data_web {
     #FFI(c)
     #Unsafe("clear a valid owned wasm input slot; the caller relinquishes all borrowed addresses")
     pub fn jet_data_web_input_free(slot: U32, _pointer: U32) -> () {
-        if Ok(slot) :: USize.try_from(slot) { INPUTS.with(fn(cell) { if Val(input) :: cell.borrow_mut().get_mut(slot) { input.clear() } }) }
+        if Ok(slot) :: USize.try_from(slot) { INPUTS.with(fn(cell) { if cell.borrow_mut().get_mut(slot) == .Val(input) { input.clear() } }) }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4978
     // GATE #4565: kernel primitive

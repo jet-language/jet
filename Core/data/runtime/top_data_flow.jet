@@ -285,7 +285,7 @@ fn jet_data_query_apply_operations<T: Clone>(rows: &[T], operations: &[DataQuery
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:666
 fn jet_data_query_collect<T: Clone>(query: &DataQuery<T>) -> [T] DataError! {
     limits :: DataLimits.safe()
-    if Val(rows_source) :: query.rows_frame() { return jet_data_collect_rows_checked(&rows_source, &limits) }
+    if query.rows_frame() == .Val(rows_source) { return jet_data_collect_rows_checked(&rows_source, &limits) }
     if query.is_recomputed() {
         compute :: query.recomputation().ok_or_else(fn() {
             jet_data_error(DataErrorKind.State, "query.collect", "recomputable query has no producer")
@@ -401,7 +401,7 @@ impl<T: Clone, K: Clone + PartialEq, V: Clone> JetDataGroupWatchSource<T, K, V> 
         group_key :: self.key(row.clone())
         group_value :: self.value(^row)?
         rank :: (sort_key.clone(), order)
-        if Val(bucket) :: state.buckets.iter_mut().find(fn(bucket) { bucket.key == group_key }) {
+        if state.buckets.iter_mut().find(fn(bucket) { bucket.key == group_key }) == .Val(bucket) {
             position :: bucket.members.iter().position(fn((id, _, _)) { *id > order }).unwrap_or(bucket.members.len())
             bucket.members.insert(position, (order, ^group_value, ^sort_key))
             if rank < bucket.rank -> bucket.rank = ^rank
@@ -418,7 +418,7 @@ impl<T: Clone, K: Clone + PartialEq, V: Clone> JetDataGroupWatchSource<T, K, V> 
     fn remove(self, state: &JetDataGroupWatchState<K, V>, order: U64) -> {
         empty := None
         loop (index, bucket) in state.buckets.iter_mut().enumerate() {
-            if Val(member) :: bucket.members.iter().position(fn((id, _, _)) { *id == order }) {
+            if bucket.members.iter().position(fn((id, _, _)) { *id == order }) == .Val(member) {
                 bucket.members.remove(member)
                 if bucket.members.is_empty() { empty = Val(index) }
                 else {
@@ -428,7 +428,7 @@ impl<T: Clone, K: Clone + PartialEq, V: Clone> JetDataGroupWatchSource<T, K, V> 
                 break
             }
         }
-        if Val(index) :: empty -> state.buckets.remove(index)
+        if empty == .Val(index) -> state.buckets.remove(index)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:923
     fn materialize(self, state: &JetDataGroupWatchState<K, V>) -> [GroupValue<K, V>] DataError! {
@@ -513,7 +513,7 @@ impl<T: Clone, K: Clone + PartialEq, V: Clone> JetDataGroupWatchSource<T, K, V>.
 fn jet_data_static_query_entries<T: Clone>(query: &DataQuery<T>, cache: &RefCell<[DataWatchEntry<T>]?>) -> [DataWatchEntry<T>] DataError! {
     // GATE #4565: kernel primitive
     #Unsafe("read and publish the one-time join snapshot through native single-thread RefCell") {
-        if Val(entries) :: cache.borrow().as_ref() -> return Ok(entries.clone())
+        if cache.borrow().as_ref() == .Val(entries) -> return Ok(entries.clone())
         rows :: jet_data_query_collect(query)?
         entries :: rows.into_iter().enumerate().map(fn((order, value)) {
             DataWatchEntry{order: order as U64, key: None, value: ^value}
@@ -599,7 +599,7 @@ impl<T: Clone, U: Clone, O: Clone> JetDataJoinWatchSource<T, U, O> {
                     output.push(DataWatchEntry{order: output.len() as U64, key: None,
                         value: self.join(left_entry.value.clone(), None)})
                 }
-                continue
+                next
             }
             loop right_entry in matches {
                 if output.len() as I64 >= limits.max_output_rows {
@@ -695,10 +695,10 @@ fn jet_data_join_query<T: Clone, U: Clone, O: Clone>(left: &DataQuery<T>, right:
         compute_right_static_entries :: right_static_entries.clone()
         result :: jet_data_reducer_query(^tracking, ^steps, fn() {
             join :: compute_join.clone()
-            left_rows :: if Val(cache) :: &compute_left_static_entries {
+            left_rows :: if (&compute_left_static_entries) == .Val(cache) {
                 jet_data_static_query_entries(&left_input, cache)?.into_iter().map(fn(entry) { ^entry.value }).collect()
             } else { jet_data_query_collect(&left_input)? }
-            right_rows :: if Val(cache) :: &compute_right_static_entries {
+            right_rows :: if (&compute_right_static_entries) == .Val(cache) {
                 jet_data_static_query_entries(&right_input, cache)?.into_iter().map(fn(entry) { ^entry.value }).collect()
             } else { jet_data_query_collect(&right_input)? }
             limits :: DataLimits.safe()
