@@ -34,7 +34,7 @@ fn store_reuse_copy_open_profile_file(source: FileReader, destination: String) -
         &hasher.update(chunk)
         &output.write_all(chunk)
     }
-    mode :: if sys.is_unix() -> info.mode & 0o777 else -> 0
+    mode :: if sys.is_unix() -> (info.mode).bit_and(0o777) else -> 0
     if sys.is_unix() -> files.set_mode(destination, mode)
     &output.fsync()
     digest :: hasher.finalize_hex()
@@ -54,5 +54,5 @@ pub fn store_profile_file_proof(path: String) -> ProfileExecutableProof IOError!
     }
     held :: opened.stat()
     if at_path.id != held.id -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("profile projection changed while opening")}))
-    Ok(ProfileExecutableProof{digest: "sha256-{foundation_sha256_file_hex(path)}", mode: held.mode & 0o777})
+    Ok(ProfileExecutableProof{digest: "sha256-{foundation_sha256_file_hex(path)}", mode: (held.mode).bit_and(0o777)})
 }

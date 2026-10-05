@@ -223,7 +223,7 @@ pub struct MovePathPermissions {
                     if entry.path == current -> saved = true
                 }
                 if !saved {
-                    files.set_mode(current, info.mode | 0o200)
+                    files.set_mode(current, (info.mode).bit_or(0o200))
                     &self.original.push(MovedPathMode{path: current, mode: info.mode})
                 }
             }
@@ -757,5 +757,5 @@ fn store_copy_nofollow_file(source: String, destination: String, expected: files
         return Err(IngestError.Mutated("`{source}` changed while copying"))
     }
     files.write_bytes(destination, bytes)
-    files.set_mode(destination, expected.mode & 0o7777)
+    files.set_mode(destination, (expected.mode).bit_and(0o7777))
 }

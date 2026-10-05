@@ -436,13 +436,13 @@ fn utf8_points(raw: [U8]) -> [Int]? {
         cp := b
         if b >= 240 {
             width = 4
-            cp = b & 7
+            cp = (b).bit_and(7)
         } else if b >= 224 {
             width = 3
-            cp = b & 15
+            cp = (b).bit_and(15)
         } else if b >= 192 {
             width = 2
-            cp = b & 31
+            cp = (b).bit_and(31)
         } else if b >= 128 {
             return None
         }
@@ -450,7 +450,7 @@ fn utf8_points(raw: [U8]) -> [Int]? {
         loop k in 1..<width {
             next :: Int.from_u8(raw[i + k])
             if next < 128 || next >= 192 -> return None
-            cp = cp * 64 + (next & 63)
+            cp = cp * 64 + ((next).bit_and(63))
         }
         &out.push(cp)
         i = i + width

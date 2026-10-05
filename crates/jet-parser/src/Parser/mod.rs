@@ -223,7 +223,7 @@ fn parse_for_check_inner(
 
     let mut p = Parser {
         toks: &toks,
-        source: source.map(str::to_owned),
+        source,
         pos: 0,
         diags: Vec::new(),
         explicit_semicolon_reported: false,
@@ -278,7 +278,7 @@ fn parse_inner(
     let (toks, fenced_statements) = prepare_tokens(toks)?;
     let mut p = Parser {
         toks: &toks,
-        source: source.map(str::to_owned),
+        source,
         pos: 0,
         explicit_semicolon_reported: false,
         retired_step: None,
@@ -431,7 +431,7 @@ fn is_teaching_parse_diag(code: &str) -> bool {
 
 struct Parser<'a> {
     toks: &'a [Token],
-    source: Option<String>,
+    source: Option<&'a str>,
     pos: usize,
     diags: Vec<Diagnostic>,
     /// D-SEMI1=A: report one explicit semicolon boundary per source file.

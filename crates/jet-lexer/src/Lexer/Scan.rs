@@ -718,7 +718,7 @@ impl<'a> Lexer<'a> {
                 // lexed first so the parser can still emit the retired
                 // external-method connector diagnostic (E0325).
                 '~' if next == '~' => toks.push(simple(self, TokKind::TildeTilde, 2)),
-                // D-XORSPELL1=A: `~|=` before `~|` before `~` (longest match).
+                // Retired arithmetic keeps longest match so E0398 covers the whole mark.
                 '~' if next == '|' && next2 == '=' => {
                     toks.push(simple(self, TokKind::TildePipeEq, 3))
                 }

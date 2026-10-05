@@ -233,7 +233,7 @@ fn jet_rust_emit_c_abi_enum_definition(ctx: &JetRustEmitContext, ty: MIRType) ->
                         if facts.bytes == None || facts.fields.len() != variants.len() -> return None
                         bytes :: facts.bytes ?? ByteLayout{size: 0, alignment: 0, stride: 0}
                         if bytes.size <= 0 || bytes.alignment <= 0 || bytes.stride != bytes.size -> return None
-                        if (bytes.alignment & (bytes.alignment - 1)) != 0 || bytes.size < jet_rust_emit_c_abi_tag_size(enum_tag) -> return None
+                        if ((bytes.alignment).bit_and((bytes.alignment - 1))) != 0 || bytes.size < jet_rust_emit_c_abi_tag_size(enum_tag) -> return None
                         payload_offset := -1
                         seen_discriminants := [Int]{}
                         index := 0
@@ -247,7 +247,7 @@ fn jet_rust_emit_c_abi_enum_definition(ctx: &JetRustEmitContext, ty: MIRType) ->
                             size :: field.size ?? 0
                             alignment :: field.alignment ?? 0
                             stride :: field.stride ?? 0
-                            if size <= 0 || size > bytes.size || alignment <= 0 || stride != size || (alignment & (alignment - 1)) != 0 || offset < 0 || offset > bytes.size - size -> return None
+                            if size <= 0 || size > bytes.size || alignment <= 0 || stride != size || ((alignment).bit_and((alignment - 1))) != 0 || offset < 0 || offset > bytes.size - size -> return None
                             if variant.payload == {
                                 .Unit -> {
                                     if offset != 0 || size != jet_rust_emit_c_abi_tag_size(enum_tag) || alignment != jet_rust_emit_c_abi_tag_size(enum_tag) -> return None

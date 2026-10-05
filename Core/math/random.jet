@@ -39,8 +39,8 @@ fn unit_open() -[Rand]> Float {
 }
 
 fn full_word64() -[Rand]> Int Never! {
-    hi :: next_bits63() & C_MASK32
-    lo :: next_bits63() & C_MASK32
+    hi :: (next_bits63()).bit_and(C_MASK32)
+    lo :: (next_bits63()).bit_and(C_MASK32)
     (hi * C_BASE32) + lo
 }
 
@@ -241,7 +241,7 @@ pub fn getrandbits(k: Int) -[Rand]> Int Never! {
     loop remaining > 0 {
         chunk := remaining
         if chunk > 63 -> chunk = 63
-        out = (out << chunk) ~| (next_bits63() & ((1 << chunk) - 1))
+        out = ((out << chunk)).bit_xor(((next_bits63()).bit_and(((1 << chunk) - 1))))
         remaining = remaining - chunk
     }
     out
@@ -378,6 +378,6 @@ pub fn binomialvariate(n: Int, p: Float) -[Rand]> Int Never! {
 /// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
 /// checked `U8{}` conversion.
 fn to_u8(n: Int) -> U8 Never! {
-    v :: n & 255
+    v :: (n).bit_and(255)
     (U8{v})
 }

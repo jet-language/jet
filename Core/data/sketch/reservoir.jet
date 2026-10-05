@@ -30,9 +30,9 @@ impl Reservoir {
             return
         }
         self.state = self.state.wrapping_add(U64{11400714819323198485})
-        z := (self.state ~| (self.state >> 30)).wrapping_mul(U64{13787848793156543929})
-        z = (z ~| (z >> 27)).wrapping_mul(U64{10723151780598845931})
-        z = z ~| (z >> 31)
+        z := ((self.state).bit_xor((self.state >> 30))).wrapping_mul(U64{13787848793156543929})
+        z = ((z).bit_xor((z >> 27))).wrapping_mul(U64{10723151780598845931})
+        z = (z).bit_xor((z >> 31))
         index :: Int.from_u64(z >> 1) %% self.seen
         if index < self.k -> self.items[index] = item
     }

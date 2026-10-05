@@ -5,9 +5,9 @@ struct SignedWord { pub value: I64 }
 fn hash2(namespace: String, identity: String) -> U64 Never! {
     prime :: U64{0x100000001b3}
     hash := U64{0xcbf29ce484222325}
-    loop byte in namespace.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    loop byte in namespace.bytes() -> hash = ((hash).bit_xor(U64.from_u8(byte))).wrapping_mul(prime)
     hash = hash.wrapping_mul(prime)
-    loop byte in identity.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    loop byte in identity.bytes() -> hash = ((hash).bit_xor(U64.from_u8(byte))).wrapping_mul(prime)
     hash
 }
 

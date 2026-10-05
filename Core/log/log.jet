@@ -285,7 +285,7 @@ fn escape(text: String) -> String {
             &out.push(U8{48})
             &out.push(U8{48})
             &out.push(hex_digit(n >> 4))
-            &out.push(hex_digit(n & 15))
+            &out.push(hex_digit((n).bit_and(15)))
             next
         }
         &out.push(b)
@@ -294,7 +294,7 @@ fn escape(text: String) -> String {
 }
 
 fn hex_digit(value: Int) -> U8 {
-    n :: value & 15
+    n :: (value).bit_and(15)
     if n < 10 -> return U8{48 + n}
     U8{87 + n}
 }

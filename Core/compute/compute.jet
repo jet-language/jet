@@ -1078,7 +1078,7 @@ fn min_int(a: Int, b: Int) -> Int Never! {
     b
 }
 
-fn is_power_two(n: Int) -> Bool Never! { n > 0 && (n & (n - 1)) == 0 }
+fn is_power_two(n: Int) -> Bool Never! { n > 0 && ((n).bit_and((n - 1))) == 0 }
 
 fn fft_radix2(input: [Float], profile: String) -> [Float] ComputeError! {
     n :: input.len()
@@ -1222,7 +1222,7 @@ fn c_min_int() -> Int Never! { -9223372036854775807 - 1 }
 fn wire_checksum(body: String) -> String ComputeError! {
     hash := 14695981039346656037
     loop byte in body.bytes() {
-        hash = ((hash ~| Int.from_u8(byte)) * 1099511628211) & C_MASK64
+        hash = ((((hash).bit_xor(Int.from_u8(byte))) * 1099511628211)).bit_and(C_MASK64)
     }
     fmt.hex(hash, 16) ?? return Err(ComputeError.Serialization)
 }

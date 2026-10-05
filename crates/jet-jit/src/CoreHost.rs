@@ -1820,12 +1820,6 @@ fn jet_jit_math_sqrt(x: f64) -> f64 {
 fn jet_jit_math_sqrt_f32(x: f64) -> f64 {
     ((x as f32).sqrt()) as f64
 }
-fn jet_jit_math_pow(base: f64, exp: f64) -> f64 {
-    base.powf(exp)
-}
-fn jet_jit_math_pow_f32(base: f64, exp: f64) -> f64 {
-    ((base as f32).powf(exp as f32)) as f64
-}
 fn jet_jit_math_floor(x: f64) -> f64 {
     x.floor()
 }
@@ -2254,8 +2248,6 @@ host_fns! {
     math_lcm: "jet_jit_math_lcm" => jet_jit_math_lcm: sig_i64_i64_i64;
     math_sqrt: "jet_jit_math_sqrt" => jet_jit_math_sqrt: sig_f64_f64;
     math_sqrt_f32: "jet_jit_math_sqrt_f32" => jet_jit_math_sqrt_f32: sig_f64_f64;
-    math_pow: "jet_jit_math_pow" => jet_jit_math_pow: sig_f64_f64_f64;
-    math_pow_f32: "jet_jit_math_pow_f32" => jet_jit_math_pow_f32: sig_f64_f64_f64;
     math_floor: "jet_jit_math_floor" => jet_jit_math_floor: sig_f64_f64;
     math_floor_f32: "jet_jit_math_floor_f32" => jet_jit_math_floor_f32: sig_f64_f64;
     math_ceil: "jet_jit_math_ceil" => jet_jit_math_ceil: sig_f64_f64;

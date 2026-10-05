@@ -28115,7 +28115,14 @@ impl<'a> RustEmitter<'a> {
                 self.prelude_call_args(*call, &[self.local_read(function, *local)])
             }
             MirSemanticOp::MathBuiltin { call, args, .. }
-            | MirSemanticOp::PreciseBuiltin { call, args, .. } => self.prelude_values(*call, args),
+            | MirSemanticOp::PreciseBuiltin { call, args, .. } => {
+                let emitted = self.prelude_values(*call, args);
+                result
+                    .and_then(|value| {
+                        self.native_int_result(&emitted, self.value_type(function, value))
+                    })
+                    .unwrap_or(emitted)
+            }
             MirSemanticOp::Print { call, value } => {
                 let test_print = matches!(
                     self.artifact.kind,

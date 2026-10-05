@@ -257,7 +257,7 @@ pub struct CacheLease {
         if !store_reuse_same_path(self.out, expected) -> return None
         object_info :: files.stat(expected) ?? return None
         if object_info.is_symlink || !object_info.is_dir -> return None
-        if sys.family() != "windows" && object_info.mode & 0o222 != 0 -> return None
+        if sys.family() != "windows" && (object_info.mode).bit_and(0o222) != 0 -> return None
         seal :: files.join(files.join(hangar, STORE_SEALS_DIR), self.expected_digest)
         sealed :: store_check_seal(&verification, expected, hangar) ?? None
         if sealed != Val(self.expected_digest) -> return None
@@ -266,7 +266,7 @@ pub struct CacheLease {
         bin_path :: files.join(expected, bin)
         bin_info :: files.stat(bin_path) ?? return None
         if bin_info.is_symlink || !bin_info.is_dir -> return None
-        if sys.family() != "windows" && bin_info.mode & 0o222 != 0 -> return None
+        if sys.family() != "windows" && (bin_info.mode).bit_and(0o222) != 0 -> return None
         Val(bin_path)
     }
 

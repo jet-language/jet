@@ -3,6 +3,10 @@
 use jet_foundation.[
     DIAGNOSTIC_ERROR,
     Diagnostic,
+    DiagnosticStructured,
+    DiagnosticFixApplicability,
+    DiagnosticFixSafety,
+    TextEdit,
     Span,
     Type,
     diagnostic_from_registry,
@@ -11,6 +15,18 @@ use jet_foundation.[
     measure_expression,
     type_name,
 ]
+
+// Two source edits avoid reconstructing an operand from the checked AST.
+fn sema_retired_integer_not(whole: Span, operand: Span) -> Diagnostic Never! {
+    diagnostic := diagnostic_from_registry("E0398", Val(whole), "`!` needs Bool; use `bit_not` to flip integer bits", "marks express ownership and outcomes; arithmetic uses named methods (D-SIGIL-ALGEBRA1=B)", "write `value.bit_not()` for an integer, or compare the value to produce Bool")
+    diagnostic.structured = Val(DiagnosticStructured.SuggestedEdits{edits: [TextEdit]{
+        TextEdit{span: Span{start: whole.start, end: operand.start}, new_text: "("},
+        TextEdit{span: Span{start: operand.end, end: operand.end}, new_text: ").bit_not()"},
+    }})
+    diagnostic.applicability = Val(DiagnosticFixApplicability.Safe)
+    diagnostic.safety = Val(DiagnosticFixSafety.BehaviorPreserving)
+    diagnostic
+}
 
 pub enum SemaSourceOrigin { Snapshot CompilerGenerated }
 

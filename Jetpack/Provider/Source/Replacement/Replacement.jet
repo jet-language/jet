@@ -418,17 +418,17 @@ fn provider_replacement_digest(parts: [String]) -> String Never! {
     hash := U64{0xcbf29ce484222325}
     loop part in parts {
         loop byte in part.bytes() {
-            hash ~|= U64{byte}
+            hash = (hash).bit_xor(U64{byte})
             hash = wrapping(hash * prime)
         }
-        hash ~|= U64{10}
+        hash = (hash).bit_xor(U64{10})
         hash = wrapping(hash * prime)
     }
     digits :: "0123456789abcdef".bytes()
     out := [U8]{}
     shift := 60
     loop shift >= 0 {
-        &out.push(digits[Int{(hash >> shift) & U64{15}}])
+        &out.push(digits[Int{((hash >> shift)).bit_and(U64{15})}])
         shift -= 4
     }
     "proof-fnv64-{pkg_bytes_text(out, 0, out.len())}"

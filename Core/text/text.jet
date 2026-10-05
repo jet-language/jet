@@ -376,9 +376,9 @@ fn decode_indexed(text: String) -> [IndexedCp] Never! {
             next
         }
         cp := 0
-        if width == 2 -> cp = first & 31
-        if width == 3 -> cp = first & 15
-        if width == 4 -> cp = first & 7
+        if width == 2 -> cp = (first).bit_and(31)
+        if width == 3 -> cp = (first).bit_and(15)
+        if width == 4 -> cp = (first).bit_and(7)
         valid := true
         k := 1
         loop k < width {
@@ -387,7 +387,7 @@ fn decode_indexed(text: String) -> [IndexedCp] Never! {
                 valid = false
                 break
             }
-            cp = (cp << 6) | (byte & 63)
+            cp = ((cp << 6)).bit_or(((byte).bit_and(63)))
             k = k + 1
         }
         if !valid {
@@ -444,17 +444,17 @@ fn encode_cp(cp: Int) -> String {
     if n < 128 {
         &out.push(U8{n})
     } else if n < 2048 {
-        &out.push(U8{Int{192} | (n >> 6)})
-        &out.push(U8{Int{128} | (n & Int{63})})
+        &out.push(U8{(Int{192}).bit_or((n >> 6))})
+        &out.push(U8{(Int{128}).bit_or(((n).bit_and(Int{63})))})
     } else if n < 65536 {
-        &out.push(U8{Int{224} | (n >> 12)})
-        &out.push(U8{Int{128} | ((n >> 6) & Int{63})})
-        &out.push(U8{Int{128} | (n & Int{63})})
+        &out.push(U8{(Int{224}).bit_or((n >> 12))})
+        &out.push(U8{(Int{128}).bit_or((((n >> 6)).bit_and(Int{63})))})
+        &out.push(U8{(Int{128}).bit_or(((n).bit_and(Int{63})))})
     } else {
-        &out.push(U8{Int{240} | (n >> 18)})
-        &out.push(U8{Int{128} | ((n >> 12) & Int{63})})
-        &out.push(U8{Int{128} | ((n >> 6) & Int{63})})
-        &out.push(U8{Int{128} | (n & Int{63})})
+        &out.push(U8{(Int{240}).bit_or((n >> 18))})
+        &out.push(U8{(Int{128}).bit_or((((n >> 12)).bit_and(Int{63})))})
+        &out.push(U8{(Int{128}).bit_or((((n >> 6)).bit_and(Int{63})))})
+        &out.push(U8{(Int{128}).bit_or(((n).bit_and(Int{63})))})
     }
     String.from_bytes(out) ?? ""
 }

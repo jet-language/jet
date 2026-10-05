@@ -385,11 +385,11 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // is `T?` (returns, arguments, fields, list/map items, typed bindings,
 // reassignment) and `x == 5` compares a `?T` with a present `T`; sema adds
 // one `Present`. The full rule lives on `LIT_VALUE` in `Syntax/core_surface.rs`.
-// D-UNIONTYPE1=A reuses the existing `|` token (TokKind::Pipe / BitOr) in type
-// position as TYPE_UNION_SEP. `T !(E1 | E2)` parses as `T !(E1 | E2)`.
-// D-BITOREXPR1=A (ratified 2026-08-28, card #2299) admits the same token in
-// value position as bitwise OR. It binds tighter than comparisons; type
-// position remains the union grammar above.
+// D-UNIONTYPE1=A reuses `|` in type position as TYPE_UNION_SEP.
+// D-SIGIL-ALGEBRA1=B (ratified 2026-10-04, card #4141) reserves marks for
+// ownership and outcomes: &, |, ~| and ^ arithmetic, their compounds, and
+// integer ! are retired with E0398 method repairs. Integer arithmetic uses
+// bit_and, bit_or, bit_xor, bit_not and pow; Float uses pow. Shifts stay.
 // D-REGEX-LIT1=D adds no punctuation. Regex patterns use the universal
 // `Type{ body }` / inferred `{ body }` form from D-LIT-DOT1.
 // D-RANGE-VALUE1=A makes `a..b` and `a..<b` construct one nominal Range

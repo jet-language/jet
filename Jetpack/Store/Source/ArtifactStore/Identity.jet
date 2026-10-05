@@ -61,7 +61,7 @@ pub struct ArtifactDigest {
         loop index in 0..<32 {
             high :: store_artifact_hex_value(raw[index * 2]) ?? return Err(ArtifactStoreError.InvalidDigest(value))
             low :: store_artifact_hex_value(raw[index * 2 + 1]) ?? return Err(ArtifactStoreError.InvalidDigest(value))
-            &digest.push(U8{(high << 4) | low})
+            &digest.push(U8{((high << 4)).bit_or(low)})
         }
         Ok(ArtifactDigest{bytes: digest})
     }

@@ -609,8 +609,8 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
             nesting := 1
             loop cursor < end && nesting > 0 {
                 next_byte :: byte_at(source, cursor)
-                &literal.push(U8{next_byte & 255})
-                &decoded.push(U8{next_byte & 255})
+                &literal.push(U8{(next_byte).bit_and(255)})
+                &decoded.push(U8{(next_byte).bit_and(255)})
                 if next_byte == 123 -> nesting += 1
                 if next_byte == 125 -> nesting -= 1
                 cursor += 1

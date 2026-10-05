@@ -326,10 +326,10 @@ fn bar_formatting_is_stable() {
     let twice = jet::format_source(&once).expect("formatted alternatives should parse");
     assert_eq!(once, twice, "alternative formatting must be stable");
 
-    let bit_or = jet::format_source("fn run() { value :: 1 | 2 }")
-        .expect("formatter should preserve value-position bitwise OR");
+    let bit_or = jet::format_source("fn run() { value :: (1).bit_or(2) }")
+        .expect("formatter should preserve the named bitwise OR");
     assert!(
-        bit_or.contains("value :: 1 | 2"),
+        bit_or.contains("bit_or(2)"),
         "formatter lost bitwise OR:\n{bit_or}"
     );
     assert_eq!(
@@ -4372,27 +4372,15 @@ fn fmt_keeps_reordered_and_skipped_argument_labels() {
 }
 
 #[test]
-fn fmt_keeps_power_and_exclusive_or_spellings() {
-    // D-EXPOP1=A / D-XORSPELL1=A: `^` is the power, `~|` is exclusive-or, and
-    // both compounds must survive a round trip byte-for-byte (fmt STABILITY —
-    // idempotence alone would not notice a dropped sigil, because a dropped
-    // one stays dropped on the second pass).
-    let src = "fn run() {\n    a :: 2 ^ 3 ^ 2\n    b :: -3 ^ 2\n    c :: (2 ^ 3) ^ 2\n    d :: (-3) ^ 2\n    e :: 2 ^ -1\n    f :: 12 ~| 10\n    g := 2\n    g ^= 10\n    h := 12\n    h ~|= 10\n    print(\"{a}{b}{c}{d}{e}{f}{g}{h}\")\n}\n";
-    let once = jet::format_source(src).expect("fmt should accept power and exclusive-or");
-    for token in [
-        "2 ^ 3 ^ 2",
-        "-3 ^ 2",
-        "(2 ^ 3) ^ 2",
-        "(-3) ^ 2",
-        "2 ^ -1",
-        "12 ~| 10",
-        "g ^= 10",
-        "h ~|= 10",
-    ] {
+fn fmt_keeps_power_and_exclusive_or_methods() {
+    // D-SIGIL-ALGEBRA1=B: methods and reassignment remain byte-stable.
+    let src = "fn run() {\n    a :: (2).pow((3).pow(2))\n    b :: -(3).pow(2)\n    c :: (2).pow(3).pow(2)\n    d :: (-3).pow(2)\n    e :: (2).pow(-1)\n    f :: (12).bit_xor(10)\n    g := 2\n    g = g.pow(10)\n    h := 12\n    h = h.bit_xor(10)\n    print(\"{a}{b}{c}{d}{e}{f}{g}{h}\")\n}\n";
+    let once = jet::format_source(src).expect("fmt should accept numeric methods");
+    for token in ["pow(", "bit_xor(", "g = g.pow(10)", "h = h.bit_xor(10)"] {
         assert!(once.contains(token), "fmt dropped `{token}`:\n{once}");
     }
-    let twice = jet::format_source(&once).expect("power and exclusive-or should re-fmt");
-    assert_eq!(once, twice, "power formatting must be byte-stable");
+    let twice = jet::format_source(&once).expect("numeric methods should re-fmt");
+    assert_eq!(once, twice, "numeric method formatting must be byte-stable");
 }
 
 #[test]

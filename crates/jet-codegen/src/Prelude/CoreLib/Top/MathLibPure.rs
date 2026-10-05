@@ -1744,6 +1744,3 @@ pub fn jet_std_math_in_range(value: i64, low: i64, high: i64) -> bool {
     value >= low && value < high
 }
 
-pub fn jet_std_math_xor(left: i64, right: i64) -> i64 {
-    left ^ right
-}

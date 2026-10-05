@@ -730,6 +730,20 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         else {
             unreachable!("method chain contains only method calls")
         };
+        if method == "bit_not" && recv_type.as_deref() == Some(Syntax::TYPE_INT) {
+            let operand = lowered_receiver
+                .take()
+                .unwrap_or_else(|| lower_expr(receiver, cx, env));
+            let ty = operand.ty.erased_inline_ranges();
+            lowered_receiver = Some(TExpr {
+                ty,
+                kind: TExprKind::Unary {
+                    op: crate::AST::UnOp::Not,
+                    operand: Box::new(operand),
+                },
+            });
+            continue;
+        }
         let resolved_ret = resolved_ret.clone().or_else(|| {
             fallback_checked_method_return(receiver, method, recv_type.as_deref(), cx, env)
         });
@@ -5245,7 +5259,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
                 // D-EXPNEG1: a written negative exponent on the default
-                // exact Int lowers to `1 / (base ^ |exponent|)` in the
+                // exact Int lowers to `1 / base.pow(abs(exponent))` in the
                 // Fraction Prelude carrier. Dynamic exponents stay on the
                 // trapping whole-number power path.
                 if *op == BinOp::Pow && lhs.ty == Type::Int && rhs.ty == Type::Int {

@@ -410,7 +410,7 @@ fn run() {
         print(left + right)
         print(left - U8{250})
         print(left * U8{2})
-        print(U8{3} ^ U8{5})
+        print(U8{3}.pow(U8{5}))
         print(left / U8{2})
     }
     print(wrapped(left, right))

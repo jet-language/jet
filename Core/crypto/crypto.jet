@@ -316,7 +316,7 @@ pub fn pbkdf2_hmac(password: [U8], salt: [U8], iterations: Int, key_len: Int) ->
         acc := copy_bytes(~u)
         loop round in 1..<iterations {
             u = hmac_sha256_raw(~password, u)
-            loop j in 0..<32 -> acc[j] = to_u8(Int.from_u8(acc[j]) ~| Int.from_u8(u[j]))
+            loop j in 0..<32 -> acc[j] = to_u8((Int.from_u8(acc[j])).bit_xor(Int.from_u8(u[j])))
         }
         loop b in acc {
             if out.len() >= key_len -> break
@@ -338,7 +338,7 @@ pub fn constant_time_equal_bytes(a: [U8], b: [U8]) -> Bool Never! {
         right := 0
         if i < n -> left = Int.from_u8(a[i])
         if i < m -> right = Int.from_u8(b[i])
-        diff = diff | (left ~| right)
+        diff = (diff).bit_or(((left).bit_xor(right)))
     }
     diff == 0
 }
@@ -425,7 +425,7 @@ fn open_sealed(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] Crypto
     if raw[4] != (U8{1}) || raw[5] != (U8{1}) || raw[6] != (U8{0}) || raw[7] != (U8{0}) {
         return Err(CryptoError.OpenFailed)
     }
-    count :: (Int.from_u8(raw[8]) << 8) | Int.from_u8(raw[9])
+    count :: ((Int.from_u8(raw[8]) << 8)).bit_or(Int.from_u8(raw[9]))
     if count < 1 || count > 256 -> return Err(CryptoError.OpenFailed)
     len_offset :: 82 + count * 80
     if raw.len() < len_offset + 20 -> return Err(CryptoError.OpenFailed)
@@ -575,9 +575,9 @@ fn bech32_polymod(values: [Int]) -> Int Never! {
     chk := 1
     loop v in values {
         top :: chk >> 25
-        chk = ((chk & 0x1ffffff) << 5) ~| v
+        chk = ((((chk).bit_and(0x1ffffff)) << 5)).bit_xor(v)
         loop i in 0..<5 {
-            if ((top >> i) & 1) == 1 -> chk = chk ~| generators[i]
+            if (((top >> i)).bit_and(1)) == 1 -> chk = (chk).bit_xor(generators[i])
         }
     }
     chk
@@ -588,7 +588,7 @@ fn bech32_hrp_expand(hrp: String) -> [Int] Never! {
     out := [Int]{}
     loop b in raw -> &out.push(Int.from_u8(b) >> 5)
     &out.push(0)
-    loop b in raw -> &out.push(Int.from_u8(b) & 31)
+    loop b in raw -> &out.push((Int.from_u8(b)).bit_and(31))
     out
 }
 
@@ -610,23 +610,23 @@ fn x25519_recipient_encode(key: [U8]) -> String Never! {
     acc := 0
     bits := 0
     loop b in key {
-        acc = ((acc << 8) | Int.from_u8(b)) & 4095
+        acc = ((((acc << 8)).bit_or(Int.from_u8(b)))).bit_and(4095)
         bits += 8
         loop bits >= 5 {
             bits -= 5
-            &data.push((acc >> bits) & 31)
+            &data.push(((acc >> bits)).bit_and(31))
         }
     }
-    if bits > 0 -> &data.push((acc << (5 - bits)) & 31)
+    if bits > 0 -> &data.push(((acc << (5 - bits))).bit_and(31))
     input := bech32_hrp_expand("jetx25519")
     loop v in data -> &input.push(v)
     loop _ in 0..<6 -> &input.push(0)
-    polymod :: bech32_polymod(input) ~| C_BECH32M_CONST
+    polymod :: (bech32_polymod(input)).bit_xor(C_BECH32M_CONST)
     charset :: bech32_charset()
     out := [U8]{}
     loop b in "jetx255191".bytes() -> &out.push(b)
     loop v in data -> &out.push(charset[v])
-    loop i in 0..<6 -> &out.push(charset[(polymod >> (5 * (5 - i))) & 31])
+    loop i in 0..<6 -> &out.push(charset[((polymod >> (5 * (5 - i)))).bit_and(31)])
     String.from_bytes(out) ?? panic("invalid UTF-8 in Bech32m recipient")
 }
 
@@ -651,21 +651,21 @@ fn x25519_recipient_decode(text: String) -> [U8]? {
     acc := 0
     bits := 0
     loop i in 0..<52 {
-        acc = ((acc << 5) | values[i]) & 4095
+        acc = ((((acc << 5)).bit_or(values[i]))).bit_and(4095)
         bits += 5
         if bits >= 8 {
             bits -= 8
             &out.push(to_u8(acc >> bits))
         }
     }
-    if (acc & ((1 << bits) - 1)) != 0 -> return None
+    if ((acc).bit_and(((1 << bits) - 1))) != 0 -> return None
     if out.len() != 32 -> return None
     Val(out)
 }
 
 fn all_zero(bytes: [U8]) -> Bool Never! {
     diff := 0
-    loop b in bytes -> diff = diff | Int.from_u8(b)
+    loop b in bytes -> diff = (diff).bit_or(Int.from_u8(b))
     diff == 0
 }
 
@@ -845,24 +845,24 @@ fn phc_b64_encode(bytes: [U8]) -> String Never! {
     out := [U8]{}
     i := 0
     loop i + 3 <= bytes.len() {
-        n :: (Int.from_u8(bytes[i]) << 16) | (Int.from_u8(bytes[i + 1]) << 8) | Int.from_u8(bytes[i + 2])
-        &out.push(raw[(n >> 18) & 63])
-        &out.push(raw[(n >> 12) & 63])
-        &out.push(raw[(n >> 6) & 63])
-        &out.push(raw[n & 63])
+        n :: (((Int.from_u8(bytes[i]) << 16)).bit_or((Int.from_u8(bytes[i + 1]) << 8))).bit_or(Int.from_u8(bytes[i + 2]))
+        &out.push(raw[((n >> 18)).bit_and(63)])
+        &out.push(raw[((n >> 12)).bit_and(63)])
+        &out.push(raw[((n >> 6)).bit_and(63)])
+        &out.push(raw[(n).bit_and(63)])
         i += 3
     }
     rest :: bytes.len() - i
     if rest == 1 {
         n :: Int.from_u8(bytes[i]) << 16
-        &out.push(raw[(n >> 18) & 63])
-        &out.push(raw[(n >> 12) & 63])
+        &out.push(raw[((n >> 18)).bit_and(63)])
+        &out.push(raw[((n >> 12)).bit_and(63)])
     }
     if rest == 2 {
-        n :: (Int.from_u8(bytes[i]) << 16) | (Int.from_u8(bytes[i + 1]) << 8)
-        &out.push(raw[(n >> 18) & 63])
-        &out.push(raw[(n >> 12) & 63])
-        &out.push(raw[(n >> 6) & 63])
+        n :: ((Int.from_u8(bytes[i]) << 16)).bit_or((Int.from_u8(bytes[i + 1]) << 8))
+        &out.push(raw[((n >> 18)).bit_and(63)])
+        &out.push(raw[((n >> 12)).bit_and(63)])
+        &out.push(raw[((n >> 6)).bit_and(63)])
     }
     String.from_bytes(out) ?? panic("invalid UTF-8 in PHC encoding")
 }
@@ -876,12 +876,12 @@ fn phc_b64_decode(text: String) -> [U8]? {
     bits := 0
     loop b in raw {
         value :: phc_b64_value(b) ?? return None
-        n = (n << 6) | value
+        n = ((n << 6)).bit_or(value)
         bits += 6
         if bits >= 8 {
             bits -= 8
             &out.push(to_u8(n >> bits))
-            n = n & ((1 << bits) - 1)
+            n = (n).bit_and(((1 << bits) - 1))
         }
     }
     if bits >= 6 || n != 0 -> return None
@@ -1000,30 +1000,30 @@ C_SHA384_IV :: [Int]{
     0x47b5481dbefa4fa4,
 }
 
-fn wrap32(n: Int) -> Int Never! { n & C_MASK32 }
+fn wrap32(n: Int) -> Int Never! { (n).bit_and(C_MASK32) }
 
 fn u8_int(b: U8) -> Int Never! { Int.from_u8(b) }
 
 fn read_be32(data: [U8], offset: Int) -> Int Never! {
     if offset < 0 || offset + 4 > data.len() -> return 0
-    (Int.from_u8(data[offset]) << 24) | (Int.from_u8(data[offset + 1]) << 16) | (Int.from_u8(data[offset + 2]) << 8) | Int.from_u8(data[offset + 3])
+    ((((Int.from_u8(data[offset]) << 24)).bit_or((Int.from_u8(data[offset + 1]) << 16))).bit_or((Int.from_u8(data[offset + 2]) << 8))).bit_or(Int.from_u8(data[offset + 3]))
 }
 
 /// Low 8 bits as `U8`. Mask in `Int` first so the constructor never sees a
 /// value outside `0..=255`.
 fn to_u8(n: Int) -> U8 Never! {
-    v :: n & 255
+    v :: (n).bit_and(255)
     (U8{v})
 }
 
 /// Big-endian 32-bit word from four bytes at `i`.
 fn be32_word(bytes: [U8], i: Int) -> Int Never! {
-    (u8_int(bytes[i]) << 24) | (u8_int(bytes[i + 1]) << 16) | (u8_int(bytes[i + 2]) << 8) | u8_int(bytes[i + 3])
+    ((((u8_int(bytes[i]) << 24)).bit_or((u8_int(bytes[i + 1]) << 16))).bit_or((u8_int(bytes[i + 2]) << 8))).bit_or(u8_int(bytes[i + 3]))
 }
 
 fn rotr32(x: Int, n: Int) -> Int Never! {
     v :: wrap32(x)
-    wrap32((v >> n) | (v << (32 - n)))
+    wrap32(((v >> n)).bit_or((v << (32 - n))))
 }
 
 fn sha256_raw(data: [U8]) -> [U8] Never! { sha2_256(data, C_SHA256_IV) }
@@ -1042,8 +1042,8 @@ fn sha2_256(data: [U8], iv: [Int]) -> [U8] Never! {
             &w.push(be32_word(~msg, i))
         }
         loop t in 16..<64 {
-            s0 :: rotr32(w[t - 15], 7) ~| rotr32(w[t - 15], 18) ~| (w[t - 15] >> 3)
-            s1 :: rotr32(w[t - 2], 17) ~| rotr32(w[t - 2], 19) ~| (w[t - 2] >> 10)
+            s0 :: ((rotr32(w[t - 15], 7)).bit_xor(rotr32(w[t - 15], 18))).bit_xor((w[t - 15] >> 3))
+            s1 :: ((rotr32(w[t - 2], 17)).bit_xor(rotr32(w[t - 2], 19))).bit_xor((w[t - 2] >> 10))
             &w.push(wrap32(w[t - 16] + s0 + w[t - 7] + s1))
         }
         a := state[0]
@@ -1055,11 +1055,11 @@ fn sha2_256(data: [U8], iv: [Int]) -> [U8] Never! {
         g := state[6]
         h := state[7]
         loop t in 0..<64 {
-            s1 :: rotr32(e, 6) ~| rotr32(e, 11) ~| rotr32(e, 25)
-            ch :: (e & f) ~| ((e ~| C_MASK32) & g)
+            s1 :: ((rotr32(e, 6)).bit_xor(rotr32(e, 11))).bit_xor(rotr32(e, 25))
+            ch :: (((e).bit_and(f))).bit_xor(((((e).bit_xor(C_MASK32))).bit_and(g)))
             temp1 :: wrap32(h + s1 + ch + C_SHA256_K[t] + w[t])
-            s0 :: rotr32(a, 2) ~| rotr32(a, 13) ~| rotr32(a, 22)
-            maj :: (a & b) ~| (a & c) ~| (b & c)
+            s0 :: ((rotr32(a, 2)).bit_xor(rotr32(a, 13))).bit_xor(rotr32(a, 22))
+            maj :: ((((a).bit_and(b))).bit_xor(((a).bit_and(c)))).bit_xor(((b).bit_and(c)))
             temp2 :: wrap32(s0 + maj)
             h = g
             g = f
@@ -1099,7 +1099,7 @@ fn sha1_raw(data: [U8]) -> [U8] {
             i :: off + t * 4
             &w.push(be32_word(~msg, i))
         }
-        loop t in 16..<80 -> &w.push(rotl32(w[t - 3] ~| w[t - 8] ~| w[t - 14] ~| w[t - 16], 1))
+        loop t in 16..<80 -> &w.push(rotl32((((w[t - 3]).bit_xor(w[t - 8])).bit_xor(w[t - 14])).bit_xor(w[t - 16]), 1))
         a := h0
         b := h1
         c := h2
@@ -1110,19 +1110,19 @@ fn sha1_raw(data: [U8]) -> [U8] {
             k := 0
             if {
                 t < 20 -> {
-                    f = (b & c) | ((b ~| C_MASK32) & d)
+                    f = (((b).bit_and(c))).bit_or(((((b).bit_xor(C_MASK32))).bit_and(d)))
                     k = 0x5a827999
                 }
                 t < 40 -> {
-                    f = b ~| c ~| d
+                    f = ((b).bit_xor(c)).bit_xor(d)
                     k = 0x6ed9eba1
                 }
                 t < 60 -> {
-                    f = (b & c) | (b & d) | (c & d)
+                    f = ((((b).bit_and(c))).bit_or(((b).bit_and(d)))).bit_or(((c).bit_and(d)))
                     k = 0x8f1bbcdc
                 }
                 else -> {
-                    f = b ~| c ~| d
+                    f = ((b).bit_xor(c)).bit_xor(d)
                     k = 0xca62c1d6
                 }
             }
@@ -1251,7 +1251,7 @@ C_SHA512_K :: [Int]{
 /// Big-endian word at `bytes[off]`.
 fn load_be64(bytes: [U8], off: Int) -> U64 Never! {
     n := U64{0}
-    loop i in 0..<8 -> n = (n << 8) | U64.from_u8(bytes[off + i])
+    loop i in 0..<8 -> n = ((n << 8)).bit_or(U64.from_u8(bytes[off + i]))
     n
 }
 
@@ -1260,8 +1260,8 @@ fn load_be64(bytes: [U8], off: Int) -> U64 Never! {
 fn sha512_block(state: &[U64], w: &[U64], k: [U64], msg: [U8], off: Int) Never! {
     loop t in 0..<16 -> w[t] = load_be64(msg, off + t * 8)
     loop t in 16..<80 {
-        s0 :: w[t - 15].rotate_right(1) ~| w[t - 15].rotate_right(8) ~| (w[t - 15] >> 7)
-        s1 :: w[t - 2].rotate_right(19) ~| w[t - 2].rotate_right(61) ~| (w[t - 2] >> 6)
+        s0 :: ((w[t - 15].rotate_right(1)).bit_xor(w[t - 15].rotate_right(8))).bit_xor((w[t - 15] >> 7))
+        s1 :: ((w[t - 2].rotate_right(19)).bit_xor(w[t - 2].rotate_right(61))).bit_xor((w[t - 2] >> 6))
         w[t] = w[t - 16] + s0 + w[t - 7] + s1
     }
     a := state[0]
@@ -1273,11 +1273,11 @@ fn sha512_block(state: &[U64], w: &[U64], k: [U64], msg: [U8], off: Int) Never! 
     g := state[6]
     h := state[7]
     loop t in 0..<80 {
-        s1 :: e.rotate_right(14) ~| e.rotate_right(18) ~| e.rotate_right(41)
-        ch :: (e & f) ~| ((e ~| U64.MAX) & g)
+        s1 :: ((e.rotate_right(14)).bit_xor(e.rotate_right(18))).bit_xor(e.rotate_right(41))
+        ch :: (((e).bit_and(f))).bit_xor(((((e).bit_xor(U64.MAX))).bit_and(g)))
         temp1 :: h + s1 + ch + k[t] + w[t]
-        s0 :: a.rotate_right(28) ~| a.rotate_right(34) ~| a.rotate_right(39)
-        maj :: (a & b) ~| (a & c) ~| (b & c)
+        s0 :: ((a.rotate_right(28)).bit_xor(a.rotate_right(34))).bit_xor(a.rotate_right(39))
+        maj :: ((((a).bit_and(b))).bit_xor(((a).bit_and(c)))).bit_xor(((b).bit_and(c)))
         h = g
         g = f
         f = e
@@ -1308,17 +1308,17 @@ fn hmac_sha256_raw(key: [U8], data: [U8]) -> [U8] Never! {
     }
     inner := [U8]{}
     outer := [U8]{}
-    loop b in k -> &inner.push(to_u8(u8_int(b) ~| 0x36))
+    loop b in k -> &inner.push(to_u8((u8_int(b)).bit_xor(0x36)))
     loop b in data -> &inner.push(b)
     inner_hash :: sha256_raw(inner)
-    loop b in k -> &outer.push(to_u8(u8_int(b) ~| 0x5c))
+    loop b in k -> &outer.push(to_u8((u8_int(b)).bit_xor(0x5c)))
     loop b in inner_hash -> &outer.push(b)
     sha256_raw(outer)
 }
 
 fn rotl32(x: Int, n: Int) -> Int Never! {
     v :: wrap32(x)
-    wrap32((v << n) | (v >> (32 - n)))
+    wrap32(((v << n)).bit_or((v >> (32 - n))))
 }
 
 fn be64(n: Int) -> [U8] Never! {
@@ -1363,7 +1363,7 @@ fn hex_encode(bytes: [U8]) -> String Never! {
     loop b in bytes {
         n :: u8_int(b)
         &out.push(hex_nibble(n >> 4))
-        &out.push(hex_nibble(n & 15))
+        &out.push(hex_nibble((n).bit_and(15)))
     }
     String.from_bytes(out) ?? panic("invalid UTF-8 in hexadecimal encoding")
 }
@@ -1487,10 +1487,10 @@ C_KECCAK_ROT :: [Int]{
 }
 
 fn rotl64(x: Int, n: Int) -> Int {
-    v :: x & C_MASK64
-    r :: n & 63
+    v :: (x).bit_and(C_MASK64)
+    r :: (n).bit_and(63)
     if r == 0 -> return v
-    ((v << r) | (v >> (64 - r))) & C_MASK64
+    ((((v << r)).bit_or((v >> (64 - r))))).bit_and(C_MASK64)
 }
 
 fn keccak(input: [U8], rate: Int, out_len: Int, delim: Int) -> [U8] {
@@ -1514,7 +1514,7 @@ fn keccak(input: [U8], rate: Int, out_len: Int, delim: Int) -> [U8] {
         if last.len() >= rate -> break
         &last.push(U8{0})
     }
-    last[rate - 1] = to_u8(u8_int(last[rate - 1]) | 0x80)
+    last[rate - 1] = to_u8((u8_int(last[rate - 1])).bit_or(0x80))
     absorb(&st, last, rate)
     keccak_f(&st)
     out := [U8]{}
@@ -1537,9 +1537,9 @@ fn absorb(st: &[Int], block: [U8], rate: Int) {
         lane := 0
         loop b in 0..<8 {
             idx :: x * 8 + b
-            if idx < n -> lane = lane | (u8_int(block[idx]) << (b * 8))
+            if idx < n -> lane = (lane).bit_or((u8_int(block[idx]) << (b * 8)))
         }
-        st[x] = (st[x] ~| lane) & C_MASK64
+        st[x] = (((st[x]).bit_xor(lane))).bit_and(C_MASK64)
     }
 }
 
@@ -1548,11 +1548,11 @@ fn keccak_f(st: &[Int]) {
         // theta
         c := [Int]{}
         loop x in 0..<5 {
-            &c.push((st[x] ~| st[x + 5] ~| st[x + 10] ~| st[x + 15] ~| st[x + 20]) & C_MASK64)
+            &c.push(((((((st[x]).bit_xor(st[x + 5])).bit_xor(st[x + 10])).bit_xor(st[x + 15])).bit_xor(st[x + 20]))).bit_and(C_MASK64))
         }
         loop x in 0..<5 {
-            d :: (c[(x + 4) % 5] ~| rotl64(c[(x + 1) % 5], 1)) & C_MASK64
-            loop y in 0..<5 -> st[x + 5 * y] = (st[x + 5 * y] ~| d) & C_MASK64
+            d :: (((c[(x + 4) % 5]).bit_xor(rotl64(c[(x + 1) % 5], 1)))).bit_and(C_MASK64)
+            loop y in 0..<5 -> st[x + 5 * y] = (((st[x + 5 * y]).bit_xor(d))).bit_and(C_MASK64)
         }
         // rho + pi
         next := [Int]{}
@@ -1571,10 +1571,10 @@ fn keccak_f(st: &[Int]) {
             row := [Int]{}
             loop x in 0..<5 -> &row.push(st[x + 5 * y])
             loop x in 0..<5 {
-                st[x + 5 * y] = (row[x] ~| (((row[(x + 1) % 5] ~| C_MASK64) & row[(x + 2) % 5]))) & C_MASK64
+                st[x + 5 * y] = (((row[x]).bit_xor((((((row[(x + 1) % 5]).bit_xor(C_MASK64))).bit_and(row[(x + 2) % 5])))))).bit_and(C_MASK64)
             }
         }
-        st[0] = (st[0] ~| C_KECCAK_RC[round]) & C_MASK64
+        st[0] = (((st[0]).bit_xor(C_KECCAK_RC[round]))).bit_and(C_MASK64)
     }
 }
 
@@ -1625,18 +1625,18 @@ fn chacha20_block(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
 
 fn qr(s: &[Int], a: Int, b: Int, c: Int, d: Int) Never! {
     s[a] = wrap32(s[a] + s[b])
-    s[d] = rotl32(s[d] ~| s[a], 16)
+    s[d] = rotl32((s[d]).bit_xor(s[a]), 16)
     s[c] = wrap32(s[c] + s[d])
-    s[b] = rotl32(s[b] ~| s[c], 12)
+    s[b] = rotl32((s[b]).bit_xor(s[c]), 12)
     s[a] = wrap32(s[a] + s[b])
-    s[d] = rotl32(s[d] ~| s[a], 8)
+    s[d] = rotl32((s[d]).bit_xor(s[a]), 8)
     s[c] = wrap32(s[c] + s[d])
-    s[b] = rotl32(s[b] ~| s[c], 7)
+    s[b] = rotl32((s[b]).bit_xor(s[c]), 7)
 }
 
 fn u32le(bytes: [U8], off: Int) -> Int Never! {
     if off + 3 >= bytes.len() -> return 0
-    (u8_int(bytes[off]) | (u8_int(bytes[off + 1]) << 8) | (u8_int(bytes[off + 2]) << 16) | (u8_int(bytes[off + 3]) << 24)) & C_MASK32
+    (((((u8_int(bytes[off])).bit_or((u8_int(bytes[off + 1]) << 8))).bit_or((u8_int(bytes[off + 2]) << 16))).bit_or((u8_int(bytes[off + 3]) << 24)))).bit_and(C_MASK32)
 }
 
 fn chacha20_xor(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never! {
@@ -1649,7 +1649,7 @@ fn chacha20_xor(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never
         ctr = ctr + 1
         loop j in 0..<64 {
             if i >= plain.len() -> return ~out
-            &out.push(to_u8(u8_int(plain[i]) ~| u8_int(block[j])))
+            &out.push(to_u8((u8_int(plain[i])).bit_xor(u8_int(block[j]))))
             i = i + 1
         }
     }
@@ -1657,7 +1657,7 @@ fn chacha20_xor(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never
 
 fn poly1305(key: [U8], data: [U8]) -> [U8] Never! {
     r := le_int(slice_u8(~key, 0, 16))
-    r = r & 0x0ffffffc0ffffffc0ffffffc0fffffff
+    r = (r).bit_and(0x0ffffffc0ffffffc0ffffffc0fffffff)
     s := le_int(slice_u8(~key, 16, 32))
     acc := 0
     poly_p :: (1 << 130) - 5
@@ -1676,7 +1676,7 @@ fn poly1305(key: [U8], data: [U8]) -> [U8] Never! {
 
 fn le_int(bytes: [U8]) -> Int Never! {
     n := 0
-    loop i in 0..<bytes.len() -> n = n | (u8_int(bytes[i]) << (8 * i))
+    loop i in 0..<bytes.len() -> n = (n).bit_or((u8_int(bytes[i]) << (8 * i)))
     n
 }
 
@@ -1792,10 +1792,10 @@ C_P25519 :: 57896044618658097711785492504343953926634992332820282019728792003956
 fn x25519_scalarmult(sk: [U8], u: [U8]) -> [U8] Never! {
     k := copy_bytes(sk)
     if k.len() != 32 || u.len() != 32 -> panic("invalid X25519 input")
-    k[0] = to_u8(u8_int(k[0]) & 248)
-    k[31] = to_u8((u8_int(k[31]) & 127) | 64)
+    k[0] = to_u8((u8_int(k[0])).bit_and(248))
+    k[31] = to_u8((((u8_int(k[31])).bit_and(127))).bit_or(64))
     public := copy_bytes(u)
-    public[31] = to_u8(u8_int(public[31]) & 127)
+    public[31] = to_u8((u8_int(public[31])).bit_and(127))
     x1 := le_int(public) % C_P25519
     x2 := 1
     z2 := 0
@@ -1805,8 +1805,8 @@ fn x25519_scalarmult(sk: [U8], u: [U8]) -> [U8] Never! {
     t := 254
     loop {
         if t < 0 -> break
-        kt :: (Int.from_u8(k[t /% 8]) >> (t %% 8)) & 1
-        if (swap ~| kt) == 1 {
+        kt :: ((Int.from_u8(k[t /% 8]) >> (t %% 8))).bit_and(1)
+        if ((swap).bit_xor(kt)) == 1 {
             tmp := x2
             x2 = x3
             x3 = tmp
@@ -1852,7 +1852,7 @@ fn mod_pow(base: Int, exp: Int, m: Int) -> Int Never! {
     e := exp
     loop {
         if e == 0 -> return r
-        if e & 1 == 1 -> r = (r * b) % m
+        if (e).bit_and(1) == 1 -> r = (r * b) % m
         b = (b * b) % m
         e = e >> 1
     }
@@ -1932,7 +1932,7 @@ fn ed_scalarmult(s: Int, x: Int, y: Int) -> EdPoint Never! {
     addend := [Int]{x % p, y % p, 1, (x * y) % p}
     bit := s
     loop bit > 0 {
-        if bit & 1 == 1 -> acc = ed_ext_add(acc, addend)
+        if (bit).bit_and(1) == 1 -> acc = ed_ext_add(acc, addend)
         addend = ed_ext_add(addend, addend)
         bit = bit >> 1
     }
@@ -1971,14 +1971,14 @@ fn ed_add(x1: Int, y1: Int, x2: Int, y2: Int) -> EdPoint Never! {
 
 fn ed_encode(x: Int, y: Int) -> [U8] Never! {
     out := le_bytes(y, 32)
-    if (x & 1) == 1 -> out[31] = to_u8(u8_int(out[31]) | 128)
+    if ((x).bit_and(1)) == 1 -> out[31] = to_u8((u8_int(out[31])).bit_or(128))
     out
 }
 
 fn ed_decode(bytes: [U8]) -> EdPoint? {
     yb := copy_bytes(bytes)
-    sign :: (Int.from_u8(yb[31]) >> 7) & 1
-    yb[31] = to_u8(u8_int(yb[31]) & 127)
+    sign :: ((Int.from_u8(yb[31]) >> 7)).bit_and(1)
+    yb[31] = to_u8((u8_int(yb[31])).bit_and(127))
     y :: le_int(yb)
     if y >= C_ED_P -> return None
     y2 :: (y * y) % C_ED_P
@@ -1990,14 +1990,14 @@ fn ed_decode(bytes: [U8]) -> EdPoint? {
         x = (x * sqrt_minus_one) % C_ED_P
         if (v * x % C_ED_P * x % C_ED_P) != u -> return None
     }
-    if (x & 1) != sign -> x = (C_ED_P - x) % C_ED_P
+    if ((x).bit_and(1)) != sign -> x = (C_ED_P - x) % C_ED_P
     Val(EdPoint{x: x, y: y})
 }
 
 fn clamp_scalar(n: Int) -> Int Never! {
     b := le_bytes(n, 32)
-    b[0] = to_u8(u8_int(b[0]) & 248)
-    b[31] = to_u8((u8_int(b[31]) & 63) | 64)
+    b[0] = to_u8((u8_int(b[0])).bit_and(248))
+    b[31] = to_u8((((u8_int(b[31])).bit_and(63))).bit_or(64))
     le_int(b)
 }
 
@@ -2186,9 +2186,9 @@ fn blake3_chunk(data: [U8], chunk_index: Int, is_root: Bool) -> [Int] {
             &block.push(U8{0})
         }
         flags := 0
-        if i == 0 -> flags = flags | 1
-        if i == blocks - 1 -> flags = flags | 2
-        if is_root && i == blocks - 1 -> flags = flags | 8
+        if i == 0 -> flags = (flags).bit_or(1)
+        if i == blocks - 1 -> flags = (flags).bit_or(2)
+        if is_root && i == blocks - 1 -> flags = (flags).bit_or(8)
         cv = blake3_compress(cv, block, chunk_index, end - start, flags)
     }
     cv
@@ -2222,7 +2222,7 @@ fn blake3_parent(left: [Int], right: [Int], is_root: Bool) -> [Int] {
         &block.push(to_u8((w >> 24)))
     }
     flags := 4
-    if is_root -> flags = flags | 8
+    if is_root -> flags = (flags).bit_or(8)
     blake3_compress(copy_ints(C_BLAKE3_IV), block, 0, 64, flags)
 }
 
@@ -2259,18 +2259,18 @@ fn blake3_compress(cv: [Int], block: [U8], counter: Int, block_len: Int, flags: 
         g(&s, 3, 4, 9, 14, m[C_BLAKE3_MSG[base + 14]], m[C_BLAKE3_MSG[base + 15]])
     }
     out := [Int]{}
-    loop i in 0..<8 -> &out.push(wrap32(s[i] ~| s[i + 8]))
+    loop i in 0..<8 -> &out.push(wrap32((s[i]).bit_xor(s[i + 8])))
     out
 }
 
 /// BLAKE3 quarter-round G: right rotations by 16, 12, 8 and 7.
 fn g(s: &[Int], a: Int, b: Int, c: Int, d: Int, mx: Int, my: Int) {
     s[a] = wrap32(s[a] + s[b] + mx)
-    s[d] = rotr32(s[d] ~| s[a], 16)
+    s[d] = rotr32((s[d]).bit_xor(s[a]), 16)
     s[c] = wrap32(s[c] + s[d])
-    s[b] = rotr32(s[b] ~| s[c], 12)
+    s[b] = rotr32((s[b]).bit_xor(s[c]), 12)
     s[a] = wrap32(s[a] + s[b] + my)
-    s[d] = rotr32(s[d] ~| s[a], 8)
+    s[d] = rotr32((s[d]).bit_xor(s[a]), 8)
     s[c] = wrap32(s[c] + s[d])
-    s[b] = rotr32(s[b] ~| s[c], 7)
+    s[b] = rotr32((s[b]).bit_xor(s[c]), 7)
 }

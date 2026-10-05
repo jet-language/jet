@@ -49,6 +49,9 @@ pub enum BuiltinMethodLowering {
     // Float predicates and integer bit-population queries.
     Predicate
     BitCount
+    // D-SIGIL-ALGEBRA1=B: checked by sema_expr_check_binary / numeric unary.
+    Arithmetic(operation: TBinaryOp)
+    BitNot
     // Exact Int Euclidean quotient and remainder (NumericBinaryMethod).
     Euclidean(remainder: Bool)
     // Fixed-width overflow policy (`checked_add`, `wrapping_mul`, `rotate_left`, …).
@@ -290,6 +293,12 @@ BUILTIN_METHOD_ROWS :: prep { [BuiltinMethodRow]{
 
     // Numbers (D-SG9/D-NUMOPS1, D-GO127-STDLIB1=A, D-INTBIG1).
     builtin_method(BuiltinMethodReceiver.Scalar, "to_string", [Type]{}, Type.String, BuiltinMethodLowering.Show),
+    builtin_method(BuiltinMethodReceiver.Integer, "bit_and", [Type]{Type.Named{name: "Self"}}, Type.Named{name: "Self"}, BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.BitAnd}),
+    builtin_method(BuiltinMethodReceiver.Integer, "bit_or", [Type]{Type.Named{name: "Self"}}, Type.Named{name: "Self"}, BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.BitOr}),
+    builtin_method(BuiltinMethodReceiver.Integer, "bit_xor", [Type]{Type.Named{name: "Self"}}, Type.Named{name: "Self"}, BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.BitXor}),
+    builtin_method(BuiltinMethodReceiver.Integer, "bit_not", [Type]{}, Type.Named{name: "Self"}, BuiltinMethodLowering.BitNot),
+    builtin_method(BuiltinMethodReceiver.Integer, "pow", [Type]{Type.Named{name: "Self"}}, Type.Named{name: "Self"}, BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.Pow}),
+    builtin_method(BuiltinMethodReceiver.Float, "pow", [Type]{Type.Named{name: "Self"}}, Type.Named{name: "Self"}, BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.Pow}),
     builtin_method(BuiltinMethodReceiver.Float, "is_nan", [Type]{}, Type.Bool, BuiltinMethodLowering.Predicate),
     builtin_method(BuiltinMethodReceiver.Float, "is_infinite", [Type]{}, Type.Bool, BuiltinMethodLowering.Predicate),
     builtin_method(BuiltinMethodReceiver.Float, "is_finite", [Type]{}, Type.Bool, BuiltinMethodLowering.Predicate),

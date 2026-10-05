@@ -931,9 +931,6 @@ fn jet_jit_math_abs_diff(left: i64, right: i64) -> i64 {
 fn jet_jit_math_in_range(value: i64, low: i64, high: i64) -> i8 {
     i8::from(math_rt::jet_std_math_in_range(value, low, high))
 }
-fn jet_jit_math_xor(left: i64, right: i64) -> i64 {
-    math_rt::jet_std_math_xor(left, right)
-}
 fn jet_jit_math_min_f32(left: f64, right: f64) -> f64 {
     math_rt::jet_std_math_min_f32(left as f32, right as f32) as f64
 }
@@ -1368,7 +1365,6 @@ host_fns! {
     saturating_mul: "jet_jit_math_saturating_mul" => jet_jit_math_saturating_mul: i64_i64_i64;
     abs_diff: "jet_jit_math_abs_diff" => jet_jit_math_abs_diff: i64_i64_i64;
     in_range: "jet_jit_math_in_range" => jet_jit_math_in_range: i64_i64_i64_i8;
-    xor: "jet_jit_math_xor" => jet_jit_math_xor: i64_i64_i64;
     gcd_many: "jet_jit_math_gcd_many" => jet_jit_math_gcd_many: list_i64;
     lcm_many: "jet_jit_math_lcm_many" => jet_jit_math_lcm_many: list_i64;
     powmod: "jet_jit_math_powmod" => jet_jit_math_powmod: i64_i64_i64_i64;

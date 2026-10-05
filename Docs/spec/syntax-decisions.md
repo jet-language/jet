@@ -202,9 +202,9 @@ D-DOTCTOR3 whole-value reading, so `evens: [Int] :: xs.map(f)` becomes
 **S4 — Type annotations**: `name: Type` after the name on signatures and fields.
 Never on a local binding. Never `Type name`.
 
-**S17 — Compound assignment**: `+=` `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=`
-`>>=`. Arithmetic four on Int/Float; the rest Int-only. LHS must be a mutable
-binding or `&` parameter.
+**S17 — Compound assignment**: `+=` `-=` `*=` `/=` `/%=` `%=` `%%=` `<<=`
+`>>=`. Numeric arithmetic uses the ordinary checked operations; shifts and
+remainders are integer-only. LHS must be a mutable binding or `&` parameter.
 
 **D-INCR1 — Increment/decrement** *(retired 2026-09-28, owner decision, card
 #3727)*: `++` and `--` are not Jet operators. `x += 1` / `x -= 1` (S17) is the
@@ -510,12 +510,11 @@ D-ONELINE-BODY1=B's typed `fn f() T -> expr`; the earlier general-pipe
 proposal (D-SUGAR2), superseded by D-SHAPE-PIPE1=C.
 
 **D-SHAPE-PIPE1=C — Bars mean alternatives, not general flow** *(ratified
-2026-07-15, card #552; amended by D-BITOREXPR1=A)*: single `|` remains legal
-in alternative-list grammar, including structural or-patterns and choice arms,
-and is also the value-position bitwise OR operator. Jet assigns no general flow
-meaning to a bar. Reusable flows use ordinary calls, named intermediate
-values, and ordinary named composition helpers. `||` and the separately
-ratified `|=` compound assignment keep their existing meanings.
+2026-07-15, card #552; amended by D-SIGIL-ALGEBRA1=B)*: single `|` belongs
+to alternative-list grammar, including structural or-patterns and choice arms.
+Jet assigns no general flow meaning to a bar. Reusable flows use ordinary calls,
+named intermediate values, and ordinary named composition helpers. `||` keeps
+its Boolean meaning; integer OR is `value.bit_or(other)`.
 
 ### Control flow
 
@@ -826,10 +825,16 @@ use `filter_map`/`try_collect` (D-FAILCOMP1). S25 comparison distribution is
 **S13 — Logic & comparison**: `&&` `||` `!`; `==` `!=` `<` `>` `<=` `>=`.
 Word forms are not operators.
 
-**D-BITOREXPR1=A** *(ratified 2026-08-28, card #2299)*: value-position `|`
-is bitwise OR. It binds tighter than comparisons and remains distinct from
-type-position `|`, which is the anonymous-union separator under D-UNIONTYPE1.
-The existing `|=` compound assignment remains separate.
+**D-SIGIL-ALGEBRA1=B — Words for bit arithmetic and power** *(ratified
+2026-10-04, card #4141)*: every integer type has `bit_and(other)`,
+`bit_or(other)`, `bit_xor(other)` and `bit_not()`. Power is `value.pow(exponent)`
+on Int and Float. These methods lower through the existing numeric operations
+and shared Prelude, with the same integer-width, exactness, overflow-policy
+and D-EXPNEG1 negative-exponent rules. Shifts remain `<<` and `>>`. Prefix
+`&`, `^` and `~` retain their ownership meanings; `!` negates Bool only.
+Retired infix arithmetic and compounds produce E0398 naming the method, with
+a precedence-preserving structured repair. Updates explicitly assign the
+method result back. `core.math.xor` and `core.math.pow` are removed.
 
 **D-CHAINCMP1 — Chained comparisons**: `0 <= sev < 10` desugars to
 `0 <= sev && sev < 10`, middle operand evaluated once. Same-direction chains
@@ -878,7 +883,7 @@ code may opt in per operation with `wrapping(…)` / `saturating(…)` /
 
 **D-WRAP-SCOPE1=A** *(owner outcome, card #2171)*: `#Arithmetic(.Checked | .Wrapping |
 .Saturating)` is the one lexical policy for fixed-width `+`, `-`, `*`, unary
-negation, and `^`. It may attach to a function, method, or block; the
+negation, and `pow`. It may attach to a function, method, or block; the
 innermost block wins, and a declaration policy does not cross a call boundary.
 `.Checked` is the explicit spelling of the default. Division, remainder,
 shifts, conversions, indexing, slicing, bounds, and exact `Int` keep their
@@ -2464,9 +2469,9 @@ mark, matching the fresh-argument rule; read calls stay unmarked. Sema checks
 each mark against the resolved receiver
 convention of user methods, trait dispatch, and builtin receivers: E0224
 (missing), E0225 (extra), E0226 (wrong mark), each with a machine-applicable
-fix. A line that starts with `&name` or `^name` begins a new statement; a
-continued bitwise-and or power line keeps a space after its operator, which
-`jet fmt` always emits. `~` copy grouping and `&place` window lifetimes are
+fix. A line that starts with `&name` or `^name` begins a new statement.
+Arithmetic uses named bit methods and `pow` (D-SIGIL-ALGEBRA1=B).
+`~` copy grouping and `&place` window lifetimes are
 unchanged; calls through a stored write window mark the window name. Lookup,
 evaluation order, one place evaluation, two-phase builtin borrowing, and move
 checks are unchanged. Rationale: one value-side mark position for receivers,
@@ -8815,4 +8820,9 @@ layout.
 - **D-MARKERARGS1=A —** The companion page argument is a checked Path value. A malformed path fails at compile
 time with the Path grammar's diagnostic. **Technical:** Marker signature change in Prelude/Markers.jet
 (D-MARKSIG1): HTML(page: Path). Migration: jet fix rewrites #HTML("x") to #HTML(Path{"x"}).
+
+
+**2026-10-04 — D-SIGIL-ALGEBRA1=B** *(card #4141)*: bit arithmetic and
+power use numeric methods, leaving marks to ownership and outcomes. Amends
+D-EXPOP1, D-XORSPELL1, D-BITNOT1 and D-BITOREXPR1; shifts are unchanged.
 

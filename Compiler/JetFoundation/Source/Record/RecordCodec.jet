@@ -113,13 +113,13 @@ pub struct RecordValueResult {
 pub fn record_put_uvarint(out: &[U8], value: Int) Never! {
     rest := value
     loop {
-        low :: rest & 127
+        low :: (rest).bit_and(127)
         rest = rest >> 7
         if rest == 0 {
             &out.push(U8{low})
             return
         }
-        &out.push(U8{low | 128})
+        &out.push(U8{(low).bit_or(128)})
     }
 }
 
@@ -134,7 +134,7 @@ fn record_zigzag(value: Int) -> Int Never! {
 }
 
 fn record_unzigzag(value: Int) -> Int Never! {
-    if value & 1 == 0 -> value >> 1 else -> 0 - (value >> 1) - 1
+    if (value).bit_and(1) == 0 -> value >> 1 else -> 0 - (value >> 1) - 1
 }
 
 // True when `left` sorts strictly before `right` by bytes.
@@ -404,13 +404,13 @@ fn record_read_uvarint(bytes: [U8], cursor: &RecordCursor) -> Int Never! {
     loop {
         byte :: record_read_byte(bytes, &cursor)
         if cursor.problem != None -> return 0
-        low :: byte & 127
+        low :: (byte).bit_and(127)
         if shift == 63 && low > 1 {
             record_malformed(&cursor, "varint overflows u64")
             return 0
         }
-        value = value | (low << shift)
-        if byte & 128 == 0 {
+        value = (value).bit_or((low << shift))
+        if (byte).bit_and(128) == 0 {
             if byte == 0 && shift > 0 {
                 record_malformed(&cursor, "varint is not minimal")
                 return 0

@@ -148,7 +148,7 @@ pub struct EnvelopeArchive {
 fn pkg_u32_be_bytes(value: Int) -> [U8] Never! {
     out := [U8]{}
     shift_values :: [Int]{24, 16, 8, 0}
-    loop shift in shift_values -> &out.push(U8{(value >> shift) & 0xFF})
+    loop shift in shift_values -> &out.push(U8{((value >> shift)).bit_and(0xFF)})
     out
 }
 
@@ -584,13 +584,13 @@ fn pkg_envelope_file_identity(info: Stat) -> FileID? Never! {
 
 // `<content sha256 hex>-<mode & 0o7777 as 8 hex digits>`: the CAS pool name.
 fn pkg_envelope_cas_key(info: Stat, content_digest: String) -[Env]> String Never! {
-    "{content_digest}-{pkg_envelope_hex8(pkg_envelope_mode(info) & 0o7777)}"
+    "{content_digest}-{pkg_envelope_hex8((pkg_envelope_mode(info)).bit_and(0o7777))}"
 }
 
 fn pkg_envelope_hex8(value: Int) -> String Never! {
     digits :: "0123456789abcdef".bytes()
     out := [U8]{}
     shift_values :: [Int]{28, 24, 20, 16, 12, 8, 4, 0}
-    loop shift in shift_values -> &out.push(digits[(value >> shift) & 15])
+    loop shift in shift_values -> &out.push(digits[((value >> shift)).bit_and(15)])
     String.from_bytes(out) ?? ""
 }

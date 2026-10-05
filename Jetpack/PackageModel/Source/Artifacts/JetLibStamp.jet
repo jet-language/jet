@@ -300,7 +300,7 @@ pub struct JetLibArtifact {
         stamp :: JetLibStamp.decode_prefix(&reader)
         if bytes.len() - reader.at < 8 -> return Err(JetLibError.new("truncated .jetlib artifact (payload length)"))
         declared := 0
-        loop index in 0..<8 -> declared = (declared << 8) | Int.from_u8(bytes[reader.at + index])
+        loop index in 0..<8 -> declared = ((declared << 8)).bit_or(Int.from_u8(bytes[reader.at + index]))
         payload :: bytes[reader.at + 8..<bytes.len()]
         if payload.len() != declared {
             return Err(JetLibError.new("truncated .jetlib artifact (payload declares {declared} bytes, found {payload.len()})"))
@@ -323,7 +323,7 @@ struct JetLibWriter {
 
     fn push_u32(&self, value: Int) Never! {
         shift_values :: [Int]{24, 16, 8, 0}
-        loop shift in shift_values -> &self.bytes.push(U8{(value >> shift) & 0xFF})
+        loop shift in shift_values -> &self.bytes.push(U8{((value >> shift)).bit_and(0xFF)})
     }
 
     // A u32 length prefix, then the bytes.
@@ -349,7 +349,7 @@ struct JetLibReader {
     fn take_u32(&self, what: String) -> Int JetLibError! {
         if self.bytes.len() - self.at < 4 -> return Err(JetLibError.new("truncated .jetlib header ({what})"))
         value := 0
-        loop index in 0..<4 -> value = (value << 8) | Int.from_u8(self.bytes[self.at + index])
+        loop index in 0..<4 -> value = ((value << 8)).bit_or(Int.from_u8(self.bytes[self.at + index]))
         self.at += 4
         Ok(value)
     }
@@ -357,7 +357,7 @@ struct JetLibReader {
     fn take_bytes(&self) -> [U8] JetLibError! {
         if self.bytes.len() - self.at < 4 -> return Err(JetLibError.new("truncated .jetlib header (length prefix)"))
         length := 0
-        loop index in 0..<4 -> length = (length << 8) | Int.from_u8(self.bytes[self.at + index])
+        loop index in 0..<4 -> length = ((length << 8)).bit_or(Int.from_u8(self.bytes[self.at + index]))
         self.at += 4
         if length > JETLIB_MAX_HEADER_FIELD_BYTES -> return Err(JetLibError.new(".jetlib header field is too large"))
         if self.bytes.len() - self.at < length -> return Err(JetLibError.new("truncated .jetlib header (field bytes)"))

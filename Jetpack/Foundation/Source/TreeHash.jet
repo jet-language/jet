@@ -59,16 +59,16 @@ pub struct StreamingSHA256 {
             &block.clear()
         }
         loop block.len() < 56 -> &block.push(U8{0})
-        bit_length :: (self.total * 8) & MIR_SHA256_LENGTH_MASK
-        loop shift in FOUNDATION_U64_SHIFTS -> &block.push(U8{(bit_length >> shift) & 255})
+        bit_length :: ((self.total * 8)).bit_and(MIR_SHA256_LENGTH_MASK)
+        loop shift in FOUNDATION_U64_SHIFTS -> &block.push(U8{((bit_length >> shift)).bit_and(255)})
         mir_sha256_compress(&state, &words, self.k, block)
         digest := [U8]{}
         loop lane in state {
             word :: Int.from_u32(lane)
-            &digest.push(U8{(word >> 24) & 255})
-            &digest.push(U8{(word >> 16) & 255})
-            &digest.push(U8{(word >> 8) & 255})
-            &digest.push(U8{word & 255})
+            &digest.push(U8{((word >> 24)).bit_and(255)})
+            &digest.push(U8{((word >> 16)).bit_and(255)})
+            &digest.push(U8{((word >> 8)).bit_and(255)})
+            &digest.push(U8{(word).bit_and(255)})
         }
         digest
     }
@@ -199,7 +199,7 @@ fn foundation_hash_regular_nofollow(path: String, expected: Stat, hasher: &Strea
     next_total :: total_bytes + opened.size
     if next_total > MAX_TREE_TOTAL_BYTES -> return Err(TreeHashError.TooLarge{path: path, limit: MAX_TREE_TOTAL_BYTES})
     length := [U8]{}
-    loop shift in FOUNDATION_U64_SHIFTS -> &length.push(U8{(opened.size >> shift) & 255})
+    loop shift in FOUNDATION_U64_SHIFTS -> &length.push(U8{((opened.size >> shift)).bit_and(255)})
     &hasher.update(length)
     actual_length := 0
     loop {
@@ -600,7 +600,7 @@ fn foundation_stage_and_rename(directories: [FoundationPublicationDirectory], pa
     writer.fsync()
     staged :: writer.stat()
     if staged.links != 1 -> return Err(IOError.PermissionDenied(foundation_io_context(.Write, temporary, "file authority temporary has multiple hard links")))
-    if staged.mode & 4095 != policy.mode -> return Err(IOError.PermissionDenied(foundation_io_context(.Write, temporary, "file authority temporary has incorrect permissions")))
+    if (staged.mode).bit_and(4095) != policy.mode -> return Err(IOError.PermissionDenied(foundation_io_context(.Write, temporary, "file authority temporary has incorrect permissions")))
     if before_rename == .Val(validate) -> validate()
     foundation_ensure_directories_current(directories)
     destination :: foundation_inspect_destination(parent, final_name, policy.destination_links)

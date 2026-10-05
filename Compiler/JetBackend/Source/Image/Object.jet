@@ -170,7 +170,7 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
     rela := [U8]{}
     loop entry_row in relas {
         elf64_u64(&rela, entry_row.at)
-        elf64_u64(&rela, (entry_row.symbol << 32) | entry_row.kind)
+        elf64_u64(&rela, ((entry_row.symbol << 32)).bit_or(entry_row.kind))
         elf64_u64(&rela, entry_row.addend)
     }
     shstrtab := [U8]{U8{0}}
@@ -206,7 +206,7 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
     }
     elf64_pad(&bytes, 8)
     shoff :: bytes.len()
-    loop shift in 0..<8 -> bytes[shoff_at + shift] = U8{(shoff >> (8 * shift)) & 255}
+    loop shift in 0..<8 -> bytes[shoff_at + shift] = U8{((shoff >> (8 * shift))).bit_and(255)}
     elf64_section_header(&bytes, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     // .text: PROGBITS, ALLOC | EXECINSTR
     elf64_section_header(&bytes, name_offsets[1], 1, 6, section_offsets[0], text.len(), 0, 0, X64_FUNCTION_ALIGN, 0)

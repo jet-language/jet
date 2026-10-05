@@ -29,7 +29,7 @@ pub fn lir_lint_module(program: LIRModule) -> [LIRLintIssue] Never! {
     }
     loop (index, data) in program.data {
         if data.id.value != index -> &issues.push(LIRLintIssue{function: "", block: -1, message: "data {index} carries ID {data.id.value}"})
-        if data.align <= 0 || (data.align & (data.align - 1)) != 0 -> &issues.push(LIRLintIssue{function: "", block: -1, message: "data {index} has an invalid alignment"})
+        if data.align <= 0 || ((data.align).bit_and((data.align - 1))) != 0 -> &issues.push(LIRLintIssue{function: "", block: -1, message: "data {index} has an invalid alignment"})
     }
     loop (index, function) in program.functions {
         if function.id.value != index -> &issues.push(LIRLintIssue{function: function.name, block: -1, message: "function {index} carries ID {function.id.value}"})
@@ -44,7 +44,7 @@ fn lir_lint_issue(function: LIRFunction, block: Int, message: String) -> LIRLint
 
 fn lir_lint_layout_valid(layout: LIRLayout) -> Bool Never! {
     if layout.size <= 0 || layout.align <= 0 -> return false
-    if (layout.align & (layout.align - 1)) != 0 -> return false
+    if ((layout.align).bit_and((layout.align - 1))) != 0 -> return false
     layout.size % layout.align == 0
 }
 

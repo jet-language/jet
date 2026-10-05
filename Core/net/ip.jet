@@ -112,20 +112,20 @@ pub fn network(cidr: String) -> Network IOError! {
     pref :: parse_int(String.from_bytes(slice_u(raw, slash + 1, raw.len())) ?? "") ?? return Err(net_err("bad prefix"))
     if pref < 0 || pref > 32 -> return Err(net_err("prefix must be 0..=32"))
     addr :: parse_ipv4(host) ?? return Err(net_err("bad IPv4 address"))
-    masked :: ipv4_from_int(ipv4_int(addr) & prefix_mask(pref)) ?? return Err(net_err("bad network address"))
+    masked :: ipv4_from_int((ipv4_int(addr)).bit_and(prefix_mask(pref))) ?? return Err(net_err("bad network address"))
     Ok(Network{addr: masked, prefix: pref})
 }
 
 pub fn network_contains(net: Network, addr: IPv4) -> Bool Never! {
     if net.prefix < 0 || net.prefix > 32 -> return false
     mask :: prefix_mask(net.prefix)
-    (ipv4_int(addr) & mask) == (ipv4_int(net.addr) & mask)
+    ((ipv4_int(addr)).bit_and(mask)) == ((ipv4_int(net.addr)).bit_and(mask))
 }
 
 pub fn network_broadcast(net: Network) -> IPv4 Never! {
     if net.prefix < 0 || net.prefix > 32 -> return net.addr
     mask :: prefix_mask(net.prefix)
-    bcast :: (ipv4_int(net.addr) & mask) | (4294967295 - mask)
+    bcast :: (((ipv4_int(net.addr)).bit_and(mask))).bit_or((4294967295 - mask))
     ipv4_from_int(bcast) ?? net.addr
 }
 
@@ -205,7 +205,7 @@ pub fn ipv6_is_unspecified(addr: IPv6) -> Bool Never! {
 }
 
 pub fn ipv6_is_link_local(addr: IPv6) -> Bool Never! {
-    addr.words.len() == 8 && addr.words[0] & 65472 == 65152
+    addr.words.len() == 8 && (addr.words[0]).bit_and(65472) == 65152
 }
 
 fn prefix_mask(prefix: Int) -> Int Never! {
@@ -391,7 +391,7 @@ pub fn supernet_of(outer: Network, inner: Network) -> Bool Never! { subnet_of(in
 pub fn supernet(net: Network) -> Network Never! {
     p := net.prefix - 1
     if p < 0 -> p = 0
-    masked :: ipv4_from_int(ipv4_int(net.addr) & prefix_mask(p)) ?? net.addr
+    masked :: ipv4_from_int((ipv4_int(net.addr)).bit_and(prefix_mask(p))) ?? net.addr
     {addr: masked, prefix: p}
 }
 
@@ -458,12 +458,12 @@ pub fn is_documentation(addr: IPv4) -> Bool Never! {
 pub fn is_shared(addr: IPv4) -> Bool Never! { is_carrier_grade_nat(addr) }
 
 pub fn ipv6_is_multicast(addr: IPv6) -> Bool Never! {
-    addr.words.len() == 8 && addr.words[0] & 65280 == 65280
+    addr.words.len() == 8 && (addr.words[0]).bit_and(65280) == 65280
 }
 
 pub fn ipv6_is_private(addr: IPv6) -> Bool Never! {
     // Unique-local addresses are fc00::/7.
-    addr.words.len() == 8 && addr.words[0] & 65024 == 64512
+    addr.words.len() == 8 && (addr.words[0]).bit_and(65024) == 64512
 }
 
 pub fn ipv6_is_global(addr: IPv6) -> Bool Never! {
@@ -481,7 +481,7 @@ pub fn ipv6_packed(addr: IPv6) -> [U8] Never! {
 }
 
 fn to_u8(n: Int) -> U8 Never! {
-    v :: n & 255
+    v :: (n).bit_and(255)
     (U8{v})
 }
 

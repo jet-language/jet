@@ -299,6 +299,7 @@ const BUILTIN_METHOD_VOCABULARY: &str = concat!(
     "a accepted action active_count add add_asset_bundle add_doc add_executable add_install add_library add_new ",
     "add_package add_publish add_test advance after all any average b before binary_search binary_search_by ",
     "close collect compare compare_exchange concat contains contains_value copy copy_to count count_by count_where counts count_ones count_zeros bit_count bit_length ",
+    "bit_and bit_or bit_xor bit_not pow ",
     "encode cycle contribute dedup dedup_by delete delivered delivered_handlers diagnostics difference digest downgrade ",
     "drop_last dropped each edit edit_disjoint effects elapsed_millis embed emit emit_async ends_with eof ",
     "equal error events exponential extend failure_count failures fetch filter filter_map find first ",
@@ -490,6 +491,15 @@ pub fn builtin_method_return(
     }
     if is_static_on_type {
         return builtin_static_return(recv_ty, method, arg_count);
+    }
+    // D-SIGIL-ALGEBRA1=B: these intrinsic methods lower in sema to the
+    // existing numeric operations, not to host-specific method dispatch.
+    if recv_ty.is_integer() {
+        if matches!((method, arg_count), ("bit_not", 0) | ("bit_and" | "bit_or" | "bit_xor" | "pow", 1)) {
+            return Some(Some(recv_ty.erased_inline_ranges()));
+        }
+    } else if recv_ty.is_float() && method == "pow" && arg_count == 1 {
+        return Some(Some(recv_ty.clone()));
     }
     if let Type::Apply { name, args } = recv_ty {
         if name == "Atomic" && args.len() == 1 {

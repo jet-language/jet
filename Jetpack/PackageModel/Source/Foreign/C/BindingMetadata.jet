@@ -204,7 +204,7 @@ fn pkg_cffi_metadata_escape(value: String) -> String Never! {
         }
         &out.push(U8{37})
         &out.push(digits[code >> 4])
-        &out.push(digits[code & 15])
+        &out.push(digits[(code).bit_and(15)])
     }
     String.from_bytes(out) ?? ""
 }
@@ -231,7 +231,7 @@ fn pkg_cffi_metadata_unescape(value: String) -> String ForeignBridgeError! {
         if index + 2 >= bytes.len() -> return Err(pkg_bridge_error("truncated percent escape"))
         high :: pkg_cffi_hex_value(Int.from_u8(bytes[index + 1])) ?? return Err(pkg_bridge_error("invalid percent escape"))
         low :: pkg_cffi_hex_value(Int.from_u8(bytes[index + 2])) ?? return Err(pkg_bridge_error("invalid percent escape"))
-        &out.push(U8{(high << 4) | low})
+        &out.push(U8{((high << 4)).bit_or(low)})
         index += 3
     }
     text :: String.from_bytes(out) ?? return Err(pkg_bridge_error("metadata contains invalid UTF-8"))

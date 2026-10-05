@@ -548,7 +548,7 @@ fn provider_native_read_bounded_file(path: String, limit: Int) -[FS]> [U8] Regis
 // Add the 0755 bits to the staged artifact.
 fn provider_native_make_executable(path: String) RegistryError! -[FS]> {
     stat :: files.stat(path) ?? return Err(RegistryError.Reason("could not stat executable: {err}"))
-    files.set_mode(path, stat.mode | 0o755) ?? return Err(RegistryError.Reason("could not mark executable: {err}"))
+    files.set_mode(path, (stat.mode).bit_or(0o755)) ?? return Err(RegistryError.Reason("could not mark executable: {err}"))
 }
 
 // Best-effort removal of an abandoned staging tree or file.

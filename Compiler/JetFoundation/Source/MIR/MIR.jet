@@ -79,10 +79,10 @@ pub fn stable_id(namespace: String, identity: String) -> U64 Never! {
     // each fit an Int literal: a wider literal is parsed from its decimal
     // text on every call, which dominated this function.
     high :: U64{0xcbf29ce4}
-    hash := high.wrapping_mul(U64{0x100000000}) ~| U64{0x84222325}
-    loop byte in namespace.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    hash := (high.wrapping_mul(U64{0x100000000})).bit_xor(U64{0x84222325})
+    loop byte in namespace.bytes() -> hash = ((hash).bit_xor(U64.from_u8(byte))).wrapping_mul(prime)
     hash = hash.wrapping_mul(prime)
-    loop byte in identity.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    loop byte in identity.bytes() -> hash = ((hash).bit_xor(U64.from_u8(byte))).wrapping_mul(prime)
     if hash == 0 -> return U64{1}
     hash
 }
@@ -482,7 +482,7 @@ fn is_atomic_apply(name: String, args: [MIRType]) -> Bool Never! {
     if args[0].kind == {
         .Bool -> true
         .Int -> true
-        .IntN(signed, bits) -> (signed && bits == 32) || (!signed && (bits == 32 | 64))
+        .IntN(signed, bits) -> (signed && bits == 32) || (!signed && (bits == (32).bit_or(64)))
         else -> false
     }
 }
@@ -1635,7 +1635,7 @@ pub enum MIRBinaryOp { Add Sub Mul Div FloorDiv Mod Rem Pow BitAnd BitOr BitXor 
 pub enum MIRBinaryDispatch { Primitive Prelude(call: MIRPreludeCallID, location: MIRPanicLoc?) }
 
 // `Trap` exactly when the operands are fixed-width integers, the operator can
-// overflow (`+ - * / ^ << >>`), and the dispatch is that width's trap route
+// overflow (`+ - * / pow << >>`), and the dispatch is that width's trap route
 // (`{width}.trap.{op}`). Native MIR carries the trap only in that route, so the
 // bootstrap bridge checks this rule going out and re-derives the mode coming back.
 pub enum MIRBinaryOverflow { Unchecked Trap }

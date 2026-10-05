@@ -33,7 +33,7 @@ fn store_artifact_magic(label: String) -> [U8] Never! {
 fn store_artifact_push_le64(out: &[U8], value: Int) Never! {
     shift := 0
     loop shift < 64 {
-        &out.push(U8{(value >> shift) & 255})
+        &out.push(U8{((value >> shift)).bit_and(255)})
         shift += 8
     }
 }
@@ -42,7 +42,7 @@ fn store_artifact_push_le64(out: &[U8], value: Int) Never! {
 fn store_artifact_read_le64(bytes: [U8], start: Int) -> Int Never! {
     value := 0
     loop offset in 0..<8 {
-        value = value | (Int.from_u8(bytes[start + offset]) << (offset * 8))
+        value = (value).bit_or((Int.from_u8(bytes[start + offset]) << (offset * 8)))
     }
     value
 }
@@ -140,7 +140,7 @@ fn store_artifact_io_invalid(error: IOError) -> Bool Never! {
 }
 
 fn store_artifact_is_executable(info: files.Stat) -> Bool Never! {
-    (info.mode & 0o111) != 0
+    ((info.mode).bit_and(0o111)) != 0
 }
 
 // The outcome of reading one store entry.
@@ -222,7 +222,7 @@ fn store_artifact_replace_with(temporary: String, path: String, parent: String, 
 fn store_artifact_set_executable(path: String, executable: Bool) ArtifactStoreError! -[FS]> {
     info :: files.stat(path)
     mode :: info.mode
-    updated_mode :: if executable -> mode | 0o111 else -> mode - (mode & 0o111)
+    updated_mode :: if executable -> (mode).bit_or(0o111) else -> mode - ((mode).bit_and(0o111))
     files.set_mode(path, updated_mode)
 }
 

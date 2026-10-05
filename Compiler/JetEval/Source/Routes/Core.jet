@@ -103,7 +103,7 @@ fn jet_eval_route_core_math(row: MIRCoreCall, data: [TComptimeValue], args: [Jet
             third :: jet_eval_route_core_float(data, 2, &machine, span) ?? return None
             jet_eval_route_core_float_result(if symbol == "jet_std_math_fma" -> math.fma(first, second, third) else -> math.lerp(first, second, third))
         }
-        "jet_std_math_atan2" | "jet_std_math_hypot" | "jet_std_math_copysign" | "jet_std_math_log" | "jet_std_math_pow" | "jet_std_math_fmod" | "jet_std_math_remainder" | "jet_std_math_next_after" -> {
+        "jet_std_math_atan2" | "jet_std_math_hypot" | "jet_std_math_copysign" | "jet_std_math_log" | "jet_std_math_fmod" | "jet_std_math_remainder" | "jet_std_math_next_after" -> {
             left :: jet_eval_route_core_float(data, 0, &machine, span) ?? return None
             right :: jet_eval_route_core_float(data, 1, &machine, span) ?? return None
             result :: if symbol == {
@@ -111,7 +111,6 @@ fn jet_eval_route_core_math(row: MIRCoreCall, data: [TComptimeValue], args: [Jet
                 "jet_std_math_hypot" -> math.hypot(left, right)
                 "jet_std_math_copysign" -> math.copysign(left, right)
                 "jet_std_math_log" -> math.log(left, right)
-                "jet_std_math_pow" -> math.pow(left, right)
                 "jet_std_math_fmod" -> math.fmod(left, right)
                 "jet_std_math_remainder" -> math.remainder(left, right)
                 else -> math.next_after(left, right)

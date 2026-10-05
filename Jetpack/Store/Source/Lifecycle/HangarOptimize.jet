@@ -51,7 +51,7 @@ fn store_optimize_objects_cas_pool_plan(roots: HangarRoots) -[FS, Env]> CleanRep
             metadata :: files.stat(file)
             if metadata.is_symlink || !metadata.is_file || metadata.size == 0 -> next
             bytes :: files.read_bytes(file)
-            mode :: store_optimize_permission_identity(metadata) & 0o7555
+            mode :: (store_optimize_permission_identity(metadata)).bit_and(0o7555)
             cas_file :: files.join(cas, store_shared_cas_key(pkg_sha256_hex(bytes), mode))
             existing_found :: store_node_stat(cas_file)
             if existing_found == {
@@ -153,7 +153,7 @@ fn store_optimize_objects_cas_pool(roots: HangarRoots) -[FS, Env, Time]> CleanRe
 // the readonly flag.
 fn store_optimize_permission_identity(metadata: Stat) -[Env]> Int Never! {
     if sys.is_windows() -> return if metadata.readonly -> 1 else -> 0
-    metadata.mode & 0o7777
+    (metadata.mode).bit_and(0o7777)
 }
 
 // Rust `same_file_inode`: both paths name one file (following links). Always

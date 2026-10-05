@@ -1192,8 +1192,8 @@ fn absorb_boundary(state: &[U8], index: Int, bytes: [U8]) -> Int Never! {
         sum :: (Int.from_u8(state[slot]) + Int.from_u8(digest[(slot + index) %% 32])) %% 256
         shift :: index %% 7
         rotated := sum
-        if shift != 0 -> rotated = ((sum << shift) + (sum >> (8 - shift))) & 255
-        state[slot] = U8{rotated ~| index}
+        if shift != 0 -> rotated = (((sum << shift) + (sum >> (8 - shift)))).bit_and(255)
+        state[slot] = U8{(rotated).bit_xor(index)}
     }
     index + 1
 }

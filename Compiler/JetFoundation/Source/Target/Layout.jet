@@ -285,7 +285,7 @@ pub fn jet_target_layout_from_selected_facts(triple: String, facts: MIRLayoutCap
 
 fn jet_target_layout_u64_bytes(value: Int) -> [U8] Never! {
     bytes := [U8]{}
-    loop index in 0..<8 -> &bytes.push(U8{(value >> (8 * index)) & 255})
+    loop index in 0..<8 -> &bytes.push(U8{((value >> (8 * index))).bit_and(255)})
     bytes
 }
 
@@ -918,7 +918,7 @@ fn jet_target_layout_ascii_lower(text: String) -> String Never! {
 }
 
 fn jet_layout_is_power_of_two(value: Int) -> Bool Never! {
-    value > 0 && (value & (value - 1)) == 0
+    value > 0 && ((value).bit_and((value - 1))) == 0
 }
 
 fn jet_layout_checked_add(left: Int, right: Int) -> Int? {

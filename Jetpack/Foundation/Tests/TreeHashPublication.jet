@@ -36,7 +36,7 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
             info :: files.stat(entry.path) ?? panic("stat stage")
             assert(info.is_file && !info.is_symlink)
             assert_eq(info.links, 1)
-            assert_eq(info.mode & 0o777, 0o600)
+            assert_eq((info.mode).bit_and(0o777), 0o600)
         }
     }
     assert_eq(stages, 1, "validation must run after a complete stage exists")
@@ -52,8 +52,8 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     assert(original.id != published.id)
     assert_eq(files.read(path) ?? panic("read published"), "replacement")
     assert_eq(published.links, 1)
-    assert_eq(published.mode & 0o777, 0o600)
-    assert_eq((files.stat(files.join(root, "nested")) ?? panic("stat parent")).mode & 0o777, 0o700)
+    assert_eq((published.mode).bit_and(0o777), 0o600)
+    assert_eq(((files.stat(files.join(root, "nested")) ?? panic("stat parent")).mode).bit_and(0o777), 0o700)
     foundation_publication_test_no_temporary(files.join(root, "nested/deeper"))
     files.remove_all(root) ?? panic("cleanup")
 }
@@ -504,13 +504,13 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
         loop entry in entries {
             if entry.name.starts_with(".jet-lock-") {
                 stages += 1
-                assert_eq((files.stat(entry.path) ?? panic("staged mode")).mode & 4095, 420)
+                assert_eq(((files.stat(entry.path) ?? panic("staged mode")).mode).bit_and(4095), 420)
             }
         }
         assert_eq(stages, 1)
     }
     foundation_write_file_nofollow_at_root(root, "key.pub", "public".bytes(), Val(validate), policy) ?? panic("public publish")
-    assert_eq((files.stat(files.join(root, "key.pub")) ?? panic("public mode")).mode & 4095, 420)
+    assert_eq(((files.stat(files.join(root, "key.pub")) ?? panic("public mode")).mode).bit_and(4095), 420)
     foundation_publication_test_no_temporary(root)
     files.remove_all(root) ?? panic("cleanup")
 }
@@ -629,9 +629,9 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     files.create_dir_all(existing) ?? panic("existing directory")
     files.set_mode(existing, 0o750) ?? panic("existing mode")
     held :: foundation_open_or_create_directory(parent, "existing") ?? panic("open existing")
-    assert_eq((held.stat() ?? panic("existing held metadata")).mode & 0o777, 0o750)
+    assert_eq(((held.stat() ?? panic("existing held metadata")).mode).bit_and(0o777), 0o750)
     created :: foundation_open_or_create_directory(parent, "created") ?? panic("create protected child")
-    assert_eq((created.stat() ?? panic("created held metadata")).mode & 0o777, 0o700)
+    assert_eq(((created.stat() ?? panic("created held metadata")).mode).bit_and(0o777), 0o700)
     assert_eq((created.stat() ?? panic("created identity")).id, (files.stat(files.join(root, "created")) ?? panic("bound identity")).id)
     files.write(files.join(root, "ordinary"), "sentinel") ?? panic("ordinary collision")
     files.symlink(existing, files.join(root, "linked")) ?? panic("link collision")
@@ -644,7 +644,7 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     }
     assert_eq(files.read(files.join(root, "ordinary")) ?? panic("collision preserved"), "sentinel")
     assert((files.stat(files.join(root, "linked")) ?? panic("link preserved")).is_symlink)
-    assert_eq((files.stat(existing) ?? panic("referent mode")).mode & 0o777, 0o750)
+    assert_eq(((files.stat(existing) ?? panic("referent mode")).mode).bit_and(0o777), 0o750)
     files.remove_all(root) ?? panic("cleanup")
 }
 

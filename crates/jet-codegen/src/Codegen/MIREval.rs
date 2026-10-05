@@ -30009,6 +30009,9 @@ fn mir_unary_not(
             }
             let value = match value {
                 MirEvalValue::Int(value) => value as u64,
+                MirEvalValue::BigInt(value) => value.parse::<u64>().map_err(|_| {
+                    mir_error_at("MIR fixed integer carrier exceeds its checked width", span)
+                })?,
                 _ => {
                     return Err(mir_error_at(
                         "MIR fixed integer bitwise-not requires an integer carrier",
@@ -30030,7 +30033,11 @@ fn mir_unary_not(
             } else {
                 value as i64
             };
-            Ok(MirEvalValue::Int(value))
+            Ok(if *signed {
+                MirEvalValue::Int(value)
+            } else {
+                mir_unsigned_integer(value as u64)
+            })
         }
         _ => Err(mir_error_at(
             "MIR bitwise negation requires an integer or Bool",

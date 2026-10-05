@@ -1478,7 +1478,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 0a86db9f137d7f3fe3d4aeb36b8eace763327ec1a2ee55c73cf46d8d575f7060
+// Source SHA-256: a1137040cab9f17f67cab297c1af75354a1941133f2d036432513d857ebe8a1d
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2012,7 +2012,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math", "atan2", "jet_std_math_atan2", true, &[false, false]) .with_jit_symbol("jet_jit_math_atan2") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "ceil", "jet_std_math_ceil", true, &[false]) .with_jit_symbol("jet_jit_math_ceil") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "hypot", "jet_std_math_hypot", true, &[false, false]) .with_jit_symbol("jet_jit_math_hypot") .with_pure_route(CoreCallPureRoute::Math),
-    CoreCallRecord::new("core.math", "pow", "jet_std_math_pow", true, &[false, false]) .with_jit_symbol("jet_jit_math_pow") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "sqrt", "jet_std_math_sqrt", true, &[false]) .with_pure_route(CoreCallPureRoute::Math) .without_direct_aot(),
     CoreCallRecord::new( "core.math", "is_finite", "jet_std_math_is_finite", true, &[false], ) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new( "core.math", "fabs", "jet_std_math_abs_f64", true, &[false], ) .with_jit_symbol("jet_jit_math_abs_f64") .with_pure_route(CoreCallPureRoute::Math),
@@ -2160,7 +2159,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math", "odd", "jet_std_math_is_odd", true, &[false]) .with_jit_symbol("jet_jit_math_is_odd") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "in_range", "jet_std_math_in_range", true, &[false, false, false]) .with_jit_symbol("jet_jit_math_in_range") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "log1p", "jet_std_math_ln_1p", true, &[false]) .with_jit_symbol("jet_jit_math_ln_1p") .with_pure_route(CoreCallPureRoute::Math),
-    CoreCallRecord::new("core.math", "xor", "jet_std_math_xor", true, &[false, false]) .with_jit_symbol("jet_jit_math_xor") .with_pure_route(CoreCallPureRoute::Math) .with_native_int_result(),
     CoreCallRecord::new("core.math", "random", "jet_std_random_float", true, &[]) .with_jit_symbol("jet_jit_random_float"),
     CoreCallRecord::new("core.math", "saturating_add", "jet_std_math_saturating_add", true, &[false, false]) .with_jit_symbol("jet_jit_math_saturating_add") .with_native_int_result(),
     CoreCallRecord::new("core.math", "fma", "jet_std_math_fma", true, &[false, false, false]) .with_jit_symbol("jet_jit_math_fma") .with_pure_route(CoreCallPureRoute::Math),

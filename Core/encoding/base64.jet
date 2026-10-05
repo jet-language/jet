@@ -125,7 +125,7 @@ fn ascii85_encode(data: [U8]) -> String {
         b :: if width > 1 -> u8_int(data[i + 1]) else -> 0
         c :: if width > 2 -> u8_int(data[i + 2]) else -> 0
         d :: if width > 3 -> u8_int(data[i + 3]) else -> 0
-        n :: (a << 24) | (b << 16) | (c << 8) | d
+        n :: ((((a << 24)).bit_or((b << 16))).bit_or((c << 8))).bit_or(d)
         if width == 4 && n == 0 {
             &out.push(U8{122})
         } else {
@@ -197,7 +197,7 @@ fn base85_encode(data: [U8], alphabet: String, require_full: Bool) -> String Bas
         b :: if width > 1 -> u8_int(data[i + 1]) else -> 0
         c :: if width > 2 -> u8_int(data[i + 2]) else -> 0
         d :: if width > 3 -> u8_int(data[i + 3]) else -> 0
-        value :: (a << 24) | (b << 16) | (c << 8) | d
+        value :: ((((a << 24)).bit_or((b << 16))).bit_or((c << 8))).bit_or(d)
         digits := [Int]{}
         v := value
         loop _ in 0..<5 {
@@ -250,6 +250,6 @@ fn base85_decode(text: String, alphabet: String, require_full: Bool) -> [U8] Bas
 /// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
 /// checked `U8{}` conversion.
 fn to_u8(n: Int) -> U8 Never! {
-    v :: n & 255
+    v :: (n).bit_and(255)
     (U8{v})
 }

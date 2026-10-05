@@ -1,5 +1,5 @@
-// Pratt expressions and source literals. Token precedence follows the language
-// grammar: `^` is right-associative exponentiation; `~|` is bitwise XOR.
+// Pratt expressions preserve retired arithmetic precedence solely to produce
+// behavior-preserving method repairs (D-SIGIL-ALGEBRA1=B).
 use jet_foundation.[
     AccessConvention,
     BinOp,
@@ -125,10 +125,7 @@ pub struct ParsedExprFields {
     pub span: Span
 }
 
-// Rust's precedence ladder, loosest first: `??`, one non-chaining range,
-// `||`, `&&`, comparisons, `|`, `~|`, `&`, shifts, `+ -`, `* /`, unary,
-// then right-associative `^`. Bitwise operators bind tighter than
-// comparisons (D-BITOREXPR1=A).
+// The retired arithmetic precedence slots are diagnostic recovery, not syntax.
 fn parser_expression_precedence(kind: Int) -> Int Never! {
     return if kind == {
         TOKEN_QUESTION_QUESTION -> 1
@@ -278,6 +275,14 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
         if operator == TOKEN_CARET -> next_minimum = precedence
         right :: parser_parse_expression_restricted(&state, next_minimum, depth + 1, allow_struct_lit, stop_before_comparison)
         span := parser_cover(left.span, right.span)
+        retired_method := if operator == {
+            TOKEN_AMP -> "bit_and"
+            TOKEN_PIPE -> "bit_or"
+            TOKEN_TILDE_PIPE -> "bit_xor"
+            TOKEN_CARET -> "pow"
+            else -> ""
+        }
+        if retired_method != "" -> parser_teach_arithmetic_method(&state, retired_method, left.span, right.span, operator_token.span, false)
 
         if operator == TOKEN_DOT_DOT || operator == TOKEN_DOT_DOT_LT {
             left = ParsedExpr{
@@ -833,6 +838,7 @@ fn parser_parse_interpolation(state: &JetParserState, part: StringPart, depth: I
         position: 0,
         diagnostics: [Diagnostic]{},
         source_end: part.span.end,
+        source: state.source,
         block_spans: [Span]{},
         pending_type_gt: false,
         pending_type_gt_span: Span{start: 0, end: 0},

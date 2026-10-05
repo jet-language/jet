@@ -288,7 +288,7 @@ fn decode_url_local(text: String) -> [U8]? {
         if n == 61 -> return None
         v :: val[Int.from_u8(n)]
         if v < 0 -> return None
-        acc = (acc << 6) | v
+        acc = ((acc << 6)).bit_or(v)
         bits = bits + 6
         if bits >= 8 {
             bits = bits - 8
@@ -296,11 +296,11 @@ fn decode_url_local(text: String) -> [U8]? {
             if bits == 0 {
                 acc = 0
             } else {
-                acc = acc & ((1 << bits) - 1)
+                acc = (acc).bit_and(((1 << bits) - 1))
             }
         }
     }
-    if bits > 0 && (acc & ((1 << bits) - 1)) != 0 -> return None
+    if bits > 0 && ((acc).bit_and(((1 << bits) - 1))) != 0 -> return None
     Val(out)
 }
 
@@ -603,6 +603,6 @@ fn paseto_pae_len(out: &[U8], value: Int) Never! {
 /// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
 /// checked `U8{}` conversion.
 fn to_u8(n: Int) -> U8 Never! {
-    v :: n & 255
+    v :: (n).bit_and(255)
     (U8{v})
 }

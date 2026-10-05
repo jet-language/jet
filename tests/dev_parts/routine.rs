@@ -4670,14 +4670,8 @@ fn fixed_width_integers_match_interpreter_resident_jit_default_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    // Two retired spellings, both from before this fixture's neighbours moved.
-    // D-ARROW-CONTROL1: a callable result is `=>`; `->` is reserved for
-    // selected or yielded control values, and sema rejects it with E0070, so
-    // every signature below stopped type-checking and the forced interpreter
-    // reported nine E0070s instead of running. D-EXPOP1=A / D-XORSPELL1=A
-    // (2026-08-05): the caret raises to a power and exclusive-or is `~|`, so
-    // `flags ^ mask` on a trapping `U8` would overflow rather than answer the
-    // 7 this block asks for. Both spellings move; not one expected value does.
+    // D-SIGIL-ALGEBRA1=B: named bit methods preserve the fixed-width
+    // operands and every tier must retain the same trapping/width rules.
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let source = r#"
 fn i8_id(value: I8) -> I8 { return value }
@@ -4718,11 +4712,11 @@ fn run() {
     print(i8_id(I8{7}) % I8{3})
     flags :: u8_id(U8{13})
     mask :: U8{10}
-    print(flags & mask)
+    print(flags.bit_and(mask))
     combined := U8{flags}
-    combined |= mask
+    combined = combined.bit_or(mask)
     print(combined)
-    print(flags ~| mask)
+    print(flags.bit_xor(mask))
     print(flags << 1)
     print(u8_id(U8.MAX) << 1)
     print(i8_id(I8{64}) << 1)
@@ -5224,13 +5218,8 @@ fn numeric_singleton_splits_match_resident_jit_and_aot_without_fallback() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    // D-EXPOP1=A / D-XORSPELL1=A (ratified 2026-08-05, syntax-decisions.md):
-    // `^=` raises in place and exclusive-or-assign is `~|=`. This fixture was
-    // written when the caret was xor, so `high ^= 10` had stopped meaning what
-    // the golden below says: the resident tier answered 9 ^ 10 = 3486784401,
-    // then `|= 8` = 3486784409, which is the RIGHT answer for the operator on
-    // the page. The bit-operator coverage this block exists for is spelled
-    // `~|=` now, so the operator moves and every expected value stays.
+    // D-SIGIL-ALGEBRA1=B: explicit assignments to bit_xor/bit_or preserve
+    // these singleton-split goldens without any retired arithmetic marks.
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let source = r#"
 fn run() {
@@ -5251,10 +5240,10 @@ fn run() {
     high :: &counts[2]
     low += 4
     high += 6
-    low &= 6
+    low = low.bit_and(6)
     low <<= 1
-    high ~|= 10
-    high |= 8
+    high = high.bit_xor(10)
+    high = high.bit_or(8)
     print(low)
     print(high)
     print(counts[0])

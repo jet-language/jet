@@ -1,31 +1,18 @@
-// Power grouping and result types (D-EXPSEM1=A), the way written mathematics
-// and Python read them.
-//   * `^` groups to the right, so `2 ^ 3 ^ 2` is `2 ^ (3 ^ 2)`.
-//   * `^` binds tighter than a leading minus, so `-3 ^ 2` is `-(3 ^ 2)`.
-//   * a whole number raised to a whole power stays an exact whole number.
-//   * a written negative exponent gives an exact Fraction.
-// The same rules at compile time: this power is folded while compiling.
-FOLDED :: prep { 2 ^ 3 ^ 2 }
-
-// D-TYPE2-NUM1: exact Int has no overflow boundary; this remains a whole
-// number even when the result is far beyond the machine-word fast path.
-LARGE_EXACT :: prep { 2 ^ 200 }
-
+// D-SIGIL-ALGEBRA1=B: explicit method nesting preserves power grouping.
+// Whole-number powers stay exact; a written negative exponent is Fraction.
+FOLDED :: prep { (2).pow((3).pow(2)) }
+LARGE_EXACT :: prep { (2).pow(200) }
 fn show_exact(value: Int) { print(value) }
-
-fn raise(base: Int, exponent: Int) -> Int { return base ^ exponent }
-
+fn raise(base: Int, exponent: Int) -> Int { return base.pow(exponent) }
 fn run() {
-    print(2 ^ 3 ^ 2)
-    print(-3 ^ 2)
-    print(2 ^ 10)
-    print(2 ^ -1)
+    print((2).pow((3).pow(2)))
+    print(-(3).pow(2))
+    print((2).pow(10))
+    print((2).pow(-1))
     print(FOLDED)
     show_exact(raise(2, 200))
     show_exact(LARGE_EXACT)
-    // Parentheses ask for the other grouping.
-    print((2 ^ 3) ^ 2)
-    print((-3) ^ 2)
-    // Any Float operand makes the whole power a Float.
-    print(Float.from_int(2) ^ Float.from_int(10))
+    print((2).pow(3).pow(2))
+    print((-3).pow(2))
+    print(Float.from_int(2).pow(Float.from_int(10)))
 }

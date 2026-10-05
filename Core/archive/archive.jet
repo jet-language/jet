@@ -62,14 +62,14 @@ C_CL_ORDER :: [Int]{16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1
 pub fn crc32(data: [U8]) -> Int Never! {
     crc := C_MASK32
     loop b in data {
-        crc = (crc ~| u8_int(b)) & C_MASK32
+        crc = (((crc).bit_xor(u8_int(b)))).bit_and(C_MASK32)
         loop _ in 0..<8 {
-            if (crc & 1) != 0 -> crc = ((crc >> 1) ~| C_CRC_POLY) & C_MASK32 else {
-                crc = (crc >> 1) & C_MASK32
+            if ((crc).bit_and(1)) != 0 -> crc = ((((crc >> 1)).bit_xor(C_CRC_POLY))).bit_and(C_MASK32) else {
+                crc = ((crc >> 1)).bit_and(C_MASK32)
             }
         }
     }
-    (crc ~| C_MASK32) & C_MASK32
+    (((crc).bit_xor(C_MASK32))).bit_and(C_MASK32)
 }
 
 /// Adler-32 (RFC 1950). Empty input is 1.
@@ -132,11 +132,11 @@ pub fn inflate(data: [U8]) -> [U8] ArchiveError! {
                 if r.i + 4 > r.data.len() -> return Err(ArchiveError.Malformed)
                 lo :: &r.take_u8()
                 hi :: &r.take_u8()
-                ln :: u8_int(lo) | (u8_int(hi) << 8)
+                ln :: (u8_int(lo)).bit_or((u8_int(hi) << 8))
                 nlo :: &r.take_u8()
                 nhi :: &r.take_u8()
-                nlen :: u8_int(nlo) | (u8_int(nhi) << 8)
-                if (ln ~| nlen) != 65535 || r.i + ln > r.data.len() {
+                nlen :: (u8_int(nlo)).bit_or((u8_int(nhi) << 8))
+                if ((ln).bit_xor(nlen)) != 65535 || r.i + ln > r.data.len() {
                     return Err(ArchiveError.Malformed)
                 }
                 if ln > C_MAX_OUTPUT - out.len() -> return Err(ArchiveError.Unsupported)
@@ -194,8 +194,8 @@ pub fn decompress(data: [U8]) -> [U8] ArchiveError! {
     if data.len() < 6 -> return Err(ArchiveError.Malformed)
     cmf :: u8_int(data[0])
     flg :: u8_int(data[1])
-    if (cmf & 15) != 8 || (cmf >> 4) > 7 || ((cmf << 8) + flg) % 31 != 0 -> return Err(ArchiveError.Malformed)
-    if (flg & 32) != 0 -> return Err(ArchiveError.Unsupported)
+    if ((cmf).bit_and(15)) != 8 || (cmf >> 4) > 7 || ((cmf << 8) + flg) % 31 != 0 -> return Err(ArchiveError.Malformed)
+    if ((flg).bit_and(32)) != 0 -> return Err(ArchiveError.Unsupported)
     payload :: slice_u8(data, 2, data.len() - 4)
     body :: inflate(payload)
     if adler32(body) != read_u32be(data, data.len() - 4) -> return Err(ArchiveError.Checksum)
@@ -586,7 +586,7 @@ fn zip_files(archive: [U8]) -> [ZipFile] ArchiveError! {
         nlen :: u16(archive, i + 26)
         elen :: u16(archive, i + 28)
         if flags != 0 && flags != 2048 -> return Err(ArchiveError.Unsupported)
-        if (flags & 1) != 0 || (flags & 8) != 0 -> return Err(ArchiveError.Unsupported)
+        if ((flags).bit_and(1)) != 0 || ((flags).bit_and(8)) != 0 -> return Err(ArchiveError.Unsupported)
         if method != 0 && method != 8 -> return Err(ArchiveError.Unsupported)
         if csz > C_MAX_OUTPUT -> return Err(ArchiveError.Unsupported)
         if usz > C_MAX_OUTPUT || usz > C_MAX_OUTPUT - total -> return Err(ArchiveError.Unsupported)
@@ -692,10 +692,10 @@ fn put32(out: &[U8], n: Int) Never! {
     &out.push(to_u8(n >> 24))
 }
 
-fn u16(data: [U8], i: Int) -> Int Never! { u8_int(data[i]) | (u8_int(data[i + 1]) << 8) }
+fn u16(data: [U8], i: Int) -> Int Never! { (u8_int(data[i])).bit_or((u8_int(data[i + 1]) << 8)) }
 
 fn u32(data: [U8], i: Int) -> Int Never! {
-    u8_int(data[i]) | (u8_int(data[i + 1]) << 8) | (u8_int(data[i + 2]) << 16) | (u8_int(data[i + 3]) << 24)
+    (((u8_int(data[i])).bit_or((u8_int(data[i + 1]) << 8))).bit_or((u8_int(data[i + 2]) << 16))).bit_or((u8_int(data[i + 3]) << 24))
 }
 
 fn cut(data: [U8], a: Int, b: Int) -> [U8] Never! {
@@ -760,7 +760,7 @@ fn write_octal(hdr: &[U8], off: Int, width: Int, value: Int) Never! {
     i := off + width - 2
     hdr[off + width - 1] = (U8{0})
     loop i >= off {
-        hdr[i] = to_u8(48 + (n & 7))
+        hdr[i] = to_u8(48 + ((n).bit_and(7)))
         n = n >> 3
         i = i - 1
     }
@@ -962,7 +962,7 @@ fn json_escape(value: String) -> String ArchiveError! {
             &out.push(U8{48})
             &out.push(U8{48})
             &out.push(hex_digit(n >> 4))
-            &out.push(hex_digit(n & 15))
+            &out.push(hex_digit((n).bit_and(15)))
         } else {
             &out.push(b)
         }
@@ -978,11 +978,11 @@ fn hex_digit(n: Int) -> U8 Never! {
 fn u8_int(b: U8) -> Int Never! { Int.from_u8(b) }
 
 fn to_u8(n: Int) -> U8 Never! {
-    v :: n & 255
+    v :: (n).bit_and(255)
     (U8{v})
 }
 fn read_u32be(data: [U8], i: Int) -> Int Never! {
-    (u8_int(data[i]) << 24) | (u8_int(data[i + 1]) << 16) | (u8_int(data[i + 2]) << 8) | u8_int(data[i + 3])
+    ((((u8_int(data[i]) << 24)).bit_or((u8_int(data[i + 1]) << 16))).bit_or((u8_int(data[i + 2]) << 8))).bit_or(u8_int(data[i + 3]))
 }
 
 struct BitReader {
@@ -1000,7 +1000,7 @@ impl BitReader {
             self.bad = true
             return 0
         }
-        out :: (u8_int(self.data[self.i]) >> self.bit) & 1
+        out :: ((u8_int(self.data[self.i]) >> self.bit)).bit_and(1)
         self.bit = self.bit + 1
         if self.bit == 8 {
             self.bit = 0
@@ -1013,7 +1013,7 @@ impl BitReader {
         v := 0
         k := 0
         loop k < n {
-            v = v | (&self.read_bit() << k)
+            v = (v).bit_or((&self.read_bit() << k))
             k = k + 1
         }
         v
@@ -1042,7 +1042,7 @@ fn inflate_fixed(r: &BitReader, out: &[U8]) -> Int Never! {
         code := 0
         n := 0
         loop n < 7 {
-            code = (code << 1) | (&r.read_bit())
+            code = ((code << 1)).bit_or((&r.read_bit()))
             n = n + 1
         }
         if r.bad -> return C_INFLATE_MALFORMED
@@ -1051,13 +1051,13 @@ fn inflate_fixed(r: &BitReader, out: &[U8]) -> Int Never! {
         sym := 0
         if code <= 23 -> sym = 256 + code else {
             extra = &r.read_bit()
-            code = (code << 1) | extra
+            code = ((code << 1)).bit_or(extra)
             if {
                 code >= 48 && code <= 191 -> { sym = code - 48 }
                 code >= 192 && code <= 199 -> { sym = 280 + (code - 192) }
                 else -> {
                     extra2 = &r.read_bit()
-                    code = (code << 1) | extra2
+                    code = ((code << 1)).bit_or(extra2)
                     if code >= 400 && code <= 511 -> sym = 144 + (code - 400) else {
                         return C_INFLATE_MALFORMED
                     }
@@ -1078,7 +1078,7 @@ fn inflate_fixed(r: &BitReader, out: &[U8]) -> Int Never! {
                 add := 0
                 k := 0
                 loop k < extra_n {
-                    add = add | (&r.read_bit() << k)
+                    add = (add).bit_or((&r.read_bit() << k))
                     k = k + 1
                 }
                 if r.bad -> return C_INFLATE_MALFORMED
@@ -1086,7 +1086,7 @@ fn inflate_fixed(r: &BitReader, out: &[U8]) -> Int Never! {
                 dcode := 0
                 n2 := 0
                 loop n2 < 5 {
-                    dcode = (dcode << 1) | (&r.read_bit())
+                    dcode = ((dcode << 1)).bit_or((&r.read_bit()))
                     n2 = n2 + 1
                 }
                 if r.bad || dcode < 0 || dcode >= C_DIST_BASE.len() -> return C_INFLATE_MALFORMED
@@ -1094,7 +1094,7 @@ fn inflate_fixed(r: &BitReader, out: &[U8]) -> Int Never! {
                 k2 := 0
                 d_extra :: C_DIST_EXTRA[dcode]
                 loop k2 < d_extra {
-                    dadd = dadd | (&r.read_bit() << k2)
+                    dadd = (dadd).bit_or((&r.read_bit() << k2))
                     k2 = k2 + 1
                 }
                 if r.bad -> return C_INFLATE_MALFORMED
@@ -1212,7 +1212,7 @@ fn inflate_dynamic(r: &BitReader, out: &[U8]) -> Int Never! {
         sym := -1
         loop len < 7 {
             bit :: &tmp.get_bits_lsb(1)
-            acc = (acc << 1) | bit
+            acc = ((acc << 1)).bit_or(bit)
             len = len + 1
             sym = huff_sym(~cl_len, ~cl_codes, acc, len)
             if sym >= 0 -> break
@@ -1282,7 +1282,7 @@ fn inflate_dynamic(r: &BitReader, out: &[U8]) -> Int Never! {
         sym := -1
         loop len < 15 {
             bit :: &tmp.get_bits_lsb(1)
-            acc = (acc << 1) | bit
+            acc = ((acc << 1)).bit_or(bit)
             len = len + 1
             sym = huff_sym(~lit_len, ~lit_codes, acc, len)
             if sym >= 0 -> break
@@ -1324,7 +1324,7 @@ fn inflate_dynamic(r: &BitReader, out: &[U8]) -> Int Never! {
                 dcode := -1
                 loop dlen < 15 {
                     bit :: &tmp.get_bits_lsb(1)
-                    dacc = (dacc << 1) | bit
+                    dacc = ((dacc << 1)).bit_or(bit)
                     dlen = dlen + 1
                     dcode = huff_sym(~dist_len, ~dist_codes, dacc, dlen)
                     if dcode >= 0 -> break

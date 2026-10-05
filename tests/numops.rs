@@ -149,14 +149,14 @@ fn fixed_width_overflow_methods_do_not_trap() {
 }
 
 #[test]
-fn bit_operators_and_mixed_width_shift() {
+fn bit_methods_and_mixed_width_shift() {
     if !have_rustc() {
         return;
     }
-    // `&`/`~|` and the separately ratified `|=` keep the U8 width; a shift count
-    // may be any integer and the result keeps the left side's width.
+    // Bit methods keep the U8 width; a shift count may be any integer and
+    // the result keeps the left side's width.
     let src = "fn run() {\n    a :: U8{ 12 }\n    b :: U8{ 10 }\n    \
-               print(a & b)\n    c := U8{ a }\n    c |= b\n    print(c)\n    print(a ~| b)\n    \
+               print(a.bit_and(b))\n    c := U8{ a }\n    c = c.bit_or(b)\n    print(c)\n    print(a.bit_xor(b))\n    \
                print(a << 2)\n    print(a >> 1)\n}\n";
     let (code, stdout, stderr) = build_and_run("u8_bitops", src);
     assert_eq!(code, 0, "bit ops should succeed: {stderr}");

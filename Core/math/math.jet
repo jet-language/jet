@@ -118,7 +118,6 @@ pub fn log(n: Float, base: Float) -> Float Never! { core.math.log(n, base) }
 pub fn log10(n: Float) -> Float Never! { core.math.log10(n) }
 pub fn log2(n: Float) -> Float Never! { core.math.log2(n) }
 pub fn logb(n: Float) -> Float Never! { core.math.logb(n) }
-pub fn pow(a: Float, b: Float) -> Float Never! { core.math.pow(a, b) }
 pub fn sin(n: Float) -> Float Never! { core.math.sin(n) }
 pub fn sinh(n: Float) -> Float Never! { core.math.sinh(n) }
 pub fn sqrt(n: Float) -> Float Never! { core.math.sqrt(n) }
@@ -225,7 +224,7 @@ pub fn checked_pow(base: Int, exponent: Int) -> Int? Never! {
     factor := base
     power := exponent
     loop power > 0 {
-        if (power & 1) != 0 {
+        if ((power).bit_and(1)) != 0 {
             result = checked_mul(result, factor) ?? return None
         }
         power = power /% 2
@@ -240,7 +239,7 @@ pub fn int_pow(base: Int, exponent: Int) -> Int Never! {
     factor := base
     power := exponent
     loop power > 0 {
-        if (power & 1) != 0 {
+        if ((power).bit_and(1)) != 0 {
             result = result * factor
         }
         power = power /% 2
@@ -318,7 +317,7 @@ pub fn powmod(base: Int, exponent: Int, modulus: Int) -> Int? Never! {
     if factor < 0 -> factor = factor + modulus
     power := exponent
     loop power > 0 {
-        if (power & 1) != 0 {
+        if ((power).bit_and(1)) != 0 {
             product :: checked_mul(result, factor) ?? return None
             result = product %% modulus
         }
@@ -355,7 +354,6 @@ pub fn abs_diff(a: Int, b: Int) -> Int Never! {
 
 pub fn even(n: Int) -> Bool Never! { is_even(n) }
 pub fn odd(n: Int) -> Bool Never! { is_odd(n) }
-pub fn xor(a: Int, b: Int) -> Int Never! { core.math.xor(a, b) }
 pub fn in_range(value: Int, low: Int, high: Int) -> Bool Never! {
     value >= low && value < high
 }

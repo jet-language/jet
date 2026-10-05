@@ -354,7 +354,7 @@ pub fn store_remove_hangar_node(verification: &StoreVerification, path: String) 
             files.remove_all(path)
         }
         metadata.is_file -> {
-            files.set_mode(path, metadata.mode | 0o222)
+            files.set_mode(path, (metadata.mode).bit_or(0o222))
             files.remove(path)
         }
         else -> return Err(StoreError.InvalidData("refusing to remove unsupported Hangar node `{path}`"))

@@ -223,6 +223,18 @@ fn parser_report_explicit_semicolon(state: &JetParserState, span: Span) Never! {
     &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: new_text}))
 }
 
+fn parser_teach_arithmetic_method(state: &JetParserState, method: String, lhs: Span, rhs: Span, operator: Span, compound: Bool) Never! {
+    diagnostic := diagnostic_from_registry("E0398", Val(operator), "this arithmetic spelling is retired; use `{method}`", "marks express ownership and outcomes; arithmetic uses named methods (D-SIGIL-ALGEBRA1=B)", "write `value.{method}(other)` and assign the result back for a compound update")
+    if lhs.start >= 0 && rhs.end <= state.source.len() && lhs.end <= rhs.start {
+        left :: parser_source_slice(state, lhs.start, lhs.end)
+        right :: parser_source_slice(state, rhs.start, rhs.end)
+        replacement :: if compound -> "{left} = ({left}).{method}({right})" else -> "({left}).{method}({right})"
+        diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: lhs.start, end: rhs.end}, new_text: replacement})
+    }
+    &state.diagnostics.push(diagnostic)
+}
+
+
 fn parser_type_close_here(state: &JetParserState) -> Bool Never! {
     if state.pending_type_gt -> return true
     kind :: parser_current(&state).kind

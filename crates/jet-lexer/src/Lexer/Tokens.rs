@@ -137,9 +137,9 @@ pub enum TokKind {
     /// `copy` verb; was retired by D-MEM1 as the D-CAP7 write sigil, since
     /// superseded by `&`).
     Tilde,
-    /// D-XORSPELL1=A: `a ~| b` is bitwise exclusive-or.
+    /// D-SIGIL-ALGEBRA1=B: retired exclusive-or, lexed to teach `bit_xor`.
     TildePipe,
-    /// D-XORSPELL1=A: `a ~|= b` is exclusive-or-assign.
+    /// D-SIGIL-ALGEBRA1=B: retired exclusive-or assignment, lexed for E0398.
     TildePipeEq,
     /// Retired external-method connector. Longest-match before `~` so parser
     /// can teach E0325.

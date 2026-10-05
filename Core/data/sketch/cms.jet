@@ -55,7 +55,7 @@ fn hashd(key: String, d: Int) -> Int {
     loop b in key.bytes() {
         // Keep the accumulator in a positive 31-bit domain after every
         // multiply; this avoids target-dependent signed overflow.
-        h = ((h ~| (b & 255)) * 16777619) & 2147483647
+        h = ((((h).bit_xor(((b).bit_and(255)))) * 16777619)).bit_and(2147483647)
     }
     h
 }

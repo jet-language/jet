@@ -1899,13 +1899,13 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "union order rule requires a type annotation",
-            "fn run() { value :: left | right }\n",
-            "fn run() { value :: right | left }\n",
+            "fn run() { value :: left.bit_or(right) }\n",
+            "fn run() { value :: right.bit_or(left) }\n",
         ),
         (
             "union order rule rejects struct field values",
-            "fn run() { p :: Point{x: left | right} }\n",
-            "fn run() { p :: Point{x: right | left} }\n",
+            "fn run() { p :: Point{x: left.bit_or(right)} }\n",
+            "fn run() { p :: Point{x: right.bit_or(left)} }\n",
         ),
         (
             "union order rule rejects dotted member replacement",

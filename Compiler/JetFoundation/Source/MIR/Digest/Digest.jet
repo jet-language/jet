@@ -33,35 +33,35 @@ fn mir_digest_hash_writer() -> MIRCanonicalWriter Never! {
 fn mir_digest_u8(writer: &MIRCanonicalWriter, value: U8) Never! {
     if writer.hashing {
         byte :: U64.from_u8(value)
-        writer.lane0 = (writer.lane0 ~| byte).wrapping_mul(U64{0x100000001b3})
-        writer.lane1 = (writer.lane1 ~| byte).wrapping_mul(U64{0x100000001b3})
-        writer.lane2 = (writer.lane2 ~| byte).wrapping_mul(U64{0x100000001b3})
-        writer.lane3 = (writer.lane3 ~| byte).wrapping_mul(U64{0x100000001b3})
+        writer.lane0 = ((writer.lane0).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
+        writer.lane1 = ((writer.lane1).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
+        writer.lane2 = ((writer.lane2).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
+        writer.lane3 = ((writer.lane3).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
     } else {
         &writer.bytes.push(value)
     }
 }
 
 fn mir_digest_u16(writer: &MIRCanonicalWriter, value: Int) Never! {
-    mir_digest_u8(&writer, U8{value & 255})
-    mir_digest_u8(&writer, U8{(value >> 8) & 255})
+    mir_digest_u8(&writer, U8{(value).bit_and(255)})
+    mir_digest_u8(&writer, U8{((value >> 8)).bit_and(255)})
 }
 
 // One little-endian 64-bit word: MIR ids, id lists and literal codes.
 fn mir_digest_u64(writer: &MIRCanonicalWriter, value: U64) Never! {
     if !writer.hashing {
-        loop index in 0..<8 -> &writer.bytes.push(U8.from_u64((value >> (8 * index)) & U64{255}) ?? U8{0})
+        loop index in 0..<8 -> &writer.bytes.push(U8.from_u64(((value >> (8 * index))).bit_and(U64{255})) ?? U8{0})
     } else {
         lane0 := writer.lane0
         lane1 := writer.lane1
         lane2 := writer.lane2
         lane3 := writer.lane3
         loop index in 0..<8 {
-            byte :: (value >> (8 * index)) & U64{255}
-            lane0 = (lane0 ~| byte).wrapping_mul(U64{0x100000001b3})
-            lane1 = (lane1 ~| byte).wrapping_mul(U64{0x100000001b3})
-            lane2 = (lane2 ~| byte).wrapping_mul(U64{0x100000001b3})
-            lane3 = (lane3 ~| byte).wrapping_mul(U64{0x100000001b3})
+            byte :: ((value >> (8 * index))).bit_and(U64{255})
+            lane0 = ((lane0).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
+            lane1 = ((lane1).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
+            lane2 = ((lane2).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
+            lane3 = ((lane3).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
         }
         writer.lane0 = lane0
         writer.lane1 = lane1
@@ -74,18 +74,18 @@ fn mir_digest_u64(writer: &MIRCanonicalWriter, value: U64) Never! {
 // `mir_digest_u64`.
 fn mir_digest_int(writer: &MIRCanonicalWriter, value: Int) Never! {
     if !writer.hashing {
-        loop index in 0..<8 -> &writer.bytes.push(U8{(value >> (8 * index)) & 255})
+        loop index in 0..<8 -> &writer.bytes.push(U8{((value >> (8 * index))).bit_and(255)})
     } else {
         lane0 := writer.lane0
         lane1 := writer.lane1
         lane2 := writer.lane2
         lane3 := writer.lane3
         loop index in 0..<8 {
-            byte :: U64.from_u8(U8{(value >> (8 * index)) & 255})
-            lane0 = (lane0 ~| byte).wrapping_mul(U64{0x100000001b3})
-            lane1 = (lane1 ~| byte).wrapping_mul(U64{0x100000001b3})
-            lane2 = (lane2 ~| byte).wrapping_mul(U64{0x100000001b3})
-            lane3 = (lane3 ~| byte).wrapping_mul(U64{0x100000001b3})
+            byte :: U64.from_u8(U8{((value >> (8 * index))).bit_and(255)})
+            lane0 = ((lane0).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
+            lane1 = ((lane1).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
+            lane2 = ((lane2).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
+            lane3 = ((lane3).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
         }
         writer.lane0 = lane0
         writer.lane1 = lane1
@@ -121,10 +121,10 @@ fn mir_digest_bytes(writer: &MIRCanonicalWriter, value: [U8]) Never! {
         lane3 := writer.lane3
         loop byte in value {
             word :: U64.from_u8(byte)
-            lane0 = (lane0 ~| word).wrapping_mul(U64{0x100000001b3})
-            lane1 = (lane1 ~| word).wrapping_mul(U64{0x100000001b3})
-            lane2 = (lane2 ~| word).wrapping_mul(U64{0x100000001b3})
-            lane3 = (lane3 ~| word).wrapping_mul(U64{0x100000001b3})
+            lane0 = ((lane0).bit_xor(word)).wrapping_mul(U64{0x100000001b3})
+            lane1 = ((lane1).bit_xor(word)).wrapping_mul(U64{0x100000001b3})
+            lane2 = ((lane2).bit_xor(word)).wrapping_mul(U64{0x100000001b3})
+            lane3 = ((lane3).bit_xor(word)).wrapping_mul(U64{0x100000001b3})
         }
         writer.lane0 = lane0
         writer.lane1 = lane1
@@ -4091,7 +4091,7 @@ fn mir_digest_cache_frame(bytes: &[U8], value: String) Never! {
 
 fn mir_digest_u64_bytes(bytes: &[U8], value: Int) Never! {
     loop index in 0..<8 {
-        &bytes.push(U8{(value >> (8 * index)) & 255})
+        &bytes.push(U8{((value >> (8 * index))).bit_and(255)})
     }
 }
 
@@ -4683,7 +4683,7 @@ fn mir_digest_hex(bytes: [U8]) -> String Never! {
     output := ""
     loop byte in bytes {
         value :: Int.from_u8(byte)
-        output = "{output}{mir_digest_hex_digit((value >> 4) & 15)}{mir_digest_hex_digit(value & 15)}"
+        output = "{output}{mir_digest_hex_digit(((value >> 4)).bit_and(15))}{mir_digest_hex_digit((value).bit_and(15))}"
     }
     output
 }
@@ -4700,7 +4700,7 @@ pub fn mir_program_digest(program: MIRProgram) -> String {
     loop lane in lanes {
         hash :: Int.from_u64(lane)
         loop index in 0..<8 {
-            &output.push(U8{(hash >> (8 * index)) & 255})
+            &output.push(U8{((hash >> (8 * index))).bit_and(255)})
         }
     }
     mir_digest_hex(output)

@@ -688,20 +688,20 @@ fn utf8_bytes(cp: Int) -> [U8] Never! {
         return out
     }
     if cp < 2048 {
-        &out.push(U8{192 | (cp >> 6)})
-        &out.push(U8{128 | (cp & 63)})
+        &out.push(U8{(192).bit_or((cp >> 6))})
+        &out.push(U8{(128).bit_or(((cp).bit_and(63)))})
         return out
     }
     if cp < 65536 {
-        &out.push(U8{224 | (cp >> 12)})
-        &out.push(U8{128 | ((cp >> 6) & 63)})
-        &out.push(U8{128 | (cp & 63)})
+        &out.push(U8{(224).bit_or((cp >> 12))})
+        &out.push(U8{(128).bit_or((((cp >> 6)).bit_and(63)))})
+        &out.push(U8{(128).bit_or(((cp).bit_and(63)))})
         return out
     }
-    &out.push(U8{240 | (cp >> 18)})
-    &out.push(U8{128 | ((cp >> 12) & 63)})
-    &out.push(U8{128 | ((cp >> 6) & 63)})
-    &out.push(U8{128 | (cp & 63)})
+    &out.push(U8{(240).bit_or((cp >> 18))})
+    &out.push(U8{(128).bit_or((((cp >> 12)).bit_and(63)))})
+    &out.push(U8{(128).bit_or((((cp >> 6)).bit_and(63)))})
+    &out.push(U8{(128).bit_or(((cp).bit_and(63)))})
     out
 }
 
@@ -882,20 +882,20 @@ fn utf16_units(text: String) -> [Int] Never! {
         cp := b
         width := 1
         if b >= 240 {
-            cp = ((b & 7) << 18) | ((Int.from_u8(raw[i + 1]) & 63) << 12) | ((Int.from_u8(raw[i + 2]) & 63) << 6) | (Int.from_u8(raw[i + 3]) & 63)
+            cp = ((((((b).bit_and(7)) << 18)).bit_or((((Int.from_u8(raw[i + 1])).bit_and(63)) << 12))).bit_or((((Int.from_u8(raw[i + 2])).bit_and(63)) << 6))).bit_or(((Int.from_u8(raw[i + 3])).bit_and(63)))
             width = 4
         }
         if b >= 224 && b < 240 {
-            cp = ((b & 15) << 12) | ((Int.from_u8(raw[i + 1]) & 63) << 6) | (Int.from_u8(raw[i + 2]) & 63)
+            cp = (((((b).bit_and(15)) << 12)).bit_or((((Int.from_u8(raw[i + 1])).bit_and(63)) << 6))).bit_or(((Int.from_u8(raw[i + 2])).bit_and(63)))
             width = 3
         }
         if b >= 192 && b < 224 {
-            cp = ((b & 31) << 6) | (Int.from_u8(raw[i + 1]) & 63)
+            cp = ((((b).bit_and(31)) << 6)).bit_or(((Int.from_u8(raw[i + 1])).bit_and(63)))
             width = 2
         }
         if cp >= 65536 {
             &units.push(55296 + ((cp - 65536) >> 10))
-            &units.push(56320 + ((cp - 65536) & 1023))
+            &units.push(56320 + (((cp - 65536)).bit_and(1023)))
         } else {
             &units.push(cp)
         }

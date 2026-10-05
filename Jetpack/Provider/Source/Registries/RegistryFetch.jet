@@ -903,7 +903,7 @@ fn provider_registry_extract_tar(path: String, gzip: Bool, destination: String) 
             entry :: found ?? break
             prepared :: provider_registry_prepare_entry(entry.name, provider_registry_tar_kind(entry.kind), destination)
             target :: prepared ?? next
-            out := if files.create(target, if_exists: .Replace, mode: entry.mode & 0o777) == {
+            out := if files.create(target, if_exists: .Replace, mode: (entry.mode).bit_and(0o777)) == {
                 .Ok(writer) -> writer
                 .Err(error) -> { return Err(RegistryError.Reason("could not create `{entry.name}`: {error}")) }
             }
@@ -920,7 +920,7 @@ fn provider_registry_extract_tar(path: String, gzip: Bool, destination: String) 
             entry :: found ?? break
             prepared :: provider_registry_prepare_entry(entry.name, provider_registry_tar_kind(entry.kind), destination)
             target :: prepared ?? next
-            out := if files.create(target, if_exists: .Replace, mode: entry.mode & 0o777) == {
+            out := if files.create(target, if_exists: .Replace, mode: (entry.mode).bit_and(0o777)) == {
                 .Ok(writer) -> writer
                 .Err(error) -> { return Err(RegistryError.Reason("could not create `{entry.name}`: {error}")) }
             }

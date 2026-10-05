@@ -27,6 +27,7 @@ use jet_foundation.[
     TNumericOp,
     TPreludeArg,
     TStaticOwner,
+    TUnaryOp,
     Type,
     builtin_method_bind,
     builtin_method_row,
@@ -109,6 +110,8 @@ fn sema_value_method_kind(row: BuiltinMethodRow, method: String, receiver_value:
         }
         .Predicate -> TExprKind.NumericMethod{receiver: receiver_value, operation: TNumericOp.Predicate{name: method}}
         .BitCount -> TExprKind.NumericMethod{receiver: receiver_value, operation: TNumericOp.BitCount{method: method, width: sema_value_method_bit_width(receiver_value.ty)}}
+        .Arithmetic(operation) -> TExprKind.Binary{op: operation, overflow: false, line: line, lhs: receiver_value, rhs: typed[0]}
+        .BitNot -> TExprKind.Unary{op: TUnaryOp.Not, operand: receiver_value}
         .Euclidean(remainder) -> TExprKind.NumericBinaryMethod{receiver: receiver_value, operation: if remainder -> TNumericOp.EuclideanRem{line: line} else -> TNumericOp.EuclideanDiv{line: line}, argument: typed[0]}
         .Overflow(prefix, operation) -> TExprKind.OverflowOpt{prefix: prefix, operation: operation, line: line, policy: None, lhs: receiver_value, rhs: typed[0]}
         .Atomic -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.AtomicMethod{method: method}, args: typed}

@@ -35,7 +35,7 @@ fn store_reuse_direct_cas_entry(verification: &StoreVerification, roots: HangarR
     object_info :: files.stat(expected) ?? return false
     seal_info :: files.stat(store_reuse_seal_path(roots, digest)) ?? return false
     if !object_info.is_dir || object_info.is_symlink || !seal_info.is_file -> return false
-    if object_info.mode & 0o222 != 0 -> return false
+    if (object_info.mode).bit_and(0o222) != 0 -> return false
     sealed :: store_check_seal(&verification, expected, roots.hangar_dir()) ?? None
     sealed == Val(digest)
 }
@@ -386,7 +386,7 @@ pub fn store_copy_snapshot_node(source: String, destination: String, hardlinks: 
         files.create_dir_all(destination)
         entries :: files.list_dir(source)
         loop entry in entries -> store_copy_snapshot_node(entry.path, files.join(destination, entry.name), &hardlinks)
-        files.set_mode(destination, info.mode & 0o7777)
+        files.set_mode(destination, (info.mode).bit_and(0o7777))
         return
     }
     if info.is_file {
@@ -402,7 +402,7 @@ pub fn store_copy_snapshot_node(source: String, destination: String, hardlinks: 
             }
             .None -> files.copy2(source, destination)
         }
-        files.set_mode(destination, info.mode & 0o7777)
+        files.set_mode(destination, (info.mode).bit_and(0o7777))
         return
     }
     if info.is_symlink {

@@ -87,24 +87,24 @@ pub fn token_urlsafe(n: Int) -[Rand]> String CryptoError! {
     out := [U8]{}
     i := 0
     loop i + 3 <= b.len() {
-        v :: (Int.from_u8(b[i]) << 16) | (Int.from_u8(b[i + 1]) << 8) | Int.from_u8(b[i + 2])
-        &out.push(raw[(v >> 18) & 63])
-        &out.push(raw[(v >> 12) & 63])
-        &out.push(raw[(v >> 6) & 63])
-        &out.push(raw[v & 63])
+        v :: (((Int.from_u8(b[i]) << 16)).bit_or((Int.from_u8(b[i + 1]) << 8))).bit_or(Int.from_u8(b[i + 2]))
+        &out.push(raw[((v >> 18)).bit_and(63)])
+        &out.push(raw[((v >> 12)).bit_and(63)])
+        &out.push(raw[((v >> 6)).bit_and(63)])
+        &out.push(raw[(v).bit_and(63)])
         i += 3
     }
     rest :: b.len() - i
     if rest == 1 {
         v :: Int.from_u8(b[i]) << 16
-        &out.push(raw[(v >> 18) & 63])
-        &out.push(raw[(v >> 12) & 63])
+        &out.push(raw[((v >> 18)).bit_and(63)])
+        &out.push(raw[((v >> 12)).bit_and(63)])
     }
     if rest == 2 {
-        v :: (Int.from_u8(b[i]) << 16) | (Int.from_u8(b[i + 1]) << 8)
-        &out.push(raw[(v >> 18) & 63])
-        &out.push(raw[(v >> 12) & 63])
-        &out.push(raw[(v >> 6) & 63])
+        v :: ((Int.from_u8(b[i]) << 16)).bit_or((Int.from_u8(b[i + 1]) << 8))
+        &out.push(raw[((v >> 18)).bit_and(63)])
+        &out.push(raw[((v >> 12)).bit_and(63)])
+        &out.push(raw[((v >> 6)).bit_and(63)])
     }
     text :: String.from_bytes(out) ?? panic("invalid URL-safe token encoding")
     Ok(text)
@@ -152,9 +152,9 @@ pub fn randbits(k: Int) -[Rand]> Int CryptoError! {
     width :: (k + 7) /% 8
     b := bytes(width) ?? return Err(.Unavailable)
     excess :: width * 8 - k
-    if excess > 0 -> b[0] = U8{Int.from_u8(b[0]) & (255 >> excess)}
+    if excess > 0 -> b[0] = U8{(Int.from_u8(b[0])).bit_and((255 >> excess))}
     out := 0
-    loop x in b -> out = (out << 8) | Int.from_u8(x)
+    loop x in b -> out = ((out << 8)).bit_or(Int.from_u8(x))
     Ok(out)
 }
  

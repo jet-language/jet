@@ -599,7 +599,7 @@ fn jet_rust_emit_fold_index_add(tree: &[String:Int], name: String, line: Int, co
     loop at <= size {
         key :: "{name}:{at}"
         &tree.add(key, (tree.get(key) ?? 0) + count).drop("replace prefix count")
-        at += at & (0 - at)
+        at += (at).bit_and((0 - at))
     }
 }
 
@@ -610,7 +610,7 @@ fn jet_rust_emit_fold_index_prefix(tree: [String:Int], name: String, end: Int) -
     at := end
     loop at > 0 {
         count += tree.get("{name}:{at}") ?? 0
-        at -= at & (0 - at)
+        at -= (at).bit_and((0 - at))
     }
     count
 }
@@ -628,7 +628,7 @@ fn jet_rust_emit_fold_index_next(tree: [String:Int], name: String, from: Int, si
         candidate :: at + step
         if candidate <= size {
             stored :: tree.get("{name}:{candidate}") ?? 0
-            count :: if inverse -> (candidate & (0 - candidate)) - stored else -> stored
+            count :: if inverse -> ((candidate).bit_and((0 - candidate))) - stored else -> stored
             if count < wanted {
                 at = candidate
                 wanted -= count

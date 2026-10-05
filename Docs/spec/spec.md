@@ -171,8 +171,8 @@ stmt     = binding | assign | if | loop | "break" | "next"
 pattern  = ident | ".{" ident { "," ident } [ "," ".." ] "}"
          | "[" [ ident { "," ident } ] "]" ;
 fence    = "<:" ( ident | expr ) { "," ( ident | expr ) } ":>" ;
-assign   = place ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
-                 | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr NL ;
+assign   = place ( "=" | "+=" | "-=" | "*=" | "/=" | "/%=" | "%=" | "%%="
+                 | "<<=" | ">>=" ) expr NL ;
 ```
 
 A parameter's access marker is on its type (`x: &T` or `x: ^T`); receivers
@@ -202,12 +202,12 @@ loop-body= effect-body | "->" value-arm-body ;
 effect-body = block | "->" non-if-stmt ;
 ```
 
-The expression parser uses precedence climbing. From weakest to strongest, the
-relevant operators are `||`, `&&`, comparisons, `|`, `~|`, `&`, shifts, `+` and
-`-`, `*`, `/`, `/%`, `%`, `%%`, unary `-` and `!`, power `^`, then calls,
+The expression parser uses precedence climbing. From weakest to strongest,
+the relevant operators are `||`, `&&`, comparisons, shifts, `+` and `-`,
+`*`, `/`, `/%`, `%`, `%%`, unary `-` and Boolean `!`, then calls,
 field/index access, identifiers, literals, and parenthesized expressions.
-`|` is bitwise OR, `&` is bitwise AND, and `~|` is bitwise XOR
-(D-BITOREXPR1, D-XORSPELL1, D-EXPSEM1).
+Bit arithmetic uses `bit_and`, `bit_or`, `bit_xor`, and `bit_not`; power
+uses `pow` (D-SIGIL-ALGEBRA1=B). Method nesting states the grouping explicitly.
 
 ## Values, expressions, and calls
 
@@ -262,7 +262,7 @@ that fact as `value.$origin -> ?OriginInfo`; there is no runtime origin
 projection (D-TRACK-ORIGIN1=A).
 
 Arithmetic `+`, `-`, `*`, and the numeric division operations use the registered
-numeric widening law. `%`, `&`, `|`, `~|`, `<<`, and `>>` are integer-only.
+numeric widening law. `%`, `%%`, `<<`, `>>` and the bit methods are integer-only.
 `+` on `String` is a teaching error that points to interpolation. Compound
 assignment follows the corresponding binary operator. Comparisons use the same
 numeric widening law and return `Bool`; nonnumeric operands must have matching

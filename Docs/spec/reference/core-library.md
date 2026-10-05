@@ -1717,6 +1717,25 @@ fn run() {
 }
 ```
 
+Numeric arithmetic methods need no import (D-SIGIL-ALGEBRA1=B):
+
+| Method | Receiver | Description |
+| --- | --- | --- |
+| `value.bit_and(other)` | Int and each fixed-width integer | Keep shared bits; the usual integer join determines the width. |
+| `value.bit_or(other)` | Int and each fixed-width integer | Keep bits set in either operand. |
+| `value.bit_xor(other)` | Int and each fixed-width integer | Keep bits set in exactly one operand. |
+| `value.bit_not()` | Int and each fixed-width integer | Flip every bit, keeping the width; exact Int returns `-value - 1`. |
+| `value.pow(exponent)` | Int and Float | Numeric power with the existing exactness and negative-exponent rules. A written negative Int exponent produces Fraction; a dynamic negative Int exponent stops with the existing arithmetic fault. |
+
+These intrinsic methods call the same numeric runtime on every tier.
+An update writes `value = value.bit_xor(other)`. `!value` is Boolean
+negation only. Shifts retain `<<` and `>>`.
+
+Floating classifiers such as `math.is_nan` require Float or F32, not Int.
+Multi-operand floating calls such as `math.hypot`, and floating `pow`
+operands, must use matching Float/F32 widths; convert explicitly before
+calling them. Source-owned Core wrappers preserve these same constraints.
+
 | Function | Returns | Description |
 | --- | --- | --- |
 | `math.acos(x)`, `acosh(x)`, `asin(x)`, `asinh(x)`, `atan(x)`, `atan2(y, x)`, `atanh(x)` | `Float` | Inverse trigonometric and hyperbolic functions. The extended float family is part of the shared math surface (D-CORESURFACE1). |
@@ -1724,14 +1743,14 @@ fn run() {
 | `math.min(a: Int, b: Int)` / `math.max(a: Int, b: Int)` | `Int` | Integer extrema. |
 | `math.clamp(value, lo, hi)` | `Int` | Clamp an integer; reversed bounds are accepted by swapping the bounds. |
 | `math.is_even(value)` / `math.is_odd(value)` | `Bool` | Test integer parity. |
-| `math.sign(value)` | `Int` | Return the integer sign. |
+| `math.sign(value: Int)` | `Int` | Return `-1`, `0`, or `1` for a negative, zero, or positive integer. |
 | `math.isqrt(value)` | `?Int` | Return the integer square root when the input is nonnegative. |
 | `math.gcd(a, b)` / `math.lcm(a, b)` | `Int` | Greatest common divisor or least common multiple. |
 | `math.gcd_many(values)` / `math.lcm_many(values)` | `Int` | Fold integer gcd or lcm over a list. |
 | `math.cos(x)`, `cosh(x)`, `sin(x)`, `sinh(x)`, `tan(x)`, `tanh(x)`, `math.cot(x)` | `Float` | Trigonometric and hyperbolic functions. |
 | `math.exp(x)`, `exp2(x)`, `exp_m1(x)`, `expm1(x)`, `math.erf(x)`, `math.erfc(x)` | `Float` | Exponential and error functions. |
 | `math.ln(x)`, `ln_1p(x)`, `log1p(x)`, `log10(x)`, `log2(x)`, `logb(x)`, `log(x, base)` | `Float` | Natural, base-specific, and compensated logarithms. |
-| `math.sqrt(x)`, `cbrt(x)`, `hypot(x, y)`, `pow(x, y)` | `Float` | Roots, hypotenuse, and floating-point power. |
+| `math.sqrt(x)`, `cbrt(x)`, `hypot(x, y)` | `Float` | Roots and hypotenuse. |
 | `math.floor(x)` / `math.ceil(x)` / `math.trunc(x)` | `Float` | Directed or toward-zero rounding in floating-point form. |
 | `math.fract(x)` | `Float` | Return the fractional part. |
 | `math.gamma(x)` / `math.lgamma(x)` | `Float` | Gamma and log-gamma functions. |
@@ -3111,7 +3130,7 @@ The wrappers accept exactly one integer arithmetic operation; another expression
 reports **E1005**. Integer types expose `MIN`, `MAX`, `count_ones`,
 `count_zeros`, `leading_zeros`, and `trailing_zeros`. Float types expose
 `INFINITY`, `NEG_INFINITY`, `NAN`, and `EPSILON`, plus `is_nan`, `is_infinite`,
-and `is_finite`. Bitwise operators preserve operand width. A shift keeps its
+and `is_finite`. Named bit methods preserve operand width. A shift keeps its
 left operand's width, and its count may be any integer width (`U64{byte} << n`
 with `n: U8`); a count past the value's width traps rather than leaking a
 host-language panic.

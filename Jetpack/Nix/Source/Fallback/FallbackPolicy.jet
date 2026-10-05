@@ -191,6 +191,6 @@ fn nix_truncate_utf8(text: String, limit: Int) -> String Never! {
     raw :: text.bytes()
     if raw.len() <= limit -> return ~text
     end := limit
-    loop end > 0 && (Int.from_u8(raw[end]) & 192) == 128 -> end -= 1
+    loop end > 0 && ((Int.from_u8(raw[end])).bit_and(192)) == 128 -> end -= 1
     pkg_bytes_text(raw, 0, end)
 }

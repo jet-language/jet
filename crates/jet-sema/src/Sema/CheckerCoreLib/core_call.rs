@@ -891,6 +891,14 @@ fn crypto_misuse_diagnostic(
     ))
 }
 
+fn core_math_float_contract(name: &str) -> bool {
+    matches!(
+        name,
+        "is_nan" | "is_inf" | "is_finite"
+            | "atan2" | "hypot" | "lerp" | "copysign" | "log" | "fma" | "muladd"
+    )
+}
+
 fn resolved_core_fixed_sig(
     module: &str,
     name: &str,
@@ -2311,6 +2319,82 @@ impl<'a> Checker<'a> {
         ty
     }
 
+    // Source wrappers and native calls use the same classifier/pair validation.
+    fn infer_core_math_float_contract(
+        &mut self,
+        name: &str,
+        span: Span,
+        args: &mut [crate::AST::CallArg],
+    ) -> Option<Type> {
+        if matches!(name, "is_nan" | "is_inf" | "is_finite") {
+            if args.len() != 1 {
+                self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+            }
+            let Some(arg) = args.first_mut() else {
+                return Some(Type::Bool);
+            };
+            let ty = self.infer(&mut arg.expr)?;
+            if !matches!(ty, Type::Float | Type::Float32) {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!("`{}` needs Float or F32, not {}", name, ty.show()),
+                    "floating-point classification only applies to floats".to_string(),
+                    "pass a Float or F32 value".to_string(),
+                    Some(arg.expr.span()),
+                ));
+                return None;
+            }
+            return Some(Type::Bool);
+        }
+        let wanted = if matches!(name, "lerp" | "fma" | "muladd") { 3 } else { 2 };
+        if args.len() != wanted {
+            self.diags.push(wrong_core_arity(name, wanted, args.len(), span));
+        }
+        // D-TYPE2-DEFAULT1: exact carriers cross the approximation boundary,
+        // but explicit Float/F32 carriers must retain matching widths.
+        let approximate = |ty: Type| {
+            if matches!(&ty, Type::Named(name)
+                if name == Syntax::TYPE_FRACTION || name == Syntax::TYPE_DECIMAL)
+            {
+                Type::Float
+            } else {
+                ty
+            }
+        };
+        let Some(first) = args.first_mut().and_then(|a| self.infer(&mut a.expr)) else {
+            for arg in args.iter_mut().skip(1) {
+                self.infer(&mut arg.expr);
+            }
+            return Some(Type::Float);
+        };
+        let first = approximate(first);
+        if !matches!(first, Type::Float | Type::Float32) {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!("`{}` needs Float or F32, not {}", name, first.show()),
+                "this math function operates on floating-point numbers".to_string(),
+                "pass Float or F32 values".to_string(),
+                Some(args[0].expr.span()),
+            ));
+            return None;
+        }
+        for arg in args.iter_mut().skip(1) {
+            if let Some(got) = self.infer(&mut arg.expr) {
+                if approximate(got) != first {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("`{}` needs all arguments to have the same float type", name),
+                        "D-FLOATW1: mixing float widths is not allowed".to_string(),
+                        "convert the arguments to the same float width".to_string(),
+                        Some(arg.expr.span()),
+                    ));
+                    return None;
+                }
+            }
+        }
+        Some(first)
+    }
+
     pub(crate) fn infer_core_call(
         &mut self,
         module: &str,
@@ -2378,6 +2462,10 @@ impl<'a> Checker<'a> {
                         .position(|candidate| candidate.module_alias == source.alias)
                 });
                 if let (Some(alias), Some(source_idx)) = (alias, source_idx) {
+                    // Check raw grades before the source wrapper can widen them.
+                    if module == "core.math" && core_math_float_contract(name) {
+                        self.infer_core_math_float_contract(name, span, args)?;
+                    }
                     return self.infer_import_call(
                         alias,
                         source_idx,
@@ -4853,88 +4941,8 @@ impl<'a> Checker<'a> {
                 }
                 return Some(ty);
             }
-            ("core.math", "atan2" | "hypot" | "lerp" | "copysign" | "log" | "fma" | "muladd") => {
-                let wanted = if name == "lerp" || name == "fma" || name == "muladd" {
-                    3
-                } else {
-                    2
-                };
-                if args.len() != wanted {
-                    self.diags
-                        .push(wrong_core_arity(name, wanted, args.len(), span));
-                }
-                // D-TYPE2-DEFAULT1: these leave the exact world too, so an
-                // exact carrier crosses here exactly as it does at the
-                // one-argument functions above. Admitting `sqrt(0.5)` while
-                // rejecting `log(0.5, 2)` would be one boundary with two
-                // rules again.
-                let exact_crosses = |ty: &Type| {
-                    matches!(ty, Type::Named(name)
-                            if name == Syntax::TYPE_FRACTION || name == Syntax::TYPE_DECIMAL)
-                };
-                let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
-                    for a in args.iter_mut().skip(1) {
-                        self.infer(&mut a.expr);
-                    }
-                    return Some(Type::Float);
-                };
-                let first = if exact_crosses(&first) {
-                    Type::Float
-                } else {
-                    first
-                };
-                if !matches!(first, Type::Float | Type::Float32) {
-                    self.diags.push(Diagnostic::error(
-                        "E0112",
-                        format!("`{}` needs Float or F32, not {}", name, first.show()),
-                        "this math function operates on floating-point numbers".to_string(),
-                        "pass Float or F32 values".to_string(),
-                        Some(args[0].expr.span()),
-                    ));
-                    return None;
-                }
-                for i in 1..args.len() {
-                    if let Some(got) = args.get_mut(i).and_then(|a| self.infer(&mut a.expr)) {
-                        let got = if exact_crosses(&got) {
-                            Type::Float
-                        } else {
-                            got
-                        };
-                        if got != first {
-                            self.diags.push(Diagnostic::error(
-                                "E0112",
-                                format!(
-                                    "`{}` needs all arguments to have the same float type",
-                                    name
-                                ),
-                                "D-FLOATW1: mixing float widths is not allowed".to_string(),
-                                "convert the arguments to the same float width".to_string(),
-                                Some(args[i].expr.span()),
-                            ));
-                        }
-                    }
-                }
-                return Some(first);
-            }
-            ("core.math", "is_nan" | "is_inf" | "is_finite") => {
-                if args.len() != 1 {
-                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-                }
-                let Some(arg) = args.get_mut(0) else {
-                    return Some(Type::Bool);
-                };
-                let ty = self.infer(&mut arg.expr)?;
-                if !matches!(ty, Type::Float | Type::Float32) {
-                    self.diags.push(Diagnostic::error(
-                        "E0112",
-                        format!("`{}` needs Float or F32, not {}", name, ty.show()),
-                        "floating-point classification only applies to floats".to_string(),
-                        "pass a Float or F32 value".to_string(),
-                        Some(arg.expr.span()),
-                    ));
-                    return None;
-                }
-                return Some(Type::Bool);
+            ("core.math", _) if core_math_float_contract(name) => {
+                return self.infer_core_math_float_contract(name, span, args);
             }
             ("core.math", "sign") => {
                 if args.len() != 1 {
@@ -4942,13 +4950,13 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(arg) = args.get_mut(0) {
                     let ty = self.infer(&mut arg.expr)?;
-                    if !matches!(ty, Type::Float | Type::Float32) {
+                    if ty != Type::Int {
                         self.diags.push(Diagnostic::error(
                             "E0112",
-                            format!("`sign` needs Float or F32, not {}", ty.show()),
-                            "`sign` classifies a floating-point value as negative, zero, or positive"
+                            format!("`sign` needs Int, not {}", ty.show()),
+                            "`sign` classifies a whole number as negative, zero, or positive"
                                 .to_string(),
-                            "pass a Float or F32 value".to_string(),
+                            "pass an Int value".to_string(),
                             Some(arg.expr.span()),
                         ));
                         return None;
@@ -5273,39 +5281,6 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(name, idx, &Type::Int, arg);
                 }
                 return Some(Type::Int);
-            }
-            ("core.math", "pow") => {
-                if args.len() != 2 {
-                    self.diags.push(wrong_core_arity(name, 2, args.len(), span));
-                }
-                let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
-                    for a in args.iter_mut().skip(1) {
-                        self.infer(&mut a.expr);
-                    }
-                    return None;
-                };
-                if !matches!(first, Type::Float | Type::Float32) {
-                    self.diags.push(Diagnostic::error(
-                        "E0112",
-                        format!("`pow` needs Float or F32, not {}", first.show()),
-                        "`pow` operates on floating-point numbers".to_string(),
-                        "pass a Float or F32 base".to_string(),
-                        Some(args[0].expr.span()),
-                    ));
-                    return None;
-                }
-                if let Some(second) = args.get_mut(1).and_then(|a| self.infer(&mut a.expr)) {
-                    if second != first {
-                        self.diags.push(Diagnostic::error(
-                                "E0112",
-                                format!("`pow` needs both arguments to have the same float type, but base is {} and exponent is {}", first.show(), second.show()),
-                                "D-FLOATW1: mixing float widths is not allowed — use the same width for both".to_string(),
-                                "convert with `F32.from_float(value)` or `Float.from_f32(value)` to match".to_string(),
-                                Some(args[1].expr.span()),
-                            ));
-                    }
-                }
-                return Some(first);
             }
             ("core.math", "abs") => {
                 if args.len() != 1 {

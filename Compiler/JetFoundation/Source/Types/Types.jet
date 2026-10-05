@@ -1043,10 +1043,10 @@ fn type_identity_knowledge(ty: Type) -> KnowledgeVector Never! {
         .Float32 -> &entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Approximate{precision: 24}}})
         .IntN(signed, bits) -> {
             lower := 0
-            upper := (2 ^ bits) - 1
+            upper := ((2).pow(bits)) - 1
             if signed {
-                lower = -(2 ^ (bits - 1))
-                upper = (2 ^ (bits - 1)) - 1
+                lower = -((2).pow((bits - 1)))
+                upper = ((2).pow((bits - 1))) - 1
             }
             &entries.push(KnowledgeEntry{path: [String]{}, plane: "Interval", fact: KnowledgeFact.Interval{lo: lower, hi: upper}})
             &entries.push(KnowledgeEntry{path: [String]{}, plane: "Layout", fact: KnowledgeFact.Layout{bytes: (bits + 7) /% 8}})

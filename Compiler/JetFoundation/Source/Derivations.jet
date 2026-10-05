@@ -210,14 +210,14 @@ fn derivation_method_raw(method: MIRDerivationMethod) -> String Never! {
 fn derivation_hash_frame(state: &DerivationHashState, value: String) Never! {
     bytes := value.bytes()
     length := bytes.len()
-    loop index in 0..<8 -> derivation_hash_byte(&state, U8{(length >> ((7 - index) * 8)) & 255})
+    loop index in 0..<8 -> derivation_hash_byte(&state, U8{((length >> ((7 - index) * 8))).bit_and(255)})
     loop byte in bytes -> derivation_hash_byte(&state, byte)
 }
 
 fn derivation_hash_byte(state: &DerivationHashState, byte: U8) Never! {
     value :: U64.from_u8(byte)
-    state.first = (state.first ~| value).wrapping_mul(U64{0x100000001b3})
-    state.second = (state.second ~| state.first.rotate_left(17) ~| value).wrapping_mul(U64{0x9e3779b185ebca87})
+    state.first = ((state.first).bit_xor(value)).wrapping_mul(U64{0x100000001b3})
+    state.second = (((state.second).bit_xor(state.first.rotate_left(17))).bit_xor(value)).wrapping_mul(U64{0x9e3779b185ebca87})
 }
 
 fn derivation_hash_hex(state: DerivationHashState) -> String Never! {
@@ -225,8 +225,8 @@ fn derivation_hash_hex(state: DerivationHashState) -> String Never! {
     first :: Int.from_u64(state.first)
     second :: Int.from_u64(state.second)
     output := [U8]{}
-    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[(first >> shift) & 15])
-    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[(second >> shift) & 15])
+    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[((first >> shift)).bit_and(15)])
+    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[((second >> shift)).bit_and(15)])
     String.from_bytes(output) ?? ""
 }
 
@@ -293,7 +293,7 @@ fn derivation_json_quote(value: String) -> String Never! {
 
 fn derivation_hex_byte(value: Int) -> String Never! {
     digits := "0123456789abcdef".bytes()
-    String.from_bytes([U8]{digits[(value >> 4) & 15], digits[value & 15]}) ?? "00"
+    String.from_bytes([U8]{digits[((value >> 4)).bit_and(15)], digits[(value).bit_and(15)]}) ?? "00"
 }
 
 fn mir_frame_schedule_json(schedule: MIRFrameSchedule) -> String Never! {

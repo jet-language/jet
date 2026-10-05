@@ -113,7 +113,7 @@ struct OverlayAuthority {
         after :: handle.stat() ?? return Err(OverlayError.IO("could not revalidate {label} `{path}`: {err}"))
         unchanged :: after.is_file && env_overlay_identity(after) == .Ok(identity)
         if !unchanged -> return Err(OverlayError.IO("{label} `{path}` changed while it was read"))
-        Ok(OverlayHeldFile{path, parent: parent.handle, name, handle, identity, mode: info.mode & 0o7777, bytes})
+        Ok(OverlayHeldFile{path, parent: parent.handle, name, handle, identity, mode: (info.mode).bit_and(0o7777), bytes})
     }
 }
 

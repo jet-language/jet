@@ -4798,34 +4798,28 @@ impl<'a> Checker<'a> {
                             None
                         }
                     }
-                    // D-BITNOT1=A: `!` flips every bit it is given. On a Bool
-                    // that is the one bit, so a yes becomes a no. On a whole
-                    // number it is the bitwise complement, and the width comes
-                    // back unchanged.
+                    // D-SIGIL-ALGEBRA1=B: only Bool uses prefix `!`.
                     UnOp::Not => {
-                        if let Type::InlineRange { base, .. } = &t {
-                            self.require_knowledge_gate(
-                                crate::Sema::KnowledgePlane::Range,
-                                crate::Sema::KnowledgeGate::BoundedArithmetic,
-                                *span,
-                            );
-                            Some(base.as_ref().erased_inline_ranges())
-                        } else if t == Type::Bool || t.is_integer() {
+                        if t == Type::Bool {
                             Some(t)
                         } else {
-                            self.diags.push(Diagnostic::error(
-                                "E0109",
-                                format!(
-                                    "`!` needs {} or a whole number, but this is {}",
-                                    Type::Bool.show(),
-                                    t.show()
-                                ),
-                                "`!` flips bits: a yes becomes a no, and a whole number \
-                                 gets every bit turned over"
-                                    .to_string(),
-                                "compare the value to something first, e.g. `!(x > 0)`".to_string(),
+                            let mut diagnostic = Diagnostic::error(
+                                if t.is_integer() { "E0398" } else { "E0109" },
+                                "`!` needs Bool; use `bit_not` to flip integer bits".to_string(),
+                                "marks express ownership and outcomes; arithmetic uses named methods (D-SIGIL-ALGEBRA1=B)".to_string(),
+                                "write `value.bit_not()` for an integer, or compare the value to produce Bool".to_string(),
                                 Some(*span),
-                            ));
+                            );
+                            if t.is_integer() {
+                                let operand = Span::new(span.start + 1, span.end);
+                                if let Some(text) = self.source.get(operand.start..operand.end) {
+                                    diagnostic = diagnostic.with_edit(crate::Diagnostics::TextEdit {
+                                        span: *span,
+                                        new_text: format!("({text}).bit_not()"),
+                                    });
+                                }
+                            }
+                            self.diags.push(diagnostic);
                             None
                         }
                     }
@@ -5224,6 +5218,76 @@ impl<'a> Checker<'a> {
                 operator_rhs: _,
                 checked_widen: _,
             } => {
+                // D-SIGIL-ALGEBRA1=B: numeric methods are the intrinsic
+                // surface for the existing shared-runtime operations.
+                let numeric_op = match method.as_str() {
+                    "bit_and" => Some(BinOp::BitAnd),
+                    "bit_or" => Some(BinOp::BitOr),
+                    "bit_xor" => Some(BinOp::BitXor),
+                    "pow" => Some(BinOp::Pow),
+                    _ => None,
+                };
+                if numeric_op.is_some() || method == "bit_not" {
+                    let receiver_ty = self.infer(receiver)?;
+                    if matches!(receiver_ty, Type::Bool | Type::String | Type::Char) {
+                        self.diags.push(Diagnostic::error(
+                            "E0109",
+                            format!("`{method}` needs a number, not {}", receiver_ty.show()),
+                            "bit methods work on integers; pow works on integer and Float values".to_string(),
+                            "use a numeric receiver".to_string(),
+                            Some(*method_span),
+                        ));
+                        return None;
+                    }
+                    if receiver_ty.is_integer() || receiver_ty.is_float() {
+                        let unary = method == "bit_not";
+                        let arity = if unary { 0 } else { 1 };
+                        if args.len() != arity || !type_args.is_empty() || !owner_type_args.is_empty() {
+                            self.diags.push(Diagnostic::error(
+                                "E0104",
+                                format!("`{method}` takes {arity} argument(s) and no type arguments"),
+                                "numeric methods name one intrinsic operation".to_string(),
+                                format!("write `value.{method}({})`", if unary { "" } else { "other" }),
+                                Some(*method_span),
+                            ));
+                            return None;
+                        }
+                        if args.iter().any(|arg| arg.label.is_some() || arg.spread) {
+                            self.diags.push(Diagnostic::error(
+                                "E0764",
+                                format!("`{method}` takes no labelled or spread arguments"),
+                                "numeric intrinsic methods are positional".to_string(),
+                                "pass the operand without a label or spread".to_string(),
+                                Some(*method_span),
+                            ));
+                            return None;
+                        }
+                        let span = Span::new(receiver.span().start, args.last().map_or(method_span.end, |arg| arg.expr.span().end));
+                        if unary {
+                            if !receiver_ty.is_integer() {
+                                self.diags.push(Diagnostic::error(
+                                    "E0109",
+                                    "`bit_not` needs a whole number".to_string(),
+                                    "bit methods preserve an integer width".to_string(),
+                                    "use an integer receiver".to_string(),
+                                    Some(span),
+                                ));
+                                return None;
+                            }
+                            // Keep the source method in the checked AST: an
+                            // outer intrinsic may infer its receiver again,
+                            // and integer `!` is deliberately no longer legal.
+                            let ty = receiver_ty.erased_inline_ranges();
+                            *recv_type = Some(Syntax::TYPE_INT.to_string());
+                            *resolved_ret = Some(ty.clone());
+                            return Some(ty);
+                        }
+                        let receiver = std::mem::replace(receiver, Box::new(Expr::Unit(span)));
+                        let rhs = args.remove(0).expr;
+                        *e = Expr::Binary(numeric_op.unwrap(), receiver, Box::new(rhs), span);
+                        return self.infer(e);
+                    }
+                }
                 // D-SHAPE3a=A: the parser's empty identifier is the unspellable
                 // receiver sentinel for `.new(...)`. Resolve it only from the same
                 // expected type already propagated for literals/calls; never search a

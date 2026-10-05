@@ -1853,7 +1853,7 @@ fn sema_checked_validate_struct_field(definition: StructDef, field: Field, diagn
 fn sema_checked_validate_layout(definition: StructDef, diagnostics: &[Diagnostic]) {
     if definition.layout == .Val(layout) {
         if layout == .CAligned(alignment, target_mode) {
-            if alignment <= 0 || alignment & (alignment - 1) != 0 || (!target_mode && alignment > 1048576) {
+            if alignment <= 0 || (alignment).bit_and((alignment - 1)) != 0 || (!target_mode && alignment > 1048576) {
                 &diagnostics.push(sema_error("E1119", definition.layout_span ?? definition.name_span, "the requested layout alignment is not usable", "aligned layouts require a positive power-of-two supported by the selected target and portable baseline", "use a positive power-of-two alignment no larger than 1048576, or use target alignment mode"))
             }
         }

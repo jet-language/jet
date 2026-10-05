@@ -36,7 +36,7 @@ pub fn pack_u8(n: Int) -> [U8] BinaryError! {
 
 pub fn pack_i8(n: Int) -> [U8] BinaryError! {
     if n < -128 || n > 127 -> return Err(BinaryError.Range)
-    pack_u8(n & 255)
+    pack_u8((n).bit_and(255))
 }
 
 pub fn pack_u16le(n: Int) -> [U8] BinaryError! {
@@ -83,14 +83,14 @@ pub fn unpack_u16le(data: [U8], offset: Int) -> Int? Never! {
     if offset < 0 || offset + 1 >= data.len() -> return None
     a :: u8_int(data[offset])
     b :: u8_int(data[offset + 1])
-    Val(a | (b << 8))
+    Val((a).bit_or((b << 8)))
 }
 
 pub fn unpack_u16be(data: [U8], offset: Int) -> Int? Never! {
     if offset < 0 || offset + 1 >= data.len() -> return None
     a :: u8_int(data[offset])
     b :: u8_int(data[offset + 1])
-    Val((a << 8) | b)
+    Val(((a << 8)).bit_or(b))
 }
 
 pub fn unpack_u32le(data: [U8], offset: Int) -> Int? Never! {
@@ -99,7 +99,7 @@ pub fn unpack_u32le(data: [U8], offset: Int) -> Int? Never! {
     k := 0
     loop k < 4 {
         b :: u8_int(data[offset + k])
-        n = n | (b << (k * 8))
+        n = (n).bit_or((b << (k * 8)))
         k = k + 1
     }
     Val(n)
@@ -111,7 +111,7 @@ pub fn unpack_u32be(data: [U8], offset: Int) -> Int? Never! {
     k := 0
     loop k < 4 {
         b :: u8_int(data[offset + k])
-        n = (n << 8) | b
+        n = ((n << 8)).bit_or(b)
         k = k + 1
     }
     Val(n)
@@ -120,20 +120,20 @@ pub fn unpack_u32be(data: [U8], offset: Int) -> Int? Never! {
 pub fn unpack_u64le(data: [U8], offset: Int) -> Int? Never! {
     lo :: unpack_u32le(data, offset) ?? return None
     hi :: unpack_u32le(data, offset + 4) ?? return None
-    Val(lo | (hi << 32))
+    Val((lo).bit_or((hi << 32)))
 }
 
 pub fn unpack_u64be(data: [U8], offset: Int) -> Int? Never! {
     hi :: unpack_u32be(data, offset) ?? return None
     lo :: unpack_u32be(data, offset + 4) ?? return None
-    Val(lo | (hi << 32))
+    Val((lo).bit_or((hi << 32)))
 }
 
 pub fn sign_extend(n: Int, bits: Int) -> Int Never! {
     sign :: 1 << (bits - 1)
     mask :: (1 << bits) - 1
-    v := n & mask
-    if (v & sign) != 0 -> return v - (1 << bits)
+    v := (n).bit_and(mask)
+    if ((v).bit_and(sign)) != 0 -> return v - (1 << bits)
     v
 }
 
@@ -314,8 +314,8 @@ fn pack_one(code: Int, little: Bool, value: Int) -> [U8] BinaryError! {
     if code == 98 -> return pack_i8(value)
     if code == 104 {
         if value < -32768 || value > 32767 -> return Err(BinaryError.Range)
-        if little -> return pack_u16le(value & 65535)
-        return pack_u16be(value & 65535)
+        if little -> return pack_u16le((value).bit_and(65535))
+        return pack_u16be((value).bit_and(65535))
     }
     if code == 72 {
         if little -> return pack_u16le(value)
@@ -323,8 +323,8 @@ fn pack_one(code: Int, little: Bool, value: Int) -> [U8] BinaryError! {
     }
     if code == 105 || code == 108 {
         if value < -2147483648 || value > 2147483647 -> return Err(BinaryError.Range)
-        if little -> return pack_u32le(value & 4294967295)
-        return pack_u32be(value & 4294967295)
+        if little -> return pack_u32le((value).bit_and(4294967295))
+        return pack_u32be((value).bit_and(4294967295))
     }
     if code == 73 || code == 76 {
         if little -> return pack_u32le(value)
@@ -332,8 +332,8 @@ fn pack_one(code: Int, little: Bool, value: Int) -> [U8] BinaryError! {
     }
     if code == 113 {
         if value < -9223372036854775808 || value > 9223372036854775807 -> return Err(BinaryError.Range)
-        if little -> return pack_u64le(value & 18446744073709551615)
-        return pack_u64be(value & 18446744073709551615)
+        if little -> return pack_u64le((value).bit_and(18446744073709551615))
+        return pack_u64be((value).bit_and(18446744073709551615))
     }
     if little -> return pack_u64le(value)
     pack_u64be(value)
@@ -369,6 +369,6 @@ fn unpack_one(code: Int, little: Bool, data: [U8], offset: Int) -> (next: Int, v
 /// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
 /// checked `U8{}` conversion.
 fn to_u8(n: Int) -> U8 Never! {
-    v :: n & 255
+    v :: (n).bit_and(255)
     (U8{v})
 }

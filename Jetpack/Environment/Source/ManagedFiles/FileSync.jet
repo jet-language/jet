@@ -231,7 +231,7 @@ fn env_files_object_path(objects_dir: String, declaration: ManagedFile, digest: 
 
 fn env_files_effective_permissions(declaration: ManagedFile, fallback: Int) -> Int Never! {
     permissions :: declaration.permissions ?? fallback
-    if declaration.sensitive -> return permissions & 0o700
+    if declaration.sensitive -> return (permissions).bit_and(0o700)
     permissions
 }
 
@@ -247,15 +247,15 @@ fn env_files_destination_permissions(declaration: ManagedFile) -> Int? Never! {
             0o600
         }
     }
-    if declaration.sensitive -> return Val(permissions & 0o700)
+    if declaration.sensitive -> return Val((permissions).bit_and(0o700))
     Val(permissions)
 }
 
 // Whether the file at `path` carries `expected` mode bits. Non-Unix hosts
 // compare the readonly mapping.
 fn env_files_mode_matches(info: Stat, expected: Int) -[Env]> Bool Never! {
-    if sys.is_unix() -> return info.mode & 0o7777 == expected
-    info.readonly == (expected & 0o222 == 0)
+    if sys.is_unix() -> return (info.mode).bit_and(0o7777) == expected
+    info.readonly == ((expected).bit_and(0o222) == 0)
 }
 
 fn env_files_destination_permissions_match(path: String, declaration: ManagedFile) -[FS, Env]> Bool EnvironmentError! {
@@ -275,7 +275,7 @@ fn env_files_object_permissions_match(path: String, declaration: ManagedFile) -[
 // its private mode applied before the first byte is written.
 fn env_files_create_new_file(path: String, permissions: Int?) -[FS]> FileWriter IOError! {
     mode :: if permissions == {
-        .Val(value) -> Val(value & 0o7777)
+        .Val(value) -> Val((value).bit_and(0o7777))
         .None -> None
     }
     files.create(path, if_exists: .Refuse, mode: mode, links: .Refuse)

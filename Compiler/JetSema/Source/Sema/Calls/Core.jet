@@ -640,7 +640,48 @@ pub fn sema_call_core_check_fixed(environment: SemaScopeEnvironment, module_name
     }
 }
 
+// Source exports must satisfy the same native floating contract as the Core
+// kernel. Check inferred argument grades before source-parameter conversion can
+// hide an Int classifier input or widen one side of a mixed-width pair.
+fn sema_call_core_check_source_float_contract(target: SemaCallDirectTarget, args: [CallArg], span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return true
+    module_index :: sema_registration_module_index(graph, target.symbol.module_name) ?? return true
+    module_name :: graph.modules[module_index].module_name
+    signature :: core_call_typed_signature(module_name, target.symbol.name, args.len()) ?? return true
+    floating := loop parameter in signature.type_parameters {
+        if parameter.constraint == CoreCallTypeConstraint.Floating || parameter.constraint == CoreCallTypeConstraint.FloatingOrExact -> break true
+    } ?? false
+    if !floating -> return true
+    params := sema_call_core_parameter_records(signature, [Type]{}, span, false)
+    local_args := loop argument in args -> argument
+    binding :: sema_call_bind_args("{module_name}.{target.symbol.name}", params, &local_args, span, &diagnostics) ?? return false
+    facts :: sema_call_collect_inference_facts(params, binding, args, environment, &scopes, &state, &tail_store, &context)
+    loop parameter in signature.type_parameters {
+        if parameter.constraint != CoreCallTypeConstraint.Floating && parameter.constraint != CoreCallTypeConstraint.FloatingOrExact -> next
+        width := Type.Float
+        has_width := false
+        loop (index, parameter_type) in facts.parameter_types {
+            same_parameter :: if parameter_type == {.Named(name) -> name == parameter.name else -> false}
+            if !same_parameter -> next
+            actual :: sema_call_core_inference_type(signature, facts.argument_types[index])
+            if !sema_call_core_type_constraint_satisfied(parameter.constraint, actual, environment) {
+                &diagnostics.push(sema_error("E0112", span, "`{module_name}.{target.symbol.name}` needs a floating value, not `{type_name(actual)}`", "this operation uses a floating-point grade rather than a whole-number grade", "pass values with a compatible floating-point grade"))
+                return false
+            }
+            if has_width && width != actual {
+                &diagnostics.push(sema_error("E0112", span, "`{module_name}.{target.symbol.name}` needs matching float widths", "Core floating calls do not mix Float and Float32", "convert both operands to the same float width"))
+                return false
+            }
+            width = actual
+            has_width = true
+        }
+    }
+    true
+}
+
 pub fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_name: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if !sema_call_core_check_source_float_contract(target, args, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) -> return None
     call := Call{name: qualified_name, name_span: span, type_args: type_args, args: args, resolved_ret: None, range_checked: false, widen_approx: false}
     checked :: sema_call_check_direct_target_owned(&state, target, call, [SemaCallDefaultValue]{}, expected, environment, &scopes, &tail_store, &context, &diagnostics) ?? return None
     if !sema_expr_record_call_fact(environment, &scopes, &context, span, checked, &diagnostics) -> return None

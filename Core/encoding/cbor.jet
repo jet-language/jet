@@ -141,8 +141,8 @@ impl CBORReader {
         }
         head :: &self.read_byte()
         head_int := Int.from_u8(head)
-        major :: (head_int >> 5) & 7
-        extra :: head_int & 31
+        major :: ((head_int >> 5)).bit_and(7)
+        extra :: (head_int).bit_and(31)
         if extra == 31 {
             return Err(self.fail(EncodingErrorKind.Unsupported, "indefinite-length CBOR is not part of the Core DataTree adapter"))
         }
@@ -218,20 +218,20 @@ impl CBORReader {
         if extra == 25 {
             hi :: &self.read_byte()
             lo :: &self.read_byte()
-            return Ok((Int.from_u8(hi) << 8) | Int.from_u8(lo))
+            return Ok(((Int.from_u8(hi) << 8)).bit_or(Int.from_u8(lo)))
         }
         if extra == 26 {
             b0 :: &self.read_byte()
             b1 :: &self.read_byte()
             b2 :: &self.read_byte()
             b3 :: &self.read_byte()
-            return Ok((Int.from_u8(b0) << 24) | (Int.from_u8(b1) << 16) | (Int.from_u8(b2) << 8) | Int.from_u8(b3))
+            return Ok(((((Int.from_u8(b0) << 24)).bit_or((Int.from_u8(b1) << 16))).bit_or((Int.from_u8(b2) << 8))).bit_or(Int.from_u8(b3)))
         }
         if extra == 27 {
             n := 0
             loop _ in 0..<8 {
                 b :: &self.read_byte()
-                n = (n << 8) | Int.from_u8(b)
+                n = ((n << 8)).bit_or(Int.from_u8(b))
             }
             return Ok(n)
         }
@@ -334,29 +334,29 @@ fn write_cbor_int(out: &[U8], n: Int) {
 
 fn write_cbor_head(out: &[U8], major: Int, n: Int) {
     if n < 24 {
-        &out.push(to_u8((major << 5) | n))
+        &out.push(to_u8(((major << 5)).bit_or(n)))
         return
     }
     if n < 256 {
-        &out.push(to_u8((major << 5) | 24))
+        &out.push(to_u8(((major << 5)).bit_or(24)))
         &out.push(U8{n})
         return
     }
     if n < 65536 {
-        &out.push(to_u8((major << 5) | 25))
+        &out.push(to_u8(((major << 5)).bit_or(25)))
         &out.push(to_u8(n >> 8))
         &out.push(to_u8(n))
         return
     }
     if n < 4294967296 {
-        &out.push(to_u8((major << 5) | 26))
+        &out.push(to_u8(((major << 5)).bit_or(26)))
         &out.push(to_u8(n >> 24))
         &out.push(to_u8(n >> 16))
         &out.push(to_u8(n >> 8))
         &out.push(to_u8(n))
         return
     }
-    &out.push(to_u8((major << 5) | 27))
+    &out.push(to_u8(((major << 5)).bit_or(27)))
     k := 7
     loop k >= 0 {
         &out.push(to_u8(n >> (k * 8)))
@@ -367,6 +367,6 @@ fn write_cbor_head(out: &[U8], major: Int, n: Int) {
 /// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
 /// checked `U8{}` conversion.
 fn to_u8(n: Int) -> U8 Never! {
-    v :: n & 255
+    v :: (n).bit_and(255)
     (U8{v})
 }

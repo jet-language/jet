@@ -355,7 +355,7 @@ fn store_broker_validate_managed_directory(path: String, label: String) StoreErr
 fn store_broker_require_private_mode_followed(path: String, label: String) StoreError! {
     if sys.family() == "windows" -> return
     info :: files.stat(files.canonicalize(path))
-    if info.mode & 0o077 != 0 -> return Err(store_broker_invalid("{label} has insecure permissions"))
+    if (info.mode).bit_and(0o077) != 0 -> return Err(store_broker_invalid("{label} has insecure permissions"))
 }
 
 // Rust `user_systemd_unit_dir`: `$XDG_CONFIG_HOME` or `$HOME/.config`.
@@ -395,7 +395,7 @@ fn store_broker_ensure_admin_public_dir(path: String) StoreError! {
         store_broker_require_admin_dir(path)
         if sys.family() != "windows" {
             info :: files.stat(path)
-            if info.mode & 0o005 != 0o005 -> store_broker_set_mode(path, 0o755)
+            if (info.mode).bit_and(0o005) != 0o005 -> store_broker_set_mode(path, 0o755)
         }
     } else {
         store_broker_set_mode(path, 0o755)
@@ -407,14 +407,14 @@ fn store_broker_require_admin_dir(path: String) StoreError! {
     if sys.family() == "windows" -> return
     info :: files.stat(path)
     if (info.owner ?? -1) != 0 -> return Err(store_broker_invalid("shared-store administrator directory is not root-owned"))
-    if info.mode & 0o022 != 0 -> return Err(store_broker_invalid("shared-store administrator directory is writable by another user"))
+    if (info.mode).bit_and(0o022) != 0 -> return Err(store_broker_invalid("shared-store administrator directory is writable by another user"))
 }
 
 fn store_broker_require_admin_public_dir(path: String) StoreError! {
     store_broker_require_admin_dir(path)
     if sys.family() == "windows" -> return
     info :: files.stat(path)
-    if info.mode & 0o005 != 0o005 -> return Err(store_broker_invalid("shared-store administrator directory is not traversable by enrolled users"))
+    if (info.mode).bit_and(0o005) != 0o005 -> return Err(store_broker_invalid("shared-store administrator directory is not traversable by enrolled users"))
 }
 
 fn store_broker_validate_admin_directory(path: String, label: String) StoreError! {
@@ -435,7 +435,7 @@ fn store_broker_ensure_private_dir(path: String) StoreError! {
     store_broker_ensure_real_dir(path)
     if sys.family() == "windows" -> return
     info :: files.stat(path)
-    if info.mode & 0o077 != 0 {
+    if (info.mode).bit_and(0o077) != 0 {
         if existed -> return Err(store_broker_invalid("shared-store directory has insecure permissions"))
         files.set_mode(path, 0o700)
     }
@@ -444,7 +444,7 @@ fn store_broker_ensure_private_dir(path: String) StoreError! {
 fn store_broker_require_private_mode(path: String, label: String) StoreError! {
     if sys.family() == "windows" -> return
     info :: files.stat(path)
-    if info.mode & 0o077 != 0 -> return Err(store_broker_invalid("{label} has insecure permissions"))
+    if (info.mode).bit_and(0o077) != 0 -> return Err(store_broker_invalid("{label} has insecure permissions"))
 }
 
 fn store_broker_set_private_mode(path: String) StoreError! {
@@ -455,7 +455,7 @@ fn store_broker_set_private_mode(path: String) StoreError! {
 fn store_broker_require_safe_descriptor(path: String, label: String) StoreError! {
     info :: files.stat(path)
     if info.is_symlink || !info.is_file -> return Err(store_broker_invalid("{label} is not a regular file"))
-    if sys.family() != "windows" && info.mode & 0o022 != 0 -> return Err(store_broker_invalid("{label} is writable by another user"))
+    if sys.family() != "windows" && (info.mode).bit_and(0o022) != 0 -> return Err(store_broker_invalid("{label} is writable by another user"))
 }
 
 fn store_broker_require_admin_descriptor(path: String) StoreError! {

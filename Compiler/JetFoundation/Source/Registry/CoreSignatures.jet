@@ -273,7 +273,7 @@ fn core_sig_math_fixed(module_name: String, member: String) -> CoreTypedCallSign
         if core_sig_one_of(member, [String]{"tau_const", "random"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(float)))
         if core_sig_one_of(member, [String]{"gcd_many", "lcm_many", "sum_int", "prod_int"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read)}, Val(integer)))
         if member == "powmod" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(Type.Option{inner: integer})))
-        if core_sig_one_of(member, [String]{"abs_diff", "xor"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(integer)))
+        if member == "abs_diff" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(integer)))
         if core_sig_one_of(member, [String]{"even", "odd"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(Type.Bool)))
         if member == "in_range" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(Type.Bool)))
         if member == "sumprod" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_float, read), core_sig_positional(list_float, read)}, Val(float)))
@@ -366,12 +366,9 @@ fn core_sig_numeric_or_default(module_name: String, member: String) -> CoreTyped
             [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(t),
             core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
     }
-    if member == "sign" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Union{members: [Type]{float, Type.Float32}}, read)}, Val(integer)))
+    if member == "sign" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(integer)))
     if member == "to_bits" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Union{members: [Type]{float, Type.Float32}}, read)}, Val(integer)))
     if member == "from_bits" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(float)))
-    if member == "pow" {
-        return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read), core_sig_positional(t, read)}, Val(t), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
-    }
     if member == "cmp" {
         return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read), core_sig_positional(t, read)}, Val(integer), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
     }

@@ -128,8 +128,8 @@ fn parser_try_take_pattern_body(state: &JetParserState, depth: Int) -> ParsedTak
 
 fn parser_pattern_byte_text(value: Int) -> String Never! {
     if value < 128 -> return String.from_bytes([U8]{U8{value}}) ?? ""
-    high := 192 | (value >> 6)
-    low := 128 | (value & 63)
+    high := (192).bit_or((value >> 6))
+    low := (128).bit_or(((value).bit_and(63)))
     String.from_bytes([U8]{U8{high}, U8{low}}) ?? ""
 }
 

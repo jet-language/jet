@@ -1317,9 +1317,9 @@ fn jet_eval_fixed_primitive(machine: &JetEvalMachine, op: MIRBinaryOp, lhs: TCom
             // Fixed-width `Rem` is the truncated remainder (dividend's sign), like MIR `Rem`.
             Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: left %% right}})
         }
-        .BitAnd -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: left & right}})
-        .BitOr -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: left | right}})
-        .BitXor -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: left ~| right}})
+        .BitAnd -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: (left).bit_and(right)}})
+        .BitOr -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: (left).bit_or(right)}})
+        .BitXor -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: (left).bit_xor(right)}})
         .Shl -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: left << right}})
         .Shr -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: left >> right}})
         else -> {
@@ -1390,18 +1390,12 @@ fn jet_eval_unary(machine: &JetEvalMachine, op: MIRUnaryOp, value: JetEvalRuntim
                 jet_eval_compiler_fail(&machine, span, "MIR fixed integer bitwise-not has invalid width")
                 return None
             }
-            number := 0
-            if data == {
-                .Int(raw) -> number = raw
-                else -> {
-                    jet_eval_compiler_fail(&machine, span, "MIR fixed integer bitwise-not requires an integer carrier")
-                    return None
-                }
-            }
+            number :: jet_eval_route_core_wrapping_bits(data, &machine, span) ?? return None
             mask :: if bits == 64 -> -1 else -> (1 << bits) - 1
-            inverted := (!number) & mask
-            if signed && bits < 64 && (inverted & (1 << (bits - 1))) != 0 -> inverted = inverted | (!mask)
-            return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: inverted}})
+            inverted := number.bit_not().bit_and(mask)
+            if signed && bits < 64 && inverted.bit_and(1 << (bits - 1)) != 0 -> inverted = inverted.bit_or(mask.bit_not())
+            result :: if signed || bits < 64 -> TComptimeValue.Int{value: inverted} else -> jet_eval_integer_constant_value(inverted, false, bits)
+            return Val(JetEvalRuntimeValue.Data{value: result})
         }
         else -> {}
     }
@@ -1572,7 +1566,7 @@ fn jet_eval_binary(machine: &JetEvalMachine, op: MIRBinaryOp, left: JetEvalRunti
                 .Sub -> Val(left_number - right_number)
                 .Mul -> Val(left_number * right_number)
                 .Div -> Val(left_number / right_number)
-                .Pow -> Val(left_number ^ right_number)
+                .Pow -> Val((left_number).pow(right_number))
                 else -> Float?{None}
             }
             // Rust MirFloat::binop: an F32 operation rounds to binary32.

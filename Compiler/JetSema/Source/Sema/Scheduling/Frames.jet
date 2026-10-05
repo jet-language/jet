@@ -367,7 +367,7 @@ fn sema_frame_schedule_validate(operations: [FrameOperation]) -> String? {
             }
             if access.layout != None {
                 layout :: access.layout ?? ResourceLayout{size: 0, align: 0, layout: "", device: ""}
-                if layout.size <= 0 || layout.size > 0xffffffffffffffff || layout.align <= 0 || layout.align > 0xffffffffffffffff || (layout.align & (layout.align - 1)) != 0 -> return Val("operation `{operation.name}` has invalid access to `{sema_frame_resource_label(access.resource)}`: layout size must be positive and alignment must be a non-zero power of two")
+                if layout.size <= 0 || layout.size > 0xffffffffffffffff || layout.align <= 0 || layout.align > 0xffffffffffffffff || ((layout.align).bit_and((layout.align - 1))) != 0 -> return Val("operation `{operation.name}` has invalid access to `{sema_frame_resource_label(access.resource)}`: layout size must be positive and alignment must be a non-zero power of two")
                 if layout.layout.trim() == "" -> return Val("operation `{operation.name}` has invalid access to `{sema_frame_resource_label(access.resource)}`: layout identity must not be empty")
             }
         }

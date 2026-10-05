@@ -599,46 +599,88 @@ impl<'a> Parser<'a> {
         )
     }
 
-    /// D-BITOREXPR1=A: `|` is bitwise OR in value position. Keep it above
-    /// comparisons; type position has its own `|` union grammar.
+    pub(in crate::Parser) fn teach_arithmetic_method(
+        &mut self,
+        method: &str,
+        lhs: Span,
+        rhs: Span,
+        operator: Span,
+        compound: bool,
+    ) {
+        let whole = Span::new(lhs.start, rhs.end);
+        let mut diagnostic = Diagnostic::error(
+            "E0398",
+            format!("this arithmetic spelling is retired; use `{method}`"),
+            "marks express ownership and outcomes; arithmetic uses named methods (D-SIGIL-ALGEBRA1=B)".to_string(),
+            format!("write `value.{method}(other)`{}", if compound { " and assign the result back" } else { "" }),
+            Some(operator),
+        );
+        if let Some(source) = self.source.as_deref() {
+            if let (Some(left), Some(right)) = (
+                source.get(lhs.start..lhs.end),
+                source.get(rhs.start..rhs.end),
+            ) {
+                let new_text = if compound {
+                    format!("{left} = ({left}).{method}({right})")
+                } else {
+                    format!("({left}).{method}({right})")
+                };
+                diagnostic = diagnostic.with_edit(crate::Diagnostics::TextEdit { span: whole, new_text });
+            }
+        }
+        self.diags.push(diagnostic);
+    }
+
+    /// Parse retired arithmetic only to offer a precedence-preserving repair.
     pub(in crate::Parser) fn expr_bitor(
         &mut self,
         allow_struct_lit: bool,
     ) -> Result<Expr, Diagnostic> {
+        let start = self.peek().span.start;
         let mut lhs = self.expr_bitxor(allow_struct_lit)?;
         while matches!(self.peek().kind, TokKind::Pipe)
             && !matches!(self.peek2().kind, TokKind::Gt)
         {
+            let left_end = self.prev_end();
             let op_span = self.bump().span;
+            let right_start = self.peek().span.start;
             let rhs = self.expr_bitxor(allow_struct_lit)?;
-            let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
+            let span = Span::new(start, self.prev_end());
+            self.teach_arithmetic_method("bit_or", Span::new(start, left_end), Span::new(right_start, span.end), op_span, false);
             lhs = Expr::Binary(BinOp::BitOr, Box::new(lhs), Box::new(rhs), span);
         }
         Ok(lhs)
     }
 
-    /// D-XORSPELL1=A: `~|` is bitwise exclusive-or, in the precedence slot
-    /// the old `^` spelling held.
+    /// The retired XOR precedence is retained only for its structured repair.
     pub(in crate::Parser) fn expr_bitxor(
         &mut self,
         allow_struct_lit: bool,
     ) -> Result<Expr, Diagnostic> {
+        let start = self.peek().span.start;
         let mut lhs = self.expr_bitand(allow_struct_lit)?;
         while matches!(self.peek().kind, TokKind::TildePipe) {
+            let left_end = self.prev_end();
             let op_span = self.bump().span;
+            let right_start = self.peek().span.start;
             let rhs = self.expr_bitand(allow_struct_lit)?;
-            let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
+            let span = Span::new(start, self.prev_end());
+            self.teach_arithmetic_method("bit_xor", Span::new(start, left_end), Span::new(right_start, span.end), op_span, false);
             lhs = Expr::Binary(BinOp::BitXor, Box::new(lhs), Box::new(rhs), span);
         }
         Ok(lhs)
     }
 
     fn expr_bitand(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+        let start = self.peek().span.start;
         let mut lhs = self.expr_shift(allow_struct_lit)?;
         while matches!(self.peek().kind, TokKind::Amp) {
+            let left_end = self.prev_end();
             let op_span = self.bump().span;
+            let right_start = self.peek().span.start;
             let rhs = self.expr_shift(allow_struct_lit)?;
-            let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
+            let span = Span::new(start, self.prev_end());
+            self.teach_arithmetic_method("bit_and", Span::new(start, left_end), Span::new(right_start, span.end), op_span, false);
             lhs = Expr::Binary(BinOp::BitAnd, Box::new(lhs), Box::new(rhs), span);
         }
         Ok(lhs)
@@ -725,7 +767,7 @@ impl<'a> Parser<'a> {
             TokKind::Bang => {
                 let span = self.bump().span;
                 let inner = self.expr_unary(allow_struct_lit)?;
-                let full = Span::new(span.start, inner.span().end);
+                let full = Span::new(span.start, self.prev_end());
                 Ok(Expr::Unary(UnOp::Not, Box::new(inner), full))
             }
             TokKind::Ident(n)
@@ -1087,19 +1129,19 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-EXPSEM1=A: infix `^` raises to a power. It binds tighter than
-    /// every other binary operator and tighter than unary minus, so
-    /// `-3 ^ 2` is `-(3 ^ 2)`. It is right-associative and its exponent
-    /// runs back through the unary level, so `2 ^ 3 ^ 2` is `2 ^ (3 ^ 2)`
-    /// and `2 ^ -1` reads the negative exponent.
+    /// Parse retired power with its original associativity for the repair.
     fn expr_pow(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+        let start = self.peek().span.start;
         let base = self.expr_postfix(allow_struct_lit)?;
         if !matches!(self.peek().kind, TokKind::Caret) {
             return Ok(base);
         }
+        let left_end = self.prev_end();
         let op_span = self.bump().span;
+        let right_start = self.peek().span.start;
         let exponent = self.expr_unary(allow_struct_lit)?;
-        let span = Span::new(base.span().start, exponent.span().end.max(op_span.end));
+        let span = Span::new(start, self.prev_end());
+        self.teach_arithmetic_method("pow", Span::new(start, left_end), Span::new(right_start, span.end), op_span, false);
         Ok(Expr::Binary(
             BinOp::Pow,
             Box::new(base),

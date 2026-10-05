@@ -51,7 +51,7 @@ pub struct ForeignIdentityBuilder {
 }
 
 fn pkg_bridge_push_u64_le(bytes: &[U8], value: Int) Never! {
-    loop index in 0..<8 -> &bytes.push(U8{(value >> (index * 8)) & 255})
+    loop index in 0..<8 -> &bytes.push(U8{((value >> (index * 8))).bit_and(255)})
 }
 
 // `[1]` / `[0]`: the one-byte boolean identity field.

@@ -579,9 +579,9 @@ fn mir_pass_integer_result(op: MIRBinaryOp, left: Int, right: Int) -> Int? {
         .FloorDiv -> mir_pass_floor_div(left, right)
         .Mod -> mir_pass_floor_mod(left, right)
         .Rem -> if right == 0 -> None else -> Val(left %% right)
-        .BitAnd -> Val(left & right)
-        .BitOr -> Val(left | right)
-        .BitXor -> Val(left ~| right)
+        .BitAnd -> Val((left).bit_and(right))
+        .BitOr -> Val((left).bit_or(right))
+        .BitXor -> Val((left).bit_xor(right))
         .Shl -> if right < 0 || right >= 63 -> None else -> mir_pass_checked_mul(left, 1 << right)
         .Shr -> {
             if right < 0 || right >= 63 -> return None

@@ -9,7 +9,7 @@ use crate::Sema::{KnowledgeGate, KnowledgePlane};
 use crate::AST::{BinOp, CtValue, Dimension, Expr, StrPart, Type};
 use std::collections::HashMap;
 
-/// D-EXPSEM1=A: a written-out negative exponent, such as the `-1` in `2 ^ -1`.
+/// D-EXPSEM1=A: a written negative exponent, such as `-1` in `(2).pow(-1)`.
 /// Only a spelled numeral counts. An exponent whose sign the checker cannot
 /// see keeps the whole-number result type, and the Prelude traps if the value
 /// turns out negative at run time.
@@ -1269,6 +1269,20 @@ impl<'a> Checker<'a> {
         let rt = self.infer(rhs);
         self.expected_type = saved_expected;
         let (mut lt, mut rt) = (lt?, rt?);
+        if op == BinOp::Pow
+            && matches!(lt, Type::Float | Type::Float32)
+            && matches!(rt, Type::Float | Type::Float32)
+            && lt != rt
+        {
+            self.diags.push(Diagnostic::error(
+                "E0109",
+                "`pow` needs both float operands to have the same width".to_string(),
+                "D-FLOATW1: mixing float widths is not allowed".to_string(),
+                "convert the operands to the same float width".to_string(),
+                Some(span),
+            ));
+            return None;
+        }
         // D-OPT-LIFT1=A: `x == 5` holds only when the optional `x` holds 5,
         // and `x != 5` is its opposite. The plain side lifts once, so the
         // comparison is the existing optional equality on every tier.
@@ -1418,6 +1432,7 @@ impl<'a> Checker<'a> {
                     .push(crate::Sema::e3403("Clock comparison", Some(span)));
             }
         }
+
 
         let joins_numeric = matches!(
             op,

@@ -244,12 +244,11 @@ pub enum BinOp {
     /// D-MODSEM1=A: infix `%%` is the truncated remainder — its answer takes
     /// the dividend's sign, so `-7 %% 2` is -1. It pairs with `/`.
     Rem,
-    /// D-EXPOP1=A / D-EXPSEM1=A: infix `^` raises the left side to the power of
-    /// the right side. Right-associative, binds tighter than unary minus.
+    /// D-SIGIL-ALGEBRA1=B: the checked numeric `pow` operation.
     Pow,
     BitAnd,
     BitOr,
-    /// D-XORSPELL1=A: bitwise exclusive-or is infix `~|`, because `^` is power.
+    /// D-SIGIL-ALGEBRA1=B: the checked integer `bit_xor` operation.
     BitXor,
     Shl,
     Shr,

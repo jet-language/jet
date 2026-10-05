@@ -27,8 +27,8 @@ pub fn nix_nix32_encode(bytes: [U8]) -> String Never! {
         index :: bit /% 8
         shift :: bit % 8
         value := Int.from_u8(bytes[index]) >> shift
-        if index < bytes.len() - 1 -> value |= Int.from_u8(bytes[index + 1]) << (8 - shift)
-        &out.push(alphabet[value & 31])
+        if index < bytes.len() - 1 -> value = (value).bit_or(Int.from_u8(bytes[index + 1]) << (8 - shift))
+        &out.push(alphabet[(value).bit_and(31)])
         group -= 1
     }
     String.from_bytes(out) ?? panic("Nix32 alphabet is ASCII")
@@ -49,11 +49,11 @@ pub fn nix_nix32_decode(text: String) -> [U8] NixError! {
         index :: bit /% 8
         shift :: bit % 8
         loop folded.len() <= index -> &folded.push(0)
-        folded[index] = folded[index] | ((digit << shift) & 255)
+        folded[index] = (folded[index]).bit_or((((digit << shift)).bit_and(255)))
         carry :: digit >> (8 - shift)
         if carry != 0 {
             loop folded.len() <= index + 1 -> &folded.push(0)
-            folded[index + 1] = folded[index + 1] | carry
+            folded[index + 1] = (folded[index + 1]).bit_or(carry)
         }
     }
     out := [U8]{}
@@ -84,7 +84,7 @@ pub fn nix_compress_hash(hash: [U8], size: Int) -> [U8] Never! {
     loop _ in 0..<size -> &folded.push(0)
     loop index in 0..<hash.len() {
         slot :: index % size
-        folded[slot] = folded[slot] ~| Int.from_u8(hash[index])
+        folded[slot] = (folded[slot]).bit_xor(Int.from_u8(hash[index]))
     }
     out := [U8]{}
     loop value in folded -> &out.push(U8{value})

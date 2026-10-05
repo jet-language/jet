@@ -13,15 +13,15 @@ pub struct X64ExecutableResult {
 }
 
 fn elf64_u16(bytes: &[U8], value: Int) Never! {
-    loop shift in 0..<2 -> &bytes.push(U8{(value >> (8 * shift)) & 255})
+    loop shift in 0..<2 -> &bytes.push(U8{((value >> (8 * shift))).bit_and(255)})
 }
 
 fn elf64_u32(bytes: &[U8], value: Int) Never! {
-    loop shift in 0..<4 -> &bytes.push(U8{(value >> (8 * shift)) & 255})
+    loop shift in 0..<4 -> &bytes.push(U8{((value >> (8 * shift))).bit_and(255)})
 }
 
 fn elf64_u64(bytes: &[U8], value: Int) Never! {
-    loop shift in 0..<8 -> &bytes.push(U8{(value >> (8 * shift)) & 255})
+    loop shift in 0..<8 -> &bytes.push(U8{((value >> (8 * shift))).bit_and(255)})
 }
 
 // The file: ELF header, one program header, then `text`; execution starts at

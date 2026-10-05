@@ -7,7 +7,7 @@
 pub fn foundation_public_destination_ipv4(a: Int, b: Int, c: Int, d: Int) -> Bool Never! {
     !(a == 0
         || a == 10
-        || (a == 100 && (b & 192) == 64)
+        || (a == 100 && ((b).bit_and(192)) == 64)
         || a == 127
         || (a == 169 && b == 254)
         || (a == 172 && b >= 16 && b <= 31)
@@ -29,7 +29,7 @@ pub fn foundation_public_destination_ipv6(words: [Int]) -> Bool Never! {
     second :: words[1]
     // The 2000::/3 rule already excludes unspecified, loopback, multicast,
     // ULA and link-local space. Preserve Rust's documentation exception.
-    (first & 57344) == 8192 && !(first == 8193 && second == 3512)
+    ((first).bit_and(57344)) == 8192 && !(first == 8193 && second == 3512)
 }
 
 // #3595 REQUIRED native bridges, intentionally not guessed Core APIs:

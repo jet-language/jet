@@ -576,10 +576,10 @@ fn store_decode_nix_base32(value: String) -> [U8]? Never! {
         if digit < 0 -> return None
         bit :: (51 - index) * 5
         loop offset in 0..<5 {
-            if digit & (1 << offset) != 0 {
+            if (digit).bit_and((1 << offset)) != 0 {
                 target :: bit + offset
                 if target >= 256 -> return None
-                output[target /% 8] = output[target /% 8] | (1 << (target % 8))
+                output[target /% 8] = (output[target /% 8]).bit_or((1 << (target % 8)))
             }
         }
     }
@@ -596,7 +596,7 @@ fn store_encode_nix_base32(value: [U8]) -> String Never! {
         digit := 0
         loop offset in 0..<5 {
             target :: bit + offset
-            if target < 256 && (Int.from_u8(value[target /% 8]) & (1 << (target % 8))) != 0 -> digit = digit | (1 << offset)
+            if target < 256 && ((Int.from_u8(value[target /% 8])).bit_and((1 << (target % 8)))) != 0 -> digit = (digit).bit_or((1 << offset))
         }
         &out.push(alphabet[digit])
     }

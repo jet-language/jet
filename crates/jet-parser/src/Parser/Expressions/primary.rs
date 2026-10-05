@@ -1075,7 +1075,7 @@ impl<'a> Parser<'a> {
                 StrTokPart::Interp(toks) => {
                     let mut sub = Parser {
                         toks: &toks,
-                        source: None,
+                        source: self.source,
                         explicit_semicolon_reported: false,
                         retired_step: None,
                         pos: 0,

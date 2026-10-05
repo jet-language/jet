@@ -435,19 +435,13 @@ pub const OP_PERCENT: &str = "%";
 /// answer takes the dividend's sign, so `-7 %% 2` is -1. It partners `/`.
 pub const OP_PERCENT_PERCENT: &str = "%%";
 pub const OP_AMP: &str = "&";
-/// D-PATO / D-SHAPE-PIPE1=C / D-BITOREXPR1=A (ratified 2026-08-28): peer
-/// alternatives and value-position bitwise OR use the single bar; it is not
-/// a general flow operator.
+/// D-PATO / D-SHAPE-PIPE1=C: peer alternatives use the single bar.
+/// D-SIGIL-ALGEBRA1=B retires its arithmetic meaning.
 pub const OP_PIPE: &str = "|";
-/// D-EXPOP1=A (ratified 2026-08-05): infix `^` raises to a power. Prefix `^`
-/// stays the take sigil (D-MEM1); parser position tells them apart.
+/// D-SIGIL-ALGEBRA1=B: prefix `^` is take; infix power is retired.
 pub const OP_CARET: &str = "^";
-/// D-XORSPELL1=A (ratified 2026-08-05): bitwise exclusive-or, the exclusive
-/// variant of `|`. Prefix `~` stays the copy sigil (D-SHAPE-COPY1).
+/// D-SIGIL-ALGEBRA1=B: retained only to teach `bit_xor`.
 pub const OP_TILDE_PIPE: &str = "~|";
-/// D-BITNOT1=A (ratified 2026-08-05): prefix `!` turns over every bit it is
-/// given — the one bit of a `Bool`, or every bit of a whole number.
-pub const OP_BIT_NOT: &str = OP_NOT;
 pub const OP_SHL: &str = "<<";
 pub const OP_SHR: &str = ">>";
 
@@ -489,9 +483,9 @@ pub const OP_PERCENT_EQ: &str = "%=";
 pub const OP_PERCENT_PERCENT_EQ: &str = "%%=";
 pub const OP_AMP_EQ: &str = "&=";
 pub const OP_PIPE_EQ: &str = "|=";
-/// D-EXPOP1=A (ratified 2026-08-05): power-assign.
+/// D-SIGIL-ALGEBRA1=B: retained only to teach a `pow` assignment.
 pub const OP_CARET_EQ: &str = "^=";
-/// D-XORSPELL1=A (ratified 2026-08-05): exclusive-or-assign.
+/// D-SIGIL-ALGEBRA1=B: retained only to teach a `bit_xor` assignment.
 pub const OP_TILDE_PIPE_EQ: &str = "~|=";
 pub const OP_SHL_EQ: &str = "<<=";
 pub const OP_SHR_EQ: &str = ">>=";
@@ -510,12 +504,8 @@ pub const PAT_WILDCARD_SLOT: &str = "_";
 // D-PATR (ratified 2026-06-19): range patterns (`lo..hi`) reuse OP_RANGE (S22) at arm-head
 // level and inside variant payload slots. Open Int/Char subjects always still require `else`.
 
-// D-PATO (ratified 2026-06-19), D-SHAPE-PIPE1=C (ratified 2026-07-15), and
-// D-BITOREXPR1=A (ratified 2026-08-28):
-// structural or-patterns and choice alternatives use OP_PIPE (single `|`).
-// `Active(id) | Reconnecting(id) -> …`; alternatives must bind the same names at the same types.
-// Value-position `|` is bitwise OR and binds above comparisons. No general bar
-// flow operator exists. `||` remains value-or / boolean-or; `|=` remains bitwise-or-assign under S17.
+// D-PATO / D-SHAPE-PIPE1=C: structural or-patterns and choice alternatives
+// use OP_PIPE. D-SIGIL-ALGEBRA1=B retires value arithmetic and |=.
 
 // D-ENUMDOT1 (ratified 2026-06-26, implemented): a leading `.` before a variant name in pattern
 // position (`.Circle(r)`, `.Empty`) is now accepted everywhere a variant pattern is written —

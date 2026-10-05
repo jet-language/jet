@@ -391,7 +391,7 @@ fn cli_cc_mark_link_outputs_executable(project_root: String, outputs: [String]) 
         reader :: files.open(path, links: .Refuse) ?? return Err(CLIToolError.new("open link output `{output}`: {err}"))
         metadata :: reader.stat() ?? return Err(CLIToolError.new("inspect link output `{output}`: {err}"))
         if !metadata.is_file -> return Err(CLIToolError.new("link output `{output}` is not a regular file"))
-        files.set_mode(path, metadata.mode | 0o111) ?? return Err(CLIToolError.new("set executable mode on link output `{output}`: {err}"))
+        files.set_mode(path, (metadata.mode).bit_or(0o111)) ?? return Err(CLIToolError.new("set executable mode on link output `{output}`: {err}"))
     }
 }
 

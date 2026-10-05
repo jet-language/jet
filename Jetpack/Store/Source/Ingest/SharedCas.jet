@@ -27,14 +27,14 @@ pub fn store_shared_cas_key(digest_hex: String, mode: Int) -> String Never! {
 }
 
 // `mode & !0o222`.
-fn store_clear_write_bits(mode: Int) -> Int Never! { mode - (mode & 0o222) }
+fn store_clear_write_bits(mode: Int) -> Int Never! { mode - ((mode).bit_and(0o222)) }
 
 fn store_hex8(value: Int) -> String Never! {
     digits :: "0123456789abcdef".bytes()
     out := [U8]{}
     loop index in 0..<8 {
         shift :: (7 - index) * 4
-        &out.push(digits[(value >> shift) & 15])
+        &out.push(digits[((value >> shift)).bit_and(15)])
     }
     String.from_bytes(out) ?? panic("hex digits are ASCII")
 }
@@ -192,7 +192,7 @@ fn store_same_file_inode(left: String, right: String) -[FS]> Bool Never! {
     left_info.id == right_info.id
 }
 
-fn store_permission_identity(info: files.Stat) -> Int Never! { info.mode & 0o7777 }
+fn store_permission_identity(info: files.Stat) -> Int Never! { (info.mode).bit_and(0o7777) }
 
 fn store_sha256_file_hex(path: String) -[FS]> String StoreError! {
     Ok(crypto.sha256(files.read_bytes(path)).hex())

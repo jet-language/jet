@@ -88,7 +88,7 @@ fn run() {
     #Unsafe("fixed AEAD tamper vector") {
         sealed :: expert.xchacha20poly1305_seal(key, nonce, [U8]{1, 2, 3}, [U8]{4, 5}) ?? return
         tampered := sealed
-        tampered[0] = U8{Int.from_u8(tampered[0]) ~| 1}
+        tampered[0] = U8{Int.from_u8(tampered[0]).bit_xor(1)}
         if expert.xchacha20poly1305_open(key, nonce, tampered, [U8]{4, 5}) == {
             .Err(_) -> print("tamper:rejected")
             else -> print("tamper:wrong-error")

@@ -324,7 +324,7 @@ fn store_artifact_test_host_limit(store: ArtifactStore) -[FS]> Int? Never! {
     }
     assert_eq(files.read(destination) ?? panic("read restored"), "artifact")
     info :: files.stat(destination) ?? panic("restored mode")
-    assert((info.mode & 0o111) != 0)
+    assert(((info.mode).bit_and(0o111)) != 0)
     files.write(artifact.path, "broken") ?? panic("corrupt object")
     broken :: store.restore_file(key, destination) ?? panic("restore corrupt")
     if broken == {

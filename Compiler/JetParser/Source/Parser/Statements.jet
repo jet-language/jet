@@ -1717,6 +1717,19 @@ fn parser_assignment_binop(kind: Int) -> BinOp? {
 // S17: an assignment target is a name, an indexed slot or a field place,
 // after any parentheses; a compound update of anything else is E0165.
 fn parser_expression_lvalue(state: &JetParserState, expr: Expr, fallback_span: Span, operator: Token) -> LValue {
+    retired_method := if operator.kind == {
+        TOKEN_AMP_EQ -> "bit_and"
+        TOKEN_PIPE_EQ -> "bit_or"
+        TOKEN_TILDE_PIPE_EQ -> "bit_xor"
+        TOKEN_CARET_EQ -> "pow"
+        else -> ""
+    }
+    if retired_method != "" {
+        rhs_start := operator.span.end
+        end := if state.position > 0 -> state.tokens[state.position - 1].span.end else -> rhs_start
+        if state.position > 1 && state.tokens[state.position - 1].kind == TOKEN_SEMI -> end = state.tokens[state.position - 2].span.end
+        parser_teach_arithmetic_method(&state, retired_method, expr_span(expr), Span{start: rhs_start, end: end}, operator.span, true)
+    }
     if expr == {
         .Paren(inner, _) -> return parser_expression_lvalue(&state, inner, fallback_span, operator)
         .Ident(name, span) -> return LValue.Local{name: name, name_span: span}

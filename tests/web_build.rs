@@ -2207,10 +2207,10 @@ fn web_js_whole_numbers_stay_exact_above_two_to_the_fifty_three() {
     let src = r#"#Target(JS)
 fn run() {
     print(7 / 2)
-    print(2 ^ 60)
-    print(3 ^ 39)
-    print(2 ^ 60 > 2 ^ 53)
-    wide := 2 ^ 60
+    print((2).pow(60))
+    print((3).pow(39))
+    print((2).pow(60) > (2).pow(53))
+    wide := (2).pow(60)
     print(wide + 1)
     print(wide /% 10)
 }

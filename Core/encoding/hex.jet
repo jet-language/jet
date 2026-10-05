@@ -139,7 +139,7 @@ pub fn b2a_uu(data: [U8]) -> String Never! {
             a :: u8_int(data[pos])
             b :: if j + 1 < count -> u8_int(data[pos + 1]) else -> 0
             c :: if j + 2 < count -> u8_int(data[pos + 2]) else -> 0
-            out = "{out}{uu_char(a >> 2)}{uu_char(((a << 4) ~| (b >> 4)) & 63)}{uu_char(((b << 2) ~| (c >> 6)) & 63)}{uu_char(c & 63)}"
+            out = "{out}{uu_char(a >> 2)}{uu_char(((((a << 4)).bit_xor((b >> 4)))).bit_and(63))}{uu_char(((((b << 2)).bit_xor((c >> 6)))).bit_and(63))}{uu_char((c).bit_and(63))}"
             j += 3
         }
         out = "{out}\n"
@@ -169,14 +169,14 @@ pub fn a2b_uu(text: String) -> [U8] Never! {
             b :: uu_value(raw[i + 1])
             c :: uu_value(raw[i + 2])
             d :: uu_value(raw[i + 3])
-            &out.push(to_u8((a << 2) ~| (b >> 4)))
+            &out.push(to_u8(((a << 2)).bit_xor((b >> 4))))
             produced += 1
             if produced < count {
-                &out.push(to_u8((b << 4) ~| (c >> 2)))
+                &out.push(to_u8(((b << 4)).bit_xor((c >> 2))))
                 produced += 1
             }
             if produced < count {
-                &out.push(to_u8((c << 6) ~| d))
+                &out.push(to_u8(((c << 6)).bit_xor(d)))
                 produced += 1
             }
             i += 4
@@ -189,13 +189,13 @@ fn qp_hex(n: Int) -> U8 { nibble_upper(n) }
 
 fn uu_char(n: Int) -> U8 {
     if n == 0 -> return (U8{96})
-    U8{32 + (n & 63)}
+    U8{32 + ((n).bit_and(63))}
 }
 
 fn uu_value(byte: U8) -> Int {
     n :: u8_int(byte)
     if n == 96 -> return 0
-    (n - 32) & 63
+    ((n - 32)).bit_and(63)
 }
 
 pub fn encode_sep(data: [U8], sep: String) -> String Never! { core.encoding.hex.encode_sep(data, sep) }
@@ -206,6 +206,6 @@ pub fn dump(data: [U8]) -> String Never! { core.encoding.hex.dump(data) }
 /// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
 /// checked `U8{}` conversion.
 fn to_u8(n: Int) -> U8 Never! {
-    v :: n & 255
+    v :: (n).bit_and(255)
     (U8{v})
 }

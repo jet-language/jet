@@ -5056,7 +5056,14 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                     entries :: jet_rust_emit_place_local(&ctx, local, false)
                     return jet_rust_emit_route_call(&ctx, call, [String]{entries})
                 }
-                .MathBuiltin(_, call, args) | .PreciseBuiltin(_, call, args) -> return jet_rust_emit_semantic_values(&ctx, function, call, args)
+                .MathBuiltin(_, call, args) | .PreciseBuiltin(_, call, args) -> {
+                    emitted :: jet_rust_emit_semantic_values(&ctx, function, call, args)
+                    if result == .Val(value) {
+                        result_ty :: jet_rust_emit_value_type(ctx, function, value)
+                        if jet_rust_emit_native_int_result(&ctx, emitted, result_ty) == .Val(converted) -> return converted
+                    }
+                    return emitted
+                }
                 .Print(call, value) -> return jet_rust_emit_print(&ctx, function, call, value)
                 .AmbientInput(call, prompt) -> return jet_rust_emit_ambient_input(&ctx, function, call, prompt)
                 .LayoutCompare(call, op, left, right) -> return "{jet_rust_emit_semantic_values(&ctx, function, call, [MIRValueID]{left, right})} /* layout_compare={jet_rust_emit_layout_compare_name(op)} */"

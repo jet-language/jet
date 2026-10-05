@@ -2090,7 +2090,7 @@ fn jet_eval_integer_constant_value(value: Int, signed: Bool, bits: Int) -> TComp
     if signed -> return TComptimeValue.Int{value: value}
     if bits < 64 {
         mask :: if bits == 63 -> 9223372036854775807 else -> (1 << bits) - 1
-        return TComptimeValue.Int{value: value & mask}
+        return TComptimeValue.Int{value: (value).bit_and(mask)}
     }
     if value >= 0 -> return TComptimeValue.Int{value: value}
     // value + 2^63 lies in 0..<2^63; add 2^63 = 9223372036854775808 through

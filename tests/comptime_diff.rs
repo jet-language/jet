@@ -27,11 +27,10 @@ const CASES: &[&str] = &[
     "(0 - 17) % 5",
     "(0 - 17) / 5",
     "1 << 10",
-    "255 & 15",
-    // D-BITOREXPR1=A: value-position `|` is bitwise OR; `|=` remains covered
-    // by tests/numops.rs.
-    "12 | 10",
-    "6 ^ 3",
+    "(255).bit_and(15)",
+    // D-SIGIL-ALGEBRA1=B: named integer arithmetic matches runtime.
+    "(12).bit_or(10)",
+    "(6).pow(3)",
     "1000000 * 1000000",
     // Float rounding + S21 "always a decimal" display
     "Float{3.0} / Float{2.0}",
@@ -94,7 +93,7 @@ const CASES: &[&str] = &[
     "(999999999999999999999999999999 + 999999999999999999999999999999).to_string()",
     "(100 - 1).to_string()",
     "(7 * 6).to_string()",
-    "(2 ^ 200).to_string()",
+    "(2).pow(200).to_string()",
     "(0 - 3).to_string()",
 ];
 
@@ -455,7 +454,7 @@ fn comptime_exact_int_matches_runtime() {
                     | "(999999999999999999999999999999 + 999999999999999999999999999999).to_string()"
                     | "(100 - 1).to_string()"
                     | "(7 * 6).to_string()"
-                    | "(2 ^ 200).to_string()"
+                    | "(2).pow(200).to_string()"
                     | "(0 - 3).to_string()"
             )
         })
@@ -467,7 +466,7 @@ fn comptime_exact_int_matches_runtime() {
             "(999999999999999999999999999999 + 999999999999999999999999999999).to_string()",
             "(100 - 1).to_string()",
             "(7 * 6).to_string()",
-            "(2 ^ 200).to_string()",
+            "(2).pow(200).to_string()",
             "(0 - 3).to_string()",
         ],
         "exact Int differential cases must stay exact"

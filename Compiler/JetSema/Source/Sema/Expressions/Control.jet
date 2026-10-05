@@ -359,8 +359,8 @@ fn sema_failure_conversion_name_part(name: String) -> String Never! {
     encoded := [U8]{}
     loop byte in bytes {
         code :: Int.from_u8(byte)
-        &encoded.push(digits[(code >> 4) & 15])
-        &encoded.push(digits[code & 15])
+        &encoded.push(digits[((code >> 4)).bit_and(15)])
+        &encoded.push(digits[(code).bit_and(15)])
     }
     "__{bytes.len()}_{String.from_bytes(encoded) ?? ""}"
 }

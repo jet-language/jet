@@ -690,10 +690,10 @@ fn sema_expr_binary_name(op: BinOp) -> String Never! {
         .FloorDiv -> "/%"
         .Mod -> "%"
         .Rem -> "rem"
-        .Pow -> "**"
-        .BitAnd -> "&"
-        .BitOr -> "|"
-        .BitXor -> "^"
+        .Pow -> "pow"
+        .BitAnd -> "bit_and"
+        .BitOr -> "bit_or"
+        .BitXor -> "bit_xor"
         .Shl -> "<<"
         .Shr -> ">>"
         .Eq -> "=="
@@ -792,7 +792,7 @@ fn sema_expr_byte_text(value: U8) -> String Never! {
     byte :: Int.from_u8(value)
     if byte < 128 -> return String.from_bytes([U8]{value}) ?? ""
     first :: U8{192 + (byte >> 6)}
-    second :: U8{128 + (byte & 63)}
+    second :: U8{128 + ((byte).bit_and(63))}
     String.from_bytes([U8]{first, second}) ?? ""
 }
 
@@ -3001,11 +3001,14 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
         result_ty := sema_expr_numeric_base(value.ty)
         return sema_expr_expected(sema_tir_expr(result_ty, TExprKind.Unary{op: TUnaryOp.Neg, operand: value}, span), expected, environment, &diagnostics)
     }
-    if value.ty == Type.Bool || sema_expr_is_integer(value.ty) {
-        result_ty := if value.ty == Type.Bool -> Type.Bool else -> sema_expr_numeric_base(value.ty)
-        return sema_expr_expected(sema_tir_expr(result_ty, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span), expected, environment, &diagnostics)
+    if value.ty == Type.Bool {
+        return sema_expr_expected(sema_tir_expr(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span), expected, environment, &diagnostics)
     }
-    &diagnostics.push(sema_error("E0109", span, "logical `!` needs a Bool or whole number", "logical negation flips a yes-or-no value and bitwise negation flips every integer bit", "compare the value to produce Bool, or use a whole-number value"))
+    if sema_expr_is_integer(value.ty) {
+        &diagnostics.push(sema_retired_integer_not(span, Span{start: span.start + 1, end: span.end}))
+        return None
+    }
+    &diagnostics.push(sema_error("E0109", span, "logical `!` needs Bool", "arithmetic uses named methods (D-SIGIL-ALGEBRA1=B)", "compare the value to produce Bool; use `value.bit_not()` for an integer"))
     None
 }
 
@@ -3156,6 +3159,10 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
             }
             else -> {}
         }
+    }
+    if op == BinOp.Pow && ((lhs.ty == Type.Float && rhs.ty == Type.Float32) || (lhs.ty == Type.Float32 && rhs.ty == Type.Float)) {
+        &diagnostics.push(sema_error("E0109", span, "`pow` needs both float operands to have the same width", "D-FLOATW1: mixing float widths is not allowed", "convert the operands to the same float width"))
+        return None
     }
     line :: sema_source_line_at(environment.source_segments, span) ?? return None
     if op == BinOp.And || op == BinOp.Or {
@@ -3426,6 +3433,46 @@ fn sema_check_expression_inner(expr: Expr, expected: Type?, environment: SemaSco
         }
         .CallValue(callee, args, span) -> sema_expr_check_indirect_call(callee, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _, _, _, _) -> {
+            // D-SIGIL-ALGEBRA1=B: lower numeric methods through the same
+            // checked operations and shared Prelude as arithmetic expressions.
+            if method == "bit_and" || method == "bit_or" || method == "bit_xor" || method == "bit_not" || method == "pow" {
+                probe := sema_probe_expression(receiver, None, environment, &scopes, state, &tail_store, &context, &diagnostics)
+                if probe == .Val(value) {
+                    if value.ty == Type.Bool || value.ty == Type.String || value.ty == Type.Char {
+                        &diagnostics.push(sema_error("E0109", method_span, "`{method}` needs a number, not {sema_type_show(value.ty)}", "bit methods work on integers; pow works on integer and Float values", "use a numeric receiver"))
+                        return None
+                    }
+                    if sema_expr_is_numeric(sema_expr_numeric_base(value.ty)) {
+                        unary :: method == "bit_not"
+                        arity :: if unary -> 0 else -> 1
+                        if args.len() != arity || type_args.len() != 0 || owner_type_args.len() != 0 {
+                            &diagnostics.push(sema_error("E0104", method_span, "`{method}` takes {arity} argument(s) and no type arguments", "numeric methods name one intrinsic operation", "write `value.{method}(other)`; `bit_not` takes no argument"))
+                            return None
+                        }
+                        loop argument in args {
+                            if argument.label != None || argument.spread {
+                                &diagnostics.push(sema_error("E0764", method_span, "`{method}` takes no labelled or spread arguments", "numeric intrinsic methods are positional", "pass the operand without a label or spread"))
+                                return None
+                            }
+                        }
+                        if unary {
+                            if !sema_expr_is_integer(value.ty) {
+                                &diagnostics.push(sema_error("E0109", method_span, "`bit_not` needs a whole number", "bit methods preserve an integer width", "use an integer receiver"))
+                                return None
+                            }
+                            checked :: sema_check_expression(receiver, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+                            return sema_expr_expected(sema_tir_expr(sema_expr_numeric_base(checked.ty), TExprKind.Unary{op: TUnaryOp.Not, operand: checked}, expr_span(expr)), expected, environment, &diagnostics)
+                        }
+                        operation :: if method == {
+                            "bit_and" -> BinOp.BitAnd
+                            "bit_or" -> BinOp.BitOr
+                            "bit_xor" -> BinOp.BitXor
+                            else -> BinOp.Pow
+                        }
+                        return sema_expr_check_binary(operation, receiver, args[0].expr, expr_span(expr), expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+                    }
+                }
+            }
             // D-CAP-RECEIVER1=D: check the ordinary unmarked call, then
             // compare the written receiver mark with its resolved convention.
             unmarked :: sema_receiver_mark_begin(&state, receiver)

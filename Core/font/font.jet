@@ -114,15 +114,15 @@ fn decode_cp(raw: [U8], i: Int) -> DecodePair {
     cp := 0
     if first >= 194 && first <= 223 {
         width = 2
-        cp = first & 31
+        cp = (first).bit_and(31)
     }
     if first >= 224 && first <= 239 {
         width = 3
-        cp = first & 15
+        cp = (first).bit_and(15)
     }
     if first >= 240 && first <= 244 {
         width = 4
-        cp = first & 7
+        cp = (first).bit_and(7)
     }
     if width == 0 || i + width > raw.len() -> return DecodePair{cp: 65533, next: i + 1}
 
@@ -140,7 +140,7 @@ fn decode_cp(raw: [U8], i: Int) -> DecodePair {
     loop k < width {
         byte :: Int.from_u8(raw[i + k])
         if byte < 128 || byte >= 192 -> return DecodePair{cp: 65533, next: i + 1}
-        cp = (cp << 6) | (byte & 63)
+        cp = ((cp << 6)).bit_or(((byte).bit_and(63)))
         k += 1
     }
     if cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF) {
