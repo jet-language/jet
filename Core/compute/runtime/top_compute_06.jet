@@ -751,7 +751,7 @@ fn jet_compute_validate_sparse(sparse: &JetSparseCsr) -> () JetComputeError! {
     rows :: USize.try_from(sparse.rows).map_err(_ -> JetComputeError.InvalidShape("sparse row count is too large"))?
     if sparse.row_ptr.len() != rows.saturating_add(1) || sparse.col_idx.len() != sparse.values.len() -> return Err(JetComputeError.InvalidShape("sparse CSR arrays have inconsistent lengths"))
     nnz :: I64.try_from(sparse.values.len()).map_err(_ -> JetComputeError.InvalidShape("sparse nnz is too large"))?
-    if sparse.row_ptr.first().copied() != Val(I64{0}) || sparse.row_ptr.last().copied() != Val(nnz)
+    if sparse.row_ptr.first() != 0 || sparse.row_ptr.last() != nnz
         || sparse.row_ptr.windows(2).any(pair -> pair[0] < 0 || pair[1] < pair[0] || pair[1] > nnz)
         || sparse.col_idx.iter().any(col -> col < 0 || col >= sparse.cols)
         || sparse.values.iter().any(value -> !value.is_finite()) {
