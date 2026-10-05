@@ -92,11 +92,13 @@ use jet_foundation.[
     TNumericOp,
     TOrFallback,
     TPanicLoc,
+    TPreludeArg,
     TPattern,
     TPlace,
     TRangeArm,
     TRequireKind,
     TScopeMemberKind,
+    TStaticOwner,
     TStmt,
     TTraitMethod,
     TTransactionSnapshot,
@@ -327,8 +329,12 @@ fn jet_codegen_lower_task_group(builder: &JetCodegenBuilder, group: TLocal, limi
     place := jet_codegen_bind_local(&builder, group, group_ty, group.mutable, None, None, false)
     _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: place, value: value})
 
+    // Rust `TStmt::TaskGroup`: the group joins its children through the
+    // Prelude's borrowed `JetTaskGroup::close`, deferred to the scope's exit.
     resource := TExpr{ty: group_ty, kind: TExprKind.Local{local: group}, span: span, integer_bounds: None, cost: None}
-    close := TExpr{ty: Type.Named{name: "Unit"}, kind: TExprKind.Close{value: resource}, span: span, integer_bounds: None, cost: None}
+    close_method := TMethodRef{symbol: symbol_id(SymbolKind.Function, "", "jet_std::JetTaskGroup", "close"), name: "close", mangled: false, trait_owner: None, operator_identity: None}
+    close_arg := TCallArg{value: resource, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+    close := TExpr{ty: Type.Named{name: "Unit"}, kind: TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: true, path: "jet_std::JetTaskGroup", generics: [TPreludeArg]{}}, owner_type: None, method: close_method, type_args: [Type]{}, args: [TCallArg]{close_arg}}, span: span, integer_bounds: None, cost: None}
     group_symbol :: group.symbol_id ?? panic("checked task-group local has no symbol identity")
     thunk := jet_codegen_lower_defer_thunk(&builder, close, group_symbol, scope.value, span)
     jet_codegen_register_deferred_call(&builder, thunk)
