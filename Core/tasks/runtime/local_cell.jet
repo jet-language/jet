@@ -97,7 +97,7 @@ impl<T> JetCell<T> {
         #Unsafe("increment local read loan; retained token outlives every projected pointer and unwinds on panic") {
             state :: self.inner.borrows.get()
             if state < 0 -> panic("Cell borrow conflict: cannot read while an edit guard is active")
-            self.inner.borrows.set(state.checked_add(1).expect("Cell borrow count overflow"))
+            self.inner.borrows.set(state.checked_add(1) ?? panic("Cell borrow count overflow"))
             root: Rc<dyn JetCellLoanRoot> :: self.inner.clone()
             JetCellReadGuard{loan: Rc.new(JetCellLoan{root, write: false}), ptr: NonNull.from(@*self.inner.value.get())}
         }
@@ -141,7 +141,7 @@ impl<T: JetCellOptionLike> JetCell<T> {
     }
     // Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:177
     pub fn get_or_set<F: FnOnce() -> T.Value>(self, init: F) -> T.Value {
-        self.try_get_or_set(fn() -> T.Value Never! { Ok(init()) }).expect("infallible Cell initializer")
+        self.try_get_or_set(fn() -> T.Value Never! { Ok(init()) }) ?? panic("infallible Cell initializer")
     }
     // Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:185
     pub fn try_get_or_set<F: FnOnce() -> T.Value E!, E>(self, init: F) -> T.Value E! {
@@ -219,7 +219,7 @@ impl<T: Sized?> JetCellEditGuard<T> {
         #Unsafe("track shared callback under exclusive root loan and restore access state on callback exit") {
             state :: self.access.get()
             if state < 0 -> panic("Cell guard conflict: cannot read during an edit callback")
-            self.access.set(state.checked_add(1).expect("Cell guard read count overflow"))
+            self.access.set(state.checked_add(1) ?? panic("Cell guard read count overflow"))
             access :: JetCellGuardAccess{state: @self.access, write: false}
             f(self.ptr.as_ref())
         }

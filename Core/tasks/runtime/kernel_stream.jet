@@ -57,7 +57,7 @@ pub fn jet_stream_with_event_time<T: Send, F: FnMut(@T) -> R + Send, R: JetStrea
         loop {
             value :: &stream.pull_checked()
             if value.is_none() -> break
-            item :: value.unwrap()
+            item :: value ?? panic("unwrap failed")
             timestamp :: (&event_time)(@item).into_event_time()
             if !sender.send_stream(JetStreamEvent.new(^item, ^timestamp)) -> break
         }
@@ -73,7 +73,7 @@ pub fn jet_stream_with_event_time_ns<T: Send, F: FnMut(@T) -> I64 + Send>(stream
         loop {
             value :: &stream.pull_checked()
             if value.is_none() -> break
-            item :: value.unwrap()
+            item :: value ?? panic("unwrap failed")
             timestamp :: CivilDateTime.from_unix_nanoseconds((&event_time)(@item))
             if !sender.send_stream(JetStreamEvent.new(^item, ^timestamp)) -> break
         }
@@ -167,7 +167,7 @@ impl<K: Clone + PartialEq, T> JetEventTimeState<K, T> {
     // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:307
     pub fn take_ready_windows(self: &Self) -> [JetStreamWindow<K, T>] {
         if self.watermark.is_none() -> return []
-        watermark_ns :: self.watermark.as_ref().unwrap().total_nanoseconds()
+        watermark_ns :: (self.watermark.as_ref() ?? panic("unwrap failed")).total_nanoseconds()
         window_ns :: self.window_ns
         &self.take_windows_where(window -> window_end_ns(window.start_ns, window_ns) <= watermark_ns)
     }
@@ -182,7 +182,7 @@ impl<K: Clone + PartialEq, T> JetEventTimeState<K, T> {
     // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:333
     fn advance_watermark(self: &Self) -> Unit {
         if self.max_event_time.is_none() -> return
-        candidate :: jet_stream_datetime_from_ns(self.max_event_time.as_ref().unwrap().total_nanoseconds().saturating_sub(self.allowed_lateness_ns as I128))
+        candidate :: jet_stream_datetime_from_ns((self.max_event_time.as_ref() ?? panic("unwrap failed")).total_nanoseconds().saturating_sub(self.allowed_lateness_ns as I128))
         if self.watermark.as_ref().is_none_or(watermark -> candidate.total_nanoseconds() > watermark.total_nanoseconds()) -> self.watermark = Val(candidate)
     }
     // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:349
@@ -298,7 +298,7 @@ pub fn jet_keyed_stream_window<K: Clone + PartialEq + Send, T: Send, D: JetStrea
         loop {
             window :: &windows.pull_window()
             if window.is_none() -> break
-            if !sender.send_stream(window.unwrap()) -> break
+            if !sender.send_stream(window ?? panic("unwrap failed")) -> break
         }
     })
 }

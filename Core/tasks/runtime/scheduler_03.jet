@@ -112,18 +112,18 @@ impl Scheduler {
     fn pop_local(self: &Self, id: USize, allow_blocking: Bool) -> Job? {
         // GATE #4565: kernel primitive
         #Unsafe("worker queue owns jobs under its mutex; remove the newest permitted local job") {
-            queue := self.workers[id].queue.lock().unwrap()
+            queue := self.workers[id].queue.lock() ?? panic("unwrap failed")
             if allow_blocking { queue.pop_back() }
-            else { queue.iter().rposition(fn(job) { not job.blocking }).map(fn(index) { queue.remove(index).unwrap() }) }
+            else { queue.iter().rposition(fn(job) { not job.blocking }).map(fn(index) { queue.remove(index) ?? panic("unwrap failed") }) }
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3691
     fn pop_global(self: &Self, allow_blocking: Bool) -> Job? {
         // GATE #4565: kernel primitive
         #Unsafe("global queue owns jobs under its mutex; remove the oldest permitted job") {
-            queue := self.global.lock().unwrap()
+            queue := self.global.lock() ?? panic("unwrap failed")
             if allow_blocking { queue.pop_front() }
-            else { queue.iter().position(fn(job) { not job.blocking }).map(fn(index) { queue.remove(index).unwrap() }) }
+            else { queue.iter().position(fn(job) { not job.blocking }).map(fn(index) { queue.remove(index) ?? panic("unwrap failed") }) }
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3695
@@ -132,9 +132,9 @@ impl Scheduler {
         #Unsafe("steal oldest permitted work while each victim queue is mutex-owned") {
             loop (index, worker) in self.workers.iter().enumerate() {
                 if index == thief -> next
-                queue := worker.queue.lock().unwrap()
+                queue := worker.queue.lock() ?? panic("unwrap failed")
                 job :: if allow_blocking { queue.pop_front() }
-                    else { queue.iter().position(fn(job) { not job.blocking }).map(fn(index) { queue.remove(index).unwrap() }) }
+                    else { queue.iter().position(fn(job) { not job.blocking }).map(fn(index) { queue.remove(index) ?? panic("unwrap failed") }) }
                 if job == .Val(job) -> return Val(^job)
             }
         }
@@ -159,8 +159,8 @@ impl Scheduler {
                     next
                 }
                 if self.shutdown.load(Ordering.Relaxed) -> break
-                guard :: self.global.lock().unwrap()
-                _ :: self.notify.wait_timeout(^guard, Duration.from_millis(10)).unwrap()
+                guard :: self.global.lock() ?? panic("unwrap failed")
+                _ :: self.notify.wait_timeout(^guard, Duration.from_millis(10)) ?? panic("unwrap failed")
             }
         }
     }
@@ -169,7 +169,7 @@ impl Scheduler {
         // GATE #4565: kernel primitive
         #Unsafe("bounded compensation accounting is mutex-owned; one reserve executes only nonblocking jobs") {
             reserve :: {
-                state := self.blocking_wait.lock().unwrap()
+                state := self.blocking_wait.lock() ?? panic("unwrap failed")
                 state.waits += 1
                 ordinary :: state.threads - (if state.reserve { USize{1} } else { USize{0} })
                 reserve :: if ordinary < state.waits.min(JET_BLOCKING_COMPENSATION_LIMIT) { false }
@@ -190,7 +190,7 @@ impl Scheduler {
     fn blocking_wait_leave(self: &Self) -> {
         // GATE #4565: kernel primitive
         #Unsafe("decrement blocking waiter count before waking compensation workers") {
-            state := self.blocking_wait.lock().unwrap()
+            state := self.blocking_wait.lock() ?? panic("unwrap failed")
             state.waits -= 1
             drop(^state)
             self.notify.notify_all()
@@ -202,7 +202,7 @@ impl Scheduler {
         #Unsafe("bounded retained scheduler worker retires when its waiter demand ends") {
             loop {
                 {
-                    state := self.blocking_wait.lock().unwrap()
+                    state := self.blocking_wait.lock() ?? panic("unwrap failed")
                     if (reserve && state.waits <= JET_BLOCKING_COMPENSATION_LIMIT) || (not reserve && state.waits == 0) {
                         state.threads -= 1
                         if reserve -> state.reserve = false
@@ -217,8 +217,8 @@ impl Scheduler {
                     self.notify.notify_one()
                     next
                 }
-                guard :: self.global.lock().unwrap()
-                _ :: self.notify.wait_timeout(^guard, Duration.from_millis(2)).unwrap()
+                guard :: self.global.lock() ?? panic("unwrap failed")
+                _ :: self.notify.wait_timeout(^guard, Duration.from_millis(2)) ?? panic("unwrap failed")
             }
         }
     }
@@ -243,10 +243,10 @@ NEXT_TASK_COMPLETION_ORDER :: #Unsafe("mutex owns the unique checked completion 
 fn next_task_completion_order() -> (high: U64, low: U64) {
     // GATE #4565: kernel primitive
     #Unsafe("allocate an unsigned 128-bit completion order under its mutex, trapping on exact overflow") {
-        next := NEXT_TASK_COMPLETION_ORDER.lock().unwrap()
+        next := NEXT_TASK_COMPLETION_ORDER.lock() ?? panic("unwrap failed")
         order :: *next
         if order.low == U64.MAX {
-            high :: order.high.checked_add(1).expect("task completion order exhausted")
+            high :: (order.high.checked_add(1) ?? panic("task completion order exhausted"))
             *next = (high: high, low: U64{0})
         } else { *next = (high: order.high, low: order.low + 1) }
         order
@@ -331,7 +331,7 @@ impl<T> JetSchedulerJoin<T> {
     fn fill_pending(self: &Self) -> Bool {
         // GATE #4565: kernel primitive
         #Unsafe("probe receiver under pending mutex without consuming the later typed join") {
-            pending := self.pending.lock().unwrap()
+            pending := self.pending.lock() ?? panic("unwrap failed")
             if pending.is_some() -> return true
             match self.rx.try_recv() {
                 Ok(result) -> {
@@ -397,7 +397,7 @@ impl<T> JetSchedulerJoin<T> {
         jet_scheduler_blocking_wait_enter()
         // GATE #4565: kernel primitive
         #Unsafe("block on receiver only when no completion is already held") {
-            if self.pending.lock().unwrap().is_none() { _ :: self.rx.recv() }
+            if (self.pending.lock() ?? panic("unwrap failed")).is_none() { _ :: self.rx.recv() }
         }
         jet_scheduler_blocking_wait_leave()
     }
@@ -487,12 +487,12 @@ pub fn jet_scheduler_all<T: Send>(entries: [(JetSchedulerJoin<T>, Arc<JetTaskCon
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4084
 // D-RACEWIN1: first success wins and cancels losers.
 pub fn jet_scheduler_race<T: Send>(entries: [(JetSchedulerJoin<T>, Arc<JetTaskControl>)]) -> Result<T, JetTaskFailure> {
-    jet_scheduler_select_tasks(^entries, .Race).map(fn(values) { values.pop().expect("race result missing") })
+    jet_scheduler_select_tasks(^entries, .Race).map(fn(values) { values.pop() ?? panic("race result missing") })
 }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4092
 // First completion exposes either success or failure.
 pub fn jet_scheduler_any<T: Send>(entries: [(JetSchedulerJoin<T>, Arc<JetTaskControl>)]) -> Result<T, JetTaskFailure> {
-    jet_scheduler_select_tasks(^entries, .Any).map(fn(values) { values.pop().expect("any result missing") })
+    jet_scheduler_select_tasks(^entries, .Any).map(fn(values) { values.pop() ?? panic("any result missing") })
 }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4102
 // D-SELECT-GENERIC1=A: scheduler owns readiness, waiting, arm choice and failure.
@@ -631,7 +631,7 @@ fn jet_scheduler_spawn_with_control_kind<T: Send>(spawn_site: USize, label: &Str
                 jet_scheduler_task_panic_leave()
                 jet_scheduler_set_task_control(None)
                 jet_observe_task_finish(observe_id)
-                task_completion_order.set(next_task_completion_order()).expect("task completion recorded twice")
+                task_completion_order.set(next_task_completion_order()) ?? panic("task completion recorded twice")
                 _ :: tx.send(.Cancelled)
                 task_completion_wait.wake()
                 return
@@ -648,7 +648,7 @@ fn jet_scheduler_spawn_with_control_kind<T: Send>(spawn_site: USize, label: &Str
                 Err(error) -> {
                     if error.is<JetCancelUnwind>() { JetSchedulerResult.Cancelled }
                     else if error.is<JetDeadlineUnwind>() {
-                        deadline :: error.downcast<JetDeadlineUnwind>().expect("deadline payload type checked")
+                        deadline :: error.downcast<JetDeadlineUnwind>() ?? panic("deadline payload type checked")
                         JetSchedulerResult.Deadline(^deadline.rendered)
                     } else {
                         JetSchedulerResult.Panicked(jet_observe_task_failure_message(
@@ -657,7 +657,7 @@ fn jet_scheduler_spawn_with_control_kind<T: Send>(spawn_site: USize, label: &Str
                 }
             }
             jet_observe_task_finish(observe_id)
-            task_completion_order.set(next_task_completion_order()).expect("task completion recorded twice")
+            task_completion_order.set(next_task_completion_order()) ?? panic("task completion recorded twice")
             _ :: tx.send(^result)
             task_completion_wait.wake()
         })})
@@ -674,8 +674,8 @@ pub fn jet_scheduler_drain() -> {
             // Parked tasks need an external event; exit observer reports the bounded identity.
             if jet_observe_has_parked_tasks() -> return
             if sched.live.load(Ordering.Relaxed) == 0 {
-                guard :: sched.global.lock().unwrap()
-                pending_local :: sched.workers.iter().any(fn(worker) { not worker.queue.lock().unwrap().is_empty() })
+                guard :: sched.global.lock() ?? panic("unwrap failed")
+                pending_local :: sched.workers.iter().any(fn(worker) { not (worker.queue.lock() ?? panic("unwrap failed")).is_empty() })
                 io_drained :: METRIC_IO_ACTIVE.load(Ordering.Acquire) == 0
                     && METRIC_IO_ALLOCATED.load(Ordering.Acquire) == METRIC_IO_RETIRED.load(Ordering.Acquire)
                 if guard.is_empty() && not pending_local && io_drained -> return
@@ -692,8 +692,8 @@ pub fn jet_scheduler_drain_after_exit() -> {
     #Unsafe("exit drain cannot return until worker queues and all retained I/O operations retire") {
         loop {
             if sched.live.load(Ordering.Relaxed) == 0 {
-                guard :: sched.global.lock().unwrap()
-                pending_local :: sched.workers.iter().any(fn(worker) { not worker.queue.lock().unwrap().is_empty() })
+                guard :: sched.global.lock() ?? panic("unwrap failed")
+                pending_local :: sched.workers.iter().any(fn(worker) { not (worker.queue.lock() ?? panic("unwrap failed")).is_empty() })
                 io_drained :: METRIC_IO_ACTIVE.load(Ordering.Acquire) == 0
                     && METRIC_IO_ALLOCATED.load(Ordering.Acquire) == METRIC_IO_RETIRED.load(Ordering.Acquire)
                 if guard.is_empty() && not pending_local && io_drained -> return

@@ -17,10 +17,10 @@ impl IOPoller {
     #Unsafe("remove interest and logical stream owner under mutex; Windows retires outstanding kernel requests")
     fn unregister(self: &Self, id: USize) -> {
         self.interests.lock().unwrap().retain(fn(i) { i.stream_id != id })
-        _ :: self.retire_requested.lock().unwrap().insert(id)
+        _ :: (self.retire_requested.lock() ?? panic("unwrap failed")).insert(id)
         if target.selected_os() != .Windows {
-            _ :: self.streams.lock().unwrap().remove(&id)
-            _ :: self.retire_requested.lock().unwrap().remove(&id)
+            _ :: (self.streams.lock() ?? panic("unwrap failed")).remove(&id)
+            _ :: (self.retire_requested.lock() ?? panic("unwrap failed")).remove(&id)
         } else { self.iocp_notify() }
     }
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1819
@@ -80,12 +80,12 @@ impl IOPoller {
         fd_slots := [I32:Arc<ParkSlot>]{}
         loop {
             pending :: {
-                interests :: self.interests.lock().unwrap()
-                streams :: self.streams.lock().unwrap()
+                interests :: self.interests.lock() ?? panic("unwrap failed")
+                streams :: self.streams.lock() ?? panic("unwrap failed")
                 out := []
                 for interest in interests.iter() {
                     stream :: streams.get(&interest.stream_id) ?? next
-                    fd :: stream.lock().unwrap().as_raw_fd()
+                    fd :: (stream.lock() ?? panic("unwrap failed")).as_raw_fd()
                     if fd_slots.contains_key(&fd) { next }
                     events := U32{0}
                     if interest.readable { events |= EPOLLIN }
@@ -107,7 +107,7 @@ impl IOPoller {
                     fd :: ev.data as I32
                     if fd_slots.remove(&fd) == .Val(slot) {
                         _ :: epoll_ctl(epfd, EPOLL_CTL_DEL, fd, ptr.null())
-                        interests := self.interests.lock().unwrap()
+                        interests := self.interests.lock() ?? panic("unwrap failed")
                         interests.retain(fn(i) { not Arc.ptr_eq(&i.slot, &slot) })
                         slot.wake()
                     }
@@ -153,12 +153,12 @@ impl IOPoller {
         fd_slots := [I32:Arc<ParkSlot>]{}
         loop {
             pending :: {
-                interests :: self.interests.lock().unwrap()
-                streams :: self.streams.lock().unwrap()
+                interests :: self.interests.lock() ?? panic("unwrap failed")
+                streams :: self.streams.lock() ?? panic("unwrap failed")
                 out := []
                 for interest in interests.iter() {
                     stream :: streams.get(&interest.stream_id) ?? next
-                    fd :: stream.lock().unwrap().as_raw_fd()
+                    fd :: (stream.lock() ?? panic("unwrap failed")).as_raw_fd()
                     if fd_slots.contains_key(&fd) { next }
                     if interest.readable { out.push((fd, EVFILT_READ, interest.slot.clone())) }
                     if interest.writable { out.push((fd, EVFILT_WRITE, interest.slot.clone())) }
@@ -180,7 +180,7 @@ impl IOPoller {
                     if fd_slots.remove(&fd) == .Val(slot) {
                         del :: Kevent{ident: ev.ident, filter: ev.filter, flags: EV_DELETE, fflags: 0, data: 0, udata: ptr.null_mut()}
                         _ :: kevent(kq, &del, 1, ptr.null_mut(), 0, ptr.null())
-                        interests := self.interests.lock().unwrap()
+                        interests := self.interests.lock() ?? panic("unwrap failed")
                         interests.retain(fn(i) { not Arc.ptr_eq(&i.slot, &slot) })
                         slot.wake()
                     }
@@ -241,7 +241,7 @@ impl IOPoller {
         if port == 0 {
             _ :: METRIC_IO_FAILURES.fetch_add(1, Ordering.Relaxed)
             *self.backend_state.lock().unwrap() = .Failed("internal scheduler IOCP creation failed")
-            for interest in self.interests.lock().unwrap().drain(..) { interest.slot.wake() }
+            for interest in (self.interests.lock() ?? panic("unwrap failed")).drain(..) { interest.slot.wake() }
             self.streams.lock().unwrap().clear()
             self.retire_requested.lock().unwrap().clear()
             self.iocp_shutdown_done.store(true, Ordering.Release)
@@ -253,11 +253,11 @@ impl IOPoller {
         active := [USize:Active]{}
         loop {
             pending :: {
-                interests :: self.interests.lock().unwrap()
-                streams :: self.streams.lock().unwrap()
+                interests :: self.interests.lock() ?? panic("unwrap failed")
+                streams :: self.streams.lock() ?? panic("unwrap failed")
                 interests.iter().filter(fn(interest) { not active.contains_key(&interest.stream_id) })
                     .filter_map(fn(interest) { streams.get(&interest.stream_id).map(fn(stream) {
-                        (interest.stream_id, stream.clone(), stream.lock().unwrap().as_raw_socket() as USize, interest.readable, interest.writable)
+                        (interest.stream_id, stream.clone(), (stream.lock() ?? panic("unwrap failed")).as_raw_socket() as USize, interest.readable, interest.writable)
                     }) }).collect()
             }
             for (id, stream, socket, readable, writable) in pending {
@@ -265,9 +265,9 @@ impl IOPoller {
                 if associated == 0 {
                     _error :: GetLastError()
                     _ :: METRIC_IO_FAILURES.fetch_add(1, Ordering.Relaxed)
-                    if self.interests.lock().unwrap().iter().find(fn(interest) { interest.stream_id == id }).map(fn(interest) { interest.slot.clone() }) == .Val(slot) { slot.wake() }
+                    if (self.interests.lock() ?? panic("unwrap failed")).iter().find(fn(interest) { interest.stream_id == id }).map(fn(interest) { interest.slot.clone() }) == .Val(slot) { slot.wake() }
                     self.interests.lock().unwrap().retain(fn(interest) { interest.stream_id != id })
-                    _ :: self.streams.lock().unwrap().remove(&id)
+                    _ :: (self.streams.lock() ?? panic("unwrap failed")).remove(&id)
                     next
                 }
                 operations := []
@@ -288,13 +288,13 @@ impl IOPoller {
                     }
                 }
                 if operations.is_empty() {
-                    if self.interests.lock().unwrap().iter().find(fn(interest) { interest.stream_id == id }).map(fn(interest) { interest.slot.clone() }) == .Val(slot) { slot.wake() }
+                    if (self.interests.lock() ?? panic("unwrap failed")).iter().find(fn(interest) { interest.stream_id == id }).map(fn(interest) { interest.slot.clone() }) == .Val(slot) { slot.wake() }
                 } else {
                     active[id] = Active{_stream: ^stream, socket: socket, operations: ^operations, cancel_requested: false}
                     _ :: METRIC_IO_ACTIVE.fetch_add(1, Ordering.Relaxed)
                 }
             }
-            retiring :: self.retire_requested.lock().unwrap().iter().copied().collect()
+            retiring :: (self.retire_requested.lock() ?? panic("unwrap failed")).iter().copied().collect()
             loop id in retiring {
                 if active.get_mut(&id) == .Val(entry) {
                     if not entry.cancel_requested {
@@ -302,12 +302,12 @@ impl IOPoller {
                         for operation in &entry.operations { _ :: CancelIoEx(entry.socket, *operation) }
                     }
                 } else {
-                    _ :: self.streams.lock().unwrap().remove(&id)
-                    _ :: self.retire_requested.lock().unwrap().remove(&id)
+                    _ :: (self.streams.lock() ?? panic("unwrap failed")).remove(&id)
+                    _ :: (self.retire_requested.lock() ?? panic("unwrap failed")).remove(&id)
                 }
             }
             for (id, entry) in active.iter_mut() {
-                if not self.interests.lock().unwrap().iter().any(fn(interest) { interest.stream_id == *id }) && not entry.cancel_requested {
+                if not (self.interests.lock() ?? panic("unwrap failed")).iter().any(fn(interest) { interest.stream_id == *id }) && not entry.cancel_requested {
                     entry.cancel_requested = true
                     for operation in &entry.operations { _ :: CancelIoEx(entry.socket, *operation) }
                 }
@@ -322,7 +322,7 @@ impl IOPoller {
                 if ok == 0 {
                     _ :: METRIC_IO_FAILURES.fetch_add(1, Ordering.Relaxed)
                     *self.backend_state.lock().unwrap() = .Failed("internal scheduler IOCP completion port failed")
-                    for interest in self.interests.lock().unwrap().drain(..) { interest.slot.wake() }
+                    for interest in (self.interests.lock() ?? panic("unwrap failed")).drain(..) { interest.slot.wake() }
                     loop entry in active.values_mut() {
                         if not entry.cancel_requested {
                             entry.cancel_requested = true
@@ -347,13 +347,13 @@ impl IOPoller {
                         _ :: METRIC_IO_RETIRED.fetch_add(1, Ordering.Relaxed)
                         owner :: active.iter().find_map(fn((id, entry)) { if entry.operations.contains(&drain_operation) { Val(*id) } else { None } })
                         if owner == .Val(id) {
-                            entry := active.get_mut(&id).unwrap()
+                            entry := active.get_mut(&id) ?? panic("unwrap failed")
                             entry.operations.retain(fn(candidate) { *candidate != drain_operation })
                             if entry.operations.is_empty() {
                                 _ :: active.remove(&id)
                                 _ :: METRIC_IO_ACTIVE.fetch_sub(1, Ordering.Relaxed)
-                                _ :: self.streams.lock().unwrap().remove(&id)
-                                _ :: self.retire_requested.lock().unwrap().remove(&id)
+                                _ :: (self.streams.lock() ?? panic("unwrap failed")).remove(&id)
+                                _ :: (self.retire_requested.lock() ?? panic("unwrap failed")).remove(&id)
                             }
                         } else { _ :: METRIC_IO_STALE.fetch_add(1, Ordering.Relaxed) }
                     }
@@ -382,7 +382,7 @@ impl IOPoller {
             entry := active.get_mut(&id) ?? next
             entry.operations.retain(fn(candidate) { *candidate != operation })
             slot :: {
-                interests := self.interests.lock().unwrap()
+                interests := self.interests.lock() ?? panic("unwrap failed")
                 slot :: interests.iter().find(fn(interest) { interest.stream_id == id }).map(fn(interest) { interest.slot.clone() })
                 interests.retain(fn(interest) { interest.stream_id != id })
                 ^slot
@@ -395,8 +395,8 @@ impl IOPoller {
             if entry.operations.is_empty() {
                 _ :: active.remove(&id)
                 _ :: METRIC_IO_ACTIVE.fetch_sub(1, Ordering.Relaxed)
-                _ :: self.streams.lock().unwrap().remove(&id)
-                _ :: self.retire_requested.lock().unwrap().remove(&id)
+                _ :: (self.streams.lock() ?? panic("unwrap failed")).remove(&id)
+                _ :: (self.retire_requested.lock() ?? panic("unwrap failed")).remove(&id)
             }
         }
     }
@@ -406,12 +406,12 @@ impl IOPoller {
     fn run_portable_poll(self: Arc<Self>) -> {
         loop {
             ready :: {
-                interests :: self.interests.lock().unwrap()
-                streams :: self.streams.lock().unwrap()
+                interests :: self.interests.lock() ?? panic("unwrap failed")
+                streams :: self.streams.lock() ?? panic("unwrap failed")
                 slots := []
                 for interest in interests.iter() {
                     stream :: streams.get(&interest.stream_id) ?? next
-                    s := stream.lock().unwrap()
+                    s := stream.lock() ?? panic("unwrap failed")
                     _ :: s.set_nonblocking(true)
                     buf := Array<U8,1>.filled(0)
                     if interest.readable {
@@ -428,14 +428,14 @@ impl IOPoller {
                 ^slots
             }
             if not ready.is_empty() {
-                interests := self.interests.lock().unwrap()
+                interests := self.interests.lock() ?? panic("unwrap failed")
                 for slot in &ready {
                     interests.retain(fn(i) { not Arc.ptr_eq(&i.slot, slot) })
                     slot.wake()
                 }
             }
-            g :: self.interests.lock().unwrap()
-            _ :: self.notify.wait_timeout(g, Duration.from_millis(5)).unwrap()
+            g :: self.interests.lock() ?? panic("unwrap failed")
+            _ :: self.notify.wait_timeout(g, Duration.from_millis(5)) ?? panic("unwrap failed")
         }
     }
 }
@@ -462,7 +462,7 @@ impl JetSchedulerRawIoHandle {
     // GATE #4565: kernel primitive
     #Unsafe("registration admission checks both active states while holding handle mutex")
     fn add_registration(self: &Self, registration: &Arc<JetRawIoRegistration>) -> Bool {
-        registrations := self.registrations.lock().unwrap()
+        registrations := self.registrations.lock() ?? panic("unwrap failed")
         if self.closed.load(Ordering.Acquire) || not registration.active.load(Ordering.Acquire) { return false }
         registrations[registration.id] = Arc.downgrade(registration)
         true
@@ -470,14 +470,14 @@ impl JetSchedulerRawIoHandle {
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2463
     // GATE #4565: kernel primitive
     fn remove_registration(self: &Self, id: USize) -> {
-        #Unsafe("remove logical registration under handle mutex") { _ :: self.registrations.lock().unwrap().remove(&id) }
+        #Unsafe("remove logical registration under handle mutex") { _ :: (self.registrations.lock() ?? panic("unwrap failed")).remove(&id) }
     }
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2469
     // GATE #4565: kernel primitive
     #Unsafe("first close drains weak registrations and wakes them outside handle lock")
     pub fn close(self: &Self) -> {
         if self.closed.swap(true, Ordering.AcqRel) { return }
-        registrations :: self.registrations.lock().unwrap().drain().filter_map(fn((_, registration)) { registration.upgrade() }).collect()
+        registrations :: (self.registrations.lock() ?? panic("unwrap failed")).drain().filter_map(fn((_, registration)) { registration.upgrade() }).collect()
         loop registration in registrations { registration.close() }
     }
 }
@@ -564,9 +564,9 @@ impl JetRawIoPoller {
         const POLLOUT: I16 = 0x0004
         loop {
             (descriptors, descriptor_ids) := {
-                interests :: self.interests.lock().unwrap()
+                interests :: self.interests.lock() ?? panic("unwrap failed")
                 if interests.is_empty() {
-                    _guard :: self.notify.wait(interests).unwrap()
+                    _guard :: self.notify.wait(interests) ?? panic("unwrap failed")
                     next
                 }
                 descriptors :: interests.iter().map(fn(interest) {
@@ -591,7 +591,7 @@ impl JetRawIoPoller {
                 }) }).collect()
             ready_ids :: ready_events.iter().map(fn((id, _, _)) { *id }).collect<HashSet<USize>>()
             ready :: {
-                interests := self.interests.lock().unwrap()
+                interests := self.interests.lock() ?? panic("unwrap failed")
                 ready :: interests.iter().filter_map(fn(interest) {
                     (_, readable, writable) :: ready_events.iter().find(fn((id, _, _)) { *id == interest.registration.id }) ?? return None
                     Val((interest.registration.clone(), (interest.readable && *readable, interest.writable && *writable)))
@@ -716,7 +716,7 @@ fn io_poller() -> Arc<IOPoller> {
 #Unsafe("owned cloned TCP descriptor remains in poller until registration guard retires it")
 pub fn jet_scheduler_io_wait(stream: &TcpStream, read: Bool, write: Bool, wait_kind: &String) -> {
     jet_scheduler_world_reject_uncontrolled("network")
-    shared :: Arc.new(Mutex.new(stream.try_clone().expect("tcp clone")))
+    shared :: Arc.new(Mutex.new(stream.try_clone() ?? panic("tcp clone")))
     poller :: io_poller()
     (id, slot) :: poller.register(^shared, read, write).unwrap_or_else(fn(error) { jet_scheduler_fatal(error) })
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2855
@@ -789,7 +789,7 @@ impl<T> Clone for JetSchedulerChannel<T> {
     // GATE #4565: kernel primitive
     #Unsafe("clone increments receiver ownership, never clones T")
     fn clone(self: &Self) -> Self {
-        state := self.inner.state.lock().unwrap()
+        state := self.inner.state.lock() ?? panic("unwrap failed")
         state.receiver_count += 1
         jet_observe_channel_update(self.inner.observe_id, &state)
         drop(^state)
@@ -802,7 +802,7 @@ impl<T> Drop for JetSchedulerChannel<T> {
     #Unsafe("final receiver closes queue and wakes blocked senders outside state lock")
     fn drop(self: &Self) -> {
         send_waiters :: {
-            st := self.inner.state.lock().unwrap()
+            st := self.inner.state.lock() ?? panic("unwrap failed")
             st.receiver_count = st.receiver_count.saturating_sub(1)
             waiters :: if st.receiver_count == 0 {
                 st.closed = true
@@ -832,7 +832,7 @@ impl<T: Send> JetSchedulerChannel<T> {
             queue: VecDeque.new(), recv_waiters: [], send_waiters: [], reserved_sends: 0, closed: false, cancelled: false,
             capacity: capacity, kind: kind, delay_ms: delay_ms, sender_count: 0, receiver_count: 1}), observe_id: observe_id})}
         if observe_id != 0 {
-            state :: channel.inner.state.lock().unwrap()
+            state :: channel.inner.state.lock() ?? panic("unwrap failed")
             jet_observe_channel_update(observe_id, &state)
         }
         ^channel
@@ -841,7 +841,7 @@ impl<T: Send> JetSchedulerChannel<T> {
     // GATE #4565: kernel primitive
     #Unsafe("sender retains state and increments logical endpoint count under lock")
     pub fn sender(self: &Self) -> JetSchedulerSender<T> {
-        state := self.inner.state.lock().unwrap()
+        state := self.inner.state.lock() ?? panic("unwrap failed")
         state.sender_count += 1
         jet_observe_channel_update(self.inner.observe_id, &state)
         drop(^state)
@@ -859,7 +859,7 @@ impl<T: Send> JetSchedulerChannel<T> {
             if current_task_control() == .Val(ctrl) { ctrl.wait_while_paused() }
             slot :: ParkSlot.new()
             parked :: {
-                st := self.inner.state.lock().unwrap()
+                st := self.inner.state.lock() ?? panic("unwrap failed")
                 if st.queue.pop_front() == .Val(v) {
                     if st.send_waiters.pop() == .Val(wake) { wake.wake() }
                     jet_observe_channel_update(self.inner.observe_id, &st)
@@ -875,7 +875,7 @@ impl<T: Send> JetSchedulerChannel<T> {
             }
             if parked {
                 jet_scheduler_yield("channel receive", &slot, None)
-                st := self.inner.state.lock().unwrap()
+                st := self.inner.state.lock() ?? panic("unwrap failed")
                 st.recv_waiters.retain(fn(w) { not Arc.ptr_eq(w, &slot) })
                 jet_observe_channel_update(self.inner.observe_id, &st)
             }
@@ -885,7 +885,7 @@ impl<T: Send> JetSchedulerChannel<T> {
     // GATE #4565: kernel primitive
     #Unsafe("nonblocking pop wakes one capacity waiter under state lock")
     pub fn try_receive(self: &Self) -> T? {
-        st := self.inner.state.lock().unwrap()
+        st := self.inner.state.lock() ?? panic("unwrap failed")
         out :: st.queue.pop_front()
         if out.is_some() { if st.send_waiters.pop() == .Val(slot) { slot.wake() } }
         jet_observe_channel_update(self.inner.observe_id, &st)
@@ -905,7 +905,7 @@ impl<T: Send> JetSchedulerChannel<T> {
     // GATE #4565: kernel primitive
     pub fn is_ready(self: &Self) -> Bool {
         #Unsafe("read queue readiness and closed under one lock") {
-            state :: self.inner.state.lock().unwrap()
+            state :: self.inner.state.lock() ?? panic("unwrap failed")
             not state.queue.is_empty() || state.closed
         }
     }
@@ -921,7 +921,7 @@ impl<T: Send> JetSchedulerChannel<T> {
     #Unsafe("close/cancel detaches both waiter lists and wakes after state unlock")
     fn close_inner(self: &Self, cancelled: Bool) -> {
         (recv_waiters, send_waiters) :: {
-            st := self.inner.state.lock().unwrap()
+            st := self.inner.state.lock() ?? panic("unwrap failed")
             st.closed = true
             st.cancelled |= cancelled
             waiters :: (mem.take(&st.recv_waiters), mem.take(&st.send_waiters))
@@ -938,7 +938,7 @@ impl<T> Clone for JetSchedulerSender<T> {
     // GATE #4565: kernel primitive
     #Unsafe("clone increments logical sender count without cloning payload")
     fn clone(self: &Self) -> Self {
-        state := self.inner.state.lock().unwrap()
+        state := self.inner.state.lock() ?? panic("unwrap failed")
         state.sender_count += 1
         jet_observe_channel_update(self.inner.observe_id, &state)
         drop(^state)
@@ -951,7 +951,7 @@ impl<T> Drop for JetSchedulerSender<T> {
     #Unsafe("last sender closes channel and wakes receivers after unlocking")
     fn drop(self: &Self) -> {
         recv_waiters :: {
-            st := self.inner.state.lock().unwrap()
+            st := self.inner.state.lock() ?? panic("unwrap failed")
             st.sender_count = st.sender_count.saturating_sub(1)
             waiters :: if st.sender_count == 0 {
                 st.closed = true
@@ -969,7 +969,7 @@ impl<T: Send> JetSchedulerSender<T> {
     #Unsafe("close detaches sender/receiver waiters under state lock")
     pub fn close(self: &Self) -> {
         (recv_waiters, send_waiters) :: {
-            st := self.inner.state.lock().unwrap()
+            st := self.inner.state.lock() ?? panic("unwrap failed")
             st.closed = true
             waiters :: (mem.take(&st.recv_waiters), mem.take(&st.send_waiters))
             jet_observe_channel_update(self.inner.observe_id, &st)
@@ -989,7 +989,7 @@ impl<T: Send> JetSchedulerSender<T> {
             if current_task_control() == .Val(ctrl) { ctrl.wait_while_paused() }
             slot :: ParkSlot.new()
             reserved :: {
-                state := self.inner.state.lock().unwrap()
+                state := self.inner.state.lock() ?? panic("unwrap failed")
                 if state.closed || state.receiver_count == 0 {
                     jet_observe_channel_update(self.inner.observe_id, &state)
                     return Err(.Closed)
@@ -1012,7 +1012,7 @@ impl<T: Send> JetSchedulerSender<T> {
             }
             if reserved { return Ok(JetSchedulerSendReservation{inner: self.inner.clone(), active: true}) }
             jet_scheduler_yield("channel send capacity", &slot, None)
-            state := self.inner.state.lock().unwrap()
+            state := self.inner.state.lock() ?? panic("unwrap failed")
             state.send_waiters.retain(fn(waiter) { not Arc.ptr_eq(waiter, &slot) })
             jet_observe_channel_update(self.inner.observe_id, &state)
         }
@@ -1089,7 +1089,7 @@ impl<T: Send> JetSchedulerChannel<T> {
     #Unsafe("final physical receiver closes and recovers queue under same mutex as send acceptance")
     pub fn close_receiver_and_drain(self: &Self) -> [T] {
         (queue, recv_waiters, send_waiters) :: {
-            st := self.inner.state.lock().unwrap()
+            st := self.inner.state.lock() ?? panic("unwrap failed")
             if st.receiver_count > 1 { return [] }
             st.receiver_count = 0
             st.closed = true
@@ -1125,7 +1125,7 @@ impl<T> ChannelInner<T> {
     // GATE #4565: kernel primitive
     #Unsafe("select pop transfers one value and wakes capacity waiter")
     fn try_pop(self: &Self) -> T? {
-        st := self.state.lock().unwrap()
+        st := self.state.lock() ?? panic("unwrap failed")
         out :: st.queue.pop_front()
         if out.is_some() { if st.send_waiters.pop() == .Val(slot) { slot.wake() } }
         ^out
@@ -1136,7 +1136,7 @@ impl<T> ChannelInner<T> {
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3445
     // GATE #4565: kernel primitive
     fn is_closed_and_empty(self: &Self) -> Bool { #Unsafe("atomic closed/empty snapshot") {
-        state :: self.state.lock().unwrap()
+        state :: self.state.lock() ?? panic("unwrap failed")
         state.closed && state.queue.is_empty()
     } }
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3450

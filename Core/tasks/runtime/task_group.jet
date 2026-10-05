@@ -101,7 +101,7 @@ impl JetTaskGroupSlots {
         // GATE #4565: kernel primitive
         #Unsafe("publish close while holding admission lock before waking every waiter") {
             {
-                active :: self.active.lock().unwrap()
+                active :: self.active.lock() ?? panic("unwrap failed")
                 self.closing.store(true, Ordering.Release)
                 self.wake.notify_all()
             }
@@ -112,7 +112,7 @@ impl JetTaskGroupSlots {
     fn register_waiter(self: &Self, waiter: Arc<dyn JetTaskGroupWaiter>) -> {
         // GATE #4565: kernel primitive
         #Unsafe("weak waiter registry is synchronized and does not retain blocked tasks") {
-            waiters := self.waiters.lock().unwrap()
+            waiters := self.waiters.lock() ?? panic("unwrap failed")
             waiters.retain(fn(waiter) { waiter.upgrade().is_some() })
             waiters.push(Arc.downgrade(&waiter))
         }
@@ -121,7 +121,7 @@ impl JetTaskGroupSlots {
     fn wake_waiters(self: &Self) -> {
         // GATE #4565: kernel primitive
         #Unsafe("upgrade each live waiter only during synchronized notification") {
-            waiters := self.waiters.lock().unwrap()
+            waiters := self.waiters.lock() ?? panic("unwrap failed")
             waiters.retain(fn(waiter) {
                 if waiter.upgrade() == .Val(waiter) {
                     waiter.wake()
@@ -136,7 +136,7 @@ impl JetTaskGroupSlots {
         #Unsafe("admission owns lock; release it before scheduler wait and reacquire before inspecting capacity") {
             wake_waiter: Arc<dyn JetTaskGroupWaiter> :: waiter.clone()
             registered := false
-            active := self.active.lock().unwrap()
+            active := self.active.lock() ?? panic("unwrap failed")
             loop {
                 if self.closing.load(Ordering.Acquire) { return Ok(None) }
                 if *active < self.limit {
@@ -149,7 +149,7 @@ impl JetTaskGroupSlots {
                 }
                 drop(^active)
                 wait(&waiter)?
-                active = self.active.lock().unwrap()
+                active = self.active.lock() ?? panic("unwrap failed")
             }
         }
     }
@@ -164,7 +164,7 @@ impl Drop for JetTaskGroupPermit {
         // GATE #4565: kernel primitive
         #Unsafe("permit releases one admission slot and wakes blocked tasks after unlocking") {
             {
-                active := self.slots.active.lock().unwrap()
+                active := (self.slots.active.lock() ?? panic("unwrap failed"))
                 *active = active.saturating_sub(1)
                 self.slots.wake.notify_one()
             }
@@ -297,7 +297,7 @@ impl<T, E> JetTaskSelectPolicy<T, E> {
                         self.first_error = Val((order, index, ^error))
                     }
                     if self.pending == 0 {
-                        JetTaskDecision.Finish(Err(self.first_error.take().expect("race recorded an error").2))
+                        JetTaskDecision.Finish(Err((self.first_error.take() ?? panic("race recorded an error")).2))
                     } else { JetTaskDecision.Wait }
                 }
             }
@@ -306,7 +306,7 @@ impl<T, E> JetTaskSelectPolicy<T, E> {
                 Ok(value) -> {
                     self.values[index] = Val(^value)
                     if self.pending == 0 {
-                        JetTaskDecision.Finish(Ok(self.values.iter_mut().map(fn(value) { value.take().expect("all result missing") }).collect()))
+                        JetTaskDecision.Finish(Ok(self.values.iter_mut().map(fn(value) { value.take() ?? panic("all result missing") }).collect()))
                     } else { JetTaskDecision.Wait }
                 }
             }

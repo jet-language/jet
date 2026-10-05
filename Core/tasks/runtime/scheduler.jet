@@ -246,7 +246,7 @@ pub fn jet_scheduler_classify_unwind<T>(payload: Box<Any + Send>) -> JetSchedule
     #Unsafe("single conversion of owned native payload into scheduler status") {
         if payload.is<JetCancelUnwind>() { return .Cancelled }
         if payload.is<JetDeadlineUnwind>() {
-            deadline :: payload.downcast<JetDeadlineUnwind>().expect("deadline payload type checked")
+            deadline :: payload.downcast<JetDeadlineUnwind>() ?? panic("deadline payload type checked")
             return .Deadline(^deadline.rendered)
         }
         message :: payload.downcast_ref<String>().map((message) -> message)
@@ -357,7 +357,7 @@ impl ParkSlot {
         // GATE #4565: kernel primitive
         #Unsafe("predicate recheck shares waker mutex; spurious wakes cannot lose notification or extend deadline") {
             if self.notified.swap(false, Ordering.Acquire) { return }
-            guard := self.lock.lock().unwrap()
+            guard := self.lock.lock() ?? panic("unwrap failed")
             if self.notified.swap(false, Ordering.Acquire) { return }
             _ :: METRIC_PARK_BLOCKS.fetch_add(1, Ordering.Relaxed)
             if timeout == {
@@ -366,14 +366,14 @@ impl ParkSlot {
                     loop {
                         remaining :: deadline.saturating_duration_since(Instant.now())
                         if remaining.is_zero() { break }
-                        (next, result) :: self.cv.wait_timeout(^guard, remaining).unwrap()
+                        (next, result) :: self.cv.wait_timeout(^guard, remaining) ?? panic("unwrap failed")
                         guard = ^next
                         if self.notified.swap(false, Ordering.Acquire) || result.timed_out() { break }
                     }
                 }
                 .None -> {
                     loop {
-                        guard = self.cv.wait(^guard).unwrap()
+                        guard = self.cv.wait(^guard) ?? panic("unwrap failed")
                         if self.notified.swap(false, Ordering.Acquire) { break }
                     }
                 }
@@ -384,7 +384,7 @@ impl ParkSlot {
     pub fn wake(self: &Self) -> () {
         // GATE #4565: kernel primitive
         #Unsafe("same predicate mutex prevents wake between recheck and condvar wait from being lost") {
-            guard :: self.lock.lock().unwrap()
+            guard :: self.lock.lock() ?? panic("unwrap failed")
             self.notified.store(true, Ordering.Release)
             self.cv.notify_one()
         }
@@ -457,7 +457,7 @@ impl JetTaskControl {
             self.paused.store(true, Ordering.Relaxed)
             if jet_observe_registry() == .Val(registry) {
                 id :: self.observe_id.load(Ordering.Relaxed)
-                if registry.tasks.lock().unwrap().get_mut(&id) == .Val(task) { task.state = "paused" }
+                if (registry.tasks.lock() ?? panic("unwrap failed")).get_mut(&id) == .Val(task) { task.state = "paused" }
             }
         }
     }
@@ -468,7 +468,7 @@ impl JetTaskControl {
             self.paused.store(false, Ordering.Relaxed)
             if jet_observe_registry() == .Val(registry) {
                 id :: self.observe_id.load(Ordering.Relaxed)
-                if registry.tasks.lock().unwrap().get_mut(&id) == .Val(task) { task.state = "running" }
+                if (registry.tasks.lock() ?? panic("unwrap failed")).get_mut(&id) == .Val(task) { task.state = "running" }
             }
             self.park.wake()
         }
@@ -480,10 +480,10 @@ impl JetTaskControl {
             self.cancelled.store(true, Ordering.Release)
             if jet_observe_registry() == .Val(registry) {
                 id :: self.observe_id.load(Ordering.Relaxed)
-                if registry.tasks.lock().unwrap().get_mut(&id) == .Val(task) { task.cancelled = true }
+                if (registry.tasks.lock() ?? panic("unwrap failed")).get_mut(&id) == .Val(task) { task.cancelled = true }
             }
             self.park.wake()
-            loop waiter in self.cancel_waiters.lock().unwrap().drain(..) {
+            loop waiter in (self.cancel_waiters.lock() ?? panic("unwrap failed")).drain(..) {
                 if waiter.upgrade() == Some(waiter) { waiter.wake() }
             }
             callbacks :: mem.take(&*self.cancel_callbacks.lock().unwrap_or_else((poisoned) -> poisoned.into_inner()))
@@ -494,7 +494,7 @@ impl JetTaskControl {
     fn register_cancel_waiter(self: &Self, slot: &Arc<ParkSlot>) -> () {
         // GATE #4565: kernel primitive
         #Unsafe("register weak waiter or immediately wake it if cancellation already landed") {
-            waiters := self.cancel_waiters.lock().unwrap()
+            waiters := self.cancel_waiters.lock() ?? panic("unwrap failed")
             if self.cancelled.load(Ordering.Relaxed) { slot.wake() }
             else { waiters.push(Arc.downgrade(slot)) }
         }
@@ -931,7 +931,7 @@ impl JetSchedulerTaskCompletionScope {
                 cleanups :: TASK_COMPLETION_FRAMES.with((frames) -> {
                     frames := frames.borrow_mut()
                     assert_eq(frames.len(), self.frame_index + 1, "task completion scopes must drain in nested order")
-                    mem.take(frames.last_mut().expect("task completion frame is present"))
+                    mem.take(frames.last_mut() ?? panic("task completion frame is present"))
                 })
                 if cleanups.is_empty() { break }
                 loop cleanup in cleanups.into_iter().rev() {
@@ -1104,7 +1104,7 @@ pub fn jet_scheduler_blocking_wait_stats() -> (USize,USize,USize) {
     // GATE #4565: kernel primitive
     #Unsafe("read wait/thread/peak counters under scheduler's compensation mutex") {
         sched :: scheduler()
-        state :: sched.blocking_wait.lock().unwrap()
+        state :: sched.blocking_wait.lock() ?? panic("unwrap failed")
         (state.waits, state.threads, state.peak)
     }
 }
@@ -1129,7 +1129,7 @@ impl TimerWheel {
                 now :: Instant.now()
                 due := [] as [Arc<ParkSlot>]
                 {
-                    entries := self.entries.lock().unwrap()
+                    entries := self.entries.lock() ?? panic("unwrap failed")
                     entries.retain((e) -> {
                         if e.wake_at <= now {
                             due.push(e.slot.clone())
@@ -1139,11 +1139,11 @@ impl TimerWheel {
                 }
                 loop slot in due { slot.wake() }
                 sleep_for :: {
-                    entries :: self.entries.lock().unwrap()
+                    entries :: self.entries.lock() ?? panic("unwrap failed")
                     entries.iter().map((e) -> e.wake_at.saturating_duration_since(now)).min().unwrap_or(Duration.from_millis(50))
                 }
-                guard :: self.entries.lock().unwrap()
-                _ :: self.notify.wait_timeout(^guard, sleep_for.min(Duration.from_millis(50))).unwrap()
+                guard :: self.entries.lock() ?? panic("unwrap failed")
+                _ :: self.notify.wait_timeout(^guard, sleep_for.min(Duration.from_millis(50))) ?? panic("unwrap failed")
             }
         }
     }
@@ -1278,11 +1278,11 @@ impl IOPoller {
     fn register(self: &Arc<Self>, stream: Arc<Mutex<TcpStream>>, readable: Bool, writable: Bool) -> (USize,Arc<ParkSlot>) Err! {
         // GATE #4565: kernel primitive
         #Unsafe("backend-state guard excludes shutdown while native stream ownership and interest are registered") {
-            state :: self.backend_state.lock().unwrap()
+            state :: self.backend_state.lock() ?? panic("unwrap failed")
             if *state == IOBackendState.Failed(error) { return Err(error) }
             if *state == IOBackendState.Closed { return Err("scheduler IO backend is closed") }
             slot :: ParkSlot.new()
-            streams := self.streams.lock().unwrap()
+            streams := self.streams.lock() ?? panic("unwrap failed")
             id :: self.next_key.fetch_add(1, Ordering.Relaxed)
             _ :: streams.insert(id, ^stream)
             drop(^streams)
