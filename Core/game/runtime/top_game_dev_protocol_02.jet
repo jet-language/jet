@@ -566,7 +566,7 @@ module jet_game_wasm_bridge {
             envelope.reset = session.envelope.reset || truncated
             envelope.truncated = session.envelope.truncated || truncated
             since :: if self.sent_sequence != 0 { Val(self.sent_sequence) } else { None }
-            for event in session.envelope.events_since(since) { _ :: envelope.push(event.clone()) }
+            loop event in session.envelope.events_since(since) { _ :: envelope.push(event.clone()) }
             wire :: envelope.serialize()?
             self.sent_sequence = latest
             self.output = wire.into_bytes()
@@ -644,7 +644,7 @@ module jet_game_wasm_bridge {
         const MAX_CONTROLS_PER_TICK: USize = 32
         pending :: jet_devtools_command_count(session.envelope.session_id).min(MAX_CONTROLS_PER_TICK)
         dispatched := 0
-        for _ in 0..<pending {
+        loop _ in 0..<pending {
             request :: match jet_devtools_poll_game_control(session.envelope.session_id) {
                 Val(request) -> request
                 None -> break
@@ -990,7 +990,7 @@ fn game_dev_eval_result(request_id: String, status: String) -> JetGamePausedEval
 fn game_dev_json_string(value: String) -> String {
     output := String.with_capacity(value.len() + 2)
     output.push('"')
-    for character in value.chars() {
+    loop character in value.chars() {
         match character {
             '"' -> output.push_str("\\\"")
             '\\' -> output.push_str("\\\\")

@@ -62,7 +62,7 @@ impl GameState.Drop {
         timestamp_ms :: #Unsafe("native wall clock timestamps the stopped development session") {
             SystemTime.now().duration_since(UNIX_EPOCH).map(fn(duration) { duration.as_millis() as U64 }).unwrap_or(0)
         }
-        if Val(dev_session) :: self.dev_session.as_mut() -> _ :: dev_session.stop(timestamp_ms, "game state dropped")
+        if self.dev_session.as_mut() == .Val(dev_session) -> _ :: dev_session.stop(timestamp_ms, "game state dropped")
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:82
@@ -246,17 +246,17 @@ fn jet_game_scene_on_frame(scene: &GameScene, f: Box<fn(GameFrame) -> ()>, sched
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:332
 fn jet_game_execute_frame_callback(callback: &GameFrameCallback, frame: GameFrame) -> {
-    if Val(schedule) :: &callback.schedule {
+    if (&callback.schedule) == .Val(schedule) {
         if schedule.operations.windows(2).any(fn(window) { window[0].source_index > window[1].source_index }) {
             panic("checked game frame schedule is not in source order")
         }
         if callback.derivation.is_none() -> panic("checked game frame schedule has no canonical derivation")
     }
     completion :: callback.completion.clone()
-    if Val(completion) :: completion {
+    if completion == .Val(completion) {
         with_frame_completion_scope(^completion, fn() { callback.callback(^frame) })
     } else { callback.callback(^frame) }
-    if Val(schedule) :: &callback.schedule {
+    if (&callback.schedule) == .Val(schedule) {
         // GATE #4565: kernel primitive
         #Unsafe("check reuse readiness under the native completion mutex after callback execution") {
             completion :: callback.completion.as_ref().expect("checked game frame schedule has no completion state")
@@ -333,7 +333,7 @@ fn jet_game_assets_reload(assets: &GameAssets, timestamp_ms: U64, plan: JetGameA
         }) -> return Ok(^receipt)
         payload :: GameAssetRuntimePayload{artifact: ^fact.artifact, bytes: Arc.from(^fact.bytes), metadata: ^fact.metadata}
         state := assets.state.borrow_mut()
-        previous_len :: if Val(existing) :: state.asset_handles.get(&asset_key) { existing.replace(^payload) }
+        previous_len :: if state.asset_handles.get(&asset_key) == .Val(existing) { existing.replace(^payload) }
         else {
             state.asset_handles.insert(^asset_key, GameAssetRuntimeHandle.new(^payload))
             0
@@ -360,8 +360,8 @@ fn read_vmhwm_bytes() -> U64 {
         Err(_) -> return 0
     }
     loop line in text.lines() {
-        if Val(rest) :: line.strip_prefix("VmHWM:") {
-            if Val(kib) :: rest.split_whitespace().next().and_then(fn(v) { v.parse<U64>().ok() }) -> return kib.saturating_mul(1024)
+        if line.strip_prefix("VmHWM:") == .Val(rest) {
+            if rest.split_whitespace().next().and_then(fn(v) { v.parse<U64>().ok() }) == .Val(kib) -> return kib.saturating_mul(1024)
         }
     }
     0
@@ -375,7 +375,7 @@ fn jet_game_replay_input(replay: &GameReplay?, frame_idx: I64, _bindings: &[(Str
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:542
 // Foundation owns ordinary and probe iteration; this adapter projects its facts.
 fn jet_game_run(scene: &GameScene, replay: &GameReplay?, backend: &GameBackend?, frames: &I64?) -> String {
-    if Val(frames) :: frames -> JetGameFrameBudget.validate(*frames).unwrap_or_else(fn(error) { panic("{error}") })
+    if frames == .Val(frames) -> JetGameFrameBudget.validate(*frames).unwrap_or_else(fn(error) { panic("{error}") })
     backend := backend.cloned().unwrap_or_else(jet_game_backend_headless)
     backend.frame_budget.set_requested(frames.copied()).unwrap_or_else(fn(error) { panic("{error}") })
     replay_path :: replay.map(fn(r) { r.path.clone() }).unwrap_or_else(fn() { "<none>" })
