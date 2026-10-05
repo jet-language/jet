@@ -195,7 +195,7 @@ fn jet_sync_text_edit(doc: JetSyncText, replica: String, index: I64, delete_coun
         atom :: &doc.atoms[visible[before]]
         (atom.replica.clone(), atom.counter)
     })
-    loop offset in 0..delete_count -> doc.atoms[visible[index + offset]].deleted = true
+    loop offset in 0..<delete_count -> doc.atoms[visible[index + offset]].deleted = true
     jet_sync_text_insert_after(&doc, &replica, ^anchor, &insert)
     doc
 }
