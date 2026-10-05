@@ -435,9 +435,15 @@ fn link_sym_at(c: LinkContext, obj: Int, k: Int) -> Int Never! {
 fn link_sym_shndx(c: LinkContext, obj: Int, k: Int) -> Int Never! {
     b :: c.obj_buffer[obj]
     index := link_u16(c.bufs, b, link_sym_at(c, obj, k) + 6)
-    if index == 0xffff && c.obj_shndx[obj] >= 0 -> index = link_u32(c.bufs, b, c.obj_shndx[obj] + 4 * k)
-    if index == 0xfff1 -> return LINK_ABS
-    if index == 0xfff2 -> return LINK_COMMON
+    if index == 0xffff {
+        if c.obj_shndx[obj] < 0 -> return LINK_UNDEF
+        index = link_u32(c.bufs, b, c.obj_shndx[obj] + 4 * k)
+    } else {
+        // Reserved st_shndx values have meaning only in the 16-bit field.
+        // An extended section index equal to SHN_ABS/COMMON is still a section.
+        if index == 0xfff1 -> return LINK_ABS
+        if index == 0xfff2 -> return LINK_COMMON
+    }
     if index <= 0 || index >= c.obj_count[obj] -> return LINK_UNDEF
     s :: c.obj_first_section[obj] + index
     if c.discarded.len() > 0 && c.discarded.get(s) != None -> return LINK_UNDEF

@@ -38,7 +38,8 @@ struct LinkPack {
     pub sec_out: [Int]
     // Named local symbols, by file symbol id (locals) or -1 - global id
     // (localized definitions): name, info, output section index (or
-    // 0xfff1), value and size.
+    // LINK_ABS), value and size. Negative sentinels cannot alias a real
+    // output section index in the ELF reserved-index range.
     pub local_index: [Int:Int]
     pub l_name: [String]
     pub l_info: [Int]
@@ -114,7 +115,7 @@ fn link_pack_symbol(c: &LinkContext, p: &LinkPack, obj: Int, k: Int) -> Int Neve
         if kind != LINK_G_FILE || p.exports.get(f) != None -> return link_pack_global(&p, f)
         s :: ~c.g_section[f]
         name :: ~c.g_name[f]
-        if s == LINK_ABS -> return link_pack_local(&p, -1 - f, name, 0, 0xfff1, c.g_value[f], c.g_size[f])
+        if s == LINK_ABS -> return link_pack_local(&p, -1 - f, name, 0, LINK_ABS, c.g_value[f], c.g_size[f])
         out :: link_pack_out(c, p, s)
         if out < 0 {
             site :: link_section_label(c, s)
@@ -132,7 +133,7 @@ fn link_pack_symbol(c: &LinkContext, p: &LinkPack, obj: Int, k: Int) -> Int Neve
     value :: link_u64(c.bufs, b, at + 8)
     size :: link_u64(c.bufs, b, at + 16)
     file_symbol :: c.obj_first_symbol[obj] + k
-    if s == LINK_ABS -> return link_pack_local(&p, file_symbol, link_cstr(c.bufs, b, c.obj_strtab[obj] + link_u32(c.bufs, b, at)), info & 15, 0xfff1, value, size)
+    if s == LINK_ABS -> return link_pack_local(&p, file_symbol, link_cstr(c.bufs, b, c.obj_strtab[obj] + link_u32(c.bufs, b, at)), info & 15, LINK_ABS, value, size)
     if s < 0 {
         object :: ~c.obj_name[obj]
         link_error(&c, "runtime pack: {object} refers to local symbol {k}, whose section was discarded")
@@ -180,16 +181,18 @@ fn link_pack_section_name(c: LinkContext, class: Int, s: Int) -> String Never! {
     ".rodata"
 }
 
-// Symbol table entry; `xindex` collects the extended section indexes.
+// Symbol table entry; every real reserved-range section index crosses through
+// SHN_XINDEX. Absolute/common are negative linker sentinels, never indexes.
 fn link_pack_sym(symtab: &[U8], xindex: &[U8], name: Int, info: Int, shndx: Int, value: Int, size: Int) Never! {
     elf64_u32(&symtab, name)
     &symtab.push(U8{info})
     &symtab.push(U8{0})
-    if shndx >= 0xff00 && shndx < 0xfff1 {
+    if shndx >= 0xff00 {
         elf64_u16(&symtab, 0xffff)
         elf64_u32(&xindex, shndx)
     } else {
-        elf64_u16(&symtab, shndx)
+        encoded :: if shndx == LINK_ABS -> 0xfff1 else if shndx == LINK_COMMON -> 0xfff2 else -> shndx
+        elf64_u16(&symtab, encoded)
         elf64_u32(&xindex, 0)
     }
     elf64_u64(&symtab, value)
@@ -338,12 +341,12 @@ fn link_pack_write(c: &LinkContext, exports: [Int]) -> [U8] Never! {
             s :: c.g_section[f]
             bind :: if c.g_weak_def[f] -> 2 else -> 1
             if s == LINK_ABS {
-                link_pack_sym(&symtab, &xindex, name_at, bind << 4, 0xfff1, c.g_value[f], c.g_size[f])
+                link_pack_sym(&symtab, &xindex, name_at, bind << 4, LINK_ABS, c.g_value[f], c.g_size[f])
             } else {
                 link_pack_sym(&symtab, &xindex, name_at, (bind << 4) | link_pack_sym_type(c, s), link_pack_out(c, p, s), c.g_value[f], c.g_size[f])
             }
         } else if kind == LINK_G_COMMON {
-            link_pack_sym(&symtab, &xindex, name_at, 0x11, 0xfff2, c.g_common_align[f], c.g_common_size[f])
+            link_pack_sym(&symtab, &xindex, name_at, 0x11, LINK_COMMON, c.g_common_align[f], c.g_common_size[f])
         } else {
             bind :: if c.g_strong_ref[f] -> 1 else -> 2
             link_pack_sym(&symtab, &xindex, name_at, bind << 4, 0, 0, 0)

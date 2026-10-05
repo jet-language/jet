@@ -558,6 +558,13 @@ the Jet-hosted `jet build` reads the key from that file in one place
   names are reduced to what classification and init-array priority read.
 - One `.eh_frame` holds the FDEs of kept sections and the CIEs they use;
   `.note.GNU-stack` marks the stack non-executable.
+- Every real section index at or above `SHN_LORESERVE` (`0xff00`) is encoded
+  as `SHN_XINDEX` with its full index in `.symtab_shndx`, including indexes
+  numerically equal to `SHN_ABS`/`SHN_COMMON` and indexes above 65535.
+  Absolute/common symbols use distinct internal sentinels; those reserved
+  values are interpreted only in the original 16-bit `st_shndx` field, never
+  after resolving an extended index. `Tests/run-link.mjs <outdir> --indices`
+  assembles the boundary round-trip tests.
 
 The program link recognizes the startup object by the pack's
 `__jet_link_main` export. Because the pack is plain ELF, GNU ld links it too
