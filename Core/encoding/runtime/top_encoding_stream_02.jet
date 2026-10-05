@@ -8,7 +8,7 @@ fn jet_json_fold_from_event(reader: &JSONReader, first: DataEvent, heap: &JetJso
     loop {
         event :: if pending.take() == {
             .Val(value) -> ^value
-            None -> {
+            .None -> {
                 value :: reader.next_event() ?? return Err(^err)
                 if value == Some(event) -> ^event
                 else -> return Err(jet_encoding_error(.Truncated, reader.offset, reader.line, reader.column, "JSON value ended before it was closed"))
@@ -126,7 +126,7 @@ impl JSONLReader {
         first :: self.json.next_event() ?? return self.fail(^err)
         event :: if first == {
             .Val(event) -> ^event
-            None -> { return self.fail(jet_encoding_error(.Truncated, self.json.offset, self.json.line, self.json.column, "JSONL record ended before a complete value")) }
+            .None -> { return self.fail(jet_encoding_error(.Truncated, self.json.offset, self.json.line, self.json.column, "JSONL record ended before a complete value")) }
         }
         value :: jet_json_fold_from_event(&self.json, ^event, &heap) ?? return self.fail(^err)
         next :: self.json.next_event() ?? return self.fail(^err)
@@ -772,8 +772,8 @@ fn jet_enc_xml_reader_scan(reader: &XMLReader) -> DataTree? EncodingError! {
         }
         if reader.eof -> return Ok(None)
         read_bytes :: if reader.limits.max_total_bytes == {
-            Ok(maximum) -> reader.limits.buffer_bytes.min(maximum.saturating_sub(reader.total).saturating_add(1))
-            Err(JetAbsent) -> reader.limits.buffer_bytes
+            .Ok(maximum) -> reader.limits.buffer_bytes.min(maximum.saturating_sub(reader.total).saturating_add(1))
+            .Err(JetAbsent) -> reader.limits.buffer_bytes
         }
         bytes: [U8] := []
         if !jet_encoding_reserve_vec(Val(reader.allocation), &bytes, USize.from_i64(read_bytes)) -> return jet_encoding_fail(&reader.terminal, jet_xml_heap_error(reader.total))
