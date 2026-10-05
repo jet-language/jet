@@ -36,21 +36,21 @@ impl TraitRegistry {
     // Rust: crates/jet-foundation/src/Traits.rs:1822
     fn auto_derive_fields_ready(self, item: Item, trait_name: String, supports: fn(String, String) -> Bool?) -> Bool Never! {
         type_params :: match item {
-            Item.Struct(s) -> s.type_params
-            Item.Enum(e) -> e.type_params
+            .Struct(s) -> s.type_params
+            .Enum(e) -> e.type_params
             _ -> return false
         }
         ready :: |ty| self.auto_derive_type_ready(ty, trait_name, type_params, supports)
         match item {
-            Item.Struct(s) -> s.fields.iter()
+            .Struct(s) -> s.fields.iter()
                 .filter(|field| field.computed.is_none())
                 // A redacted field's carrier needs no Debug implementation.
                 .filter(|field| !(trait_name == DEBUG && field.redact))
                 .all(|field| ready(field.ty))
-            Item.Enum(e) -> e.variants.iter().all(|variant| match variant.payload {
+            .Enum(e) -> e.variants.iter().all(|variant| match variant.payload {
                 VariantPayload.Unit -> true
-                VariantPayload.Single(ty, _) -> ready(ty)
-                VariantPayload.Named(fields) -> fields.iter().all(|field| ready(field.ty))
+                .Single(ty, _) -> ready(ty)
+                .Named(fields) -> fields.iter().all(|field| ready(field.ty))
             })
             _ -> false
         }
@@ -60,7 +60,7 @@ impl TraitRegistry {
     fn auto_derive_type_ready(self, ty: Type, trait_name: String, type_params: [TypeParam], foreign_supports: fn(String, String) -> Bool?) -> Bool Never! {
         codec :: trait_name == ENCODE || trait_name == DECODE
         match ty {
-            Type.List(inner) | Type.Option(inner) | Type.FixedList{elem: inner, ..} -> {
+            .List(inner) | .Option(inner) | .FixedList{elem: inner, ..} -> {
                 if trait_name == COMPARABLE -> Self.native_ordering_ready(ty)
                 else -> self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
             }
@@ -70,18 +70,18 @@ impl TraitRegistry {
                 else -> self.auto_derive_type_ready(ok, trait_name, type_params, foreign_supports)
                     && self.auto_derive_type_ready(err, trait_name, type_params, foreign_supports)
             }
-            Type.Map{key, value, ..} -> {
+            .Map{key, value, ..} -> {
                 if trait_name == COMPARABLE -> false
                 else -> (!codec || matches(key, Type.String))
                     && self.auto_derive_type_ready(key, trait_name, type_params, foreign_supports)
                     && self.auto_derive_type_ready(value, trait_name, type_params, foreign_supports)
             }
-            Type.Tuple(fields) -> {
+            .Tuple(fields) -> {
                 if codec -> false
                 else if trait_name == COMPARABLE -> Self.native_ordering_ready(ty)
                 else -> fields.iter().all(|(_, field)| self.auto_derive_type_ready(field, trait_name, type_params, foreign_supports))
             }
-            Type.Union(members) -> {
+            .Union(members) -> {
                 if trait_name == COMPARABLE -> Self.native_ordering_ready(ty)
                 else -> members.iter().all(|member| self.auto_derive_type_ready(member, trait_name, type_params, foreign_supports))
             }
@@ -92,21 +92,21 @@ impl TraitRegistry {
             }
             Type.Tagged{marker: TagMarker.Internal(InternalTag.CoreCryptoNominal), inner}
                 if trait_name == DEBUG && matches(inner, Type.Named(name) if name == "Secret") -> true
-            Type.Tagged{inner, ..} -> {
+            .Tagged{inner, ..} -> {
                 if codec -> false
                 else if trait_name == COMPARABLE -> Self.native_ordering_ready(ty)
                 else -> self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
             }
-            Type.InlineRange{base: inner, ..} -> self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
-            Type.Named(name) if type_params.iter().any(|param| param.name == name) ->
+            .InlineRange{base: inner, ..} -> self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
+            .Named(name) if type_params.iter().any(|param| param.name == name) ->
                 type_params.iter().find(|param| param.name == name)
                     .is_some_and(|param| param.bounds.iter().any(|bound| bound == trait_name))
-            Type.Named(name) -> foreign_supports(name, trait_name) ?? self.implements_trait(name, trait_name)
+            .Named(name) -> foreign_supports(name, trait_name) ?? self.implements_trait(name, trait_name)
             Type.Float | Type.Float32 -> trait_name != COMPARABLE
-            Type.Int | Type.Bool | Type.String | Type.Char | Type.IntN{..} -> true
-            Type.Quantity{base, ..} -> !codec && self.auto_derive_type_ready(base, trait_name, type_params, foreign_supports)
-            Type.Measure(_) -> !codec
-            Type.Shared(_) | Type.TraitObject(_) | Type.Fn{..} -> false
+            Type.Int | Type.Bool | Type.String | Type.Char | .IntN{..} -> true
+            .Quantity{base, ..} -> !codec && self.auto_derive_type_ready(base, trait_name, type_params, foreign_supports)
+            .Measure(_) -> !codec
+            .Shared(_) | .TraitObject(_) | .Fn{..} -> false
         }
     }
 
@@ -153,18 +153,18 @@ impl TraitRegistry {
     // Rust: crates/jet-foundation/src/Traits.rs:2096
     pub fn type_implements_trait(self, ty: Type, trait_name: String) -> Bool Never! {
         match ty {
-            Type.IntN{..} | Type.InlineRange{..} | Type.Float32 ->
+            .IntN{..} | .InlineRange{..} | Type.Float32 ->
                 Generics.is_builtin_trait(trait_name) && trait_name != CLOSE && trait_name != Generics.CHECKED_TEXT
-            Type.List(inner) | Type.Option(inner) | Type.FixedList{elem: inner, ..} if trait_name == EQUATABLE ->
+            .List(inner) | .Option(inner) | .FixedList{elem: inner, ..} if trait_name == EQUATABLE ->
                 self.type_implements_trait(inner, trait_name)
-            Type.Map{key, value, ..} if trait_name == EQUATABLE ->
+            .Map{key, value, ..} if trait_name == EQUATABLE ->
                 self.type_implements_trait(key, trait_name) && self.type_implements_trait(value, trait_name)
-            Type.List(inner) | Type.Option(inner) | Type.FixedList{elem: inner, ..} if trait_name == COMPARABLE -> Self.native_ordering_ready(inner)
+            .List(inner) | .Option(inner) | .FixedList{elem: inner, ..} if trait_name == COMPARABLE -> Self.native_ordering_ready(inner)
             Type.Result{ok, err} if trait_name == EQUATABLE -> self.type_implements_trait(ok, trait_name) && self.type_implements_trait(err, trait_name)
             Type.Result{ok, err} if trait_name == COMPARABLE -> Self.native_ordering_ready(ok) && Self.native_ordering_ready(err)
-            Type.Tuple(fields) if trait_name == EQUATABLE -> fields.iter().all(|(_, field)| self.type_implements_trait(field, trait_name))
-            Type.Tuple(fields) if trait_name == COMPARABLE -> fields.iter().all(|(_, field)| Self.native_ordering_ready(field))
-            Type.Named(name) -> self.implements_trait(name, trait_name)
+            .Tuple(fields) if trait_name == EQUATABLE -> fields.iter().all(|(_, field)| self.type_implements_trait(field, trait_name))
+            .Tuple(fields) if trait_name == COMPARABLE -> fields.iter().all(|(_, field)| Self.native_ordering_ready(field))
+            .Named(name) -> self.implements_trait(name, trait_name)
             Type.Apply{name, args} -> {
                 if !self.implements_trait(name, trait_name) -> return false
                 params :: self.struct_params.get(name) ?? return true
@@ -174,9 +174,9 @@ impl TraitRegistry {
                         || self.structural_params.get(name).is_some_and(|used| !used.contains(index) || self.type_implements_trait(arg, trait_name))
                         || (!self.structural_params.contains_key(name) && self.type_implements_trait(arg, trait_name))))
             }
-            Type.TraitObject(bounds) -> bounds.iter().any(|bound| bound == trait_name)
-            Type.Tagged{inner, ..} if trait_name == COMPARABLE -> Self.native_ordering_ready(inner)
-            Type.Tagged{inner, ..} -> self.type_implements_trait(inner, trait_name)
+            .TraitObject(bounds) -> bounds.iter().any(|bound| bound == trait_name)
+            .Tagged{inner, ..} if trait_name == COMPARABLE -> Self.native_ordering_ready(inner)
+            .Tagged{inner, ..} -> self.type_implements_trait(inner, trait_name)
             other -> self.implements_trait(other.name(), trait_name)
         }
     }
@@ -681,25 +681,25 @@ pub fn struct_auto_derive_ok(s: StructDef) -> Bool Never! {
 pub fn enum_auto_derive_ok(e: EnumDef) -> Bool Never! {
     !e.is_single_use && e.variants.iter().all(|v| match v.payload {
         VariantPayload.Unit -> true
-        VariantPayload.Single(t, _) -> field_auto_ok(t, e.name)
-        VariantPayload.Named(fs) -> fs.iter().all(|f| field_auto_ok(f.ty, e.name))
+        .Single(t, _) -> field_auto_ok(t, e.name)
+        .Named(fs) -> fs.iter().all(|f| field_auto_ok(f.ty, e.name))
     })
 }
 
 // Rust: crates/jet-foundation/src/Traits.rs:3620
 fn field_auto_ok(ty: Type, owner: String) -> Bool Never! {
     match ty {
-        Type.Int | Type.Float | Type.Bool | Type.String | Type.Char | Type.IntN{..} | Type.Float32 -> true
-        Type.List(inner) | Type.Option(inner) | Type.Tagged{inner, ..}
-            | Type.FixedList{elem: inner, ..} | Type.InlineRange{base: inner, ..} -> field_auto_ok(inner, owner)
-        Type.Map{key, value, ..} | Type.Result{ok: key, err: value} -> field_auto_ok(key, owner) && field_auto_ok(value, owner)
-        Type.Tuple(fields) -> fields.iter().all(|(_, field)| field_auto_ok(field, owner))
-        Type.Union(members) -> members.iter().all(|member| field_auto_ok(member, owner))
-        Type.Named(_) -> true
-        Type.Apply{name, ..} -> name != Syntax.TYPE_SHARED_GUARD
-        Type.Quantity{base, ..} -> field_auto_ok(base, owner)
-        Type.Measure(_) -> true
-        Type.Shared(_) | Type.TraitObject(_) | Type.Fn{..} -> false
+        Type.Int | Type.Float | Type.Bool | Type.String | Type.Char | .IntN{..} | Type.Float32 -> true
+        .List(inner) | .Option(inner) | .Tagged{inner, ..}
+            | .FixedList{elem: inner, ..} | .InlineRange{base: inner, ..} -> field_auto_ok(inner, owner)
+        .Map{key, value, ..} | Type.Result{ok: key, err: value} -> field_auto_ok(key, owner) && field_auto_ok(value, owner)
+        .Tuple(fields) -> fields.iter().all(|(_, field)| field_auto_ok(field, owner))
+        .Union(members) -> members.iter().all(|member| field_auto_ok(member, owner))
+        .Named(_) -> true
+        .Apply{name, ..} -> name != Syntax.TYPE_SHARED_GUARD
+        .Quantity{base, ..} -> field_auto_ok(base, owner)
+        .Measure(_) -> true
+        .Shared(_) | .TraitObject(_) | .Fn{..} -> false
     }
 }
 
@@ -729,15 +729,15 @@ pub fn rust_type_name_assoc(ty: Type, assoc: HashSet<String>) -> String Never! {
             "{prefix}{bits}"
         }
         Type.Float32 -> "f32"
-        Type.List(inner) -> "Vec<{rust_type_name_assoc(inner, assoc)}>"
-        Type.FixedList{elem, len, ..} -> "[{rust_type_name_assoc(elem, assoc)}; {len}]"
+        .List(inner) -> "Vec<{rust_type_name_assoc(inner, assoc)}>"
+        .FixedList{elem, len, ..} -> "[{rust_type_name_assoc(elem, assoc)}; {len}]"
         Type.Result{ok, err} -> "JetOutcome<{rust_type_name_assoc(ok, assoc)}, {rust_type_name_assoc(err, assoc)}>"
-        Type.Named(n) if n.is_empty() -> "Self"
-        Type.Named(n) if n == Syntax.INTERNAL_UNIT_TYPE -> "()"
-        Type.Named(n) if n == Syntax.TYPE_ERR -> "JetErr"
-        Type.Named(n) if n == Syntax.TYPE_NEVER -> "std::convert::Infallible"
-        Type.Named(n) if assoc.contains(n) -> "Self::{n}"
-        Type.Named(n) -> Names.mangle_path(n)
+        .Named(n) if n.is_empty() -> "Self"
+        .Named(n) if n == Syntax.INTERNAL_UNIT_TYPE -> "()"
+        .Named(n) if n == Syntax.TYPE_ERR -> "JetErr"
+        .Named(n) if n == Syntax.TYPE_NEVER -> "std::convert::Infallible"
+        .Named(n) if assoc.contains(n) -> "Self::{n}"
+        .Named(n) -> Names.mangle_path(n)
         Type.Apply{name, args} if name == "View" && args.len() == 1 -> {
             if matches(args[0], Type.Named(inner) if inner == "str") -> "&str"
             else -> "&[{rust_type_name_assoc(args[0], assoc)}]"
@@ -747,13 +747,13 @@ pub fn rust_type_name_assoc(ty: Type, assoc: HashSet<String>) -> String Never! {
             rendered :: args.iter().map(|a| rust_type_name_assoc(a, assoc)).collect::<[String]>().join(", ")
             "{Names.mangle_path(name)}<{rendered}>"
         }
-        Type.TraitObject(t) -> {
+        .TraitObject(t) -> {
             rendered :: t.iter().map(|name| Names.mangle_path(name)).collect::<[String]>().join(" + ")
             "Box<dyn {rendered}>"
         }
-        Type.Option(inner) -> "JetOutcome<{rust_type_name_assoc(inner, assoc)}, JetAbsent>"
-        Type.Map{key, value, ..} -> "std::collections::BTreeMap<{rust_type_name_assoc(key, assoc)}, {rust_type_name_assoc(value, assoc)}>"
-        Type.Fn{..} -> "Box<dyn Fn()>"
+        .Option(inner) -> "JetOutcome<{rust_type_name_assoc(inner, assoc)}, JetAbsent>"
+        .Map{key, value, ..} -> "std::collections::BTreeMap<{rust_type_name_assoc(key, assoc)}, {rust_type_name_assoc(value, assoc)}>"
+        .Fn{..} -> "Box<dyn Fn()>"
         _ -> "()"
     }
 }
@@ -819,15 +819,15 @@ pub fn emit_trait_def(t: TraitDef, out: &String, render_view_return: fn(Type, Ha
 fn trait_assoc(items: [Item], type_name: String, trait_name: String, assoc: String) -> Type? Never! {
     loop item in items {
         match item {
-            Item.Impl(i) if i.type_name == type_name && i.trait_name == Val(trait_name) ->
+            .Impl(i) if i.type_name == type_name && i.trait_name == Val(trait_name) ->
                 return i.assoc_type_impls.iter().find(|(n, _, _)| n == assoc).map(|(_, _, t)| t.clone())
-            Item.Struct(s) if s.name == type_name -> {
+            .Struct(s) if s.name == type_name -> {
                 loop block in s.trait_impls {
                     if block.trait_name == trait_name ->
                         return block.assoc_type_impls.iter().find(|(n, _, _)| n == assoc).map(|(_, _, t)| t.clone())
                 }
             }
-            Item.Enum(e) if e.name == type_name -> {
+            .Enum(e) if e.name == type_name -> {
                 loop block in e.trait_impls {
                     if block.trait_name == trait_name ->
                         return block.assoc_type_impls.iter().find(|(n, _, _)| n == assoc).map(|(_, _, t)| t.clone())

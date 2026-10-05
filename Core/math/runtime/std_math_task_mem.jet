@@ -369,7 +369,7 @@ impl<T: Send> JetTaskGroupChild for JetTaskState<T> {
     fn join(self: &JetTaskState<T>) -> () {
         // GATE #4565: kernel primitive
         #Unsafe("take the sole child handle and drain without parent wait policy during unwinding") {
-            if self.handle.lock().unwrap().take() == Some(handle) { handle.drain() }
+            if self.handle.lock().unwrap().take() == .Val(handle) { handle.drain() }
         }
     }
 }
@@ -391,7 +391,7 @@ impl JetTaskGroup {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:539
     pub fn with_limit(limit: I64) -> JetTaskGroup {
         // GATE #4565: kernel primitive
-        JetTaskGroup{children: #Unsafe("allocate bounded lexical task admission runtime") { Arc.new(JetTaskGroupRuntime.new_defaulted(Some(limit))) }, owner: true}
+        JetTaskGroup{children: #Unsafe("allocate bounded lexical task admission runtime") { Arc.new(JetTaskGroupRuntime.new_defaulted(Val(limit))) }, owner: true}
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:549
     pub fn spawn<T: Send>(self: &JetTaskGroup, f: fn() -> T) -> JetTask<T> { self.spawn_at(0, "", ^f) }
@@ -446,7 +446,7 @@ impl<T: Send> JetTask<T> {
         // GATE #4565: kernel primitive
         #Unsafe("scheduler owns Send captures and join handle; child inherits deadline guard until completion") {
             JetTask<T>{state: Arc.new(JetTaskState<T>{
-                handle: Mutex.new(Some(jet_scheduler_spawn_blocking_with_control_at(spawn_site, label, () -> {
+                handle: Mutex.new(Val(jet_scheduler_spawn_blocking_with_control_at(spawn_site, label, () -> {
                     _deadline_guard :: inherited_deadline.map((deadline) -> jet_ctx_push_deadline(deadline))
                     f()
                 }, control.clone()))), control: ^control, skip_join_deadline: false})}
@@ -462,7 +462,7 @@ impl<T: Send> JetTask<T> {
         // GATE #4565: kernel primitive
         #Unsafe("typed child owns inherited deadline guard and skips untyped join deadline recheck") {
             JetTask<T>{state: Arc.new(JetTaskState<T>{
-                handle: Mutex.new(Some(jet_scheduler_spawn_blocking_with_control_at(spawn_site, label, () -> {
+                handle: Mutex.new(Val(jet_scheduler_spawn_blocking_with_control_at(spawn_site, label, () -> {
                     _deadline_guard :: inherited_deadline.map((deadline) -> jet_ctx_push_deadline(deadline))
                     _typed_deadline_boundary :: JetTypedDeadlineBoundary.enter()
                     f()
@@ -507,7 +507,7 @@ impl<T: Send> JetTask<T> {
         state :: ^self.state
         // GATE #4565: kernel primitive
         handle :: #Unsafe("take completion without applying parent cancellation policy") { state.handle.lock().unwrap().take() }
-        if handle == Some(child) { child.drain() }
+        if handle == .Val(child) { child.drain() }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:748
     pub fn detach(self: ^JetTask<T>) -> () {
@@ -574,9 +574,9 @@ pub fn jet_select_try_wait_tagged<T: Send>(recvs: [JetReceiver<T>], after_ns: [J
     after_ms :: after_ns.into_iter().map((ns) ->
         jet_task_delay_ms_defaulted(jet_std_time_duration_to_millis(jet_select_duration_ns(&ns)))).collect()
     if jet_scheduler_try_select(^inners, ^after_ms) == {
-        Some(.Recv{arm, value}) -> (jet_int_owned_from_i64(arm as I64), Ok(^value))
-        Some(.After{arm}) -> (jet_int_owned_from_i64((recvs.len() + arm) as I64), Err(JetAbsent))
-        Some(.Closed) | None -> (jet_int_owned_from_i64(-1), Err(JetAbsent))
+        .Val(.Recv{arm, value}) -> (jet_int_owned_from_i64(arm as I64), Ok(^value))
+        .Val(.After{arm}) -> (jet_int_owned_from_i64((recvs.len() + arm) as I64), Err(JetAbsent))
+        .Val(.Closed) | None -> (jet_int_owned_from_i64(-1), Err(JetAbsent))
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:919
@@ -641,12 +641,12 @@ impl<T: Send> JetReceiver<T> {
     pub fn receive(self: &JetReceiver<T>) -> T Closed! {
         // Scheduler wait owns cancellation unwind; shielded cleanup defers deadline too.
         if !jet_scheduler_shielded() {
-            if jet_deadline_remaining_ms() == Some(remaining) {
+            if jet_deadline_remaining_ms() == .Val(remaining) {
                 if remaining <= 0 { jet_deadline_exceeded("channel receive") }
             }
         }
         if self.inner.receive() == {
-            Some(value) -> {
+            .Val(value) -> {
                 jet_deadline_check("channel receive")
                 Ok(^value)
             }
@@ -739,21 +739,24 @@ impl<T> JetSharedCell<T> {
         #Unsafe("caller holds lifetime mutex and observes zero logical owners and active borrows") {
             value :: (&*self.value.get()).take()?
             finalizer :: self.payload_finalizer.lock().unwrap_or_else((poisoned) -> poisoned.into_inner()).take()
-            Some((^value, ^finalizer))
+            Val((^value, ^finalizer))
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1158
     fn finish_retired_payload(retired: (T, JetSharedPhysicalFinalizerBinding<T>?)?) -> JetSharedPhysicalCompletion? {
         if retired == {
-            Some((value, Some(finalizer))) -> Some(finalizer.finish(^value))
-            Some((value, None)) -> { drop(^value); None }
+            Some((value, Val(finalizer))) -> Val(finalizer.finish(^value))
+            Some((value, None)) -> {
+                drop(^value)
+                None
+            }
             None -> None
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1171
     fn deliver_retired_payload(retired: (T, JetSharedPhysicalFinalizerBinding<T>?)?) -> () {
         if retired == {
-            Some((value, Some(finalizer))) -> finalizer.finish_and_deliver(^value)
+            Some((value, Val(finalizer))) -> finalizer.finish_and_deliver(^value)
             Some((value, None)) -> drop(^value)
             None -> {}
         }
@@ -792,7 +795,10 @@ impl<T> JetSharedCell<T> {
             slot := self.payload_finalizer.lock().unwrap_or_else((poisoned) -> poisoned.into_inner())
             if slot.is_some() { return Err("Shared payload finalizer is already installed") }
             if finalizer.take() == {
-                Some(candidate) -> { *slot = Some(^candidate); Ok(()) }
+                .Val(candidate) -> {
+                    *slot = Val(^candidate)
+                    Ok(())
+                }
                 None -> Err("Shared payload finalizer candidate is empty")
             }
         }
@@ -910,13 +916,13 @@ impl<T> JetSharedCell<T> {
     fn store_scalar_value(self: &Self, value: &T) -> () {
         // GATE #4565: kernel primitive
         #Unsafe("selected exact scalar kind determines atomic publication representation") {
-            if self.scalar.as_ref() == Some(scalar) { scalar.store(jet_shared_scalar_bits(value, scalar.kind())) }
+            if self.scalar.as_ref() == .Val(scalar) { scalar.store(jet_shared_scalar_bits(value, scalar.kind())) }
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1437
     fn with_read<R>(self: &Self, f: fn(&T) -> R) -> R {
         permit :: jet_shared_acquire(&self.protocol, false, () -> false).expect("uncancelled Shared read acquires")
-        if self.scalar_snapshot() == Some(value) { return f(&value) }
+        if self.scalar_snapshot() == .Val(value) { return f(&value) }
         // GATE #4565: kernel primitive
         #Unsafe("read permit remains held through the entire payload callback") {
             f((&*self.value.get()).as_ref().expect("Shared payload was retired"))
@@ -948,9 +954,9 @@ impl<T> JetSharedCell<T> {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1491
     fn refresh_scalar_shadow(self: &Self) -> () {
-        if self.scalar_snapshot() == Some(value) {
+        if self.scalar_snapshot() == .Val(value) {
             // GATE #4565: kernel primitive
-            #Unsafe("caller holds cell guard permit while synchronizing its projection shadow") { *self.value.get() = Some(^value) }
+            #Unsafe("caller holds cell guard permit while synchronizing its projection shadow") { *self.value.get() = Val(^value) }
         }
     }
 }
@@ -974,7 +980,7 @@ impl<T> JetShared<T> {
             JetShared(Arc.new(JetSharedCell<T>{
                 protocol: JetSharedProtocol.new(), scalar: ^scalar, revision: AtomicU64.new(0),
                 owner_lifetime: Mutex.new(JetSharedOwnerLifetime{logical_owners: 1, active_borrows: 0}),
-                payload_finalizer: Mutex.new(None), value: UnsafeCell.new(Some(^value))
+                payload_finalizer: Mutex.new(None), value: UnsafeCell.new(Val(^value))
             }), true)
         }
     }
@@ -1000,7 +1006,7 @@ impl<T> JetShared<T> {
         // GATE #4565: kernel primitive
         #Unsafe("exclusive permit covers payload write and release publication") {
             if self.0.scalar.is_some() { self.0.store_scalar_value(&value) }
-            else { *self.0.value.get() = Some(^value) }
+            else { *self.0.value.get() = Val(^value) }
             self.0.revision.store(next, Ordering.Release)
         }
     }
@@ -1010,11 +1016,11 @@ impl<T> JetShared<T> {
         next :: self.0.next_revision().expect("Shared revision generation exhausted")
         // GATE #4565: kernel primitive
         #Unsafe("exclusive permit covers atomic swap or structured replacement and revision publication") {
-            old :: if self.0.scalar.as_ref() == Some(scalar) {
+            old :: if self.0.scalar.as_ref() == .Val(scalar) {
                 bits :: scalar.swap(jet_shared_scalar_bits(&value, scalar.kind()))
                 jet_shared_scalar_from_bits<T>(bits, scalar.kind())
             } else {
-                mem.replace(&*self.0.value.get(), Some(^value)).expect("Shared payload was retired")
+                mem.replace(&*self.0.value.get(), Val(^value)).expect("Shared payload was retired")
             }
             self.0.revision.store(next, Ordering.Release)
             ^old
@@ -1040,7 +1046,7 @@ impl<T> JetShared<T> {
             consumed :: Arc.new(AtomicBool.new(false))
             (revision, value) :: owner.with_read((value) -> (owner.revision.load(Ordering.Acquire), project(value)))
             assert(owner.retain_logical_owner(), "snapshot requires a live Shared owner")
-            JetSharedSnapshot<T,U>{owner: ^owner, revision: revision, valid: ^valid, consumed: ^consumed, value: Some(^value)}
+            JetSharedSnapshot<T,U>{owner: ^owner, revision: revision, valid: ^valid, consumed: ^consumed, value: Val(^value)}
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1657
@@ -1050,14 +1056,14 @@ impl<T> JetShared<T> {
         stm.touch(protocol.clone())
         // GATE #4565: kernel primitive
         #Unsafe("transaction snapshot shares the canonical staged participant and invalidation flag") {
-            snapshot :: if stm.staged_value<T>(&protocol) == Some(staged) {
+            snapshot :: if stm.staged_value<T>(&protocol) == .Val(staged) {
                 owner :: self.0.clone()
                 valid :: Arc.new(AtomicBool.new(true))
                 consumed :: Arc.new(AtomicBool.new(false))
                 revision :: stm.snapshot_revision(&protocol, owner.revision.load(Ordering.Acquire)).expect("SharedRevisionError.GenerationExhausted")
                 value :: project(&staged.borrow())
                 assert(owner.retain_logical_owner(), "snapshot requires a live Shared owner")
-                JetSharedSnapshot<T,U>{owner: ^owner, revision: revision, valid: ^valid, consumed: ^consumed, value: Some(^value)}
+                JetSharedSnapshot<T,U>{owner: ^owner, revision: revision, valid: ^valid, consumed: ^consumed, value: Val(^value)}
             } else { self.capture_with(^project) }
             stm.record_snapshot(^protocol, snapshot.valid.clone())
             ^snapshot
@@ -1076,7 +1082,7 @@ impl<T> JetShared<T> {
             next :: self.0.next_revision()?
             if snapshot.consumed.swap(true, Ordering.AcqRel) { return Ok(false) }
             if self.0.scalar.is_some() { self.0.store_scalar_value(&value) }
-            else { *self.0.value.get() = Some(^value) }
+            else { *self.0.value.get() = Val(^value) }
             self.0.revision.store(next, Ordering.Release)
             snapshot.valid.store(false, Ordering.Release)
             Ok(true)
@@ -1087,7 +1093,7 @@ impl<T> JetShared<T> {
     pub fn read_txn<R>(self: &Self, stm: &jet_stm.Guard, f: fn(&T) -> R) -> R {
         protocol: Arc<JetSharedCanonicalOwner> :: self.0.protocol.clone()
         stm.touch(protocol.clone())
-        if stm.staged_value<T>(&protocol) == Some(staged) { f(&staged.borrow()) }
+        if stm.staged_value<T>(&protocol) == .Val(staged) { f(&staged.borrow()) }
         else { self.read(^f) }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1759

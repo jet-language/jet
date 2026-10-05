@@ -109,12 +109,18 @@ pub fn jet_stats_prod(values: [F64]) -> F64 { values.into_iter().product() }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:165
 pub fn jet_stats_cumsum(values: [F64]) -> [F64] {
     total := 0.0
-    values.into_iter().map(fn(value) { total += value; total }).collect()
+    values.into_iter().map(fn(value) {
+        total += value
+        total
+    }).collect()
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:176
 pub fn jet_stats_cumprod(values: [F64]) -> [F64] {
     total := 1.0
-    values.into_iter().map(fn(value) { total *= value; total }).collect()
+    values.into_iter().map(fn(value) {
+        total *= value
+        total
+    }).collect()
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:187
 pub fn jet_stats_diff(values: [F64]) -> [F64] { values.windows(2).map(fn(pair) { pair[1] - pair[0] }).collect() }
@@ -134,7 +140,10 @@ pub fn jet_stats_ewma(values: [F64], alpha: F64) -> [F64] {
     alpha :: alpha.clamp(0.0, 1.0)
     total := *first
     out := [total]
-    out.extend(rest.iter().map(fn(value) { total = alpha * *value + (1.0 - alpha) * total; total }))
+    out.extend(rest.iter().map(fn(value) {
+        total = alpha * *value + (1.0 - alpha) * total
+        total
+    }))
     out
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:222
@@ -145,7 +154,10 @@ pub fn jet_stats_rank(values: [F64]) -> [F64] {
 pub fn jet_stats_zscore(values: [F64]) -> [F64] {
     if values.is_empty() -> return []
     mean :: values.iter().sum<F64>() / values.len() as F64
-    variance :: values.iter().map(fn(value) { delta :: *value - mean; delta * delta }).sum<F64>() / values.len() as F64
+    variance :: values.iter().map(fn(value) {
+        delta :: *value - mean
+        delta * delta
+    }).sum<F64>() / values.len() as F64
     deviation :: variance.sqrt()
     if deviation == 0.0 -> return []
     values.into_iter().map(fn(value) { (value - mean) / deviation }).collect()
@@ -153,7 +165,10 @@ pub fn jet_stats_zscore(values: [F64]) -> [F64] {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:254
 pub fn jet_stats_clip(values: [F64], low: F64, high: F64) -> [F64] { values.into_iter().map(fn(value) { value.clamp(low, high) }).collect() }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:260
-fn jet_stats_sorted(values: [F64]) -> [F64] { values.sort_by(F64.total_cmp); ^values }
+fn jet_stats_sorted(values: [F64]) -> [F64] {
+    values.sort_by(F64.total_cmp)
+    ^values
+}
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:265
 fn jet_stats_mean_value(values: View<F64>) -> F64? { if values.is_empty() -> None else -> Val(values.iter().sum<F64>() / values.len() as F64) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:269
@@ -219,7 +234,10 @@ pub fn jet_stats_mode(values: [F64]) -> F64? {
     best_count := USize{0}
     for value in &values {
         count :: values.iter().filter(fn(other) { **other == *value }).count()
-        if count > best_count { best = *value; best_count = count }
+        if count > best_count {
+            best = *value
+            best_count = count
+        }
     }
     Val(best)
 }
@@ -279,7 +297,10 @@ pub fn jet_stats_kde(values: [F64], bandwidth: F64) -> [F64] {
     if values.is_empty() || bandwidth <= 0.0 -> return []
     scale :: values.len() as F64 * bandwidth * (2.0 * PI).sqrt()
     values.iter().map(fn(point) {
-        values.iter().map(fn(value) { z :: (point - value) / bandwidth; (-0.5 * z * z).exp() }).sum<F64>() / scale
+        values.iter().map(fn(value) {
+            z :: (point - value) / bandwidth
+            (-0.5 * z * z).exp()
+        }).sum<F64>() / scale
     }).collect()
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:467
@@ -365,7 +386,10 @@ pub fn jet_stats_histogram(values: [F64], bins: I64) -> [I64] {
     low :: values.iter().copied().reduce(F64.min) ?? return []
     high :: values.iter().copied().reduce(F64.max) ?? return []
     out := [I64].filled(bins as USize, 0)
-    if high == low { out[0] = values.len() as I64; return out }
+    if high == low {
+        out[0] = values.len() as I64
+        return out
+    }
     span :: high - low
     for value in values {
         index := ((value - low) / span * bins as F64) as I64
@@ -591,7 +615,10 @@ pub fn jet_comb_cycle(items: [I64], times: I64) -> [I64] {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1061
 pub fn jet_comb_accumulate(items: [I64]) -> [I64] {
     total := I64{0}
-    items.into_iter().map(fn(value) { total = total.saturating_add(value); total }).collect()
+    items.into_iter().map(fn(value) {
+        total = total.saturating_add(value)
+        total
+    }).collect()
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1072
 pub fn jet_comb_reverse(items: [I64]) -> [I64] {

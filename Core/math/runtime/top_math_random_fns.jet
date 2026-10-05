@@ -108,7 +108,10 @@ fn jet_std_random_int(low: I64, high: I64) -> I64 {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:148
 fn jet_std_random_float() -> F64 { (jet_rng_next() as F64) / (U64.MAX as F64) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:151
-fn jet_std_random_float_open() -> F64 { x :: jet_std_random_float(); if x <= 0.0 -> F64.MIN_POSITIVE else -> x }
+fn jet_std_random_float_open() -> F64 {
+    x :: jet_std_random_float()
+    if x <= 0.0 -> F64.MIN_POSITIVE else -> x
+}
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:155
 fn jet_std_random_float_range(low: F64, high: F64) -> F64 {
     if !(high > low) -> return low
@@ -206,14 +209,20 @@ fn jet_std_random_weighted_pick<T: Clone>(xs: &[T], weights: &[F64]) -> T? {
 fn jet_std_random_sample<T: Clone>(xs: &[T], k: I64) -> [T] {
     want :: (k.max(0) as USize).min(xs.len())
     pool := xs.clone()
-    for i in 0..<want { j :: jet_std_random_int(i as I64, pool.len() as I64 - 1) as USize; pool.swap(i, j) }
+    for i in 0..<want {
+        j :: jet_std_random_int(i as I64, pool.len() as I64 - 1) as USize
+        pool.swap(i, j)
+    }
     pool.truncate(want)
     pool
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:315
 fn jet_std_random_shuffle<T>(xs: &[T]) -> {
     len :: xs.len()
-    for i in (1..<len).rev() { j :: jet_std_random_int(0, i as I64) as USize; xs.swap(i, j) }
+    for i in (1..<len).rev() {
+        j :: jet_std_random_int(0, i as I64) as USize
+        xs.swap(i, j)
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:324
 // Seedable simulation bytes are NOT cryptographically secure.

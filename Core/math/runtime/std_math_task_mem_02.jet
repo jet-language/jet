@@ -623,10 +623,10 @@ impl<T> JetSharedLease for JetSharedRootLease<T> {
         // Release the physical permit before payload retirement can acquire other permits.
         permit_outcome :: self.permit.release()
         completion := ^permit_outcome.completion
-        if self.logical_owner.borrow_mut().take() is Val(owner) {
+        if self.logical_owner.borrow_mut().take() == .Val(owner) {
             if completion.is_some() { owner.release_and_deliver() } else { completion = owner.release() }
         }
-        if self.physical_borrow.borrow_mut().take() is Val(borrow) {
+        if self.physical_borrow.borrow_mut().take() == .Val(borrow) {
             if completion.is_some() { borrow.release_and_deliver() } else { completion = borrow.release() }
         }
         JetSharedPhysicalOperationOutcome.new(^permit_outcome.result, ^completion)
@@ -635,8 +635,8 @@ impl<T> JetSharedLease for JetSharedRootLease<T> {
     fn release_during_drop(self: &Self) -> {
         if self.editable && self.permit.held() && self.dirty.replace(false) { self.cell.commit_guard() }
         self.permit.release_during_drop()
-        if self.logical_owner.borrow_mut().take() is Val(owner) { owner.release_and_deliver() }
-        if self.physical_borrow.borrow_mut().take() is Val(borrow) { borrow.release_and_deliver() }
+        if self.logical_owner.borrow_mut().take() == .Val(owner) { owner.release_and_deliver() }
+        if self.physical_borrow.borrow_mut().take() == .Val(borrow) { borrow.release_and_deliver() }
     }
 }
 impl<T> Drop for JetSharedRootLease<T> {
@@ -872,7 +872,7 @@ impl<T> JetPool<T> {
     pub fn new() -> Self { JetPool{slots: [], free: []} }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3100
     pub fn add(self: &Self, value: T) -> JetId<T> {
-        if self.free.pop() is Val(idx) {
+        if self.free.pop() == .Val(idx) {
             gen :: match self.slots[idx] {
                 .Vacant(g) -> g
                 .Occupied(..) -> unreachable("a free-list slot is always Vacant")
@@ -1023,7 +1023,7 @@ pub fn jet_pool_get_mut<T>(pool: &JetPool<T>, id: JetId<T>, file: String,
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3335
 pub fn jet_pool_set<T>(pool: &JetPool<T>, id: JetId<T>, value: T, file: String,
     line: U32, fn_name: String, src_line: String) -> {
-    if pool.checked_get_mut(id) is Val(slot) {
+    if pool.checked_get_mut(id) == .Val(slot) {
         *slot = ^value
         return
     }
