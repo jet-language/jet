@@ -19,7 +19,7 @@ struct JetTestingDiffLines { lines: [String], truncated: Bool }
 fn jet_testing_diff_lines(input: String) -> JetTestingDiffLines {
     end := input.len().min(JET_TESTING_DIFF_MAX_BYTES)
     loop while end > 0 && !input.is_char_boundary(end) { end -= 1 }
-    prefix := input[..end] // #4303
+    prefix := input[0..<end] // #4303
     lines := [String]{}
     truncated_by_lines := false
     loop line in prefix.split_inclusive('\n') {
@@ -43,13 +43,13 @@ fn jet_testing_diff_push(output: &String, truncated: &Bool, text: String) -> Uni
     if available >= marker.len() {
         text_len := available - marker.len()
         loop while text_len > 0 && !text.is_char_boundary(text_len) { text_len -= 1 }
-        prefix := text[..text_len] // #4303
+        prefix := text[0..<text_len] // #4303
         &output.push_str(prefix)
         &output.push_str(marker)
     } else if available > 0 {
         marker_len := available
         loop while marker_len > 0 && !marker.is_char_boundary(marker_len) { marker_len -= 1 }
-        prefix := marker[..marker_len] // #4303
+        prefix := marker[0..<marker_len] // #4303
         &output.push_str(prefix)
     }
     *truncated = true
@@ -69,8 +69,8 @@ fn jet_testing_unified_diff(path: String, expected: String, actual: String) -> S
     rows :: expected_lines.lines.len() + 1
     cols :: actual_lines.lines.len() + 1
     lcs := [USize].filled(rows * cols, 0)
-    loop row in (0..expected_lines.lines.len()).rev() {
-        loop col in (0..actual_lines.lines.len()).rev() {
+    loop row in (0..<expected_lines.lines.len()).rev() {
+        loop col in (0..<actual_lines.lines.len()).rev() {
             index :: row * cols + col
             lcs[index] = if expected_lines.lines[row] == actual_lines.lines[col] {
                 1 + lcs[(row + 1) * cols + col + 1]
