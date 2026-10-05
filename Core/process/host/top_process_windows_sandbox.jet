@@ -612,7 +612,7 @@ module jet_process_windows_sandbox {
                     if count == 0 -> break
                     kept :: match limit {
                         None -> {
-                            bytes.extend_from_slice(chunk[..count])
+                            bytes.extend_from_slice(chunk[0..<count])
                             count
                         }
                         Val(maximum) -> {
@@ -623,7 +623,7 @@ module jet_process_windows_sandbox {
                                 kept :: available.min(count)
                                 match shared.compare_exchange(used, used + kept, Ordering.AcqRel, Ordering.Acquire) {
                                     Ok(_) -> {
-                                        bytes.extend_from_slice(chunk[..kept])
+                                        bytes.extend_from_slice(chunk[0..<kept])
                                         break kept
                                     }
                                     Err(next) -> used = next

@@ -587,7 +587,7 @@ fn jet_process_output_state_read(state: &Arc<ProcessOutputState>, bytes: &[U8]) 
             if buffer.cursor < buffer.bytes.len() {
                 available :: &buffer.bytes[buffer.cursor..]
                 count :: available.len().min(bytes.len())
-                bytes[..count].copy_from_slice(&available[..count])
+                bytes[0..<count].copy_from_slice(&available[0..<count])
                 buffer.cursor += count
                 return Ok(count)
             }
@@ -649,7 +649,7 @@ fn jet_process_output_worker<R: io.Read + Send>(reader: R, state: Arc<ProcessOut
                 }
                 if kept != 0 {
                     buffer := state.bytes.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
-                    buffer.bytes.extend_from_slice(&chunk[..kept])
+                    buffer.bytes.extend_from_slice(&chunk[0..<kept])
                     state.ready.notify_all()
                 }
                 if kept < count {
@@ -710,13 +710,13 @@ fn jet_process_drain_reader<R: io.Read + Send>(reader: R?, limit: Usize?, budget
                         if count == 0 -> break
                         kept :: match limit {
                             None -> {
-                                bytes.extend_from_slice(&chunk[..count])
+                                bytes.extend_from_slice(&chunk[0..<count])
                                 count
                             }
                             .Val(limit) -> {
                                 budget :: budget.as_ref().expect("bounded process output needs a shared budget")
                                 kept :: jet_process_output_reserve(limit, budget, count)
-                                if kept != 0 -> bytes.extend_from_slice(&chunk[..kept])
+                                if kept != 0 -> bytes.extend_from_slice(&chunk[0..<kept])
                                 kept
                             }
                         }
@@ -967,7 +967,7 @@ fn jet_process_checked_stderr(errors: String) -> String {
     if errors.len() <= LIMIT -> return errors.to_string()
     end := LIMIT
     loop !errors.is_char_boundary(end) -> end -= 1
-    errors[..end].to_string()
+    errors[0..<end].to_string()
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1741
 fn jet_process_spec_run_checked(spec: &ProcessSpec) -> ProcessReceipt IOError! {

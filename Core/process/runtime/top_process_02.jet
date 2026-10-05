@@ -101,7 +101,7 @@ fn jet_process_forward_pipeline_output(reader: ChildStdout, writer: ChildStdin, 
             if count == 0 { return Ok(()) }
             kept :: jet_process_output_reserve(limit, &budget, count)
             if kept != 0 {
-                match writer.write_all(&chunk[..kept]) {
+                match writer.write_all(&chunk[0..<kept]) {
                     Ok(()) -> {}
                     Err(error) if error.kind() == io.ErrorKind.BrokenPipe -> return Err(^error)
                     Err(error) -> return Err(^error)
@@ -294,7 +294,7 @@ fn jet_process_spec_pipeline(specs: &[ProcessSpec]) -> ProcessReceipt IOError! {
     wait_error := None
     stage_finished := [Bool].repeat(false, children.len())
     if direct_wait {
-        for index in 0..children.len() {
+        for index in 0..<children.len() {
             status :: match children[index].child.wait() {
                 Ok(status) -> ^status
                 Err(error) -> {
@@ -316,7 +316,7 @@ fn jet_process_spec_pipeline(specs: &[ProcessSpec]) -> ProcessReceipt IOError! {
             }
         }
     } else {
-        for index in 0..children.len() {
+        for index in 0..<children.len() {
             if stage_finished[index] { continue }
             status :: loop {
                 if pipeline_limit_hit.load(Ordering.Acquire) {
@@ -329,7 +329,7 @@ fn jet_process_spec_pipeline(specs: &[ProcessSpec]) -> ProcessReceipt IOError! {
                     break None
                 }
                 current_status := None
-                for stage in 0..children.len() {
+                for stage in 0..<children.len() {
                     if stage_finished[stage] { continue }
                     if Val(limit) :: jet_process_live_resource_limit(children[stage].child.id(), &specs[stage]) {
                         jet_process_pipeline_cleanup(&children)
