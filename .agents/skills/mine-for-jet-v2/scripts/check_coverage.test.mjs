@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { check, main, render as renderResult, sample, seconds, vague } from './check_coverage.mjs';
+import { check, main, merge, render as renderResult, sample, seconds, vague } from './check_coverage.mjs';
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'coverage-pass');
 const read = name => JSON.parse(readFileSync(join(FIXTURE, name), 'utf8'));
@@ -155,4 +156,93 @@ test('vague accepts specific reasons and rejects boilerplate', () => {
   assert.equal(vague('Sponsor read for a VPN service with no language or tooling mechanism', 'sponsor VPN'), null);
   assert.match(vague('not applicable'), /too short/);
   assert.match(vague('no finding here, nothing new, already covered by Jet lanes'), /generic/);
+});
+
+// Shards of the fixture: A holds the talk's first 5 minutes, B the rest of the talk plus the article.
+function shards() {
+  const full = run(); const [talkSource, article] = full.coverage.sources;
+  const pick = (ids, sources) => ({
+    coverage: { ...full.coverage, sources },
+    ledger: { schema: full.ledger.schema, segments: Object.fromEntries(ids.map(id => [id, full.ledger.segments[id]])) },
+    claims: { claims: full.claims.claims.filter(row => ids.includes(row.segment)) },
+  });
+  const a = pick(['example-talk/01'], [{ ...talkSource, range: { start_s: 0, end_s: 300 }, segments: [talkSource.segments[0]] }]);
+  const b = pick(['example-talk/02', 'example-article/01', 'example-article/02'],
+    [{ ...talkSource, range: { start_s: 300, end_s: 420 }, segments: [talkSource.segments[1]] }, article]);
+  return { a: { dir: 'shard-a', ...a }, b: { dir: 'shard-b', ...b } };
+}
+const shape = (files, ignore = []) => rules(files).filter(line => !ignore.some(rule => line.startsWith(`${rule}|`)));
+
+test('a ranged shard checks contiguity and densities against its absolute range', () => {
+  const { a, b } = shards();
+  assert.deepEqual(rules(a), []);
+  const report = check(a).report.sources[0];
+  assert.equal(report.size, 300);
+  assert.match(renderResult(check(a)), /source example-talk \(video, range 00:00-05:00, 5\.0 min, 1 segments\)/);
+  // B's talk half alone has only micro claims; everything else is clean.
+  assert.deepEqual(shape(b, ['scale']), []);
+  const short = shards().a; short.coverage.sources[0].range.end_s = 360;
+  expectError(short, /^segment-gap\|source example-talk\|segments end at 05:00 but the range ends at 06:00/);
+});
+
+test('a shard must use absolute source times for segments, ledger and claim locators', () => {
+  const { b } = shards(); const seg = b.coverage.sources[0].segments[0];
+  seg.start = '00:00'; seg.end = '02:00';
+  expectError(b, /^segment-gap\|segment example-talk\/02\|starts at 00:00 but the previous segment ended at 05:00/);
+  expectError(b, /^ledger\|.*02\.L1\|at 05:20 is outside 00:00-02:00/);
+  const relative = shards().b; relative.claims.claims.find(row => row.id === 'C5').locator = '00:20';
+  expectError(relative, /^claim-segment\|claims\.json C5\|locator time 00:20 is outside the range 05:00-07:00; use absolute source times/);
+  const whole = run(); claim(whole, 'C2').locator = '12:00';
+  expectError(whole, /^claim-segment\|claims\.json C2\|locator time 12:00 is outside the source 00:00-07:00/);
+  const past = shards().b; past.coverage.sources[0].range.end_s = 500;
+  expectError(past, /^schema\|source example-talk\|range ends at 08:20, past the source duration 07:00/);
+  const textRange = shards().b; textRange.coverage.sources[1].range = { start_s: 0, end_s: 10 };
+  expectError(textRange, /^schema\|source example-article\|range applies only to video\/audio sources/);
+  const bad = shards().a; bad.coverage.sources[0].range = { start_s: 300, end_s: 0 };
+  expectError(bad, /^schema\|source example-talk\|range needs absolute start_s < end_s/);
+});
+
+test('merge joins shards into one contiguous source and re-checks', () => {
+  const { a, b } = shards();
+  const { errors, files } = merge([b, a]);
+  assert.deepEqual(errors, []);
+  const talkSource = files.coverage.sources.find(source => source.source_id === 'example-talk');
+  assert.equal(talkSource.range, undefined);
+  assert.deepEqual(talkSource.segments.map(row => row.id), ['example-talk/01', 'example-talk/02']);
+  assert.deepEqual(files.coverage.merged_from, ['shard-b', 'shard-a']);
+  assert.deepEqual(rules(files), []);
+  // Shards that stop short keep a range, so the merged check still knows the covered span.
+  const partial = shards(); partial.b.coverage.sources[0].range.end_s = 360;
+  partial.b.coverage.sources[0].segments[0].end = '06:00';
+  const joined = merge([partial.a, partial.b]).files;
+  assert.deepEqual(joined.coverage.sources[0].range, { start_s: 0, end_s: 360 });
+  const conflict = shards(); conflict.b.coverage.sources[0].title = 'Another talk';
+  conflict.b.ledger.segments['example-talk/01'] = [];
+  delete conflict.a.coverage.sources[0].range;
+  const problems = merge([conflict.a, conflict.b]).errors.join('\n');
+  assert.match(problems, /shard-b: source example-talk title differs from shard-a/);
+  assert.match(problems, /shard-b: ledger segment example-talk\/01 is already in another shard/);
+  assert.match(problems, /every shard needs a range/);
+});
+
+test('--merge writes the joined run, never overwrites, and exits by the re-check', t => {
+  const scratch = process.env.JET_SCRATCH_ROOT || join(homedir(), '.cache/jet-dev/scratch');
+  mkdirSync(scratch, { recursive: true });
+  const root = mkdtempSync(join(scratch, 'check-coverage-test-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const shard of Object.values(shards())) {
+    mkdirSync(join(root, shard.dir));
+    for (const name of ['coverage', 'ledger', 'claims']) writeFileSync(join(root, shard.dir, `${name}.json`), JSON.stringify(shard[name]));
+  }
+  const args = ['--merge', join(root, 'shard-a'), join(root, 'shard-b'), '--out', join(root, 'merged')];
+  const out = sink();
+  assert.equal(main(args, out, sink()), 0);
+  assert.match(out.data, /merged 2 shards into .*\nsource example-talk \(video, 7\.0 min, 2 segments\)[\s\S]*PASS\n$/);
+  assert.ok(existsSync(join(root, 'merged', 'ledger.json')));
+  assert.equal(main([join(root, 'merged')], sink(), sink()), 0);
+  const again = sink();
+  assert.equal(main(args, sink(), again), 1);
+  assert.match(again.data, /already exists; merge never overwrites/);
+  assert.equal(main(['--merge', join(root, 'shard-a'), '--out', join(root, 'x')], sink(), sink()), 2);
+  assert.equal(main(['--merge', join(root, 'shard-a'), join(root, 'shard-b')], sink(), sink()), 2);
 });

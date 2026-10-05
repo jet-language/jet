@@ -3,7 +3,7 @@
 // ledger per segment, a full segment x lane matrix, densities, and the recall audit.
 // Exit 0 only when nothing is missing; 1 on any gap; 2 on usage errors.
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -151,11 +151,24 @@ export function check({ coverage, ledger, claims, audit }, { requireAudit = fals
     const segments = Array.isArray(source.segments) ? source.segments : [];
     if (!segments.length) err('segment', sourceWhere, 'no segments');
     const sourceReport = { source_id: source.source_id, kind: source.kind, family, title: source.title, size: 0,
-      items: 0, claims: 0, micro: 0, macro: 0, segments: [] };
+      items: 0, claims: 0, micro: 0, macro: 0, segments: [], span: null, ranged: source.range !== undefined };
     report.sources.push(sourceReport);
     sourceOf.set(sourceReport, source);
 
-    let cursor = 0; let words = 0; const paths = new Set();
+    // AV segments must tile [0, duration_s], or the shard's absolute range when one is declared.
+    if (family === 'av') {
+      const duration = seconds(source.duration_s);
+      if (Number.isNaN(duration) || duration <= 0) err('schema', sourceWhere, 'video/audio source needs duration_s');
+      if (source.range !== undefined) {
+        const start = isObj(source.range) ? seconds(source.range.start_s) : NaN;
+        const end = isObj(source.range) ? seconds(source.range.end_s) : NaN;
+        if (Number.isNaN(start) || Number.isNaN(end) || end <= start) err('schema', sourceWhere, 'range needs absolute start_s < end_s (seconds)');
+        else if (duration > 0 && end > duration + 2) err('schema', sourceWhere, `range ends at ${clock(end)}, past the source duration ${clock(duration)}`);
+        else sourceReport.span = [start, end];
+      } else if (duration > 0) sourceReport.span = [0, duration];
+    } else if (source.range !== undefined) err('schema', sourceWhere, 'range applies only to video/audio sources');
+
+    let cursor = sourceReport.span?.[0] ?? 0; let words = 0; const paths = new Set();
     for (const [position, segment] of segments.entries()) {
       const where = `segment ${segment?.id ?? `${source.source_id}#${position}`}`;
       if (!isObj(segment)) { err('schema', where, 'segment must be an object'); continue; }
@@ -185,10 +198,9 @@ export function check({ coverage, ledger, claims, audit }, { requireAudit = fals
         entry.size = 1; entry.label = segment.path;
       }
     }
-    if (family === 'av') {
-      const duration = seconds(source.duration_s);
-      if (Number.isNaN(duration) || duration <= 0) err('schema', sourceWhere, 'video/audio source needs duration_s');
-      else if (Math.abs(duration - cursor) > 2) err('segment-gap', sourceWhere, `segments end at ${clock(cursor)} but the source runs ${clock(duration)}`);
+    if (family === 'av' && sourceReport.span && Math.abs(sourceReport.span[1] - cursor) > 2) {
+      err('segment-gap', sourceWhere, `segments end at ${clock(cursor)} but the ${sourceReport.ranged ? 'range' : 'source'} `
+        + `${sourceReport.ranged ? 'ends at' : 'runs'} ${clock(sourceReport.span[1])}`);
     } else if (family === 'text') {
       if (!Number.isInteger(source.words) || source.words <= 0) err('schema', sourceWhere, 'text source needs its total words count');
       else if (Math.abs(source.words - words) > Math.max(10, source.words * 0.01)) err('segment-gap', sourceWhere, `segments hold ${words} of ${source.words} words`);
@@ -214,6 +226,16 @@ export function check({ coverage, ledger, claims, audit }, { requireAudit = fals
     if (!entry) { err('claim-segment', `claims.json ${claim.id}`, `segment ${claim.segment} is not in coverage.json`); continue; }
     if (entry.source.source_id !== claim.source_id) err('claim-segment', `claims.json ${claim.id}`, `source_id ${claim.source_id} differs from segment source ${entry.source.source_id}`);
     entry.claims.push(claim);
+    // AV claim locators use absolute source times inside the covered span (shards included).
+    const { span, ranged } = entry.sourceReport;
+    if (entry.family !== 'av' || !span) continue;
+    for (const [stamp] of String(claim.locator ?? '').matchAll(/\b\d+:\d{2}(?::\d{2})?\b/g)) {
+      const at = seconds(stamp);
+      if (at < span[0] - 1 || at > span[1] + 1) {
+        err('claim-segment', `claims.json ${claim.id}`, `locator time ${stamp} is outside the ${ranged ? 'range' : 'source'} `
+          + `${clock(span[0])}-${clock(span[1])}; use absolute source times`);
+      }
+    }
   }
   const ownClaim = (entry, id, where, rule) => {
     const claim = byId.get(id);
@@ -374,7 +396,8 @@ const sizeLabel = (size, family) => (family === 'av' ? `${(size / 60).toFixed(1)
 export function render({ errors, report }, { perRule = Infinity } = {}) {
   const lines = [];
   for (const source of report.sources) {
-    lines.push(`source ${source.source_id} (${source.kind}, ${sizeLabel(source.size, source.family)}, ${source.segments.length} segments): `
+    const range = source.ranged && source.span ? `range ${clock(source.span[0])}-${clock(source.span[1])}, ` : '';
+    lines.push(`source ${source.source_id} (${source.kind}, ${range}${sizeLabel(source.size, source.family)}, ${source.segments.length} segments): `
       + `ledger ${source.items} (${per(source.items, source.size, source.family)}), claims ${source.claims} `
       + `(${per(source.claims, source.size, source.family)}), micro ${source.micro} / macro ${source.macro}`);
     for (const segment of source.segments) {
@@ -400,23 +423,98 @@ export function render({ errors, report }, { perRule = Infinity } = {}) {
   return `${lines.join('\n')}\n`;
 }
 
-const USAGE = 'usage: check_coverage.mjs RUN_DIR [--audit] [--summary] | check_coverage.mjs RUN_DIR --sample SEED';
+// Joins shard run directories: same-source shards become one source (segments sorted, range dropped
+// when the shards tile the whole duration); ledgers and claims are concatenated. Conflicts are errors.
+export function merge(shards) {
+  const errors = [];
+  const sources = new Map(); const ledger = {}; const claims = []; const meta = {};
+  for (const { dir, coverage, ledger: shardLedger, claims: shardClaims } of shards) {
+    if (!isObj(coverage) || !Array.isArray(coverage.sources)) { errors.push(`${dir}: coverage.json missing or has no sources`); continue; }
+    for (const source of coverage.sources) {
+      const prior = sources.get(source?.source_id);
+      if (!prior) { sources.set(source?.source_id, { ...source, segments: [...(source.segments ?? [])], shards: [{ dir, range: source.range }] }); continue; }
+      for (const field of ['kind', 'title', 'ref', 'duration_s', 'words']) {
+        if (JSON.stringify(prior[field]) !== JSON.stringify(source[field])) errors.push(`${dir}: source ${source.source_id} ${field} differs from ${prior.shards[0].dir}`);
+      }
+      if (prior.shards.some(shard => shard.range === undefined) || source.range === undefined) errors.push(`${dir}: source ${source.source_id} appears in several shards, so every shard needs a range`);
+      prior.segments.push(...(source.segments ?? []));
+      prior.lanes_not_run = { ...(source.lanes_not_run ?? {}), ...(prior.lanes_not_run ?? {}) };
+      const justifications = [prior.scale_justification, source.scale_justification].filter(text);
+      if (justifications.length) prior.scale_justification = justifications.join(' ');
+      prior.shards.push({ dir, range: source.range });
+    }
+    if (shardLedger !== undefined) {
+      if (!isObj(shardLedger?.segments)) errors.push(`${dir}: ledger.json has no segments map`);
+      else for (const [id, items] of Object.entries(shardLedger.segments)) {
+        if (id in ledger) errors.push(`${dir}: ledger segment ${id} is already in another shard`); else ledger[id] = items;
+      }
+    }
+    if (shardClaims !== undefined) {
+      const list = Array.isArray(shardClaims) ? shardClaims : shardClaims?.claims;
+      if (!Array.isArray(list)) errors.push(`${dir}: claims.json is not an array or {"claims": [...]}`); else claims.push(...list);
+      if (isObj(shardClaims)) for (const [key, value] of Object.entries(shardClaims)) if (key !== 'claims' && !(key in meta)) meta[key] = value;
+    }
+  }
+  const merged = [];
+  for (const { shards: parts, ...source } of sources.values()) {
+    if (parts.length > 1 && FAMILY[source.kind] === 'av') {
+      source.segments.sort((a, b) => seconds(a?.start) - seconds(b?.start));
+      const range = { start_s: Math.min(...parts.map(part => seconds(part.range?.start_s))),
+        end_s: Math.max(...parts.map(part => seconds(part.range?.end_s))) };
+      if (range.start_s === 0 && Math.abs(range.end_s - seconds(source.duration_s)) <= 2) delete source.range; else source.range = range;
+    } else if (parts.length > 1) errors.push(`source ${source.source_id}: only video/audio sources can be sharded by range`);
+    merged.push(source);
+  }
+  const first = shards.find(shard => isObj(shard.coverage))?.coverage ?? {};
+  return { errors, files: {
+    coverage: { ...first, schema: SCHEMAS.coverage, merged_from: shards.map(shard => shard.dir), sources: merged },
+    ledger: { schema: SCHEMAS.ledger, segments: ledger },
+    claims: { ...meta, claims },
+  } };
+}
+
+const USAGE = 'usage: check_coverage.mjs RUN_DIR [--audit] [--summary] | check_coverage.mjs RUN_DIR --sample SEED\n'
+  + '       check_coverage.mjs --merge SHARD_DIR SHARD_DIR... --out RUN_DIR [--summary]';
+const readRun = (dir, loadErrors) => name => {
+  let raw;
+  try { raw = readFileSync(join(dir, name), 'utf8'); } catch (error) { if (error.code !== 'ENOENT') loadErrors.push(`${join(dir, name)}: ${error.message}`); return undefined; }
+  try { return JSON.parse(raw); } catch (error) { loadErrors.push(`${join(dir, name)}: invalid JSON: ${error.message}`); return null; }
+};
 export function main(argv = process.argv.slice(2), out = process.stdout, errOut = process.stderr) {
-  let dir = null; let requireAudit = false; let seed = null; let perRule = Infinity;
+  let dir = null; let requireAudit = false; let seed = null; let perRule = Infinity; let shardDirs = null; let outDir = null;
+  const usage = () => { errOut.write(`${USAGE}\n`); return 2; };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--audit') requireAudit = true;
     else if (argv[i] === '--summary') perRule = 3;
-    else if (argv[i] === '--sample') { seed = argv[++i]; if (!text(seed)) { errOut.write(`${USAGE}\n`); return 2; } }
-    else if (argv[i].startsWith('--') || dir) { errOut.write(`${USAGE}\n`); return 2; }
+    else if (argv[i] === '--sample') { seed = argv[++i]; if (!text(seed)) return usage(); }
+    else if (argv[i] === '--merge') shardDirs = [];
+    else if (argv[i] === '--out') { outDir = argv[++i]; if (!text(outDir) || outDir.startsWith('--')) return usage(); }
+    else if (argv[i].startsWith('--')) return usage();
+    else if (shardDirs) shardDirs.push(argv[i]);
+    else if (dir) return usage();
     else dir = argv[i];
   }
-  if (!dir) { errOut.write(`${USAGE}\n`); return 2; }
   const loadErrors = [];
-  const load = name => {
-    let raw;
-    try { raw = readFileSync(join(dir, name), 'utf8'); } catch (error) { if (error.code !== 'ENOENT') loadErrors.push(`${name}: ${error.message}`); return undefined; }
-    try { return JSON.parse(raw); } catch (error) { loadErrors.push(`${name}: invalid JSON: ${error.message}`); return null; }
-  };
+  if (shardDirs) {
+    if (shardDirs.length < 2 || !outDir || dir || seed !== null || requireAudit) return usage();
+    const shards = shardDirs.map(shardDir => {
+      const load = readRun(shardDir, loadErrors);
+      return { dir: shardDir, coverage: load('coverage.json'), ledger: load('ledger.json'), claims: load('claims.json') };
+    });
+    const { errors, files } = merge(shards);
+    errors.unshift(...loadErrors);
+    const names = { coverage: 'coverage.json', ledger: 'ledger.json', claims: 'claims.json' };
+    for (const name of Object.values(names)) if (existsSync(join(outDir, name))) errors.push(`${join(outDir, name)} already exists; merge never overwrites`);
+    if (errors.length) { errOut.write(`check_coverage: merge failed:\n${errors.map(line => `  ${line}`).join('\n')}\n`); return 1; }
+    mkdirSync(outDir, { recursive: true });
+    for (const [key, name] of Object.entries(names)) writeFileSync(join(outDir, name), `${JSON.stringify(files[key], null, 2)}\n`, { flag: 'wx' });
+    out.write(`merged ${shardDirs.length} shards into ${outDir}\n`);
+    const result = check(files);
+    out.write(render(result, { perRule }));
+    return result.errors.length ? 1 : 0;
+  }
+  if (!dir || outDir) return usage();
+  const load = readRun(dir, loadErrors);
   const coverage = load('coverage.json');
   if (seed !== null) {
     if (!isObj(coverage)) { errOut.write('check_coverage: --sample needs a readable coverage.json\n'); return 1; }

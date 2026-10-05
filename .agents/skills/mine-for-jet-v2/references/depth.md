@@ -51,6 +51,25 @@ out of scope. Nothing is skipped by leaving a hole.
 Only `audience-corrections` may be switched off source-wide in `lanes_not_run`;
 every other lane needs a row in every segment.
 
+**Sharded video/audio.** When a long source is split across miners, each shard's
+run directory declares the slice it owns on the source: `"range": { "start_s":
+3600, "end_s": 5400 }` (absolute seconds, `end_s` ≤ `duration_s`; `duration_s`
+stays the whole source's). Segments must then tile exactly `start_s`..`end_s`,
+and every time is absolute source time: segment `start`/`end`, ledger `at`, and
+timestamps in claim `locator`s (a shard starting at 1:00:00 never writes
+`00:20`). Densities use the range length. Segment, ledger-item and claim IDs
+stay unique across shards. Join and re-check before hand-in:
+
+```sh
+Tools/agent/jet-env node .agents/skills/mine-for-jet-v2/scripts/check_coverage.mjs \
+  --merge "$CAPTURE_ROOT/shard-a" "$CAPTURE_ROOT/shard-b" --out "$CAPTURE_ROOT/merged"
+```
+
+Merge requires a `range` on every shard of a shared source and identical
+`kind`/`title`/`ref`/`duration_s`, sorts segments, drops `range` once the shards
+cover the whole duration, never overwrites `--out`, and exits by the re-check of
+the merged run. The recall audit runs on the merged run.
+
 ## 2. Concept ledger before claims (`ledger.json`)
 
 While reading each segment, enumerate **every** concept, technique, mechanism,
