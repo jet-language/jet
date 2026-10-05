@@ -5,29 +5,34 @@ use core.time.runtime.kernel_time.[jet_time_instant_elapsed_ns, jet_time_instant
 use core.time.runtime.top_time_sleep.[jet_std_time_sleep_duration_ns]
 
 // Rust: crates/jet-codegen/src/Prelude/Core/TimeInstant.rs:4
-#Derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)
+// Rust derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord): one I64
+// field, so the derived order is the monotonic order.
+#Comparable
 pub struct JetInstant { start_ns: I64 }
-// Rust: crates/jet-codegen/src/Prelude/Core/TimeInstant.rs:9
+
 impl JetInstant {
     // Rust: crates/jet-codegen/src/Prelude/Core/TimeInstant.rs:10
-    pub fn now() -> Self { JetInstant{start_ns: jet_time_monotonic_now_ns()} }
+    pub fn now() -> JetInstant { JetInstant{start_ns: jet_time_monotonic_now_ns()} }
     // Rust: crates/jet-codegen/src/Prelude/Core/TimeInstant.rs:16
-    pub fn elapsed_millis(self) -> I64 { self.elapsed_nanos().saturating_div(1_000_000) }
+    // Rust saturating_div by a positive divisor is truncating division.
+    pub fn elapsed_millis(self) -> I64 { self.elapsed_nanos() / I64{1000000} }
     // Rust: crates/jet-codegen/src/Prelude/Core/TimeInstant.rs:20
     pub fn elapsed_nanos(self) -> I64 { jet_time_instant_elapsed_ns(jet_time_monotonic_now_ns(), self.start_ns) }
     // Rust: crates/jet-codegen/src/Prelude/Core/TimeInstant.rs:24
-    pub fn plus_duration_ns(self, ns: I64) -> Self { Self{start_ns: jet_time_instant_add_duration_ns(self.start_ns, ns)} }
+    pub fn plus_duration_ns(self, ns: I64) -> JetInstant { JetInstant{start_ns: jet_time_instant_add_duration_ns(self.start_ns, ns)} }
     // Rust: crates/jet-codegen/src/Prelude/Core/TimeInstant.rs:30
-    pub fn minus_duration_ns(self, ns: I64) -> Self { Self{start_ns: jet_time_instant_sub_duration_ns(self.start_ns, ns)} }
+    pub fn minus_duration_ns(self, ns: I64) -> JetInstant { JetInstant{start_ns: jet_time_instant_sub_duration_ns(self.start_ns, ns)} }
     // Rust: crates/jet-codegen/src/Prelude/Core/TimeInstant.rs:36
-    pub fn difference_ns(self, other: Self) -> I64 { jet_time_instant_difference_ns(self.start_ns, other.start_ns) }
+    pub fn difference_ns(self, other: JetInstant) -> I64 { jet_time_instant_difference_ns(self.start_ns, other.start_ns) }
     // Rust: crates/jet-codegen/src/Prelude/Core/TimeInstant.rs:40
-    pub fn compare_to(self, other: Self) -> I64 { jet_time_instant_compare(self.start_ns, other.start_ns) }
+    pub fn compare_to(self, other: JetInstant) -> I64 { jet_time_instant_compare(self.start_ns, other.start_ns) }
     // Rust: crates/jet-codegen/src/Prelude/Core/TimeInstant.rs:44
     pub fn to_string_fmt(self) -> String { "Instant" }
 }
+
 // Rust: crates/jet-codegen/src/Prelude/Core/TimeInstant.rs:51
-pub fn jet_time_sleep_until(deadline: JetInstant) -> Unit {
-    remaining :: deadline.start_ns.saturating_sub(jet_time_monotonic_now_ns()).max(0)
-    jet_std_time_sleep_duration_ns(remaining)
+// Sleeps until the deadline; a past deadline sleeps zero.
+pub fn jet_time_sleep_until(deadline: JetInstant) {
+    remaining :: deadline.start_ns.saturating_sub(jet_time_monotonic_now_ns())
+    jet_std_time_sleep_duration_ns(if remaining < 0 -> I64{0} else -> remaining)
 }

@@ -6,24 +6,23 @@ use jet_std.[jet_scheduler_shielded, jet_task_sleep_ms_defaulted, jet_task_delay
 
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:18
 pub fn jet_deadline_remaining_ms() -> I64? {
-    jet_ctx_deadline_ms().map(d -> d.saturating_sub(jet_std_time_now()))
+    deadline :: jet_ctx_deadline_ms() ?? return None
+    Val(deadline.saturating_sub(jet_std_time_now()))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:25
-fn jet_deadline_check(wait_kind: String) -> Unit {
+fn jet_deadline_check(wait_kind: String) {
     deadline :: jet_task_deadline_if_expired(jet_deadline_remaining_ms(), wait_kind)
-    if Err(JetTaskWaitInterrupt.Deadline(_)) = jet_task_wait_policy(deadline, false, jet_scheduler_shielded()) {
-        jet_deadline_exceeded(wait_kind)
-    }
+    if jet_task_wait_policy(deadline, false, jet_scheduler_shielded()) == .Err(.Deadline(_)) -> jet_deadline_exceeded(wait_kind)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:35
-pub fn jet_std_time_sleep(millis: I64) -> Unit { jet_task_sleep_ms_defaulted(millis) }
+pub fn jet_std_time_sleep(millis: I64) { jet_task_sleep_ms_defaulted(millis) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:42
-pub fn jet_std_time_duration_to_millis(nanos: I64) -> I64 { nanos.saturating_div(1_000_000) }
+// Rust saturating_div by a positive divisor is truncating division.
+pub fn jet_std_time_duration_to_millis(nanos: I64) -> I64 { nanos / I64{1000000} }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:49
-pub fn jet_task_timeout_duration_ns(nanos: I64) -> Unit {
-    millis :: jet_std_time_duration_to_millis(nanos)
-    delay :: jet_task_delay_ms_defaulted(millis) as I64
+pub fn jet_task_timeout_duration_ns(nanos: I64) {
+    delay :: jet_task_delay_ms_defaulted(jet_std_time_duration_to_millis(nanos)) as I64
     jet_ctx_set_deadline_min(jet_std_time_now().saturating_add(delay))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:57
-pub fn jet_std_time_sleep_duration_ns(nanos: I64) -> Unit { jet_task_sleep_duration_ns_defaulted(nanos) }
+pub fn jet_std_time_sleep_duration_ns(nanos: I64) { jet_task_sleep_duration_ns_defaulted(nanos) }
