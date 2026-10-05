@@ -584,6 +584,9 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         n if n == Syntax::TYPE_AUTHORITY => Some("JetAuthority"),
         n if n == Syntax::DETERMINISTIC_WORLD_TYPE => Some("JetDeterministicWorld"),
         n if n == Syntax::TYPE_ERR => Some("JetErr"),
+        // D-ALLOC-ERR: the one allocation-failure record is the root Prelude
+        // `AllocError` shared by jet_mem and the numeric kernels.
+        "AllocError" => Some("AllocError"),
         "Transaction" => Some("JetTransaction"),
         "Counter" => Some("JetCounter"),
         "OrderedMap" => Some("JetOrderedMap"),
