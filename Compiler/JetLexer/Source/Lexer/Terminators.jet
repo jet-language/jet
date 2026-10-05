@@ -492,7 +492,7 @@ fn split_spelling(kind: Int) -> String Never! {
     }
 }
 
-fn lexed_with_terminators(facts: [Int], lexed: ^Lexed, events: [Int]) -> Lexed {
+fn lexed_with_terminators(facts: [Int], lexed: ^LexedTokens, events: [Int]) -> LexedTokens {
     tokens := [Token]{}
     diagnostics := ^lexed.diagnostics
     // The payload tokens, last first: each one is moved over (popped), never
@@ -507,11 +507,7 @@ fn lexed_with_terminators(facts: [Int], lexed: ^Lexed, events: [Int]) -> Lexed {
             at :: events[event_index * 3 + 2]
             if {
                 event == 1 -> {
-                    &tokens.push(Token{
-                        kind: K_SEMI,
-                        span: Span{start: at, end: at},
-                        payload: empty_payload(""),
-                    })
+                    &tokens.push(token_synthetic(K_SEMI, Span{start: at, end: at}))
                 }
                 else -> {
                     kind :: kind_at(facts, raw_index)
@@ -546,14 +542,16 @@ fn lexed_with_terminators(facts: [Int], lexed: ^Lexed, events: [Int]) -> Lexed {
         }
         raw_index += 1
     }
-    Lexed{tokens: tokens, diagnostics: diagnostics}
+    LexedTokens{tokens: tokens, diagnostics: diagnostics}
 }
 
 fn lex_with_terminators(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool) -> Lexed {
+    tables := token_tables()
     facts :: raw_token_facts(source, config_surface)
-    raw :: lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, 0)
+    raw :: lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, 0, &tables)
     events :: terminator_events(source, facts)
-    lexed_with_terminators(facts, ^raw, events)
+    lexed :: lexed_with_terminators(facts, ^raw, events)
+    Lexed{tokens: lexed.tokens, tables: tables, diagnostics: lexed.diagnostics}
 }
 
 pub fn lex(source: [U8]) -> Lexed {

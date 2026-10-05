@@ -1,30 +1,39 @@
 // Stable parser-facing lexer data. Spans are UTF-8 byte offsets into the
-// original source; payload.text preserves that exact source spelling.
+// original source. A token names its exact source spelling (`text`) and its
+// decoded value (`decoded`) in the lexed source's `NameTable`; literal facts
+// live in `TokenTables.literals`, so a token holds no heap data.
 use jet_foundation.[
     Diagnostic,
+    Name,
+    NameTable,
     Span,
+    name_empty,
+    name_table,
+    name_text,
 ]
-
-pub struct TokenPayload {
-    pub text: String
-    pub decoded: String
-    pub integer: Int?
-    pub decimal: Float?
-    pub suffix: String
-    pub interpolations: Int
-    pub string_parts: [StringPart]
-}
 
 pub struct Token {
     pub kind: Int
     pub span: Span
-    pub payload: TokenPayload
+    pub text: Name
+    pub decoded: Name
+    // Row in `TokenTables.literals`, or -1 when the token has no literal facts.
+    pub literal: Int
+}
+
+// Number and string facts of one literal token.
+pub struct TokenLiteral {
+    pub integer: Int?
+    pub decimal: Float?
+    pub suffix: Name
+    pub interpolations: Int
+    pub string_parts: [StringPart]
 }
 
 pub struct StringPart {
     pub kind: Int
     pub span: Span
-    pub text: String
+    pub text: Name
     pub byte: Int
     pub tokens: [Token]
 }
@@ -33,9 +42,83 @@ pub STRING_PART_TEXT :: 1
 pub STRING_PART_INTERPOLATION :: 2
 pub STRING_PART_BYTE :: 3
 
+// The spellings and literal facts a lexed source's tokens refer to,
+// interpolated tokens included.
+pub struct TokenTables {
+    pub names: NameTable
+    pub literals: [TokenLiteral]
+}
+
 pub struct Lexed {
     pub tokens: [Token]
+    pub tables: TokenTables
     pub diagnostics: [Diagnostic]
+}
+
+pub fn token_tables() -> TokenTables Never! {
+    TokenTables{names: name_table(), literals: [TokenLiteral]{}}
+}
+
+// A token with no spelling and no literal facts.
+pub fn token_synthetic(kind: Int, span: Span) -> Token Never! {
+    Token{kind: kind, span: span, text: name_empty(), decoded: name_empty(), literal: -1}
+}
+
+pub fn token_text(tables: TokenTables, token: Token) -> String Never! {
+    name_text(tables.names, token.text)
+}
+
+pub fn token_decoded(tables: TokenTables, token: Token) -> String Never! {
+    name_text(tables.names, token.decoded)
+}
+
+pub fn token_integer(tables: TokenTables, token: Token) -> Int? Never! {
+    if token.literal < 0 -> return None
+    tables.literals[token.literal].integer
+}
+
+pub fn token_decimal(tables: TokenTables, token: Token) -> Float? Never! {
+    if token.literal < 0 -> return None
+    tables.literals[token.literal].decimal
+}
+
+pub fn token_suffix(tables: TokenTables, token: Token) -> String Never! {
+    if token.literal < 0 -> return ""
+    name_text(tables.names, tables.literals[token.literal].suffix)
+}
+
+pub fn token_interpolations(tables: TokenTables, token: Token) -> Int Never! {
+    if token.literal < 0 -> return 0
+    tables.literals[token.literal].interpolations
+}
+
+pub fn token_string_part_count(tables: TokenTables, token: Token) -> Int Never! {
+    if token.literal < 0 -> return 0
+    tables.literals[token.literal].string_parts.len()
+}
+
+pub fn token_string_parts(tables: TokenTables, token: Token) -> [StringPart] Never! {
+    if token.literal < 0 -> return [StringPart]{}
+    tables.literals[token.literal].string_parts
+}
+
+fn shifted_token_span(span: Span, offset: Int) -> Span Never! {
+    Span{start: span.start + offset, end: span.end + offset}
+}
+
+// Moves a token, its literal's string parts and their tokens by `offset`.
+pub fn token_shift_spans(token: &Token, offset: Int, literals: &[TokenLiteral]) Never! {
+    token.span = shifted_token_span(token.span, offset)
+    if token.literal < 0 -> return
+    row :: token.literal
+    loop part_index in 0..<literals[row].string_parts.len() {
+        literals[row].string_parts[part_index].span = shifted_token_span(literals[row].string_parts[part_index].span, offset)
+        loop nested_index in 0..<literals[row].string_parts[part_index].tokens.len() {
+            nested := literals[row].string_parts[part_index].tokens[nested_index]
+            token_shift_spans(&nested, offset, &literals)
+            literals[row].string_parts[part_index].tokens[nested_index] = nested
+        }
+    }
 }
 
 // These numeric tags are stable at the Jet parser boundary and align with the

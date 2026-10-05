@@ -134,8 +134,11 @@ fn scan_unit_suffix_end(source: [U8], start: Int) -> Int {
 }
 
 fn word_kind(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Never! {
-    // Every keyword below is at most 8 bytes (`comptime`); a longer word is a name.
-    if end - start > 8 -> return K_IDENT
+    // Every keyword is 2-8 bytes and starts with a byte in `N`..`y`, so other
+    // words are identifiers without reading their spelling.
+    length :: end - start
+    first :: byte_at(source, start)
+    if length < 2 || length > 8 || first < 78 || first > 121 -> return K_IDENT
     word :: slice_text(source, start, end)
     previous_is_dot :: if previous_kind == {
         K_DOT -> true
