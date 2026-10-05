@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SHAPES, corpus } from './corpora.mjs';
+import { LAYOUTS, SHAPES, corpus } from './corpora.mjs';
 import { writeFiles } from './generate.mjs';
 import { phaseTable, readTrace, runMeasured } from '../throughput/measure.mjs';
 import { profileRun } from './profile.mjs';
@@ -294,17 +294,19 @@ export async function run(config) {
   const save = () => fs.writeFileSync(config.receipt, `${JSON.stringify(receipt, null, 2)}\n`);
   for (const shape of config.shapes) {
     for (const compiler of config.compilers) {
+    for (const layout of config.layouts) {
       const ladder = ladderFor(config, shape);
-      const series = { shape, compiler: compiler.label, kind: SHAPES[shape].kind, dimension: SHAPES[shape].dimension, ladder, baseline: null, points: [], truncated: null };
+      const label = `${shape}[${layout}]/${compiler.label}`;
+      const series = { shape, layout, compiler: compiler.label, kind: SHAPES[shape].kind, dimension: SHAPES[shape].dimension, ladder, baseline: null, points: [], truncated: null };
       receipt.series.push(series);
-      const where = n => path.join(config.workDir, compiler.label, shape, String(n));
-      series.baseline = await measure(config, compiler, corpus(shape, 1, config.seed), where(1));
-      log(config, `${shape}/${compiler.label} N=1 ${summary(series.baseline)}`);
+      const where = n => path.join(config.workDir, compiler.label, `${shape}-${layout}`, String(n));
+      series.baseline = await measure(config, compiler, corpus(shape, 1, config.seed, layout), where(1));
+      log(config, `${label} N=1 ${summary(series.baseline)}`);
       for (const n of ladder) {
-        const built = corpus(shape, n, config.seed);
+        const built = corpus(shape, n, config.seed, layout);
         const point = await measure(config, compiler, built, where(n));
         series.points.push(point);
-        log(config, `${shape}/${compiler.label} N=${n} (${built.code_lines} lines) ${summary(point)}`);
+        log(config, `${label} N=${n} (${built.code_lines} lines) ${summary(point)}`);
         save();
         if (!point.ok) {
           series.truncated = `N=${n}: ${point.problems.join('; ')}${point.open_phases.length ? ` (open phase: ${point.open_phases.join(', ')})` : ''}`;
@@ -327,10 +329,11 @@ export async function run(config) {
       if (series.truncated) series.failures.push({ kind: series.truncated.startsWith('stopped') ? 'truncated' : 'compile', text: series.truncated });
       if (SHAPES[shape].kind === 'domain') series.projection = project(series, judged);
       if (config.profileTop && series.failures.some(failure => failure.kind === 'growth') && ok.length) {
-        series.profile = await profileTop(config, compiler, shape, ok[ok.length - 1], series.failures);
+        series.profile = await profileTop(config, compiler, shape, layout, ok[ok.length - 1], series.failures);
       }
-      for (const failure of series.failures) receipt.failures.push(`${shape}/${compiler.label}: ${failure.text}`);
+      for (const failure of series.failures) receipt.failures.push(`${label}: ${failure.text}`);
       save();
+    }
     }
   }
   receipt.passed = receipt.failures.length === 0;
@@ -341,10 +344,10 @@ export async function run(config) {
 
 // Re-run the largest passing rung under perf and attribute samples to the
 // failing phases (profile.mjs): the responsible functions with their source.
-async function profileTop(config, compiler, shape, point, failures) {
-  const dir = path.join(config.workDir, compiler.label, shape, `${point.n}-profile`);
+async function profileTop(config, compiler, shape, layout, point, failures) {
+  const dir = path.join(config.workDir, compiler.label, `${shape}-${layout}`, `${point.n}-profile`);
   const phases = [...new Set(failures.filter(f => f.kind === 'growth').map(f => f.phase))];
-  const profiled = await measure({ ...config, profile: { wrap: d => profileRun.wrap(d) } }, compiler, corpus(shape, point.n, config.seed), dir);
+  const profiled = await measure({ ...config, profile: { wrap: d => profileRun.wrap(d) } }, compiler, corpus(shape, point.n, config.seed, layout), dir);
   return profileRun.attribute(dir, phases, { repo: REPO, top: 12, ok: profiled.ok });
 }
 
@@ -369,12 +372,13 @@ const USAGE = `Usage: node harness.mjs --compiler LABEL=KIND:PATH [--compiler ..
   --domain-ladder A,B,.. domain ladder in code lines (default ${DOMAIN_LADDER.join(',')})
   --memory-max 20G  --timeout 1800  --stop-after SECONDS (skip larger rungs after a slower one)
   --profile              perf-profile the top rung of every failing series (profile.mjs)
+  --layout files|single  repeatable; default both (a multi-file failure is a gate failure)
   --work-dir DIR  --receipt FILE  --seed S
 Exit 0 pass, 1 any growth/floor/compile failure, 2 invalid invocation.`;
 
 export function options(args) {
   const config = { compilers: [], shapes: [], bases: {}, ladders: {}, steps: 4, domainLadder: [...DOMAIN_LADDER], memoryMax: '20G', timeoutS: 1800,
-    stopAfterS: Infinity, jetCommand: 'build', seed: 1, profileTop: false,
+    stopAfterS: Infinity, jetCommand: 'build', seed: 1, profileTop: false, layouts: [],
     workDir: path.join(os.homedir(), '.cache/jet-dev/scratch/scaling-gate', new Date().toISOString().replace(/[:.]/g, '-')) };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
@@ -398,6 +402,7 @@ export function options(args) {
       case '--jet-command': if (!['build', 'check'].includes(value)) throw new Error('--jet-command is build or check'); config.jetCommand = value; break;
       case '--work-dir': config.workDir = path.resolve(value); break;
       case '--receipt': config.receipt = path.resolve(value); break;
+      case '--layout': if (!LAYOUTS.includes(value)) throw new Error(`--layout is ${LAYOUTS.join(' or ')}`); config.layouts.push(value); break;
       case '--seed': config.seed = Number(value); break;
       default: throw new Error(`Unknown option: ${flag}`);
     }
@@ -406,6 +411,7 @@ export function options(args) {
   if (new Set(config.compilers.map(c => c.label)).size !== config.compilers.length) throw new Error('Compiler labels must be unique');
   if (!config.shapes.length) config.shapes = Object.keys(SHAPES);
   config.shapes = [...new Set(config.shapes)];
+  config.layouts = config.layouts.length ? [...new Set(config.layouts)] : [...LAYOUTS];
   config.receipt ??= path.join(config.workDir, 'receipt.json');
   return config;
 }

@@ -11,7 +11,13 @@ node Tools/perf/scaling/generate.mjs web 125000 NEW_DIR     # one corpus
 node --test Tools/perf/scaling/scaling.test.mjs
 node Tools/perf/scaling/harness.mjs --compiler rust=jet:target/release/jet \
   --compiler p15=bootstrap:$HOME/.cache/jet-dev/candP15/jetc0 --stress --memory-max 20G --profile
+node Tools/perf/scaling/report.mjs RECEIPT.json > report.md   # markdown tables of a receipt
 ```
+
+Every corpus is measured in two layouts: `files` (as generated, many files)
+and `single` (one main.jet). A compiler that fails the multi-file layout fails
+the gate. Run `jet` compilers through `Tools/agent/jet-env` (rustc on PATH);
+the proofq jobs are `~/.cache/jet-dev/proofq/queue/PerfScalingGate-{stress,domains}.sh`.
 
 Shapes (`corpora.mjs`, `domains.mjs`, helpers in `package.mjs`): stress shapes
 grow one dimension with N (files, small functions, statements per function,

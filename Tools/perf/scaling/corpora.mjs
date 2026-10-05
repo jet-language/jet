@@ -409,12 +409,35 @@ export const SHAPES = Object.freeze({
 
 // The package of `shape` at size `n` (N for stress shapes, code lines for
 // domain shapes): files, expected diagnostics, code lines and digest.
-export function corpus(shape, n, seed = 1) {
+// `layout` is `files` (as generated: many files, the realistic layout) or
+// `single` (every file concatenated into main.jet, `use` lines hoisted and
+// deduplicated). Both are gated: a compiler that only handles one file must
+// fail the `files` series, not be excused from it.
+export const LAYOUTS = Object.freeze(['files', 'single']);
+export function corpus(shape, n, seed = 1, layout = 'files') {
   const entry = SHAPES[shape];
   if (!entry) throw new Error(`Unknown shape: ${shape} (shapes: ${Object.keys(SHAPES).join(', ')})`);
   if (!Number.isSafeInteger(n) || n < 1) throw new Error('N must be a positive safe integer');
+  if (!LAYOUTS.includes(layout)) throw new Error(`Unknown layout: ${layout}`);
   const built = entry.build(n, random(seed));
-  const files = built.files ?? built;
+  let files = built.files ?? built;
+  if (layout === 'single') files = singleFile(files);
   const expect = built.expect ?? { diagnostics: 0 };
-  return { shape, n, seed, kind: entry.kind, files, expect, code_lines: codeLines(files), source_sha256: sourceDigest(files) };
+  return { shape, n, seed, layout, kind: entry.kind, files, expect, code_lines: codeLines(files), source_sha256: sourceDigest(files) };
+}
+
+// One package file: the other files in path order, then main.jet.
+function singleFile(files) {
+  const uses = new Set();
+  const bodies = [];
+  const names = Object.keys(files).filter(name => name !== 'package.jet' && name !== 'main.jet').sort();
+  for (const name of [...names, 'main.jet']) {
+    const kept = [];
+    for (const line of files[name].split('\n')) {
+      if (/^use /.test(line)) uses.add(line);
+      else kept.push(line);
+    }
+    bodies.push(`// ---- ${name}`, ...kept);
+  }
+  return { 'package.jet': files['package.jet'], 'main.jet': `${[...uses, '', ...bodies].join('\n')}\n` };
 }
