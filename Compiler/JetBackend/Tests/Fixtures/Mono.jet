@@ -1,0 +1,776 @@
+// Entry-rooted native monomorphization fixtures (Lower/Mono.jet). These
+// hand-MIR programs keep their generic declarations (no #Inline(Always)), so
+// the native backend itself instantiates every generic function and method.
+// Source sketches describe the checked Jet input.
+use jet_backend.[LowerPrepared, lir_lower_entry, lower_call_bindings, lower_instance_id, lower_prepare_entry]
+use jet_foundation.[
+    MIRAccess, MIRBinaryOp, MIRBlockID, MIRCallArg,
+    MIRCallFallibility, MIRCallee, MIRCaptureParam, MIRConstReport, MIRConstant,
+    MIRConversion, MIRCopyFact, MIRCoreCallID, MIRDataPlan, MIRDataPlanCallable,
+    MIRDataPlanColumn, MIRDataPlanNode, MIRDataPlanNodeID, MIRDataPlanOperation,
+    MIRDataPlanPhysicalNode, MIRDataPlanSourceKind, MIRDataPlanStreamMode,
+    MIRFunction, MIRFunctionForm, MIRFunctionID, MIRFunctionSignature, MIRGenericParam, MIRImplDef,
+    MIRHardwareOp, MIRFailureCarrier, MIRGeneratorFacts, MIROperation,
+    MIROptimizationDecision, MIRPanicLoc, MIRPreludeTypeArg, MIRProgram,
+    MIRSemanticOp, MIRStringFormat, MIRTerminator, MIRTextHoleKind, MIRTextPatternPart,
+    MIRBinaryPatternPart, MIRTraitRef, MIRType, MIRTypeDef, MIRTypeDefKind,
+    MIRTypeKind, MIRUnionCoercion, MIRValueID, MIRVariant, MIRVariantPayload,
+    MIRVectorAccess, MIRVectorFact, MIRVectorLayout, MIRVectorRule,
+    MIRWebParamField, MIRWebParamReconstruction,
+    mir_copy_ownership, mir_field_id, mir_function_id, mir_nominal_ref,
+    mir_owned_ownership, mir_type_from_kind, mir_type_id, mir_type_with_identity,
+]
+
+fn fx_mono_binders(name: String) -> [MIRGenericParam] Never! {
+    [MIRGenericParam]{MIRGenericParam{name: name, bounds: [MIRTraitRef]{}}}
+}
+
+// A binder is a zero-argument Apply named by the parameter.
+fn fx_mono_parameter(name: String) -> MIRType Never! {
+    mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref(name), args: [MIRType]{}})
+}
+
+fn fx_mono_apply(owner: String, args: [MIRType]) -> MIRType Never! {
+    mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref(owner), args: args})
+}
+
+fn fx_mono_template(name: String, b: FxBuilder, ret: MIRType) -> MIRFunction Never! {
+    f := fx_function(name, b, ret)
+    f.generic_params = fx_mono_binders("T")
+    f
+}
+
+fn fx_mono_call(b: &FxBuilder, callee: MIRCallee, types: [MIRType], args: [MIRCallArg], ret: MIRType) -> MIRValueID Never! {
+    fx_owned(&b, ret, MIROperation.Call{callee: callee, args: args, type_args: types})
+}
+
+fn fx_mono_user(b: &FxBuilder, name: String, ty: MIRType, value: MIRValueID) -> MIRValueID Never! {
+    fx_mono_call(&b, MIRCallee.User{function: mir_function_id(name)}, [MIRType]{ty}, [MIRCallArg]{fx_arg(value, MIRAccess.Read)}, ty)
+}
+
+fn fx_mono_copy(b: &FxBuilder, ty: MIRType, value: MIRValueID) -> MIRValueID Never! {
+    fx_owned(&b, ty, MIROperation.Copy{value: value, fact: MIRCopyFact.Explicit})
+}
+
+fn fx_mono_drop(b: &FxBuilder, value: MIRValueID) Never! {
+    fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
+}
+
+fn fx_mono_text(b: &FxBuilder, text: String) -> MIRValueID Never! {
+    fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: text}})
+}
+
+fn fx_mono_field(b: &FxBuilder, base: MIRValueID, owner: String, field: String, ty: MIRType) -> MIRValueID Never! {
+    fx_value(&b, ty, fx_borrow(), MIROperation.Field{base: base, field: mir_field_id("{owner}.{field}")})
+}
+
+fn fx_mono_record_def(owner: String) -> MIRTypeDef Never! {
+    fx_type_def(owner, MIRTypeDefKind.Struct{fields: [MIRField]{fx_field(owner, "label", fx_string()), fx_field(owner, "number", fx_int())}, methods: [MIRFunctionID]{}})
+}
+
+fn fx_mono_record_type(owner: String) -> MIRType Never! {
+    name := mir_nominal_ref(owner)
+    // Deliberately identical display spelling, different declaration IDs.
+    if owner == "left.Record" || owner == "right.Record" -> name.name = "Record"
+    mir_type_with_identity(mir_type_from_kind(MIRTypeKind.Apply{name: name, args: [MIRType]{}}), mir_type_id(owner))
+}
+
+fn fx_mono_record(b: &FxBuilder, owner: String, text: String, number: Int) -> MIRValueID Never! {
+    label :: fx_mono_text(&b, text)
+    n :: fx_int_const(&b, number)
+    fx_owned(&b, fx_mono_record_type(owner), MIROperation.Struct{type_id: mir_type_id(owner), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("{owner}.label"), value: label}, MIRFieldValue{field: mir_field_id("{owner}.number"), value: n}}})
+}
+
+fn fx_mono_print_record(b: &FxBuilder, value: MIRValueID, owner: String) Never! {
+    label :: fx_mono_field(&b, value, owner, "label", fx_string())
+    number :: fx_mono_field(&b, value, owner, "number", fx_int())
+    fx_print(&b, label)
+    fx_print(&b, number)
+}
+
+fn fx_mono_identity() -> MIRFunction Never! {
+    t :: fx_mono_parameter("T")
+    b := fx_builder()
+    x :: fx_param(&b, "x", t, fx_borrow())
+    copied :: fx_mono_copy(&b, t, x)
+    fx_block(&b, 0, MIRTerminator.Return{value: Val(copied)})
+    fx_mono_template("identity", b, t)
+}
+
+fn fx_mono_outer() -> MIRFunction Never! {
+    t :: fx_mono_parameter("T")
+    b := fx_builder()
+    x :: fx_param(&b, "x", t, fx_borrow())
+    forwarded :: fx_mono_user(&b, "identity", t, x)
+    fx_block(&b, 0, MIRTerminator.Return{value: Val(forwarded)})
+    fx_mono_template("outer", b, t)
+}
+
+// fn identity<T>(x: T) -> T { ~x }
+// fn run() { a :: 7; s :: "mono"; r :: Record{label:"owned",number:9}
+//   print(identity(a)); _ :: identity(a); print(identity(s))
+//   returned :: identity(r); print(returned.label); print(returned.number) }
+// expect-stdout mono-three-types: "7\nmono\nowned\n9\n"
+// expect-exit mono-three-types: 0
+fn fx_mono_three_types() -> MIRProgram Never! {
+    fx_mono_values(false)
+}
+
+// fn outer<T>(x: T) -> T { identity<T>(x) }
+// fn run() { print(outer(11)); print(outer("nested"))
+//   r :: outer(Record{label:"inner",number:12}); print(r.label); print(r.number) }
+// expect-stdout mono-nested-call: "11\nnested\ninner\n12\n"
+// expect-exit mono-nested-call: 0
+fn fx_mono_nested_call() -> MIRProgram Never! {
+    fx_mono_values(true)
+}
+
+fn fx_mono_values(nested: Bool) -> MIRProgram Never! {
+    name :: if nested -> "outer" else -> "identity"
+    r := fx_builder()
+    number :: fx_int_const(&r, if nested -> 11 else -> 7)
+    n :: fx_mono_user(&r, name, fx_int(), number)
+    fx_print(&r, n)
+    // A second call site with the same arguments reuses the instance.
+    again :: fx_mono_user(&r, name, fx_int(), number)
+    fx_mono_drop(&r, n)
+    fx_mono_drop(&r, again)
+    text :: fx_mono_text(&r, if nested -> "nested" else -> "mono")
+    s :: fx_mono_user(&r, name, fx_string(), text)
+    fx_print(&r, s)
+    record :: fx_mono_record(&r, "Record", if nested -> "inner" else -> "owned", if nested -> 12 else -> 9)
+    copied :: fx_mono_user(&r, name, fx_mono_record_type("Record"), record)
+    fx_mono_print_record(&r, copied, "Record")
+    fx_mono_drop(&r, copied)
+    fx_mono_drop(&r, record)
+    fx_mono_drop(&r, s)
+    fx_mono_drop(&r, text)
+    fx_do(&r, MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("monomorphic_leaf")}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    leaf := fx_builder()
+    fx_block(&leaf, 0, MIRTerminator.Return{value: None})
+    functions := [MIRFunction]{fx_mono_identity()}
+    if nested -> &functions.push(fx_mono_outer())
+    &functions.push(fx_function("monomorphic_leaf", leaf, fx_unit()))
+    &functions.push(fx_function("run", r, fx_unit()))
+    fx_program(functions, [MIRTypeDef]{fx_mono_record_def("Record")})
+}
+
+fn fx_mono_pair_def() -> MIRTypeDef Never! {
+    t :: fx_mono_parameter("T")
+    computed := fx_field("Pair", "computed", t)
+    computed.computed = true
+    d := fx_type_def("Pair", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Pair", "first", t), computed, fx_field("Pair", "second", t)}, methods: [MIRFunctionID]{}})
+    d.generic_params = fx_mono_binders("T")
+    // A checked recursive-edge wrapper on an instantiated field.
+    d.boxed_edges = [String]{"second"}
+    d
+}
+
+fn fx_mono_pair(b: &FxBuilder, ty: MIRType, first: MIRValueID, second: MIRValueID) -> MIRValueID Never! {
+    // Reverse operand order also checks ID-based field selection.
+    fx_owned(&b, ty, MIROperation.Struct{type_id: mir_type_id("Pair"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("Pair.second"), value: second}, MIRFieldValue{field: mir_field_id("Pair.first"), value: first}}})
+}
+
+fn fx_mono_print_pair(b: &FxBuilder, pair: MIRValueID, elem: MIRType) Never! {
+    a :: fx_mono_field(&b, pair, "Pair", "first", elem)
+    z :: fx_mono_field(&b, pair, "Pair", "second", elem)
+    fx_print(&b, a)
+    fx_print(&b, z)
+}
+
+// struct Pair<T> { first: T, computed: T -> first, second: T }
+// fn rename(&s: String) { s = "changed" }
+// fn run() { i :: Pair<Int>{first:1,second:2}; print(i.first); print(i.second)
+//   s :: Pair<String>{first:"left",second:"right"}; print(s.first); print(s.second)
+//   duplicate := ~s; rename(&duplicate.second)
+//   print(s.first); print(duplicate.second) }
+// The computed member occupies no slot between the two stored fields.
+// expect-stdout mono-generic-struct: "1\n2\nleft\nright\nleft\nchanged\n"
+// expect-exit mono-generic-struct: 0
+fn fx_mono_generic_struct() -> MIRProgram Never! {
+    ints :: fx_mono_apply("Pair", [MIRType]{fx_int()})
+    strings :: fx_mono_apply("Pair", [MIRType]{fx_string()})
+    n := fx_builder()
+    slot :: fx_write_param(&n, "s", fx_string())
+    fresh :: fx_mono_text(&n, "changed")
+    fx_do(&n, MIROperation.ReplacePlace{place: slot, value: fresh})
+    fx_block(&n, 0, MIRTerminator.Return{value: None})
+    r := fx_builder()
+    one :: fx_int_const(&r, 1)
+    two :: fx_int_const(&r, 2)
+    i :: fx_mono_pair(&r, ints, one, two)
+    fx_mono_print_pair(&r, i, fx_int())
+    left :: fx_mono_text(&r, "left")
+    right :: fx_mono_text(&r, "right")
+    s :: fx_mono_pair(&r, strings, left, right)
+    fx_mono_print_pair(&r, s, fx_string())
+    duplicate :: fx_mono_copy(&r, strings, s)
+    root :: fx_local(&r, "duplicate", strings, mir_owned_ownership())
+    fx_do(&r, MIROperation.WritePlace{place: root, value: duplicate})
+    second :: fx_field_place(&r, root, "Pair.second", fx_string())
+    fx_call_write(&r, "rename", second, fx_string())
+    original :: fx_mono_field(&r, s, "Pair", "first", fx_string())
+    changed :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.ReadPlace{place: second})
+    fx_print(&r, original)
+    fx_print(&r, changed)
+    gone :: fx_owned(&r, strings, MIROperation.MovePlace{place: root})
+    fx_mono_drop(&r, gone)
+    fx_mono_drop(&r, s)
+    fx_mono_drop(&r, i)
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("rename", n, fx_unit()), fx_function("run", r, fx_unit())}, [MIRTypeDef]{fx_mono_pair_def()})
+}
+
+fn fx_mono_first_method() -> MIRFunction Never! {
+    t :: fx_mono_parameter("T")
+    owner :: fx_mono_apply("Pair", [MIRType]{t})
+    b := fx_builder()
+    receiver :: fx_param(&b, "self", owner, fx_borrow())
+    first :: fx_mono_field(&b, receiver, "Pair", "first", t)
+    copied :: fx_mono_copy(&b, t, first)
+    fx_block(&b, 0, MIRTerminator.Return{value: Val(copied)})
+    f := fx_function("Pair.first_value", b, t)
+    f.form = MIRFunctionForm.Method{owner: owner, self_access: Val(MIRAccess.Read)}
+    f
+}
+
+fn fx_mono_choose_method() -> MIRFunction Never! {
+    owner :: fx_mono_apply("Pair", [MIRType]{fx_mono_parameter("T")})
+    u :: fx_mono_parameter("U")
+    b := fx_builder()
+    _ := fx_param(&b, "self", owner, fx_borrow())
+    x :: fx_param(&b, "value", u, fx_borrow())
+    copied :: fx_mono_copy(&b, u, x)
+    fx_block(&b, 0, MIRTerminator.Return{value: Val(copied)})
+    f := fx_function("Pair.choose", b, u)
+    f.form = MIRFunctionForm.Method{owner: owner, self_access: Val(MIRAccess.Read)}
+    f.generic_params = fx_mono_binders("U")
+    f
+}
+
+fn fx_mono_set_method() -> MIRFunction Never! {
+    t :: fx_mono_parameter("T")
+    owner :: fx_mono_apply("Pair", [MIRType]{t})
+    b := fx_builder()
+    root :: fx_write_param(&b, "self", owner)
+    first :: fx_field_place(&b, root, "Pair.first", t)
+    x :: fx_param(&b, "value", t, fx_borrow())
+    copied :: fx_mono_copy(&b, t, x)
+    fx_do(&b, MIROperation.ReplacePlace{place: first, value: copied})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    f := fx_function("Pair.set_first", b, fx_unit())
+    f.form = MIRFunctionForm.Method{owner: owner, self_access: Val(MIRAccess.Write)}
+    f
+}
+
+// impl<T> Pair<T> { fn first_value(self) -> T { ~self.first }
+//   fn choose<U>(self, x: U) -> U { ~x }
+//   fn set_first(&self, x: T) { self.first = ~x } }
+// fn run() { i := Pair<Int>{first:3,second:4}; s := Pair<String>{first:"owner",second:"tail"}
+//   print(Pair<Int>.first_value(i)); print(s.first_value())
+//   print(i.choose<String>("independent")); print(s.choose<Int>(8))
+//   i.set_first(5); s.set_first("updated"); print(i.first); print(s.first) }
+// Owner arguments precede the method's own type arguments in instance keys.
+// expect-stdout mono-owner-methods: "3\nowner\nindependent\n8\n5\nupdated\n"
+// expect-exit mono-owner-methods: 0
+fn fx_mono_owner_methods() -> MIRProgram Never! {
+    ints :: fx_mono_apply("Pair", [MIRType]{fx_int()})
+    strings :: fx_mono_apply("Pair", [MIRType]{fx_string()})
+    r := fx_builder()
+    one :: fx_int_const(&r, 3)
+    two :: fx_int_const(&r, 4)
+    i :: fx_mono_pair(&r, ints, one, two)
+    a :: fx_mono_text(&r, "owner")
+    z :: fx_mono_text(&r, "tail")
+    s :: fx_mono_pair(&r, strings, a, z)
+    int_root :: fx_local(&r, "i", ints, mir_owned_ownership())
+    str_root :: fx_local(&r, "s", strings, mir_owned_ownership())
+    fx_do(&r, MIROperation.WritePlace{place: int_root, value: i})
+    fx_do(&r, MIROperation.WritePlace{place: str_root, value: s})
+    first_i :: fx_mono_call(&r, MIRCallee.Associated{function: mir_function_id("Pair.first_value"), owner: ints}, [MIRType]{}, [MIRCallArg]{fx_arg(i, MIRAccess.Read)}, fx_int())
+    first_s :: fx_mono_call(&r, MIRCallee.Method{function: mir_function_id("Pair.first_value"), owner: strings}, [MIRType]{}, [MIRCallArg]{fx_arg(s, MIRAccess.Read)}, fx_string())
+    fx_print(&r, first_i)
+    fx_print(&r, first_s)
+    text :: fx_mono_text(&r, "independent")
+    eight :: fx_int_const(&r, 8)
+    chosen_s :: fx_mono_call(&r, MIRCallee.Method{function: mir_function_id("Pair.choose"), owner: ints}, [MIRType]{fx_string()}, [MIRCallArg]{fx_arg(i, MIRAccess.Read), fx_arg(text, MIRAccess.Read)}, fx_string())
+    chosen_i :: fx_mono_call(&r, MIRCallee.Associated{function: mir_function_id("Pair.choose"), owner: strings}, [MIRType]{fx_int()}, [MIRCallArg]{fx_arg(s, MIRAccess.Read), fx_arg(eight, MIRAccess.Read)}, fx_int())
+    fx_print(&r, chosen_s)
+    fx_print(&r, chosen_i)
+    five :: fx_int_const(&r, 5)
+    fresh :: fx_mono_text(&r, "updated")
+    wi := fx_arg(i, MIRAccess.Write)
+    wi.place = Val(int_root)
+    ws := fx_arg(s, MIRAccess.Write)
+    ws.place = Val(str_root)
+    _ := fx_mono_call(&r, MIRCallee.Method{function: mir_function_id("Pair.set_first"), owner: ints}, [MIRType]{}, [MIRCallArg]{wi, fx_arg(five, MIRAccess.Read)}, fx_unit())
+    _ := fx_mono_call(&r, MIRCallee.Method{function: mir_function_id("Pair.set_first"), owner: strings}, [MIRType]{}, [MIRCallArg]{ws, fx_arg(fresh, MIRAccess.Read)}, fx_unit())
+    int_first :: fx_field_place(&r, int_root, "Pair.first", fx_int())
+    str_first :: fx_field_place(&r, str_root, "Pair.first", fx_string())
+    now_i :: fx_value(&r, fx_int(), fx_borrow(), MIROperation.ReadPlace{place: int_first})
+    now_s :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.ReadPlace{place: str_first})
+    fx_print(&r, now_i)
+    fx_print(&r, now_s)
+    fx_mono_drop(&r, first_i)
+    fx_mono_drop(&r, first_s)
+    fx_mono_drop(&r, chosen_s)
+    fx_mono_drop(&r, chosen_i)
+    fx_mono_drop(&r, text)
+    fx_mono_drop(&r, fresh)
+    gone_i :: fx_owned(&r, ints, MIROperation.MovePlace{place: int_root})
+    gone_s :: fx_owned(&r, strings, MIROperation.MovePlace{place: str_root})
+    fx_mono_drop(&r, gone_i)
+    fx_mono_drop(&r, gone_s)
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_mono_first_method(), fx_mono_choose_method(), fx_mono_set_method(), fx_function("run", r, fx_unit())}, [MIRTypeDef]{fx_mono_pair_def()})
+}
+
+fn fx_mono_recursive_template(name: String, next: String) -> MIRFunction Never! {
+    t :: fx_mono_parameter("T")
+    b := fx_builder()
+    x :: fx_param(&b, "x", t, fx_borrow())
+    n :: fx_param(&b, "n", fx_int(), mir_copy_ownership())
+    zero :: fx_int_const(&b, 0)
+    done :: fx_compare(&b, MIRBinaryOp.Eq, n, zero)
+    fx_block(&b, 0, MIRTerminator.Branch{condition: done, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+    copied :: fx_mono_copy(&b, t, x)
+    fx_block(&b, 1, MIRTerminator.Return{value: Val(copied)})
+    one :: fx_int_const(&b, 1)
+    smaller :: fx_int_op(&b, MIRBinaryOp.Sub, "sub", n, one)
+    result :: fx_mono_call(&b, MIRCallee.User{function: mir_function_id(next)}, [MIRType]{t}, [MIRCallArg]{fx_arg(x, MIRAccess.Read), fx_arg(smaller, MIRAccess.Read)}, t)
+    fx_block(&b, 2, MIRTerminator.Return{value: Val(result)})
+    fx_mono_template(name, b, t)
+}
+
+// fn recur<T>(x:T,n:Int)->T { if n == 0 -> ~x else -> recur<T>(x,n-1) }
+// fn even<T>(x:T,n:Int)->T { if n == 0 -> ~x else -> odd<T>(x,n-1) }
+// fn odd<T>(x:T,n:Int)->T { if n == 0 -> ~x else -> even<T>(x,n-1) }
+// fn unused_captured<T>() { /* never reached: never instantiated */ }
+// fn run() { print(recur<Int>(13,3)); print(even<String>("mutual",4)) }
+// expect-stdout mono-recursive: "13\nmutual\n"
+// expect-exit mono-recursive: 0
+fn fx_mono_recursive() -> MIRProgram Never! {
+    r := fx_builder()
+    number :: fx_int_const(&r, 13)
+    three :: fx_int_const(&r, 3)
+    text :: fx_mono_text(&r, "mutual")
+    four :: fx_int_const(&r, 4)
+    i :: fx_mono_call(&r, MIRCallee.User{function: mir_function_id("recur")}, [MIRType]{fx_int()}, [MIRCallArg]{fx_arg(number, MIRAccess.Read), fx_arg(three, MIRAccess.Read)}, fx_int())
+    s :: fx_mono_call(&r, MIRCallee.User{function: mir_function_id("even")}, [MIRType]{fx_string()}, [MIRCallArg]{fx_arg(text, MIRAccess.Read), fx_arg(four, MIRAccess.Read)}, fx_string())
+    fx_print(&r, i)
+    fx_print(&r, s)
+    fx_mono_drop(&r, i)
+    fx_mono_drop(&r, s)
+    fx_mono_drop(&r, text)
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    c := fx_builder()
+    _ := fx_owned(&c, fx_mono_parameter("T"), MIROperation.Capture{slot: 0})
+    fx_block(&c, 0, MIRTerminator.Return{value: None})
+    captured := fx_mono_template("unused_captured", c, fx_unit())
+    captured.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "x", span: fx_span(), ty: fx_mono_parameter("T"), access: MIRAccess.Read, ownership: fx_borrow()}}
+    fx_program([MIRFunction]{captured, fx_mono_recursive_template("recur", "recur"), fx_mono_recursive_template("even", "odd"), fx_mono_recursive_template("odd", "even"), fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}
+
+// module left { struct Record { label:String,number:Int } }
+// module right { struct Record { label:String,number:Int } }
+// fn run() { a :: identity(left.Record{label:"left-module",number:21})
+//   b :: identity(right.Record{label:"right-module",number:22})
+//   print(a.label); print(a.number); print(b.label); print(b.number)
+//   p :: Pair<Pair<String>>{first:Pair{first:"nested",second:"a"},second:Pair{first:"b",second:"c"}}
+//   print(identity(p).first.first); print(identity(Pair<Int>{first:6,second:7}).first) }
+// Two declarations of one display name get two instances and two glue rows.
+// expect-stdout mono-identity-collisions: "left-module\n21\nright-module\n22\nnested\n6\n"
+// expect-exit mono-identity-collisions: 0
+fn fx_mono_identity_collisions() -> MIRProgram Never! {
+    left_def := fx_mono_record_def("left.Record")
+    right_def := fx_mono_record_def("right.Record")
+    left_def.name = "Record"
+    right_def.name = "Record"
+    r := fx_builder()
+    left :: fx_mono_record(&r, "left.Record", "left-module", 21)
+    right :: fx_mono_record(&r, "right.Record", "right-module", 22)
+    a :: fx_mono_user(&r, "identity", fx_mono_record_type("left.Record"), left)
+    b :: fx_mono_user(&r, "identity", fx_mono_record_type("right.Record"), right)
+    fx_mono_print_record(&r, a, "left.Record")
+    fx_mono_print_record(&r, b, "right.Record")
+    strings :: fx_mono_apply("Pair", [MIRType]{fx_string()})
+    nested :: fx_mono_apply("Pair", [MIRType]{strings})
+    n :: fx_mono_text(&r, "nested")
+    x :: fx_mono_text(&r, "a")
+    y :: fx_mono_text(&r, "b")
+    z :: fx_mono_text(&r, "c")
+    first :: fx_mono_pair(&r, strings, n, x)
+    second :: fx_mono_pair(&r, strings, y, z)
+    pair :: fx_mono_pair(&r, nested, first, second)
+    duplicate :: fx_mono_user(&r, "identity", nested, pair)
+    inner :: fx_mono_field(&r, duplicate, "Pair", "first", strings)
+    leaf :: fx_mono_field(&r, inner, "Pair", "first", fx_string())
+    fx_print(&r, leaf)
+    six :: fx_int_const(&r, 6)
+    seven :: fx_int_const(&r, 7)
+    ints :: fx_mono_apply("Pair", [MIRType]{fx_int()})
+    int_pair :: fx_mono_pair(&r, ints, six, seven)
+    int_copy :: fx_mono_user(&r, "identity", ints, int_pair)
+    int_first :: fx_mono_field(&r, int_copy, "Pair", "first", fx_int())
+    fx_print(&r, int_first)
+    fx_mono_drop(&r, int_copy)
+    fx_mono_drop(&r, int_pair)
+    fx_mono_drop(&r, duplicate)
+    fx_mono_drop(&r, pair)
+    fx_mono_drop(&r, a)
+    fx_mono_drop(&r, b)
+    fx_mono_drop(&r, left)
+    fx_mono_drop(&r, right)
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_mono_identity(), fx_function("run", r, fx_unit())}, [MIRTypeDef]{left_def, right_def, fx_mono_pair_def()})
+}
+
+fn fx_mono_wrap_def() -> MIRTypeDef Never! {
+    d := fx_display_type("Wrap", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Wrap", "value", fx_mono_parameter("T"))}, methods: [MIRFunctionID]{}})
+    d.generic_params = fx_mono_binders("T")
+    d
+}
+
+fn fx_mono_wrap(b: &FxBuilder, ty: MIRType, value: MIRValueID) -> MIRValueID Never! {
+    fx_owned(&b, ty, MIROperation.Struct{type_id: mir_type_id("Wrap"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("Wrap.value"), value: value}}})
+}
+
+// #Printable struct Wrap<T> { value: T }
+// impl<T> Display for Wrap<T> { fn display(self) -> String { "wrapped" } }
+// fn run() { i :: Wrap<Int>{value: 7}; s :: Wrap<String>{value: "text"}
+//   print(i); print(s); print("{i}"); print("{s}") }
+// Show renders each instance structurally; the generic Display impl's method
+// is instantiated per receiver.
+// expect-stdout mono-render: "Wrap { value: 7 }\nWrap { value: \"text\" }\nwrapped\nwrapped\n"
+// expect-exit mono-render: 0
+fn fx_mono_render() -> MIRProgram Never! {
+    t :: fx_mono_parameter("T")
+    owner :: fx_mono_apply("Wrap", [MIRType]{t})
+    d := fx_builder()
+    fx_param(&d, "self", owner, fx_borrow()).drop("fixture receiver")
+    text :: fx_mono_text(&d, "wrapped")
+    fx_block(&d, 0, MIRTerminator.Return{value: Val(text)})
+    display := fx_function("wrap_display", d, fx_string())
+    display.name = "display"
+    display.form = MIRFunctionForm.Method{owner: owner, self_access: Val(MIRAccess.Read)}
+    ints :: fx_mono_apply("Wrap", [MIRType]{fx_int()})
+    strings :: fx_mono_apply("Wrap", [MIRType]{fx_string()})
+    r := fx_builder()
+    seven :: fx_int_const(&r, 7)
+    i :: fx_mono_wrap(&r, ints, seven)
+    word :: fx_mono_text(&r, "text")
+    s :: fx_mono_wrap(&r, strings, word)
+    fx_print(&r, i)
+    fx_print(&r, s)
+    fx_render_interpolation(&r, i, MIRStringFormat.Display)
+    fx_render_interpolation(&r, s, MIRStringFormat.Display)
+    fx_mono_drop(&r, i)
+    fx_mono_drop(&r, s)
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    p := fx_program([MIRFunction]{display, fx_function("run", r, fx_unit())}, [MIRTypeDef]{fx_mono_wrap_def()})
+    p.impls = [MIRImplDef]{fx_display_impl("wrap Display", "Display", owner, mir_function_id("wrap_display"), 1)}
+    p
+}
+
+// Structural-only: impl<T> Pair<T> { fn inventory<U>(self, x:T)->T { ~x } }
+// carrying failure/coercion/host/hardware/data metadata. Execution of those
+// routes is not O0's; every type-bearing row must still be substituted.
+// type GenericAlias<T> = T; distinct GenericDistinct<T> = T
+// enum GenericEnum<T> { Single(T), Named{value:T} }
+fn fx_mono_substitution_inventory() -> MIRProgram Never! {
+    t :: mir_type_with_identity(fx_mono_parameter("T"), mir_type_id("inventory.T"))
+    u :: fx_mono_parameter("U")
+    union :: mir_type_with_identity(mir_type_from_kind(MIRTypeKind.Union{members: [MIRType]{t, fx_int()}}), mir_type_id("inventory.union"))
+    owner :: fx_mono_apply("Pair", [MIRType]{t})
+    b := fx_builder()
+    _ := fx_param(&b, "self", owner, fx_borrow())
+    x :: fx_param(&b, "x", t, fx_borrow())
+    _ := fx_local(&b, "local", t, mir_owned_ownership())
+    _ := fx_owned(&b, mir_type_from_kind(MIRTypeKind.Option{inner: t}), MIROperation.Constant{value: MIRConstant.Failed{report: MIRConstReport.Clean{ty: t}}})
+    _ := fx_owned(&b, t, MIROperation.Convert{value: x, parameters: [MIRValueID]{}, target: t, conversion: MIRConversion.Prelude{call: fx_prelude_id("inventory", "convert"), location: MIRPanicLoc{file: fx_source_file(), line: 7, column: 2}, fallibility: MIRCallFallibility.Failure{failure: MIRFailureCarrier.Result{success: t, error: u}}}})
+    arg := fx_arg(x, MIRAccess.Read)
+    callable_ty :: mir_type_from_kind(MIRTypeKind.Fn{signature: MIRFunctionSignature{params: [MIRType]{t}, ret: Val(u), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}})
+    arg.fn_coercion = Val(MIRFnCoercion{ty: callable_ty, already_boxed: false})
+    arg.box_as_trait = Val(mir_type_id("inventory.T"))
+    arg.widen_to_union = Val(MIRUnionCoercion{union: mir_type_id("inventory.union"), variant: "T"})
+    fx_do(&b, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("inventory", "static"), args: [MIRCallArg]{arg}, owner_type_args: [MIRPreludeTypeArg]{MIRPreludeTypeArg.Type{ty: t}, MIRPreludeTypeArg.HostUsize}, type_args: [MIRType]{u}}})
+    fx_do(&b, MIROperation.Semantic{operation: MIRSemanticOp.HardwareCall{call: fx_prelude_id("inventory", "dma"), op: MIRHardwareOp.DMAStart{profile_id: "fixture", channel: "0", buffer_ty: t}, receiver: None, args: [MIRCallArg]{arg}}})
+    fx_do(&b, MIROperation.Semantic{operation: MIRSemanticOp.HostBorrowCallback{callable: x, params: [MIRType]{t, u}}})
+    plan :: MIRDataPlan{
+        schema_version: 1, source: MIRDataPlanSourceKind.Table,
+        logical: [MIRDataPlanNode]{MIRDataPlanNode{id: MIRDataPlanNodeID{value: 1}, operation: MIRDataPlanOperation.Scan, inputs: [MIRDataPlanNodeID]{}, source: Val(MIRDataPlanSourceKind.Table), row_type: t, columns: [MIRDataPlanColumn]{MIRDataPlanColumn{name: "value", ty: t, nullable: false}}, callable: Val(MIRDataPlanCallable{label: "map", parameter: t, result: u, span: fx_span()}), stream: MIRDataPlanStreamMode.Materialized{reason: "fixture"}, span: fx_span()}},
+        physical: [MIRDataPlanPhysicalNode]{}, output: MIRDataPlanNodeID{value: 1}, source_span: fx_span(),
+    }
+    fx_do(&b, MIROperation.CoreCall{call: MIRCoreCallID{value: 1}, route: fx_prelude_id("inventory", "data"), args: [MIRCallArg]{arg}, type_args: [MIRType]{t, u}, fallibility: MIRCallFallibility.Failure{failure: MIRFailureCarrier.Optional{value: t}}, data_plan: Val(plan)})
+    fx_do(&b, MIROperation.Semantic{operation: MIRSemanticOp.TextPatternMatch{call: fx_prelude_id("inventory", "text"), subject: x, parts: [MIRTextPatternPart]{MIRTextPatternPart.Hole{kind: MIRTextHoleKind.Text, ty: mir_type_id("inventory.T"), span: fx_span()}}}})
+    fx_do(&b, MIROperation.Semantic{operation: MIRSemanticOp.BinaryPatternMatch{call: fx_prelude_id("inventory", "binary"), subject: x, parts: [MIRBinaryPatternPart]{MIRBinaryPatternPart.Bits{width: U8{8}, ty: mir_type_id("inventory.T"), little: true, span: fx_span()}, MIRBinaryPatternPart.Rest{ty: mir_type_id("inventory.T"), span: fx_span()}}}})
+    fx_do(&b, MIROperation.TraitBox{value: x, target: mir_type_id("inventory.T")})
+    _ := fx_copy(&b, t, MIROperation.PtrFromAddr{address: x, element: t})
+    _ := fx_mono_copy(&b, fx_mono_apply("GenericAlias", [MIRType]{t}), x)
+    _ := fx_mono_copy(&b, fx_mono_apply("GenericDistinct", [MIRType]{t}), x)
+    _ := fx_owned(&b, fx_mono_apply("GenericEnum", [MIRType]{t}), MIROperation.Enum{type_id: mir_type_id("GenericEnum"), variant: "Single", args: [MIREnumArg]{MIREnumArg{field: None, value: x, boxed: false}}})
+    copied :: fx_mono_copy(&b, t, x)
+    fx_block(&b, 0, MIRTerminator.Return{value: Val(copied)})
+    f := fx_function("Pair.inventory", b, t)
+    f.form = MIRFunctionForm.Method{owner: owner, self_access: Val(MIRAccess.Read)}
+    f.generic_params = fx_mono_binders("U")
+    f.failure = MIRFailureCarrier.Result{success: t, error: u}
+    f.generator = Val(MIRGeneratorFacts{item: t})
+    f.web_param_reconstructions = [MIRWebParamReconstruction]{MIRWebParamReconstruction{local: "local", ty: t, fields: [MIRWebParamField]{MIRWebParamField{field: "value", parameter: "x", ty: t}}}}
+    vector :: MIRVectorFact{loop_header: MIRBlockID{value: 0}, cursor: None, body_blocks: [MIRBlockID]{MIRBlockID{value: 0}}, advance_block: None, rule: MIRVectorRule.Elementwise, accesses: [MIRVectorAccess]{}, layout: MIRVectorLayout.Flat, element_type: Val(t), packed: false, lane_width: None, no_aliasing: true, no_early_exit: true, effect_free_body: true, no_cross_iteration_dependencies: true, fixed_reduction: None, span: fx_span(), decision: MIROptimizationDecision.Eligible}
+    f.optimization.vector_facts = [MIRVectorFact]{vector}
+    f.optimization.checked_vector_facts = [MIRVectorFact]{vector}
+    alias_def := fx_type_def("GenericAlias", MIRTypeDefKind.Alias{target: t})
+    alias_def.generic_params = fx_mono_binders("T")
+    distinct_def := fx_type_def("GenericDistinct", MIRTypeDefKind.Distinct{base: t, range: None})
+    distinct_def.generic_params = fx_mono_binders("T")
+    en := fx_type_def("GenericEnum", MIRTypeDefKind.Enum{variants: [MIRVariant]{fx_variant("Single", MIRVariantPayload.Single{value: t}), fx_variant("Named", MIRVariantPayload.Named{fields: [MIRField]{fx_field("GenericEnum.Named", "value", t)}})}, methods: [MIRFunctionID]{}})
+    en.generic_params = fx_mono_binders("T")
+    r := fx_builder()
+    a :: fx_mono_text(&r, "inventory")
+    z :: fx_mono_text(&r, "tail")
+    pair :: fx_mono_pair(&r, fx_mono_apply("Pair", [MIRType]{fx_string()}), a, z)
+    _ := fx_mono_call(&r, MIRCallee.Method{function: mir_function_id("Pair.inventory"), owner: fx_mono_apply("Pair", [MIRType]{fx_string()})}, [MIRType]{fx_int()}, [MIRCallArg]{fx_arg(pair, MIRAccess.Read), fx_arg(a, MIRAccess.Read)}, fx_string())
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    p := fx_program([MIRFunction]{f, fx_function("run", r, fx_unit())}, [MIRTypeDef]{fx_mono_pair_def(), alias_def, distinct_def, en})
+    p.type_instances = [MIRType]{t, union}
+    p
+}
+
+// fn run() { missing() } / identity<>(1) / identity<Int,String>(1)
+// / identity<T>(1) outside any binder.
+fn fx_mono_bad_call(kind: String) -> MIRProgram Never! {
+    r := fx_builder()
+    x :: fx_int_const(&r, 1)
+    name :: if kind == "missing" -> "missing" else -> "identity"
+    types := [MIRType]{}
+    if kind == "extra" -> types = [MIRType]{fx_int(), fx_string()}
+    if kind == "unbound" -> types = [MIRType]{fx_mono_parameter("T")}
+    _ := fx_mono_call(&r, MIRCallee.User{function: mir_function_id(name)}, types, [MIRCallArg]{fx_arg(x, MIRAccess.Read)}, fx_int())
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_mono_identity(), fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}
+
+// fn run() { Pair<>.first_value() }: the owner lacks its argument.
+fn fx_mono_bad_owner() -> MIRProgram Never! {
+    r := fx_builder()
+    _ := fx_mono_call(&r, MIRCallee.Associated{function: mir_function_id("Pair.first_value"), owner: fx_mono_apply("Pair", [MIRType]{})}, [MIRType]{}, [MIRCallArg]{}, fx_int())
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_mono_first_method(), fx_function("run", r, fx_unit())}, [MIRTypeDef]{fx_mono_pair_def()})
+}
+
+// fn tap__generic__Int(x: Int) -> Int { x } (the front end already
+// specialized it); fn run() { tap__generic__Int<Int>(1) }: the call's type
+// arguments bind nothing and the callee lowers as itself.
+fn fx_mono_specialized_call() -> Bool Never! {
+    t := fx_builder()
+    x :: fx_param(&t, "x", fx_int(), mir_copy_ownership())
+    fx_block(&t, 0, MIRTerminator.Return{value: Val(x)})
+    r := fx_builder()
+    one :: fx_int_const(&r, 1)
+    _ := fx_mono_call(&r, MIRCallee.User{function: mir_function_id("tap__generic__Int")}, [MIRType]{fx_int()}, [MIRCallArg]{fx_arg(one, MIRAccess.Read)}, fx_int())
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    lowered :: lir_lower_entry(fx_program([MIRFunction]{fx_function("tap__generic__Int", t, fx_int()), fx_function("run", r, fx_unit())}, [MIRTypeDef]{}), mir_function_id("run"))
+    loop issue in lowered.issues -> print("mono: specialized call: {issue.message}")
+    lowered.issues.len() == 0
+}
+
+// A lowering issue naming `text`; preparation failures leave no functions.
+fn fx_mono_has_issue(program: MIRProgram, text: String, prepared: Bool) -> Bool Never! {
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    if prepared && lowered.lir.functions.len() != 0 -> return false
+    loop issue in lowered.issues {
+        if issue.message.contains(text) -> return true
+    }
+    print("mono: expected an issue containing `{text}`; got {lowered.issues.len()} issue(s), {lowered.lir.functions.len()} function(s)")
+    loop issue in lowered.issues -> print("mono:   {issue.message}")
+    false
+}
+
+fn fx_mono_rejection_checks() -> Bool Never! {
+    if !fx_mono_has_issue(fx_mono_bad_call("missing"), "missing reachable function", true) -> return false
+    if !fx_mono_has_issue(fx_mono_bad_call("arity"), "function type argument arity mismatch", true) -> return false
+    if !fx_mono_has_issue(fx_mono_bad_call("extra"), "function type argument arity mismatch", true) -> return false
+    if !fx_mono_has_issue(fx_mono_bad_owner(), "owner type argument arity mismatch", true) -> return false
+    if !fx_mono_has_issue(fx_mono_bad_call("unbound"), "unbound type parameter T", true) -> return false
+    if !fx_mono_specialized_call() -> return false
+    // The resource diagnostic names the leaf request (`<key> at <site>`) first.
+    fx_mono_has_issue(fx_mono_depth(), "specialization depth limit 128: expand at expand<", true)
+}
+
+// fn expand<T>() { expand<List<T>>() }: no finite key graph. A same-key
+// cycle (mono-recursive) is the contrasting positive case.
+fn fx_mono_depth() -> MIRProgram Never! {
+    b := fx_builder()
+    list :: mir_type_from_kind(MIRTypeKind.List{inner: fx_mono_parameter("T")})
+    fx_do(&b, MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("expand")}, args: [MIRCallArg]{}, type_args: [MIRType]{list}})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    r := fx_builder()
+    fx_do(&r, MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("expand")}, args: [MIRCallArg]{}, type_args: [MIRType]{fx_int()}})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_mono_template("expand", b, fx_unit()), fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}
+
+// No generic binder survives instantiation anywhere in a type.
+fn fx_mono_closed_type(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Apply(name, args) -> {
+            if args.len() == 0 && (name.name == "T" || name.name == "U") -> return false
+            loop arg in args { if !fx_mono_closed_type(arg) -> return false }
+            true
+        }
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> fx_mono_closed_type(inner)
+        .Map(left, right) | .Result(left, right) -> fx_mono_closed_type(left) && fx_mono_closed_type(right)
+        .Tuple(fields) -> {
+            loop field in fields { if !fx_mono_closed_type(field.ty) -> return false }
+            true
+        }
+        .Union(members) -> {
+            loop member in members { if !fx_mono_closed_type(member) -> return false }
+            true
+        }
+        .Fn(signature) -> {
+            loop param in signature.params { if !fx_mono_closed_type(param) -> return false }
+            if signature.ret == .Val(ret) -> return fx_mono_closed_type(ret)
+            true
+        }
+        else -> true
+    }
+}
+
+fn fx_mono_closed_body(f: MIRFunction) -> Bool Never! {
+    if f.generic_params.len() != 0 || !fx_mono_closed_type(f.return_type) -> return false
+    loop param in f.params { if !fx_mono_closed_type(param.ty) -> return false }
+    loop local in f.locals { if !fx_mono_closed_type(local.ty) -> return false }
+    loop value in f.values { if !fx_mono_closed_type(value.ty) -> return false }
+    loop place in f.places { if !fx_mono_closed_type(place.ty) -> return false }
+    if f.form == .Method(owner, _) {
+        if !fx_mono_closed_type(owner) -> return false
+    }
+    if f.failure == .Result(success, error) {
+        if !fx_mono_closed_type(success) || !fx_mono_closed_type(error) -> return false
+    }
+    if f.generator == .Val(generator) {
+        if !fx_mono_closed_type(generator.item) -> return false
+    }
+    loop row in f.web_param_reconstructions {
+        if !fx_mono_closed_type(row.ty) -> return false
+        loop field in row.fields { if !fx_mono_closed_type(field.ty) -> return false }
+    }
+    loop fact in f.optimization.vector_facts {
+        if fact.element_type == .Val(element) {
+            if !fx_mono_closed_type(element) -> return false
+        }
+    }
+    loop block in f.blocks {
+        loop instruction in block.instructions {
+            if instruction.ty == .Val(ty) {
+                if !fx_mono_closed_type(ty) -> return false
+            }
+            closed :: if instruction.operation == {
+                .Convert(_, _, target, conversion) -> fx_mono_closed_type(target) && (if conversion == .Prelude(_, _, fallibility) -> fallibility != MIRCallFallibility.Infallible && fx_mono_closed_fallibility(fallibility) else -> true)
+                .PtrFromAddr(_, element) -> fx_mono_closed_type(element)
+                .CoreCall(_, _, args, types, fallibility, data) -> fx_mono_closed_types(types) && fx_mono_closed_args(args) && fx_mono_closed_fallibility(fallibility) && fx_mono_closed_plan(data)
+                .Constant(value) -> if value == .Failed(report) -> (if report == .Clean(ty) -> fx_mono_closed_type(ty) else -> true) else -> true
+                .Semantic(operation) -> if operation == {
+                    .StaticPreludeCall(_, args, owners, types) -> fx_mono_closed_args(args) && fx_mono_closed_types(types) && (if owners[0] == .Type(ty) -> fx_mono_closed_type(ty) else -> false)
+                    .HardwareCall(_, op, _, args) -> fx_mono_closed_args(args) && (if op == .DMAStart(_, _, ty) -> fx_mono_closed_type(ty) else -> true)
+                    .HostBorrowCallback(_, types) -> fx_mono_closed_types(types)
+                    else -> true
+                }
+                else -> true
+            }
+            if !closed -> return false
+        }
+    }
+    true
+}
+
+fn fx_mono_closed_types(types: [MIRType]) -> Bool Never! {
+    loop ty in types { if !fx_mono_closed_type(ty) -> return false }
+    true
+}
+
+fn fx_mono_closed_args(args: [MIRCallArg]) -> Bool Never! {
+    loop arg in args {
+        if arg.fn_coercion == .Val(coercion) {
+            if !fx_mono_closed_type(coercion.ty) -> return false
+        }
+        // ID-only operands name the substituted types, never the template's.
+        if arg.box_as_trait == .Val(boxed) {
+            if boxed == mir_type_id("inventory.T") -> return false
+        }
+        if arg.widen_to_union == .Val(widen) {
+            if widen.union == mir_type_id("inventory.union") -> return false
+        }
+    }
+    true
+}
+
+fn fx_mono_closed_fallibility(fallibility: MIRCallFallibility) -> Bool Never! {
+    if fallibility == {
+        .Infallible -> true
+        .Failure(failure) -> if failure == {
+            .Infallible -> true
+            .Result(success, error) -> fx_mono_closed_type(success) && fx_mono_closed_type(error)
+            .Optional(value) | .Diverges(value) -> fx_mono_closed_type(value)
+        }
+    }
+}
+
+fn fx_mono_closed_plan(plan: MIRDataPlan?) -> Bool Never! {
+    data :: plan ?? return true
+    loop node in data.logical {
+        if !fx_mono_closed_type(node.row_type) -> return false
+        loop column in node.columns { if !fx_mono_closed_type(column.ty) -> return false }
+        if node.callable == .Val(callable) {
+            if !fx_mono_closed_type(callable.parameter) || !fx_mono_closed_type(callable.result) -> return false
+        }
+    }
+    true
+}
+
+// Inventory shape: originals keep their IDs and come first in declaration
+// order; each distinct binding is one instance whose ID lowering derives.
+fn fx_mono_inventory(p: MIRProgram, instances: Int, originals: [String]) -> Bool Never! {
+    q :: lower_prepare_entry(p, mir_function_id("run"))
+    if q.issues.len() != 0 || q.instances.len() != instances || q.functions.len() != instances + originals.len() {
+        kept :: loop row in q.functions -> row.name
+        print("mono: expected {instances} instance(s) beside [{originals.join(", ")}], kept [{kept.join(", ")}]")
+        loop issue in q.issues -> print("mono:   {issue.message}")
+        return false
+    }
+    loop (index, name) in originals {
+        if q.functions[index].id != mir_function_id(name) || q.functions[index].instance_row != -1 -> return false
+    }
+    loop instance in q.instances {
+        if !fx_mono_closed_body(instance) -> return false
+    }
+    loop (row, descriptor) in q.functions {
+        if (q.mir_rows.get(descriptor.id.value) ?? -1) != row -> return false
+    }
+    true
+}
+
+fn fx_mono_structural_checks() -> Bool Never! {
+    // identity<Int>, identity<String>, identity<Record>; both Int sites share one.
+    if !fx_mono_inventory(fx_mono_three_types(), 3, [String]{"monomorphic_leaf", "run"}) -> return false
+    // outer and identity, each at three types.
+    if !fx_mono_inventory(fx_mono_nested_call(), 6, [String]{"monomorphic_leaf", "run"}) -> return false
+    // first_value x2, choose x2, set_first x2; owner bindings key the methods.
+    if !fx_mono_inventory(fx_mono_owner_methods(), 6, [String]{"run"}) -> return false
+    // recur<Int>, even<String>, odd<String>; same-key recursion terminates and
+    // the unreached generic is never instantiated.
+    if !fx_mono_inventory(fx_mono_recursive(), 3, [String]{"run"}) -> return false
+    // identity at left.Record, right.Record, Pair<Pair<String>>, Pair<Int>.
+    if !fx_mono_inventory(fx_mono_identity_collisions(), 4, [String]{"run"}) -> return false
+    if !fx_mono_inventory(fx_mono_substitution_inventory(), 1, [String]{"run"}) -> return false
+    // The call-site derivation lowering uses names the registered instance.
+    q :: lower_prepare_entry(fx_mono_owner_methods(), mir_function_id("run"))
+    choose :: lower_instance_id(mir_function_id("Pair.choose"), lower_call_bindings(Val(fx_mono_apply("Pair", [MIRType]{fx_int()})), [MIRType]{fx_string()}))
+    if q.mir_rows.get(choose.value) == None -> return false
+    swapped :: lower_instance_id(mir_function_id("Pair.choose"), lower_call_bindings(Val(fx_mono_apply("Pair", [MIRType]{fx_string()})), [MIRType]{fx_int()}))
+    if q.mir_rows.get(swapped.value) == None || swapped == choose -> return false
+    true
+}

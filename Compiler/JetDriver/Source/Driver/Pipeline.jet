@@ -2709,7 +2709,15 @@ fn jet_driver_native_emit_config() -> JetRustEmitConfig Never! {
 
 pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
     kg := jet_driver_keep_going_log(None)
-    jet_driver_compile_stages(^request, &kg)
+    jet_driver_compile_stages(^request, &kg, true)
+}
+
+// Native code generation consumes checked MIR directly. Emitting Rust is not
+// a prerequisite for this feed; the checked front-end/optimizer stages and
+// their diagnostics are identical to the ordinary compile path.
+pub fn jet_driver_compile_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
+    kg := jet_driver_keep_going_log(None)
+    jet_driver_compile_stages(^request, &kg, false)
 }
 
 // JET_KEEP_GOING (the bootstrap entry reads it): every phase runs past the
@@ -2719,7 +2727,7 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
 // the trace sink.
 pub fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options: JetDriverKeepGoing) -> JetDriverCompileResult {
     kg := jet_driver_keep_going_log(Val(options))
-    result := jet_driver_compile_stages(^request, &kg)
+    result := jet_driver_compile_stages(^request, &kg, true)
     if result.internal_problem == .Val(problem) -> jet_driver_keep_going_row(&kg, "internal", "-", "ICE", problem, "-")
     // Reports of a stage that returned early; recorded rows are not repeated.
     kg.diagnostic_mark = 0
@@ -2728,7 +2736,7 @@ pub fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options:
     result
 }
 
-fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKeepGoingLog) -> JetDriverCompileResult {
+fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, emit_rust: Bool) -> JetDriverCompileResult {
     trace := jet_driver_empty_compile_trace()
     // Phase spans for the host trace (JET_TRACE_FILE). A phase an early
     // return abandons is closed by the next enclosing end the host records.
@@ -3287,6 +3295,10 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
             return jet_driver_compile_internal_result(load, trace, "the checked Cranelift MIR artifact has no unique runtime entry identity")
         }
         return result
+    }
+
+    if !emit_rust {
+        return jet_driver_compile_result(load, load.diagnostics, entry_function, Val(^optimized_program), None, None, None, true, trace)
     }
 
     if request.trace_sink == .Val(sink) -> sink.begin("emit", "", -1, -1)

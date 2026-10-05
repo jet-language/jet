@@ -2,15 +2,26 @@
 // compiler's MIR by Compiler/JetBackend/Tests/mir-debug.mjs, through the Jet
 // backend. For every case named in `cases.txt` it reads `<case>.mird` (the
 // entry function id, then the program in the line stream the generated
-// `mird_*` decoder reads), lowers the program, and either writes the
-// relocatable object `<case>.o` or the reasons it could not into
-// `<case>.issues`. One line `<case>\t<status>` per case goes to stdout as soon
-// as the case is done, so run-goldens.mjs can restart after a crash. The unit
-// is assembled by run-goldens.mjs and never listed in
-// Compiler/Bootstrap/sources.list.
-use jet_backend.[LIRFunctionID, lir_lower_program, x64_relocatable_object]
+// `mird_*` decoder reads), keeps the functions the entry reaches, lowers the
+// program, and either writes the relocatable object `<case>.o` plus, when
+// `runtime-pack.txt` names a runtime pack, `<case>.exe`: the object linked with
+// that pack by the in-process linker, exactly as native `jet build` links
+// (wall time in `<case>.link-ms`; or the link error in `<case>.pack-issues`),
+// and, when the freestanding image runtime serves every import, the static
+// executable `<case>.elf`; or
+// the reasons it could not into `<case>.issues`. One line `<case>\t<status>`
+// per case goes to stdout as soon as the case is done, so run-goldens.mjs can
+// restart after a crash. The unit is assembled by run-goldens.mjs and never
+// listed in Compiler/Bootstrap/sources.list.
+use jet_backend.[lir_lower_entry, lir_print_module, x64_link_executable, x64_relocatable_object, x64_static_executable]
 use core.files as files
 use core.math as math
+use core.time as time
+
+struct GLPack {
+    pub path: String
+    pub bytes: [U8]
+}
 
 struct MIRDReader {
     pub lines: [String]
@@ -27,6 +38,12 @@ fn mird_next(r: &MIRDReader) -> String {
 fn mird_int(r: &MIRDReader) -> Int {
     text :: mird_next(&r)
     Int.parse(text) ?? panic("MIR stream line {r.at}: `{text}` is not an integer")
+}
+
+fn mird_u64(r: &MIRDReader) -> U64 {
+    text :: mird_next(&r)
+    value :: Int.parse(text) ?? panic("MIR stream line {r.at}: `{text}` is not an integer")
+    U64.from_int(value) ?? panic("MIR stream line {r.at}: `{text}` is not a U64")
 }
 
 fn mird_bool(r: &MIRDReader) -> Bool {
@@ -62,27 +79,23 @@ fn gl_write_issues(name: String, lines: [String]) {
     files.write("{name}.issues", text) ?? panic("cannot write {name}.issues")
 }
 
-fn gl_case(name: String) -> String {
+fn gl_case(name: String, pack: GLPack?) -> String {
     text :: files.read("{name}.mird") ?? return "missing"
     r := MIRDReader{lines: text.split("\n").to_list(), at: 0}
-    entry_id :: mird_int(&r)
-    program :: mird_mir_program(&r)
-    entry := -1
-    loop (index, function) in program.functions {
-        if function.id.value == entry_id -> entry = index
-    }
-    if entry < 0 {
-        gl_write_issues(name, [String]{"harness\tentry function {entry_id} is not in the program"})
-        return "unsupported"
-    }
-    lowered :: lir_lower_program(program)
+    entry_id :: mird_u64(&r)
+    lowered :: lir_lower_entry(mird_mir_program(&r), MIRFunctionID{value: entry_id})
     if lowered.issues.len() > 0 {
         lines := [String]{}
         loop issue in lowered.issues -> &lines.push("{issue.function}\t{issue.message}")
         gl_write_issues(name, lines)
         return "unsupported"
     }
-    object :: x64_relocatable_object(lowered.lir, LIRFunctionID{value: entry})
+    entry :: lowered.entry ?? panic("lowering without issues has an entry")
+    // A `<case>.want-lir` marker asks for the lowered LIR as `<case>.lir`.
+    if files.exists("{name}.want-lir") {
+        files.write("{name}.lir", lir_print_module(lowered.lir)) ?? panic("cannot write {name}.lir")
+    }
+    object :: x64_relocatable_object(lowered.lir, entry)
     if object.errors.len() > 0 {
         lines := [String]{}
         loop error in object.errors -> &lines.push("native\t{error}")
@@ -90,13 +103,41 @@ fn gl_case(name: String) -> String {
         return "unsupported"
     }
     files.write_bytes("{name}.o", object.bytes) ?? panic("cannot write {name}.o")
-    "object"
+    if pack == .Val(runtime) {
+        watch :: time.start()
+        linked :: x64_link_executable([String]{"{name}.o", runtime.path}, ^[[U8]]{object.bytes, runtime.bytes})
+        files.write("{name}.link-ms", "{watch.elapsed_millis()}\n") ?? panic("cannot write {name}.link-ms")
+        if linked.errors.len() > 0 {
+            report := ""
+            loop error in linked.errors -> report = "{report}{error}\n"
+            files.write("{name}.pack-issues", report) ?? panic("cannot write {name}.pack-issues")
+        } else {
+            files.write_bytes("{name}.exe", linked.bytes) ?? panic("cannot write {name}.exe")
+            files.set_mode("{name}.exe", 0o755) ?? panic("cannot make {name}.exe executable")
+        }
+    }
+    image :: x64_static_executable(lowered.lir, entry)
+    if image.errors.len() > 0 {
+        files.write("{name}.static-issues", "{image.errors[0]}\n") ?? panic("cannot write {name}.static-issues")
+        return "object"
+    }
+    files.write_bytes("{name}.elf", image.bytes) ?? panic("cannot write {name}.elf")
+    files.set_mode("{name}.elf", 0o755) ?? panic("cannot make {name}.elf executable")
+    "static"
+}
+
+// The runtime pack `runtime-pack.txt` names, read once for every case.
+fn gl_pack() -> GLPack? {
+    text :: files.read("runtime-pack.txt") ?? return None
+    path :: text.trim()
+    Val(GLPack{path: path, bytes: files.read_bytes(path) ?? panic("cannot read the runtime pack {path}")})
 }
 
 fn run() {
     list :: files.read("cases.txt") ?? panic("cannot read cases.txt")
+    pack :: gl_pack()
     loop name in list.split("\n").to_list() {
         if name == "" -> next
-        print("{name}\t{gl_case(name)}")
+        print("{name}\t{gl_case(name, pack)}")
     }
 }

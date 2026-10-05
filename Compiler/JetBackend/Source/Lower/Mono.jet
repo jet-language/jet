@@ -1,0 +1,956 @@
+// Entry-rooted monomorphization (D-EXEC1 native O0): the executable inventory
+// is the functions the entry reaches, with every generic function and every
+// method of a generic type instantiated once per distinct concrete binding,
+// the same instances the Rust host's rustc monomorphizes from its generic
+// emission. One FIFO (this file plus Reach.jet) discovers functions, concrete
+// types and render edges together.
+//
+// Original bodies stay borrowed from the program; only instances are rebuilt.
+// MIR IDs are stable: an original keeps its ID, and an instance's ID is
+// derived from its original and its bound types' structural fingerprints
+// (lower_instance_id), so lowering derives every direct call target from the
+// call site alone and needs no target table. Local IDs (blocks, values,
+// places, ops) survive instantiation unchanged.
+//
+// A concrete type's fingerprint is identity-free: nominal declaration IDs,
+// ordered arguments and leaf facts. Two checked identities of one concrete
+// type share one entry; two nominal declarations never merge. A substituted
+// type whose shape changed, and an identity-less bound type replacing a
+// checked binder, take the identity `mir_type_id("mono:" + its
+// fingerprint)`, except tuples, which keep their checked identity because
+// their MIR field IDs are derived from it (`<identity key>::<name>`).
+//
+// Generic ancestry (each new function or type specialization along the
+// request chain) is limited to 128, which bounds polymorphic recursion; the
+// diagnostic names the leaf request and its chain.
+use jet_foundation.[
+    MIRAccess, MIRBasicBlock, MIRBinaryPatternPart, MIRCallArg, MIRCallFallibility,
+    MIRCallee, MIRConstant, MIRConstReport, MIRConstField, MIRConstEnumArg,
+    MIRConstMapEntry, MIRConversion, MIRDataPlan, MIRDataPlanNode,
+    MIRDataPlanColumn, MIRDataPlanCallable, MIRFailureCarrier,
+    MIRField, MIRFnCoercion, MIRFunction, MIRFunctionForm,
+    MIRFunctionID, MIRFunctionSignature, MIRGenericParam, MIRHardwareOp,
+    MIRInstruction, MIRMeasure, MIROperation, MIROptimizationFacts, MIRParam,
+    MIRCaptureParam, MIRLocal, MIRValueFact, MIRPlace, MIRPreludeTypeArg,
+    MIRProgram, MIRSemanticOp, MIRTextPatternPart, MIRTupleField,
+    MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeID, MIRTypeKind,
+    MIRVariant, MIRVariantPayload, MIRUnionCoercion, MIRVectorFact,
+    MIRGeneratorFacts, MIRWebParamField, MIRWebParamReconstruction,
+    MIRCLIEntry, MIRCLICommand, MIRCLIInput,
+    mir_type_display_name, mir_type_from_kind,
+    mir_type_id, mir_type_with_identity, stable_id, mir_tag_name,
+]
+
+pub struct LowerFunctionSource { pub instance: Bool, pub index: Int }
+
+// One function of the inventory. `instance_row` is -1 for a borrowed
+// original (its body is program.functions[source_row]), else the row of its
+// body in LowerPrepared.instances (-2 while queued, before materialization).
+pub struct LowerPreparedFunction {
+    pub id: MIRFunctionID
+    pub original: MIRFunctionID
+    pub source_row: Int
+    pub instance_row: Int
+    pub key: String
+    // An instance's LIR function name: the original's key and its bound
+    // types (`identity<Int>`); the original's key for an original.
+    pub name: String
+    pub bindings: LowerBindings
+    pub parent: Int
+}
+
+struct LowerMonoAncestor { pub parent: Int, pub label: String, pub depth: Int }
+struct LowerMonoType { pub ty: MIRType, pub parent: Int }
+enum LowerMonoPending { Function(row: Int) Type(row: Int) Render(row: Int, show: Bool) }
+// A shared dependency list node: a function to request, or a branch into
+// another list (close adapters shared by several handle types).
+struct LowerMonoEdge { pub function: MIRFunctionID?, pub branch: Int, pub next: Int }
+
+pub struct LowerPrepared {
+    // Final order: reached originals in declaration order, then instances in
+    // first-request order.
+    pub functions: [LowerPreparedFunction]
+    pub instances: [MIRFunction]
+    // Original MIR function ID -> its row in program.functions.
+    pub source_rows: [U64:Int]
+    // Concrete MIR function ID -> its row in `functions`.
+    pub mir_rows: [U64:Int]
+    pub entry: MIRFunctionID?
+    // Preparation failed when non-empty; `functions` is then empty.
+    pub issues: [LIRLoweringIssue]
+    // Instance key -> descriptor row while the queue runs.
+    pub instance_rows: [String:Int]
+    pub original_descriptors: [U64:Int]
+    pub reserved_ids: [U64:String]
+    // Declaration MIRTypeID -> its row in program.types.
+    pub declaration_rows: [U64:Int]
+    // Checked type identity -> type; resolves ID-only type operands.
+    pub checked_types: LowerTypeIndex
+    // Concrete type fingerprint -> its row in type_work.
+    pub type_rows: [String:Int]
+    pub type_work: [LowerMonoType]
+    pub render_seen: [String:Bool]
+    pub free_binders: [String:Bool]
+    // "key:<function key>" / "name:<function name>" -> MIR function ID value.
+    pub function_names: [String:U64]
+    pub callbacks: [U64:Int]
+    pub callbacks_seen: [U64:Bool]
+    pub foreign_rows: [U64:Int]
+    pub foreign_seen: [U64:Bool]
+    pub constant_rows: [String:Int]
+    pub constants_seen: [Int:Bool]
+    // Handle type fingerprint -> first lifecycle edge.
+    pub lifecycle: [String:Int]
+    // Trait method ID -> first edge to its default body and implementations.
+    pub trait_targets: [U64:Int]
+    pub trait_seen: [U64:Bool]
+    pub edges: [LowerMonoEdge]
+    pub edges_seen: [Int:Bool]
+    pub ancestors: [LowerMonoAncestor]
+    pub pending: [LowerMonoPending]
+}
+
+pub fn lower_prepared_source(prepared: LowerPrepared, row: Int) -> LowerFunctionSource Never! {
+    descriptor :: prepared.functions[row]
+    if descriptor.instance_row >= 0 -> return LowerFunctionSource{instance: true, index: descriptor.instance_row}
+    LowerFunctionSource{instance: false, index: descriptor.source_row}
+}
+
+// ---------------------------------------------------------------------------
+// Instance identity.
+
+// The types a direct call binds, in instance-key order: the callee owner's
+// applied arguments (a method of `Pair<Int>` binds Pair's parameters), then
+// the call's own type arguments.
+pub fn lower_call_bindings(owner: MIRType?, type_args: [MIRType]) -> [MIRType] Never! {
+    bound := [MIRType]{}
+    if owner == .Val(ty) {
+        if ty.kind == .Apply(_, args) {
+            loop arg in args -> &bound.push(arg)
+        }
+    }
+    loop arg in type_args -> &bound.push(arg)
+    bound
+}
+
+pub fn lower_instance_key(original: MIRFunctionID, bound: [MIRType]) -> String Never! {
+    "function:{original.value}:{lower_mono_type_list_key(bound)}"
+}
+
+// The concrete MIR function a direct call of `original` binding `bound`
+// runs: the original itself when nothing binds.
+pub fn lower_instance_id(original: MIRFunctionID, bound: [MIRType]) -> MIRFunctionID Never! {
+    if bound.len() == 0 -> return ~original
+    MIRFunctionID{value: stable_id("mir-function-instance", lower_instance_key(original, bound))}
+}
+
+// ---------------------------------------------------------------------------
+// Structural fingerprints.
+
+fn lower_mono_part(text: String) -> String Never! { "{text.bytes().len()}:{text}" }
+
+fn lower_mono_access(access: MIRAccess) -> String Never! {
+    if access == {
+        .Read -> "r"
+        .Write -> "w"
+        .Move -> "m"
+    }
+}
+
+pub fn lower_mono_fingerprint(ty: MIRType) -> String Never! {
+    if ty.kind == {
+        .Int -> "int"
+        .Float -> "float"
+        .Bool -> "bool"
+        .String -> "string"
+        .Char -> "char"
+        .Float32 -> "float32"
+        .IntN(signed, bits) -> "integer:{signed}:{bits}"
+        .Apply(name, args) -> "nominal:{name.id.value}:{lower_mono_type_list_key(args)}"
+        .List(inner) -> "list:{lower_mono_child_key(inner)}"
+        .Map(key, value) -> "map:{lower_mono_child_key(key)}{lower_mono_child_key(value)}"
+        .Shared(inner) -> "shared:{lower_mono_child_key(inner)}"
+        .Option(inner) -> "option:{lower_mono_child_key(inner)}"
+        .Result(ok, err) -> "result:{lower_mono_child_key(ok)}{lower_mono_child_key(err)}"
+        .Fn(signature) -> {
+            codes :: if signature.call_metadata == {
+                .None -> ""
+                .Val(metadata) -> {
+                    rows :: loop access in metadata.conventions -> lower_mono_access(access)
+                    rows.join("")
+                }
+            }
+            "fn:{lower_mono_type_list_key(signature.params)}:{lower_mono_optional_key(signature.ret)}:{codes}"
+        }
+        .SendFn(params, ret, conventions) -> {
+            codes :: loop convention in conventions -> lower_mono_access(convention)
+            "send:{lower_mono_type_list_key(params)}:{lower_mono_optional_key(ret)}:{codes.join("")}"
+        }
+        .TraitObject(bounds) -> {
+            ids :: loop bound in bounds -> "{bound.id.value}"
+            "trait:{ids.join(":")}"
+        }
+        .Tuple(fields) -> {
+            keys :: loop field in fields -> "{lower_mono_part(field.name)}{lower_mono_child_key(field.ty)}"
+            "tuple:{keys.len()}:{keys.join("")}"
+        }
+        .FixedList(elem, len) -> "fixed:{lower_mono_part(lower_mono_measure_key(len))}:{lower_mono_child_key(elem)}"
+        .InlineRange(base, lo, hi) -> "range:{lo}:{hi}:{lower_mono_child_key(base)}"
+        .Tagged(marker, inner) -> {
+            domain :: if marker == {
+                .User(_) -> "user"
+                .Internal(_) -> "internal"
+            }
+            "tag:{domain}:{lower_mono_part(mir_tag_name(marker))}:{lower_mono_child_key(inner)}"
+        }
+        .Union(members) -> "union:{lower_mono_type_list_key(members)}"
+        .Quantity(base, dimension) -> {
+            axes :: loop axis in dimension.axes -> "{lower_mono_part(axis.name)}{lower_mono_part(lower_mono_measure_key(axis.exponent))}"
+            "quantity:{axes.len()}:{axes.join("")}:{lower_mono_child_key(base)}"
+        }
+        .Measure(value) -> "measure:{lower_mono_part(lower_mono_measure_key(value))}"
+    }
+}
+
+fn lower_mono_child_key(ty: MIRType) -> String Never! { lower_mono_part(lower_mono_fingerprint(ty)) }
+
+fn lower_mono_type_list_key(types: [MIRType]) -> String Never! {
+    rows :: loop ty in types -> lower_mono_child_key(ty)
+    "{rows.len()}:{rows.join("")}"
+}
+
+fn lower_mono_optional_key(ty: MIRType?) -> String Never! {
+    if ty == {
+        .None -> "absent"
+        .Val(value) -> "present:{lower_mono_child_key(value)}"
+    }
+}
+
+fn lower_mono_measure_key(measure: MIRMeasure) -> String Never! {
+    if measure == {
+        .Literal(kind, value) -> "literal:{lower_mono_part(kind)}:{value}"
+        .SignedLiteral(kind, value) -> "signed:{lower_mono_part(kind)}:{value}"
+        .Symbol(kind, name) -> "symbol:{lower_mono_part(kind)}{lower_mono_part(name)}"
+        .Combined(kind, rule, left, right) -> {
+            operation :: if rule == {
+                .Add -> "add"
+                .Mul -> "mul"
+                .Match -> "match"
+            }
+            "combined:{lower_mono_part(kind)}:{operation}:{lower_mono_part(lower_mono_measure_key(left))}{lower_mono_part(lower_mono_measure_key(right))}"
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Substitution. Bindings map generic parameter names (a binder is a
+// zero-argument Apply) to concrete types; `ids` resolves ID-only type
+// operands. An unchanged row keeps its identity and layout.
+
+// Generic parameter name -> its row in `types`.
+pub struct LowerBindings { pub rows: [String:Int], pub types: [MIRType] }
+
+// Checked type identity value -> its row in `types`.
+pub struct LowerTypeIndex { pub rows: [U64:Int], pub types: [MIRType] }
+
+fn lower_bindings_empty() -> LowerBindings Never! { LowerBindings{rows: [String:Int]{}, types: [MIRType]{}} }
+
+// The first binding of a name wins; generic parameter names are unique.
+fn lower_bind(b: &LowerBindings, name: String, ty: MIRType) Never! {
+    if b.rows.get(name) != None -> return
+    &b.rows.add(name, b.types.len()).drop("checked absent above")
+    &b.types.push(ty)
+}
+
+fn lower_bound(b: LowerBindings, name: String) -> MIRType? {
+    row :: b.rows.get(name) ?? return None
+    Val(b.types[row])
+}
+
+fn lower_index_type(index: &LowerTypeIndex, id: MIRTypeID, ty: MIRType) Never! {
+    if index.rows.get(id.value) != None -> return
+    &index.rows.add(id.value, index.types.len()).drop("checked absent above")
+    &index.types.push(ty)
+}
+
+pub fn lower_subst_type(ty: MIRType, bindings: LowerBindings) -> MIRType Never! {
+    if ty.kind == .Apply(name, args) {
+        if args.len() == 0 {
+            if lower_bound(bindings, name.name) == .Val(bound) {
+                // A checked binder keeps an identity, so ID-only operands
+                // naming it (lower_subst_type_id) resolve to its instance.
+                if ty.identity == None || bound.identity != None -> return bound
+                return mir_type_with_identity(bound, mir_type_id("mono:{lower_mono_fingerprint(bound)}"))
+            }
+        }
+    }
+    kind :: if ty.kind == {
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .TraitObject(_) | .Measure(_) -> ty.kind
+        .List(inner) -> MIRTypeKind.List{inner: lower_subst_type(inner, bindings)}
+        .Map(key, value) -> MIRTypeKind.Map{key: lower_subst_type(key, bindings), value: lower_subst_type(value, bindings)}
+        .Shared(inner) -> MIRTypeKind.Shared{inner: lower_subst_type(inner, bindings)}
+        .Option(inner) -> MIRTypeKind.Option{inner: lower_subst_type(inner, bindings)}
+        .Result(ok, err) -> MIRTypeKind.Result{ok: lower_subst_type(ok, bindings), err: lower_subst_type(err, bindings)}
+        .Fn(signature) -> MIRTypeKind.Fn{signature: lower_subst_signature(signature, bindings)}
+        .SendFn(params, ret, conventions) -> {
+            mapped :: loop param in params -> lower_subst_type(param, bindings)
+            MIRTypeKind.SendFn{params: mapped, ret: lower_subst_optional(ret, bindings), conventions: conventions}
+        }
+        .Apply(name, args) -> {
+            mapped :: loop arg in args -> lower_subst_type(arg, bindings)
+            MIRTypeKind.Apply{name: name, args: mapped}
+        }
+        .Tuple(fields) -> {
+            mapped :: loop field in fields -> MIRTupleField{name: field.name, ty: lower_subst_type(field.ty, bindings)}
+            MIRTypeKind.Tuple{fields: mapped}
+        }
+        .FixedList(elem, len) -> MIRTypeKind.FixedList{elem: lower_subst_type(elem, bindings), len: len}
+        .InlineRange(base, lo, hi) -> MIRTypeKind.InlineRange{base: lower_subst_type(base, bindings), lo: lo, hi: hi}
+        .Tagged(marker, inner) -> MIRTypeKind.Tagged{marker: marker, inner: lower_subst_type(inner, bindings)}
+        .Union(members) -> {
+            mapped :: loop member in members -> lower_subst_type(member, bindings)
+            MIRTypeKind.Union{members: mapped}
+        }
+        .Quantity(base, dimension) -> MIRTypeKind.Quantity{base: lower_subst_type(base, bindings), dimension: dimension}
+    }
+    if kind == ty.kind -> return ~ty
+    changed :: mir_type_from_kind(kind)
+    if kind == .Tuple(_) {
+        if ty.identity == .Val(identity) -> return mir_type_with_identity(changed, identity)
+    }
+    mir_type_with_identity(changed, mir_type_id("mono:{lower_mono_fingerprint(changed)}"))
+}
+
+fn lower_subst_optional(ty: MIRType?, bindings: LowerBindings) -> MIRType? {
+    present :: ty ?? return None
+    Val(lower_subst_type(present, bindings))
+}
+
+fn lower_subst_signature(signature: MIRFunctionSignature, bindings: LowerBindings) -> MIRFunctionSignature Never! {
+    params :: loop param in signature.params -> lower_subst_type(param, bindings)
+    MIRFunctionSignature{params: params, ret: lower_subst_optional(signature.ret, bindings), effect_bound: signature.effect_bound, param_contract: signature.param_contract, call_metadata: signature.call_metadata, return_view_provenance: signature.return_view_provenance}
+}
+
+fn lower_subst_field(field: MIRField, bindings: LowerBindings) -> MIRField Never! {
+    MIRField{id: field.id, name: field.name, shape_names: field.shape_names, skip: field.skip, ty: lower_subst_type(field.ty, bindings), span: field.span, public: field.public, package_public: field.package_public, computed: field.computed, has_default: field.has_default, redact: field.redact}
+}
+
+fn lower_subst_definition_kind(kind: MIRTypeDefKind, bindings: LowerBindings) -> MIRTypeDefKind Never! {
+    if kind == {
+        .Struct(fields, methods) -> {
+            mapped :: loop field in fields -> lower_subst_field(field, bindings)
+            MIRTypeDefKind.Struct{fields: mapped, methods: methods}
+        }
+        .Enum(variants, methods) -> {
+            mapped :: loop variant in variants -> {
+                payload :: if variant.payload == {
+                    .Unit -> MIRVariantPayload.Unit
+                    .Single(value) -> MIRVariantPayload.Single{value: lower_subst_type(value, bindings)}
+                    .Named(fields) -> {
+                        rows :: loop field in fields -> lower_subst_field(field, bindings)
+                        MIRVariantPayload.Named{fields: rows}
+                    }
+                }
+                MIRVariant{name: variant.name, wire_name: variant.wire_name, span: variant.span, payload: payload, discriminant: variant.discriminant}
+            }
+            MIRTypeDefKind.Enum{variants: mapped, methods: methods}
+        }
+        .Distinct(base, range) -> MIRTypeDefKind.Distinct{base: lower_subst_type(base, bindings), range: range}
+        .Alias(target) -> MIRTypeDefKind.Alias{target: lower_subst_type(target, bindings)}
+        .UnitFamily(members) -> MIRTypeDefKind.UnitFamily{members: members}
+    }
+}
+
+fn lower_subst_cli_input(input: MIRCLIInput, bindings: LowerBindings) -> MIRCLIInput Never! {
+    MIRCLIInput{parameter: input.parameter, name: input.name, label: input.label, ty: lower_subst_type(input.ty, bindings),
+        zone: input.zone, flag: input.flag, short: input.short, env: input.env, help: input.help, metavar: input.metavar,
+        shape: input.shape, positional: input.positional, variadic: input.variadic}
+}
+
+fn lower_subst_cli(entry: MIRCLIEntry?, bindings: LowerBindings) -> MIRCLIEntry? {
+    source :: entry ?? return None
+    inputs :: loop input in source.inputs -> lower_subst_cli_input(input, bindings)
+    commands :: loop command in source.commands -> {
+        rows :: loop input in command.inputs -> lower_subst_cli_input(input, bindings)
+        MIRCLICommand{name: command.name, description: command.description, function: command.function, receiver: command.receiver, inputs: rows}
+    }
+    Val(MIRCLIEntry{record_inputs: source.record_inputs, description: source.description, inputs: inputs, commands: commands, standard: source.standard, version: source.version})
+}
+
+// The declaration `definition` instantiated with `args` (one per generic
+// parameter, in order). The declaration and field IDs are kept: a concrete
+// view, never a new declaration.
+pub fn lower_instantiate_definition(definition: MIRTypeDef, args: [MIRType]) -> MIRTypeDef Never! {
+    bindings := lower_bindings_empty()
+    loop (index, parameter) in definition.generic_params {
+        if index < args.len() -> lower_bind(&bindings, parameter.name, args[index])
+    }
+    MIRTypeDef{
+        id: definition.id, module_id: definition.module_id, key: definition.key, name: definition.name, span: definition.span,
+        public: definition.public, package_public: definition.package_public, generic_params: [MIRGenericParam]{},
+        derives: definition.derives, auto_derive_default: definition.auto_derive_default, auto_printable: definition.auto_printable,
+        published_schema: definition.published_schema, single_use: definition.single_use, must_use: definition.must_use,
+        // C enum layout facts belong to non-generic C-layout declarations only.
+        layout: definition.layout, c_layout_tag: definition.c_layout_tag, enum_layout: None,
+        layout_alignment: definition.layout_alignment, cli: lower_subst_cli(definition.cli, bindings), serde: definition.serde, cli_bindings: definition.cli_bindings,
+        ownership: definition.ownership, boxed_edges: definition.boxed_edges, compiler_builtin: definition.compiler_builtin,
+        kind: lower_subst_definition_kind(definition.kind, bindings),
+    }
+}
+
+fn lower_subst_failure(failure: MIRFailureCarrier, bindings: LowerBindings) -> MIRFailureCarrier Never! {
+    if failure == {
+        .Infallible -> MIRFailureCarrier.Infallible
+        .Result(success, error) -> MIRFailureCarrier.Result{success: lower_subst_type(success, bindings), error: lower_subst_type(error, bindings)}
+        .Optional(value) -> MIRFailureCarrier.Optional{value: lower_subst_type(value, bindings)}
+        .Diverges(value) -> MIRFailureCarrier.Diverges{value: lower_subst_type(value, bindings)}
+    }
+}
+
+fn lower_subst_fallibility(value: MIRCallFallibility, bindings: LowerBindings) -> MIRCallFallibility Never! {
+    if value == {
+        .Infallible -> MIRCallFallibility.Infallible
+        .Failure(failure) -> MIRCallFallibility.Failure{failure: lower_subst_failure(failure, bindings)}
+    }
+}
+
+fn lower_subst_conversion(conversion: MIRConversion, bindings: LowerBindings) -> MIRConversion Never! {
+    if conversion == {
+        .Transparent | .NumericCast | .SendFn -> conversion
+        .Prelude(call, location, fallibility) -> MIRConversion.Prelude{call: call, location: location, fallibility: lower_subst_fallibility(fallibility, bindings)}
+    }
+}
+
+// An ID-only type operand names a checked type; its instance is the
+// substituted type's identity.
+fn lower_subst_type_id(id: MIRTypeID, bindings: LowerBindings, ids: LowerTypeIndex) -> MIRTypeID Never! {
+    row :: ids.rows.get(id.value) ?? return id
+    lower_subst_type(ids.types[row], bindings).identity ?? id
+}
+
+fn lower_subst_optional_id(id: MIRTypeID?, bindings: LowerBindings, ids: LowerTypeIndex) -> MIRTypeID? {
+    present :: id ?? return None
+    Val(lower_subst_type_id(present, bindings, ids))
+}
+
+fn lower_subst_arg(arg: MIRCallArg, bindings: LowerBindings, ids: LowerTypeIndex) -> MIRCallArg Never! {
+    coercion := MIRFnCoercion?{None}
+    if arg.fn_coercion == .Val(value) -> coercion = Val(MIRFnCoercion{ty: lower_subst_type(value.ty, bindings), already_boxed: value.already_boxed})
+    widened := MIRUnionCoercion?{None}
+    if arg.widen_to_union == .Val(value) -> widened = Val(MIRUnionCoercion{union: lower_subst_type_id(value.union, bindings, ids), variant: value.variant})
+    MIRCallArg{value: arg.value, place: arg.place, access: arg.access, span: arg.span, label: arg.label, source_index: arg.source_index,
+        binder_slot: arg.binder_slot, spread: arg.spread, implicit_clone: arg.implicit_clone, shared_auto_clone: arg.shared_auto_clone,
+        owned_last_use: arg.owned_last_use, authority_boundary: arg.authority_boundary, fn_coercion: coercion,
+        widen_fixed_to_list: arg.widen_fixed_to_list, widen_to_union: widened,
+        box_as_trait: lower_subst_optional_id(arg.box_as_trait, bindings, ids)}
+}
+
+fn lower_subst_args(args: [MIRCallArg], bindings: LowerBindings, ids: LowerTypeIndex) -> [MIRCallArg] Never! {
+    loop arg in args -> lower_subst_arg(arg, bindings, ids)
+}
+
+fn lower_subst_types(types: [MIRType], bindings: LowerBindings) -> [MIRType] Never! {
+    loop ty in types -> lower_subst_type(ty, bindings)
+}
+
+fn lower_subst_constant(value: MIRConstant, bindings: LowerBindings) -> MIRConstant Never! {
+    if value == {
+        .Int(_, _, _) | .Float(_, _, _) | .Bool(_) | .Char(_) | .String(_) | .Bytes(_) | .Unit | .BigInt(_) -> value
+        .List(values) -> {
+            mapped :: loop item in values -> lower_subst_constant(item, bindings)
+            MIRConstant.List{values: mapped}
+        }
+        .Map(entries) -> {
+            mapped :: loop entry in entries -> MIRConstMapEntry{key: entry.key, value: lower_subst_constant(entry.value, bindings)}
+            MIRConstant.Map{entries: mapped}
+        }
+        .Struct(name, fields) -> {
+            mapped :: loop field in fields -> MIRConstField{name: field.name, value: lower_subst_constant(field.value, bindings)}
+            MIRConstant.Struct{type_name: name, fields: mapped}
+        }
+        .Enum(name, variant, args) -> {
+            mapped :: loop arg in args -> MIRConstEnumArg{name: arg.name, value: lower_subst_constant(arg.value, bindings)}
+            MIRConstant.Enum{type_name: name, variant: variant, args: mapped}
+        }
+        .Present(inner) -> MIRConstant.Present{value: lower_subst_constant(inner, bindings)}
+        .Failed(report) -> {
+            mapped :: if report == {
+                .Clean(ty) -> MIRConstReport.Clean{ty: lower_subst_type(ty, bindings)}
+                .Told(inner) -> MIRConstReport.Told{value: lower_subst_constant(inner, bindings)}
+            }
+            MIRConstant.Failed{report: mapped}
+        }
+    }
+}
+
+fn lower_subst_callee(callee: MIRCallee, bindings: LowerBindings) -> MIRCallee Never! {
+    if callee == {
+        .User(_) | .Core(_) | .Prelude(_) | .Foreign(_) | .Indirect(_) -> callee
+        .Associated(function, owner) -> MIRCallee.Associated{function: function, owner: lower_subst_type(owner, bindings)}
+        .Method(function, owner) -> MIRCallee.Method{function: function, owner: lower_subst_type(owner, bindings)}
+        .TraitMethod(method, trait_ref, receiver) -> MIRCallee.TraitMethod{method: method, trait_ref: trait_ref, receiver: lower_subst_type(receiver, bindings)}
+    }
+}
+
+fn lower_subst_data_plan(plan: MIRDataPlan?, bindings: LowerBindings) -> MIRDataPlan? {
+    source :: plan ?? return None
+    logical :: loop node in source.logical -> {
+        columns :: loop column in node.columns -> MIRDataPlanColumn{name: column.name, ty: lower_subst_type(column.ty, bindings), nullable: column.nullable}
+        callable := MIRDataPlanCallable?{None}
+        if node.callable == .Val(value) -> callable = Val(MIRDataPlanCallable{label: value.label, parameter: lower_subst_type(value.parameter, bindings), result: lower_subst_type(value.result, bindings), span: value.span})
+        MIRDataPlanNode{id: node.id, operation: node.operation, inputs: node.inputs, source: node.source, row_type: lower_subst_type(node.row_type, bindings), columns: columns, callable: callable, stream: node.stream, span: node.span}
+    }
+    Val(MIRDataPlan{schema_version: source.schema_version, source: source.source, logical: logical, physical: source.physical, output: source.output, source_span: source.source_span})
+}
+
+fn lower_subst_text_parts(parts: [MIRTextPatternPart], bindings: LowerBindings, ids: LowerTypeIndex) -> [MIRTextPatternPart] Never! {
+    loop part in parts -> if part == {
+        .Literal(_) -> part
+        .Hole(kind, ty, span) -> MIRTextPatternPart.Hole{kind: kind, ty: lower_subst_type_id(ty, bindings, ids), span: span}
+    }
+}
+
+fn lower_subst_binary_parts(parts: [MIRBinaryPatternPart], bindings: LowerBindings, ids: LowerTypeIndex) -> [MIRBinaryPatternPart] Never! {
+    loop part in parts -> if part == {
+        .Literal(_) -> part
+        .Bits(width, ty, little, span) -> MIRBinaryPatternPart.Bits{width: width, ty: lower_subst_type_id(ty, bindings, ids), little: little, span: span}
+        .Rest(ty, span) -> MIRBinaryPatternPart.Rest{ty: lower_subst_type_id(ty, bindings, ids), span: span}
+    }
+}
+
+fn lower_subst_semantic(operation: MIRSemanticOp, bindings: LowerBindings, ids: LowerTypeIndex) -> MIRSemanticOp Never! {
+    if operation == {
+        .MathBuiltin(type_id, call, args) -> MIRSemanticOp.MathBuiltin{type_id: lower_subst_type_id(type_id, bindings, ids), call: call, args: args}
+        .PreciseBuiltin(type_id, call, args) -> MIRSemanticOp.PreciseBuiltin{type_id: lower_subst_type_id(type_id, bindings, ids), call: call, args: args}
+        .StructLiteral(type_id, fields, extra, trait_coercion, boxed_fields) -> MIRSemanticOp.StructLiteral{type_id: type_id, fields: fields, extra: extra, trait_coercion: lower_subst_optional_id(trait_coercion, bindings, ids), boxed_fields: boxed_fields}
+        .StaticPreludeCall(call, args, owner_type_args, type_args) -> {
+            owners :: loop arg in owner_type_args -> if arg == {
+                .Type(ty) -> MIRPreludeTypeArg.Type{ty: lower_subst_type(ty, bindings)}
+                .HostUsize -> MIRPreludeTypeArg.HostUsize
+            }
+            MIRSemanticOp.StaticPreludeCall{call: call, args: lower_subst_args(args, bindings, ids), owner_type_args: owners, type_args: lower_subst_types(type_args, bindings)}
+        }
+        .HardwareCall(call, op, receiver, args) -> {
+            hardware :: if op == {
+                .RegisterRead(_, _, _, _) | .RegisterWrite(_, _, _, _) -> op
+                .DMAStart(profile_id, channel, buffer_ty) -> MIRHardwareOp.DMAStart{profile_id: profile_id, channel: channel, buffer_ty: lower_subst_type(buffer_ty, bindings)}
+                .DMAWait(profile_id, channel, buffer_ty) -> MIRHardwareOp.DMAWait{profile_id: profile_id, channel: channel, buffer_ty: lower_subst_type(buffer_ty, bindings)}
+            }
+            MIRSemanticOp.HardwareCall{call: call, op: hardware, receiver: receiver, args: lower_subst_args(args, bindings, ids)}
+        }
+        .AllocNew(call, kind, inline_size, args) -> MIRSemanticOp.AllocNew{call: call, kind: kind, inline_size: inline_size, args: lower_subst_args(args, bindings, ids)}
+        .ClosureMethod(receiver, args, call) -> MIRSemanticOp.ClosureMethod{receiver: receiver, args: lower_subst_args(args, bindings, ids), call: call}
+        .HostCall(call, args) -> MIRSemanticOp.HostCall{call: call, args: lower_subst_args(args, bindings, ids)}
+        .HostBorrowCallback(callable, params) -> MIRSemanticOp.HostBorrowCallback{callable: callable, params: lower_subst_types(params, bindings)}
+        .TextPatternMatch(call, subject, parts) -> MIRSemanticOp.TextPatternMatch{call: call, subject: subject, parts: lower_subst_text_parts(parts, bindings, ids)}
+        .BinaryPatternMatch(call, subject, parts) -> MIRSemanticOp.BinaryPatternMatch{call: call, subject: subject, parts: lower_subst_binary_parts(parts, bindings, ids)}
+        .CursorTakePattern(receiver, receiver_place, parts) -> MIRSemanticOp.CursorTakePattern{receiver: receiver, receiver_place: receiver_place, parts: lower_subst_text_parts(parts, bindings, ids)}
+        .ReaderTakePattern(receiver, receiver_place, parts) -> MIRSemanticOp.ReaderTakePattern{receiver: receiver, receiver_place: receiver_place, parts: lower_subst_binary_parts(parts, bindings, ids)}
+        // These carry no type: only value, place and declaration operands.
+        .DataEntriesToMap(_, _) | .Print(_, _) | .AmbientInput(_, _) | .RequireStop(_, _, _, _, _, _, _)
+        | .LayoutCompare(_, _, _, _) | .ReflectOf(_, _, _, _) | .LayoutLiteral(_)
+        | .CellGuardProject(_, _, _, _, _, _) | .SharedGuardMap(_, _, _, _)
+        | .SharedGuardSplit(_, _, _, _, _, _) | .SharedGuardWait(_, _, _, _) | .ConditionNotify(_, _, _)
+        | .ColumnarRead(_, _, _, _, _) | .DecodeUnder(_, _, _) | .BuiltinMethod(_, _, _, _, _)
+        | .OptionLift2(_, _, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _)
+        | .OverflowOption(_, _, _, _) | .HandleMethod(_, _, _, _, _) | .PluginInvoke(_, _, _, _, _)
+        | .HTTPRouterRegister(_, _, _, _, _, _, _, _) | .CoreClosureCall(_, _, _, _, _, _)
+        | .TaskGroup(_, _, _) | .Select(_, _, _) | .PolicyFunction(_, _) | .InterruptFunction(_, _)
+        | .CarrierFact(_, _, _, _) | .GCEdit(_, _, _, _, _, _, _) | .TypedTextInterp(_, _, _, _, _)
+        | .CCallback(_, _, _) -> operation
+    }
+}
+
+fn lower_subst_operation(operation: MIROperation, bindings: LowerBindings, ids: LowerTypeIndex) -> MIROperation Never! {
+    if operation == {
+        .Constant(value) -> MIROperation.Constant{value: lower_subst_constant(value, bindings)}
+        .BuildList(values, trait_coercion) -> MIROperation.BuildList{values: values, trait_coercion: lower_subst_optional_id(trait_coercion, bindings, ids)}
+        .Convert(value, parameters, target, conversion) -> MIROperation.Convert{value: value, parameters: parameters, target: lower_subst_type(target, bindings), conversion: lower_subst_conversion(conversion, bindings)}
+        .TraitBox(value, target) -> MIROperation.TraitBox{value: value, target: lower_subst_type_id(target, bindings, ids)}
+        .Call(callee, args, type_args) -> MIROperation.Call{callee: lower_subst_callee(callee, bindings), args: lower_subst_args(args, bindings, ids), type_args: lower_subst_types(type_args, bindings)}
+        .IndirectCall(callee, args, type_args) -> MIROperation.IndirectCall{callee: callee, args: lower_subst_args(args, bindings, ids), type_args: lower_subst_types(type_args, bindings)}
+        .PtrFromAddr(address, element) -> MIROperation.PtrFromAddr{address: address, element: lower_subst_type(element, bindings)}
+        .CoreCall(call, route, args, type_args, fallibility, data_plan) -> MIROperation.CoreCall{call: call, route: route, args: lower_subst_args(args, bindings, ids), type_args: lower_subst_types(type_args, bindings), fallibility: lower_subst_fallibility(fallibility, bindings), data_plan: lower_subst_data_plan(data_plan, bindings)}
+        .Todo(call, location, expected_type) -> MIROperation.Todo{call: call, location: location, expected_type: lower_subst_optional(expected_type, bindings)}
+        .Semantic(semantic) -> MIROperation.Semantic{operation: lower_subst_semantic(semantic, bindings, ids)}
+        // Declaration, value, place and local operands only; the concrete
+        // types of their results are the substituted value and place facts.
+        .Parameter(_, _) | .Capture(_) | .Global(_) | .Phi(_) | .ReadPlace(_) | .MovePlace(_)
+        | .WritePlace(_, _) | .ReplacePlace(_, _) | .InitializeUninit(_) | .Copy(_, _) | .Move(_)
+        | .Unary(_, _) | .Binary(_, _, _, _, _) | .BuildString(_) | .BuildMap(_)
+        | .EnumIs(_, _, _) | .EnumPayload(_, _, _, _) | .OptionIsSome(_) | .OptionValue(_)
+        | .ResultIsOk(_) | .ResultValue(_, _) | .PatternCapture(_, _) | .PatternMatched(_)
+        | .ProjectMembers(_, _) | .Index(_, _, _, _, _, _, _) | .Slice(_, _, _, _, _, _)
+        | .Range(_, _, _) | .Field(_, _) | .Struct(_, _) | .Enum(_, _, _) | .Tuple(_, _)
+        | .Present(_) | .Absent | .ResultOk(_) | .ResultErr(_) | .Closure(_, _, _) | .Deref(_)
+        | .RawAddressOf(_) | .AddressOf(_, _) | .AttachTag(_, _) | .Never(_)
+        | .LoopRangeInit(_, _, _, _, _) | .LoopRangeHasNext(_, _) | .LoopRangeValue(_, _) | .LoopRangeAdvance(_, _)
+        | .LoopIterInit(_, _, _, _, _) | .LoopIterHasNext(_, _) | .LoopIterValue(_, _) | .LoopIterAdvance(_, _)
+        | .ScopeEnter(_, _) | .ScopeExit(_) | .Drop(_, _) -> operation
+    }
+}
+
+fn lower_subst_vector(fact: MIRVectorFact, bindings: LowerBindings) -> MIRVectorFact Never! {
+    MIRVectorFact{loop_header: fact.loop_header, cursor: fact.cursor, body_blocks: fact.body_blocks, advance_block: fact.advance_block,
+        rule: fact.rule, accesses: fact.accesses, layout: fact.layout, element_type: lower_subst_optional(fact.element_type, bindings),
+        packed: fact.packed, lane_width: fact.lane_width, no_aliasing: fact.no_aliasing, no_early_exit: fact.no_early_exit,
+        effect_free_body: fact.effect_free_body, no_cross_iteration_dependencies: fact.no_cross_iteration_dependencies,
+        fixed_reduction: fact.fixed_reduction, span: fact.span, decision: fact.decision}
+}
+
+// The concrete body of one instance, keyed `name`: every type-bearing row
+// substituted, every local identity kept.
+fn lower_mono_materialize(source: MIRFunction, id: MIRFunctionID, name: String, bindings: LowerBindings, ids: LowerTypeIndex) -> MIRFunction Never! {
+    form :: if source.form == {
+        .TopLevel -> MIRFunctionForm.TopLevel
+        .Method(owner, self_access) -> MIRFunctionForm.Method{owner: lower_subst_type(owner, bindings), self_access: self_access}
+        .TraitMethod(owner, trait_ref, self_access, serde) -> MIRFunctionForm.TraitMethod{owner: lower_subst_type(owner, bindings), trait_ref: trait_ref, self_access: self_access, serde: serde}
+    }
+    params :: loop param in source.params -> MIRParam{index: param.index, name: param.name, span: param.span, ty: lower_subst_type(param.ty, bindings), access: param.access, ownership: param.ownership, public_label: param.public_label, variadic: param.variadic, default_present: param.default_present}
+    captures :: loop param in source.capture_params -> MIRCaptureParam{slot: param.slot, name: param.name, span: param.span, ty: lower_subst_type(param.ty, bindings), access: param.access, ownership: param.ownership}
+    locals :: loop local in source.locals -> MIRLocal{id: local.id, name: local.name, span: local.span, ty: lower_subst_type(local.ty, bindings), place: local.place, mutable: local.mutable, ownership: local.ownership, is_comptime: local.is_comptime, uninit: local.uninit, arena_view: local.arena_view, string_view: local.string_view, gc_root: local.gc_root}
+    values :: loop value in source.values -> MIRValueFact{id: value.id, ty: lower_subst_type(value.ty, bindings), span: value.span, ownership: value.ownership}
+    places :: loop place in source.places -> MIRPlace{id: place.id, span: place.span, ty: lower_subst_type(place.ty, bindings), base: place.base, projections: place.projections, access: place.access, persist_key: place.persist_key}
+    web :: loop row in source.web_param_reconstructions -> {
+        fields :: loop field in row.fields -> MIRWebParamField{field: field.field, parameter: field.parameter, ty: lower_subst_type(field.ty, bindings)}
+        MIRWebParamReconstruction{local: row.local, ty: lower_subst_type(row.ty, bindings), fields: fields}
+    }
+    facts :: source.optimization
+    vectors :: loop fact in facts.vector_facts -> lower_subst_vector(fact, bindings)
+    checked_vectors :: loop fact in facts.checked_vector_facts -> lower_subst_vector(fact, bindings)
+    optimization :: MIROptimizationFacts{
+        pure: facts.pure, replayable: facts.replayable, diverges: facts.diverges, inline: facts.inline, inline_always: facts.inline_always,
+        gc_return: facts.gc_return, gc_scope: facts.gc_scope, kernel: facts.kernel, auto_vectorizable: facts.auto_vectorizable,
+        no_aliasing: facts.no_aliasing, no_early_exit: facts.no_early_exit, no_cross_iteration_dependencies: facts.no_cross_iteration_dependencies,
+        derived_from_digest: facts.derived_from_digest, decision_rows: facts.decision_rows, pass_ids: facts.pass_ids,
+        loop_facts: facts.loop_facts, bounds_facts: facts.bounds_facts, vector_facts: vectors, checked_vector_facts: checked_vectors,
+        fusion_facts: facts.fusion_facts, acceleration_facts: facts.acceleration_facts,
+    }
+    generator := MIRGeneratorFacts?{None}
+    if source.generator == .Val(value) -> generator = Val(MIRGeneratorFacts{item: lower_subst_type(value.item, bindings)})
+    blocks :: loop block in source.blocks -> {
+        instructions :: loop instruction in block.instructions -> MIRInstruction{id: instruction.id, span: instruction.span, source_line: instruction.source_line, result: instruction.result, ty: lower_subst_optional(instruction.ty, bindings), operation: lower_subst_operation(instruction.operation, bindings, ids)}
+        MIRBasicBlock{id: block.id, span: block.span, instructions: instructions, terminator: block.terminator}
+    }
+    MIRFunction{
+        id: id, module_id: source.module_id, source_file: source.source_file, key: name, module_name: source.module_name,
+        name: source.name, span: source.span, kind: source.kind, form: form, visibility: source.visibility, target_applicability: source.target_applicability,
+        web_bucket: source.web_bucket, web_marker: source.web_marker, generic_params: [MIRGenericParam]{}, capture_params: captures, params: params,
+        declared_return: lower_subst_optional(source.declared_return, bindings), return_type: lower_subst_type(source.return_type, bindings),
+        failure: lower_subst_failure(source.failure, bindings), effects: source.effects, captures: source.captures,
+        generator: generator,
+        optimization: optimization, is_unsafe: source.is_unsafe, unsafe_gate: source.unsafe_gate, is_pure: source.is_pure,
+        memo_bound: source.memo_bound, memo_unbounded: source.memo_unbounded, is_reactive: source.is_reactive, reactive_upgrades: source.reactive_upgrades,
+        is_inline: source.is_inline, is_inline_always: source.is_inline_always, is_scalar: source.is_scalar, kernel_proof: source.kernel_proof,
+        gc_return: source.gc_return, return_view_provenance: source.return_view_provenance, web_param_reconstructions: web, blocks: blocks,
+        entry: source.entry, locals: locals, values: values, places: places, scopes: source.scopes, drops: source.drops, foreign_language: source.foreign_language,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The queue.
+
+fn lower_mono_issue(q: &LowerPrepared, message: String) Never! {
+    &q.issues.push(LIRLoweringIssue{function: "entry preparation", message: message})
+}
+
+fn lower_mono_chain(q: LowerPrepared, parent: Int, label: String) -> String Never! {
+    rows := [String]{label}
+    current := parent
+    loop current >= 0 {
+        &rows.push(q.ancestors[current].label)
+        current = q.ancestors[current].parent
+    }
+    // Leaf first: the failing request leads the diagnostic.
+    rows.join(" <- ")
+}
+
+fn lower_mono_ancestor(q: &LowerPrepared, parent: Int, label: String, specialization: Bool) -> Int Never! {
+    previous :: if parent < 0 -> 0 else -> q.ancestors[parent].depth
+    depth :: previous + (if specialization -> 1 else -> 0)
+    if depth > 128 {
+        chain :: lower_mono_chain(q, parent, label)
+        lower_mono_issue(&q, "specialization depth limit 128: {chain}")
+        return -1
+    }
+    row :: q.ancestors.len()
+    &q.ancestors.push(LowerMonoAncestor{parent: parent, label: label, depth: depth})
+    row
+}
+
+// Queues a concrete type once: Reach visits its lifecycle edges and stored
+// components. A zero-argument Apply naming a generic parameter and no
+// declaration is a binder no instance bound.
+fn lower_mono_intern_type(q: &LowerPrepared, ty: MIRType, parent: Int) Never! {
+    if ty.identity == .Val(id) {
+        lower_index_type(&q.checked_types, id, ty)
+    }
+    fingerprint :: lower_mono_fingerprint(ty)
+    if q.type_rows.get(fingerprint) != None -> return
+    specialization := false
+    if ty.kind == .Apply(name, args) {
+        if args.len() == 0 && q.free_binders.get(name.name) != None && q.declaration_rows.get(name.id.value) == None {
+            chain :: lower_mono_chain(q, parent, mir_type_display_name(ty))
+            return lower_mono_issue(&q, "unbound type parameter {name.name} in {chain}")
+        }
+        specialization = args.len() > 0
+    }
+    ancestor :: lower_mono_ancestor(&q, parent, "type {mir_type_display_name(ty)}", specialization)
+    if ancestor < 0 -> return
+    row :: q.type_work.len()
+    &q.type_rows.add(fingerprint, row).drop("checked absent above")
+    &q.type_work.push(LowerMonoType{ty: ty, parent: ancestor})
+    &q.pending.push(LowerMonoPending.Type{row: row})
+}
+
+// Registers the concrete function a direct call reaches: `owner` is the
+// callee's checked owner (methods and associated functions), `type_args`
+// the call's own type arguments. Returns its concrete ID.
+fn lower_mono_request(p: MIRProgram, q: &LowerPrepared, original: MIRFunctionID, owner: MIRType?, type_args: [MIRType], parent: Int, site: String) -> MIRFunctionID? {
+    row :: q.source_rows.get(original.value) ?? {
+        lower_mono_issue(&q, "missing reachable function {original.value} at {site}")
+        return None
+    }
+    source :: p.functions[row]
+    // A callee the front end already specialized (`tap__generic__Int`) has
+    // no generic parameters; its calls still list the type arguments, which
+    // bind nothing (lower_call resolves them the same way).
+    call_args :: if source.generic_params.len() == 0 -> [MIRType]{} else -> type_args
+    bound :: lower_call_bindings(owner, call_args)
+    key :: lower_instance_key(original, bound)
+    if q.instance_rows.get(key) == .Val(existing) -> return Val(q.functions[existing].id)
+    bindings := lower_bindings_empty()
+    if owner == .Val(ty) {
+        if ty.kind == .Apply(name, owner_args) {
+            if q.declaration_rows.get(name.id.value) == .Val(declaration) {
+                parameters :: p.types[declaration].generic_params
+                if parameters.len() != owner_args.len() {
+                    lower_mono_issue(&q, "owner type argument arity mismatch for {source.key} at {site}: expected {parameters.len()}, got {owner_args.len()}")
+                    return None
+                }
+                loop (index, parameter) in parameters -> lower_bind(&bindings, parameter.name, owner_args[index])
+            } else if owner_args.len() > 0 {
+                lower_mono_issue(&q, "missing owner declaration {name.id.value} for {source.key} at {site}")
+                return None
+            }
+        }
+    }
+    if source.generic_params.len() != call_args.len() {
+        lower_mono_issue(&q, "function type argument arity mismatch for {source.key} at {site}: expected {source.generic_params.len()}, got {call_args.len()}")
+        return None
+    }
+    loop (index, parameter) in source.generic_params {
+        if lower_bound(bindings, parameter.name) != None {
+            lower_mono_issue(&q, "duplicate owner/function type parameter {parameter.name} in {source.key}")
+            return None
+        }
+        lower_bind(&bindings, parameter.name, call_args[index])
+    }
+    specialized :: bound.len() > 0
+    ancestor :: lower_mono_ancestor(&q, parent, "{source.key} at {site}", specialized)
+    if ancestor < 0 -> return None
+    loop ty in bound -> lower_mono_intern_type(&q, ty, ancestor)
+    id :: lower_instance_id(original, bound)
+    if q.reserved_ids.get(id.value) == .Val(previous) {
+        if specialized || previous != "original:{original.value}" {
+            lower_mono_issue(&q, "function identity collision {id.value}: {previous} versus {key}")
+            return None
+        }
+    } else {
+        &q.reserved_ids.add(id.value, key).drop("checked absent above")
+    }
+    descriptor :: q.functions.len()
+    &q.instance_rows.add(key, descriptor).drop("checked absent above")
+    if !specialized -> &q.original_descriptors.add(original.value, descriptor).drop("one descriptor per original")
+    labels :: loop ty in bound -> mir_type_display_name(ty)
+    base :: if source.key == "" -> source.name else -> source.key
+    name :: if specialized -> "{base}<{labels.join(", ")}>" else -> source.key
+    &q.functions.push(LowerPreparedFunction{id: id, original: original, source_row: row, instance_row: if specialized -> -2 else -> -1, key: key, name: name, bindings: bindings, parent: ancestor})
+    &q.pending.push(LowerMonoPending.Function{row: descriptor})
+    Val(id)
+}
+
+// A generic function or a method of a generic type: instantiated only for a
+// concrete call site, never from a table edge that has no receiver.
+fn lower_mono_template(p: MIRProgram, q: LowerPrepared, id: MIRFunctionID) -> Bool Never! {
+    row :: q.source_rows.get(id.value) ?? return false
+    if p.functions[row].generic_params.len() > 0 -> return true
+    if p.functions[row].form == {
+        .Method(owner, _) | .TraitMethod(owner, _, _, _) -> if owner.kind == .Apply(_, args) -> args.len() > 0 else -> false
+        .TopLevel -> false
+    }
+}
+
+// A function a body names without a call site (closure, optimizer decision):
+// its parameters take the enclosing instance's bindings of the same names.
+fn lower_mono_dependency(p: MIRProgram, q: &LowerPrepared, id: MIRFunctionID, bindings: LowerBindings, parent: Int, site: String) Never! {
+    row :: q.source_rows.get(id.value) ?? return lower_mono_issue(&q, "missing reachable function {id.value} at {site}")
+    target :: p.functions[row]
+    arguments := [MIRType]{}
+    loop parameter in target.generic_params {
+        bound :: lower_bound(bindings, parameter.name) ?? return lower_mono_issue(&q, "unbound type parameter {parameter.name} for dependency {target.key} at {site}")
+        &arguments.push(bound)
+    }
+    owner :: if target.form == {
+        .TopLevel -> None
+        .Method(ty, _) | .TraitMethod(ty, _, _, _) -> Val(lower_subst_type(ty, bindings))
+    }
+    lower_mono_request(p, &q, id, owner, arguments, parent, site).drop("dependency request")
+}
+
+fn lower_mono_edge(q: &LowerPrepared, function: MIRFunctionID?, branch: Int, next: Int) -> Int Never! {
+    row :: q.edges.len()
+    &q.edges.push(LowerMonoEdge{function: function, branch: branch, next: next})
+    row
+}
+
+fn lower_mono_empty() -> LowerPrepared Never! {
+    LowerPrepared{
+        functions: [LowerPreparedFunction]{}, instances: [MIRFunction]{},
+        source_rows: [U64:Int]{}, mir_rows: [U64:Int]{}, entry: None, issues: [LIRLoweringIssue]{},
+        instance_rows: [String:Int]{}, original_descriptors: [U64:Int]{}, reserved_ids: [U64:String]{},
+        declaration_rows: [U64:Int]{}, checked_types: LowerTypeIndex{rows: [U64:Int]{}, types: [MIRType]{}},
+        type_rows: [String:Int]{}, type_work: [LowerMonoType]{}, render_seen: [String:Bool]{}, free_binders: [String:Bool]{},
+        function_names: [String:U64]{},
+        callbacks: [U64:Int]{}, callbacks_seen: [U64:Bool]{}, foreign_rows: [U64:Int]{}, foreign_seen: [U64:Bool]{},
+        constant_rows: [String:Int]{}, constants_seen: [Int:Bool]{},
+        lifecycle: [String:Int]{}, trait_targets: [U64:Int]{}, trait_seen: [U64:Bool]{},
+        edges: [LowerMonoEdge]{}, edges_seen: [Int:Bool]{},
+        ancestors: [LowerMonoAncestor]{}, pending: [LowerMonoPending]{},
+    }
+}
+
+// Indexes the program's tables once; the queue then probes maps only.
+fn lower_mono_index(p: MIRProgram, q: &LowerPrepared) Never! {
+    loop (row, function) in p.functions {
+        if q.source_rows.get(function.id.value) != None {
+            lower_mono_issue(&q, "function identity collision {function.id.value} in original declarations")
+            next
+        }
+        &q.source_rows.add(function.id.value, row).drop("checked absent above")
+        &q.reserved_ids.add(function.id.value, "original:{function.id.value}").drop("checked absent above")
+        &q.function_names.add("key:{function.key}", function.id.value).drop("function keys are unique")
+        if q.function_names.get("name:{function.name}") == None -> &q.function_names.add("name:{function.name}", function.id.value).drop("checked absent above")
+        loop parameter in function.generic_params {
+            if q.free_binders.get(parameter.name) == None -> &q.free_binders.add(parameter.name, true).drop("checked absent above")
+        }
+    }
+    loop (row, definition) in p.types {
+        if q.declaration_rows.get(definition.id.value) != None {
+            lower_mono_issue(&q, "type declaration identity collision {definition.id.value}")
+            next
+        }
+        &q.declaration_rows.add(definition.id.value, row).drop("checked absent above")
+        loop parameter in definition.generic_params {
+            if q.free_binders.get(parameter.name) == None -> &q.free_binders.add(parameter.name, true).drop("checked absent above")
+        }
+    }
+    // Checked types are indexed for ID-only operands, not made reachable.
+    loop ty in p.type_instances {
+        if ty.identity == .Val(id) {
+            lower_index_type(&q.checked_types, id, ty)
+        }
+    }
+    loop (row, adapter) in p.callbacks -> &q.callbacks.add(adapter.id.value, row).drop("callback ids are unique")
+    loop (row, constant) in p.constants {
+        &q.constant_rows.add("key:{constant.key}", row).drop("constant keys are unique")
+        if q.constant_rows.get("name:{constant.name}") == None -> &q.constant_rows.add("name:{constant.name}", row).drop("checked absent above")
+    }
+    loop (row, foreign) in p.foreign -> &q.foreign_rows.add(foreign.id.value, row).drop("foreign ids are unique")
+    adapter_heads := [String:Int]{}
+    loop adapter in p.cffi.close_adapters {
+        named := q.function_names.get("key:{adapter.adapter_function}")
+        if named == None -> named = q.function_names.get("name:{adapter.adapter_function}")
+        id :: MIRFunctionID{value: named ?? next}
+        key :: "{lower_mono_part(adapter.lib)}{lower_mono_part(adapter.handle_type)}"
+        head :: lower_mono_edge(&q, Val(id), -1, adapter_heads.get(key) ?? -1)
+        &adapter_heads.add(key, head).drop("replaces the previous head")
+    }
+    loop handle in p.handles {
+        key :: lower_mono_fingerprint(handle.ty)
+        shared :: adapter_heads.get("{lower_mono_part(handle.payload.library)}{lower_mono_part(handle.payload.typedef_name)}") ?? -1
+        head := q.lifecycle.get(key) ?? -1
+        if shared >= 0 -> head = lower_mono_edge(&q, None, shared, head)
+        if handle.close == .Val(id) -> head = lower_mono_edge(&q, Val(id), -1, head)
+        if handle.undo == .Val(id) -> head = lower_mono_edge(&q, Val(id), -1, head)
+        &q.lifecycle.add(key, head).drop("replaces the previous head")
+    }
+    trait_methods := [String:U64]{}
+    loop definition in p.traits {
+        loop method in definition.methods {
+            &trait_methods.add("{definition.id.value}:{lower_mono_part(method.name)}", method.id.value).drop("trait method names are unique")
+            head :: if method.default == .Val(id) -> lower_mono_edge(&q, Val(id), -1, -1) else -> -1
+            &q.trait_targets.add(method.id.value, head).drop("trait method ids are unique")
+        }
+    }
+    loop implementation in p.impls {
+        trait_ref :: implementation.trait_ref ?? next
+        loop id in implementation.methods {
+            function_row :: q.source_rows.get(id.value) ?? next
+            method :: trait_methods.get("{trait_ref.id.value}:{lower_mono_part(p.functions[function_row].name)}") ?? next
+            previous :: q.trait_targets.get(method) ?? -1
+            head :: lower_mono_edge(&q, Val(id), -1, previous)
+            &q.trait_targets.add(method, head).drop("replaces the previous head")
+        }
+    }
+}
+
+fn lower_mono_run(p: MIRProgram, q: &LowerPrepared) Never! {
+    cursor := 0
+    loop cursor < q.pending.len() && q.issues.len() == 0 {
+        work :: ~q.pending[cursor]
+        cursor += 1
+        if work == {
+            .Function(row) -> {
+                source_row :: q.functions[row].source_row
+                parent :: q.functions[row].parent
+                if q.functions[row].instance_row == -1 {
+                    lower_reach_body(p, &q, p.functions[source_row], lower_bindings_empty(), parent)
+                } else {
+                    id :: q.functions[row].id
+                    bindings :: ~q.functions[row].bindings
+                    name :: ~q.functions[row].name
+                    function :: lower_mono_materialize(p.functions[source_row], id, name, bindings, q.checked_types)
+                    lower_reach_body(p, &q, function, bindings, parent)
+                    q.functions[row].instance_row = q.instances.len()
+                    &q.instances.push(function)
+                }
+            }
+            .Type(row) -> {
+                ty :: ~q.type_work[row].ty
+                parent :: q.type_work[row].parent
+                lower_reach_concrete_type(p, &q, ty, parent)
+            }
+            .Render(row, show) -> {
+                ty :: ~q.type_work[row].ty
+                parent :: q.type_work[row].parent
+                lower_reach_render_type(p, &q, ty, show, parent)
+            }
+        }
+    }
+    // Reorder descriptors only: originals in declaration order, then instances.
+    ordered := [LowerPreparedFunction]{}
+    loop function in p.functions {
+        if q.original_descriptors.get(function.id.value) == .Val(row) -> &ordered.push(q.functions[row])
+    }
+    loop descriptor in q.functions {
+        if descriptor.instance_row >= 0 -> &ordered.push(descriptor)
+    }
+    q.functions = ordered
+    loop (row, descriptor) in q.functions -> &q.mir_rows.add(descriptor.id.value, row).drop("concrete IDs are unique")
+    // A failed preparation has no executable inventory, never a runnable subset.
+    if q.issues.len() > 0 {
+        q.functions = [LowerPreparedFunction]{}
+        q.instances = [MIRFunction]{}
+        q.mir_rows = [U64:Int]{}
+    }
+}
+
+// The executable inventory reached from `entry`.
+pub fn lower_prepare_entry(program: MIRProgram, entry: MIRFunctionID) -> LowerPrepared Never! {
+    q := lower_mono_empty()
+    lower_mono_index(program, &q)
+    if q.issues.len() == 0 -> q.entry = lower_mono_request(program, &q, entry, None, [MIRType]{}, -1, "entry")
+    lower_mono_run(program, &q)
+    q
+}

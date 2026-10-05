@@ -1,0 +1,159 @@
+// Checked program stops. MIRRust.rs:require_stop/require_locals and
+// Prelude/Core.rs:jet_require, jet_require_eq, jet_panic_rich own the meaning.
+use jet_foundation.[MIRInstruction, MIRPanicContext, MIRPanicLoc, MIRPreludeCallID, MIRProgram, MIRRequireKind, MIRType, MIRValueID]
+
+fn lower_require_string(f: &LowerFunction) -> LIRValueID Never! {
+    lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_string_drop"}, None)
+}
+
+fn lower_require_literal(m: &LowerModule, f: &LowerFunction, text: String) -> LIRValueID Never! {
+    value :: lower_require_string(&f)
+    args :: lower_static_text(&m, &f, text)
+    lower_call_runtime(&m, &f, "jet_rt_string_from_static", args, Val(value))
+    value
+}
+
+fn lower_require_null(f: &LowerFunction) -> LIRValueID Never! {
+    value :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: value, value: 0})
+    value
+}
+
+fn lower_require_static_text(m: &LowerModule, descriptor: LIRDataID, offset: Int, text: String) Never! {
+    data :: lower_data(&m, text)
+    length :: ~m.data[data.value].bytes.len()
+    lower_static_store(&m, descriptor, offset, lower_static_pointer(data))
+    lower_static_store(&m, descriptor, offset + 8, lower_static_word(length))
+}
+
+fn lower_require_push(m: &LowerModule, f: &LowerFunction, builder: LIRValueID, text: String) Never! {
+    args := [LIRValueID]{builder}
+    loop arg in lower_static_text(&m, &f, text) -> &args.push(arg)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_push_static", args, None)
+}
+
+// Debug's scalar and structural policies are shared with `{value:Debug}`.
+fn lower_require_debug(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, value: LIRValueID) -> LIRValueID? {
+    text :: lower_render_value(p, &m, &f, ty, Val(value), LowerRenderMode.Debug) ?? return None
+    Val(text.value)
+}
+
+fn lower_require_debug_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID) -> LIRValueID? {
+    ty :: lower_value_type(c, value) ?? {
+        lower_fail(&m, &f, "require diagnostic value has no checked type")
+        return None
+    }
+    lowered :: lower_use(&m, &f, value) ?? return None
+    lower_require_debug(p, &m, &f, ty, lowered)
+}
+
+// jet run's debug context (MIRRust.rs:require_locals): preserve the supplied
+// name/order and read current root storage, not an earlier SSA read of it.
+fn lower_require_locals(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, context: MIRPanicContext) -> LIRValueID? {
+    if context.locals.len() == 0 -> return Val(lower_require_null(&f))
+    builder :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
+    loop (ordinal, local) in context.locals {
+        index :: c.local_slots.get(local.local.value) ?? {
+            lower_fail(&m, &f, "require diagnostic local has no lowered root; this context is not lowered at O0 yet")
+            return None
+        }
+        slot :: c.slots[index]
+        current :: lower_slot_root(p, c, &m, &f, index)
+        value := current ?? {
+            lower_fail(&m, &f, "require diagnostic local has no value; this context is not lowered at O0 yet")
+            return None
+        }
+        if slot.write_param >= 0 && !lower_is_inline(p, slot.ty) {
+            parameter :: ~f.params[slot.write_param]
+            address :: parameter ?? return None
+            layout :: lower_value_layout(f, value)
+            loaded :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
+            lower_emit(&f, LIRInst.Load{dst: loaded, base: address, offset: 0})
+            value = loaded
+        }
+        text :: lower_require_debug(p, &m, &f, slot.ty, value) ?? return None
+        if ordinal > 0 -> lower_require_push(&m, &f, builder, ", ")
+        lower_require_push(&m, &f, builder, "{local.name} = ")
+        lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, text}, None)
+        lower_emit(&f, LIRInst.Drop{value: text})
+    }
+    result :: lower_require_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(result))
+    Val(result)
+}
+
+// The report's context is entirely static; render it once at lowering, with
+// exactly RuntimeDiagnosticCore.rs:jet_write_runtime_stop's spacing. The
+// descriptor also carries the original fields for the hosted Prelude adapter.
+fn lower_require_context_text(path: String, location: MIRPanicLoc, context: MIRPanicContext) -> String Never! {
+    out := [U8]{}
+    if path != "" {
+        heading :: if context.function == "" -> "  --> {path}:{location.line}\n" else -> "  --> {path}:{location.line} in {context.function}\n"
+        loop byte in heading.bytes() -> &out.push(byte)
+    }
+    if context.source_line != "" {
+        digits :: "{location.line}".bytes().len()
+        loop _ in 0..<(digits + 3) -> &out.push(U8{32})
+        loop byte in "|\n{location.line} | {context.source_line}\n".bytes() -> &out.push(byte)
+        loop _ in 0..<(digits + 3) -> &out.push(U8{32})
+        &out.push(U8{124})
+        &out.push(U8{32})
+        loop _ in 0..<(if location.column > 0 -> location.column - 1 else -> 0) -> &out.push(U8{32})
+        loop _ in 0..<(if context.caret > 0 -> context.caret else -> 1) -> &out.push(U8{94})
+        &out.push(U8{10})
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn lower_require_stop(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, kind: MIRRequireKind, condition: MIRValueID?, location: MIRPanicLoc, context: MIRPanicContext, values: [MIRValueID], always_stops: Bool) Never! {
+    _ := lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "require stop names missing Prelude call {call.value}")
+    if kind == .Panic {
+        if condition != None || values.len() != 1 -> return lower_fail(&m, &f, "panic requires one message and no condition")
+    } else {
+        if condition == None -> return lower_fail(&m, &f, "require stop has no checked condition")
+        if kind == .RequireEq && values.len() != 2 -> return lower_fail(&m, &f, "require_eq requires two diagnostic values")
+        if kind == .Require && values.len() > 1 -> return lower_fail(&m, &f, "require expects only an optional message")
+    }
+    conditional :: kind != .Panic && !always_stops
+    next_block := LIRBlockID{value: -1}
+    if conditional {
+        checked :: condition ?? return
+        flag :: lower_use(&m, &f, checked) ?? return
+        stop :: lower_new_block(&f)
+        next_block = lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: flag, then_target: lower_target(next_block, [LIRValueID]{}), else_target: lower_target(stop, [LIRValueID]{})})
+        lower_start(&f, stop, [LIRValueID]{})
+    }
+    empty :: lower_require_null(&f)
+    message := empty
+    left := empty
+    right := empty
+    if kind == .RequireEq {
+        left = lower_require_debug_value(p, c, &m, &f, values[0]) ?? return
+        right = lower_require_debug_value(p, c, &m, &f, values[1]) ?? return
+    } else if values.len() == 0 {
+        message = lower_require_literal(&m, &f, "condition failed")
+    } else {
+        text :: lower_display(p, c, &m, &f, values[0]) ?? return
+        message = text.value
+    }
+    locals :: lower_require_locals(p, c, &m, &f, context) ?? return
+    path :: lower_source_path(p, m, location.file)
+    data :: lower_static_object(&m, 88)
+    lower_require_static_text(&m, data, 0, path)
+    lower_static_store(&m, data, 16, lower_static_word(location.line))
+    lower_require_static_text(&m, data, 24, context.function)
+    lower_require_static_text(&m, data, 40, context.source_line)
+    lower_static_store(&m, data, 56, lower_static_word(location.column))
+    lower_static_store(&m, data, 64, lower_static_word(context.caret))
+    lower_require_static_text(&m, data, 72, lower_require_context_text(path, location, context))
+    descriptor :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.DataAddress{dst: descriptor, data: data})
+    ordinal :: lower_const(&f, if kind == .Require -> 0 else -> if kind == .RequireEq -> 1 else -> 2)
+    lower_noreturn_call(&m, &f, "jet_rt_require_stop", [LIRValueID]{ordinal, descriptor, message, left, right, locals})
+    if conditional {
+        lower_start(&f, next_block, [LIRValueID]{})
+        lower_alias_absent(&f, instruction)
+    }
+}

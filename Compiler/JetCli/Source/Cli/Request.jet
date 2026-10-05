@@ -22,6 +22,7 @@ use jet_driver.[
     JetDriverVerbOutput,
     JET_DRIVER_EXIT_USER_ERROR,
     jet_driver_compile,
+    jet_driver_compile_mir,
 ]
 use jet_eval.[
     jet_eval_default_config,
@@ -30,6 +31,8 @@ use jet_eval.[
 // Names the Jet toolchain source tree: the directory that holds `Core/`. The
 // Rust host embeds those bodies; the Jet host reads them from this tree.
 pub JET_CLI_TOOLCHAIN_ROOT_ENV :: "JET_TOOLCHAIN_ROOT"
+// Raw build identity supplied by the packaging host, never a guessed version.
+pub JET_CLI_COMPILER_IDENTITY_ENV :: "JET_COMPILER_IDENTITY"
 
 // crates/jet-foundation/src/SHA256.rs `MAX_TREE_DEPTH`.
 JET_CLI_MAX_TREE_DEPTH :: 256
@@ -199,7 +202,7 @@ fn jet_cli_memory_available() -[FS]> Int? Never! {
 // adapter makes dynamic calls with no effect bound), so this function and the
 // host verbs above it stay unannotated, like the bootstrap entry
 // (Compiler/Bootstrap/Host/Entry.jet).
-pub fn jet_cli_compile_file(file: String, color: Bool, threads: Int?) -> JetCLICompiled {
+pub fn jet_cli_compile_file(file: String, color: Bool, emit_rust: Bool, threads: Int?) -> JetCLICompiled {
     entry_path :: cli_files.realpath(file) ?? return jet_cli_refused("can't securely read the file `{file}`", "check the spelling, or run jet from the folder that contains it", color)
     root :: jet_cli_source_root(entry_path)
     root_stat :: cli_files.stat(root) ?? return jet_cli_refused("can't securely read the source root `{root}`", "check that the directory exists and is readable", color)
@@ -236,7 +239,7 @@ pub fn jet_cli_compile_file(file: String, color: Bool, threads: Int?) -> JetCLIC
         authorized_sources: ~snapshot,
         canonical_effect_source: JET_CLI_EFFECT_SOURCE,
         core_sources: core_sources,
-        host_facts: JetDriverHostFacts{target_triple: Val(jet_cli_host_triple(cli_sys.arch(), os)), active_os: Val(os), compiler_identity: None},
+        host_facts: JetDriverHostFacts{target_triple: Val(jet_cli_host_triple(cli_sys.arch(), os)), active_os: Val(os), compiler_identity: cli_sys.get(JET_CLI_COMPILER_IDENTITY_ENV)},
         eval_config: jet_eval_default_config(),
         target: JetDriverCompileTarget.Native,
         record_store: None,
@@ -244,5 +247,6 @@ pub fn jet_cli_compile_file(file: String, color: Bool, threads: Int?) -> JetCLIC
         mir_lint_every_pass: false,
         compiler_threads: CompilerThreads{cap: threads, cores: cli_sys.cpu_count(), memory_available: jet_cli_memory_available()},
     }
-    JetCLICompiled.Compiled{result: jet_driver_compile(^request), snapshot: snapshot}
+    result :: if emit_rust -> jet_driver_compile(^request) else -> jet_driver_compile_mir(^request)
+    JetCLICompiled.Compiled{result: result, snapshot: snapshot}
 }

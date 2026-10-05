@@ -1,0 +1,442 @@
+// Structural Show/Display/Debug borrows values and returns one owned String.
+// MIRRust.rs:emit_structural_impl; StructuralDebug.rs:jet_debug_record/variant.
+use jet_foundation.[
+    MIRField, MIRFunctionID, MIRImplDef, MIRProgram, MIRType, MIRTypeDef,
+    mir_type_display_name, mir_type_same_checked_type,
+]
+enum LowerRenderMode { Display Show Debug }
+
+fn lower_render_helper(mode: LowerRenderMode) -> String Never! {
+    if mode == {
+        .Display -> "display"
+        .Show -> "show"
+        .Debug -> "debug"
+    }
+}
+fn lower_render_clean_report(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    if ty.kind == .Apply(name, args) {
+        if args.len() == 0 && (name.name == "Absent" || name.name == "Never") -> return true
+    }
+    if lower_type_def(p, ty) == .Val(definition) {
+        if definition.kind == .Alias(inner) -> return lower_render_clean_report(p, inner)
+    }
+    false
+}
+
+
+
+fn lower_render_impl_selected(p: MIRProgram, implementation: MIRImplDef, ty: MIRType, show: Bool) -> Bool Never! {
+    trait_ref :: implementation.trait_ref ?? return false
+    if trait_ref.name != (if show -> "Printable" else -> "Display") -> return false
+    if !implementation.target_applicability.rust_aot -> return false
+    if implementation.target_os == .Val(os) {
+        os_name :: if os == {
+            .Linux -> "linux"
+            .MacOS -> "macos"
+            .Windows -> "windows"
+        }
+        if os_name != p.facts.active_os -> return false
+    }
+    mir_type_same_checked_type(implementation.self_type, ty) || lower_render_template(p, implementation.self_type, ty)
+}
+
+// A generic implementation `impl Printable for Box<T>` renders every
+// instance of Box: its receiver applies the declaration to its own parameters.
+fn lower_render_template(p: MIRProgram, self_type: MIRType, ty: MIRType) -> Bool Never! {
+    if self_type.kind == .Apply(name, args) {
+        if ty.kind == .Apply(other, _) {
+            if name.id != other.id || args.len() == 0 -> return false
+            definition :: lower_type_def_by_id(p, name.id) ?? return false
+            if definition.generic_params.len() != args.len() -> return false
+            loop (index, arg) in args {
+                if arg.kind == .Apply(binder, binder_args) {
+                    if binder.name != definition.generic_params[index].name || binder_args.len() > 0 -> return false
+                } else {
+                    return false
+                }
+            }
+            return true
+        }
+    }
+    false
+}
+
+// The implementation's method rendering a value; Reach.jet requests its
+// instance for the rendered receiver, as lower_render_value calls it.
+fn lower_render_method(p: MIRProgram, implementation: MIRImplDef, show: Bool) -> MIRFunctionID? {
+    method_name :: if show -> "show" else -> "display"
+    loop id in implementation.methods {
+        loop function in p.functions {
+            if function.id == id && function.name == method_name -> return Val(id)
+        }
+    }
+    None
+}
+
+fn lower_render_name(name: String) -> String Never! {
+    if !name.starts_with("__jet_") -> return ~name
+    bytes :: name.bytes()
+    String.from_bytes(bytes.slice(6, bytes.len())) ?? ~name
+}
+
+fn lower_render_static(m: &LowerModule, f: &LowerFunction, builder: LIRValueID, text: String) Never! {
+    args := [LIRValueID]{builder}
+    loop arg in lower_static_text(&m, &f, text) -> &args.push(arg)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_push_static", args, None)
+}
+
+fn lower_render_string(f: &LowerFunction) -> LIRValueID Never! {
+    lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_string_drop"}, None)
+}
+
+fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, value: LIRValueID?, mode: LowerRenderMode) -> LowerText? {
+    loop implementation in p.impls {
+        if mode == .Debug -> next
+        if !lower_render_impl_selected(p, implementation, ty, mode == .Show) -> next
+        id :: lower_render_method(p, implementation, mode == .Show) ?? {
+            lower_fail(&m, &f, "selected display implementation has no reachable method")
+            return None
+        }
+        index :: lower_function_index(m, lower_instance_id(id, lower_call_bindings(Val(ty), [MIRType]{})))
+        if index < 0 {
+            lower_fail(&m, &f, "selected display method {id.value} is missing")
+            return None
+        }
+        // The original's parameters and String result are the instance's too.
+        function :: p.functions[m.mir_sources[index]]
+        if function.params.len() != 1 || function.params[0].access != .Read || function.return_type.kind != .String {
+            lower_fail(&m, &f, "this display implementation signature is not lowered at O0 yet")
+            return None
+        }
+        args := [LIRValueID]{}
+        if value == .Val(operand) -> &args.push(operand)
+        text :: lower_render_string(&f)
+        signature :: ~m.mir_signatures[index]
+        lower_emit(&f, LIRInst.Call{dst: Val(text), signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: args})
+        return Val(LowerText{value: text, owned: true})
+    }
+    if lower_text_type(ty) {
+        operand :: value ?? return None
+        if mode != .Debug -> return Val(LowerText{value: operand, owned: false})
+        quoted :: lower_render_string(&f)
+        lower_call_runtime(&m, &f, "jet_rt_require_debug_string", [LIRValueID]{operand}, Val(quoted))
+        return Val(LowerText{value: quoted, owned: true})
+    }
+    if ty.kind == {
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_render_value(p, &m, &f, inner, value, mode)
+        else -> {}
+    }
+    if lower_type_def(p, ty) == .Val(definition) {
+        if definition.kind == {
+            .Alias(base) | .Distinct(base, _) -> return lower_render_value(p, &m, &f, base, value, mode)
+            else -> {}
+        }
+    }
+    repr :: lower_repr(p, ty)
+    if repr == .Absent {
+        builder :: lower_pointer(&f)
+        lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
+        lower_render_static(&m, &f, builder, if mir_type_display_name(ty) == "Absent" -> "null" else -> "()")
+        text :: lower_render_string(&f)
+        lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(text))
+        return Val(LowerText{value: text, owned: true})
+    }
+    operand :: value ?? {
+        lower_fail(&m, &f, "displaying {mir_type_display_name(ty)} without a value is not lowered at O0 yet")
+        return None
+    }
+    // A Core record renders through its runtime type's own JetDisplay /
+    // JetShow / JetDebug, as generated Rust does (Records.jet).
+    if lower_record_render(p, &m, &f, ty, operand, mode) == .Val(text) -> return Val(text)
+    if repr == .Handle(_, _) {
+        // A runtime handle renders through its runtime type's own JetDisplay /
+        // JetShow (generated jet_rt_handle_display_<T> / jet_rt_handle_show_<T>).
+        symbol :: lower_render_handle_symbol(p, ty, mode) ?? {
+            lower_fail(&m, &f, "displaying {mir_type_display_name(ty)} is not lowered at O0 yet")
+            return None
+        }
+        text :: lower_render_string(&f)
+        lower_call_runtime(&m, &f, symbol, [LIRValueID]{operand}, Val(text))
+        return Val(LowerText{value: text, owned: true})
+    }
+    symbol :: if repr == {
+        .Word -> if {
+            lower_is_exact_int(ty) -> "jet_rt_int_to_string"
+            ty.kind == .Char -> "jet_rt_char_to_string"
+            lower_is_unsigned_word(ty) -> "jet_rt_u64_to_string"
+            else -> "jet_rt_i64_to_string"
+        }
+        .Flag -> "jet_rt_bool_to_string"
+        .FloatBits -> if mode == .Debug -> "jet_rt_float_debug" else -> "jet_rt_float_to_string"
+        .Boxed(_) | .Inline(_) | .Discriminant -> ""
+        else -> {
+            lower_fail(&m, &f, "displaying {mir_type_display_name(ty)} is not lowered at O0 yet")
+            return None
+        }
+    }
+    text :: lower_render_string(&f)
+    if symbol != "" -> lower_call_runtime(&m, &f, symbol, [LIRValueID]{operand}, Val(text))
+    else -> lower_call_helper(&m, &f, lower_render_helper(mode), ty, [LIRValueID]{operand}, Val(text))
+    Val(LowerText{value: text, owned: true})
+}
+
+fn lower_render_handle_symbol(p: MIRProgram, ty: MIRType, mode: LowerRenderMode) -> String? {
+    if ty.kind == .Apply(name, args) {
+        if args.len() > 0 -> return None
+        if !name.name.starts_with("<corelib>/") {
+            if lower_type_def(p, ty) == .Val(_) -> return None
+        }
+        runtime :: lower_runtime_handle(name.name) ?? return None
+        if mode == .Show && runtime.show -> return Val("jet_rt_handle_show_{runtime.runtime}")
+        if mode == .Display && runtime.display -> return Val("jet_rt_handle_display_{runtime.runtime}")
+        if mode == .Debug && runtime.debug -> return Val("jet_rt_handle_debug_{runtime.runtime}")
+    }
+    None
+}
+
+fn lower_display_boxed(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, ty: MIRType, value: LIRValueID) -> LowerText? {
+    lower_render_value(p, &m, &f, ty, Val(value), LowerRenderMode.Display)
+}
+
+fn lower_show(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID) -> LowerText? {
+    ty :: lower_value_type(c, value) ?? return None
+    operand := LIRValueID?{None}
+    if lower_repr(p, ty) != .Absent -> operand = lower_use(&m, &f, value)
+    lower_render_value(p, &m, &f, ty, operand, LowerRenderMode.Show)
+}
+
+fn lower_render_push(p: MIRProgram, m: &LowerModule, f: &LowerFunction, builder: LIRValueID, ty: MIRType, value: LIRValueID?, mode: LowerRenderMode) Never! {
+    text :: lower_render_value(p, &m, &f, ty, value, mode) ?? return
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, text.value}, None)
+    if text.owned -> lower_emit(&f, LIRInst.Drop{value: text.value})
+}
+
+// A field or payload of a record or variant: a String member renders quoted
+// (Rust `{:?}`), as the resident engine renders a nested String slot
+// (runtime_host.rs display_slot_text); every other member as itself.
+fn lower_render_member_push(p: MIRProgram, m: &LowerModule, f: &LowerFunction, builder: LIRValueID, ty: MIRType, value: LIRValueID?, mode: LowerRenderMode) Never! {
+    if ty.kind != .String -> return lower_render_push(p, &m, &f, builder, ty, value, mode)
+    operand :: value ?? return
+    quoted :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_require_debug_string", [LIRValueID]{operand}, Val(quoted))
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, quoted}, None)
+    lower_emit(&f, LIRInst.Drop{value: quoted})
+}
+
+// The member of `ty` at byte `offset` of `boxed` (through its recursive-edge
+// wrapper when `indirect`); an inline member is its address.
+fn lower_render_load(p: MIRProgram, f: &LowerFunction, boxed: LIRValueID, offset: Int, ty: MIRType, indirect: Bool) -> LIRValueID? {
+    if indirect {
+        wrapper :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Load{dst: wrapper, base: boxed, offset: offset})
+        return lower_read_at(p, &f, wrapper, 0, ty)
+    }
+    lower_read_at(p, &f, boxed, offset, ty)
+}
+
+fn lower_render_record(p: MIRProgram, m: &LowerModule, f: &LowerFunction, builder: LIRValueID, boxed: LIRValueID, name: String, fields: [MIRField], definition: MIRTypeDef, ty: MIRType, payload: Bool, mode: LowerRenderMode) Never! {
+    stored :: lower_stored_fields(fields)
+    lower_render_static(&m, &f, builder, "{lower_render_name(name)} {{")
+    loop (index, field) in stored {
+        lower_render_static(&m, &f, builder, "{if index == 0 -> " " else -> ", "}{lower_render_name(field.name)}: ")
+        declared_index := -1
+        loop (position, declared) in fields { if declared.id == field.id -> declared_index = position }
+        info :: if payload -> lower_render_payload_info(p, definition, name, declared_index) else -> lower_struct_field(p, ty, field.id)
+        found :: info ?? return
+        value :: lower_render_load(p, &f, boxed, found.offset, field.ty, found.boxed)
+        lower_render_member_push(p, &m, &f, builder, field.ty, value, mode)
+    }
+    lower_render_static(&m, &f, builder, if stored.len() == 0 -> "}}" else -> " }}")
+}
+
+// Payload member `index` of variant `variant_name`, as a field of the record.
+fn lower_render_payload_info(p: MIRProgram, definition: MIRTypeDef, variant_name: String, index: Int) -> LowerFieldInfo? {
+    found :: lower_variant(definition, variant_name) ?? return None
+    info :: lower_enum_payload_info(p, definition, found.variant, index) ?? return None
+    Val(LowerFieldInfo{offset: info.offset, ty: info.ty, boxed: info.boxed})
+}
+
+fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    layout :: lower_repr_layout(lower_repr(p, glue.ty)) ?? lir_layout_pointer()
+    f := lower_helper_start(&m, glue, [LIRLayout]{layout}, Val(lir_layout_pointer()))
+    operand :: ~f.open_params[0]
+    mode :: if glue.helper == "show" -> LowerRenderMode.Show else if glue.helper == "debug" -> LowerRenderMode.Debug else -> LowerRenderMode.Display
+    builder :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
+    done :: lower_new_block(&f)
+    falls_through := true
+    if glue.ty.kind == .Option(inner) {
+        null :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+        absent :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: absent, condition: LIRCondition.Eq, left: operand, right: null})
+        empty :: lower_new_block(&f)
+        present :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(empty, [LIRValueID]{}), else_target: lower_target(present, [LIRValueID]{})})
+        lower_start(&f, empty, [LIRValueID]{})
+        lower_render_static(&m, &f, builder, if mode == .Debug -> "None" else -> "null")
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, present, [LIRValueID]{})
+        value :: lower_render_load(p, &f, operand, 0, inner, false)
+        if mode == .Debug -> lower_render_static(&m, &f, builder, "Val(")
+        lower_render_push(p, &m, &f, builder, inner, value, mode)
+        if mode == .Debug -> lower_render_static(&m, &f, builder, ")")
+    } else if glue.ty.kind == .Result(ok_ty, err_ty) {
+        verdict :: lower_word(&f)
+        lower_emit(&f, LIRInst.Load{dst: verdict, base: operand, offset: 0})
+        zero :: lower_const(&f, 0)
+        failed :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: verdict, right: zero})
+        err_block :: lower_new_block(&f)
+        ok_block :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(err_block, [LIRValueID]{}), else_target: lower_target(ok_block, [LIRValueID]{})})
+        lower_start(&f, err_block, [LIRValueID]{})
+        clean :: lower_render_clean_report(p, err_ty)
+        if clean -> lower_render_static(&m, &f, builder, if mode == .Debug -> "None" else -> "null")
+        else {
+            lower_render_static(&m, &f, builder, "Err(")
+            error_value :: lower_render_load(p, &f, operand, 8, err_ty, false)
+            lower_render_push(p, &m, &f, builder, err_ty, error_value, mode)
+            lower_render_static(&m, &f, builder, ")")
+        }
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, ok_block, [LIRValueID]{})
+        if !clean || mode == .Debug -> lower_render_static(&m, &f, builder, if clean -> "Val(" else -> "Ok(")
+        ok_value :: lower_render_load(p, &f, operand, 8, ok_ty, false)
+        lower_render_push(p, &m, &f, builder, ok_ty, ok_value, mode)
+        if !clean || mode == .Debug -> lower_render_static(&m, &f, builder, ")")
+    } else if glue.ty.kind == .List(elem) {
+        // `[a, b]`, each element rendered as a member (runtime_host.rs
+        // display_handle_text_mode List: display_slot_text per element).
+        lower_render_static(&m, &f, builder, "[")
+        length :: lower_list_word(&f, operand, 0)
+        data :: lower_list_data(&f, operand)
+        stride :: lower_list_stride(p, elem)
+        zero :: lower_const(&f, 0)
+        at :: lower_word(&f)
+        head :: lower_new_block(&f)
+        body :: lower_new_block(&f)
+        comma :: lower_new_block(&f)
+        item :: lower_new_block(&f)
+        close :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{zero})})
+        lower_start(&f, head, [LIRValueID]{at})
+        more :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: length})
+        lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(close, [LIRValueID]{})})
+        lower_start(&f, body, [LIRValueID]{})
+        first :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: first, condition: LIRCondition.Eq, left: at, right: zero})
+        lower_seal(&f, LIRTerminator.Branch{condition: first, then_target: lower_target(item, [LIRValueID]{}), else_target: lower_target(comma, [LIRValueID]{})})
+        lower_start(&f, comma, [LIRValueID]{})
+        lower_render_static(&m, &f, builder, ", ")
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(item, [LIRValueID]{})})
+        lower_start(&f, item, [LIRValueID]{})
+        address :: lower_list_address(&f, data, at, stride)
+        value :: lower_render_load(p, &f, address, 0, elem, false)
+        lower_render_member_push(p, &m, &f, builder, elem, value, mode)
+        next_at :: lower_word(&f)
+        one :: lower_const(&f, 1)
+        lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_at})})
+        lower_start(&f, close, [LIRValueID]{})
+        lower_render_static(&m, &f, builder, "]")
+    } else if lower_map_shape(p, glue.ty) == .Val(shape) {
+        // `[k: v, ...]`, `[:]` when empty; keys and values render as
+        // themselves (TextValues.rs jet_text_map over jet_display).
+        length :: lower_list_word(&f, operand, 0)
+        data :: lower_list_data(&f, operand)
+        zero :: lower_const(&f, 0)
+        empty :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: empty, condition: LIRCondition.Eq, left: length, right: zero})
+        bare :: lower_new_block(&f)
+        open :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: empty, then_target: lower_target(bare, [LIRValueID]{}), else_target: lower_target(open, [LIRValueID]{})})
+        lower_start(&f, bare, [LIRValueID]{})
+        lower_render_static(&m, &f, builder, "[:]")
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, open, [LIRValueID]{})
+        lower_render_static(&m, &f, builder, "[")
+        at :: lower_word(&f)
+        head :: lower_new_block(&f)
+        body :: lower_new_block(&f)
+        comma :: lower_new_block(&f)
+        item :: lower_new_block(&f)
+        close :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{zero})})
+        lower_start(&f, head, [LIRValueID]{at})
+        more :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: length})
+        lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(close, [LIRValueID]{})})
+        lower_start(&f, body, [LIRValueID]{})
+        first :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: first, condition: LIRCondition.Eq, left: at, right: zero})
+        lower_seal(&f, LIRTerminator.Branch{condition: first, then_target: lower_target(item, [LIRValueID]{}), else_target: lower_target(comma, [LIRValueID]{})})
+        lower_start(&f, comma, [LIRValueID]{})
+        lower_render_static(&m, &f, builder, ", ")
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(item, [LIRValueID]{})})
+        lower_start(&f, item, [LIRValueID]{})
+        entry :: lower_list_address(&f, data, at, shape.stride)
+        key :: lower_render_load(p, &f, entry, shape.key_offset, shape.key, false)
+        lower_render_push(p, &m, &f, builder, shape.key, key, mode)
+        lower_render_static(&m, &f, builder, ": ")
+        value :: lower_render_load(p, &f, entry, shape.value_offset, shape.value, false)
+        lower_render_push(p, &m, &f, builder, shape.value, value, mode)
+        next_at :: lower_word(&f)
+        one :: lower_const(&f, 1)
+        lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_at})})
+        lower_start(&f, close, [LIRValueID]{})
+        lower_render_static(&m, &f, builder, "]")
+    } else if glue.ty.kind == .Tuple(_) {
+        lower_render_static(&m, &f, builder, "(")
+        members :: lower_inline_members(p, glue.ty)
+        loop (index, member) in members {
+            if index > 0 -> lower_render_static(&m, &f, builder, ", ")
+            value :: lower_render_load(p, &f, operand, member.offset, member.ty, member.boxed)
+            lower_render_member_push(p, &m, &f, builder, member.ty, value, mode)
+        }
+        if members.len() == 1 -> lower_render_static(&m, &f, builder, ",")
+        lower_render_static(&m, &f, builder, ")")
+    } else if lower_type_def(p, glue.ty) == .Val(definition) {
+        if definition.kind == .Struct(fields, _) {
+            lower_render_record(p, &m, &f, builder, operand, definition.name, fields, definition, glue.ty, false, mode)
+        } else if definition.kind == .Enum(variants, _) {
+            discriminant := operand
+            if !lower_enum_is_tag(variants) {
+                discriminant = lower_word(&f)
+                lower_emit(&f, LIRInst.Load{dst: discriminant, base: operand, offset: 0})
+            }
+            loop (index, variant) in variants {
+                expected :: lower_const(&f, lower_discriminant(index))
+                selected :: lower_flag(&f)
+                lower_emit(&f, LIRInst.Compare{dst: selected, condition: LIRCondition.Eq, left: discriminant, right: expected})
+                body :: lower_new_block(&f)
+                next_block :: lower_new_block(&f)
+                lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(next_block, [LIRValueID]{})})
+                lower_start(&f, body, [LIRValueID]{})
+                if variant.payload == {
+                    .Unit -> lower_render_static(&m, &f, builder, lower_render_name(variant.name))
+                    .Single(inner) -> {
+                        lower_render_static(&m, &f, builder, "{lower_render_name(variant.name)}(")
+                        info :: lower_enum_payload_info(p, definition, variant, 0) ?? panic("a Single payload has storage")
+                        value :: lower_render_load(p, &f, operand, info.offset, inner, info.boxed)
+                        lower_render_member_push(p, &m, &f, builder, inner, value, mode)
+                        lower_render_static(&m, &f, builder, ")")
+                    }
+                    .Named(fields) -> lower_render_record(p, &m, &f, builder, operand, variant.name, fields, definition, glue.ty, true, mode)
+                }
+                lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+                lower_start(&f, next_block, [LIRValueID]{})
+            }
+            lower_seal(&f, LIRTerminator.Unreachable)
+            falls_through = false
+        } else -> lower_fail(&m, &f, "displaying {definition.name} is not lowered at O0 yet")
+    } else -> lower_fail(&m, &f, "displaying {mir_type_display_name(glue.ty)} is not lowered at O0 yet")
+    if falls_through -> lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+    text :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(text))
+    lower_seal(&f, LIRTerminator.Return{value: Val(text)})
+    lir_builder_finish(f.builder)
+}

@@ -1,0 +1,101 @@
+// Permanent in-process ABI/W^X proofs. No evaluator or external executable
+// stands in for the target: every answer comes from mapped native code.
+use core.math as math
+use jet_backend.[LIRABIClass, LIRLayout, LIRModule, LIRSignature, LIRSignatureID, LIRCallConv, LIRFunctionID, LIRDrop, LIRInst, LIRTerminator, LIRValueID, LIRData, LIRDataID, X64ImageDataReloc, X64MemoryImage, X64Runtime, lir_builder, lir_builder_block_id, lir_builder_value, lir_builder_push, lir_builder_seal, lir_builder_finish, lir_layout_word, lir_layout_bool, lir_layout_float, lir_layout_pointer, x64_call_image, x64_call_loaded, x64_load_image, x64_runtime_current, x64_unload_image]
+use jet_backend.[LIRFunction, LIRDataReloc]
+use jet_backend.[LIRCallee, x64_rebind_slot]
+
+fn ci_require(ok: Bool, name: String) {
+    if !ok -> panic("native call proof failed: {name}")
+}
+
+fn ci_identity(layouts: [LIRLayout], returned: Int, words: [Int], expected: Int) {
+    signature :: LIRSignatureID{value: 0}
+    builder := lir_builder(LIRFunctionID{value: 0}, "identity", signature)
+    block :: lir_builder_block_id(&builder)
+    params := [LIRValueID]{}
+    loop layout in layouts -> &params.push(lir_builder_value(&builder, layout, LIRDrop.Trivial, None))
+    lir_builder_seal(&builder, block, params, LIRTerminator.Return{value: Val(params[returned])})
+    program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: signature, convention: LIRCallConv.SystemV, params: layouts, result: Val(layouts[returned])}}, functions: [LIRFunction]{lir_builder_finish(builder)}, data: [LIRData]{}}
+    call :: x64_call_image(program, LIRFunctionID{value: 0})
+    loop error in call.image.errors -> print(error)
+    ci_require(call.image.errors.len() == 0, "compile identity")
+    loaded :: x64_load_image(call.image, x64_runtime_current())
+    loop error in loaded.errors -> print(error)
+    ci_require(loaded.errors.len() == 0, "load identity")
+    result :: x64_call_loaded(loaded, call, words)
+    ci_require(result.errors.len() == 0 && result.word == expected, "identity result")
+    ci_require(x64_call_loaded(loaded, call, [Int]{}).errors.len() > 0, "wrong argument count")
+    ci_require(x64_unload_image(loaded), "unload identity")
+}
+
+fn ci_mutable_data() {
+    signature :: LIRSignatureID{value: 0}
+    builder := lir_builder(LIRFunctionID{value: 0}, "data", signature)
+    block :: lir_builder_block_id(&builder)
+    address :: lir_builder_value(&builder, lir_layout_pointer(), LIRDrop.Trivial, None)
+    pointer :: lir_builder_value(&builder, lir_layout_pointer(), LIRDrop.Trivial, None)
+    word :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
+    answer :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
+    lir_builder_push(&builder, LIRInst.DataAddress{dst: address, data: LIRDataID{value: 0}})
+    lir_builder_push(&builder, LIRInst.Load{dst: pointer, base: address, offset: 0})
+    lir_builder_push(&builder, LIRInst.Const{dst: word, value: 42})
+    lir_builder_push(&builder, LIRInst.Store{base: pointer, offset: 0, value: word})
+    lir_builder_push(&builder, LIRInst.Load{dst: answer, base: pointer, offset: 0})
+    lir_builder_seal(&builder, block, [LIRValueID]{}, LIRTerminator.Return{value: Val(answer)})
+    zeros :: [U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}}
+    program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{lir_builder_finish(builder)}, data: [LIRData]{LIRData{id: LIRDataID{value: 0}, bytes: zeros, align: 8192, relocs: [LIRDataReloc]{LIRDataReloc{offset: 0, target: LIRDataID{value: 1}, addend: 0}}}, LIRData{id: LIRDataID{value: 1}, bytes: zeros, align: 8, relocs: [LIRDataReloc]{}}}}
+    call :: x64_call_image(program, LIRFunctionID{value: 0})
+    loaded :: x64_load_image(call.image, x64_runtime_current())
+    loop error in loaded.errors -> print(error)
+    ci_require(loaded.errors.len() == 0, "load relocated data")
+    ci_require(loaded.base % 8192 == 0, "over-page origin alignment")
+    ci_require(loaded.code_size < loaded.size, "data has separate pages")
+    result :: x64_call_loaded(loaded, call, [Int]{})
+    ci_require(result.errors.len() == 0 && result.word == 42, "mutable relocated data")
+    ci_require(x64_unload_image(loaded), "unload data")
+    bad := call.image
+    bad.data_offset = 1
+    ci_require(x64_load_image(bad, x64_runtime_current()).errors.len() > 0, "unaligned data boundary")
+    bad = call.image
+    bad.entry = bad.data_offset
+    ci_require(x64_load_image(bad, x64_runtime_current()).errors.len() > 0, "entry in data")
+    bad = call.image
+    bad.relocs[0] = X64ImageDataReloc{at: 0, target: bad.data_offset}
+    ci_require(x64_load_image(bad, x64_runtime_current()).errors.len() > 0, "data relocation in code")
+}
+
+fn ci_runtime_symbol() {
+    signature :: LIRSignatureID{value: 0}
+    builder := lir_builder(LIRFunctionID{value: 0}, "runtime", signature)
+    block :: lir_builder_block_id(&builder)
+    argument :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
+    result :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
+    lir_builder_push(&builder, LIRInst.Call{dst: Val(result), signature: signature, callee: LIRCallee.Runtime{symbol: "labs"}, args: [LIRValueID]{argument}})
+    lir_builder_seal(&builder, block, [LIRValueID]{argument}, LIRTerminator.Return{value: Val(result)})
+    program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{lir_builder_finish(builder)}, data: [LIRData]{}}
+    call :: x64_call_image(program, LIRFunctionID{value: 0})
+    loaded :: x64_load_image(call.image, x64_runtime_current())
+    loop error in loaded.errors -> print(error)
+    ci_require(loaded.errors.len() == 0, "resident runtime resolution")
+    answer :: x64_call_loaded(loaded, call, [Int]{-42})
+    ci_require(answer.errors.len() == 0 && answer.word == 42, "runtime import stub")
+    ci_require(!x64_rebind_slot(loaded, loaded.base, 1), "reject non-import rebind")
+    ci_require(!x64_rebind_slot(loaded, loaded.slots[0], 0), "reject null rebind")
+    ci_require(x64_unload_image(loaded), "unload runtime call")
+    missing := call.image
+    missing.imports[0] = "jet_no_such_runtime_symbol"
+    rejected :: x64_load_image(missing, x64_runtime_current())
+    ci_require(rejected.errors.len() > 0 && rejected.base == 0, "unresolved symbol before execution")
+}
+
+fn run() {
+    ci_identity([LIRLayout]{lir_layout_word()}, 0, [Int]{42}, 42)
+    ci_identity([LIRLayout]{lir_layout_bool()}, 0, [Int]{1}, 1)
+    ci_identity([LIRLayout]{lir_layout_word(), lir_layout_word(), lir_layout_word(), lir_layout_word(), lir_layout_word(), lir_layout_word(), lir_layout_word(), lir_layout_word()}, 7, [Int]{1, 2, 3, 4, 5, 6, 7, 8}, 8)
+    ci_identity([LIRLayout]{lir_layout_float()}, 0, [Int]{math.to_bits(1.0)}, math.to_bits(1.0))
+    ci_identity([LIRLayout]{lir_layout_float(), lir_layout_float(), lir_layout_float(), lir_layout_float(), lir_layout_float(), lir_layout_float(), lir_layout_float(), lir_layout_float(), lir_layout_float()}, 8, [Int]{0, 0, 0, 0, 0, 0, 0, 0, math.to_bits(1.0)}, math.to_bits(1.0))
+    ci_mutable_data()
+    ci_runtime_symbol()
+    print("native call images: pass")
+}
