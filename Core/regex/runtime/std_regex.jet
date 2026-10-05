@@ -285,7 +285,7 @@ impl JetRegexMatch {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:353
     pub fn name(self: &Self, name: &String) -> String JetAbsent! {
-        idx :: self.names.iter().position(fn(n) { n.as_ref() == Val(name) }) ?? return Err(JetAbsent{})
+        idx :: self.names.iter().position(fn(n) { n == name }) ?? return Err(JetAbsent{})
         self.group(idx as I64)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:366
@@ -634,7 +634,7 @@ impl RegexParser {
             arms.push(self.parse_seq(terminator)?)
         }
         if terminator == .Val(end) {
-            if self.peek() != Val(end) -> return Err("invalid regex: missing `{end}`")
+            if self.peek() != end -> return Err("invalid regex: missing `{end}`")
             self.pos += 1
         }
         if arms.len() == 1 { Ok(arms.remove(0)) } else { Ok(.Alt(^arms)) }
@@ -1187,7 +1187,7 @@ fn regex_scan(program: &RegexProgram, flags: &RegexFlags, groups: Usize, text: &
             }
         }
         if winner_start == .Val(winner) {
-            if scratch.current.min_start != Val(winner) {
+            if scratch.current.min_start != winner {
                 run :: last_match.take() ?? return
                 resume :: regex_next_search_pos(text, run.span.0, run.span.1)
                 drop(^scratch)
