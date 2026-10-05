@@ -258,4 +258,41 @@ mod jet_c_abi_task {
             Box::into_raw(Box::new(JetIter(Box::new(std::iter::from_fn(move || receiver.receive().ok())))))
         })
     }
+
+    // Shared<T> (MathTaskMem.rs JetShared over NativeValue; SharedRoutes.rs
+    // jet_shared_read / jet_shared_edit). The callback is the native closure
+    // `invoke(env, value_slot, out_slot)`, run under the shared lock; it
+    // writes its result into the caller's `out` slot.
+    type NativeShared = jet_std::JetShared<NativeValue>;
+
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_shared_new(slot: *const u8, meta: *const NativeMeta) -> *mut NativeShared {
+        guard(|| Box::into_raw(Box::new(NativeShared::new(NativeValue::moved(slot, Meta::copy(meta))))))
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_shared_read(shared: *mut NativeShared, env: *mut u8, invoke: usize, out: *mut u8) {
+        guard(|| {
+            let invoke: unsafe extern "C" fn(*mut u8, *const u8, *mut u8) -> u64 = std::mem::transmute(invoke);
+            jet_shared_read(&*shared, |value: &NativeValue| { invoke(env, value.slot(), out); })
+        })
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_shared_edit(shared: *mut NativeShared, env: *mut u8, invoke: usize, out: *mut u8) {
+        guard(|| {
+            let invoke: unsafe extern "C" fn(*mut u8, *mut u8, *mut u8) -> u64 = std::mem::transmute(invoke);
+            jet_shared_edit(&*shared, |value: &mut NativeValue| { invoke(env, value.slot_mut(), out); })
+        })
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_shared_clone(shared: *mut NativeShared) -> *mut NativeShared {
+        guard(|| Box::into_raw(Box::new((*shared).clone())))
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_shared_drop(shared: *mut NativeShared) {
+        guard(|| { if !shared.is_null() { drop(Box::from_raw(shared)); } })
+    }
 }
