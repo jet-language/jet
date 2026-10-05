@@ -57,7 +57,7 @@ fn jet_auth_valid_identifier(value: String, max: USize) -> Bool {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:93
 fn jet_auth_constant_time_text_eq(left: String, right: String) -> Bool {
     difference := U8.from(left.len() != right.len())
-    for index in 0..<left.len().max(right.len()) {
+    loop index in 0..<left.len().max(right.len()) {
         a :: left.as_bytes().get(index).copied().unwrap_or(0)
         b :: right.as_bytes().get(index).copied().unwrap_or(0)
         difference |= a ^ b
@@ -88,7 +88,7 @@ fn jet_auth_opaque_token(prefix: String) -> String Err! {
     token := String.with_capacity(prefix.len() + 1 + bytes.len() * 2)
     token.push_str(prefix)
     token.push('-')
-    for byte in bytes { token.push_str("{byte:02x}") }
+    loop byte in bytes { token.push_str("{byte:02x}") }
     Ok(^token)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:156
@@ -134,7 +134,7 @@ fn jet_oauth_b64url_decode(text: String) -> [U8] Err! {
     out := [U8].with_capacity(text.len().saturating_mul(3) / 4)
     accumulator := U32{0}
     bits := U8{0}
-    for byte in text.bytes() {
+    loop byte in text.bytes() {
         value :: match byte {
             65..90 -> byte - U8{65}
             97..122 -> byte - U8{97} + U8{26}
@@ -156,7 +156,7 @@ fn jet_oauth_b64url_decode(text: String) -> [U8] Err! {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:247
 fn jet_oauth_json_hex4(chars: [Char], position: &USize) -> U32? {
     value := U32{0}
-    for index in 0..<4 {
+    loop index in 0..<4 {
         digit :: chars.get(*position)?.to_digit(16)?
         *position += 1
         value = value * 16 + digit
@@ -227,24 +227,24 @@ fn jet_oauth_json_skip_value(chars: [Char], position: &USize) -> Bool {
             character :: match chars.get(*position).copied() { Val(character) -> character, None -> break }
             if character == '"' {
                 if jet_oauth_json_string(chars, position).is_none() { return false }
-                continue
+                next
             }
             if character == '{' {
                 closers.push('}')
                 *position += 1
-                continue
+                next
             }
             if character == '[' {
                 closers.push(']')
                 *position += 1
-                continue
+                next
             }
             if character == '}' || character == ']' {
                 if closers.last() != character { return false }
                 _ :: closers.pop()
                 *position += 1
                 if closers.is_empty() { return true }
-                continue
+                next
             }
             *position += 1
         }
@@ -494,7 +494,7 @@ fn jet_auth_session_id(session: &JetAuthSession) -> String { session.id.clone() 
 fn jet_app_auth(users_table: String) -> JetAuthApp { JetAuthApp{users_table: ^users_table, providers: []} }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:843
 fn jet_app_auth_oauth(auth: JetAuthApp, providers: String) -> JetAuthApp {
-    for part in providers.split(fn(c) { c == ',' || c == ' ' }) {
+    loop part in providers.split(fn(c) { c == ',' || c == ' ' }) {
         provider := part.trim() // #4303
         if jet_auth_valid_identifier(provider, 128) && !auth.providers.iter().any(fn(existing) { existing == provider }) { auth.providers.push(provider.to_string()) }
     }

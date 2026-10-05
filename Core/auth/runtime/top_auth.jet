@@ -38,10 +38,10 @@ fn jet_auth_b64_decode_inner(s: String) -> [U8] Err! {
     buf := U32{0}
     bits := U8{0}
     padding := false
-    for b in s.bytes() {
+    loop b in s.bytes() {
         if b == U8{61} {
             padding = true
-            continue
+            next
         }
         if padding -> return Err("base64 padding must be final")
         v :: match b {
@@ -83,7 +83,7 @@ fn jet_auth_object(text: String) -> [(String, DataTree)] JetAuthError! {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:109
 fn jet_auth_json_hex4(chars: [Char], pos: &USize) -> U32? {
     value := U32{0}
-    for _ in 0..<4 {
+    loop _ in 0..<4 {
         digit :: chars.get(pos)?.to_digit(16)?
         pos += 1
         value = value * 16 + digit
@@ -148,7 +148,7 @@ fn jet_auth_json_skip_value(chars: [Char], pos: &USize) -> {
         while chars.get(pos) == .Val(character) {
             if character == '"' {
                 _ :: jet_auth_json_string(chars, &pos)
-                continue
+                next
             }
             pos += 1
             match character {
@@ -331,7 +331,7 @@ fn jet_auth_pae(pieces: [[U8]]) -> [U8] {
     capacity :: 8 + pieces.iter().map(piece -> 8 + piece.len()).sum::<USize>()
     out := [U8].with_capacity(capacity)
     out.extend_from_slice(U64{pieces.len()}.to_le_bytes())
-    for piece in pieces {
+    loop piece in pieces {
         out.extend_from_slice(U64{piece.len()}.to_le_bytes())
         out.extend_from_slice(piece)
     }
