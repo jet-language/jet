@@ -1195,6 +1195,28 @@ fn sema_ownership_diag_view_return_boundary(span: Span) -> Diagnostic {
     sema_error("E2305", span, "returned views need a stable owner relationship", "each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources", "return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `~`")
 }
 
+// Rust `consumed_view_owner` (#4392): a `^` parameter (or `^self`) moves into
+// this function and is freed when it returns, so it cannot own a returned
+// view. A consumed view carrier differs: its windows still borrow the
+// caller's owner.
+fn sema_ownership_consumed_view_owner(place: SemaOwnershipPlace, scopes: SemaScopeTable) -> Bool Never! {
+    loop binding in scopes.bindings {
+        if binding.symbol.id.key != place.root_key -> next
+        if binding.access != AccessConvention.Move -> return false
+        ty :: binding.symbol.ty ?? return true
+        if ty == {
+            .Apply(name, args) -> return !((name == "View" || name == "ViewMut") && args.len() == 1)
+            else -> return true
+        }
+    }
+    false
+}
+
+fn sema_ownership_diag_view_return_consumed(place: SemaOwnershipPlace, span: Span) -> Diagnostic {
+    owner := sema_ownership_place_name(place)
+    sema_error("E2305", span, "this view points into `{owner}`, which this function consumes", "`^{owner}` moves the value into this function, which frees it when it returns, so a returned window into it would outlive its owner", "take `{owner}` as a read or `&` parameter so the caller keeps owning it, or return an owned copy with `~`")
+}
+
 fn sema_ownership_place_has_fresh_projection(place: SemaOwnershipPlace) -> Bool Never! {
     loop projection in place.typed_projections {
         if projection == {
@@ -1216,6 +1238,10 @@ pub fn sema_ownership_record_view_return(state: &SemaOwnershipState, place: Sema
     }
     source_path :: sema_ownership_view_source_for_place(place, receiver_key, parameter_keys, scopes) ?? {
         &diagnostics.push(sema_ownership_diag_view_return_owner(place, span))
+        return false
+    }
+    if sema_ownership_consumed_view_owner(place, scopes) {
+        &diagnostics.push(sema_ownership_diag_view_return_consumed(place, span))
         return false
     }
     mutable := access == AccessConvention.Write

@@ -32,9 +32,9 @@
 <h2>What</h2>
 <p class="diag-copy what" data-registry-field="what">A declared `View&lt;T&gt;` would outlive an owner, or sema cannot stabilize a public owner set for each declared view slot. Read-only views entering non-view owning slots materialize by default; `copies: .Explicit` restores the refusal.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">Each declared view slot keeps a bounded set of possible receiver, parameter, or static sources through every return path, call, generic instantiation, aggregate projection, function value, lambda, and trait implementation. Every possible owner must stay live.</p>
+<p class="diag-copy why" data-registry-field="why">Each declared view slot keeps a bounded set of possible receiver, parameter, or static sources through every return path, call, generic instantiation, aggregate projection, function value, lambda, and trait implementation. Every possible owner must stay live; a consumed (`^`) parameter or receiver is freed when the function returns, so it never owns a returned view.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Keep every possible owner alive, preserve the declared view boundary, or remove `copies: .Explicit` / write `~view` when an owning destination is intended.</p>
+<p class="diag-copy fix" data-registry-field="fix">Keep every possible owner alive (take a returned view&#39;s source as a read or `&amp;` parameter, not `^`), preserve the declared view boundary, or remove `copies: .Explicit` / write `~view` when an owning destination is intended.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2305</code>: <code>tests/ui/task_detach_view_capture.stderr</code>.</p>
 <pre class="diag">Error [E2305]: a returned view cannot borrow from a temporary argument
