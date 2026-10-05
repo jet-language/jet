@@ -1,9 +1,47 @@
 // Numeric predicates and 64-bit overflow policies. The Prelude's shared
 // FixedArithmetic.rs kernel, not Rust's narrower checked_rem, defines the rules.
 use jet_foundation.[
-    MIRBinaryOverflow, MIRInstruction, MIRPanicLoc, MIRPreludeCallID, MIRProgram, MIRSourceFileID,
+    MIRBinaryOp, MIRBinaryOverflow, MIRInstruction, MIRPanicLoc, MIRPreludeCallID, MIRProgram, MIRSourceFileID,
     MIRType, MIRTypeKind, MIRValueID, mir_symbol_name,
 ]
+
+// `jet_<u|i><bits>_trap_<add|sub|mul|shl|shr>`: Rust checked fixed-width
+// arithmetic that stops on overflow or an out-of-range shift count, which
+// lower_binary emits natively (lower_narrow_binary / Overflows).
+fn lower_fixed_trap_route(symbol: String) -> Bool Never! {
+    widths :: [String]{"u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64"}
+    operations :: [String]{"add", "sub", "mul", "shl", "shr"}
+    loop width in widths {
+        loop operation in operations {
+            if symbol == "jet_{width}_trap_{operation}" -> return true
+        }
+    }
+    false
+}
+
+// A binary operator dispatched to its Prelude route: exact Int `+ - *` have an
+// inline fast path; every other route is called with the operands (and the
+// source location when the row takes one).
+fn lower_binary_route(p: MIRProgram, m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: MIRBinaryOp, exact: Bool, call: MIRPreludeCallID, location: MIRPanicLoc?, left_value: LIRValueID, right_value: LIRValueID) Never! {
+    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "binary operator names missing Prelude call {call.value}")
+    symbol :: lower_runtime_symbol(row)
+    if exact && row.signature.arity == 2 {
+        if op == {
+            .Add -> return lower_exact_arithmetic(&m, &f, dst, LIRBinaryOp.Add, left_value, right_value, symbol)
+            .Sub -> return lower_exact_arithmetic(&m, &f, dst, LIRBinaryOp.Sub, left_value, right_value, symbol)
+            .Mul -> return lower_exact_arithmetic(&m, &f, dst, LIRBinaryOp.Mul, left_value, right_value, symbol)
+            else -> {}
+        }
+    }
+    args := [LIRValueID]{left_value, right_value}
+    if row.signature.arity == 4 {
+        site :: location ?? return lower_fail(&m, &f, "binary Prelude route {symbol} needs a source location")
+        loop arg in lower_location(p, &m, &f, site) -> &args.push(arg)
+    } else {
+        if row.signature.arity != 2 -> return lower_fail(&m, &f, "binary Prelude route {symbol} has arity {row.signature.arity}")
+    }
+    lower_call_runtime(&m, &f, symbol, args, Val(dst))
+}
 
 fn lower_numeric_compare(f: &LowerFunction, condition: LIRCondition, left: LIRValueID, right: LIRValueID) -> LIRValueID Never! {
     dst :: lower_flag(&f)

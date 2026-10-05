@@ -2065,25 +2065,16 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
     exact :: lower_is_exact_int(left_ty)
     unsigned :: lower_is_unsigned_word(left_ty)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return lower_fail(&m, &f, "binary operator has no result")
-    if dispatch == .Prelude(call, location) {
+    // A fixed-width trapping route (`jet_u64_trap_add`, ...: Rust checked
+    // arithmetic that stops on overflow or an out-of-range shift count) is
+    // the native checked operator below.
+    fixed_trap := false
+    if dispatch == .Prelude(call, _) {
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "binary operator names missing Prelude call {call.value}")
-        symbol :: lower_runtime_symbol(row)
-        if exact && row.signature.arity == 2 {
-            if op == {
-                .Add -> return lower_exact_arithmetic(&m, &f, dst, LIRBinaryOp.Add, left_value, right_value, symbol)
-                .Sub -> return lower_exact_arithmetic(&m, &f, dst, LIRBinaryOp.Sub, left_value, right_value, symbol)
-                .Mul -> return lower_exact_arithmetic(&m, &f, dst, LIRBinaryOp.Mul, left_value, right_value, symbol)
-                else -> {}
-            }
-        }
-        args := [LIRValueID]{left_value, right_value}
-        if row.signature.arity == 4 {
-            site :: location ?? return lower_fail(&m, &f, "binary Prelude route {symbol} needs a source location")
-            loop arg in lower_location(p, &m, &f, site) -> &args.push(arg)
-        } else {
-            if row.signature.arity != 2 -> return lower_fail(&m, &f, "binary Prelude route {symbol} has arity {row.signature.arity}")
-        }
-        return lower_call_runtime(&m, &f, symbol, args, Val(dst))
+        fixed_trap = !exact && lower_fixed_trap_route(lower_runtime_symbol(row))
+    }
+    if dispatch == .Prelude(call, location) {
+        if !fixed_trap -> return lower_binary_route(p, &m, &f, dst, op, exact, call, location, left_value, right_value)
     }
     left_layout :: lower_value_layout(f, left_value)
     if lower_condition_of(op) == .Val(condition) {
@@ -2097,6 +2088,12 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
             no :: lower_const_flag(&f, 0)
             return lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: equal, right: no})
         }
+        if (condition == .Eq || condition == .Ne) && left_layout.class != .Integer && left_layout != lir_layout_float() {
+            same :: lower_equal_values(p, &m, &f, left_ty, Val(left_value), Val(right_value)) ?? return
+            if condition == .Eq -> return lower_emit(&f, LIRInst.Move{dst: dst, src: same})
+            no :: lower_const_flag(&f, 0)
+            return lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: same, right: no})
+        }
         if left_layout.class != .Integer && left_layout != lir_layout_float() -> return lower_fail(&m, &f, "comparison of {mir_type_display_name(left_ty)} is not lowered at O0 yet")
         return lower_emit(&f, LIRInst.Compare{dst: dst, condition: if unsigned -> lower_unsigned_condition(condition) else -> condition, left: left_value, right: right_value})
     }
@@ -2109,7 +2106,15 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
     if exact -> return lower_fail(&m, &f, "exact Int operator {lower_binary_name(op)} without a Prelude route")
     if left_layout != lir_layout_word() -> return lower_fail(&m, &f, "operator {lower_binary_name(op)} on {mir_type_display_name(left_ty)} is not lowered at O0 yet")
     narrow :: lower_narrow_bits(left_ty)
-    if narrow > 0 -> return lower_narrow_binary(&m, &f, dst, word_op, overflow, lower_narrow_signed(left_ty), narrow, left_value, right_value)
+    checked :: if fixed_trap -> MIRBinaryOverflow.Trap else -> overflow
+    if narrow > 0 -> return lower_narrow_binary(&m, &f, dst, word_op, checked, lower_narrow_signed(left_ty), narrow, left_value, right_value)
+    if fixed_trap && (word_op == .Shl || word_op == .Shr) {
+        // Rust checked_shl/checked_shr: a count outside 0..<64 stops.
+        width :: lower_const(&f, 64)
+        out_of_range :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: out_of_range, condition: LIRCondition.UGe, left: right_value, right: width})
+        lower_check(&m, &f, out_of_range, "jet_rt_panic_overflow")
+    }
     if word_op == .Div || word_op == .Rem {
         zero :: lower_const(&f, 0)
         is_zero :: lower_flag(&f)
@@ -2141,7 +2146,7 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
         lower_logic(&f, both, true, is_minus_one, is_minimum)
         lower_check(&m, &f, both, "jet_rt_panic_overflow")
     }
-    if overflow == .Trap && (word_op == .Add || word_op == .Sub || word_op == .Mul) {
+    if checked == .Trap && (word_op == .Add || word_op == .Sub || word_op == .Mul) {
         overflowed :: lower_flag(&f)
         lower_emit(&f, LIRInst.Overflows{dst: overflowed, op: if unsigned -> lower_unsigned_overflow_op(word_op) else -> word_op, left: left_value, right: right_value})
         lower_check(&m, &f, overflowed, "jet_rt_panic_overflow")
@@ -2306,6 +2311,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     }
     if semantic == .StaticPreludeCall(call, args, owner_type_args, type_args) {
         if owner_type_args.len() > 0 || type_args.len() > 0 -> return lower_fail(&m, &f, "generic StaticPreludeCall {lower_route_name(p, call)} is not lowered at O0 yet")
+        if lower_route_name(p, call) == "core.compare.eq" && args.len() == 2 -> return lower_core_equal(p, c, &m, &f, instruction, args[0].value, args[1].value)
         values :: lower_route_values(&m, &f, args, "StaticPreludeCall") ?? return
         return lower_route_call(p, c, &m, &f, instruction, call, values, "StaticPreludeCall")
     }
@@ -2764,6 +2770,7 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "iter.advance.typed" -> return lower_helper_iter_typed(p, &m, glue, true)
     if glue.helper == "iter.advance" -> return lower_helper_iter_advance(p, &m, glue)
     if glue.helper == "display" || glue.helper == "show" -> return lower_helper_display(p, &m, glue)
+    if glue.helper == "equal" -> return lower_helper_equal(p, &m, glue)
     if glue.helper == "list.push" -> return lower_helper_list_push(p, &m, glue)
     if glue.helper == "list.join" -> return lower_helper_list_join(p, &m, glue)
     if glue.helper == "list.pop" -> return lower_helper_list_pop(p, &m, glue)

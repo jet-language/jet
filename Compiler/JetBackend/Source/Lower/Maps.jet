@@ -108,16 +108,17 @@ fn lower_map_key_order(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MI
     LowerMapOrder{less: less, same: equal}
 }
 
-// Drops the owned `value` of `ty` held in a LIR value (not in storage).
+// Drops the owned `value` of `ty` held in a LIR value (not in storage), e.g. a
+// helper parameter (whose LIR value carries no drop glue): through a stack
+// cell, so its drop is the stored-value drop.
 fn lower_map_drop_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value: LIRValueID, ty: MIRType) Never! {
     repr :: lower_repr(p, ty)
     if repr == .Inline(_) -> return lower_inline_drop(p, &m, &f, value, ty)
-    drop :: lower_drop(&m, repr, true)
-    if drop == .Trivial -> return
-    layout :: lower_repr_layout(repr) ?? return
-    owned :: lower_new_value(&f, layout, drop, ty.identity)
-    lower_emit(&f, LIRInst.Move{dst: owned, src: value})
-    lower_emit(&f, LIRInst.Drop{value: owned})
+    if lower_drop(&m, repr, true) == .Trivial -> return
+    cell :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: cell, size: 8, align: 8})
+    lower_emit(&f, LIRInst.Store{base: cell, offset: 0, value: value})
+    lower_drop_stored(p, &m, &f, cell, 0, ty)
 }
 
 fn lower_map_key_layout(p: MIRProgram, shape: LowerMapShape) -> LIRLayout Never! {

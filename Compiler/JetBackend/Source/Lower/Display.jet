@@ -121,6 +121,17 @@ fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
         lower_fail(&m, &f, "displaying {mir_type_display_name(ty)} without a value is not lowered at O0 yet")
         return None
     }
+    if repr == .Handle(_, _) {
+        // A runtime handle renders through its runtime type's own JetDisplay /
+        // JetShow (generated jet_rt_handle_display_<T> / jet_rt_handle_show_<T>).
+        symbol :: lower_render_handle_symbol(p, ty, show) ?? {
+            lower_fail(&m, &f, "displaying {mir_type_display_name(ty)} is not lowered at O0 yet")
+            return None
+        }
+        text :: lower_render_string(&f)
+        lower_call_runtime(&m, &f, symbol, [LIRValueID]{operand}, Val(text))
+        return Val(LowerText{value: text, owned: true})
+    }
     symbol :: if repr == {
         .Word -> if {
             lower_is_exact_int(ty) -> "jet_rt_int_to_string"
@@ -140,6 +151,16 @@ fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
     if symbol != "" -> lower_call_runtime(&m, &f, symbol, [LIRValueID]{operand}, Val(text))
     else -> lower_call_helper(&m, &f, if show -> "show" else -> "display", ty, [LIRValueID]{operand}, Val(text))
     Val(LowerText{value: text, owned: true})
+}
+
+fn lower_render_handle_symbol(p: MIRProgram, ty: MIRType, show: Bool) -> String? {
+    if ty.kind == .Apply(name, args) {
+        if args.len() > 0 || lower_type_def(p, ty) != None -> return None
+        runtime :: lower_runtime_handle(name.name) ?? return None
+        if show && runtime.show -> return Val("jet_rt_handle_show_{runtime.runtime}")
+        if !show && runtime.display -> return Val("jet_rt_handle_display_{runtime.runtime}")
+    }
+    None
 }
 
 fn lower_display_boxed(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, ty: MIRType, value: LIRValueID) -> LowerText? {

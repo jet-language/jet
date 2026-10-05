@@ -200,6 +200,15 @@ const cfgsBefore = (lineStart) => {
   }
 }
 
+// Computed route families (TIR routes.rs): precise_builtin_route spells every
+// precise-numeric entry point `jet_<type>_<func>` and geometry_method_route
+// every coordinate-space method `jet_math_<Type>_<method>`, both at the
+// runtime root, so their rows are the root functions of those names.
+for (const key of fns.keys()) {
+  if (/^jet_(?:decimal|fraction)_[a-z0-9_]+$/.test(key)) addRoute(key, false, `core.precise.${key.slice(4)}`);
+  else if (/^jet_math_[A-Z][A-Za-z0-9]*_[a-z0-9_]+$/.test(key)) addRoute(key, false, `core.math.${key.slice(9)}`);
+}
+
 // ---------------------------------------------------------------------------
 // 3. Carriers.
 
@@ -209,6 +218,44 @@ for (const m of handTable.matchAll(/exact_int_(?:binary|located)!\s*\{?\(?([^)}]
   for (const name of m[1].split(",").map((s) => s.trim()).filter(Boolean)) handExports.add(name);
 }
 const fixedInts = new Set(["u8", "u16", "u32", "u64", "usize", "i8", "i16", "i32", "isize"]);
+
+// A handle type whose runtime declaration derives `Clone` also gets a clone
+// (a copy of an owned value the lowering must duplicate, e.g. a payload read
+// out of a place that keeps its own), and may be passed by value (the adapter
+// clones the borrowed handle, as a by-value String parameter copies its text).
+// One deriving (or implementing) `PartialEq` gets an equality adapter: the
+// structural `==` / `jet_eq` of a value holding it calls the runtime's own.
+const lines = text.split("\n");
+const derivedKnown = new Map();
+const derives = (full, trait) => {
+  const name = full.split("::").pop();
+  const key = `${trait} ${name}`;
+  if (derivedKnown.has(key)) return derivedKnown.get(key);
+  const head = new RegExp(`^\\s*pub (struct|enum) ${name}\\b`);
+  const derive = new RegExp(`#\\[derive\\([^)]*\\b${trait}\\b`);
+  const manual = new RegExp(`^\\s*impl (?:(?:std|core)::(?:cmp|clone)::)?${trait} for ${name}\\s*\\{`, "m");
+  let found = manual.test(text);
+  for (let i = 0; i < lines.length && !found; i++) {
+    if (!head.test(lines[i])) continue;
+    for (let k = i - 1; k >= 0 && /^\s*(#\[|\/\/)/.test(lines[k]); k--) {
+      if (derive.test(lines[k])) found = true;
+    }
+  }
+  derivedKnown.set(key, found);
+  return found;
+};
+const derivesClone = (full) => derives(full, "Clone");
+
+// The crate-root render traits (`JetDisplay` for `{value}`, `JetShow` for
+// `{value:show}`) a handle type implements: its runtime display and show
+// adapters call that one implementation (I9). A type name declared twice is
+// ambiguous and gets neither.
+const declared = new Map();
+for (const match of text.matchAll(/^\s*pub (?:struct|enum) ([A-Z][A-Za-z0-9_]*)\b/gm)) declared.set(match[1], (declared.get(match[1]) ?? 0) + 1);
+const renders = { JetDisplay: new Set(), JetShow: new Set() };
+for (const match of text.matchAll(/^\s*impl (?:(?:super|crate)::)*(JetDisplay|JetShow) for (?:(?:super|crate|[a-z_][a-z0-9_]*)::)*([A-Z][A-Za-z0-9_]*)\s*\{/gm)) {
+  if (declared.get(match[2]) === 1) renders[match[1]].add(match[2]);
+}
 
 // A Rust type written in module `path` as a type the adapter module names.
 const qualify = (ty, path) => {
@@ -290,6 +337,13 @@ function paramCarrier(ty, path) {
     const full = qualify(borrowed[1], path);
     return { ...one(`Handle{name: "${name}"}`, `*mut ${full}`, (a) => `unsafe { &*${a} }`), handle: { name, full } };
   }
+  // A cloneable handle by value: the adapter copies the borrowed handle.
+  if (!borrowed && opaqueName.test(ty)) {
+    const name = opaqueName.exec(ty)[1];
+    const full = qualify(ty, path);
+    if (name === "String" || name === "Self" || !derivesClone(full)) return null;
+    return { ...one(`Handle{name: "${name}"}`, `*mut ${full}`, (a) => `unsafe { &*${a} }.clone()`), handle: { name, full } };
+  }
   return null;
 }
 
@@ -328,9 +382,18 @@ function splitTop(s) {
 }
 
 // The result shape: { jet, ret, outs: [{ name, cty }], body(call) } or null.
+// A never-returning kernel (`!`) has the Unit shape: the call does not come back.
+// A List inside an Option or Result comes back as two out words, its slot
+// buffer (`some` / `ok`) and its length (`some_len` / `ok_len`); the lowering
+// passes the second at the payload slot's next word.
 function resultShape(ty, path, nativeInt) {
   ty = (ty ?? "()").replace(/\s+/g, "");
+  if (ty === "!") ty = "()";
   const generic = /^(Option|Result)<(.*)>$/.exec(ty);
+  const listOf = (t) => {
+    const list = /^Vec<(.+)>$/.exec(t);
+    return list ? elementCarrier(list[1]) : null;
+  };
   const list = /^Vec<(.+)>$/.exec(ty);
   if (list) {
     // A List result: its length, with its slot buffer written to `data`.
@@ -347,23 +410,39 @@ function resultShape(ty, path, nativeInt) {
     return { jet: `Plain{carrier: LowerRouteCarrier.${v.jet}}`, ret: v.cty, outs: [], handles: v.handle ? [v.handle] : [], body: (call) => (v.cty ? v.wrap(call) : `${call}`) };
   }
   const args = splitTop(generic[2]);
+  const listArm = (name, element, pattern, tag) =>
+    `${pattern}(value) => { let len = list_out(value.into_iter().map(|e| ${element.write}).collect(), ${name}); unsafe { ${name}_len.write(len) }; ${tag} }`;
   if (generic[1] === "Option") {
-    const v = args.length === 1 ? valueCarrier(args[0], path, nativeInt) : null;
+    if (args.length !== 1) return null;
+    const element = listOf(args[0]);
+    if (element) {
+      return {
+        jet: `Option{some: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "some", cty: "*mut u64" }, { name: "some_len", cty: "i64" }], handles: [],
+        body: (call) => `match ${call} {\n            ${listArm("some", element, "Some", 1)}\n            None => 0,\n        }`,
+      };
+    }
+    const v = valueCarrier(args[0], path, nativeInt);
     if (!v || !v.cty) return null;
     return {
       jet: `Option{some: LowerRouteCarrier.${v.jet}}`, ret: "i64", outs: [{ name: "some", cty: v.cty }], handles: v.handle ? [v.handle] : [],
       body: (call) => `match ${call} {\n            Some(value) => { unsafe { some.write(${v.wrap("value")}) }; 1 }\n            None => 0,\n        }`,
     };
   }
-  const ok = args.length === 2 ? valueCarrier(args[0], path, nativeInt) : null;
-  const err = args.length === 2 ? valueCarrier(args[1], path, false) : null;
-  if (!ok || !err || !err.cty) return null;
+  if (args.length !== 2) return null;
+  const okList = listOf(args[0]);
+  const ok = okList ? null : valueCarrier(args[0], path, nativeInt);
+  const err = valueCarrier(args[1], path, false);
+  if ((!ok && !okList) || !err || !err.cty) return null;
   const outs = [];
-  if (ok.cty) outs.push({ name: "ok", cty: ok.cty });
+  if (okList) outs.push({ name: "ok", cty: "*mut u64" }, { name: "ok_len", cty: "i64" });
+  else if (ok.cty) outs.push({ name: "ok", cty: ok.cty });
   outs.push({ name: "err", cty: err.cty });
-  const okArm = ok.cty ? `Ok(value) => { unsafe { ok.write(${ok.wrap("value")}) }; 1 }` : "Ok(()) => 1,";
+  const okArm = okList
+    ? listArm("ok", okList, "Ok", 1)
+    : ok.cty ? `Ok(value) => { unsafe { ok.write(${ok.wrap("value")}) }; 1 }` : "Ok(()) => 1,";
+  const okJet = okList ? `List{elem: LowerRouteCarrier.${okList.jet}}` : ok.jet;
   return {
-    jet: `Result{ok: LowerRouteCarrier.${ok.jet}, err: LowerRouteCarrier.${err.jet}}`, ret: "i64", outs, handles: [ok.handle, err.handle].filter(Boolean),
+    jet: `Result{ok: LowerRouteCarrier.${okJet}, err: LowerRouteCarrier.${err.jet}}`, ret: "i64", outs, handles: [ok?.handle, err.handle].filter(Boolean),
     body: (call) => `match ${call} {\n            ${okArm}\n            Err(error) => { unsafe { err.write(${err.wrap("error")}) }; 0 }\n        }`,
   };
 }
@@ -465,21 +544,6 @@ rs.push("        // SAFETY: the caller passes a writable out slot.");
 rs.push("        unsafe { data.write(buffer) };");
 rs.push("        len as i64");
 rs.push("    }");
-// A handle type whose runtime declaration derives `Clone` also gets a clone
-// (a copy of an owned value the lowering must duplicate, e.g. a payload read
-// out of a place that keeps its own).
-const derivesClone = (full) => {
-  const name = full.split("::").pop();
-  const lines = text.split("\n");
-  const head = new RegExp(`^\\s*pub (struct|enum) ${name}\\b`);
-  for (let i = 0; i < lines.length; i++) {
-    if (!head.test(lines[i])) continue;
-    for (let k = i - 1; k >= 0 && /^\s*(#\[|\/\/)/.test(lines[k]); k--) {
-      if (/#\[derive\([^)]*\bClone\b/.test(lines[k])) return true;
-    }
-  }
-  return false;
-};
 const cloneable = new Set(handleRows.filter(([, full]) => derivesClone(full)).map(([name]) => name));
 for (const [name, full] of handleRows) {
   rs.push("");
@@ -496,6 +560,33 @@ for (const [name, full] of handleRows) {
   rs.push(`    pub extern "C" fn jet_rt_handle_clone_${name}(value: *mut ${full}) -> *mut ${full} {`);
   rs.push("        // SAFETY: `value` is a live handle the caller owns for this call.");
   rs.push("        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))");
+  rs.push("    }");
+}
+// Display and show of a handle: the runtime type's own JetDisplay / JetShow
+// implementation, as a new owned String handle.
+const rendered = (name, full) => {
+  const runtimeName = full.split("::").pop();
+  return { display: renders.JetDisplay.has(runtimeName), show: renders.JetShow.has(runtimeName) };
+};
+for (const [name, full] of handleRows) {
+  for (const [kind, trait, method] of [["display", "JetDisplay", "jet_display"], ["show", "JetShow", "jet_show"]]) {
+    if (!rendered(name, full)[kind]) continue;
+    rs.push("");
+    rs.push("    #[no_mangle]");
+    rs.push(`    pub extern "C" fn jet_rt_handle_${kind}_${name}(value: *mut ${full}) -> JetCString {`);
+    rs.push("        // SAFETY: `value` is a live handle the caller lends for this call.");
+    rs.push(`        guard(|| handle(<${full} as crate::${trait}>::${method}(unsafe { &*value })))`);
+    rs.push("    }");
+  }
+}
+const comparable = new Set(handleRows.filter(([, full]) => derives(full, "PartialEq")).map(([name]) => name));
+for (const [name, full] of handleRows) {
+  if (!comparable.has(name)) continue;
+  rs.push("");
+  rs.push("    #[no_mangle]");
+  rs.push(`    pub extern "C" fn jet_rt_handle_eq_${name}(left: *mut ${full}, right: *mut ${full}) -> bool {`);
+  rs.push("        // SAFETY: both are live handles the caller lends for this call.");
+  rs.push("        guard(|| unsafe { &*left } == unsafe { &*right })");
   rs.push("    }");
 }
 for (const adapter of adapters) {
@@ -561,12 +652,17 @@ for (const [name] of handleRows) {
 }
 jet.push("// The runtime handle type a Jet Core type with no Jet definition crosses the");
 jet.push("// boundary as (dropped by `jet_rt_handle_drop_<runtime name>`; copied by");
-jet.push("// `jet_rt_handle_clone_<runtime name>` when `clone`).");
-jet.push("pub struct LowerRuntimeHandle { pub jet_name: String, pub runtime: String, pub clone: Bool }");
+jet.push("// `jet_rt_handle_clone_<runtime name>` when `clone`; rendered by");
+jet.push("// `jet_rt_handle_display_<runtime name>` / `jet_rt_handle_show_<runtime name>`");
+jet.push("// when `display` / `show`; compared by `jet_rt_handle_eq_<runtime name>` when `eq`).");
+jet.push("pub struct LowerRuntimeHandle { pub jet_name: String, pub runtime: String, pub clone: Bool, pub display: Bool, pub show: Bool, pub eq: Bool }");
 jet.push("");
 jet.push("LOWER_RUNTIME_HANDLES :: prep { [LowerRuntimeHandle]{");
+const fullOf = new Map(handleRows);
 for (const [jetName, name] of [...jetNames].sort((a, b) => a[0].localeCompare(b[0]))) {
-  if (name) jet.push(`    LowerRuntimeHandle{jet_name: "${jetName}", runtime: "${name}", clone: ${cloneable.has(name)}},`);
+  if (!name) continue;
+  const render = rendered(name, fullOf.get(name));
+  jet.push(`    LowerRuntimeHandle{jet_name: "${jetName}", runtime: "${name}", clone: ${cloneable.has(name)}, display: ${render.display}, show: ${render.show}, eq: ${comparable.has(name)}},`);
 }
 jet.push("} }");
 jet.push("");

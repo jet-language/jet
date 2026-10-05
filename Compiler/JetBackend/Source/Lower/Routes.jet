@@ -149,6 +149,9 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             if lower_route_drop(carrier) != .Trivial -> lower_emit(&f, LIRInst.Drop{value: unused})
         }
         .Option(some) -> {
+            // A List payload comes back as two out words (gen-c-abi-routes.mjs
+            // listArm); its Option box build is not lowered yet.
+            if some == .List(_) -> return lower_fail(&m, &f, "{what} {name} Option of a List result is not lowered at O0 yet")
             ty :: result_ty ?? return lower_fail(&m, &f, "{what} {name} Option result has no checked type")
             if !lower_route_shape_matches(p, ty, route.result) -> return lower_fail(&m, &f, "{what} {name} result type {mir_type_display_name(ty)} does not match its runtime route")
             dst :: lower_result(p, c, &m, &f, instruction)
@@ -176,6 +179,7 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             lower_start(&f, merge, [LIRValueID]{joined})
         }
         .Result(ok, _) -> {
+            if ok == .List(_) -> return lower_fail(&m, &f, "{what} {name} Result of a List result is not lowered at O0 yet")
             ty :: result_ty ?? return lower_fail(&m, &f, "{what} {name} Result result has no checked type")
             if !lower_route_shape_matches(p, ty, route.result) -> return lower_fail(&m, &f, "{what} {name} result type {mir_type_display_name(ty)} does not match its runtime route")
             dst :: lower_result(p, c, &m, &f, instruction)

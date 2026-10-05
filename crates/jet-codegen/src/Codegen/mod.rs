@@ -3300,6 +3300,7 @@ impl JetDbRequestScope { fn enter(_: Option<String>) -> Self { Self } }\n",
     }
     if runtime_parts.contains(&MirRuntimePartId::AuthSession) {
         out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSession.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSessionRender.rs"));
     }
     if runtime_parts.contains(&MirRuntimePartId::Sync) {
         out.push_str("\nmod jet_sync {\n");
@@ -3384,6 +3385,7 @@ fn push_typed_app_preludes(out: &mut String, runtime_parts: &BTreeSet<MirRuntime
     out.push_str(&flat_prelude_body(OPENAPI_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(WEB_QUERY_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(WEB_FORMS_PRELUDE_RAW));
+    out.push_str(WEB_FORMS_RENDER_PRELUDE);
     out.push_str(&flat_prelude_body(WEB_TABLE_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(WEB_VIRTUAL_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(WEB_STORE_PRELUDE_RAW));
@@ -4056,6 +4058,7 @@ impl JetDbRequestScope {{ fn enter(_: Option<String>) -> Self {{ Self }} }}\n",
     if needs_auth_session {
         // D-AUTH1=A: sessions + `app.auth` prelude.
         out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSession.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSessionRender.rs"));
     }
     if needs_sync {
         // D-SYNC1=A / D-DBPOLICY1=A: CRDT values + row policies.
@@ -4171,6 +4174,7 @@ const WEB_ROUTER_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebRou
 const OPENAPI_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/OpenAPI.rs");
 const WEB_QUERY_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebQuery.rs");
 const WEB_FORMS_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebForms.rs");
+const WEB_FORMS_RENDER_PRELUDE: &str = include_str!("../Prelude/CoreLib/Top/WebFormsRender.rs");
 const WEB_TABLE_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebTable.rs");
 const WEB_VIRTUAL_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebVirtual.rs");
 const WEB_STORE_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebStore.rs");
@@ -4230,6 +4234,7 @@ fn push_app_preludes(out: &mut String, used_core: &std::collections::HashSet<Str
         out.push_str(&flat_prelude_body(OPENAPI_PRELUDE_RAW));
         out.push_str(&flat_prelude_body(WEB_QUERY_PRELUDE_RAW));
         out.push_str(&flat_prelude_body(WEB_FORMS_PRELUDE_RAW));
+        out.push_str(WEB_FORMS_RENDER_PRELUDE);
         out.push_str(&flat_prelude_body(WEB_TABLE_PRELUDE_RAW));
         out.push_str(&flat_prelude_body(WEB_VIRTUAL_PRELUDE_RAW));
         out.push_str(&flat_prelude_body(WEB_STORE_PRELUDE_RAW));

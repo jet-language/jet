@@ -1,0 +1,223 @@
+// Structural equality: `==` / `!=` over aggregates and Core `jet_eq`
+// (assert_eq), the Rust derived `PartialEq` the generated program compares
+// with (MIRRust.rs emit_type_def derives, Prelude jet_eq). Scalars compare
+// in place, a String through jet_rt_string_eq, a runtime handle through its
+// own PartialEq (generated jet_rt_handle_eq_<T>), and every Option, Result,
+// List, Map, struct, tuple and enum through one generated helper per type
+// ("equal"), which compares members in declaration order.
+use jet_foundation.[MIRInstruction, MIRProgram, MIRType, MIRTypeDef, MIRValueID, mir_field_id, mir_type_display_name]
+
+// Core `jet_eq(&left, &right)` (assert_eq and `compare.eq`): the structural
+// equality of two borrowed values.
+fn lower_core_equal(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, left: MIRValueID, right: MIRValueID) Never! {
+    ty :: lower_value_type(c, left) ?? return lower_fail(&m, &f, "core.compare.eq argument has no checked type")
+    a := LIRValueID?{None}
+    b := LIRValueID?{None}
+    if lower_repr(p, ty) != .Absent {
+        a = Val(lower_use(&m, &f, left) ?? return)
+        b = Val(lower_use(&m, &f, right) ?? return)
+    }
+    same :: lower_equal_values(p, &m, &f, ty, a, b) ?? return
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return lower_fail(&m, &f, "core.compare.eq has no result")
+    lower_emit(&f, LIRInst.Move{dst: dst, src: same})
+}
+
+// The equality of two borrowed values of `ty` (as lower_read_at reads them)
+// as a new Bool, or None (reported) when `ty` has no lowered equality.
+fn lower_equal_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, left: LIRValueID?, right: LIRValueID?) -> LIRValueID? {
+    repr :: lower_repr(p, ty)
+    if repr == .Absent -> return Val(lower_const_flag(&f, 1))
+    a :: left ?? return lower_equal_fail(&m, &f, ty)
+    b :: right ?? return lower_equal_fail(&m, &f, ty)
+    dst :: lower_flag(&f)
+    if lower_is_exact_int(ty) {
+        lower_exact_compare(&m, &f, dst, LIRCondition.Eq, a, b)
+        return Val(dst)
+    }
+    if lower_text_type(ty) {
+        lower_call_runtime(&m, &f, "jet_rt_string_eq", [LIRValueID]{a, b}, Val(dst))
+        return Val(dst)
+    }
+    if repr == {
+        .Word | .Flag | .FloatBits | .Discriminant -> lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: a, right: b})
+        .Handle(_, _) -> {
+            symbol :: lower_equal_handle_symbol(p, ty) ?? return lower_equal_fail(&m, &f, ty)
+            lower_call_runtime(&m, &f, symbol, [LIRValueID]{a, b}, Val(dst))
+        }
+        // The helper is keyed by the representation's own type, so a
+        // distinct or alias type shares its base's helper.
+        .Boxed(boxed) -> lower_call_helper(&m, &f, "equal", boxed, [LIRValueID]{a, b}, Val(dst))
+        .Inline(aggregate) -> lower_call_helper(&m, &f, "equal", aggregate, [LIRValueID]{a, b}, Val(dst))
+        else -> return lower_equal_fail(&m, &f, ty)
+    }
+    Val(dst)
+}
+
+fn lower_equal_fail(m: &LowerModule, f: &LowerFunction, ty: MIRType) -> LIRValueID? {
+    lower_fail(&m, &f, "equality of {mir_type_display_name(ty)} is not lowered at O0 yet")
+    None
+}
+
+fn lower_equal_handle_symbol(p: MIRProgram, ty: MIRType) -> String? {
+    if ty.kind == .Apply(name, args) {
+        if args.len() > 0 || lower_type_def(p, ty) != None -> return None
+        runtime :: lower_runtime_handle(name.name) ?? return None
+        if runtime.eq -> return Val("jet_rt_handle_eq_{runtime.runtime}")
+    }
+    None
+}
+
+// Compare the members of `ty` at `left`/`right` + `offset` (through their
+// recursive-edge wrapper when `boxed`); continue in a new block when equal,
+// else jump to `differ`.
+fn lower_equal_member(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, left: LIRValueID, right: LIRValueID, offset: Int, boxed: Bool, differ: LIRBlockID) Never! {
+    a :: lower_render_load(p, &f, left, offset, ty, boxed)
+    b :: lower_render_load(p, &f, right, offset, ty, boxed)
+    same :: lower_equal_values(p, &m, &f, ty, a, b) ?? return
+    lower_equal_continue(&f, same, differ)
+}
+
+fn lower_equal_continue(f: &LowerFunction, same: LIRValueID, differ: LIRBlockID) Never! {
+    next_block :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: same, then_target: lower_target(next_block, [LIRValueID]{}), else_target: lower_target(differ, [LIRValueID]{})})
+    lower_start(&f, next_block, [LIRValueID]{})
+}
+
+// Two words equal, else `differ`.
+fn lower_equal_words(f: &LowerFunction, a: LIRValueID, b: LIRValueID, differ: LIRBlockID) Never! {
+    same :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: same, condition: LIRCondition.Eq, left: a, right: b})
+    lower_equal_continue(&f, same, differ)
+}
+
+fn lower_helper_equal(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    layout :: lower_repr_layout(lower_repr(p, glue.ty)) ?? lir_layout_pointer()
+    f := lower_helper_start(&m, glue, [LIRLayout]{layout, layout}, Val(lir_layout_bool()))
+    left :: ~f.open_params[0]
+    right :: ~f.open_params[1]
+    equal :: lower_new_block(&f)
+    differ :: lower_new_block(&f)
+    ty :: glue.ty
+    if ty.kind == .Option(inner) {
+        // Both absent are equal; one absent differs; else the payloads.
+        null :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+        left_absent :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: left_absent, condition: LIRCondition.Eq, left: left, right: null})
+        right_absent :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: right_absent, condition: LIRCondition.Eq, left: right, right: null})
+        lower_equal_words(&f, left_absent, right_absent, differ)
+        present :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: left_absent, then_target: lower_target(equal, [LIRValueID]{}), else_target: lower_target(present, [LIRValueID]{})})
+        lower_start(&f, present, [LIRValueID]{})
+        lower_equal_member(p, &m, &f, inner, left, right, 0, false, differ)
+    } else if ty.kind == .Result(ok_ty, err_ty) {
+        // [verdict word, payload]: verdict 0 is Err.
+        left_verdict :: lower_list_word(&f, left, 0)
+        right_verdict :: lower_list_word(&f, right, 0)
+        lower_equal_words(&f, left_verdict, right_verdict, differ)
+        zero :: lower_const(&f, 0)
+        failed :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: left_verdict, right: zero})
+        err_block :: lower_new_block(&f)
+        ok_block :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(err_block, [LIRValueID]{}), else_target: lower_target(ok_block, [LIRValueID]{})})
+        lower_start(&f, err_block, [LIRValueID]{})
+        lower_equal_member(p, &m, &f, err_ty, left, right, 8, false, differ)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(equal, [LIRValueID]{})})
+        lower_start(&f, ok_block, [LIRValueID]{})
+        lower_equal_member(p, &m, &f, ok_ty, left, right, 8, false, differ)
+    } else if lower_list_element(ty) == .Val(elem) {
+        lower_equal_sequence(p, &m, &f, left, right, lower_list_stride(p, elem), [LowerMember]{LowerMember{id: mir_field_id("element"), name: "element", offset: 0, ty: elem, boxed: false}}, differ)
+    } else if lower_map_shape(p, ty) == .Val(shape) {
+        members :: [LowerMember]{
+            LowerMember{id: mir_field_id("key"), name: "key", offset: shape.key_offset, ty: shape.key, boxed: false},
+            LowerMember{id: mir_field_id("value"), name: "value", offset: shape.value_offset, ty: shape.value, boxed: false},
+        }
+        lower_equal_sequence(p, &m, &f, left, right, shape.stride, members, differ)
+    } else if lower_inline_type(p, ty) == .Val(aggregate) {
+        loop member in lower_inline_members(p, aggregate) {
+            if f.failed -> break
+            lower_equal_member(p, &m, &f, member.ty, left, right, member.offset, member.boxed, differ)
+        }
+    } else if lower_type_def(p, ty) == .Val(definition) {
+        lower_equal_variants(p, &m, &f, definition, left, right, equal, differ)
+    } else {
+        _ := lower_equal_fail(&m, &f, ty)
+    }
+    if f.failed {
+        lower_seal(&f, LIRTerminator.Unreachable)
+        return lir_builder_finish(f.builder)
+    }
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(equal, [LIRValueID]{})})
+    lower_start(&f, equal, [LIRValueID]{})
+    yes :: lower_const_flag(&f, 1)
+    lower_seal(&f, LIRTerminator.Return{value: Val(yes)})
+    lower_start(&f, differ, [LIRValueID]{})
+    no :: lower_const_flag(&f, 0)
+    lower_seal(&f, LIRTerminator.Return{value: Val(no)})
+    lir_builder_finish(f.builder)
+}
+
+// A List or Map header pair: equal lengths, then every entry's `members` in
+// order (BTreeMap / Vec PartialEq).
+fn lower_equal_sequence(p: MIRProgram, m: &LowerModule, f: &LowerFunction, left: LIRValueID, right: LIRValueID, stride: Int, members: [LowerMember], differ: LIRBlockID) Never! {
+    length :: lower_list_word(&f, left, 0)
+    other :: lower_list_word(&f, right, 0)
+    lower_equal_words(&f, length, other, differ)
+    left_data :: lower_list_data(&f, left)
+    right_data :: lower_list_data(&f, right)
+    zero :: lower_const(&f, 0)
+    at :: lower_word(&f)
+    head :: lower_new_block(&f)
+    body :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{zero})})
+    lower_start(&f, head, [LIRValueID]{at})
+    more :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: length})
+    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, body, [LIRValueID]{})
+    a :: lower_list_address(&f, left_data, at, stride)
+    b :: lower_list_address(&f, right_data, at, stride)
+    loop member in members {
+        if f.failed -> return
+        lower_equal_member(p, &m, &f, member.ty, a, b, member.offset, member.boxed, differ)
+    }
+    next_at :: lower_word(&f)
+    one :: lower_const(&f, 1)
+    lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_at})})
+    lower_start(&f, done, [LIRValueID]{})
+}
+
+// A boxed enum: equal discriminants, then the selected variant's payload
+// members; each arm ends in `equal` or `differ`. The block left open (no
+// variant selected) is unreachable.
+fn lower_equal_variants(p: MIRProgram, m: &LowerModule, f: &LowerFunction, definition: MIRTypeDef, left: LIRValueID, right: LIRValueID, equal: LIRBlockID, differ: LIRBlockID) Never! {
+    variants :: if definition.kind == {
+        .Enum(rows, _) -> rows
+        else -> {
+            lower_fail(&m, &f, "equality of {definition.name} is not lowered at O0 yet")
+            return
+        }
+    }
+    left_tag :: lower_list_word(&f, left, 0)
+    right_tag :: lower_list_word(&f, right, 0)
+    lower_equal_words(&f, left_tag, right_tag, differ)
+    loop (index, variant) in variants {
+        expected :: lower_const(&f, lower_discriminant(index))
+        selected :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: selected, condition: LIRCondition.Eq, left: left_tag, right: expected})
+        body :: lower_new_block(&f)
+        next_block :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(next_block, [LIRValueID]{})})
+        lower_start(&f, body, [LIRValueID]{})
+        loop member in lower_variant_members(p, definition, variant) {
+            if f.failed -> return
+            lower_equal_member(p, &m, &f, member.ty, left, right, member.offset, member.boxed, differ)
+        }
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(equal, [LIRValueID]{})})
+        lower_start(&f, next_block, [LIRValueID]{})
+    }
+}
