@@ -185,11 +185,11 @@ impl JetMappedStorage {
     fn checked_window(self: &JetMappedStorage, start_value: I64, end_value: I64) -> (Usize, Usize) IOError! {
         start :: if Usize.try_from(start_value).ok() == {
             .Val(value) -> value
-            .None -> return Err(self.invalid_window(start_value, end_value))
+            .None -> { return Err(self.invalid_window(start_value, end_value)) }
         }
         end :: if Usize.try_from(end_value).ok() == {
             .Val(value) -> value
-            .None -> return Err(self.invalid_window(start as I64, end_value))
+            .None -> { return Err(self.invalid_window(start as I64, end_value)) }
         }
         if start > end || end > self.length -> return Err(self.invalid_window(start as I64, end as I64))
         Ok((start, end))
@@ -234,7 +234,7 @@ impl JetMappedFile {
     pub fn window_len(self: &JetMappedFile, offset: I64, length: I64) -> JetMappedByteView IOError! {
         end :: if offset.checked_add(length) == {
             .Val(end) -> end
-            .None -> return Err(self.storage.invalid_window(offset, length))
+            .None -> { return Err(self.storage.invalid_window(offset, length)) }
         }
         self.window(offset, end)
     }
@@ -254,7 +254,7 @@ impl JetMappedFile {
     pub fn window_len_view(self: &JetMappedFile, offset: I64, length: I64) -> View<U8> IOError! {
         end :: if offset.checked_add(length) == {
             .Val(end) -> end
-            .None -> return Err(self.storage.invalid_window(offset, length))
+            .None -> { return Err(self.storage.invalid_window(offset, length)) }
         }
         self.window_view(offset, end)
     }
@@ -293,21 +293,21 @@ impl JetMappedByteView {
     pub fn window(self: &JetMappedByteView, start_value: I64, end_value: I64) -> JetMappedByteView IOError! {
         start :: if Usize.try_from(start_value).ok() == {
             .Val(value) -> value
-            .None -> return Err(self.storage.invalid_window(start_value, end_value))
+            .None -> { return Err(self.storage.invalid_window(start_value, end_value)) }
         }
         end :: if Usize.try_from(end_value).ok() == {
             .Val(value) -> value
-            .None -> return Err(self.storage.invalid_window(start as I64, end_value))
+            .None -> { return Err(self.storage.invalid_window(start as I64, end_value)) }
         }
         relative_len :: self.end - self.start
         if start > end || end > relative_len -> return Err(self.storage.invalid_window(start as I64, end as I64))
         absolute_start :: if self.start.checked_add(start) == {
             .Val(value) -> value
-            .None -> return Err(self.storage.invalid_window(start as I64, end as I64))
+            .None -> { return Err(self.storage.invalid_window(start as I64, end as I64)) }
         }
         absolute_end :: if self.start.checked_add(end) == {
             .Val(value) -> value
-            .None -> return Err(self.storage.invalid_window(start as I64, end as I64))
+            .None -> { return Err(self.storage.invalid_window(start as I64, end as I64)) }
         }
         Ok(JetMappedByteView { storage: self.storage.clone(), start: absolute_start, end: absolute_end })
     }
@@ -315,7 +315,7 @@ impl JetMappedByteView {
     pub fn window_len(self: &JetMappedByteView, offset: I64, length: I64) -> JetMappedByteView IOError! {
         end :: if offset.checked_add(length) == {
             .Val(end) -> end
-            .None -> return Err(self.storage.invalid_window(offset, length))
+            .None -> { return Err(self.storage.invalid_window(offset, length)) }
         }
         self.window(offset, end)
     }

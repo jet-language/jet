@@ -166,7 +166,7 @@ module jet_atomic_windows {
             }
             if replaced != 0 -> return Ok(())
             error :: #Unsafe("capture thread-local Windows last-error immediately after replacement failure") { io.Error.last_os_error() }
-            if error.raw_os_error() != Val(ERROR_FILE_NOT_FOUND) and error.raw_os_error() != Val(ERROR_PATH_NOT_FOUND) ->
+            if error.raw_os_error() != ERROR_FILE_NOT_FOUND and error.raw_os_error() != ERROR_PATH_NOT_FOUND ->
                 return Err(^error)
         }
         moved :: #Unsafe("atomically move the exclusive sibling with replace-existing and write-through flags") {
