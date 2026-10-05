@@ -2,7 +2,7 @@
 // owns only representation/ownership conversion; argument checks, laziness,
 // short-circuiting and failure policy remain in Collections.rs/LoopCursor.rs.
 #[cfg(not(target_arch = "wasm32"))]
-mod jet_c_abi_iter {
+pub(crate) mod jet_c_abi_iter {
     use super::*;
     use super::jet_c_abi::{guard, JetCString, view};
     use std::cmp::Ordering;
@@ -24,7 +24,7 @@ mod jet_c_abi_iter {
         child0: *const NativeMeta,
         child1: *const NativeMeta,
     }
-    struct Meta {
+    pub(crate) struct Meta {
         stride: usize,
         clone: usize,
         drop: usize,
@@ -36,7 +36,7 @@ mod jet_c_abi_iter {
         child1: Option<Arc<Meta>>,
     }
     impl Meta {
-        unsafe fn copy(raw: *const NativeMeta) -> Arc<Self> {
+        pub(crate) unsafe fn copy(raw: *const NativeMeta) -> Arc<Self> {
             let row = &*raw;
             Arc::new(Self {
                 stride: row.stride, clone: row.clone, drop: row.drop,
@@ -46,10 +46,10 @@ mod jet_c_abi_iter {
                 child1: (!row.child1.is_null()).then(|| Self::copy(row.child1)),
             })
         }
-        fn tag(&self) -> u32 { self.kind as u32 }
-        fn payload_size(&self) -> usize { match self.tag() { 11 => 0, 9 => 1, _ => self.stride } }
-        fn first(&self) -> Arc<Meta> { self.child0.as_ref().expect("native child descriptor").clone() }
-        fn second(&self) -> Arc<Meta> { self.child1.as_ref().expect("native error descriptor").clone() }
+        pub(crate) fn tag(&self) -> u32 { self.kind as u32 }
+        pub(crate) fn payload_size(&self) -> usize { match self.tag() { 11 => 0, 9 => 1, _ => self.stride } }
+        pub(crate) fn first(&self) -> Arc<Meta> { self.child0.as_ref().expect("native child descriptor").clone() }
+        pub(crate) fn second(&self) -> Arc<Meta> { self.child1.as_ref().expect("native error descriptor").clone() }
     }
 
     // Lists and most inline records fit without a heap allocation per element.
@@ -68,8 +68,8 @@ mod jet_c_abi_iter {
     }
     pub struct NativeValue { meta: Arc<Meta>, slot: Slot, owned: bool }
     impl NativeValue {
-        fn zeroed(meta: Arc<Meta>) -> Self { Self { slot: Slot::zeroed(meta.stride), meta, owned: true } }
-        unsafe fn moved(source: *const u8, meta: Arc<Meta>) -> Self {
+        pub(crate) fn zeroed(meta: Arc<Meta>) -> Self { Self { slot: Slot::zeroed(meta.stride), meta, owned: true } }
+        pub(crate) unsafe fn moved(source: *const u8, meta: Arc<Meta>) -> Self {
             let mut value = Self::zeroed(meta);
             ptr::copy_nonoverlapping(source, value.slot.data_mut(), value.meta.payload_size());
             value
@@ -81,13 +81,13 @@ mod jet_c_abi_iter {
             clone(source, value.slot.data_mut());
             value
         }
-        fn word(&self) -> u64 { unsafe { ptr::read_unaligned(self.slot.data().cast()) } }
+        pub(crate) fn word(&self) -> u64 { unsafe { ptr::read_unaligned(self.slot.data().cast()) } }
         fn scalar(meta: Arc<Meta>, word: u64) -> Self {
             let mut value = Self::zeroed(meta);
             unsafe { ptr::write_unaligned(value.slot.data_mut().cast(), word) };
             value
         }
-        fn put(mut self, target: *mut u8) {
+        pub(crate) fn put(mut self, target: *mut u8) {
             unsafe { ptr::copy_nonoverlapping(self.slot.data(), target, self.meta.payload_size()) };
             // Move the slot ownership, but still release its container and meta.
             self.owned = false;
@@ -104,7 +104,9 @@ mod jet_c_abi_iter {
             self.owned = false;
             NativeList { header, at: 0, meta: child }
         }
-        fn into_result(mut self) -> Result<Self, Failure> {
+        // A native Result box holds 1 for Ok and 0 for Err first (Lower.jet
+        // lower_result_box); the payload follows at 8.
+        pub(crate) fn into_result(mut self) -> Result<Self, Failure> {
             let kind = self.meta.tag();
             let raw = self.word() as *mut u8;
             self.owned = false;
@@ -120,10 +122,10 @@ mod jet_c_abi_iter {
                 let ok = self.meta.first(); let err = self.meta.second();
                 let size = 8 + ((ok.payload_size().max(err.payload_size()) + 7) & !7);
                 let tag = unsafe { ptr::read_unaligned(raw.cast::<u64>()) };
-                let meta = if tag == 0 { ok } else { err };
+                let meta = if tag != 0 { ok } else { err };
                 let value = unsafe { Self::moved(raw.add(8), meta) };
                 unsafe { free(raw, size) };
-                if tag == 0 { Ok(value) } else { Err(Failure::Error(value)) }
+                if tag != 0 { Ok(value) } else { Err(Failure::Error(value)) }
             }
         }
     }
@@ -166,15 +168,15 @@ mod jet_c_abi_iter {
 
     #[repr(C)]
     #[derive(Clone, Copy)]
-    struct Header { len: usize, cap: usize, data: *mut u8 }
-    unsafe fn allocate(size: usize) -> *mut u8 {
+    pub(crate) struct Header { pub(crate) len: usize, pub(crate) cap: usize, pub(crate) data: *mut u8 }
+    pub(crate) unsafe fn allocate(size: usize) -> *mut u8 {
         if size == 0 { return ptr::null_mut(); }
         let layout = std::alloc::Layout::from_size_align_unchecked(size, 8);
         let raw = std::alloc::alloc(layout);
         if raw.is_null() { std::alloc::handle_alloc_error(layout); }
         raw
     }
-    unsafe fn free(raw: *mut u8, size: usize) {
+    pub(crate) unsafe fn free(raw: *mut u8, size: usize) {
         if !raw.is_null() { std::alloc::dealloc(raw, std::alloc::Layout::from_size_align_unchecked(size.max(1), 8)); }
     }
     struct NativeList { header: Header, at: usize, meta: Arc<Meta> }
@@ -213,22 +215,22 @@ mod jet_c_abi_iter {
         }
         NativeList { header, at: 0, meta }
     }
-    fn list_into(values: Vec<NativeValue>, target: *mut Header) {
+    pub(crate) fn list_into(values: Vec<NativeValue>, target: *mut Header) {
         let len = values.len();
         let stride = values.first().map_or(0, |value| value.meta.stride);
         let raw = unsafe { allocate(len * stride) };
         for (at, value) in values.into_iter().enumerate() { value.put(unsafe { raw.add(at * stride) }); }
         unsafe { ptr::write_unaligned(target, Header { len, cap: len, data: raw }) };
     }
-    fn list_value(values: Vec<NativeValue>, meta: Arc<Meta>) -> NativeValue {
+    pub(crate) fn list_value(values: Vec<NativeValue>, meta: Arc<Meta>) -> NativeValue {
         let mut value = NativeValue::zeroed(meta);
         list_into(values, value.slot.data_mut().cast()); value
     }
-    enum Failure { Absent, Error(NativeValue) }
+    pub(crate) enum Failure { Absent, Error(NativeValue) }
     type NativeIter = JetIter<NativeValue>;
     fn handle(iter: NativeIter) -> *mut NativeIter {
-        let iter = if crate::jet_std::jet_native_comptime_active() {
-            JetIter(Box::new(iter.0.inspect(|_| crate::jet_std::jet_native_comptime_work(1))))
+        let iter = if jet_native_comptime_active() {
+            JetIter(Box::new(iter.0.inspect(|_| jet_native_comptime_work(1))))
         } else { iter };
         Box::into_raw(Box::new(iter))
     }
@@ -447,11 +449,11 @@ mod jet_c_abi_iter {
             let raw = unsafe { allocate(size) };
             match result {
                 Ok(iter) => unsafe {
-                    ptr::write_unaligned(raw.cast::<u64>(), 0);
+                    ptr::write_unaligned(raw.cast::<u64>(), 1);
                     ptr::write_unaligned(raw.add(8).cast::<*mut NativeIter>(), handle(iter));
                 },
                 Err(Failure::Error(value)) => {
-                    unsafe { ptr::write_unaligned(raw.cast::<u64>(), 1) };
+                    unsafe { ptr::write_unaligned(raw.cast::<u64>(), 0) };
                     value.put(unsafe { raw.add(8) });
                 }
                 Err(Failure::Absent) => unreachable!("checked Result failure carrier"),
@@ -479,8 +481,8 @@ mod jet_c_abi_iter {
                 let size = 8 + ((meta.payload_size().max(error.payload_size()) + 7) & !7);
                 let raw = allocate(size);
                 match result {
-                    Ok(values) => { ptr::write_unaligned(raw.cast::<u64>(), 0); list_value(values, meta).put(raw.add(8)); }
-                    Err(Failure::Error(value)) => { ptr::write_unaligned(raw.cast::<u64>(), 1); value.put(raw.add(8)); }
+                    Ok(values) => { ptr::write_unaligned(raw.cast::<u64>(), 1); list_value(values, meta).put(raw.add(8)); }
+                    Err(Failure::Error(value)) => { ptr::write_unaligned(raw.cast::<u64>(), 0); value.put(raw.add(8)); }
                     Err(Failure::Absent) => unreachable!("checked Result collection"),
                 }
                 raw

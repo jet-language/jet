@@ -44,9 +44,9 @@ fn lower_lazy_slot_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
             lower_inline_clone(p, &m, &f, source, target, glue.ty)
         } else if lower_read_at(p, &f, source, 0, glue.ty) == .Val(value) {
             layout :: lower_value_layout(f, value)
-            copy :: lower_new_value(&f, layout, LIRDrop.Trivial, glue.ty.identity)
-            lower_clone_into(p, &m, &f, value, copy, glue.ty)
-            lower_write_at(p, &f, target, 0, copy, glue.ty)
+            copied :: lower_new_value(&f, layout, LIRDrop.Trivial, glue.ty.identity)
+            lower_clone_into(p, &m, &f, value, copied, glue.ty)
+            lower_write_at(p, &f, target, 0, copied, glue.ty)
         }
     } else {
         lower_drop_stored(p, &m, &f, source, 0, glue.ty)
@@ -116,9 +116,9 @@ fn lower_lazy_callback_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -
         }
         arg :: lower_read_at(p, &f, source, 0, ty) ?? next
         if access == .Move && !owned_inputs && (lower_is_inline(p, ty) || lower_needs_drop(p, ty)) {
-            copy :: lower_new_value(&f, lower_value_layout(f, arg), LIRDrop.Trivial, ty.identity)
-            lower_clone_into(p, &m, &f, arg, copy, ty)
-            &args.push(copy)
+            copied :: lower_new_value(&f, lower_value_layout(f, arg), LIRDrop.Trivial, ty.identity)
+            lower_clone_into(p, &m, &f, arg, copied, ty)
+            &args.push(copied)
         } else {
             &args.push(arg)
         }
