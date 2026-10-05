@@ -649,12 +649,13 @@ fn sema_call_core_check_source_float_contract(target: SemaCallDirectTarget, args
     module_index :: sema_registration_module_index(graph, target.symbol.module_name) ?? return true
     module_name :: graph.modules[module_index].module_name
     signature :: core_call_typed_signature(module_name, target.symbol.name, args.len()) ?? return true
-    floating := loop parameter in signature.type_parameters {
+    floating :: loop parameter in signature.type_parameters {
         if parameter.constraint == CoreCallTypeConstraint.Floating || parameter.constraint == CoreCallTypeConstraint.FloatingOrExact -> break true
     } ?? false
     if !floating -> return true
     params := sema_call_core_parameter_records(signature, [Type]{}, span, false)
-    local_args := loop argument in args -> argument
+    local_args := [CallArg]{}
+    loop argument in args -> &local_args.push(argument)
     binding :: sema_call_bind_args("{module_name}.{target.symbol.name}", params, &local_args, span, &diagnostics) ?? return false
     facts :: sema_call_collect_inference_facts(params, binding, args, environment, &scopes, &state, &tail_store, &context)
     loop parameter in signature.type_parameters {
