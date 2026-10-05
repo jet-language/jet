@@ -1,123 +1,115 @@
-use jet_foundation.Text.TEXT_NUL
-
 // Rust: crates/jet-codegen/src/Prelude/TypedText.rs:1
-// One typed-text semantic kernel; SQL binding element type stays at the adapter.
+// D-TYPEDTEXT1=D: one typed-text semantic kernel for every tier. SQL keeps its
+// binding element type at the adapter, so the checked SQL carrier can use
+// DBValue while this kernel stays independent of the database wire module.
+use core.text.runtime.kernel_unicode_string as unicode_string
+
 // Rust: crates/jet-codegen/src/Prelude/TypedText.rs:6
-pub fn jet_typed_sql_raw<T>(template: String) -> (String, [T]) { (^template, []) }
-// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:10
-pub fn jet_typed_sql_interpolate<T>(literals: &[String], holes: [T]) -> (String, [T]) {
-    capacity :: literals.iter().map(fn(literal) { literal.len() }).sum<USize>() + holes.len()
-    template := String.with_capacity(capacity)
-    loop (index, literal) in literals.iter().enumerate() {
-        template.push_str(literal)
-        if index < holes.len() { template.push('?') }
-    }
-    (^template, ^holes)
+pub fn jet_typed_sql_raw<T>(template: String) -> (template: String, params: [T]) Never! {
+    (template: template, params: [T]{})
+}
+// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:10. Each literal that has
+// a following hole contributes one `?` placeholder.
+pub fn jet_typed_sql_interpolate<T>(literals: [String], holes: ^[T]) -> (template: String, params: [T]) Never! {
+    parts :: loop index in 0..<literals.len() -> if holes.len() > index -> "{literals[index]}?" else -> literals[index]
+    (template: parts.join(""), params: ^holes)
 }
 // Rust: crates/jet-codegen/src/Prelude/TypedText.rs:26
-pub fn jet_typed_sql_template<T>(value: &(String, [T])) -> String { value.0.clone() }
+pub fn jet_typed_sql_template<T>(value: (template: String, params: [T])) -> String Never! { ~value.template }
 // Rust: crates/jet-codegen/src/Prelude/TypedText.rs:30
-pub fn jet_typed_sql_params<T: Clone>(value: &(String, [T])) -> [T] { value.1.clone() }
+pub fn jet_typed_sql_params<T>(value: (template: String, params: [T])) -> [T] Never! { ~value.params }
 // Rust: crates/jet-codegen/src/Prelude/TypedText.rs:34
-pub fn jet_typed_html_raw(value: String) -> String { ^value }
+pub fn jet_typed_html_raw(value: ^String) -> String Never! { value }
 // Rust: crates/jet-codegen/src/Prelude/TypedText.rs:38
-pub fn jet_typed_html_text(value: String) -> String { ^value }
-// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:42
-pub fn jet_typed_html_escape(value: String) -> String {
-    out := String.with_capacity(value.len())
-    loop ch in value.chars() {
-        match ch {
-            '&' -> out.push_str("&amp;")
-            '<' -> out.push_str("&lt;")
-            '>' -> out.push_str("&gt;")
-            '"' -> out.push_str("&quot;")
-            '\'' -> out.push_str("&#39;")
-            _ -> out.push(ch)
+pub fn jet_typed_html_text(value: ^String) -> String Never! { value }
+// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:42. Every escaped character
+// is ASCII, so a byte walk leaves multi-byte UTF-8 sequences untouched.
+pub fn jet_typed_html_escape(value: String) -> String Never! {
+    out := [U8]{}
+    loop byte in value.bytes() {
+        if byte == {
+            38 -> push_text(&out, "&amp;")
+            60 -> push_text(&out, "&lt;")
+            62 -> push_text(&out, "&gt;")
+            34 -> push_text(&out, "&quot;")
+            39 -> push_text(&out, "&#39;")
+            else -> &out.push(byte)
         }
     }
-    out
+    String.from_bytes(out) ?? panic("HTML escaping keeps UTF-8 intact")
 }
-// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:57
-pub fn jet_typed_html_interpolate(literals: &[String], holes: [String], trusted_html: &[Bool]) -> String {
-    capacity :: literals.iter().map(fn(literal) { literal.len() }).sum<USize>() + holes.iter().map(fn(hole) { hole.len() }).sum<USize>()
-    out := String.with_capacity(capacity)
-    holes := holes.into_iter()
-    loop (index, literal) in literals.iter().enumerate() {
-        out.push_str(literal)
-        if holes.next() == .Val(hole) {
-            if trusted_html.get(index).copied().unwrap_or(false) { out.push_str(&hole) }
-            else { out.push_str(&jet_typed_html_escape(&hole)) }
-        }
+// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:57. Hole i follows literal
+// i; a missing trust flag escapes.
+pub fn jet_typed_html_interpolate(literals: [String], holes: [String], trusted_html: [Bool]) -> String Never! {
+    parts :: loop index in 0..<literals.len() -> if {
+        index >= holes.len() -> literals[index]
+        trusted_html.len() > index && trusted_html[index] -> "{literals[index]}{holes[index]}"
+        else -> "{literals[index]}{jet_typed_html_escape(holes[index])}"
     }
-    out
+    parts.join("")
 }
 // Rust: crates/jet-codegen/src/Prelude/TypedText.rs:79
-pub fn jet_typed_sh_raw(value: String) -> [String] {
-    value.split_whitespace().map(fn(word) { word.to_string() }).collect()
-}
-// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:83
-pub fn jet_typed_sh_interpolate(literals: &[String], holes: [String]) -> [String] {
-    argv := [String].with_capacity(holes.len())
-    holes := holes.into_iter()
-    loop literal in literals {
-        argv.extend(literal.split_whitespace().map(fn(word) { word.to_string() }))
-        if holes.next() == .Val(hole) { argv.push(^hole) }
+pub fn jet_typed_sh_raw(value: String) -> [String] Never! { unicode_string.split_whitespace(value) }
+// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:83. Literal words split on
+// White_Space; each hole stays one argument.
+pub fn jet_typed_sh_interpolate(literals: [String], holes: [String]) -> [String] Never! {
+    argv := [String]{}
+    loop index in 0..<literals.len() {
+        loop word in unicode_string.split_whitespace(literals[index]) -> &argv.push(word)
+        if holes.len() > index -> &argv.push(holes[index])
     }
     argv
 }
 // Rust: crates/jet-codegen/src/Prelude/TypedText.rs:95
-// Checked boundary heads share encoding/traversal semantics across adapters.
+// D-BOUND-HEAD1=A: checked boundary heads use this one interpolation kernel on
+// every tier; adapters marshal lists and never decide encoding or traversal.
 // Rust: crates/jet-codegen/src/Prelude/TypedText.rs:99
-pub fn jet_typed_path_interpolate(literals: &[String], holes: &[String]) -> String {
+pub fn jet_typed_path_interpolate(literals: [String], holes: [String]) -> String Never! {
     interpolate_typed_head(literals, holes, encode_path_component)
 }
 // Rust: crates/jet-codegen/src/Prelude/TypedText.rs:103
-pub fn jet_typed_datetime_interpolate(literals: &[String], holes: &[String]) -> String {
-    interpolate_typed_head(literals, holes, fn(hole) { hole.to_string() })
+pub fn jet_typed_datetime_interpolate(literals: [String], holes: [String]) -> String Never! {
+    interpolate_typed_head(literals, holes, (hole: String) -> hole)
 }
 // Rust: crates/jet-codegen/src/Prelude/TypedText.rs:107
-pub fn jet_validate_typed_path_literal(literals: &[String]) -> Unit Err! {
-    if literals.iter().any(fn(literal) { literal.contains(TEXT_NUL) }) { Err("a Path cannot contain a NUL character") }
-    else { Ok(()) }
-}
-// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:115
-fn interpolate_typed_head<F: Fn(String) -> String>(literals: &[String], holes: &[String], encode_hole: F) -> String {
-    capacity :: literals.iter().map(fn(literal) { literal.len() }).sum<USize>() + holes.iter().map(fn(hole) { hole.len() }).sum<USize>()
-    out := String.with_capacity(capacity)
-    loop (index, literal) in literals.iter().enumerate() {
-        out.push_str(literal)
-        if holes.get(index) == .Val(hole) { out.push_str(&encode_hole(hole)) }
-    }
-    out
-}
-// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:132
-fn encode_path_component(value: String) -> String {
-    // Encode separators/control bytes and both traversal components: holes are one component.
-    if value == "." || value == ".." {
-        return value.as_bytes().iter().map(fn(byte) { format("%{:02X}", byte) }).collect()
-    }
-    percent_encode_path(value)
-}
-// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:146
-fn percent_encode_path(value: String) -> String {
-    out := String.with_capacity(value.len())
-    loop byte in value.as_bytes() {
-        byte :: *byte
-        if byte.is_ascii_alphanumeric() || byte == '-' as U8 || byte == '.' as U8 || byte == '_' as U8 || byte == '~' as U8 {
-            out.push(byte as Char)
-        } else {
-            out.push('%')
-            out.push(typed_text_hex_digit(byte >> 4))
-            out.push(typed_text_hex_digit(byte & 0x0f))
+pub fn jet_validate_typed_path_literal(literals: [String]) Err! {
+    loop literal in literals {
+        loop byte in literal.bytes() {
+            if byte == 0 -> return Err("a Path cannot contain a NUL character")
         }
     }
-    out
 }
-// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:160
-fn typed_text_hex_digit(nibble: U8) -> Char {
-    match nibble {
-        0..9 -> ('0' as U8 + nibble) as Char
-        10..15 -> ('A' as U8 + nibble - 10) as Char
-        _ -> panic("percent hex nibble is always four bits")
+// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:115
+fn interpolate_typed_head(literals: [String], holes: [String], encode_hole: fn(String) -> String Never!) -> String Never! {
+    parts :: loop index in 0..<literals.len() -> if holes.len() > index -> "{literals[index]}{encode_hole(holes[index])}" else -> literals[index]
+    parts.join("")
+}
+// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:132-158. Separators and
+// control bytes are percent-encoded, so a hole is one filesystem component;
+// `.` and `..` are encoded whole so a hole never becomes a traversal step.
+fn encode_path_component(value: String) -> String Never! {
+    traversal :: value == "." || value == ".."
+    out := [U8]{}
+    loop byte in value.bytes() {
+        n :: Int.from_u8(byte)
+        if !traversal && path_safe(n) {
+            &out.push(byte)
+        } else {
+            &out.push(U8{37})
+            &out.push(hex_digit(n >> 4))
+            &out.push(hex_digit(n & 15))
+        }
     }
+    String.from_bytes(out) ?? panic("path encoding keeps UTF-8 intact")
+}
+// ASCII alphanumerics and `-` `.` `_` `~` stay literal.
+fn path_safe(n: Int) -> Bool Never! {
+    (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45 || n == 46 || n == 95 || n == 126
+}
+// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:160. Uppercase hex nibble.
+fn hex_digit(nibble: Int) -> U8 Never! {
+    if nibble < 10 -> U8{48 + nibble} else -> U8{55 + nibble}
+}
+fn push_text(out: &[U8], text: String) Never! {
+    loop byte in text.bytes() -> &out.push(byte)
 }

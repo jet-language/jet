@@ -388,6 +388,31 @@ pub fn trim(text: String) -> String Never! {
     text.slice(bounds.start, bounds.end)
 }
 
+// Rust str::split_whitespace: fields separated by White_Space runs; no empty
+// fields. Field bytes are copied whole, so UTF-8 sequences stay intact.
+pub fn split_whitespace(text: String) -> [String] Never! {
+    whitespace_asset :: text_unicode_white_space.UNICODE_WHITE_SPACE
+    raw :: utf8_bytes(text)
+    out := [String]{}
+    start := -1
+    at := 0
+    loop at < raw.len() {
+        width :: utf8_width_at(raw, at)
+        space :: text_asset.asset_contains(whitespace_asset, scalar_at(raw, at))
+        if space && start >= 0 {
+            &out.push(utf8_field(raw, start, at))
+            start = -1
+        }
+        if !space && start < 0 -> start = at
+        at = at + width
+    }
+    if start >= 0 -> &out.push(utf8_field(raw, start, raw.len()))
+    out
+}
+fn utf8_field(raw: [U8], start: Int, end: Int) -> String Never! {
+    String.from_bytes(raw[start..<end]) ?? panic("whitespace split keeps UTF-8 fields intact")
+}
+
 // Constant-storage two-way substring search: linear time without needle copies.
 // A reversed accessor implements rfind with the same search policy.
 fn byte_at(bytes: [U8], at: Int, reverse: Bool) -> U8 Never! {
