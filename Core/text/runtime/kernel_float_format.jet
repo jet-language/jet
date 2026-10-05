@@ -74,9 +74,8 @@ fn decimal(raw: U64, buf: &[U8#N], digits: dec.Digits, precision: Int) -> String
     }
     owned(^out)
 }
-// digits_to_exp_str: `min_digits` pads the fraction with zeros (exact
-// precision); shortest rendering passes 0.
-fn exponential(raw: U64, buf: &[U8#N], digits: dec.Digits, min_digits: Int) -> String Never! {
+// digits_to_exp_str for shortest digits.
+fn exponential(raw: U64, buf: &[U8#N], digits: dec.Digits) -> String Never! {
     exponent := digits.exp - 1
     negative :: exponent < 0
     if negative -> exponent = -exponent
@@ -90,17 +89,15 @@ fn exponential(raw: U64, buf: &[U8#N], digits: dec.Digits, min_digits: Int) -> S
         value /= U32{10}
         if value == 0 -> break
     }
-    fraction :: digits.len > 1 || min_digits > 1
-    padding :: if min_digits > digits.len -> min_digits - digits.len else -> 0
+    fraction :: digits.len > 1
     out := [U8]{}
-    length :: digits.len + padding + flag(fraction) + 1 + flag(negative) + n + flag((raw >> 63) != 0)
+    length :: digits.len + flag(fraction) + 1 + flag(negative) + n + flag((raw >> 63) != 0)
     &out.try_reserve(length) ?? panic("float string allocation failed")
     sign(&out, raw)
     &out.push(buf[0])
     if fraction {
         &out.push(U8{46})
         bytes(&out, buf, 1, digits.len)
-        zeroes(&out, padding)
     }
     &out.push(U8{101})
     if negative -> &out.push(U8{45})
@@ -129,7 +126,7 @@ pub fn debug(value: F64) -> String Never! {
     digits :: grisu.shortest(&decoded, &buf)
     // Positive finite IEEE bits have the same ordering as the values.
     // Literal thresholds are exact binary64 representations of 1e-4 and 1e16.
-    if magnitude < (U64{0x3f1a36e2eb1c432d}) || magnitude >= (U64{0x4341c37937e08000}) -> return exponential(raw, &buf, digits, 0)
+    if magnitude < (U64{0x3f1a36e2eb1c432d}) || magnitude >= (U64{0x4341c37937e08000}) -> return exponential(raw, &buf, digits)
     decimal(raw, &buf, digits, 1)
 }
 // Check original nonnegative usize domain against the selected target, then
@@ -152,30 +149,4 @@ pub fn fixed(value: F64, precision: Int) -> String Never! {
     digits :: grisu.exact(&decoded, &buf, max_buf_len(decoded.exp), limit)
     if digits.exp <= limit -> return render_zero(raw, precision)
     decimal(raw, &buf, digits, precision)
-}
-// fmt/float.rs float_to_exponential_common_exact (`{:.*e}`): precision + 1
-// significant digits through flt2dec::to_exact_exp_str with limit i16::MIN.
-pub fn exact_exponential(value: F64, precision: Int) -> String Never! {
-    checked_precision(precision)
-    raw :: bits(value)
-    if special(raw) == .Val(text) -> return text
-    ndigits :: precision + 1
-    if (raw & U64{0x7fffffffffffffff}) == 0 {
-        // Zero renders [0.][0000]e0, keeping the sign bit as Display does.
-        out := [U8]{}
-        sign(&out, raw)
-        &out.push(U8{48})
-        if ndigits > 1 {
-            &out.push(U8{46})
-            zeroes(&out, ndigits - 1)
-        }
-        &out.push(U8{101})
-        &out.push(U8{48})
-        return owned(^out)
-    }
-    decoded :: dec.finite(raw)
-    maxlen :: max_buf_len(decoded.exp)
-    buf := [U8#1024]{uninit}
-    digits :: grisu.exact(&decoded, &buf, if ndigits < maxlen -> ndigits else -> maxlen, -32768)
-    exponential(raw, &buf, digits, ndigits)
 }

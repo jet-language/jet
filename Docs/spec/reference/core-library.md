@@ -2570,20 +2570,20 @@ values, not bytes; binary-size formatting uses binary units.
 | `hex(value: Int, width: Int) -> String` | text | Format lower-case hexadecimal with the requested width. |
 | `ordinal(value: Int) -> String` | text | Add an English ordinal suffix. |
 | `plural(value: Int, singular: String, many: String) -> String` | text | Choose a singular or plural word from the value. |
-| `pad_left(text: String, width: Int, fill: String) -> String` | text | Pad on the left. |
-| `pad_right(text: String, width: Int, fill: String) -> String` | text | Pad on the right. |
-| `pad_center(text: String, width: Int, fill: String) -> String` | text | Pad on both sides. |
+| `pad_left(text: String, width: Int, fill: String) -> String` | text | Pad on the left; an empty `fill` pads with spaces. |
+| `pad_right(text: String, width: Int, fill: String) -> String` | text | Pad on the right; an empty `fill` pads with spaces. |
+| `pad_center(text: String, width: Int, fill: String) -> String` | text | Pad on both sides; the left side gets the smaller half and the fill pattern restarts on each side (`pad_center("x", 4, "ab")` is `axab`). |
 | `pad(text: String, width: Int, fill: String) -> String` | text | Apply the module's default padding direction. |
 | `grouped(value: Float, frac: Int) -> String` | text | Add grouping separators and keep `frac` fractional digits. |
-| `decimal(value: Float, frac: Int) -> String` | text | Format fixed-point decimal output. |
-| `percent(value: Float, frac: Int) -> String` | text | Format a percentage with `frac` fractional digits. |
-| `sci(value: Float, frac: Int) -> String` | text | Format scientific notation. |
-| `pretty(value: String) -> String` | text | Expand braces, brackets, and commas into an indented display. |
-| `bytes(value: Int) -> String` | text | Format bytes with `B`, `KiB`, `MiB`, `GiB`, or `TiB`. |
+| `decimal(value: Float, frac: Int) -> String` | text | Format fixed-point decimal output, rounding half away from zero with no negative zero (`decimal(0.125, 2)` is `0.13`, `decimal(-0.0001, 2)` is `0.00`). |
+| `percent(value: Float, frac: Int) -> String` | text | Format a grouped percentage with `frac` fractional digits (`percent(12345.6, 0)` is `1,234,560%`). |
+| `sci(value: Float, frac: Int) -> String` | text | Format normalized scientific notation with a plain exponent (`1.23e3`, `1.23e-3`, `1.00e1` for `9.999`). |
+| `pretty(value: String) -> String` | text | Lay out Debug text one item per line with commas between items; empty collections stay on one line, and `[:]` and `[redacted]` are unchanged. |
+| `bytes(value: Int) -> String` | text | Format bytes in SI units `B`, `KB`, `MB`, `GB`, `TB`, `PB`, or `EB`, with one decimal below 10 (`1536` is `1.5 KB`). |
 | `duration(milliseconds: Int) -> String` | text | Format a duration using at most three nonzero units. |
 
-The implementation is in [`Core/text/fmt.jet`](../../../Core/text/fmt.jet).
-`bytes` deliberately uses powers-of-two units, and `duration` does not emit
+The implementation is in [`Core/text/fmt.jet`](../../../Core/text/fmt.jet); the
+runtime formatting entry points delegate to it. `duration` does not emit
 unbounded trailing zero units.
 The library-call boundary is deliberate: ordinary human formatting remains explicit (`D-HUMANFMT1`), and `pretty` follows the expanded deterministic Debug shape (`D-FMT-PRETTY1`).
 
