@@ -28,6 +28,8 @@
 // 5. Relocation, with the static-executable relaxations: TLS
 //    general/local-dynamic to local-exec, initial-exec to local-exec, and
 //    GOT loads/calls to direct `lea`/`call`/`jmp` when the instruction allows.
+// 6. Debug tail: after the loaded image, the relocated `.debug_*` sections
+//    of the directly linked objects, a `.symtab` and section headers.
 //
 // Inputs are read in place. Section headers and local symbols are not copied
 // into tables (a runtime codegen unit has ~63k sections): they are read from
@@ -1730,6 +1732,217 @@ fn link_got_local(c: LinkContext, fsym: Int) -> Int Never! {
 }
 
 // ---------------------------------------------------------------------------
+// Debug sections, symbols and section headers.
+//
+// After the loaded image the executable carries what debuggers and
+// symbolizers read: the `.debug_*` sections of the objects linked directly
+// (the program's; archive members contribute none), relocated; a `.symtab`
+// of every live function and object symbol; and section headers naming the
+// image's parts (code, unwind tables, data) and those tables. None of it is
+// loaded.
+
+// Not a layout class: the row of a `.debug_*` section, whose address is its
+// offset in the output section of its name. Added after layout, so it is in
+// no layout order list.
+LINK_DEBUG :: prep { -3 }
+
+// Output `.debug_*` sections: names in first-seen order, and per name the
+// rows of its input sections in input order and its size.
+struct LinkDebug {
+    pub names: [String]
+    pub rows: [[Int]]
+    pub sizes: [Int]
+}
+
+struct LinkSectionHeader {
+    pub name: String
+    pub kind: Int
+    pub flags: Int
+    pub addr: Int
+    pub offset: Int
+    pub size: Int
+    pub link: Int
+    pub info: Int
+    pub align: Int
+    pub entry_size: Int
+}
+
+// Give every unloaded, uncompressed `.debug_*` section of a directly linked
+// object a row (with no GOT slots) whose address is its offset in the
+// output section of its name, so relocations against it yield DWARF
+// section offsets.
+fn link_debug_sections(c: &LinkContext) -> LinkDebug Never! {
+    debug := LinkDebug{names: [String]{}, rows: [[Int]]{}, sizes: [Int]{}}
+    groups := [String:Int]{}
+    loop obj in 0..<c.obj_name.len() {
+        if c.obj_base[obj] != 0 -> next
+        b :: ~c.obj_buffer[obj]
+        first :: ~c.obj_first_section[obj]
+        loop k in 1..<c.obj_count[obj] {
+            s :: first + k
+            if link_sec_type(c, obj, s) != LINK_SHT_PROGBITS || (link_sec_flags(c, obj, s) & 0x802) != 0 -> next
+            name_at :: link_sec_name(c, obj, s)
+            if !link_name_has(c.bufs, b, name_at, ".debug_", false) -> next
+            name :: link_cstr(c.bufs, b, name_at)
+            group := groups.get(name) ?? -1
+            if group < 0 {
+                group = debug.names.len()
+                &groups.add(name, group).drop("checked absent above")
+                &debug.names.push(name)
+                &debug.rows.push([Int]{})
+                &debug.sizes.push(0)
+            }
+            offset :: link_align(debug.sizes[group], link_sec_align(c, obj, s))
+            row :: c.live_secs.len()
+            c.live[s] = row
+            &c.live_secs.push(s)
+            &c.live_class.push(LINK_DEBUG)
+            &c.live_addr.push(offset)
+            &c.rel_base.push(c.rel_slot.len())
+            loop _ in 0..<link_rel_count(c, obj, s) -> &c.rel_slot.push(-1)
+            &debug.rows[group].push(row)
+            debug.sizes[group] = offset + link_sec_size(c, obj, s)
+        }
+    }
+    debug
+}
+
+// The address range of a layout class's rows (empty when it has none).
+fn link_class_extent(c: LinkContext, l: LinkLayout, class: Int) -> [Int] Never! {
+    rows :: l.order[class]
+    if rows.len() == 0 -> return [Int]{0, 0}
+    last :: rows[rows.len() - 1]
+    s :: c.live_secs[last]
+    [Int]{c.live_addr[rows[0]], c.live_addr[last] + link_sec_size(c, link_obj_of(c, s), s)}
+}
+
+// The output section header index of the image part holding section `s`,
+// or -1 when `s` is not loaded.
+fn link_symbol_header(c: LinkContext, class_headers: [Int], s: Int) -> Int Never! {
+    row :: link_live_row(c, s)
+    if row < 0 -> return -1
+    class :: c.live_class[row]
+    if class < 0 -> return -1
+    class_headers[class]
+}
+
+fn link_image_symbol(symtab: &[U8], strtab: &[U8], name: String, info: Int, header: Int, value: Int, size: Int) Never! {
+    elf64_u32(&symtab, elf64_string(&strtab, name))
+    &symtab.push(U8{info})
+    &symtab.push(U8{0})
+    elf64_u16(&symtab, header)
+    elf64_u64(&symtab, value)
+    elf64_u64(&symtab, size)
+}
+
+// Append the debug sections, the symbol table and the section headers to
+// the loaded image `out`, and point the ELF header at the headers.
+fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDebug) Never! {
+    headers := [LinkSectionHeader]{}
+    class_headers := [Int]{}
+    loop _ in 0..<LINK_CLASSES -> &class_headers.push(-1)
+    names :: [String]{".rodata", ".eh_frame", ".text", ".tdata", ".tbss", ".preinit_array", ".init_array", ".fini_array", ".data.rel.ro", ".data", ".bss"}
+    kinds :: [Int]{LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS, LINK_SHT_PREINIT_ARRAY, LINK_SHT_INIT_ARRAY, LINK_SHT_FINI_ARRAY, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS}
+    // ALLOC, plus EXECINSTR for code, WRITE for data, TLS for thread data.
+    flags :: [Int]{2, 2, 6, 0x403, 0x403, 3, 3, 3, 3, 3, 3}
+    loop class in 0..<LINK_CLASSES {
+        extent := link_class_extent(c, l, class)
+        if class == LINK_EH -> extent = [Int]{c.eh_start, c.eh_start + c.eh_size}
+        // .bss also holds the common symbols, through the end of memory.
+        if class == LINK_BSS {
+            extent = if l.has_rw -> [Int]{l.bss_start, l.mem_end} else -> [Int]{0, 0}
+        }
+        if extent[1] > extent[0] {
+            class_headers[class] = headers.len() + 1
+            &headers.push(LinkSectionHeader{name: names[class], kind: kinds[class], flags: flags[class], addr: extent[0], offset: extent[0] - LINK_BASE, size: extent[1] - extent[0], link: 0, info: 0, align: if class == LINK_TEXT -> 16 else -> 8, entry_size: 0})
+        }
+        // The GOT follows the read-only-after-relocation data.
+        if class == LINK_RELRO && c.got_keys.len() > 0 {
+            &headers.push(LinkSectionHeader{name: ".got", kind: LINK_SHT_PROGBITS, flags: 3, addr: c.got_start, offset: c.got_start - LINK_BASE, size: 8 * c.got_keys.len(), link: 0, info: 0, align: 8, entry_size: 8})
+        }
+    }
+    loop (group, name) in debug.names {
+        start :: out.len()
+        loop row in debug.rows[group] {
+            link_pad_to(&out, start + c.live_addr[row], 0)
+            link_emit_section(&c, &out, row)
+        }
+        link_pad_to(&out, start + debug.sizes[group], 0)
+        &headers.push(LinkSectionHeader{name: name, kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: start, size: debug.sizes[group], link: 0, info: 0, align: 1, entry_size: 0})
+    }
+
+    // Symbols: every named local function and object of a loaded section,
+    // then the globals defined in one.
+    strtab := [U8]{U8{0}}
+    symtab := [U8]{}
+    loop _ in 0..<24 -> &symtab.push(U8{0})
+    loop obj in 0..<c.obj_name.len() {
+        b :: ~c.obj_buffer[obj]
+        loop k in 1..<c.obj_first_global[obj] {
+            at :: link_sym_at(c, obj, k)
+            info :: link_u8(c.bufs, b, at + 4)
+            if (info & 15) != 1 && (info & 15) != 2 -> next
+            name_offset :: link_u32(c.bufs, b, at)
+            if name_offset == 0 -> next
+            s :: link_sym_shndx(c, obj, k)
+            header :: link_symbol_header(c, class_headers, s)
+            if header < 0 -> next
+            link_image_symbol(&symtab, &strtab, link_cstr(c.bufs, b, c.obj_strtab[obj] + name_offset), info, header, link_sec_addr(c, s) + link_u64(c.bufs, b, at + 8), link_u64(c.bufs, b, at + 16))
+        }
+    }
+    first_global :: symtab.len().div_euclid(24)
+    loop g in 0..<c.g_name.len() {
+        if c.g_kind[g] != LINK_G_FILE || c.g_alias[g] >= 0 -> next
+        s :: c.g_section[g]
+        header :: link_symbol_header(c, class_headers, s)
+        if header < 0 -> next
+        class :: c.live_class[c.live[s]]
+        if class == LINK_TDATA || class == LINK_TBSS -> next
+        bind :: if c.g_weak_def[g] -> 2 else -> 1
+        kind :: if class == LINK_TEXT -> 2 else -> 1
+        link_image_symbol(&symtab, &strtab, c.g_name[g], (bind << 4) | kind, header, link_global_addr(c, g), c.g_size[g])
+    }
+    elf64_pad(&out, 8)
+    symtab_at :: out.len()
+    &out.extend(symtab)
+    strtab_index :: headers.len() + 2
+    &headers.push(LinkSectionHeader{name: ".symtab", kind: LINK_SHT_SYMTAB, flags: 0, addr: 0, offset: symtab_at, size: symtab.len(), link: strtab_index, info: first_global, align: 8, entry_size: 24})
+    strtab_at :: out.len()
+    &out.extend(strtab)
+    &headers.push(LinkSectionHeader{name: ".strtab", kind: 3, flags: 0, addr: 0, offset: strtab_at, size: strtab.len(), link: 0, info: 0, align: 1, entry_size: 0})
+    shstrtab := [U8]{U8{0}}
+    name_offsets := [Int]{}
+    loop header in headers -> &name_offsets.push(elf64_string(&shstrtab, header.name))
+    &name_offsets.push(elf64_string(&shstrtab, ".shstrtab"))
+    shstrtab_at :: out.len()
+    &out.extend(shstrtab)
+    &headers.push(LinkSectionHeader{name: ".shstrtab", kind: 3, flags: 0, addr: 0, offset: shstrtab_at, size: shstrtab.len(), link: 0, info: 0, align: 1, entry_size: 0})
+    elf64_pad(&out, 8)
+    shoff :: out.len()
+    loop _ in 0..<64 -> &out.push(U8{0})
+    loop (index, header) in headers {
+        elf64_u32(&out, name_offsets[index])
+        elf64_u32(&out, header.kind)
+        elf64_u64(&out, header.flags)
+        elf64_u64(&out, header.addr)
+        elf64_u64(&out, header.offset)
+        elf64_u64(&out, header.size)
+        elf64_u32(&out, header.link)
+        elf64_u32(&out, header.info)
+        elf64_u64(&out, header.align)
+        elf64_u64(&out, header.entry_size)
+    }
+    // e_shoff, e_shentsize, e_shnum and e_shstrndx.
+    link_put64(&out, 40, shoff)
+    count :: headers.len() + 1
+    fields :: [Int]{64, count, count - 1}
+    loop (index, value) in fields {
+        out[58 + 2 * index] = U8{value & 255}
+        out[59 + 2 * index] = U8{(value >> 8) & 255}
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Entry point.
 
 // Load every input buffer: relocatable objects directly, static archives
@@ -1813,7 +2026,9 @@ pub fn x64_link_executable(names: [String], bufs: ^[[U8]]) -> X64ExecutableResul
     startup :: link_has_startup(c)
     link_define_names(&c, layout, startup)
     entry :: link_global_addr(c, entry_g)
-    image :: link_write(&c, layout, entry)
+    debug :: link_debug_sections(&c)
+    image := link_write(&c, layout, entry)
+    link_write_sections(&c, &image, layout, debug)
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
     X64ExecutableResult{bytes: image, errors: [String]{}}
 }

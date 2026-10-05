@@ -96,6 +96,7 @@ const parts = [
   body("Compiler/JetBackend/Source/Image/RuntimeStrings.jet"),
   body("Compiler/JetBackend/Source/Image/ELF.jet"),
   body("Compiler/JetBackend/Source/Image/Object.jet"),
+  body("Compiler/JetBackend/Source/Image/Dwarf.jet"),
   body("Compiler/JetBackend/Source/Image/Memory.jet"),
   body("Compiler/JetBackend/Tests/LowerFixtures.jet"),
   ...sorted("Compiler/JetBackend/Tests/Fixtures").map(body),

@@ -22,6 +22,11 @@ pub struct X64Allocation {
     pub spill_slots: Int
     // Callee-saved registers the function writes, in push order.
     pub callee_saved: [Int]
+    // Per value, the first and last position of its interval (-1: unused);
+    // a value holds its location over the whole interval. Positions count
+    // each block start, instruction and terminator in function order.
+    pub starts: [Int]
+    pub ends: [Int]
 }
 
 X64_CALLER_SAVED_POOL :: prep { [Int]{1, 2, 6, 7, 8, 9} }
@@ -311,5 +316,5 @@ pub fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
         loop value in 0..<count { if registers[value] == reg -> used = true }
         if used -> &callee_saved.push(reg)
     }
-    X64Allocation{locations: locations, spill_slots: spill_slots, callee_saved: callee_saved}
+    X64Allocation{locations: locations, spill_slots: spill_slots, callee_saved: callee_saved, starts: starts, ends: ends}
 }

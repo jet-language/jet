@@ -14,6 +14,8 @@
 // same section symbol. The module data is writable: the entry function fills
 // the String slots of frozen statics with runtime handles before the program
 // runs (Lower/Statics.jet lower_static_fixups); nothing else writes it.
+// `.eh_frame` and the DWARF 5 sections (Image/Dwarf.jet) describe every
+// function's frame, source lines and variables.
 
 ELF64_SECTION_HEADER_SIZE :: prep { 64 }
 ELF64_SYMBOL_SIZE :: prep { 24 }
@@ -25,11 +27,23 @@ ELF64_R_X86_64_PLT32 :: prep { 4 }
 // Section indices of the object, in header order.
 ELF64_OBJECT_TEXT :: prep { 1 }
 ELF64_OBJECT_RODATA :: prep { 2 }
-ELF64_OBJECT_RELA :: prep { 3 }
 ELF64_OBJECT_SYMTAB :: prep { 4 }
 ELF64_OBJECT_STRTAB :: prep { 5 }
 ELF64_OBJECT_SHSTRTAB :: prep { 6 }
-ELF64_OBJECT_SECTIONS :: prep { 9 }
+ELF64_OBJECT_EH_FRAME :: prep { 9 }
+ELF64_OBJECT_DEBUG_ABBREV :: prep { 11 }
+ELF64_OBJECT_DEBUG_INFO :: prep { 12 }
+ELF64_OBJECT_DEBUG_LINE :: prep { 14 }
+ELF64_OBJECT_DEBUG_LOCLISTS :: prep { 16 }
+ELF64_OBJECT_SECTIONS :: prep { 17 }
+
+// Local symbols before the functions: null, then the section symbols
+// relocations name.
+ELF64_OBJECT_SYMBOL_TEXT :: prep { 1 }
+ELF64_OBJECT_SYMBOL_DATA :: prep { 2 }
+ELF64_OBJECT_SYMBOL_ABBREV :: prep { 3 }
+ELF64_OBJECT_SYMBOL_LINE :: prep { 4 }
+ELF64_OBJECT_SYMBOL_LOCLISTS :: prep { 5 }
 
 struct X64ObjectRela { pub at: Int, pub symbol: Int, pub kind: Int, pub addend: Int }
 
@@ -40,6 +54,18 @@ struct X64ObjectSymbol {
     pub section: Int
     pub value: Int
     pub size: Int
+}
+
+// One section header after the null one: its contents and header fields.
+struct X64ObjectSection {
+    pub name: String
+    pub kind: Int
+    pub flags: Int
+    pub bytes: [U8]
+    pub link: Int
+    pub info: Int
+    pub align: Int
+    pub entry_size: Int
 }
 
 // Append `text` to a string table; returns its offset.
@@ -80,6 +106,35 @@ fn x64_object_main(entry: LIRFunctionID) -> X64CompiledFunction Never! {
     X64CompiledFunction{id: LIRFunctionID{value: -1}, name: "main", code: code, relocs: relocs}
 }
 
+// `main`'s frame: after `push rbx` the CFA is rsp + 16 with rbx below the
+// return address; at the closing `ret`, after `pop rbx`, it is rsp + 8.
+fn x64_object_main_debug(main: X64CompiledFunction) -> X64FunctionDebug Never! {
+    cfi := [U8]{}
+    ret_at :: main.code.len() - 1
+    dwarf_cfa_advance(&cfi, 0, 1)
+    dwarf_cfa_def_cfa_offset(&cfi, 16)
+    dwarf_cfa_offset(&cfi, x64_dwarf_register(X64_RBX), 2)
+    dwarf_cfa_advance(&cfi, 1, ret_at)
+    dwarf_cfa_def_cfa_offset(&cfi, 8)
+    X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: cfi, ranges: [X64VariableRange]{}}
+}
+
+fn x64_object_rela_section(name: String, relas: [X64ObjectRela], target: Int) -> X64ObjectSection Never! {
+    bytes := [U8]{}
+    loop row in relas {
+        elf64_u64(&bytes, row.at)
+        elf64_u64(&bytes, (row.symbol << 32) | row.kind)
+        elf64_u64(&bytes, row.addend)
+    }
+    // RELA, INFO_LINK, against .symtab, for `target`.
+    X64ObjectSection{name: name, kind: 4, flags: 0x40, bytes: bytes, link: ELF64_OBJECT_SYMTAB, info: target, align: 8, entry_size: ELF64_RELA_SIZE}
+}
+
+// A DWARF section: PROGBITS, not loaded.
+fn x64_object_debug_section(name: String, bytes: [U8]) -> X64ObjectSection Never! {
+    X64ObjectSection{name: name, kind: 1, flags: 0, bytes: bytes, link: 0, info: 0, align: 1, entry_size: 0}
+}
+
 // Compile `program` into a relocatable object whose `main` runs `entry`,
 // which takes no parameters and returns nothing.
 pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64ExecutableResult Never! {
@@ -90,8 +145,11 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
     if signature.params.len() != 0 || !returns_nothing -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {program.functions[entry.value].name} must take no parameters and return nothing"}}
     compiled :: x64_compile_module(program)
     if compiled.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: compiled.errors}
-    functions := [X64CompiledFunction]{x64_object_main(entry)}
+    main :: x64_object_main(entry)
+    functions := [X64CompiledFunction]{main}
     loop function in compiled.functions -> &functions.push(function)
+    debug := [X64FunctionDebug]{x64_object_main_debug(main)}
+    loop row in compiled.debug -> &debug.push(row)
 
     // .text and .rodata contents.
     text := [U8]{}
@@ -117,17 +175,20 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
                 &data_errors.push("data {index}: relocation target {reloc.target.value} is not in the object")
                 next
             }
-            &data_relas.push(X64ObjectRela{at: data_offsets[index] + reloc.offset, symbol: 2, kind: ELF64_R_X86_64_64, addend: data_offsets[reloc.target.value] + reloc.addend})
+            &data_relas.push(X64ObjectRela{at: data_offsets[index] + reloc.offset, symbol: ELF64_OBJECT_SYMBOL_DATA, kind: ELF64_R_X86_64_64, addend: data_offsets[reloc.target.value] + reloc.addend})
         }
     }
     if data_errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: data_errors}
 
-    // Symbols: null, the two section symbols, one local per function, then
-    // the globals (`main` and every runtime symbol the code calls).
+    // Symbols: null, the section symbols, one local per function, then the
+    // globals (`main` and every runtime symbol the code calls).
     symbols := [X64ObjectSymbol]{
         X64ObjectSymbol{name: "", info: 0, section: 0, value: 0, size: 0},
         X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_TEXT, value: 0, size: 0},
         X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_RODATA, value: 0, size: 0},
+        X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_DEBUG_ABBREV, value: 0, size: 0},
+        X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_DEBUG_LINE, value: 0, size: 0},
+        X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_DEBUG_LOCLISTS, value: 0, size: 0},
     }
     loop (index, function) in functions {
         if index > 0 -> &symbols.push(X64ObjectSymbol{name: function.name, info: 2, section: ELF64_OBJECT_TEXT, value: offsets[index], size: function.code.len()})
@@ -167,7 +228,7 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
                 }
                 .Data(id) -> {
                     if id.value >= 0 && id.value < data_offsets.len() {
-                        &relas.push(X64ObjectRela{at: at, symbol: 2, kind: ELF64_R_X86_64_PC32, addend: data_offsets[id.value] - 4})
+                        &relas.push(X64ObjectRela{at: at, symbol: ELF64_OBJECT_SYMBOL_DATA, kind: ELF64_R_X86_64_PC32, addend: data_offsets[id.value] - 4})
                     } else {
                         &errors.push("{function.name}: data {id.value} is not in the module")
                     }
@@ -189,22 +250,37 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
         elf64_u64(&symtab, symbol.value)
         elf64_u64(&symtab, symbol.size)
     }
-    rela := [U8]{}
-    loop entry_row in relas {
-        elf64_u64(&rela, entry_row.at)
-        elf64_u64(&rela, (entry_row.symbol << 32) | entry_row.kind)
-        elf64_u64(&rela, entry_row.addend)
-    }
-    data_rela := [U8]{}
-    loop entry_row in data_relas {
-        elf64_u64(&data_rela, entry_row.at)
-        elf64_u64(&data_rela, (entry_row.symbol << 32) | entry_row.kind)
-        elf64_u64(&data_rela, entry_row.addend)
+    dwarf :: x64_dwarf_sections(program, functions, debug, offsets, text.len(), X64DwarfSymbols{
+        text: ELF64_OBJECT_SYMBOL_TEXT, abbrev: ELF64_OBJECT_SYMBOL_ABBREV, line: ELF64_OBJECT_SYMBOL_LINE, loclists: ELF64_OBJECT_SYMBOL_LOCLISTS,
+    })
+    // Header order is the ELF64_OBJECT_* indices; .shstrtab is filled below.
+    sections :: [X64ObjectSection]{
+        // .text: PROGBITS, ALLOC | EXECINSTR
+        X64ObjectSection{name: ".text", kind: 1, flags: 6, bytes: text, link: 0, info: 0, align: X64_FUNCTION_ALIGN, entry_size: 0},
+        // .data: PROGBITS, WRITE + ALLOC
+        X64ObjectSection{name: ".data", kind: 1, flags: 3, bytes: rodata, link: 0, info: 0, align: rodata_align, entry_size: 0},
+        x64_object_rela_section(".rela.text", relas, ELF64_OBJECT_TEXT),
+        // .symtab: names in .strtab, locals before `first_global`
+        X64ObjectSection{name: ".symtab", kind: 2, flags: 0, bytes: symtab, link: ELF64_OBJECT_STRTAB, info: first_global, align: 8, entry_size: ELF64_SYMBOL_SIZE},
+        X64ObjectSection{name: ".strtab", kind: 3, flags: 0, bytes: strtab, link: 0, info: 0, align: 1, entry_size: 0},
+        X64ObjectSection{name: ".shstrtab", kind: 3, flags: 0, bytes: [U8]{}, link: 0, info: 0, align: 1, entry_size: 0},
+        // .note.GNU-stack: empty, no flags: the stack is not executable.
+        X64ObjectSection{name: ".note.GNU-stack", kind: 1, flags: 0, bytes: [U8]{}, link: 0, info: 0, align: 1, entry_size: 0},
+        // .rela.data: absolute pointer words against the .data section symbol.
+        x64_object_rela_section(".rela.data", data_relas, ELF64_OBJECT_RODATA),
+        // .eh_frame: PROGBITS, ALLOC
+        X64ObjectSection{name: ".eh_frame", kind: 1, flags: 2, bytes: dwarf.eh_frame, link: 0, info: 0, align: 8, entry_size: 0},
+        x64_object_rela_section(".rela.eh_frame", dwarf.eh_relas, ELF64_OBJECT_EH_FRAME),
+        x64_object_debug_section(".debug_abbrev", dwarf.abbrev),
+        x64_object_debug_section(".debug_info", dwarf.info),
+        x64_object_rela_section(".rela.debug_info", dwarf.info_relas, ELF64_OBJECT_DEBUG_INFO),
+        x64_object_debug_section(".debug_line", dwarf.line),
+        x64_object_rela_section(".rela.debug_line", dwarf.line_relas, ELF64_OBJECT_DEBUG_LINE),
+        x64_object_debug_section(".debug_loclists", dwarf.loclists),
     }
     shstrtab := [U8]{U8{0}}
-    names :: [String]{".text", ".data", ".rela.text", ".symtab", ".strtab", ".shstrtab", ".note.GNU-stack", ".rela.data"}
-    name_offsets := [Int]{0}
-    loop name in names -> &name_offsets.push(elf64_string(&shstrtab, name))
+    name_offsets := [Int]{}
+    loop section in sections -> &name_offsets.push(elf64_string(&shstrtab, section.name))
 
     // File: header, section contents, section header table.
     bytes := [U8]{}
@@ -224,31 +300,21 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
     elf64_u16(&bytes, ELF64_SECTION_HEADER_SIZE)
     elf64_u16(&bytes, ELF64_OBJECT_SECTIONS)
     elf64_u16(&bytes, ELF64_OBJECT_SHSTRTAB)
-    contents :: [[U8]]{text, rodata, rela, symtab, strtab, shstrtab, data_rela}
-    aligns :: [Int]{X64_FUNCTION_ALIGN, rodata_align, 8, 8, 1, 1, 8}
     section_offsets := [Int]{}
-    loop (index, content) in contents {
-        elf64_pad(&bytes, aligns[index])
+    section_sizes := [Int]{}
+    loop (index, section) in sections {
+        contents :: if index + 1 == ELF64_OBJECT_SHSTRTAB -> shstrtab else -> section.bytes
+        elf64_pad(&bytes, section.align)
         &section_offsets.push(bytes.len())
-        loop byte in content -> &bytes.push(byte)
+        &section_sizes.push(contents.len())
+        loop byte in contents -> &bytes.push(byte)
     }
     elf64_pad(&bytes, 8)
     shoff :: bytes.len()
     loop shift in 0..<8 -> bytes[shoff_at + shift] = U8{(shoff >> (8 * shift)) & 255}
     elf64_section_header(&bytes, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-    // .text: PROGBITS, ALLOC | EXECINSTR
-    elf64_section_header(&bytes, name_offsets[1], 1, 6, section_offsets[0], text.len(), 0, 0, X64_FUNCTION_ALIGN, 0)
-    // .data: PROGBITS, WRITE + ALLOC
-    elf64_section_header(&bytes, name_offsets[2], 1, 3, section_offsets[1], rodata.len(), 0, 0, rodata_align, 0)
-    // .rela.text: RELA, INFO_LINK, against .symtab, for .text
-    elf64_section_header(&bytes, name_offsets[3], 4, 0x40, section_offsets[2], rela.len(), ELF64_OBJECT_SYMTAB, ELF64_OBJECT_TEXT, 8, ELF64_RELA_SIZE)
-    // .symtab: names in .strtab, locals before `first_global`
-    elf64_section_header(&bytes, name_offsets[4], 2, 0, section_offsets[3], symtab.len(), ELF64_OBJECT_STRTAB, first_global, 8, ELF64_SYMBOL_SIZE)
-    elf64_section_header(&bytes, name_offsets[5], 3, 0, section_offsets[4], strtab.len(), 0, 0, 1, 0)
-    elf64_section_header(&bytes, name_offsets[6], 3, 0, section_offsets[5], shstrtab.len(), 0, 0, 1, 0)
-    // .note.GNU-stack: empty, no flags: the stack is not executable.
-    elf64_section_header(&bytes, name_offsets[7], 1, 0, shoff, 0, 0, 0, 1, 0)
-    // .rela.data: absolute pointer words against the .data section symbol.
-    elf64_section_header(&bytes, name_offsets[8], 4, 0x40, section_offsets[6], data_rela.len(), ELF64_OBJECT_SYMTAB, ELF64_OBJECT_RODATA, 8, ELF64_RELA_SIZE)
+    loop (index, section) in sections {
+        elf64_section_header(&bytes, name_offsets[index], section.kind, section.flags, section_offsets[index], section_sizes[index], section.link, section.info, section.align, section.entry_size)
+    }
     X64ExecutableResult{bytes: bytes, errors: [String]{}}
 }

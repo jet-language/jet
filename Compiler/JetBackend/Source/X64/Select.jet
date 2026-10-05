@@ -35,13 +35,39 @@ pub struct X64CompiledFunction {
     pub relocs: [X64Reloc]
 }
 
+// Debug facts of one compiled function for Image/Dwarf.jet: a line row
+// where each run of code from one source line starts, the end of the
+// prologue, the call frame instructions of its FDE, and where each debug
+// variable lives over which code range.
+pub struct X64LineRow { pub at: Int, pub line: Int }
+
+// A register (hardware number) or a frame slot at `offset` from rbp.
+pub enum X64DebugLocation {
+    Register(reg: Int)
+    Frame(offset: Int)
+}
+
+// LIRFunctionDebug.variables[variable] is at `location` for code offsets
+// start..<end.
+pub struct X64VariableRange { pub variable: Int, pub start: Int, pub end: Int, pub location: X64DebugLocation }
+
+pub struct X64FunctionDebug {
+    pub lines: [X64LineRow]
+    pub body: Int
+    pub cfi: [U8]
+    pub ranges: [X64VariableRange]
+}
+
 pub struct X64CompileResult {
     pub function: X64CompiledFunction?
+    pub debug: X64FunctionDebug?
     pub errors: [String]
 }
 
+// debug[i] belongs to functions[i].
 pub struct X64ModuleResult {
     pub functions: [X64CompiledFunction]
+    pub debug: [X64FunctionDebug]
     pub errors: [String]
 }
 
@@ -58,6 +84,8 @@ struct X64Emitter {
     pub saved: [Int]
     // LIR value -> rbp displacement of its StackSlot storage (0 for none).
     pub stack: [Int]
+    // Offset of every `ret`, for the CFI of the epilogues.
+    pub returns: [Int]
 }
 
 struct X64Frame { pub stack: [Int], pub bytes: Int }
@@ -304,6 +332,7 @@ fn x64_emit_epilogue(emitter: &X64Emitter) Never! {
         index -= 1
     }
     x64_pop(&emitter.code, X64_RBP)
+    &emitter.returns.push(emitter.code.len())
     x64_ret(&emitter.code)
 }
 
@@ -341,18 +370,51 @@ fn x64_use_counts(function: LIRFunction) -> [Int] Never! {
     counts
 }
 
+// The line row for code starting at `at`: a new row when the line changes,
+// replacing a row at the same offset that no code followed.
+fn x64_debug_line(lines: &[X64LineRow], at: Int, line: Int) Never! {
+    if line <= 0 -> return
+    count :: lines.len()
+    if count > 0 {
+        last :: lines[count - 1]
+        if last.line == line -> return
+        if last.at == at {
+            lines[count - 1] = X64LineRow{at: at, line: line}
+            return
+        }
+    }
+    &lines.push(X64LineRow{at: at, line: line})
+}
+
 // Compile one linted function. `program` supplies signatures.
 pub fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64CompileResult Never! {
     gaps :: x64_selection_gaps(program, function)
-    if gaps.len() > 0 -> return X64CompileResult{function: None, errors: gaps}
+    if gaps.len() > 0 -> return X64CompileResult{function: None, debug: None, errors: gaps}
     allocation :: x64_allocate(function)
     uses :: x64_use_counts(function)
     frame :: x64_frame(function, allocation.callee_saved.len(), allocation.spill_slots)
-    emitter := X64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, fixups: [X64BlockFixup]{}, saved: allocation.callee_saved, stack: frame.stack}
+    emitter := X64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, fixups: [X64BlockFixup]{}, saved: allocation.callee_saved, stack: frame.stack, returns: [Int]{}}
 
+    // The frame and its call frame instructions: after `push rbp` the CFA
+    // is rsp + 16 with rbp saved below the return address; after
+    // `mov rbp, rsp` it is rbp + 16; callee-saved register k is saved at
+    // CFA - 8 * (3 + k) (data alignment -8).
+    cfi := [U8]{}
     x64_push(&emitter.code, X64_RBP)
+    dwarf_cfa_advance(&cfi, 0, emitter.code.len())
+    dwarf_cfa_def_cfa_offset(&cfi, 16)
+    dwarf_cfa_offset(&cfi, x64_dwarf_register(X64_RBP), 2)
+    cfa_at := emitter.code.len()
     x64_mov_rr(&emitter.code, X64_RBP, X64_RSP)
-    loop reg in allocation.callee_saved -> x64_push(&emitter.code, reg)
+    dwarf_cfa_advance(&cfi, cfa_at, emitter.code.len())
+    dwarf_cfa_def_cfa_register(&cfi, x64_dwarf_register(X64_RBP))
+    cfa_at = emitter.code.len()
+    loop (index, reg) in allocation.callee_saved {
+        x64_push(&emitter.code, reg)
+        dwarf_cfa_advance(&cfi, cfa_at, emitter.code.len())
+        dwarf_cfa_offset(&cfi, x64_dwarf_register(reg), 3 + index)
+        cfa_at = emitter.code.len()
+    }
     if frame.bytes > 0 -> x64_alu_ri(&emitter.code, X64Alu.Sub, X64_RSP, frame.bytes)
     // Parameters: general registers move in parallel first, then Float
     // parameters leave their xmm registers and stack parameters are loaded
@@ -395,9 +457,25 @@ pub fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Com
         }
     }
 
+    // The prologue ends where the entry block starts; the line table marks
+    // it with the function's own line until a body line replaces it.
+    body :: emitter.code.len()
+    lines := [X64LineRow]{}
+    if function.debug.line > 0 {
+        &lines.push(X64LineRow{at: 0, line: function.debug.line})
+        &lines.push(X64LineRow{at: body, line: function.debug.line})
+    }
+    // Code offset of every allocation position (block start, instruction,
+    // terminator; then the end), and whether a value an interval starts
+    // there is defined by the code at that position.
+    positions := [Int]{}
+    defining := [Bool]{}
     block_offsets := [Int]{}
     loop (block_index, block) in function.blocks {
         &block_offsets.push(emitter.code.len())
+        &positions.push(emitter.code.len())
+        &defining.push(false)
+        located :: block.lines.len() == block.insts.len() + 1
         fused := false
         if block.terminator == .Branch(condition, _, _) {
             if block.insts.len() > 0 {
@@ -405,15 +483,60 @@ pub fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Com
             }
         }
         loop (inst_index, inst) in block.insts {
+            &positions.push(emitter.code.len())
+            &defining.push(true)
+            if located -> x64_debug_line(&lines, emitter.code.len(), block.lines[inst_index])
             if !(fused && inst_index == block.insts.len() - 1) -> x64_select_inst(&emitter, function, allocation, inst)
         }
+        &positions.push(emitter.code.len())
+        &defining.push(false)
+        if located -> x64_debug_line(&lines, emitter.code.len(), block.lines[block.insts.len()])
         x64_select_terminator(&emitter, function, allocation, block, block_index, fused)
     }
+    &positions.push(emitter.code.len())
     loop fixup in emitter.fixups -> x64_patch_rel32(&emitter.code, fixup.at, block_offsets[fixup.block])
+    // Each epilogue's `ret` runs after `pop rbp`: the CFA is rsp + 8 there.
+    loop at in emitter.returns {
+        dwarf_cfa_advance(&cfi, cfa_at, at)
+        dwarf_cfa_remember_state(&cfi)
+        dwarf_cfa_def_cfa(&cfi, x64_dwarf_register(X64_RSP), 8)
+        dwarf_cfa_advance(&cfi, at, at + 1)
+        dwarf_cfa_restore_state(&cfi)
+        cfa_at = at + 1
+    }
+    debug :: X64FunctionDebug{lines: lines, body: body, cfi: cfi, ranges: x64_variable_ranges(function, allocation, positions, defining)}
     X64CompileResult{
         function: Val(X64CompiledFunction{id: function.id, name: function.name, code: emitter.code, relocs: emitter.relocs}),
+        debug: Val(debug),
         errors: [String]{},
     }
+}
+
+// Where each debug binding's value lives: its location over the code of its
+// interval, from after its definition (or its block's start, for a block
+// parameter) through its last position. A value bound twice to one
+// variable yields one range.
+fn x64_variable_ranges(function: LIRFunction, allocation: X64Allocation, positions: [Int], defining: [Bool]) -> [X64VariableRange] Never! {
+    ranges := [X64VariableRange]{}
+    seen := [Int:Bool]{}
+    count :: function.values.len()
+    loop binding in function.debug.bindings {
+        value :: binding.value.value
+        first :: allocation.starts[value]
+        if first < 0 -> next
+        key :: binding.variable * count + value
+        if seen.get(key) != None -> next
+        &seen.add(key, true).drop("checked absent above")
+        start :: if defining[first] -> positions[first + 1] else -> positions[first]
+        end :: positions[allocation.ends[value] + 1]
+        if start >= end -> next
+        location :: if allocation.locations[value] == {
+            .Reg(reg) -> X64DebugLocation.Register{reg: reg}
+            .Stack(slot) -> X64DebugLocation.Frame{offset: x64_slot_disp(allocation.callee_saved.len(), slot)}
+        }
+        &ranges.push(X64VariableRange{variable: binding.variable, start: start, end: end, location: location})
+    }
+    ranges
 }
 
 // Ordered IEEE comparison of two Float bit words into the Bool `reg`.
@@ -672,12 +795,16 @@ fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation
 pub fn x64_compile_module(program: LIRModule) -> X64ModuleResult Never! {
     errors := [String]{}
     loop issue in lir_lint_module(program) -> &errors.push("LIR lint: {issue.function} b{issue.block}: {issue.message}")
-    if errors.len() > 0 -> return X64ModuleResult{functions: [X64CompiledFunction]{}, errors: errors}
+    if errors.len() > 0 -> return X64ModuleResult{functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, errors: errors}
     functions := [X64CompiledFunction]{}
+    debug := [X64FunctionDebug]{}
     loop function in program.functions {
         result :: x64_compile_function(program, function)
         loop error in result.errors -> &errors.push(error)
-        if result.function == .Val(compiled) -> &functions.push(compiled)
+        if result.function == .Val(compiled) {
+            &functions.push(compiled)
+            &debug.push(result.debug ?? X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
+        }
     }
-    X64ModuleResult{functions: functions, errors: errors}
+    X64ModuleResult{functions: functions, debug: debug, errors: errors}
 }

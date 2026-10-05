@@ -128,9 +128,10 @@ fn jet_cli_runtime_key(runtime_dir: String) -[FS]> String? Never! {
 // Dev builds: the Jet-native backend lowers the optimized MIR to LIR, writes
 // a relocatable object, and the in-process linker binds it to the runtime
 // pack into a static x86-64 executable (D-EXEC1: the one compiled runtime).
-// A program it cannot lower yet is refused with the backend's first
-// finding, never built another way.
-fn jet_cli_build_native(file: String, result: JetDriverCompileResult, binary: String, color: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
+// The object's debug information names source files relative to the source
+// root `root`. A program it cannot lower yet is refused with the backend's
+// first finding, never built another way.
+fn jet_cli_build_native(file: String, result: JetDriverCompileResult, root: String, binary: String, color: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
     unpruned :: result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
     entry_id :: result.entry_function ?? return jet_cli_build_failed("`{file}` has no `fn run` to build", "an executable starts at the program's `fn run`", "add `fn run()` to the file, or check it with `jet check {file}`", color)
     // Only functions the entry reaches are lowered, generic ones per instance.
@@ -144,7 +145,9 @@ fn jet_cli_build_native(file: String, result: JetDriverCompileResult, binary: St
         }
     }
     entry :: lowered.entry ?? return jet_cli_ice("the MIR program of `{file}` lost its entry function")
-    object :: x64_relocatable_object(lowered.lir, entry)
+    lir := lowered.lir
+    lir.debug.directory = root
+    object :: x64_relocatable_object(lir, entry)
     if object.errors.len() > 0 {
         return JetDriverVerbOutput{
             stdout: "",
@@ -205,7 +208,7 @@ fn jet_cli_build_result(file: String, source: String, color: Bool, release: Bool
     stem :: jet_cli_stem(file)
     binary :: "{build_dir}/{stem}"
     if release -> return jet_cli_build_release(file, result, root, build_dir, stem, binary, color)
-    jet_cli_build_native(file, result, binary, color)
+    jet_cli_build_native(file, result, root, binary, color)
 }
 
 fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Bool) -> JetDriverVerbOutput {

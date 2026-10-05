@@ -169,7 +169,8 @@ fn fx_statics_addresses_module() -> LIRModule Never! {
         &entry.blocks[0].insts.push(LIRInst.Drop{value: text})
     }
     // The owned copy was dropped by its MIR Drop above; its storage address
-    // stays comparable.
+    // stays comparable. The appended checks have no source lines.
+    loop _ in entry.blocks[0].lines.len()..<(entry.blocks[0].insts.len() + 1) -> &entry.blocks[0].lines.push(0)
     lir.functions[0] = entry
     lir
 }

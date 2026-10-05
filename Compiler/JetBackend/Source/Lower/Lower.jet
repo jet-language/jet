@@ -164,6 +164,12 @@ struct LowerModule {
     // Glue/helper key (lower_glue_row_key) -> its row in `glue`.
     pub glue_rows: [String:Int]
     pub issues: [LIRLoweringIssue]
+    // Debug facts (Debug.jet): source files and types for LIRModuleDebug,
+    // each interned by key (MIR source file id, canonical type key).
+    pub debug_files: [String]
+    pub debug_file_rows: [U64:Int]
+    pub debug_types: [LIRDebugType]
+    pub debug_type_rows: [String:Int]
 }
 
 // Read-only facts about the MIR function being lowered.
@@ -220,7 +226,9 @@ struct LowerFunction {
     pub phi_storage: [U64:Int]
     // A closure body's box parameter (Closures.jet).
     pub env: LIRValueID?
-    // Per slot: the memory cell of a cell slot (LowerSlot.cell), else None.
+    // Per slot: the debug variable (LIRFunctionDebug.variables) its values
+    // carry, or -1 (Debug.jet).
+    pub debug_slots: [Int]
     pub cells: [LIRValueID?]
 }
 
@@ -229,7 +237,7 @@ struct LowerFunction {
 pub fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
     prepared :: lower_prepare_entry(program, entry)
     if prepared.issues.len() > 0 {
-        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None}
+        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}, debug: lir_module_debug_none()}, issues: ~prepared.issues, entry: None}
     }
     m := LowerModule{
         signatures: [LIRSignature]{},
@@ -248,6 +256,10 @@ pub fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering
         glue: [LowerGlue]{},
         glue_rows: [String:Int]{},
         issues: [LIRLoweringIssue]{},
+        debug_files: [String]{},
+        debug_file_rows: [U64:Int]{},
+        debug_types: [LIRDebugType]{},
+        debug_type_rows: [String:Int]{},
     }
     loop (index, file) in program.source_files {
         if m.source_rows.get(file.id.value) == None -> &m.source_rows.add(file.id.value, index).drop("checked absent above")
@@ -285,7 +297,7 @@ pub fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering
         }
         cursor += 1
     }
-    lowered :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data}
+    lowered :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data, debug: LIRModuleDebug{directory: "", files: ~m.debug_files, types: ~m.debug_types}}
     issues := ~m.issues
     if issues.len() == 0 {
         loop issue in lir_lint_module(lowered) -> &issues.push(LIRLoweringIssue{function: issue.function, message: "LIR lint b{issue.block}: {issue.message}"})
@@ -634,6 +646,7 @@ fn lower_value_owned(c: LowerContext, value: MIRValueID) -> Bool Never! {
 
 fn lower_set_slot(f: &LowerFunction, slot: Int, value: LIRValueID?) Never! {
     f.current[slot] = value
+    if value == .Val(carried) -> lower_debug_bind(&f, slot, carried)
 }
 
 fn lower_define(c: LowerContext, f: &LowerFunction, value: MIRValueID, lowered: LIRValueID) Never! {
@@ -772,6 +785,7 @@ fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID
         storage: [LIRValueID?]{},
         phi_storage: [U64:Int]{},
         env: None,
+        debug_slots: [Int]{},
         cells: [LIRValueID?]{},
     }
 }
@@ -780,6 +794,7 @@ fn lower_function(p: MIRProgram, m: &LowerModule, function: MIRFunction, id: LIR
     name :: if function.key == "" -> function.name else -> function.key
     f := lower_new_function(id, name, signature, function.entry)
     c :: lower_context(p, &m, &f, function) ?? return lir_builder_finish(f.builder)
+    lower_debug_function(p, c, &m, &f)
     lower_function_body(p, c, &m, &f)
     lir_builder_finish(f.builder)
 }
@@ -1064,6 +1079,12 @@ fn lower_function_body(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
             &f.params.push(None)
         }
     }
+    // A parameter's debug variable is its MIR position (lower_debug_function);
+    // a Write parameter's entry value is the caller's place, not the value.
+    loop (index, param) in c.mir.params {
+        if param.access == .Write -> next
+        if f.params[index] == .Val(value) -> lower_debug_bind_variable(&f, index, value)
+    }
     current := [LIRValueID?]{}
     loop _ in c.slots -> &current.push(None)
     f.current = current
@@ -1145,6 +1166,7 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
     current := [LIRValueID?]{}
     loop _ in c.slots -> &current.push(None)
     f.current = current
+    lower_debug_block_line(p, c, &m, &f, block)
     loop instruction in block.instructions {
         if instruction.operation == .Phi(_) {
             if lower_result(p, c, &m, &f, instruction) == .Val(param) -> &params.push(param)
@@ -1171,6 +1193,7 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
     loop instruction in block.instructions {
         if f.failed -> return
         if instruction.operation == .Phi(_) -> next
+        lower_debug_line(p, c, &m, &f, instruction)
         lower_instruction(p, c, &m, &f, instruction)
         if lower_is_noreturn(instruction.operation) -> return
     }

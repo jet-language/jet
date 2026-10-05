@@ -439,7 +439,59 @@ push), and a StackSlot is `lea reg, [rbp - disp]`. Every return
 restores rsp with `lea rsp, [rbp - 8 * saved]`, pops the saved registers and
 rbp, and returns. Entry parameters arrive in the System V argument registers
 and are moved (in parallel) to their allocated homes. The frame keeps rbp as
-a frame pointer, so stack walks and debuggers work without unwind tables.
+a frame pointer; its call frame information is in each function's FDE
+(Debug information, below).
+
+## Debug information
+
+Native objects carry DWARF 5 and `.eh_frame` (`Image/Dwarf.jet`), so gdb and
+lldb break on source lines, step, show source, unwind through Jet frames and
+print parameters and locals. Each layer records what only it knows:
+
+- **Lowering** (`Lower/Debug.jet`) fills `LIRModule.debug` and each
+  `LIRFunction.debug`. Every LIR instruction and terminator records the
+  source line of the MIR instruction it was lowered from
+  (`LIRBlock.lines`; the instruction's `source_line`, else its span's line
+  in the function's source file; generated code keeps the current line).
+  A lowered function names its source file, line and variables: its MIR
+  parameters, then every named local with a carried slot. Whenever a slot
+  takes a new LIR value (`lower_set_slot`), the value is bound to the slot's
+  variable. Generated functions (glue, helpers, the generated entry) have no
+  file and no variables. Types are described in their stored form from the
+  value layouts: scalars are base types (Char as 4-byte UTF, fixed-width
+  integers at their width), structs and tuples are structures of their
+  stored members, a List or Map is its `[len, cap, data]` header with
+  `data` pointing at elements (or at a slot struct when an element is
+  narrower than its stride), a fieldless enum is an enumeration, a payload
+  enum or Result is a pointer to its box (the tag as an enumeration, then a
+  union of the variant payloads at offset 8), an Option is a pointer to the
+  value it holds (null for None), a runtime handle is a pointer to an opaque
+  named type, and a closure is an untyped pointer. A variable whose value is
+  an inline aggregate is described by the memory its pointer addresses.
+- **Instruction selection** returns, per function, a line row where each
+  run of code from one line starts (the row at the end of the prologue is
+  `prologue_end`), the call frame instructions of the frame above (CFA
+  `rsp + 16` after `push rbp`, `rbp + 16` after `mov rbp, rsp`, callee-saved
+  register k at `CFA - 8 * (3 + k)`, and `rsp + 8` at each `ret`), and for
+  every binding the code range of its value's allocation interval with the
+  value's register or rbp-relative slot. Where two values of one variable
+  overlap, the later definition wins.
+- **The object** gains `.eh_frame` (one CIE, one FDE per function),
+  `.debug_abbrev`, `.debug_info` (one compile unit over `.text`, language C11
+  for the debugger's expression syntax, one subprogram per function with
+  frame base rbp and each variable located by a location list),
+  `.debug_line` (one sequence per function) and `.debug_loclists` (offset
+  pairs from the start of `.text`). Addresses and section offsets are
+  relocations against section symbols, so any ELF linker places them.
+  `LIRModuleDebug.directory` is the compilation directory: `jet build`
+  sets the source root its source paths are relative to; empty means the
+  debugger's working directory.
+- **The in-process linker** keeps an FDE exactly when its function is live
+  and registers the table at startup, as for the runtime's own. After the
+  loaded image it writes the `.debug_*` sections of the directly linked
+  objects (relocated; archive members contribute none), a `.symtab` of
+  every live function and object symbol, and section headers for the
+  image's parts.
 
 ## Relocations and images
 
@@ -458,8 +510,9 @@ position-independent, so the same bytes serve every image kind:
   0) to `exit_group`. Runtime calls link against the freestanding image
   runtime below.
 - **Relocatable object** (`Image/Object.jet`, `x64_relocatable_object`): an
-  ELF64 `ET_REL` with `.text`, `.rodata`, `.rela.text`, `.symtab`, `.strtab`
-  and an empty `.note.GNU-stack`. A global `main` calls
+  ELF64 `ET_REL` with `.text`, `.rodata`, `.rela.text`, `.symtab`, `.strtab`,
+  an empty `.note.GNU-stack`, `.eh_frame` and the DWARF sections (Debug
+  information, above). A global `main` calls
   `jet_rt_main(entry)`; every runtime call is an undefined global with an
   `R_X86_64_PLT32` relocation and every data address an `R_X86_64_PC32`
   relocation against `.rodata`. The in-process linker below binds it to the
@@ -534,8 +587,9 @@ the linker supplies the few glibc-only names below. What the linker does:
   `.gcc_except_table*`, the kept unwind records plus a zero terminator),
   read+execute (`.text*`, padded with `int3`), read+write (`.tdata`, the
   init/fini arrays, `.data.rel.ro*`, the GOT, `.data*`, then `.bss*` and
-  common symbols), plus `PT_TLS` (`.tdata` + `.tbss`) and `PT_GNU_STACK`. No
-  section headers.
+  common symbols), plus `PT_TLS` (`.tdata` + `.tbss`) and `PT_GNU_STACK`.
+  Section headers, `.symtab` and debug sections follow the loaded image
+  (Debug information, above).
 - **Relocation.** `R_X86_64_64`, `PC32`, `PLT32`, `32`, `32S`, `PC64`,
   `GOTPCREL`, `GOTPCRELX`, `REX_GOTPCRELX`, `GOTPC32`, `GOTOFF64`, `TLSGD`,
   `TLSLD`, `DTPOFF32/64`, `GOTTPOFF`, `TPOFF32/64` and `SIZE32/64`; anything
