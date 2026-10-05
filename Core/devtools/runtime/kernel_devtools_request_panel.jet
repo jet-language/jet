@@ -68,9 +68,18 @@ impl JetDevtoolsRequestFact {
     pub fn new(id: ^String, method: ^String, route: ^String, started_at_ms: U64) -> JetDevtoolsRequestFact Never! {
         JetDevtoolsRequestFact{id: ^id, method: ^method, route: ^route, started_at_ms: started_at_ms, freshness: .Fresh, route_inputs: [JetDevtoolsRouteInput]{}, payload: JetDevtoolsRequestPanelValue.default()}
     }
-    pub fn with_route_input(^self, input: ^JetDevtoolsRouteInput) -> JetDevtoolsRequestFact Never! { &self.route_inputs.push(^input); ^self }
-    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsRequestFact Never! { self.freshness = freshness; ^self }
-    pub fn with_published_value(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsRequestFact Never! { self.payload = JetDevtoolsRequestPanelValue.published_value(^value); ^self }
+    pub fn with_route_input(^self, input: ^JetDevtoolsRouteInput) -> JetDevtoolsRequestFact Never! {
+        &self.route_inputs.push(^input)
+        ^self
+    }
+    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsRequestFact Never! {
+        self.freshness = freshness
+        ^self
+    }
+    pub fn with_published_value(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsRequestFact Never! {
+        self.payload = JetDevtoolsRequestPanelValue.published_value(^value)
+        ^self
+    }
     pub fn payload(self) -> (@d.JetDevtoolsValue)? Never! from self { self.payload.value() }
     pub fn payload_is_published(self) -> Bool Never! { self.payload.is_published() }
     pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
@@ -90,8 +99,14 @@ impl JetDevtoolsResponseFact {
     pub fn new(request_id: ^String, status: U16, size_bytes: U64, duration_ms: U64) -> JetDevtoolsResponseFact Never! {
         JetDevtoolsResponseFact{request_id: ^request_id, status: status, size_bytes: size_bytes, duration_ms: duration_ms, freshness: .Fresh, payload: JetDevtoolsRequestPanelValue.default()}
     }
-    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsResponseFact Never! { self.freshness = freshness; ^self }
-    pub fn with_published_value(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsResponseFact Never! { self.payload = JetDevtoolsRequestPanelValue.published_value(^value); ^self }
+    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsResponseFact Never! {
+        self.freshness = freshness
+        ^self
+    }
+    pub fn with_published_value(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsResponseFact Never! {
+        self.payload = JetDevtoolsRequestPanelValue.published_value(^value)
+        ^self
+    }
     pub fn payload(self) -> (@d.JetDevtoolsValue)? Never! from self { self.payload.value() }
     pub fn payload_is_published(self) -> Bool Never! { self.payload.is_published() }
     pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
@@ -113,8 +128,14 @@ impl JetDevtoolsAccessEvent {
     pub fn new(id: ^String, request_id: ^String, operation: ^String, target: ^String, at_ms: U64, allowed: Bool) -> JetDevtoolsAccessEvent Never! {
         JetDevtoolsAccessEvent{id: ^id, request_id: ^request_id, operation: ^operation, target: ^target, at_ms: at_ms, allowed: allowed, freshness: .Fresh, payload: JetDevtoolsRequestPanelValue.default()}
     }
-    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsAccessEvent Never! { self.freshness = freshness; ^self }
-    pub fn with_published_value(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsAccessEvent Never! { self.payload = JetDevtoolsRequestPanelValue.published_value(^value); ^self }
+    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsAccessEvent Never! {
+        self.freshness = freshness
+        ^self
+    }
+    pub fn with_published_value(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsAccessEvent Never! {
+        self.payload = JetDevtoolsRequestPanelValue.published_value(^value)
+        ^self
+    }
     pub fn payload(self) -> (@d.JetDevtoolsValue)? Never! from self { self.payload.value() }
     pub fn payload_is_published(self) -> Bool Never! { self.payload.is_published() }
     pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
@@ -136,8 +157,14 @@ impl JetDevtoolsQueryFact {
     pub fn new(id: ^String, request_id: ^String, name: ^String, started_at_ms: U64, duration_ms: U64, source_identity: ^String) -> JetDevtoolsQueryFact Never! {
         JetDevtoolsQueryFact{id: ^id, request_id: ^request_id, name: ^name, started_at_ms: started_at_ms, duration_ms: duration_ms, source_identity: ^source_identity, freshness: .Fresh, payload: JetDevtoolsRequestPanelValue.default()}
     }
-    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsQueryFact Never! { self.freshness = freshness; ^self }
-    pub fn with_published_value(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsQueryFact Never! { self.payload = JetDevtoolsRequestPanelValue.published_value(^value); ^self }
+    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsQueryFact Never! {
+        self.freshness = freshness
+        ^self
+    }
+    pub fn with_published_value(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsQueryFact Never! {
+        self.payload = JetDevtoolsRequestPanelValue.published_value(^value)
+        ^self
+    }
     pub fn payload(self) -> (@d.JetDevtoolsValue)? Never! from self { self.payload.value() }
     pub fn payload_is_published(self) -> Bool Never! { self.payload.is_published() }
     pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
@@ -160,10 +187,22 @@ impl JetDevtoolsExceptionFact {
     pub fn new(id: ^String, request_id: ^String, kind: ^String, code: ^String, at_ms: U64) -> JetDevtoolsExceptionFact Never! {
         JetDevtoolsExceptionFact{id: ^id, request_id: ^request_id, kind: ^kind, code: ^code, at_ms: at_ms, freshness: .Fresh, source_frames: [JetDevtoolsSourceFrame]{}, message: JetDevtoolsRequestPanelValue.default(), payload: JetDevtoolsRequestPanelValue.default()}
     }
-    pub fn with_source_frame(^self, frame: ^JetDevtoolsSourceFrame) -> JetDevtoolsExceptionFact Never! { &self.source_frames.push(^frame); ^self }
-    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsExceptionFact Never! { self.freshness = freshness; ^self }
-    pub fn with_published_message(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsExceptionFact Never! { self.message = JetDevtoolsRequestPanelValue.published_value(^value); ^self }
-    pub fn with_published_value(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsExceptionFact Never! { self.payload = JetDevtoolsRequestPanelValue.published_value(^value); ^self }
+    pub fn with_source_frame(^self, frame: ^JetDevtoolsSourceFrame) -> JetDevtoolsExceptionFact Never! {
+        &self.source_frames.push(^frame)
+        ^self
+    }
+    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsExceptionFact Never! {
+        self.freshness = freshness
+        ^self
+    }
+    pub fn with_published_message(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsExceptionFact Never! {
+        self.message = JetDevtoolsRequestPanelValue.published_value(^value)
+        ^self
+    }
+    pub fn with_published_value(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsExceptionFact Never! {
+        self.payload = JetDevtoolsRequestPanelValue.published_value(^value)
+        ^self
+    }
     pub fn source_frames(self) -> @[JetDevtoolsSourceFrame] Never! from self { @self.source_frames }
     pub fn message(self) -> (@d.JetDevtoolsValue)? Never! from self { self.message.value() }
     pub fn payload(self) -> (@d.JetDevtoolsValue)? Never! from self { self.payload.value() }
@@ -189,8 +228,14 @@ impl JetDevtoolsSourceFrame {
     pub fn new(id: ^String, request_id: ^String, function: ^String, file: ^String, line: U32, column: U32, frame_index: U32) -> JetDevtoolsSourceFrame Never! {
         JetDevtoolsSourceFrame{id: ^id, request_id: ^request_id, function: ^function, file: ^file, line: line, column: column, frame_index: frame_index, freshness: .Fresh, source_line: JetDevtoolsRequestPanelValue.default()}
     }
-    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsSourceFrame Never! { self.freshness = freshness; ^self }
-    pub fn with_published_source_line(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsSourceFrame Never! { self.source_line = JetDevtoolsRequestPanelValue.published_value(^value); ^self }
+    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsSourceFrame Never! {
+        self.freshness = freshness
+        ^self
+    }
+    pub fn with_published_source_line(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsSourceFrame Never! {
+        self.source_line = JetDevtoolsRequestPanelValue.published_value(^value)
+        ^self
+    }
     pub fn source_line(self) -> (@d.JetDevtoolsValue)? Never! from self { self.source_line.value() }
     pub fn source_line_is_published(self) -> Bool Never! { self.source_line.is_published() }
     pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
@@ -207,7 +252,10 @@ pub struct JetDevtoolsLogLink {
 }
 impl JetDevtoolsLogLink {
     pub fn new(id: ^String, request_id: ^String, target: ^String, at_ms: U64) -> JetDevtoolsLogLink Never! { JetDevtoolsLogLink{id: ^id, request_id: ^request_id, target: ^target, at_ms: at_ms, freshness: .Fresh} }
-    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsLogLink Never! { self.freshness = freshness; ^self }
+    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsLogLink Never! {
+        self.freshness = freshness
+        ^self
+    }
     pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
         jet_devtools_request_panel_validate_log_link(self) ?? return Err(err)
         d.JetDevtoolsEvent.from_parts(self.at_ms, source, "LogLink", ~self.id, jet_devtools_request_panel_log_link_fields(self) ?? return Err(err))
@@ -224,7 +272,10 @@ pub struct JetDevtoolsTraceLink {
 }
 impl JetDevtoolsTraceLink {
     pub fn new(id: ^String, request_id: ^String, span_id: ^String, target: ^String, at_ms: U64, duration_ms: U64) -> JetDevtoolsTraceLink Never! { JetDevtoolsTraceLink{id: ^id, request_id: ^request_id, span_id: ^span_id, target: ^target, at_ms: at_ms, duration_ms: duration_ms, freshness: .Fresh} }
-    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsTraceLink Never! { self.freshness = freshness; ^self }
+    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsTraceLink Never! {
+        self.freshness = freshness
+        ^self
+    }
     pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
         jet_devtools_request_panel_validate_trace_link(self) ?? return Err(err)
         d.JetDevtoolsEvent.from_parts(self.at_ms, source, "TraceLink", ~self.id, jet_devtools_request_panel_trace_link_fields(self) ?? return Err(err))
@@ -611,7 +662,10 @@ impl JetDevtoolsRequestPanelState {
     }
     pub fn rows(self) -> [JetDevtoolsRequestPanelProjection] Never! { self.project_all() }
     pub fn set_selection(&self, request_id: String?) -> Bool Never! {
-        if request_id == .None { self.selected_request_id = None; return true }
+        if request_id == .None {
+            self.selected_request_id = None
+            return true
+        }
         if request_id == .Val(id) {
             if !self.rows.has_key(id) -> return false
             self.selected_request_id = request_id

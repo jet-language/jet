@@ -86,11 +86,26 @@ fn jet_devtools_database_json_string(value: String) -> String Never! {
     at := 0
     loop at < raw.len() {
         cp :: db_text.scalar_at(raw, at)
-        if cp == 34 { &out.push(U8{92}); &out.push(U8{34}) }
-        else if cp == 92 { &out.push(U8{92}); &out.push(U8{92}) }
-        else if cp == 10 { &out.push(U8{92}); &out.push(U8{110}) }
-        else if cp == 13 { &out.push(U8{92}); &out.push(U8{114}) }
-        else if cp == 9 { &out.push(U8{92}); &out.push(U8{116}) }
+        if cp == 34 {
+            &out.push(U8{92})
+            &out.push(U8{34})
+        }
+        else if cp == 92 {
+            &out.push(U8{92})
+            &out.push(U8{92})
+        }
+        else if cp == 10 {
+            &out.push(U8{92})
+            &out.push(U8{110})
+        }
+        else if cp == 13 {
+            &out.push(U8{92})
+            &out.push(U8{114})
+        }
+        else if cp == 9 {
+            &out.push(U8{92})
+            &out.push(U8{116})
+        }
         else if db_assets.asset_tag(db_category.UNICODE_GENERAL_CATEGORY, cp, 8) == 0 {
             &out.push(U8{92})
             &out.push(U8{117})
@@ -663,7 +678,10 @@ impl JetDevtoolsDatabasePanelFacts {
     pub fn with_latest_explain(^self, result: ^JetDevtoolsDatabaseExplainFactResult) -> JetDevtoolsDatabasePanelFacts JetDevtoolsDatabaseFactError! {
         found := false
         loop query in self.queries {
-            if query.query_id == result.query_id { found = true; break }
+            if query.query_id == result.query_id {
+                found = true
+                break
+            }
         }
         if !found -> return Err(JetDevtoolsDatabaseFactError.InvalidPlanRow)
         panel := ^self
