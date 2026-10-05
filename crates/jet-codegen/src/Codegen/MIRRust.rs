@@ -13611,7 +13611,6 @@ impl<'a> RustEmitter<'a> {
         }
         let _ = writeln!(out, "fn __jet_harness_run() -> bool {{");
         let _ = writeln!(out, "    jet_test_install_panic_hook();");
-        let _ = writeln!(out, "    jet_test_trace_tier();");
         if self.coverage_enabled() {
             for (id, function) in self.coverage_branch_rows() {
                 let _ = writeln!(
@@ -13783,7 +13782,6 @@ impl<'a> RustEmitter<'a> {
             );
             let _ = writeln!(out, "fn __jet_fuzz_run() {{");
             let _ = writeln!(out, "    jet_test_install_panic_hook();");
-            let _ = writeln!(out, "    jet_test_trace_tier();");
             let _ = writeln!(
                 out,
                 "    let __jet_name = {name_literal};\n\

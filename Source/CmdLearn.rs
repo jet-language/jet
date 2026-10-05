@@ -1759,7 +1759,7 @@ fn watch_until_changed(path: &Path, mode: OutputMode) -> Result<(), i32> {
         println!("Press Ctrl+C to exit. Run 'jet learn' to resume.");
     }
     loop {
-        jet_jit::scheduler_sleep_ms(120);
+        jet_evalhost::scheduler_sleep_ms(120);
         let Some(receipt) = watch.poll() else {
             continue;
         };

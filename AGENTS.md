@@ -136,9 +136,11 @@ A violation stops the affected work until it is fixed at the root.
   (D-EXEC1). Code generators and hosts only marshal values and call the same
   runtime symbols; they never re-encode validation, defaults, policy, or error
   meaning. Never mark a feature as working on one level only, or defer it to a
-  later level. Until D-EXEC1's retirement step lands, the Cranelift JIT and the
-  interpreter still serve `jet run` and must keep that same meaning; do not
-  extend them. An owner-ratified exception must name the tier it excludes.
+  later level. Until native in-memory O0 lands, `jet run` and `jet dev` use the
+  normal build path and execute the result (D-EXEC2=A); the in-process
+  evaluator serves `--interpret` and compile-time code and must keep that same
+  meaning; do not extend it. An owner-ratified exception must name the tier it
+  excludes.
 
 ## Performance gate
 

@@ -2726,43 +2726,26 @@ pub(crate) struct NativeExecutionRequest<'a> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NativeEngine {
-    Interpreter,
-    Jit,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct NativeTier {
-    /// The canonical execution-tier fact. Engine choice is independent from
-    /// the build profile and is kept only as a dispatch adapter below.
+    /// The canonical execution-tier fact; `interpret` selects the in-process
+    /// evaluator lens (`--interpret`) instead of build + execute.
     execution: jet::TargetMachine::ExecutionTier,
-    engine: Option<NativeEngine>,
+    interpret: bool,
 }
 
 impl NativeTier {
     fn aot() -> Self {
         Self {
             execution: jet::TargetMachine::ExecutionTier::Aot,
-            engine: None,
+            interpret: false,
         }
     }
 
-    fn dev(engine: NativeEngine) -> Self {
+    fn interpreter() -> Self {
         Self {
             execution: jet::TargetMachine::ExecutionTier::Dev,
-            engine: Some(engine),
+            interpret: true,
         }
-    }
-
-    fn jit() -> Self {
-        Self {
-            execution: jet::TargetMachine::ExecutionTier::Jit,
-            engine: Some(NativeEngine::Jit),
-        }
-    }
-
-    fn is_engine(self) -> bool {
-        self.engine.is_some()
     }
 
     /// Project the selected tier and independent profile into the one typed
@@ -2824,54 +2807,33 @@ fn select_native_tier(
     small: bool,
     no_os: bool,
     sbom: bool,
-    profile: &BuildProfile,
-    selects_build_entry: bool,
-    is_web: bool,
-    is_plugin: bool,
     src: &str,
 ) -> NativeTier {
-    if command != "run" {
+    if command != "run" || !interpret {
         return NativeTier::aot();
     }
-    if interpret {
-        let incompatible = target.is_some()
-            || output.is_some()
-            || remote_builder.is_some()
-            || emit_rust
-            || emit_generated
-            || small
-            || no_os
-            || sbom;
-        if incompatible {
-            let diagnostic = jet::Diagnostics::Diagnostic::error(
-                "E2102",
-                "`--interpret` cannot be combined with build or artifact flags".to_string(),
-                "`--interpret` selects the interpreter engine; the build profile remains an independent fact"
-                    .to_string(),
-                "run `jet run --interpret [--release|--profile <name>] <file.jet>` without artifact flags"
-                    .to_string(),
-                None,
-            );
-            report_problems(mode, file, src, &[diagnostic]);
-            exit(ExitCodes::USAGE);
-        }
-        return NativeTier::dev(NativeEngine::Interpreter);
+    let incompatible = target.is_some()
+        || output.is_some()
+        || remote_builder.is_some()
+        || emit_rust
+        || emit_generated
+        || small
+        || no_os
+        || sbom;
+    if incompatible {
+        let diagnostic = jet::Diagnostics::Diagnostic::error(
+            "E2102",
+            "`--interpret` cannot be combined with build or artifact flags".to_string(),
+            "`--interpret` selects the interpreter engine; the build profile remains an independent fact"
+                .to_string(),
+            "run `jet run --interpret [--release|--profile <name>] <file.jet>` without artifact flags"
+                .to_string(),
+            None,
+        );
+        report_problems(mode, file, src, &[diagnostic]);
+        exit(ExitCodes::USAGE);
     }
-    if matches!(profile, BuildProfile::Fast)
-        && target.is_none()
-        && output.is_none()
-        && !emit_rust
-        && !small
-        && !no_os
-        && !sbom
-        && !is_web
-        && !is_plugin
-        && !selects_build_entry
-    {
-        NativeTier::jit()
-    } else {
-        NativeTier::aot()
-    }
+    NativeTier::interpreter()
 }
 
 fn render_native_lints(
@@ -2886,24 +2848,6 @@ fn render_native_lints(
     }
 }
 
-fn finalize_tier_trace_sidecar(mode: OutputMode) {
-    let aggregate = jet_jit::take_trace_aggregate();
-    let Some(path) = std::env::var_os("JET_TRACE_TIERS_PATH") else {
-        return;
-    };
-    let path = PathBuf::from(path);
-    if let Err(error) = jet_jit::write_trace_sidecar(&path, &aggregate) {
-        write_mode_diagnostic(
-            mode,
-            &format!(
-                "couldn't write compiler-owned tier trace `{}`: {}\n",
-                path.display(),
-                error
-            ),
-        );
-    }
-}
-
 fn finish_native_run(
     file: &str,
     src: &str,
@@ -2914,7 +2858,6 @@ fn finish_native_run(
     lints: &[jet::Diagnostics::Diagnostic],
     result: NativeRunResult,
 ) -> ! {
-    finalize_tier_trace_sidecar(mode);
     render_native_lints(file, src, mode, lints);
     match result {
         NativeRunResult::Engine(jet::Interpreter::RunOutcome::Ran {
@@ -2962,7 +2905,6 @@ fn finish_native_run(
 }
 
 fn run_native_lens(
-    tier: NativeTier,
     file: &str,
     src: &str,
     gates: jet::Policy::GateSet,
@@ -3000,36 +2942,21 @@ fn run_native_lens(
         try_recorded_run(file, &args, capture, record_name, production_receipt, mode);
     }
 
-    // The adapters marshal checked facts and runtime arguments. The workflow
+    // The adapter marshals checked facts and runtime arguments. The workflow
     // above owns authority; the completion seam below owns all output, lint,
     // diagnostic, and capture handling.
-    jet_jit::set_program_owns_streams();
-    let run = match tier.engine {
-        Some(NativeEngine::Interpreter) => {
-            jet::Interpreter::run_interpreter_once_with_source_closure(
-                file,
-                source_closure,
-                &args,
-                gates,
-                profile.budget_name(),
-                setting_overrides,
-                application_authority.as_ref(),
-                entry_fn,
-                jet::Interpreter::InterpreterInvocation::RunInterpret,
-            )
-        }
-        Some(NativeEngine::Jit) => jet::Interpreter::run_jit_once_with_source_closure(
-            file,
-            source_closure,
-            &args,
-            gates,
-            profile.budget_name(),
-            setting_overrides,
-            application_authority.as_ref(),
-            entry_fn,
-        ),
-        None => unreachable!("AOT does not use the engine lens"),
-    };
+    jet_evalhost::set_program_owns_streams();
+    let run = jet::Interpreter::run_interpreter_once_with_source_closure(
+        file,
+        source_closure,
+        &args,
+        gates,
+        profile.budget_name(),
+        setting_overrides,
+        application_authority.as_ref(),
+        entry_fn,
+        jet::Interpreter::InterpreterInvocation::RunInterpret,
+    );
     let lints = run.lints;
     finish_native_run(
         file,
@@ -3125,14 +3052,9 @@ fn generated_rust_path(artifact_path: &Path, file: &str) -> PathBuf {
         .join(format!("{}.rs", stem(file)))
 }
 
-/// Restore the cached native executable for `key` to `out`. A Cranelift key
-/// (#3953) stores only the dev image, which is appended to this `jet`'s runner.
-fn restore_native_artifact(store: &Store, key: &str, out: &Path, cranelift: bool) -> bool {
-    if cranelift {
-        crate::DevAot::restore(store, key, out)
-    } else {
-        matches!(store.restore_file(key, out), Ok(ArtifactRestore::Hit { .. }))
-    }
+/// Restore the cached native executable for `key` to `out`.
+fn restore_native_artifact(store: &Store, key: &str, out: &Path) -> bool {
+    matches!(store.restore_file(key, out), Ok(ArtifactRestore::Hit { .. }))
 }
 
 /// Replay one recorded plain native `jet build`. The recorded artifact and
@@ -3155,36 +3077,25 @@ fn replay_build_receipt(
         return false;
     };
     let artifact_path = build_artifact_path(project_root, file, None);
-    let current = if let Some(identity) = record.facts.get("dev_output") {
-        // #3953: a Cranelift executable is the runner of this `jet` plus the
-        // image its trailer names by digest. One whose length and trailer
-        // match stays untouched; otherwise the stored image is appended to a
-        // fresh runner copy. No executable-sized hash runs.
-        let output_current =
-            || crate::DevAot::output_identity(&artifact_path).as_deref() == Some(identity.as_str());
-        output_current()
-            || (crate::DevAot::restore(store, key, &artifact_path) && output_current())
-    } else {
-        let Some(rust_sha256) = record.facts.get("rust_sha256") else {
-            return false;
-        };
-        let rust_current = fs::read(generated_rust_path(&artifact_path, file))
-            .is_ok_and(|bytes| jet::SHA256::sha256_hex(&bytes) == *rust_sha256);
-        // An artifact already holding the stored bytes stays untouched; anything
-        // else is restored from the store or the Receipt is not answerable.
-        rust_current
-            && match store.lookup_artifact(key) {
-                Ok(jet_store::ArtifactLookup::Hit(artifact)) => {
-                    fs::read(&artifact_path).is_ok_and(|bytes| {
-                        jet_store::ObjectHandle::from_bytes(&bytes) == artifact.object
-                    }) || matches!(
-                        store.restore_file(key, &artifact_path),
-                        Ok(ArtifactRestore::Hit { .. })
-                    )
-                }
-                _ => false,
-            }
+    let Some(rust_sha256) = record.facts.get("rust_sha256") else {
+        return false;
     };
+    let rust_current = fs::read(generated_rust_path(&artifact_path, file))
+        .is_ok_and(|bytes| jet::SHA256::sha256_hex(&bytes) == *rust_sha256);
+    // An artifact already holding the stored bytes stays untouched; anything
+    // else is restored from the store or the Receipt is not answerable.
+    let current = rust_current
+        && match store.lookup_artifact(key) {
+            Ok(jet_store::ArtifactLookup::Hit(artifact)) => {
+                fs::read(&artifact_path).is_ok_and(|bytes| {
+                    jet_store::ObjectHandle::from_bytes(&bytes) == artifact.object
+                }) || matches!(
+                    store.restore_file(key, &artifact_path),
+                    Ok(ArtifactRestore::Hit { .. })
+                )
+            }
+            _ => false,
+        };
     if !current {
         return false;
     }
@@ -3304,15 +3215,7 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
     // `core.compiler` package views. Install the one ambient bridge before
     // entering any Driver path; otherwise `jet run` bypasses the public
     // frontend wrapper and the canonical evaluator rejects those calls.
-    let trace_tiers = jet_jit::trace_tiers_enabled();
-    jet::with_compiler_stack(|| {
-        // `--trace-tiers` is parsed on the CLI thread, while the compiler
-        // stack may run the request on its worker. Carry this thread-local
-        // execution setting across that boundary before the nested runtime
-        // lens captures and publishes its trace.
-        jet_jit::set_trace_tiers(trace_tiers);
-        run_native_execution_inner(request)
-    })
+    jet::with_compiler_stack(|| run_native_execution_inner(request))
 }
 fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     let NativeExecutionRequest {
@@ -3706,9 +3609,8 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             package_manifest.as_ref().map(|(root, _)| root.as_path()),
         );
 
-    // D-ONCE-TIER1=A / D-LENS-RUN1: native runs choose one adapter here. The
-    // interpreter and strict Cranelift adapters share authority and completion
-    // through `run_native_lens`; all other requests continue to the AOT path.
+    // D-EXEC2=A / D-LENS-RUN1: `--interpret` selects the in-process evaluator
+    // lens here; every other request continues to the normal build path.
     let tier = select_native_tier(
         cmd,
         file,
@@ -3722,15 +3624,10 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         small,
         no_os,
         sbom,
-        &profile,
-        selects_build_entry,
-        is_web,
-        is_plugin,
         &src,
     );
-    if tier.is_engine() {
+    if tier.interpret {
         run_native_lens(
-            tier,
             file,
             &src,
             gates,
@@ -3762,13 +3659,9 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     } else {
         "run"
     };
-    // #3953: dev profiles build through Cranelift; release-class, size, no-OS
-    // and audited-gate builds keep rustc/LLVM. The backend is part of the key.
-    let cranelift_dev = profile.cranelift_backend() && !no_os && gates.is_empty();
     let cache_profile_tag = format!(
-        "{profile_tag};{};aot-target=native;backend={}",
+        "{profile_tag};{};aot-target=native",
         setting_overrides_tag(setting_overrides),
-        if cranelift_dev { "cranelift" } else { "rustc" }
     );
     // `jet run` needs its key *before* the front end: a hit below replays the
     // cached binary without loading the program at all. `jet build` stays on
@@ -3788,7 +3681,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             profile.budget_name(),
             &cache_profile_tag,
             mode_tag,
-            NativeKeyBackend::for_build(cranelift_dev),
+            native_toolchain_identity(),
             invocation_authority,
         )
     } else {
@@ -3832,7 +3725,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             let out = bin_path(&project_root, file);
             if native_store
                 .as_ref()
-                .is_some_and(|store| restore_native_artifact(store, key, &out, cranelift_dev))
+                .is_some_and(|store| restore_native_artifact(store, key, &out))
             {
                 let _application_authority = resolve_run_authority_before_execution(
                     file,
@@ -4017,7 +3910,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             build_front_end.as_ref(),
             &cache_profile_tag,
             mode_tag,
-            NativeKeyBackend::for_build(cranelift_dev),
+            native_toolchain_identity(),
             invocation_authority,
         );
     }
@@ -4094,7 +3987,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     {
         native_key.as_ref().is_some_and(|key| {
             native_store.as_ref().is_some_and(|store| {
-                restore_native_artifact(store, key, &bin_path(&project_root, file), cranelift_dev)
+                restore_native_artifact(store, key, &bin_path(&project_root, file))
             })
         })
     } else {
@@ -4283,13 +4176,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             package_scope,
             build_override,
             entry_fn,
-            // #3953: a Cranelift dev build generates no Rust up front; the
-            // native build generates it only if Cranelift refuses the program.
-            cmd == "build"
-                && cranelift_dev
-                && !emit_rust
-                && !selects_build_entry
-                && target_machine.is_none(),
+            false,
             invocation_authority,
             cmd == "build",
         ) {
@@ -4677,7 +4564,6 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 native_cache_hit,
                 native_key.clone(),
                 target_machine,
-                cranelift_dev,
             );
             print_release_job_summary(&src, release_profile, mode);
             progress.major("Verifying", "build budgets");
@@ -4724,27 +4610,10 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                         package_manifest.as_ref().map(|(root, _)| root.as_path()),
                     );
                 if let Some(inputs) = plain.then(|| receipt.sealed_inputs(bundle)).flatten() {
-                    // #3953: a Cranelift executable is recognized by its
-                    // length and image trailer; a rustc one by its generated
-                    // Rust, stored under the rustc key when Cranelift refused.
                     let mut facts = BTreeMap::new();
-                    match crate::DevAot::output_identity(&artifact_path) {
-                        Some(identity) => {
-                            facts.insert("native_key".to_string(), key.clone());
-                            facts.insert("dev_output".to_string(), identity);
-                        }
-                        None => {
-                            let artifact_key = if cranelift_dev {
-                                rustc_fallback_cache_key(key)
-                            } else {
-                                key.clone()
-                            };
-                            facts.insert("native_key".to_string(), artifact_key);
-                            let rust = fs::read(generated_rust_path(&artifact_path, file))
-                                .unwrap_or_default();
-                            facts.insert("rust_sha256".to_string(), jet::SHA256::sha256_hex(&rust));
-                        }
-                    }
+                    facts.insert("native_key".to_string(), key.clone());
+                    let rust = fs::read(generated_rust_path(&artifact_path, file)).unwrap_or_default();
+                    facts.insert("rust_sha256".to_string(), jet::SHA256::sha256_hex(&rust));
                     // The closure the Receipt seals decides whether a gate
                     // applies, so a replay of an ungated build skips them.
                     if !build_gated {
@@ -4835,7 +4704,6 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 false,
                 native_key.clone(),
                 target_machine,
-                cranelift_dev,
             );
             print_release_job_summary(&src, release_profile, mode);
             if cross_target.is_some() {
@@ -6247,12 +6115,11 @@ fn test_result_cache_key(path: &Path, opts: &TestRunOpts, package: bool) -> Opti
     append_test_cache_field(&mut identity, native_identity.as_bytes());
 
     let options = format!(
-        "show_default={};coverage={};release={};profile={:?};trace_tiers={};filter={:?};shuffle={:?};serial={};measure={};docs={};browser={:?};browser_retries={:?};browser_reporter={:?};browser_ui={};browser_visual={};browser_trace={};",
+        "show_default={};coverage={};release={};profile={:?};filter={:?};shuffle={:?};serial={};measure={};docs={};browser={:?};browser_retries={:?};browser_reporter={:?};browser_ui={};browser_visual={};browser_trace={};",
         opts.show_default,
         opts.coverage,
         opts.release,
         opts.profile,
-        opts.trace_tiers,
         opts.filter,
         opts.shuffle_seed,
         opts.serial,
@@ -7142,8 +7009,6 @@ pub(crate) struct TestRunOpts {
     pub(crate) profile: Option<String>,
     /// CLI build-setting contributions shared with the checked test target.
     pub(crate) setting_overrides: BTreeMap<String, String>,
-    /// `--trace-tiers`: print the harness execution tier marker.
-    pub(crate) trace_tiers: bool,
     /// `--filter=<substr>`: only run tests whose name contains it.
     pub(crate) filter: Option<String>,
     /// `--shuffle` / `--shuffle=<seed>`: reorder tests before running (order-
@@ -7208,7 +7073,6 @@ impl TestRunOpts {
                 "--update-snapshots" | "-u" => opts.update_snapshots = true,
                 "--coverage" => opts.coverage = true,
                 "--release" => opts.release = true,
-                "--trace-tiers" => opts.trace_tiers = true,
                 "--serial" => opts.serial = true,
                 "--grade" => {
                     let value = test_run_option_value(argv, &mut index, name, inline);
@@ -7520,7 +7384,7 @@ fn run_generated_test(path: &str, opts: TestRunOpts, mode: OutputMode) -> ! {
 
 
 /// `jet test [--watch] [--fresh] [--docs] [--where=<expr>]
-/// [--capture=<failed|all|none>] [--release] [--trace-tiers] [--coverage]
+/// [--capture=<failed|all|none>] [--release] [--coverage]
 /// [--filter=<substr>] [--shuffle[=<seed>]] [--serial]`.
 /// A finite run is quiet for passing tests and stores only test results in the
 /// result cache; native build artifacts remain in the ordinary build cache.
@@ -8131,9 +7995,6 @@ fn run_test_target(
     if opts.serial {
         cmd.env("JET_TEST_SERIAL", "1");
     }
-    if opts.trace_tiers {
-        cmd.env("JET_TEST_TRACE_TIERS", "1");
-    }
     if opts.measure {
         cmd.env("JET_TEST_MEASURE", "1");
     }
@@ -8448,9 +8309,6 @@ fn append_test_watch_flags(command: &mut Command, opts: &TestRunOpts, filter: Op
     }
     for (key, value) in &opts.setting_overrides {
         command.arg(format!("--set={key}={value}"));
-    }
-    if opts.trace_tiers {
-        command.arg("--trace-tiers");
     }
     if let Some(engines) = opts.browser_engines.as_deref() {
         command.arg(format!("--browser={engines}"));
@@ -11038,50 +10896,6 @@ fn native_toolchain_identity() -> &'static str {
     NATIVE_TOOLCHAIN_IDENTITY.as_str()
 }
 
-/// #3953: identity of the Cranelift dev backend. The image is compiled by this
-/// compiler's own Cranelift lowering and appended to the runner build it names,
-/// so no rustc, C compiler or linker is probed for it.
-static DEV_AOT_TOOLCHAIN_IDENTITY: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "abi={NATIVE_CACHE_COMPILER_ABI}\u{1}build={}\u{1}version={}\u{1}semindex={}\u{1}backend=cranelift\u{1}runner={}",
-        env!("JET_COMPILER_BUILD_ID"),
-        jet::Manifest::COMPILER_VERSION,
-        jet_semindex::SCHEMA_VERSION,
-        env!("JET_RUNNER_BUILD_ID"),
-    )
-});
-
-/// The backend a native cache key describes (#3953).
-#[derive(Clone, Copy)]
-enum NativeKeyBackend<'a> {
-    /// rustc/LLVM under this toolchain identity; the emitted Rust runtime and
-    /// Core closure are part of the key.
-    Rustc(&'a str),
-    /// The Cranelift dev image: this compiler and its runner build.
-    Cranelift,
-}
-
-impl NativeKeyBackend<'static> {
-    fn for_build(cranelift: bool) -> Self {
-        if cranelift {
-            Self::Cranelift
-        } else {
-            Self::Rustc(native_toolchain_identity())
-        }
-    }
-}
-
-/// #3953: the key of the rustc executable built when Cranelift refuses a
-/// program whose key describes the Cranelift backend. The Cranelift key covers
-/// the program and this compiler; the rustc and linker identity is added here,
-/// so it is probed only when rustc actually runs.
-fn rustc_fallback_cache_key(cranelift_key: &str) -> String {
-    let mut bytes = b"jet-native-rustc-fallback-v1\0".to_vec();
-    append_cache_field(&mut bytes, cranelift_key);
-    append_cache_field(&mut bytes, native_toolchain_identity());
-    jet::SHA256::sha256_hex(&bytes)
-}
-
 fn dependency_interface_fingerprint(bundle: &jet::AST::ProgramBundle) -> String {
     let mut interfaces = Vec::new();
     for (dependency, root) in &bundle.dep_roots {
@@ -11178,7 +10992,7 @@ fn native_cache_key_with_source_closure(
     profile: &str,
     profile_tag: &str,
     mode_tag: &str,
-    backend: NativeKeyBackend<'_>,
+    toolchain_identity: &str,
     invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Option<String> {
     let overlays = source_closure
@@ -11190,7 +11004,7 @@ fn native_cache_key_with_source_closure(
         profile,
         profile_tag,
         mode_tag,
-        backend,
+        toolchain_identity,
         &overlays,
         invocation_authority,
     )
@@ -11208,7 +11022,7 @@ fn native_cache_key_with_toolchain(
         profile,
         profile_tag,
         mode_tag,
-        NativeKeyBackend::Rustc(toolchain_identity),
+        toolchain_identity,
         &[],
         invocation_authority,
     )
@@ -11219,7 +11033,7 @@ fn native_cache_key_with_toolchain_and_overlays(
     profile: &str,
     profile_tag: &str,
     mode_tag: &str,
-    backend: NativeKeyBackend<'_>,
+    toolchain_identity: &str,
     overlays: &[(&Path, &str)],
     invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Option<String> {
@@ -11266,7 +11080,7 @@ fn native_cache_key_with_toolchain_and_overlays(
         &bundle,
         profile_tag,
         mode_tag,
-        backend,
+        toolchain_identity,
         invocation_authority,
     )
 }
@@ -11276,7 +11090,7 @@ fn native_cache_key_for_prepared_build(
     prepared: Option<&jet::Driver::PreparedBuildFrontEnd>,
     profile_tag: &str,
     mode_tag: &str,
-    backend: NativeKeyBackend<'_>,
+    toolchain_identity: &str,
     invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Option<String> {
     let Some(program) = prepared.and_then(|prepared| prepared.emitted_program()) else {
@@ -11288,7 +11102,7 @@ fn native_cache_key_for_prepared_build(
         program,
         profile_tag,
         mode_tag,
-        backend,
+        toolchain_identity,
         invocation_authority,
     )
 }
@@ -11302,7 +11116,7 @@ fn native_cache_key_for_prepared_build(
 /// source edit racing the build, a fact snapshot taken twice, a differing sema
 /// mode) would have stored a binary under a key describing a different program.
 /// The inputs are canonical AST, instance identities, dependency interfaces,
-/// runtime/Core fingerprints (rustc backend), bridge identity, manifest,
+/// runtime/Core fingerprints, bridge identity, manifest,
 /// toolchain, profile, and recorded compile-time package inputs.
 
 fn native_cache_key_for_program(
@@ -11310,7 +11124,7 @@ fn native_cache_key_for_program(
     bundle: &jet::AST::ProgramBundle,
     profile_tag: &str,
     mode_tag: &str,
-    backend: NativeKeyBackend<'_>,
+    toolchain_identity: &str,
     invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Option<String> {
     debug_native_cache_event(format!(
@@ -11325,27 +11139,13 @@ fn native_cache_key_for_program(
         debug_native_cache_event("program-key-none prove-fresh");
         return None;
     }
-    // #3953: the Rust runtime and Core closure are rustc inputs. A Cranelift
-    // image runs on the runner its toolchain identity names, and its Core
-    // closure is compiled by this compiler, so neither is emitted to be hashed.
-    let (toolchain_identity, runtime_fingerprint, corelib_fingerprint) = match backend {
-        NativeKeyBackend::Rustc(toolchain_identity) => {
-            let devtools_policy =
-                jet::Driver::release_devtools_policy_for_bundle(bundle, profile_tag);
-            (
-                toolchain_identity,
-                jet::Codegen::cached_runtime_fingerprint_with_policy(&devtools_policy),
-                jet::Codegen::corelib_emission_fingerprint_with_policy(
-                    bundle,
-                    mode_tag.starts_with("test"),
-                    &devtools_policy,
-                ),
-            )
-        }
-        NativeKeyBackend::Cranelift => {
-            (DEV_AOT_TOOLCHAIN_IDENTITY.as_str(), String::new(), String::new())
-        }
-    };
+    let devtools_policy = jet::Driver::release_devtools_policy_for_bundle(bundle, profile_tag);
+    let runtime_fingerprint = jet::Codegen::cached_runtime_fingerprint_with_policy(&devtools_policy);
+    let corelib_fingerprint = jet::Codegen::corelib_emission_fingerprint_with_policy(
+        bundle,
+        mode_tag.starts_with("test"),
+        &devtools_policy,
+    );
     if !native_cacheable_program(bundle) {
         return None;
     }
@@ -14550,8 +14350,6 @@ fn build_inner(
     // such as `embed_file` or explicit C links. `build` also rejects cross-target
     cache_key: Option<String>,
     target_machine: Option<&jet::TargetMachine::TargetMachine>,
-    // #3953: the caller selected the Cranelift dev backend for this build.
-    dev_aot: bool,
 ) {
     // D-BUILD2: `jet build -v` makes the hidden Jet→Rust→native bridge honest.
     // Step labels are deterministic so they can be golden-tested.
@@ -14604,79 +14402,6 @@ fn build_inner(
         write_mode_diagnostic(mode, &format!("{message}\n"));
         exit(ExitCodes::USER_ERROR);
     });
-    // #3953: dev profiles build through Cranelift: this `jet`'s runner with
-    // the compiled image appended, and no Rust, rustc or linker. The cache
-    // holds only the image. A refusal falls back to rustc below with a note
-    // that names the reason.
-    let mut cache_key = cache_key;
-    if dev_aot {
-        if let Some(bundle) = runtime_bundle.filter(|_| {
-            ffi.is_none()
-                && clinks.is_empty()
-                && cross_target.is_none()
-                && target_machine.is_none()
-                && web.is_none()
-                && plugin.is_none()
-        }) {
-            if let (Some(key), Some(store)) = (&cache_key, native_store.as_ref()) {
-                if crate::DevAot::restore(store, key, &bin) {
-                    step("cache hit -> reused cached image".to_string());
-                    persist_build_record(
-                        native_store.as_ref(),
-                        &project_root,
-                        &record_program,
-                        &compiler_nodes,
-                        &packages,
-                        previous_record.as_ref(),
-                        true,
-                        0.0,
-                        0.0,
-                    );
-                    return;
-                }
-            }
-            let started = Instant::now();
-            step(format!("cranelift  -> {}", bin.display()));
-            match crate::DevAot::build(bundle, profile.budget_name(), &bin, native_store.as_ref()) {
-                Ok(image) => {
-                    if let (Some(key), Some(store)) = (&cache_key, native_store.as_ref()) {
-                        if let Err(error) = store.publish_bytes(key, &image, false) {
-                            crate::cli_error!("E2105", "couldn't store build cache artifact: {error}");
-                            exit(ExitCodes::USER_ERROR);
-                        }
-                        step("cache store -> saved image for next time".to_string());
-                    }
-                    persist_build_record(
-                        native_store.as_ref(),
-                        &project_root,
-                        &record_program,
-                        &compiler_nodes,
-                        &packages,
-                        previous_record.as_ref(),
-                        false,
-                        started.elapsed().as_secs_f64() * 1000.0,
-                        0.0,
-                    );
-                    return;
-                }
-                Err(reason) => {
-                    if !mode.json {
-                        write_mode_status(
-                            mode,
-                            &format!("[build] note: building with rustc because {reason}\n"),
-                        );
-                    }
-                }
-            }
-        }
-        // The key describes the Cranelift backend; the rustc executable is
-        // stored apart, under that key plus the rustc and linker identity.
-        cache_key = cache_key.map(|key| rustc_fallback_cache_key(&key));
-    }
-    // A Cranelift-selected build skipped Rust generation. rustc needs it only
-    // when its executable is not cached; it is generated below, after the
-    // cache lookup.
-    let rust_deferred = dev_aot && rust_code.is_empty() && runtime_bundle.is_some();
     let rs_name = format!("{}.rs", stem(file));
     let rs_path = output_authority.path_for(&rs_name).unwrap_or_else(|error| {
         let message = format!("error: invalid web Rust output `{rs_name}`: {error}");
@@ -14957,25 +14682,6 @@ fn build_inner(
             step("cache bypassed (C-linked build)".to_string());
         }
     }
-    let generated_rust;
-    let rust_code = match runtime_bundle.filter(|_| rust_deferred) {
-        Some(bundle) => {
-            let mut rust =
-                jet::Driver::emit_native_rust_for_checked_bundle(bundle, profile.budget_name(), ffi);
-            inject_game_crash_reporter_bootstrap(&mut rust, program_uses_game_runtime(bundle));
-            output_authority
-                .replace_file(&rs_name, rust.as_bytes())
-                .unwrap_or_else(|error| {
-                    write_mode_diagnostic(
-                        mode,
-                        &format!("error: couldn't write {}: {}\n", rs_path.display(), error),
-                    );
-                });
-            generated_rust = rust;
-            generated_rust.as_str()
-        }
-        None => rust_code,
-    };
 
     step(format!(
         "rustc      {} -> {}",
@@ -15333,7 +15039,6 @@ pub(crate) fn build(
         restored_cache,
         cache_key,
         None,
-        false,
     );
 }
 
@@ -15353,7 +15058,6 @@ pub(crate) fn build_target_machine(
     restored_cache: bool,
     cache_key: Option<String>,
     target_machine: Option<&jet::TargetMachine::TargetMachine>,
-    dev_aot: bool,
 ) {
     build_inner(
         file,
@@ -15371,7 +15075,6 @@ pub(crate) fn build_target_machine(
         restored_cache,
         cache_key,
         target_machine,
-        dev_aot,
     );
 }
 
@@ -15692,7 +15395,7 @@ mod missing_c_lib_tests {
         child_exit_code, missing_c_lib, missing_linker, native_cache_key,
         native_cache_key_for_prepared_build, native_cache_key_for_program,
         native_cache_key_with_toolchain, native_cache_salt, native_cache_salt_with_schema,
-        render_internal_fault, NativeKeyBackend,
+        render_internal_fault,
     };
 
     struct ScratchProject(std::path::PathBuf);
@@ -15758,7 +15461,7 @@ mod missing_c_lib_tests {
                 &bundle,
                 "default",
                 "run",
-                NativeKeyBackend::Rustc("comptime-input-test-toolchain"),
+                "comptime-input-test-toolchain",
                 None,
             )
             .expect("consumed-input cache key")
@@ -16125,7 +15828,7 @@ mod missing_c_lib_tests {
                 Some(&exact),
                 "dev",
                 "run",
-                NativeKeyBackend::Cranelift,
+                "prepared-cache-test-toolchain",
                 None,
             )
                 .is_some(),
@@ -16149,7 +15852,7 @@ mod missing_c_lib_tests {
                 Some(&package),
                 "dev",
                 "run",
-                NativeKeyBackend::Cranelift,
+                "prepared-cache-test-toolchain",
                 None,
             ),
             None,
