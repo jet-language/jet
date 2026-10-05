@@ -20,7 +20,7 @@ fn count_lines(src: String) -> Int IOError! {
 
 fn run() {
     task.group g {
-        (sender, ch) :: channel<Int>(1)
+        { sender, receiver: ch } :: channel<Int>(1)
         producer :: task ^sender {
             sender.send(10)
             sender.send(20)

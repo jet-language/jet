@@ -8,7 +8,7 @@ use core.net as net
 
 fn run() (Closed | NetError | RangeError | TaskFailure)! {
     budget :: 1000ms
-    (sender, ch) :: channel<String>()
+    { sender, receiver: ch } :: channel<String>()
     // The listener lives inside the server task: `accept` writes it, and a
     // written value can't be shared across the task boundary.
     server :: task {

@@ -11,7 +11,7 @@ use core.net as net
 
 fn run() (Closed | HTTPError | NetError | TaskFailure)! {
     // Spin up a minimal loopback server to respond to our client.
-    (sender, ch) :: channel<String>()
+    { sender, receiver: ch } :: channel<String>()
     t :: task {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
         sender.send(listener.local_addr() ?? panic("address"))

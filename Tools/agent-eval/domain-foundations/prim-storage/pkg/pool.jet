@@ -9,7 +9,7 @@ fn pool_worker(token: Int, returned: Sender<Int>) -> Int {
     return token
 }
 pub fn pool_demo() -> [Int] {
-    (returned, available) :: channel<Int>(capacity: 2)
+    { sender: returned, receiver: available } :: channel<Int>(capacity: 2)
     returned.send(1)
     returned.send(2)
 

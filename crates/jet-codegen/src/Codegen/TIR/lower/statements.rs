@@ -2718,17 +2718,20 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         }
         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::Tuple { .. })) => {
             return in_own_frame(|| {
-                // c109 Phase 23: a tuple-destructuring binding `(a, b) :: <init>`. Lower the
-                // init ONCE; checked tuple fields (or the VjpRun field prefix) determine
-                // canonical labels and types by position. TIR carries source names; MIR
-                // resolves the stable field IDs from the checked shape.
+                // Lower the initializer once and project checked members by name.
+                // A record pattern has already been normalized by sema; its rename
+                // controls the local name, never the selected member.
                 let Some(BindPattern::Tuple { elems, span }) = &b.pattern else {
                     unreachable!("guard matched a tuple pattern")
                 };
                 let init = lower_expr(&b.init, cx, env);
                 let canonical: Vec<(String, Type)> = match &init.ty {
                     Type::Tuple(fs) => fs.iter().map(|(n, t)| (n.clone(), (**t).clone())).collect(),
-                    Type::Apply { name, args } if name == "VJPRun" && args.len() == 1 => [
+                    Type::Apply { name, args }
+                        if args.len() == 1
+                            && (name == "VJPRun"
+                                || name.ends_with("::VJPRun")
+                                || name.ends_with(".VJPRun")) => [
                         ("value".to_string(), Type::Named("Tensor".to_string())),
                         (
                             "pull".to_string(),
@@ -2757,11 +2760,13 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 let tmp = jet_format!("{jet_prefix}d{}", span.start);
                 let kw = if b.mutable { "let mut" } else { "let" };
                 let mut binds = Vec::new();
-                for (e, (fname, fty)) in elems.iter().zip(canonical.iter()) {
-                    let local_name = e.name.clone();
-                    let field_name = fname.clone();
-                    binds.push((local_name, field_name));
-                    env.bind(&e.name, TLocal::user(&e.name), Some(fty.clone()));
+                for e in elems {
+                    let (_, fty) = canonical
+                        .iter()
+                        .find(|(name, _)| name == &e.name)
+                        .expect("sema checked tuple member");
+                    binds.push((e.local_name().to_string(), e.name.clone()));
+                    env.bind(e.local_name(), TLocal::user(e.local_name()), Some(fty.clone()));
                 }
                 ready_return!(TStmt::TupleDestructure {
                     tmp,

@@ -914,7 +914,7 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
         resolved_binding = resolved
     }
     abi :: sema_call_direct_target_abi(candidate, environment)
-    (lowered, pins) := sema_call_check_bound_arguments_owned(&state, call.name, params, abi, true, resolved_binding, &args, environment, &scopes, &tail_store, &context, call.name_span, &diagnostics) ?? return None
+    { args: lowered, pins } := sema_call_check_bound_arguments_owned(&state, call.name, params, abi, true, resolved_binding, &args, environment, &scopes, &tail_store, &context, call.name_span, &diagnostics) ?? return None
     result_type_raw :: sema_call_signature_return(candidate.signature) ?? return None
     result_type :: sema_call_resolved_type(result_type_raw, environment)
     contract_bindings := [TStmt]{}

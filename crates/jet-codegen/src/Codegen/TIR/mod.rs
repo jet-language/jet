@@ -7200,11 +7200,9 @@ pub enum TStmt {
         elem_ty: Option<Type>,
         line: usize,
     },
-    /// c109 Phase 23: a TUPLE-destructuring binding `(a, b) :: <init>` (S74,
-    /// `BindPattern::Tuple`). The checked init type supplies the canonical source
-    /// field labels and field types; MIR resolves each projection by position and
-    /// the backend chooses the Rust spelling from the checked field row. `tmp` is
-    /// retained for the legacy TIR shape; `kw` is `"let"`/`"let mut"`.
+    /// S74: named tuple member projections, with optional local renames.
+    /// MIR resolves each checked member label to its stable field identity.
+    /// `kw` is `"let"`/`"let mut"`.
     TupleDestructure {
         tmp: String,
         init: TExpr,
@@ -7212,7 +7210,7 @@ pub enum TStmt {
         /// Non-copyable guard fields must move out of the owned tuple instead
         /// of borrowing it and accidentally cloning the guarded value.
         move_fields: bool,
-        /// `(source_binding, checked_field_label)` in canonical source order.
+        /// `(local_binding, checked_field_label)` in written pattern order.
         binds: Vec<(String, String)>,
     },
     /// c109: a STRUCT-destructuring binding `Type.{ x, y } :: <init>` (S74,

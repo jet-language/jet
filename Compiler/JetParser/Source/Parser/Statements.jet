@@ -476,7 +476,7 @@ fn parser_parse_statement(state: &JetParserState) -> Stmt {
             parser_parse_comptime_binding(&state)
         }
         else -> {
-            if (token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LPAREN) && parser_pattern_binding_ahead(&state) -> return parser_parse_pattern_binding_statement(&state)
+            if (token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACE) && parser_pattern_binding_ahead(&state) -> return parser_parse_pattern_binding_statement(&state)
             parser_parse_assignment_or_expression(&state)
         }
     }
@@ -1413,11 +1413,16 @@ fn parser_parse_pattern_binding_statement(state: &JetParserState) -> Stmt {
             pattern = BindPattern.Tuple{elems: elems, span: parser_cover(start.span, close.span)}
         }
         else -> {
-            type_name :: parser_expect_name(&state, "for a struct pattern")
-            if parser_current_kind(&state) == TOKEN_DOT {
-                dot :: parser_bump(&state)
-                name :: type_name.payload.decoded
-                parser_add_fatal_code(&state, "E0320", dot.span, "struct pattern uses `{name}{{…}}`, not `{name}.{{…}}`", "literal heads place no dot before their brace (D-LIT-DOT1)", "write `{name}{{…}}`")
+            type_name := ""
+            type_span := start.span
+            if start.kind != TOKEN_LBRACE {
+                head :: parser_expect_name(&state, "for a struct pattern")
+                type_name = head.payload.decoded
+                type_span = head.span
+                if parser_current_kind(&state) == TOKEN_DOT {
+                    dot :: parser_bump(&state)
+                    parser_add_fatal_code(&state, "E0320", dot.span, "struct pattern uses `{type_name}{{…}}`, not `{type_name}.{{…}}`", "literal heads place no dot before their brace (D-LIT-DOT1)", "write `{type_name}{{…}}`")
+                }
             }
             parser_expect(&state, TOKEN_LBRACE, "`{{` to open the struct pattern")
             fields := [BindName]{}
@@ -1442,8 +1447,8 @@ fn parser_parse_pattern_binding_statement(state: &JetParserState) -> Stmt {
                 }
             }
             close :: parser_expect(&state, TOKEN_RBRACE, "`}}` to close the struct pattern")
-            span :: parser_cover(type_name.span, close.span)
-            pattern = BindPattern.Struct{type_name: type_name.payload.decoded, type_span: type_name.span, fields: fields, rest: rest, span: span}
+            span :: parser_cover(type_span, close.span)
+            pattern = BindPattern.Struct{type_name: type_name, type_span: type_span, fields: fields, rest: rest, span: span}
         }
     }
     sigil :: parser_bump(&state)

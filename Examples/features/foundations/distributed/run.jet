@@ -20,8 +20,8 @@ fn run_parallel_map() {
 
 fn run_bounded_pipeline() {
     task.group pipeline {
-        (input_tx, input_rx) :: channel<Int>(capacity: 2)
-        (output_tx, output_rx) :: channel<Int>(capacity: 2)
+        { sender: input_tx, receiver: input_rx } :: channel<Int>(capacity: 2)
+        { sender: output_tx, receiver: output_rx } :: channel<Int>(capacity: 2)
         producer_tx :: ~input_tx
         worker_tx :: ~output_tx
 

@@ -733,7 +733,7 @@ fn run() {
 
 /// c109 Phase 23: named tuples (S73/D-SG7). A tuple literal `(x: 1, y: 2)` → a generated
 /// `JetTup_<hash>` struct lit (canonical field order); field access `p.x` → `(p).__jet_x`;
-/// destructure `(a, b) :: ~p` → the borrow-temp + per-field `.clone()` form;
+/// destructure `{ x: a, y: b } :: ~p` → the borrow-temp + per-field `.clone()` form;
 /// equality is native. The tuple type passes/returns byte-identically.
 #[test]
 fn named_tuples() {
@@ -748,7 +748,7 @@ fn run() {
     p :: (x: 1, y: 2)
     q :: (y: 3, x: 4)
     same_shape :: (p == q)
-    (a, b) :: ~p
+    { x: a, y: b } :: ~p
     print(\"{p.x} {p.y} {a} {b} {same_shape}\")
     pair :: bounds()
     print(\"{pair.min} {pair.max}\")
@@ -757,6 +757,16 @@ fn run() {
     let (code, stdout) = build_and_run("tir_tuples", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "1 2 1 2 false\n0 10\n");
+}
+
+/// Tuple bindings use member names on every tier, including reverse order,
+/// explicit renaming, and partial record patterns.
+#[test]
+fn tuple_destructure_names() {
+    tir_support::assert_example_cli_tiers_agree(
+        "basics/tuple_destructure_names",
+        include_str!("../Examples/features/expected/basics/tuple_destructure_names.out"),
+    );
 }
 
 /// c109 Phase 24: JSON value type + construction + if-let matching + render/parse

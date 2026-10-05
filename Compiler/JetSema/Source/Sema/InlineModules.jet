@@ -686,7 +686,7 @@ fn sema_inline_rewrite_binding(rewrite: &SemaInlineRewrite, binding: Binding) ->
     updated.init = sema_inline_rewrite_expr(&rewrite, binding.init)
     if binding.pattern == .Val(pattern) {
         updated.pattern = Val(if pattern == {
-            .Struct(type_name, type_span, fields, rest, span) -> BindPattern.Struct{type_name: sema_inline_mapped_name(rewrite, type_name), type_span: type_span, fields: fields, rest: rest, span: span}
+            .Struct(type_name, type_span, fields, rest, span) -> BindPattern.Struct{type_name: if type_name == "" -> "" else -> sema_inline_mapped_name(rewrite, type_name), type_span: type_span, fields: fields, rest: rest, span: span}
             .Refutable(inner, fallback, names, span) -> BindPattern.Refutable{pattern: inner, fallback: sema_inline_rewrite_or_fallback(&rewrite, fallback), names: names, span: span}
             else -> ~pattern
         })

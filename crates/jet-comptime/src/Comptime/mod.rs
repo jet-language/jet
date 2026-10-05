@@ -2751,9 +2751,11 @@ fn expand_template_bind_pattern(
             type_name,
             type_span,
             ..
-        } => {
+        } if !type_name.is_empty() => {
             *type_name = expand_template_name(type_name, *type_span, interp, scope)?;
         }
+        // The inferred record form `{ … } :: value` names no type to expand.
+        crate::AST::BindPattern::Struct { .. } => {}
         crate::AST::BindPattern::Refutable { pattern, .. } => {
             expand_template_pattern(pattern, interp, scope, None)?;
         }
