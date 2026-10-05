@@ -91,32 +91,27 @@ mod jet_c_abi_task {
         guard(|| Box::from_raw(task).detach())
     }
 
-    /// The native `Result` box of an outcome: 1 and the success payload, or 0
-    /// and the owned `TaskFailure` handle (Lower.jet lower_result_box layout).
-    fn outcome(result: Result<NativeValue, JetTaskFailure>, ok: &Meta) -> *mut u8 {
-        let size = 8 + ((ok.payload_size().max(8) + 7) & !7);
-        let raw = unsafe { allocate(size) };
+    /// An outcome as the route Result carrier (Routes.jet): returns 1 and
+    /// writes the success payload to `out`, or returns 0 and writes the owned
+    /// runtime `TaskFailure` handle to `out`. The lowering builds the native
+    /// Result box and converts the failure through its record schema.
+    fn outcome(result: Result<NativeValue, JetTaskFailure>, out: *mut u8) -> i64 {
         match result {
-            Ok(value) => unsafe {
-                ptr::write_unaligned(raw.cast::<u64>(), 1);
-                value.put(raw.add(8));
-            },
-            Err(failure) => unsafe {
-                ptr::write_unaligned(raw.cast::<u64>(), 0);
-                ptr::write_unaligned(raw.add(8).cast::<*mut JetTaskFailure>(), Box::into_raw(Box::new(failure)));
-            },
+            Ok(value) => { value.put(out); 1 }
+            Err(failure) => {
+                unsafe { ptr::write_unaligned(out.cast::<*mut JetTaskFailure>(), Box::into_raw(Box::new(failure))) };
+                0
+            }
         }
-        raw
     }
 
     /// `task.join()`: `flatten` when the body is a `T E!` carrier.
     #[no_mangle]
-    pub unsafe extern "C" fn jet_rt_native_task_join(task: *mut NativeTask, flatten: u8, ok_meta: *const NativeMeta) -> *mut u8 {
+    pub unsafe extern "C" fn jet_rt_native_task_join(task: *mut NativeTask, flatten: u8, out: *mut u8) -> i64 {
         guard(|| {
-            let ok = Meta::copy(ok_meta);
             let joined = Box::from_raw(task).join();
             let result = if flatten != 0 { jet_task_flatten_result(joined.map(body_result)) } else { joined };
-            outcome(result, &ok)
+            outcome(result, out)
         })
     }
 
@@ -143,7 +138,7 @@ mod jet_c_abi_task {
     /// of tasks or closures. `ok_meta` describes the success payload: the
     /// List for `all`, one value otherwise.
     #[no_mangle]
-    pub unsafe extern "C" fn jet_rt_native_task_group(kind: i64, flatten: u8, list: *mut Header, spawn: u8, body_meta: *const NativeMeta, invoke: usize, release: usize, ok_meta: *const NativeMeta) -> *mut u8 {
+    pub unsafe extern "C" fn jet_rt_native_task_group(kind: i64, flatten: u8, list: *mut Header, spawn: u8, body_meta: *const NativeMeta, invoke: usize, release: usize, ok_meta: *const NativeMeta, out: *mut u8) -> i64 {
         guard(|| {
             let ok = Meta::copy(ok_meta);
             let tasks = tasks(list, spawn, body_meta, invoke, release);
@@ -157,7 +152,7 @@ mod jet_c_abi_task {
                 (2, true) => jet_task_flatten_result(jet_std::jet_task_race(tasks).map(body_result)),
                 _ => unreachable!("checked task group kind"),
             };
-            outcome(result, &ok)
+            outcome(result, out)
         })
     }
 
@@ -221,21 +216,16 @@ mod jet_c_abi_task {
         })
     }
 
-    /// `receive`: the native Result box of the next value or the owned
-    /// `Closed` handle once the channel is closed and drained.
+    /// `receive`: returns 1 and writes the next value to `out`, or returns 0
+    /// and writes the owned runtime `Closed` handle to `out`.
     #[no_mangle]
-    pub unsafe extern "C" fn jet_rt_native_receiver_receive(rx: *mut NativeReceiver, ok_meta: *const NativeMeta) -> *mut u8 {
-        guard(|| {
-            let ok = Meta::copy(ok_meta);
-            let raw = allocate(8 + ((ok.payload_size().max(8) + 7) & !7));
-            match (*rx).receive() {
-                Ok(value) => { ptr::write_unaligned(raw.cast::<u64>(), 1); value.put(raw.add(8)); }
-                Err(closed) => {
-                    ptr::write_unaligned(raw.cast::<u64>(), 0);
-                    ptr::write_unaligned(raw.add(8).cast::<*mut jet_std::Closed>(), Box::into_raw(Box::new(closed)));
-                }
+    pub unsafe extern "C" fn jet_rt_native_receiver_receive(rx: *mut NativeReceiver, out: *mut u8) -> i64 {
+        guard(|| match (*rx).receive() {
+            Ok(value) => { value.put(out); 1 }
+            Err(closed) => {
+                ptr::write_unaligned(out.cast::<*mut jet_std::Closed>(), Box::into_raw(Box::new(closed)));
+                0
             }
-            raw
         })
     }
 

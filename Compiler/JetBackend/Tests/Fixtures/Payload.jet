@@ -229,9 +229,10 @@ fn fx_opaque_enum_rejection_check(name: String, operation: Int) -> Bool Never! {
     program :: fx_opaque_enum_rejected(name, operation)
     if lower_native_enum_layout(program, fx_named(name)) -> return false
     lowered :: lir_lower_entry(program, mir_function_id("run"))
+    expected :: "opaque runtime enum {name} has no native enum layout"
     found := false
     loop issue in lowered.issues {
-        if issue.message == "opaque runtime enum {name} has no native enum layout" -> found = true
+        if issue.message == expected -> found = true
     }
     if !found -> return false
     loop function in lowered.lir.functions {
@@ -254,7 +255,22 @@ fn fx_opaque_enum_rejection_checks() -> Bool Never! {
     if !lower_native_enum_layout(local, fx_named("Closed")) -> return false
     if !fx_opaque_enum_rejection_check("Closed", 0) -> return false
     if !fx_opaque_enum_rejection_check("Closed", 1) -> return false
-    if !fx_opaque_enum_rejection_check("TaskFailure", 2) -> return false
-    print("opaque-enum: rejection checks passed (Closed ZST, construction, TaskFailure payload)")
+    if !fx_record_enum_projection_check() -> return false
+    print("opaque-enum: rejection checks passed (Closed ZST, construction); TaskFailure record payload projects natively")
+    true
+}
+
+// TaskFailure has a Core record schema (Records.jet): the runtime value is
+// rebuilt in its native layout at the route boundary, so a payload projection
+// reads the native box and is not rejected as an opaque runtime enum.
+fn fx_record_enum_projection_check() -> Bool Never! {
+    program :: fx_opaque_enum_rejected("TaskFailure", 2)
+    ty :: fx_named("TaskFailure")
+    if lower_record_schema(program, ty) == None -> return false
+    if !lower_native_enum_layout(program, ty) -> return false
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    loop issue in lowered.issues {
+        if issue.message.contains("opaque runtime enum") -> return false
+    }
     true
 }

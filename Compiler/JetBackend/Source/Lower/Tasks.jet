@@ -101,9 +101,46 @@ fn lower_task_group(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     invoke :: if spawn -> lower_lazy_helper_address(&m, &f, "task.body", elem) else -> zero
     release :: if spawn -> lower_lazy_helper_address(&m, &f, "task.release", elem) else -> zero
     ok_meta :: lower_lazy_meta(p, &m, &f, ok_ty)
-    dst :: lower_result(p, c, &m, &f, instruction) ?? return
     args :: [LIRValueID]{lower_const(&f, lower_task_kind(kind)), lower_const_flag(&f, if flatten -> 1 else -> 0), list, lower_const_flag(&f, if spawn -> 1 else -> 0), body_meta, invoke, release, ok_meta}
-    lower_call_runtime(&m, &f, "jet_rt_native_task_group", args, Val(dst))
+    lower_task_outcome(p, c, &m, &f, instruction, "jet_rt_native_task_group", args, result_ty)
+}
+
+// A runtime outcome `export(args..., out) -> verdict` as the instruction's native
+// Result box (1 = Ok at offset 8). The error crosses as a runtime handle: a
+// Core record (TaskFailure) is rebuilt in its native layout (Records.jet); an
+// opaque runtime handle error type is kept as the handle; any other error
+// layout is reported instead of reinterpreting runtime bytes.
+fn lower_task_outcome(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, export: String, args: [LIRValueID], result_ty: MIRType) Never! {
+    err := MIRType?{None}
+    if result_ty.kind == .Result(_, failure) -> err = Val(failure)
+    err_ty :: err ?? return lower_fail(&m, &f, "{export} result {mir_type_display_name(result_ty)} is not lowered at O0 yet")
+    runtime :: lower_record_handle(p, err_ty)
+    if runtime == None {
+        if lower_repr(p, err_ty) == {
+            .Handle(_, _) -> {}
+            else -> return lower_fail(&m, &f, "{export} failure {mir_type_display_name(err_ty)} has no runtime record marshaling")
+        }
+    }
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_alloc(&m, &f, dst, lower_box_size(p, result_ty))
+    out :: lower_address(&f, dst, 8)
+    call_args := [LIRValueID]{}
+    loop arg in args -> &call_args.push(arg)
+    &call_args.push(out)
+    verdict :: lower_word(&f)
+    lower_call_runtime(&m, &f, export, call_args, Val(verdict))
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: verdict})
+    record :: runtime ?? return
+    zero :: lower_const(&f, 0)
+    failed :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: verdict, right: zero})
+    failure :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(failure, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, failure, [LIRValueID]{})
+    lower_record_store_from_slot(p, &m, &f, err_ty, record, out, dst, 8)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
 }
 
 // `spawn`: values are [site, label] or [group, site, label]; the closure box
@@ -168,14 +205,8 @@ fn lower_task_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         lower_fail(&m, &f, "Task.join has no checked result type")
         return true
     }
-    ok_ty :: if result_ty.kind == .Result(ok, _) -> ok else -> {
-        lower_fail(&m, &f, "Task.join result {mir_type_display_name(result_ty)} is not lowered at O0 yet")
-        return true
-    }
     flatten :: lower_const_flag(&f, if symbol == "jet_task_join_result" -> 1 else -> 0)
-    ok_meta :: lower_lazy_meta(p, &m, &f, ok_ty)
-    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
-    lower_call_runtime(&m, &f, "jet_rt_native_task_join", [LIRValueID]{handle, flatten, ok_meta}, Val(dst))
+    lower_task_outcome(p, c, &m, &f, instruction, "jet_rt_native_task_join", [LIRValueID]{handle, flatten}, result_ty)
     true
 }
 
@@ -322,10 +353,18 @@ fn lower_channel_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
         lower_call_runtime(&m, &f, "jet_rt_native_receiver_is_ready", [LIRValueID]{handle}, Val(dst))
         return true
     }
-    if symbol == "try_receive" || symbol == "receive" {
+    if symbol == "try_receive" {
         meta :: lower_lazy_meta(p, &m, &f, elem)
         dst :: lower_result(p, c, &m, &f, instruction) ?? return true
-        lower_call_runtime(&m, &f, "jet_rt_native_receiver_{symbol}", [LIRValueID]{handle, meta}, Val(dst))
+        lower_call_runtime(&m, &f, "jet_rt_native_receiver_try_receive", [LIRValueID]{handle, meta}, Val(dst))
+        return true
+    }
+    if symbol == "receive" {
+        result_ty :: lower_checked_type(c, instruction) ?? {
+            lower_fail(&m, &f, "Receiver.receive has no checked result type")
+            return true
+        }
+        lower_task_outcome(p, c, &m, &f, instruction, "jet_rt_native_receiver_receive", [LIRValueID]{handle}, result_ty)
         return true
     }
     false
