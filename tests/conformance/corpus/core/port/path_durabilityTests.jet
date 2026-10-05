@@ -1,0 +1,296 @@
+use tests.common as common
+use tests.tir_support as tiers
+use tests.conformance.corpus.core.port.path_durability.[jet_string, unique_dir]
+use std.fs as fs
+use std.env as env
+use std.process as process
+use core.sys.target as target
+use core.files.runtime.top_fs_write_ops.*
+use core.files as files
+use jet as jet
+// GATE #4494 real native paths/files/processes and concurrent compiled tiers.
+// GATE #4483 all platform arms use selected target. #4409 NUL must report InvalidInput.
+use tests.conformance.corpus.core.port.power_and_exclusive_or.[accepts, diagnostic_codes, WANT]
+use tests.conformance.corpus.core.port.record_conformance as records
+use jet_foundation.RecordCodec.[encode_record]
+use jet_foundation.PackageIdentity.[source_digest, target_facts_digest, package_check_key]
+
+// Rust: tests/path_durability.rs:14
+#Test("normalize_is_lexical_rooted_and_platform_native") {
+    windows :: target.selected_os() == "windows"
+    absolute :: if windows { "C:/../../alpha/../beta" } else { "/../../alpha/../beta" }
+    root :: if windows { "C:/" } else { "/" }
+    windows_cases :: if windows { `
+    print(Path.from("C:../../leaf").normalize().to_string())
+    print(Path.from("//server/share/../../leaf").normalize().to_string())` } else { "" }
+    src :: "fn run() {{\n    print(Path.from(\"../../alpha/./beta/../gamma\").normalize().to_string())\n    print(Path.from(\"{absolute}\").normalize().to_string())\n    print(Path.from(\"\").normalize().to_string())\n    print(Path.from(\"{root}\").normalize().to_string()){windows_cases}\n}}\n"
+    (code, stdout, stderr) :: common.build_and_run("jet_path_durability", "normalize", &src)
+    assert_eq(code, 0, "generated program failed: {stderr}")
+    sep :: if windows { "\\" } else { "/" }
+    expected := ["..{sep}..{sep}alpha{sep}gamma", if windows { "C:{sep}beta" } else { "{sep}beta" }, "", if windows { "C:{sep}" } else { sep }]
+    if windows {
+        expected.push("C:..{sep}..{sep}leaf")
+        expected.push("\\\\server{sep}share{sep}leaf")
+    }
+    assert_eq(stdout, "{expected.join("\n")}\n")
+}
+
+// Rust: tests/path_durability.rs:69
+#Test("generated_normalizer_uses_platform_components") {
+    // Retired generated-Rust structure checks become lexical behavior across tiers.
+    tiers.assert_tiers_agree("normalize_components", `fn run() { print(Path.from("a/../b").normalize().to_string()) }`, "b\n")
+}
+
+// Rust: tests/path_durability.rs:79
+#Test("generated_atomic_write_has_durable_replace_contract") {
+    // The native provider owns create-new/write-all/sync/Drop/parent-sync and
+    // Windows ReplaceFileW/MoveFileExW; exercise the public atomic contract.
+    src :: `use core.files as fs
+fn run() {
+    bytes :: [U8]{ 1, 2, 3 }
+    fs.write_atomic("atomic.bin", bytes) ?? panic("atomic write failed")
+    actual :: fs.read_bytes("atomic.bin") ?? panic("atomic read failed")
+    if actual != bytes { panic("atomic payload changed") }
+    fs.remove("atomic.bin") ?? panic("atomic cleanup failed")
+}`
+    (code, _, stderr) :: common.build_and_run_in_scratch("jet_path_durability", "atomic_contract", src)
+    assert_eq(code, 0, "atomic-write contract failed: {stderr}")
+}
+
+// Rust: tests/path_durability.rs:110
+#Test("relative_atomic_write_syncs_the_current_directory_and_reports_success") {
+    src :: `use core.files as fs
+fn run() {
+    bytes :: [U8]{ 110, 101, 119 }
+    fs.write_atomic("relative.bin", bytes) ?? panic("relative atomic write failed")
+    written :: fs.read("relative.bin") ?? panic("relative read failed")
+    fs.remove("relative.bin") ?? panic("relative cleanup failed")
+    print(written)
+}`
+    (code, stdout, stderr) :: common.build_and_run_in_scratch("jet_path_durability", "atomic_relative", src)
+    assert_eq(code, 0, "relative atomic write failed: {stderr}")
+    assert_eq(stdout, "new\n")
+}
+
+// Rust: tests/path_durability.rs:133
+#Test("windows_atomic_replace_rejects_embedded_nul_without_touching_prefix_target") {
+    if target.selected_os() == "windows" {
+        root :: env.temp_dir().join("jet-path-nul-{process.id()}")
+        _ :: fs.remove_dir_all(&root)
+        fs.create_dir_all(&root).unwrap()
+        destination :: root.join("prefix-target.bin")
+        temp :: root.join("temp.bin")
+        fs.write(&destination, b"old").unwrap()
+        fs.write(&temp, b"new").unwrap()
+        invalid :: |path: OSPath| -> {
+            units := path.as_os_str().encode_wide().collect()
+            units.push(0)
+            units.extend("suffix".encode_utf16())
+            OSPath.from_wide(&units)
+        }
+        // GATE #4494 native Windows held replacement, no generated Rust callback.
+        target_error :: jet_atomic_windows.replace(&temp, &invalid(destination)).unwrap_err()
+        assert_eq(target_error.kind(), std.io.ErrorKind.InvalidInput)
+        assert_eq(fs.read(&destination).unwrap(), b"old")
+        temp_error :: jet_atomic_windows.replace(&invalid(temp), &destination).unwrap_err()
+        assert_eq(temp_error.kind(), std.io.ErrorKind.InvalidInput)
+        assert_eq(fs.read(&destination).unwrap(), b"old")
+        _ :: fs.remove_dir_all(root)
+    }
+}
+
+// Rust: tests/path_durability.rs:210
+#Test("atomic_write_retries_collision_replaces_and_cleans_failed_temp") {
+    root :: unique_dir("hostile")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    destination :: root.join("target.bin")
+    blocked :: root.join("blocked")
+    fs.create_dir(&blocked).unwrap()
+    fs.write(&destination, b"old").unwrap()
+    if target.selected_family() == "unix" {
+        fs.set_permissions(&destination, fs.Permissions.from_mode(0o640)).unwrap()
+    }
+    src :: "use core.files as fs\nuse core.sys as os\nfn run() {{\n    root :: \"{jet_string(&root)}\"\n    stale :: Path.from(root).join(\".jet_tmp_{{os.pid()}}_0\")\n    fs.write(stale, \"stale\") ?? panic(\"stale setup failed\")\n    bytes :: [U8]{{ 110, 101, 119 }}\n    fs.write_atomic(\"{jet_string(&destination)}\", bytes) ?? panic(\"replacement failed\")\n    fs.write_atomic(\"{jet_string(&blocked)}\", bytes) ?? panic(\"expected replacement failure\")\n}}\n"
+    (code, _, _) :: common.build_and_run("jet_path_durability", "atomic_hostile", &src)
+    assert_eq(code, 70, "directory replacement must fail through Jet panic")
+    assert_eq(fs.read(&destination).unwrap(), b"new")
+    if target.selected_family() == "unix" {
+        assert_eq(fs.metadata(&destination).unwrap().permissions().mode() & 0o777, 0o640)
+    }
+    debris :: fs.read_dir(&root).unwrap().filter_map(|entry| -> entry.ok()).filter(|entry| -> entry.file_name().to_string_lossy().starts_with(".jet_tmp_")).collect()
+    assert_eq(debris.len(), 1, "only the forced stale collision may remain")
+    assert_eq(fs.read(debris[0].path()).unwrap(), b"stale")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/path_durability.rs:273
+#Test("concurrent_atomic_writers_leave_one_whole_payload") {
+    root :: unique_dir("concurrent")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    destination :: root.join("target.bin")
+    fs.write(&destination, b"old").unwrap()
+    a :: [65; 257] as [UInt8]
+    b :: [66; 263] as [UInt8]
+    a_text :: "A".repeat(a.len())
+    b_text :: "B".repeat(b.len())
+    list :: |bytes: [UInt8]| -> bytes.iter().map(|byte| -> byte.to_string()).collect().join(", ")
+    src :: "use core.files as fs\nfn write_a() -[IO]> Int {{\n    bytes :: [U8]{{ {list(a)} }}\n    loop _ in 1..25 {{ fs.write_atomic(\"{jet_string(&destination)}\", bytes) ?? panic(\"writer a failed\") }}\n    return 1\n}}\nfn write_b() -[IO]> Int {{\n    bytes :: [U8]{{ {list(b)} }}\n    loop _ in 1..25 {{ fs.write_atomic(\"{jet_string(&destination)}\", bytes) ?? panic(\"writer b failed\") }}\n    return 2\n}}\nfn observe() -[IO]> Int {{\n    loop _ in 1..100 {{\n        value :: fs.read(\"{jet_string(&destination)}\") ?? panic(\"observer read failed\")\n        if value != \"old\" && value != \"{a_text}\" && value != \"{b_text}\" {{ panic(\"observer saw torn atomic-write payload\") }}\n    }}\n    return 3\n}}\nfn run() {{\n    task.group g {{\n        a :: task write_a()\n        b :: task write_b()\n        observer :: task observe()\n    }}\n}}\n"
+    (code, _, stderr) :: common.build_and_run("jet_path_durability", "atomic_concurrent", &src)
+    assert_eq(code, 0, "concurrent atomic writers failed: {stderr}")
+    final_bytes :: fs.read(&destination).unwrap()
+    assert(final_bytes == a or final_bytes == b, "observed torn atomic-write payload")
+    debris :: fs.read_dir(&root).unwrap().filter_map(|entry| -> entry.ok()).any(|entry| -> entry.file_name().to_string_lossy().starts_with(".jet_tmp_"))
+    assert(not debris, "successful concurrent writes left temporary debris")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/power_and_exclusive_or.rs:47
+#Test("power_groups_right_and_beats_unary_minus") {
+    (code, out) :: tiers.build_and_run("power_grouping", `fn run() {
+    print(2 ^ 3 ^ 2)
+    print((2 ^ 3) ^ 2)
+    print(-3 ^ 2)
+    print((-3) ^ 2)
+    print(2 * 3 ^ 2)
+    print(2 ^ 3 * 2)
+}`)
+    assert_eq(code, 0, "{out}")
+    assert_eq(out, "512\n64\n-9\n9\n18\n16\n", "{out}")
+}
+
+// Rust: tests/power_and_exclusive_or.rs:70
+#Test("power_result_types_follow_the_operands") {
+    assert(accepts("int_pow", "{WANT}fn run() {{\n    want_int(2 ^ 10)\n}}\n"))
+    assert(accepts("neg_pow_fraction", "{WANT}fn run() {{\n    print((2 ^ -1).numerator())\n}}\n"))
+    assert(not diagnostic_codes("neg_pow_float", "{WANT}fn run() {{\n    want_float(2 ^ -1)\n}}\n").is_empty(), "a written negative exponent must not infer an approximate Float")
+    assert(not diagnostic_codes("neg_pow_int", "{WANT}fn run() {{\n    want_int(2 ^ -1)\n}}\n").is_empty(), "a negative exponent must not infer a whole number")
+    assert(accepts("float_operand", "{WANT}fn run() {{\n    want_float(Float{{2.0}} ^ 10)\n}}\n"))
+    assert(not diagnostic_codes("float_operand_int", "{WANT}fn run() {{\n    want_int(Float{{2.0}} ^ 10)\n}}\n").is_empty(), "a Float operand must not infer a whole number")
+}
+
+// Rust: tests/power_and_exclusive_or.rs:116
+#Test("exact_int_power_stays_exact_across_tiers") {
+    tiers.assert_tiers_agree("exact_int_power", `FOLDED :: prep { 2 ^ 200 }
+fn show_exact(value: Int) { print(value) }
+fn raise(base: Int, exponent: Int) -> Int { return base ^ exponent }
+fn run() {
+    show_exact(raise(2, 200))
+    show_exact(FOLDED)
+}`, "1606938044258990275541962092341162602522202993782792835301376\n1606938044258990275541962092341162602522202993782792835301376\n")
+}
+
+// Rust: tests/power_and_exclusive_or.rs:142
+#Test("power_assign_raises_in_place") {
+    (code, out) :: tiers.build_and_run("power_assign", `fn run() {
+    growth := 2
+    growth ^= 10
+    print(growth)
+    price := 1.5
+    price ^= 2.0
+    print(price)
+}`)
+    assert_eq(code, 0, "{out}")
+    assert_eq(out, "1024\n2.25\n", "{out}")
+}
+
+// Rust: tests/power_and_exclusive_or.rs:163
+#Test("exclusive_or_uses_the_tilde_pipe_spelling") {
+    (code, out) :: tiers.build_and_run("exclusive_or", `fn run() {
+    print(12 ~| 10)
+    acc := 0
+    loop byte in [17, 42, 99, 8] { acc ~|= byte }
+    print(acc)
+}`)
+    assert_eq(code, 0, "{out}")
+    assert_eq(out, "6\n80\n", "{out}")
+}
+
+// Rust: tests/power_and_exclusive_or.rs:182
+#Test("exclusive_or_needs_matching_integer_widths") {
+    assert(accepts("xor_same_width", "fn run() {\n    a :: U8{12}\n    b :: U8{10}\n    print(a ~| b)\n}\n"))
+    mixed :: diagnostic_codes("xor_mixed_width", "fn run() {\n    a :: U8{12}\n    b :: I8{10}\n    print(a ~| b)\n}\n")
+    assert(mixed.iter().any(|code| -> code == "E0109"), "mixed widths must report E0109, got {mixed.debug()}")
+    floats :: diagnostic_codes("xor_floats", "fn run() {\n    print(1.5 ~| 2.5)\n}\n")
+    assert(floats.iter().any(|code| -> code == "E0109"), "exclusive-or on floats must report E0109, got {floats.debug()}")
+}
+
+// Rust: tests/power_and_exclusive_or.rs:207
+#Test("prefix_take_and_copy_survive_the_rebind") {
+    (code, out) :: tiers.build_and_run("prefix_sigils", `struct Sword { power: Int }
+fn melt(item: ^Sword) -> Int { return item.power }
+fn run() {
+    blade :: Sword{ power: 3 }
+    print(melt(^blade))
+    flags :: 12
+    source :: 5
+    print(flags ~| ~source)
+    print(flags ^ 2)
+}`)
+    assert_eq(code, 0, "{out}")
+    assert_eq(out, "3\n9\n144\n", "{out}")
+}
+
+// Rust: tests/power_and_exclusive_or.rs:233
+#Test("infix_caret_never_means_exclusive_or") {
+    (code, out) :: tiers.build_and_run("caret_is_power", "fn run() {\n    print(12 ^ 2)\n}\n")
+    assert_eq(code, 0, "{out}")
+    assert_eq(out, "144\n", "{out}")
+}
+
+// Rust: tests/power_and_exclusive_or.rs:247
+#Test("powers_above_two_to_the_fifty_three_stay_exact") {
+    tiers.assert_tiers_agree("power_above_53", `fn run() {
+    print(2 ^ 60)
+    print(3 ^ 39)
+}`, "1152921504606846976\n4052555153018976267\n")
+}
+
+// Rust: tests/record_conformance.rs:310
+#Test("jet_record_codec_and_package_keys_match_rust_bytes") {
+    repo :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    program := ""
+    loop source in records.JET_SOURCES {
+        program.push_str(fs.read_to_string(repo.join(source)).expect("read Jet codec source"))
+        program.push('\n')
+    }
+    program.push_str(records.JET_HARNESS)
+    program.push_str("\nfn run() {\n")
+    expected := []
+    loop (schema, sections) in records.record_fixtures() {
+        program.push_str("    conformance_encode({records.jet_string(schema)}, {records.jet_sections(&sections)})\n")
+        bytes :: encode_record(schema, &sections).expect("fixture encodes")
+        expected.push("encode {records.hex(bytes)}")
+    }
+    loop bytes in records.decode_fixtures() {
+        program.push_str("    conformance_decode({records.jet_bytes(&bytes)})\n")
+        expected.push(records.rust_decode_line(&bytes))
+    }
+    loop (index, fixture) in records.key_fixtures().iter().enumerate() {
+        files :: fixture.files.iter().map(|(path, source)| -> "PackageKeySourceFile{{relative_path: {records.jet_string(path)}, source: {records.jet_string(source)}}}").collect().join(", ")
+        manifest :: fixture.manifest.map_or("None", |text| -> "Val({records.jet_string(text)})")
+        facts :: fixture.facts.iter().map(|(name, value)| -> "PackageKeyTargetFact{{name: {records.jet_string(name)}, value: {records.jet_string(value)}}}").collect().join(", ")
+        dependencies :: fixture.dependencies.iter().map(|(identity, digest)| -> "PackageKeyDependency{{identity: {records.jet_string(identity)}, interface_digest: {records.jet_string(digest)}}}").collect().join(", ")
+        program.push_str("    source_{index} :: package_key_source_digest([PackageKeySourceFile]{{{files}}}, {manifest})\n")
+        program.push_str("    facts_{index} :: package_key_target_facts_digest([PackageKeyTargetFact]{{{facts}}})\n")
+        program.push_str("    key_{index} :: package_key_check_key({records.jet_string(fixture.compiler)}, facts_{index}, {records.jet_string(fixture.package)}, source_{index}, [PackageKeyDependency]{{{dependencies}}})\n")
+        program.push_str("    print(\"keys {{source_{index}}} {{facts_{index}}} {{key_{index}}}\")\n")
+        source_files :: fixture.files.iter().map(|(path, source)| -> (path.to_string(), source.as_bytes())).collect()
+        source :: source_digest(&source_files, fixture.manifest.map(|text| -> text.as_bytes()))
+        target_facts :: target_facts_digest(fixture.facts.iter().map(|(name, value)| -> (name.to_string(), value.to_string())).collect())
+        key :: package_check_key(fixture.compiler, &target_facts, fixture.package, &source, fixture.dependencies.iter().map(|(identity, digest)| -> (identity.to_string(), digest.to_string())).collect())
+        expected.push("keys {source} {target_facts} {key}")
+    }
+    program.push_str("}\n")
+    scratch :: common.Scratch.new("record-conformance")
+    fs.write(scratch.join("main.jet"), &program).expect("write conformance program")
+    output :: process.Command.new(env.var_os("CARGO_BIN_EXE_jet").unwrap()).args(["run", "main.jet"]).current_dir(&scratch.path).env("JET_STORE_DIR", scratch.join("store")).env("NO_COLOR", "1").output().expect("run the Jet record codec")
+    stdout :: String.from_utf8_lossy(&output.stdout)
+    assert(output.status.success(), "Jet record codec failed\nstdout:\n{stdout}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+    actual :: stdout.lines().map(|line| -> line.to_string()).collect()
+    assert_eq(actual.len(), expected.len(), "Jet printed a different number of lines:\n{stdout}")
+    loop (index, (actual, expected)) in actual.iter().zip(&expected).enumerate() {
+        assert_eq(actual, expected, "line {index} differs between the Jet and Rust codecs")
+    }
+}

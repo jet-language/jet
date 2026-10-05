@@ -726,3 +726,167 @@ fn timeout_for(partial: [UInt8]) -> JetHTTPReadError {
     assert(not shown.contains("private") and not shown.contains("authorization") and not shown.contains("cookie"))
     std.fs.remove_dir_all(root).unwrap()
 }
+
+// Rust: tests/http_server_lifecycle.rs:5051
+#Test("static_file_response_holds_the_open_identity_and_streams_the_selected_range") {
+    root :: std.env.temp_dir().join("jet-http-held-static-{std.process.id()}-{std.time.SystemTime.now().duration_since(std.time.UNIX_EPOCH).unwrap().as_nanos()}")
+    std.fs.create_dir_all(&root).unwrap()
+    path :: root.join("asset.bin")
+    std.fs.write(&path, b"trusted-body").unwrap()
+    headers := JetHTTPHeaders.new()
+    headers.append("range", "bytes=2-6").unwrap()
+    request :: JetHTTPRequest.server("GET", "/asset.bin", [], ^headers)
+    response :: jet_http_srv_static_files(&request, "", &root, JetHTTPStaticOptions.safe()).unwrap()
+    direct :: jet_http_srv_static_file_range(&request, path.to_string_lossy().into_owned(), "application/octet-stream").unwrap()
+    std.fs.rename(&path, root.join("old.bin")).unwrap()
+    std.fs.write(&path, b"attacker-body").unwrap()
+    assert_eq(response.status, 206)
+    assert_eq(response.body.length(), Some(5))
+    assert_eq(response.body.bytes(5).unwrap(), b"usted")
+    assert_eq(direct.body.length(), Some(5))
+    assert_eq(direct.body.bytes(5).unwrap(), b"usted")
+    std.fs.remove_dir_all(root).unwrap()
+}
+
+// Rust: tests/http_server_lifecycle.rs:5087
+#Test("windows_static_serving_fails_closed_without_held_no_reparse_identity") {
+    // GATE #4483 cfg(windows) dispatch uses selected target, not host OS.
+    if core.sys.target.selected_os() == "windows" {
+        root :: std.env.temp_dir().join("jet-http-windows-static-{std.process.id()}")
+        std.fs.create_dir_all(&root).unwrap()
+        std.fs.write(root.join("asset.txt"), b"must not serve by pathname").unwrap()
+        request :: JetHTTPRequest.server("GET", "/asset.txt", [], JetHTTPHeaders.new())
+        assert_eq(jet_http_srv_static_files(&request, "", &root, JetHTTPStaticOptions.safe()).unwrap().status, 404)
+        assert(jet_http_srv_static_file(root.join("asset.txt").to_string_lossy().into_owned(), "text/plain").is_err())
+        assert(jet_http_srv_static_file_range(&request, root.join("asset.txt").to_string_lossy().into_owned(), "text/plain").is_err())
+        std.fs.remove_dir_all(root).unwrap()
+    }
+}
+
+// Rust: tests/http_server_lifecycle.rs:5118
+#Test("http2_response_framing_filters_handler_claims_and_verifies_known_lengths") {
+    forbidden := jet_http_srv_empty_response(204)
+    forbidden.headers.append("content-length", "99").unwrap()
+    forbidden.headers.append("transfer-encoding", "chunked").unwrap()
+    forbidden.headers.append("connection", "x-hop").unwrap()
+    forbidden.headers.append("x-hop", "private").unwrap()
+    encoded :: jet_http2_encode_response_headers(&forbidden, None)
+    decoder := JetHTTP2Hpack.new()
+    decoded :: jet_http2_decode_headers(&decoder, &encoded).unwrap()
+    assert_eq(decoded, [(":status", "204")])
+    mux :: jet_http_mux_new()
+    jet_http_mux_add(&mux, "GET", "/", |_| -> jet_http_srv_response(200, "representation"))
+    head :: jet_http_mux_dispatch(&mux, JetHTTPRequest.server("HEAD", "/", [], JetHTTPHeaders.new())).unwrap()
+    length :: head.head_content_length.or_else(|| -> head.body.length())
+    decoder := JetHTTP2Hpack.new()
+    decoded :: jet_http2_decode_headers(&decoder, jet_http2_encode_response_headers(&head, length)).unwrap()
+    assert(decoded.iter().any(|(name, value)| -> name == "content-length" and value == "14"))
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    peer := TcpStream.connect(addr).unwrap()
+    (server, _) := listener.accept().unwrap()
+    peer.set_read_timeout(Some(Duration.from_secs(1))).unwrap()
+    response := jet_http_srv_empty_response(200)
+    response.body = JetHTTPBody.reader_cancellable(std.io.Cursor.new(b"ab".to_vec()), Some(1), || -> {})
+    outgoing := jet_http2_start_response(&server, 1, ^response, JET_HTTP2_MAX_FRAME).unwrap().unwrap()
+    connection_window := 65_535
+    stream_window := 65_535
+    deadline :: Instant.now() + Duration.from_secs(1)
+    loop {
+        if jet_http2_flush_body(&server, 1, &outgoing, &connection_window, &stream_window, JET_HTTP2_MAX_FRAME).unwrap() { break }
+        assert(Instant.now() < deadline, "response producer did not complete")
+        thread.yield_now()
+    }
+    wire := [] as [UInt8]
+    _ :: peer.read_to_end(&wire).ok()
+    assert(wire.windows(9).any(|header| -> header[3] == 3 and UInt32.from_be_bytes(header[5..9].try_into().unwrap()) == 1))
+}
+
+// Rust: tests/http_server_lifecycle.rs:5195
+struct Uncancellable { dropped: Arc<AtomicUsize> }
+impl Read for Uncancellable {
+    // Rust: tests/http_server_lifecycle.rs:5197
+    fn read(&self, _output: &[UInt8]) -> USize std.io.Error! {
+        thread.park()
+        .Ok(0)
+    }
+}
+impl Drop for Uncancellable {
+    // Rust: tests/http_server_lifecycle.rs:5203
+    fn drop(&self) -> { self.dropped.fetch_add(1, Ordering.AcqRel) }
+}
+
+// Rust: tests/http_server_lifecycle.rs:5194
+#Test("http2_rejects_uncancellable_reader_before_response_headers") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    peer := TcpStream.connect(addr).unwrap()
+    (server, _) := listener.accept().unwrap()
+    peer.set_nonblocking(true).unwrap()
+    dropped :: Arc.new(AtomicUsize.new(0))
+    response := jet_http_srv_empty_response(200)
+    response.body = JetHTTPBody.reader(Uncancellable{dropped: dropped.clone()}, None)
+    assert(jet_http2_start_response(&server, 1, ^response, JET_HTTP2_MAX_FRAME).err().expect("uncancellable reader rejection").contains("bounded or cancellable"))
+    assert_eq(dropped.load(Ordering.Acquire), 1)
+    byte := [0] as [UInt8]
+    assert_eq(peer.read(&byte).unwrap_err().kind(), ErrorKind.WouldBlock)
+}
+
+// Rust: tests/http_server_lifecycle.rs:5233
+#Test("http2_rejects_transport_bridge_before_response_headers") {
+    HTTP_BODY_READS.store(0, Ordering.SeqCst)
+    HTTP_H2_BRIDGE_CLOSES.store(0, Ordering.SeqCst)
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    peer := TcpStream.connect(addr).unwrap()
+    (server, _) := listener.accept().unwrap()
+    peer.set_nonblocking(true).unwrap()
+    response := jet_http_srv_empty_response(200)
+    response.body = JetHTTPBody.bridge(1, None, unread_bridge_body, close_h2_bridge_body)
+    assert(jet_http2_start_response(&server, 1, ^response, JET_HTTP2_MAX_FRAME).err().expect("transport bridge rejection").contains("bounded or cancellable"))
+    assert_eq(HTTP_BODY_READS.load(Ordering.SeqCst), 0)
+    assert_eq(HTTP_H2_BRIDGE_CLOSES.load(Ordering.SeqCst), 1)
+    byte := [0] as [UInt8]
+    assert_eq(peer.read(&byte).unwrap_err().kind(), ErrorKind.WouldBlock)
+}
+
+// Rust: tests/http_server_lifecycle.rs:5264
+#Test("server_enforces_and_releases_per_ip_connection_capacity") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    mux :: jet_http_mux_new()
+    (entered_tx, entered_rx) :: mpsc.channel()
+    (release_tx, release_rx) :: mpsc.channel()
+    release_rx :: Arc.new(Mutex.new(release_rx))
+    jet_http_mux_add(&mux, "GET", "/hold", move |_| -> {
+        entered_tx.send(()).unwrap()
+        release_rx.lock().unwrap().recv().unwrap()
+        jet_http_srv_response(200, "released")
+    })
+    jet_http_mux_add(&mux, "GET", "/ok", |_| -> jet_http_srv_response(200, "ok"))
+    shutdown :: Arc.new(AtomicBool.new(false))
+    stop :: shutdown.clone()
+    options := JetHTTPServerOptions.safe()
+    options.workers = 2
+    options.admission_queue = 2
+    options.max_connections = 2
+    options.max_connections_per_ip = 1
+    server :: thread.spawn(move || -> jet_http_server_run_listener(^listener, ^mux, ^options, stop, None, None, None).unwrap())
+    held :: thread.spawn(move || -> request(addr, b"GET /hold HTTP/1.1\r\nHost: local\r\n\r\n"))
+    entered_rx.recv_timeout(Duration.from_secs(1)).unwrap()
+    rejected :: request(addr, b"GET /ok HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n")
+    assert(rejected.starts_with("HTTP/1.1 503 Service Unavailable"), "{rejected}")
+    release_tx.send(()).unwrap()
+    assert(held.join().unwrap().contains("released"))
+    deadline :: Instant.now() + Duration.from_secs(1)
+    accepted :: loop {
+        response :: request(addr, b"GET /ok HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n")
+        if response.contains("200 OK") or Instant.now() >= deadline { break response }
+        thread.sleep(Duration.from_millis(5))
+    }
+    assert(accepted.contains("200 OK"), "capacity was not released: {accepted}")
+    shutdown.store(true, Ordering.Release)
+    report :: server.join().unwrap()
+    assert_eq(report.user_accepted, 2)
+    assert_eq(report.user_overloaded, 1)
+}

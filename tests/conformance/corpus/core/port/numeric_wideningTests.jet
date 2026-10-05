@@ -1,0 +1,224 @@
+use tests.conformance.corpus.core.port.memory_semantics.[compile_ok, compile_error, assert_all_tiers, assert_all_tiers_multi, assert_trap_all_tiers]
+
+// Rust: tests/numeric_widening.rs:212
+#Test("exact_widening_is_symmetric_at_operators_and_works_for_arguments") {
+    output :: compile_ok(`fn take_i16(value: I16) -[]> I16 { return value }
+fn return_i16(value: I8) -[]> I16 { return value }
+fn increment(value: I32) -[]> I32 { return value + 1 }
+fn run() {
+    small :: I8{1}
+    wide :: I16{2}
+    _ :: small + wide
+    _ :: 1 + wide
+    _ :: wide + 1
+    _ :: take_i16(small)
+    _ :: return_i16(small)
+    assigned := I16{0}
+    assigned = small
+    narrow_decimal :: F32{1.5}
+    wide_decimal :: Float{2.5}
+    _ :: narrow_decimal + wide_decimal
+}
+`)
+    assert(output.rust.contains("fn __jet_increment"))
+}
+// Rust: tests/numeric_widening.rs:248
+#Test("checked_and_approximate_crossings_match_aot_jit_and_interpreter") {
+    success :: `fn take_float(value: Float) -[]> Float { return value }
+fn return_float(value: Int) -[]> Float { return value }
+fn run() {
+    exact :: Int{9007199254740992}
+    assigned := Float{0.0}
+    assigned = exact
+    print(take_float(exact) == 9007199254740992.0)
+    print(return_float(exact) == 9007199254740992.0)
+    print(assigned == 9007199254740992.0)
+    print((exact + Float{0.0}) == 9007199254740992.0)
+    lossy :: Int{9007199254740993}
+    print((approx(lossy) + Float{0.0}) == 9007199254740992.0)
+}
+`
+    assert_all_tiers("numeric_widen_success", success, 0, "true\ntrue\ntrue\ntrue\ntrue\n")
+    loop (name, target, value) in [("numeric_widen_float_trap", "Float", "9007199254740993"), ("numeric_widen_f32_trap", "F32", "16777217")] {
+        source :: "fn accept(value: {target}) \{\}\nfn run() \{\n    lossy :: Int\{{value}\}\n    accept(lossy)\n\}\n"
+        assert_trap_all_tiers(name, source)
+    }
+}
+// Rust: tests/numeric_widening.rs:297
+#Test("parenthesized_approximate_crossings_match_aot_jit_and_interpreter") {
+    source :: `fn take_float(value: Float) -[]> Float { return value }
+fn return_float(value: Int) -[]> Float { return ((approx(value))) }
+fn run() {
+    lossy :: Int{9007199254740993}
+    expected :: Float{9007199254740992.0}
+    print((((approx(lossy))) + Float{0.0}) == expected)
+    print(take_float(((approx(lossy)))) == expected)
+    assigned := Float{0.0}
+    assigned = ((approx(lossy)))
+    print(assigned == expected)
+    print(return_float(lossy) == expected)
+}
+`
+    assert_all_tiers("numeric_widen_parenthesized_approx", source, 0, "true\ntrue\ntrue\ntrue\n")
+}
+// Rust: tests/numeric_widening.rs:331
+#Test("numeric_arguments_widen_at_every_user_call_seam") {
+    source :: `trait NumericSink {
+    fn accept(self, value: Float) -> Float
+}
+struct Holder { seed: Int }
+impl Holder.NumericSink {
+    fn accept(self, value: Float) -[]> Float { return value }
+}
+impl Holder {
+    fn instance(self, value: Float) -[]> Float { return value }
+    fn static(value: Float) -[]> Float { return value }
+}
+module numeric_helpers {
+    pub fn accept(value: Float) -[]> Float { return value }
+}
+fn accept_float(value: Float) -[]> Float { return value }
+fn run() {
+    narrow :: I32{7}
+    holder :: Holder{seed: 0}
+    callback :: accept_float
+    print(holder.instance(narrow) == 7.0)
+    print(Holder.static(narrow) == 7.0)
+    print(callback(narrow) == 7.0)
+    print(&numeric_helpers.accept(narrow) == 7.0)
+    print(&holder.accept(narrow) == 7.0)
+    widened :: [accept_float(narrow)]
+    print(widened[0] == 7.0)
+}
+`
+    assert_all_tiers("numeric_widen_user_call_seams", source, 0, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n")
+}
+// Rust: tests/numeric_widening.rs:391
+#Test("numeric_arguments_widen_across_imported_call_seams") {
+    files :: [("main.jet", `use "./helper" as helper
+fn run() {
+    narrow :: I32{7}
+    print(helper.accept(narrow) == 7.0)
+}
+`), ("helper.jet", `pub fn accept(value: Float) -[]> Float { return value }
+`)]
+    assert_all_tiers_multi("numeric_widen_imported_call", files, 0, "true\n")
+}
+// Rust: tests/numeric_widening.rs:417
+#Test("numeric_multi_producer_joins_widen_every_producer_across_tiers") {
+    source :: `fn run() {
+    small :: U8{1}
+    wide :: U16{2}
+    choose_first :: true
+    small_first :: if choose_first -> small else -> wide
+    wide_first :: if choose_first -> wide else -> small
+    print(small_first == U16{1})
+    print(wide_first == U16{2})
+    small_first_list :: [small, wide]
+    wide_first_list :: [wide, small]
+    print(small_first_list[0] == U16{1})
+    print(small_first_list[1] == U16{2})
+    print(wide_first_list[0] == U16{2})
+    print(wide_first_list[1] == U16{1})
+    exact :: Int{9007199254740992}
+    decimal :: Float{1.0}
+    exact_if :: if choose_first -> exact else -> decimal
+    exact_list :: [exact, decimal]
+    print(exact_if == 9007199254740992.0)
+    print(exact_list[0] == 9007199254740992.0)
+    lossy :: Int{9007199254740993}
+    rounded :: Float{9007199254740992.0}
+    approx_if :: if choose_first -> approx(lossy) else -> decimal
+    approx_list :: [approx(lossy), decimal]
+    print(approx_if == rounded)
+    print(approx_list[0] == rounded)
+}
+`
+    assert_all_tiers("numeric_multi_producer_joins", source, 0, "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n")
+}
+// Rust: tests/numeric_widening.rs:461
+#Test("widening_does_not_search_for_a_third_type_or_narrow") {
+    no_join :: compile_error(`fn run() {
+    unsigned :: U8{1}
+    signed :: I8{1}
+    _ :: unsigned + signed
+}
+`)
+    assert(no_join.contains("[E0109]") && no_join.contains("Neither U8 contains every value of I8"), no_join)
+    narrowing :: compile_error(`fn take_i8(value: I8) {}
+fn run() {
+    wide :: I16{1}
+    take_i8(wide)
+}
+`)
+    assert(narrowing.contains("[E0112]"), narrowing)
+    spread_widening :: compile_error(`fn run() {
+    small :: [U8{1}]
+    _ :: [...small, U16{2}]
+}
+`)
+    assert(spread_widening.contains("[E0504]") && spread_widening.contains("list resolves to `U16`"), spread_widening)
+}
+// Rust: tests/numeric_widening.rs:502
+#Test("bare_whole_literals_take_the_minimal_width_before_operator_join") {
+    source :: `fn run() {
+    byte :: U8{1}
+    signed :: I8{1}
+    left :: byte + 256
+    right :: 256 + byte
+    print(left == U16{257})
+    print(right == U16{257})
+    print((signed + 1) == I8{2})
+    print((1 + signed) == I8{2})
+    print((byte + 1) == U8{2})
+    print((1 + byte) == U8{2})
+    print((I8{0} + 127) == I8{127})
+    print((I16{0} + 128) == I16{128})
+    print((I8{0} + -128) == I8{-128})
+    print((I16{0} + -129) == I16{-129})
+    print((U64{0} + 9223372036854775807) == U64{9223372036854775807})
+}
+`
+    assert_all_tiers("numeric_minimal_literal_join", source, 0, "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n")
+    rendered :: compile_error("fn run() { _ :: U8{256} }")
+    assert(rendered.contains("[E1003]") && rendered.contains("U8") && rendered.contains("255"), rendered)
+    loop value in ["18446744073709551616"] {
+        too_wide :: compile_error("fn run() \{ _ :: U64\{{value}\} \}")
+        assert(too_wide.contains("[E1003]") && too_wide.contains("A `U64` holds 0..18446744073709551615"), too_wide)
+    }
+    signed_rendered :: compile_error("fn run() { _ :: I64{9223372036854775808} }")
+    assert(signed_rendered.contains("[E1003]") && signed_rendered.contains("An `I64` holds -9223372036854775808..9223372036854775807"), signed_rendered)
+}
+// Rust: tests/numeric_widening.rs:553
+#Test("fixed_width_overflow_methods_match_all_execution_tiers") {
+    source :: `fn run() {
+    a :: U8{200}
+    b :: U8{100}
+    fb :: U8{0}
+    print(a.wrapping_add(b))
+    print(a.saturating_add(b))
+    print(a.checked_add(b) ?? fb)
+    print(a.checked_rem(b) ?? fb)
+}
+`
+    assert_all_tiers("numeric_overflow_methods", source, 0, "44\n255\n0\n0\n")
+}
+// Rust: tests/numeric_widening.rs:569
+#Test("exact_and_approximate_widening_requires_approx_for_narrowing") {
+    success :: `fn take_float(value: Float) -> Float { return value }
+fn run() {
+    exact :: Int{9007199254740992}
+    lossy :: Int{9007199254740993}
+    print(take_float(exact) == 9007199254740992.0)
+    print(take_float(approx(lossy)) == 9007199254740992.0)
+}
+`
+    assert_all_tiers("exact_approximate_widening", success, 0, "true\ntrue\n")
+    narrowing :: `fn take_float(value: Float) -> Float { return value }
+fn run() {
+    lossy :: Int{9007199254740993}
+    take_float(lossy)
+}
+`
+    assert_trap_all_tiers("exact_narrowing_requires_approx", narrowing)
+}

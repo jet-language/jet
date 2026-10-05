@@ -1,0 +1,331 @@
+use tests.conformance.corpus.core.port.http_server_tls.*
+use tests.common as common
+use tests.tir_support as tir_support
+use tests.tir_support.[assert_tiers_agree, build_and_run, build_and_run_full, have_rustc]
+use std.fs as fs
+use std.process.[Command]
+use jet.[compile, compile_with_path, render_diagnostics, Loader, Sema, Diagnostics, Interpreter]
+// GATE #4494: actual native FS/process/allocator fixture leaves. Source only.
+
+// Rust: tests/http_server_tls.rs:15
+#Test("server_tls_option_validates_fixture_before_binding") {
+    if !have_rustc() || !have_cargo() {
+        std.io.stderr().write_all("note: skipping server TLS bridge test (need cargo + rustc)\n".bytes())
+        return
+    }
+    cert :: jet_string(fs.read_to_string(OSPath.from_text("tests/fixtures/tls/localhost.cert.pem")).unwrap())
+    key :: jet_string(fs.read_to_string(OSPath.from_text("tests/fixtures/tls/localhost.key.pem")).unwrap())
+    src :: "use core.http.server as server\nfn run() -> {\n    mux :: server.mux()\n    result :: server.serve(\"127.0.0.1:999999\", mux, tls: server.tls({cert}, {key}))\n    if result == {\n        Ok(_) -> { print(\"unexpected\") }\n        Err(e) -> { print(e) }\n    }\n}\n"
+    (code, stdout, stderr) :: common.build_and_run("jet_http_server_tls", "valid_fixture", src)
+    assert_eq(code, 0, "{stderr}")
+    assert(stdout.contains("bind on `127.0.0.1:999999` failed"), "fixture should validate before controlled bind failure:\nstdout={stdout}\nstderr={stderr}")
+    assert(!stdout.contains("TLS certificate"), "{stdout}")
+}
+// Rust: tests/http_server_tls.rs:47
+#Test("server_tls_bad_cert_is_jet_voiced") {
+    if !have_rustc() || !have_cargo() {
+        std.io.stderr().write_all("note: skipping server TLS bridge test (need cargo + rustc)\n".bytes())
+        return
+    }
+    src :: `use core.http.server as server
+fn run() -> {
+    mux :: server.mux()
+    result :: server.serve("127.0.0.1:999999", mux, tls: server.tls("not a cert", "not a key"))
+    if result == {
+        Ok(_) -> { print("unexpected") }
+        Err(e) -> { print(e) }
+    }
+}
+`
+    (code, stdout, stderr) :: common.build_and_run("jet_http_server_tls", "bad_cert", src)
+    assert_eq(code, 0, "{stderr}")
+    assert(stdout.contains("TLS certificate PEM did not contain a certificate"), "bad cert should stay Jet-voiced:\nstdout={stdout}\nstderr={stderr}")
+}
+// Rust: tests/http_server_tls.rs:74
+#Test("server_tls_requires_named_tls_option") {
+    src :: `use core.http.server as server
+fn run() -> {
+    mux :: server.mux()
+    _ :: server.serve("127.0.0.1:0", mux, server.tls("cert", "key"))
+}
+`
+    err :: compile(src).expect_err("unlabeled third server argument should be rejected")
+    rendered :: render_diagnostics("tests/http_server_tls/bad_label.jet", src, err)
+    assert(rendered.contains("Error [E0125]"), "{rendered}")
+    assert(rendered.contains("`serve` needs `tls:` before the third argument"), "{rendered}")
+}
+// Rust: tests/http_server_tls.rs:94
+#Test("server_bind_tls_requires_named_tls_option") {
+    src :: `use core.http.server as server
+fn run() -> {
+    mux :: server.mux()
+    _ :: server.bind("127.0.0.1:0", mux, server.tls("cert", "key"))
+}
+`
+    err :: compile(src).expect_err("unlabeled bind TLS argument should be rejected")
+    rendered :: render_diagnostics("tests/http_server_tls/bad_bind_label.jet", src, err)
+    assert(rendered.contains("Error [E0125]"), "{rendered}")
+    assert(rendered.contains("`bind` needs `tls:` before the third argument"), "{rendered}")
+}
+// Rust: tests/http_server_tls.rs:114
+#Test("server_bind_tls_labeled_compiles") {
+    src :: `use core.http.server as server
+fn run() -> {
+    mux :: server.mux()
+    _ :: server.bind("127.0.0.1:0", mux, tls: server.tls("cert", "key"))
+}
+`
+    compile(src) catch err -> {
+        rendered :: render_diagnostics("tests/http_server_tls/labeled_bind.jet", src, err)
+        assert(!rendered.contains("E0104"), "labeled bind+tls must not be rejected as arity-2:\n{rendered}")
+        assert(!rendered.contains("E0125"), "labeled bind+tls must not be rejected for missing tls: label:\n{rendered}")
+        assert(!rendered.contains("typed IR does not cover"), "labeled bind+tls must be in the TIR subset:\n{rendered}")
+    }
+}
+// Rust: tests/http_server_tls.rs:148
+#Test("server_bind_tls_validates_fixture_before_binding") {
+    if !have_rustc() || !have_cargo() {
+        std.io.stderr().write_all("note: skipping server bind TLS bridge test (need cargo + rustc)\n".bytes())
+        return
+    }
+    cert :: jet_string(fs.read_to_string(OSPath.from_text("tests/fixtures/tls/localhost.cert.pem")).unwrap())
+    key :: jet_string(fs.read_to_string(OSPath.from_text("tests/fixtures/tls/localhost.key.pem")).unwrap())
+    src :: "use core.http.server as server\nfn run() -> {\n    mux :: server.mux()\n    result :: server.bind(\"127.0.0.1:999999\", mux, tls: server.tls({cert}, {key}))\n    if result == {\n        Ok(_) -> { print(\"unexpected\") }\n        Err(e) -> { print(e) }\n    }\n}\n"
+    (code, stdout, stderr) :: common.build_and_run("jet_http_server_tls", "bind_valid_fixture", src)
+    assert_eq(code, 0, "{stderr}")
+    assert(stdout.contains("bind on `127.0.0.1:999999` failed"), "labeled bind+tls must validate PEM then hit controlled bind failure:\nstdout={stdout}\nstderr={stderr}")
+    assert(!stdout.contains("TLS certificate"), "{stdout}")
+}
+// Rust: tests/int_division.rs:16
+#Test("int_division_answers_the_true_quotient") {
+    if !have_rustc() { return }
+    src :: "{SEED}\nfn run() -> {\n    print(score(7) / score(2))\n    print(score(6) / score(2))\n    print(score(-7) / score(2))\n    print(score(1) / score(4))\n}\n"
+    (code, out) :: build_and_run("intdiv_quotient", src)
+    assert_eq(code, 0, "{out}")
+    assert_eq(out, "3.5\n3\n-3.5\n0.25\n", "{out}")
+}
+// Rust: tests/int_division.rs:38
+#Test("int_division_lands_exact") {
+    if !have_rustc() { return }
+    src :: "{SEED}\nfn want_float(x: Float) -> {\n    print(x)\n}\nfn run() -> {\n    exact :: score(7) / score(2)\n    print(exact)\n    print(7 / 3)\n    want_float(Float.from_fraction(exact))\n}\n"
+    assert_tiers_agree("intdiv_exact", src, "3.5\n7/3\n3.5\n")
+}
+// Rust: tests/int_division.rs:64
+#Test("storing_a_quotient_in_a_whole_number_points_at_floor_division") {
+    dir :: std.env.temp_dir().join("jet_intdiv_{std.process.id()}")
+    fs.create_dir_all(dir).unwrap()
+    loop src in [
+        "fn run() -> {\n    n := 7\n    n /= 2\n    print(n)\n}\n",
+        "fn run() -> {\n    n := 7\n    n = n / 2\n    print(n)\n}\n",
+        "struct Boxed { value: Int }\nfn run() -> {\n    item :: Boxed{ value: 7 / 2 }\n}\n"
+    ] {
+        path :: dir.join("intdiv_compound.jet")
+        fs.write(path, src).unwrap()
+        shown :: path.to_string_lossy()
+        diags :: compile_with_path(src, shown).err().unwrap_or_default()
+        rendered :: render_diagnostics(shown, src, diags)
+        assert(diags.iter().any(d -> { d.code == "E0108" }), "expected a type error for a quotient stored in a whole number:\n{rendered}")
+        assert(rendered.contains("Use `/%` to divide and round down"), "the fix must name floor division:\n{rendered}")
+    }
+}
+// Rust: tests/int_division.rs:92
+#Test("floor_division_remains_the_whole_number_path") {
+    if !have_rustc() { return }
+    src :: "{SEED}\nfn want_int(n: Int) -> {\n    print(n)\n}\nfn run() -> {\n    want_int(score(17) /% score(2))\n    running := score(9)\n    running /%= score(2)\n    want_int(running)\n}\n"
+    (code, out) :: build_and_run("intdiv_floor_still_int", src)
+    assert_eq(code, 0, "{out}")
+    assert_eq(out, "8\n4\n", "{out}")
+}
+// Rust: tests/int_division.rs:119
+#Test("int_division_agrees_on_every_tier") {
+    src :: "{SEED}\nfn run() -> {\n    print(score(7) / score(2))\n    print(score(6) / score(2))\n    print(score(-7) / score(2))\n    print(score(1) / score(4))\n    total :: score(8) + score(9)\n    print(total / score(2))\n    print(score(17) /% score(2))\n}\n"
+    assert_tiers_agree("intdiv_tiers", src, "3.5\n3\n-3.5\n0.25\n8.5\n8\n")
+}
+// Rust: tests/int_division.rs:141
+#Test("fixed_width_divide_by_zero_traps_with_prelude_wording") {
+    if !have_rustc() { return }
+    loop (name, src) in [
+        ("u8_div_zero", `fn run() -> {
+    a :: U8{10}
+    zero :: U8{0}
+    print(a / zero)
+}
+`),
+        ("i8_div_zero", `fn run() -> {
+    a :: I8{10}
+    zero :: I8{0}
+    print(a / zero)
+}
+`),
+        ("u8_param_div_zero", `fn div(a: U8, zero: U8) -> { print(a / zero) }
+fn run() -> { div(U8{10}, U8{0}) }
+`),
+        ("u8_call_div_zero", `fn score(n: U8) -> U8 { return n }
+fn run() -> { print(score(U8{10}) / score(U8{0})) }
+`)
+    ] {
+        (code, out, err) :: build_and_run_full("jet_intdiv", name, src)
+        assert_eq(code, 70, "{name}: fixed-width / by zero must exit 70, got {code}; out={out} err={err}")
+        assert(err.contains("E3010") && err.contains("divided by zero"), "{name}: expected Prelude division wording, got: {err}")
+        assert(!err.contains("attempt to divide by zero"), "{name}: raw Rust panic leaked (I2): {err}")
+        // Retired resident-JIT representation probe becomes the canonical O0 path.
+        (run_code, run_out, run_err) :: tir_support.run_default("{name}_o0", src)
+        assert_eq(run_code, 70, "{name}: jet run must exit 70 (I9), got {run_code}: {run_out}{run_err}")
+        assert(run_err.contains("Stop [E3010]: `divided by zero`"), "{name}: jet run expected the E3010 Prelude stop, got: {run_err}")
+        assert(!run_err.contains("E0953") && !run_err.contains("attempt to divide by zero"), "{name}: jet run must not use E0953 or raw Rust panic: {run_err}")
+    }
+}
+// Rust: tests/int_division.rs:222
+#Test("integer_ring_modulo_and_division_preserve_tier_output") {
+    source :: fs.read_to_string(OSPath.from_text("tests/int_ring_witness.jet")).unwrap()
+    assert_tiers_agree("int_ring_mod_div", source, "613081333\n")
+}
+// Rust: tests/int_division.rs:234
+#Test("exact_int_overflow_edges_agree_on_every_tier") {
+    src :: SEED + `
+fn run() -> {
+    max :: score(9223372036854775807)
+    top :: score(4611686018427387903)
+    bottom :: score(-4611686018427387904)
+    print(max + score(1))
+    print(top + score(1))
+    print(bottom - score(1))
+    print((top + score(1)) - score(1))
+    print(-bottom)
+    print(top * score(2))
+    print(bottom * score(-1))
+    print(score(3037000499) * score(3037000499))
+    print(score(3037000500) * score(3037000500))
+    print(bottom /% score(-1))
+    print(bottom %% score(-1))
+    print(score(7) /% score(2))
+    print(score(-7) /% score(2))
+    print(score(7) /% score(-2))
+    print(score(-7) /% score(-2))
+    print(score(7) % score(2))
+    print(score(-7) % score(2))
+    print(score(7) % score(-2))
+    print(score(-7) % score(-2))
+    print(score(7) %% score(2))
+    print(score(-7) %% score(2))
+    print(score(7) %% score(-2))
+    print(score(-7) %% score(-2))
+    print(score(-6) % score(3))
+    print(score(-6) /% score(4))
+    print(bottom /% score(3))
+    print(bottom % score(3))
+    print((max + score(1)) /% score(-3))
+    print((max + score(1)) % score(-3))
+    print(score(1) << score(61))
+    print(score(1) << score(62))
+    print(score(-1) << score(62))
+    print(score(3) << score(100))
+    print(score(-7) >> score(1))
+    print(score(-1) >> score(200))
+    print(score(7) >> score(200))
+    print(score(-12) & score(13))
+    print(score(-12) | score(10))
+    print(score(-12) ~| score(13))
+    print(bottom ~| score(-1))
+    print(score(-7) < score(2))
+    print(bottom < top)
+    print((max + score(1)) > top)
+}
+`
+    assert_tiers_agree("exact_int_edges", src, "9223372036854775808\n4611686018427387904\n-4611686018427387905\n4611686018427387903\n4611686018427387904\n9223372036854775806\n4611686018427387904\n9223372030926249001\n9223372037000250000\n4611686018427387904\n0\n3\n-4\n-4\n3\n1\n1\n-1\n-1\n1\n-1\n1\n-1\n0\n-2\n-1537228672809129302\n2\n-3074457345618258603\n-1\n2305843009213693952\n4611686018427387904\n-4611686018427387904\n3802951800684688204490109616128\n-4\n-1\n0\n4\n-2\n-7\n4611686018427387903\ntrue\ntrue\ntrue\n")
+}
+// Rust: tests/int_division.rs:343
+#Test("exact_int_inline_loop_allocations_do_not_scale") {
+    if !have_rustc() { return }
+    src :: `#CLI struct Args { rounds: Int }
+fn churn(rounds: Int) -> Int {
+    total := 0
+    loop i in 0..<rounds {
+        total = (total * 31 + i * 7 - 3) % 1000003
+        total += (i /% 3) %% 5
+    }
+    total
+}
+fn run(args: Args) -> { print(churn(args.rounds) >= 0) }
+`
+    scratch :: common.Scratch.new("exact_int_allocations")
+    dir :: scratch.path
+    tir_support.write_test_package(dir, tir_support.TIR_TEST_PACKAGE)
+    jet_path :: dir.join("churn.jet")
+    fs.write(jet_path, src).unwrap()
+    shown :: jet_path.to_string_lossy()
+    rust :: compile_with_path(src, shown).unwrap_or_else(diags -> { panic("front end rejected:\n{render_diagnostics(shown, src, diags)}") }).rust
+    assert(!rust.contains("#[global_allocator]"), "the default AOT program must keep the hidden system heap")
+    assert_eq(rust.matches("\nfn main() {\n").count(), 1, "emitted AOT program must have one entry to wrap")
+    // Rust peer fixture text remains Rust; this is not a production bridge.
+    counted :: rust.replacen("\nfn main() {\n", "\nfn __jet_emitted_main() {\n", 1) + `
+struct JetAllocationCounter;
+static JET_ALLOCATIONS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+unsafe impl std::alloc::GlobalAlloc for JetAllocationCounter {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        JET_ALLOCATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        unsafe { std::alloc::GlobalAlloc::alloc(&std::alloc::System, layout) }
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        unsafe { std::alloc::GlobalAlloc::dealloc(&std::alloc::System, ptr, layout) }
+    }
+}
+#[global_allocator]
+static JET_ALLOCATION_COUNTER: JetAllocationCounter = JetAllocationCounter;
+fn main() {
+    __jet_emitted_main();
+    eprintln!("jet-allocations={}", JET_ALLOCATIONS.load(std::sync::atomic::Ordering::Relaxed));
+}
+`
+    rs :: dir.join("churn.rs")
+    bin :: dir.join("churn")
+    fs.write(rs, counted).unwrap()
+    rustc :: Command.new("rustc").args(["--edition", "2021", "--crate-name", "churn"]).args([rs.to_str().unwrap(), "-o", bin.to_str().unwrap()]).output().unwrap()
+    assert(rustc.status.success(), "rustc rejected the counted AOT program:\n{String.from_utf8_lossy(rustc.stderr)}")
+    allocations :: (rounds: String) -> {
+        run :: Command.new(bin).arg(rounds).output().unwrap()
+        stderr :: String.from_utf8_lossy(run.stderr)
+        assert(run.status.success(), "{rounds} rounds failed: {stderr}")
+        assert_eq(String.from_utf8_lossy(run.stdout), "true\n", "{rounds} rounds")
+        text :: stderr.lines().find_map(line -> { line.strip_prefix("jet-allocations=") }).unwrap_or_else(() -> { panic("no allocation count in: {stderr}") })
+        text.parse<Int>().unwrap()
+    }
+    small :: allocations("1000")
+    large :: allocations("100000")
+    assert(large <= small + 64, "exact-Int loop allocations scale with iterations: {small} at 1e3 vs {large} at 1e5")
+}
+// Rust: tests/jit_shared_ownership.rs:126
+#Test("resident_jit_preserves_shared_and_closure_owner_topology") {
+    // Retired Cranelift/resident trace assertions cut over to canonical O0/O1/O2/Web behavior.
+    dir :: common.unique_tmp("jit_shared_ownership")
+    fs.create_dir_all(dir).expect("create scratch fixture directory")
+    file :: dir.join("shared_ownership.jet")
+    fs.write(file, SOURCE).expect("write Shared ownership fixture")
+    shown :: file.to_string_lossy()
+    bundle := Loader.load_entry(shown).expect("load Shared ownership fixture")
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(diagnostics.iter().all(d -> { d.severity != Diagnostics.Severity.Error }), "Shared ownership fixture diagnostics: {diagnostics}")
+    stdout :: match Interpreter.dev_iteration(shown, false, false) {
+        Interpreter.RunOutcome.Ran{stdout, stderr, exit_code} -> {
+            assert_eq(exit_code, 0, "O0 shared ownership stderr: {stderr}")
+            assert(stderr.is_empty(), "O0 shared ownership stderr: {stderr}")
+            stdout
+        }
+        Interpreter.RunOutcome.Problems(diagnostics) -> { panic("Shared ownership fixture failed: {diagnostics}") }
+    }
+    expected :: "1\n2\n2\n1\n1\n7\n8\ntrue\n8\n102\n202\n302\n2\n1\n1\n13\n1\ntrue\n11\n1\ntrue\ntrue\ntrue\n"
+    assert_eq(stdout, expected)
+    assert_tiers_agree("shared_closure_owner_topology", SOURCE, expected)
+    fs.remove_dir_all(dir).expect("remove scratch fixture directory")
+}
+// Rust: tests/measurement_exact_mixing.rs:6
+#Test("exact_values_enter_measurement_with_zero_uncertainty") {
+    source :: `fn run() -> {
+    measured :: measurement(12.0, uncertainty: 0.1)
+    exact :: 2
+    print(measured + exact)
+    print(exact + measured)
+}
+`
+    assert_tiers_agree("measurement_exact_mixing", source, "14.0 ± 0.1\n14.0 ± 0.1\n")
+}

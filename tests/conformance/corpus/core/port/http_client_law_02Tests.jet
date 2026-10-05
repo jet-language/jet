@@ -818,3 +818,459 @@ fn run() {
     }
     server.join().unwrap()
 }
+
+// Rust: tests/http_client_law.rs:3187
+#Test("cross_origin_redirect_strips_request_credentials_and_rejects_proxy_auth") {
+    first_listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    second_listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    forbidden_listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    forbidden_listener.set_nonblocking(true).unwrap()
+    first_addr :: first_listener.local_addr().unwrap()
+    second_addr :: second_listener.local_addr().unwrap()
+    forbidden_addr :: forbidden_listener.local_addr().unwrap()
+    forbidden :: thread.spawn(() -> {
+        deadline :: Instant.now() + Duration.from_secs(1)
+        loop {
+            if forbidden_listener.accept() == {
+                .Ok(_) -> return true
+                .Err(error) -> {
+                    if error.kind() != ErrorKind.WouldBlock { return false }
+                    if Instant.now() >= deadline { return false }
+                    thread.yield_now()
+                }
+            }
+        }
+    })
+    server :: thread.spawn(() -> {
+        (first, _) := first_listener.accept().unwrap()
+        first_request :: String.from_utf8_lossy(request_head(&first)).to_ascii_lowercase()
+        loop header in ["authorization: bearer secret\r\n", "cookie: session=secret\r\n"] {
+            assert(first_request.contains(header), "initial request omitted `{header}`: {first_request}")
+        }
+        assert(!first_request.contains("proxy-authorization:"), "the valid request must not carry raw proxy credentials: {first_request}")
+        assert(first_request.starts_with("get /start "))
+        first.write_all("HTTP/1.1 302 Found\r\nLocation: http://{second_addr}/next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".as_bytes()).unwrap()
+        drop(^first)
+        (second, _) := second_listener.accept().unwrap()
+        second_request :: String.from_utf8_lossy(request_head(&second)).to_ascii_lowercase()
+        assert(second_request.starts_with("get /next "))
+        loop header in ["authorization:", "proxy-authorization:", "cookie:"] {
+            assert(!second_request.contains(header), "cross-origin redirect leaked `{header}`: {second_request}")
+        }
+        second.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok").unwrap()
+    })
+    src :: """
+use core.http.client as http
+fn run() {
+    client :: http.Client.new().redirects(.Follow{ max: 2, same_origin_credentials: true }).protocols(false, true, false)
+    forbidden :: http.request("GET", "http://{forbidden_addr}/forbidden").header("Proxy-Authorization", "Basic secret")
+    if client.send(forbidden) == {
+        .Ok(_) -> print("proxy-auth accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("proxy-auth rejected")
+            else -> print("proxy-auth wrong")
+        }
+        else -> print("proxy-auth unexpected")
+    }
+    req :: http.request("GET", "http://{first_addr}/start").header("Authorization", "Bearer secret").header("Cookie", "session=secret")
+    resp :: client.send(req) ?? panic("send")
+    print(resp.body().text(8) ?? panic("body"))
+    print(resp.redirect_history().len())
+}
+"""
+    (code, stdout, stderr) :: common.build_and_run("jet_http_client_law", "cross_origin_creds", src)
+    server.join().unwrap()
+    assert(!forbidden.join().unwrap(), "raw proxy credentials reached the socket")
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "proxy-auth rejected\nok\n1\n")
+}
+
+// Rust: tests/http_client_law.rs:3280
+#Test("request_first_byte_timeout_overrides_client_phase_budget") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        _ :: request_head(&stream)
+        thread.sleep(Duration.from_millis(250))
+        _ :: stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nlate")
+    })
+    src :: """
+use core.http.client as http
+fn run() {
+    client :: http.Client.new().timeouts(5000, 5000, 5000, 5000, 5000, 5000, 5000)
+    req :: http.request("GET", "http://{addr}/slow").first_byte_timeout(40)
+    if client.send(req) == {
+        .Ok(_) -> print("ok")
+        .Err(_) -> print("timeout")
+    }
+}
+"""
+    (code, stdout, stderr) :: common.build_and_run("jet_http_client_law", "req_first_byte", src)
+    server.join().unwrap()
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "timeout\n")
+}
+
+// Rust: tests/http_client_law.rs:3311
+#Test("stale_pooled_safe_retries_and_opt_in_are_bounded") {
+    // RST forces a pre-write ECONNRESET, not a post-write EOF that must not reconnect.
+    // Rust: tests/http_client_law.rs:3314
+    fn rst_before_next_write(stream: TcpStream) -> {
+        // GATE #4494: C layout, retained native descriptor, audited setsockopt.
+        // Rust: tests/http_client_law.rs:3317
+        #Repr(C)
+        type Linger { l_onoff: I32, l_linger: I32 }
+        // Rust: tests/http_client_law.rs:3323
+        #FFI(c)
+        fn setsockopt(sockfd: I32, level: I32, optname: I32, optval: *U8, optlen: U32) -> I32
+        // Rust: tests/http_client_law.rs:3332-3333; Linux-specific law harness constants.
+        SOL_SOCKET :: 1i32
+        SO_LINGER :: 13i32
+        linger :: Linger{l_onoff: 1, l_linger: 0}
+        result :: #Unsafe("SO_LINGER reads one initialized C-layout value while its owner and stream are live") {
+            setsockopt(stream.as_raw_fd(), SOL_SOCKET, SO_LINGER, (&linger).cast(), U32{std.mem.size_of::<Linger>()})
+        }
+        assert_eq(result, 0, "SO_LINGER setup failed: {std.io.Error.last_os_error()}")
+        drop(^stream)
+    }
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    listener.set_nonblocking(true).unwrap()
+    addr :: listener.local_addr().unwrap()
+    url :: "http://{addr}/"
+    puts :: Arc.new(AtomicUsize.new(0))
+    puts_observed :: puts.clone()
+    server :: thread.spawn(() -> {
+        accept :: () -> {
+            deadline :: Instant.now() + Duration.from_secs(5)
+            loop {
+                if listener.accept() == {
+                    .Ok((stream, _)) -> {
+                        stream.set_nonblocking(false).unwrap()
+                        return ^stream
+                    }
+                    .Err(error) -> {
+                        if error.kind() != ErrorKind.WouldBlock { panic("retry accept failed: {error}") }
+                        assert(Instant.now() < deadline, "timed out waiting for retry connection")
+                        thread.sleep(Duration.from_millis(1))
+                    }
+                }
+            }
+        }
+        stream := accept()
+        assert(request_head(&stream).starts_with(b"GET /warm HTTP/1.1\r\n"))
+        stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nw").unwrap()
+        // A second request on THIS socket proves reuse; always-dial clients fail here.
+        assert(request_head(&stream).starts_with(b"GET /reuse HTTP/1.1\r\n"), "expected pooled reuse on the same TCP connection")
+        stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nr").unwrap()
+        rst_before_next_write(^stream)
+        retry_stream := accept()
+        assert(request_head(&retry_stream).starts_with(b"GET /retry HTTP/1.1\r\n"), "Safe must reconnect once after write-before-bytes IO on a reused pool socket")
+        retry_stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok").unwrap()
+        rst_before_next_write(^retry_stream)
+        warm2_stream := accept()
+        assert(request_head(&warm2_stream).starts_with(b"GET /warm2 HTTP/1.1\r\n"))
+        warm2_stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nx").unwrap()
+        rst_before_next_write(^warm2_stream)
+        warm3_stream := accept()
+        head3 :: request_head(&warm3_stream)
+        assert(head3.starts_with(b"GET /warm3 HTTP/1.1\r\n"), "POST must not dial a retry; next live request is warm3, got {String.from_utf8_lossy(head3)}")
+        warm3_stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\ny").unwrap()
+        rst_before_next_write(^warm3_stream)
+        warm4_stream := accept()
+        head4 :: request_head(&warm4_stream)
+        assert(head4.starts_with(b"GET /warm4 HTTP/1.1\r\n"), "retries(.None) must not reconnect; next is warm4, got {String.from_utf8_lossy(head4)}")
+        warm4_stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nz").unwrap()
+        rst_before_next_write(^warm4_stream)
+        warm5_stream := accept()
+        head5 :: request_head(&warm5_stream)
+        assert(head5.starts_with(b"GET /warm5 HTTP/1.1\r\n"), "Safe must not dial PUT retry; next is warm5, got {String.from_utf8_lossy(head5)}")
+        warm5_stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nq").unwrap()
+        rst_before_next_write(^warm5_stream)
+        put_stream := accept()
+        _ :: puts_observed.fetch_add(1, Ordering.Relaxed)
+        assert(request_head(&put_stream).starts_with(b"PUT /allowed HTTP/1.1\r\n"))
+        put_stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok").unwrap()
+    })
+    src :: """
+use jet_http_bridge as bridge
+use std.fs as fs
+use std.time.[Duration, Instant]
+use std.thread
+// Rust: tests/http_client_law.rs:3478 (native harness)
+fn send(client: I64, method: String, url: String, body: [U8]?) -> bridge.JetHTTPResponseParts bridge.JetHTTPBridgeError! {
+    bridge.jet_http_client_send_with_impl(
+        client, method, url, [], body,
+        Some(2000), Some(2000), Some(2000), Some(2000),
+        Some(2000), Some(2000), Some(2000), Some(2000), None, None, [], [], []
+    )
+}
+// Rust: tests/http_client_law.rs:3506
+fn drain(handle: I64) -> [U8] {
+    out := [U8]{}
+    loop {
+        chunk :: bridge.jet_http_client_body_read_impl(handle, 64).unwrap()
+        if chunk == None { break }
+        out.extend_from_slice(chunk.unwrap())
+    }
+    ^out
+}
+// Rust: tests/http_client_law.rs:3514
+fn wait_for_pooled_rst() -> {
+    // GATE #4494: C layout, fd enumeration and poll; Linux-specific law harness.
+    #Repr(C)
+    type PollFd { fd: I32, events: I16, revents: I16 }
+    #FFI(c)
+    fn poll(fds: *PollFd, nfds: USize, timeout: I32) -> I32
+    POLLIN :: 0x0001i16
+    POLLERR :: 0x0008i16
+    sockets :: fs.read_dir("/proc/self/fd").unwrap().filter_map(entry -> {
+        item :: entry.ok()?
+        target :: fs.read_link(item.path()).ok()?
+        if !target.to_string_lossy().starts_with("socket:[") { return None }
+        item.file_name().to_string_lossy().parse::<I32>().ok()
+    }).collect::<[I32]>()
+    assert(!sockets.is_empty(), "expected a pooled TCP socket after warm/reuse")
+    // Resolver/netlink FDs may also occur; wait for RST on at least one socket.
+    deadline :: Instant.now() + Duration.from_secs(2)
+    loop {
+        loop fd in sockets {
+            socket := PollFd{fd: fd, events: POLLIN, revents: 0}
+            ready :: #Unsafe("poll writes only the live initialized single PollFd value") { poll(&socket, 1, 0) }
+            if ready == 1 && socket.revents & POLLERR != 0 { return }
+        }
+        assert(Instant.now() < deadline, "pooled socket reset was not observed before retry; sockets={sockets}")
+        thread.sleep(Duration.from_millis(1))
+    }
+}
+// Rust: tests/http_client_law.rs:3565 (harness entry)
+fn run() {
+    base :: "{url}"
+    root :: bridge.jet_http_client_new_impl()
+    safe_proto :: bridge.jet_http_client_protocols_impl(root, false, true, false).unwrap()
+    bridge.jet_http_client_drop_impl(root)
+    safe :: bridge.jet_http_client_timeouts_impl(safe_proto, 2000, 2000, 2000, 2000, 2000, 2000, Some(2000)).unwrap()
+    first :: send(safe, "GET", "{base}warm", None).unwrap()
+    assert(!first.context.reused_connection)
+    assert_eq(drain(first.body_handle), b"w")
+    pooled :: send(safe, "GET", "{base}reuse", None).unwrap()
+    assert(pooled.context.reused_connection, "write-path retry proof requires a reused pooled connection first")
+    assert_eq(drain(pooled.body_handle), b"r")
+    wait_for_pooled_rst()
+    second :: send(safe, "GET", "{base}retry", None).unwrap()
+    assert(!second.context.reused_connection, "write-before-bytes IO reconnect must dial fresh")
+    assert_eq(drain(second.body_handle), b"ok")
+    wait_for_pooled_rst()
+    third :: send(safe, "GET", "{base}warm2", None).unwrap()
+    assert_eq(drain(third.body_handle), b"x")
+    wait_for_pooled_rst()
+    assert(send(safe, "POST", "{base}unsafe", Some(b"nope")).is_err())
+    none_root :: bridge.jet_http_client_new_impl()
+    none_proto :: bridge.jet_http_client_protocols_impl(none_root, false, true, false).unwrap()
+    bridge.jet_http_client_drop_impl(none_root)
+    none_retry :: bridge.jet_http_client_retries_impl(none_proto, 0).unwrap()
+    none :: bridge.jet_http_client_timeouts_impl(none_retry, 2000, 2000, 2000, 2000, 2000, 2000, Some(2000)).unwrap()
+    fourth :: send(none, "GET", "{base}warm3", None).unwrap()
+    assert_eq(drain(fourth.body_handle), b"y")
+    wait_for_pooled_rst()
+    assert(send(none, "GET", "{base}again", None).is_err())
+    bridge.jet_http_client_drop_impl(none)
+    fifth :: send(safe, "GET", "{base}warm4", None).unwrap()
+    assert_eq(drain(fifth.body_handle), b"z")
+    wait_for_pooled_rst()
+    assert(send(safe, "PUT", "{base}denied", None).is_err())
+    bridge.jet_http_client_drop_impl(safe)
+    id_root :: bridge.jet_http_client_new_impl()
+    id_proto :: bridge.jet_http_client_protocols_impl(id_root, false, true, false).unwrap()
+    bridge.jet_http_client_drop_impl(id_root)
+    id_retry :: bridge.jet_http_client_retries_impl(id_proto, 2).unwrap()
+    idem :: bridge.jet_http_client_timeouts_impl(id_retry, 2000, 2000, 2000, 2000, 2000, 2000, Some(2000)).unwrap()
+    sixth :: send(idem, "GET", "{base}warm5", None).unwrap()
+    assert_eq(drain(sixth.body_handle), b"q")
+    wait_for_pooled_rst()
+    seventh :: send(idem, "PUT", "{base}allowed", None).unwrap()
+    assert_eq(drain(seventh.body_handle), b"ok")
+    bridge.jet_http_client_drop_impl(idem)
+}
+"""
+    (code, _, stderr) :: common.build_and_run("jet_http_client_law", "retry", src)
+    assert_eq(code, 0, "retry harness failed:\n{stderr}")
+    server.join().unwrap()
+    assert_eq(puts.load(Ordering.Relaxed), 1, "only Idempotent PUT should dial")
+}
+
+// Rust: tests/http_client_law.rs:3688
+#Test("public_client_retries_method_typechecks") {
+    src :: """
+use core.http.client as http
+fn run() {
+    _ :: http.Client.new().retries(.Idempotent).retries(.Safe).retries(.None)
+}
+"""
+    (code, _, stderr) :: common.build_and_run("jet_http_client_law", "retries_type", src)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+}
+
+// Rust: tests/http_client_law.rs:3703
+#Test("h2_rejects_idle_stream_flood_before_queue_growth") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    closed :: Arc.new(AtomicBool.new(false))
+    observed :: closed.clone()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        stream.set_read_timeout(Some(Duration.from_secs(5))).unwrap()
+        stream.set_write_timeout(Some(Duration.from_secs(2))).unwrap()
+        preface := [U8].repeat(0, 24)
+        stream.read_exact(&preface).unwrap()
+        assert_eq(preface, b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+        assert_eq(read_h2_frame(&stream).0, 4)
+        write_h2_frame(&stream, 4, 0, 0, [])
+        request :: loop {
+            frame :: read_h2_frame(&stream)
+            if frame.0 == 1 { break frame }
+        }
+        assert_eq(request.2, 1)
+        // Keep response open; DATA for idle stream 3 must be rejected before queueing.
+        write_h2_frame(&stream, 1, 4, 1, [U8]{0x88})
+        chunk :: [U8].repeat(b'x', 64 * 1024)
+        length :: U32{chunk.len()}.to_be_bytes()
+        head := [U8].repeat(0, 9)
+        head[..3].copy_from_slice(length[1..])
+        head[3] = 0
+        head[4] = 0
+        head[5..].copy_from_slice(3u32.to_be_bytes())
+        stream.write_all(head).unwrap()
+        stream.write_all(chunk).unwrap()
+        stream.set_read_timeout(Some(Duration.from_millis(50))).unwrap()
+        deadline :: Instant.now() + Duration.from_millis(500)
+        byte := [U8].repeat(0, 1)
+        loop {
+            if stream.read(&byte) == {
+                .Ok(0) -> { observed.store(true, Ordering.Relaxed); break }
+                .Ok(_) -> {}
+                .Err(error) -> {
+                    if error.kind() == ErrorKind.TimedOut || error.kind() == ErrorKind.WouldBlock {
+                        if Instant.now() >= deadline { break }
+                    } else {
+                        observed.store(true, Ordering.Relaxed)
+                        break
+                    }
+                }
+            }
+            if Instant.now() >= deadline { break }
+        }
+    })
+    src :: """
+use jet_http_bridge as bridge
+fn run() {
+    root :: bridge.jet_http_client_new_impl()
+    client :: bridge.jet_http_client_protocols_impl(root, true, false, true).unwrap()
+    response :: bridge.jet_http_client_send_with_impl(
+        client, "GET", "http://{addr}/h2", [], None, None, None, None, None, None, None, None, None, None, None, [], [], []
+    ).unwrap()
+    assert_eq(response.status, 200)
+    error :: bridge.jet_http_client_body_read_impl(response.body_handle, 64 * 1024).unwrap_err()
+    assert_eq(error, bridge.JetHTTPBridgeError.InvalidFraming)
+    bridge.jet_http_client_body_close_impl(response.body_handle)
+    bridge.jet_http_client_drop_impl(client)
+    bridge.jet_http_client_drop_impl(root)
+}
+"""
+    (code, _, stderr) :: common.build_and_run("jet_http_client_law", "h2_idle_stream", src)
+    server.join().unwrap()
+    assert(closed.load(Ordering.Relaxed), "idle-stream peer remained open after invalid frame")
+    assert_eq(code, 0, "bridge H2 idle-stream harness failed:\n{stderr}")
+}
+
+// Rust: tests/http_client_law.rs:3866
+#Test("h2_bounds_queued_frames_for_another_active_stream") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    closed :: Arc.new(AtomicBool.new(false))
+    observed :: closed.clone()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        stream.set_read_timeout(Some(Duration.from_secs(5))).unwrap()
+        stream.set_write_timeout(Some(Duration.from_secs(2))).unwrap()
+        preface := [U8].repeat(0, 24)
+        stream.read_exact(&preface).unwrap()
+        assert_eq(preface, b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+        assert_eq(read_h2_frame(&stream).0, 4)
+        write_h2_frame(&stream, 4, 0, 0, [])
+        first :: loop {
+            frame :: read_h2_frame(&stream)
+            if frame.0 == 1 { break frame }
+        }
+        assert_eq(first.2, 1)
+        write_h2_frame(&stream, 1, 4, 1, [U8]{0x88})
+        second :: loop {
+            frame :: read_h2_frame(&stream)
+            if frame.0 == 1 { break frame }
+        }
+        assert_eq(second.2, 3)
+        write_h2_frame(&stream, 1, 4, 3, [U8]{0x88})
+        chunk :: [U8].repeat(b'x', 64 * 1024)
+        send := (payload: [U8]) -> {
+            length :: U32{payload.len()}.to_be_bytes()
+            head := [U8].repeat(0, 9)
+            head[..3].copy_from_slice(length[1..])
+            head[3] = 0
+            head[4] = 0
+            head[5..].copy_from_slice(3u32.to_be_bytes())
+            stream.write_all(head).and_then(_ -> stream.write_all(payload)).is_ok()
+        }
+        loop _ in 0..1024 {
+            if !send(chunk) { break }
+        }
+        stream.set_read_timeout(Some(Duration.from_millis(50))).unwrap()
+        deadline :: Instant.now() + Duration.from_millis(500)
+        byte := [U8].repeat(0, 1)
+        loop {
+            if stream.read(&byte) == {
+                .Ok(0) -> { observed.store(true, Ordering.Relaxed); break }
+                .Ok(_) -> {}
+                .Err(error) -> {
+                    if error.kind() == ErrorKind.TimedOut || error.kind() == ErrorKind.WouldBlock {
+                        if Instant.now() >= deadline { break }
+                    } else {
+                        observed.store(true, Ordering.Relaxed)
+                        break
+                    }
+                }
+            }
+            if Instant.now() >= deadline { break }
+        }
+    })
+    src :: """
+use jet_http_bridge as bridge
+use std.thread
+// Rust: tests/http_client_law.rs:3969
+fn send(client: I64, url: String) -> bridge.JetHTTPResponseParts bridge.JetHTTPBridgeError! {
+    bridge.jet_http_client_send_with_impl(
+        client, "GET", url, [], None, None, None, None, None, None, None, None, None, None, None, [], [], []
+    )
+}
+// Rust: tests/http_client_law.rs:3995
+fn run() {
+    url :: "http://{addr}/h2"
+    root :: bridge.jet_http_client_new_impl()
+    client :: bridge.jet_http_client_protocols_impl(root, true, false, true).unwrap()
+    first :: send(client, url).unwrap()
+    assert_eq(first.status, 200)
+    second_url :: url.clone()
+    second :: thread.spawn(() -> send(client, second_url).unwrap()).join().unwrap()
+    assert_eq(second.status, 200)
+    error :: bridge.jet_http_client_body_read_impl(first.body_handle, 64 * 1024).unwrap_err()
+    assert_eq(error, bridge.JetHTTPBridgeError.InvalidFraming)
+    bridge.jet_http_client_body_close_impl(first.body_handle)
+    bridge.jet_http_client_body_close_impl(second.body_handle)
+    bridge.jet_http_client_drop_impl(client)
+    bridge.jet_http_client_drop_impl(root)
+}
+"""
+    (code, _, stderr) :: common.build_and_run("jet_http_client_law", "h2_active_queue", src)
+    server.join().unwrap()
+    assert(closed.load(Ordering.Relaxed), "active-stream queue flood did not close the peer")
+    assert_eq(code, 0, "bridge H2 active-queue harness failed:\n{stderr}")
+}

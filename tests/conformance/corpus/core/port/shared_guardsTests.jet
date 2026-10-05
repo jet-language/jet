@@ -1,0 +1,257 @@
+use tests.conformance.corpus.core.port.shared_guards as guards
+use tests.conformance.corpus.core.port.shared_weak as weak
+use tests.conformance.corpus.core.port.task_control_tiers as control
+use tests.common as common
+use tests.tir_support.[build_and_run, have_rustc, run_default_multi]
+use std.fs as fs
+use std.process.Command
+use std.thread
+use std.sync.[Arc, Weak, Mutex]
+use std.sync.atomic.[AtomicUsize, Ordering]
+// GATE #4494: real threads, atomic lifetime counters, mutexes and subprocesses.
+
+// Rust: tests/shared_guards.rs:307
+#Test("shared_guard_queue_matches_native_and_default_tiers") {
+    guards.with_compiler_stack(() -> guards.assert_native_and_default(guards.QUEUE, "7\n", "jet_shared_guard_queue"))
+}
+// Rust: tests/shared_guards.rs:312
+#Test("cancelling_condition_wait_unregisters_and_releases_guard") {
+    guards.with_compiler_stack(() -> guards.assert_native_and_default(guards.CANCEL_WAIT, "7\n1\n", "jet_shared_guard_cancel"))
+}
+// Rust: tests/shared_guards.rs:319
+#Test("return_and_error_paths_release_guard") {
+    guards.with_compiler_stack(() -> guards.assert_native_and_default(guards.EARLY_EXITS, "3\n", "jet_shared_guard_early_exit"))
+}
+// Rust: tests/shared_guards.rs:326
+#Test("named_guard_spans_read_and_write_helpers_on_all_tiers") {
+    guards.with_compiler_stack(() -> guards.assert_native_and_default(guards.HELPERS, "4\n5\n", "jet_shared_guard_helpers"))
+}
+// Rust: tests/shared_guards.rs:333
+#Test("returned_named_guard_reads_and_releases_on_all_tiers") {
+    guards.with_compiler_stack(() -> guards.assert_native_and_default(guards.RETURNED_GUARD, "6\n7\n", "jet_shared_guard_returned"))
+}
+// Rust: tests/shared_guards.rs:340
+#Test("concurrent_transaction_deltas_apply_to_fresh_locked_state_on_all_tiers") {
+    guards.with_compiler_stack(() -> guards.assert_native_and_default(guards.TRANSACTION_DELTAS, "transaction-body\ntransaction-body\n2\n", "jet_shared_guard_transaction_deltas"))
+}
+// Rust: tests/shared_guards.rs:351
+#Test("mapped_and_split_guards_write_disjoint_fields_on_all_tiers") {
+    guards.with_compiler_stack(() -> guards.assert_native_and_default(guards.MAP_AND_SPLIT, "13\n10\n", "jet_shared_guard_projection"))
+}
+// Rust: tests/shared_guards.rs:358
+#Test("stored_and_returned_guards_move_as_read_capabilities_on_all_tiers") {
+    guards.with_compiler_stack(() -> guards.assert_native_and_default(guards.STORED_GUARDS, "8\n10\n9\n", "jet_shared_guard_storage"))
+}
+// Rust: tests/shared_transaction.rs:2
+#Test("shared_plain_access_repl_uses_the_same_value_surface") {
+    output :: jet.REPL.run_transcript(["struct Counter { value: Int }", "cell := shared Counter{ value: 0 }", "cell.value += 1", "cell.value"], None)
+    assert(output.contains("1 : Int"), "REPL shared access drifted: {output}")
+    assert(!output.contains("E1116"), "REPL used the retired closure form: {output}")
+}
+// Rust: tests/shared_weak.rs:34
+#Test("weak_only_cycle_frees_when_strong_roots_drop") {
+    // Rust: tests/shared_weak.rs:37
+    struct DropCount { count: Arc<AtomicUsize> }
+    impl Drop for DropCount {
+        // Rust: tests/shared_weak.rs:39
+        fn drop(self: &Self) -> { _ :: self.count.fetch_add(1, Ordering.SeqCst) }
+    }
+    // Rust: tests/shared_weak.rs:43
+    struct Node { _drop: DropCount, peer: Mutex<Weak<Node>?> }
+    drops :: Arc.new(AtomicUsize.new(0))
+    {
+        a :: Arc.new(Node{_drop: DropCount{count: drops.clone()}, peer: Mutex.new(None)})
+        b :: Arc.new(Node{_drop: DropCount{count: drops.clone()}, peer: Mutex.new(None)})
+        a.peer.lock().unwrap().value = Some(Arc.downgrade(&b))
+        b.peer.lock().unwrap().value = Some(Arc.downgrade(&a))
+        assert_eq(Arc.strong_count(&a), 1)
+        assert(a.peer.lock().unwrap().as_ref().unwrap().upgrade().is_some())
+        drop(a)
+        drop(b)
+    }
+    assert_eq(drops.load(Ordering.SeqCst), 2, "weak cycle must free")
+}
+// Rust: tests/shared_weak.rs:69
+#Test("orphan_weak_upgrade_is_none_after_strong_drop") {
+    w :: {
+        a :: Arc.new(I64{7})
+        Arc.downgrade(&a)
+    }
+    assert(w.upgrade().is_none())
+}
+// Rust: tests/shared_weak.rs:78
+#Test("shared_weak_cycle_matches_aot_and_default_tiers") {
+    weak.with_compiler_stack(() -> {
+        assert(common.have_rustc(), "Shared.Weak parity proof needs rustc")
+        expected :: weak.EXPECTED
+        source :: weak.EXAMPLE
+        (native_root, native_path) :: weak.fixture("jet_shared_weak_native", source)
+        compiled :: jet.compile_with_path(source, native_path.to_str().unwrap()).unwrap_or_else(diagnostics -> {
+            panic("{jet.render_diagnostics(native_path.to_str().unwrap(), source, diagnostics)}")
+        })
+        rust_path :: native_root.join("main.rs")
+        native_bin :: native_root.join("main")
+        fs.write(rust_path, compiled.rust).unwrap()
+        built :: Command.new("rustc").args(["--edition", "2021"]).arg(rust_path).arg("-o").arg(native_bin).output().unwrap()
+        assert(built.status.success(), "rustc rejected Shared.Weak output:\n{String.from_utf8_lossy(built.stderr)}")
+        native :: Command.new(native_bin).output().unwrap()
+        assert(native.status.success(), "{native:?}")
+        assert_eq(String.from_utf8(native.stdout).unwrap(), expected)
+        (_, default_path) :: weak.fixture("jet_shared_weak_default", source)
+        bundle := jet.Loader.load_entry(default_path.to_str().unwrap()).unwrap()
+        errors :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run).into_iter()
+            .filter(diagnostic -> diagnostic.severity == jet.Diagnostics.Severity.Error).collect::<[jet.Diagnostics.Diagnostic]>()
+        assert(errors.is_empty(), "{errors:?}")
+        // Behavioral tier parity replaces the retired resident-JIT representation.
+        loop tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+            result :: common.execute_bundle(&bundle, tier).expect("default Shared.Weak tier must execute")
+            assert_eq(result.exit_code, 0)
+            assert_eq(result.stdout, expected)
+            assert_eq(result.stderr, "")
+        }
+    })
+}
+
+// Rust: tests/task_control_tiers.rs:136
+#Test("parser_accepts_one_keyword_task_family") {
+    lexed :: jet.Compiler.lex_source(control.SOURCE)
+    assert(lexed.diagnostics.is_empty(), "lexer diagnostics: {lexed.diagnostics:?}")
+    loop spelling in ["task", "all", "race", "any", "group"] {
+        assert(lexed.tokens.iter().any(token -> token.text == spelling), "canonical task surface must lex `{spelling}`")
+    }
+    parsed :: jet.Compiler.parse_source(control.SOURCE)
+    assert(parsed.diagnostics.is_empty(), "parser diagnostics: {parsed.diagnostics:?}")
+}
+// Rust: tests/task_control_tiers.rs:184
+#Test("stream_drop_uses_task_cancel_cleanup_path") {
+    (bundle, dir) :: control.checked_task_bundle_for("stream", control.STREAM_SOURCE)
+    _ :: fs.remove_dir_all(dir)
+    interpreted :: control.run_forced_interpreter("stream", control.STREAM_SOURCE)
+    assert_eq(interpreted, control.STREAM_EXPECTED)
+    (code, stdout, stderr) :: run_default_multi("stream_cancel", "main.jet", [("main.jet", control.STREAM_SOURCE)])
+    assert_eq(code, 0, "default tier: {stderr}")
+    assert_eq(control.strip_tier_trace(stdout), control.STREAM_EXPECTED, "default tier drifted: {stderr}")
+    // Native tier execution/output replaces the retired resident-JIT trace.
+    loop tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+        result :: common.execute_bundle(&bundle, tier).expect("stream cancellation must execute")
+        assert_eq((result.exit_code, result.stdout, result.stderr), (0, control.STREAM_EXPECTED, ""))
+    }
+    if have_rustc() {
+        (code, stdout) :: build_and_run("stream_cancel", control.STREAM_SOURCE)
+        assert_eq(code, 0)
+        assert_eq(stdout, control.STREAM_EXPECTED)
+    }
+}
+// Rust: tests/task_control_tiers.rs:245
+// Yield is a wait point; drop-close cancellation is deferred until Shield exit.
+#Test("a_shielded_yield_defers_the_consumer_cancel_on_every_tier") {
+    interpreted :: control.run_forced_interpreter("shielded_stream", control.SHIELDED_STREAM_SOURCE)
+    assert_eq(interpreted, control.SHIELDED_STREAM_EXPECTED)
+    (code, stdout, stderr) :: run_default_multi("shielded_stream", "main.jet", [("main.jet", control.SHIELDED_STREAM_SOURCE)])
+    assert_eq(code, 0, "default tier: {stderr}")
+    assert_eq(control.strip_tier_trace(stdout), control.SHIELDED_STREAM_EXPECTED, "default tier drifted: {stderr}")
+    (bundle, dir) :: control.checked_task_bundle_for("shielded_stream", control.SHIELDED_STREAM_SOURCE)
+    loop tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+        result :: common.execute_bundle(&bundle, tier).expect("shielded stream must execute")
+        assert_eq((result.exit_code, result.stdout, result.stderr), (0, control.SHIELDED_STREAM_EXPECTED, ""))
+    }
+    _ :: fs.remove_dir_all(dir)
+    if have_rustc() {
+        (code, stdout) :: build_and_run("shielded_stream", control.SHIELDED_STREAM_SOURCE)
+        assert_eq(code, 0)
+        assert_eq(stdout, control.SHIELDED_STREAM_EXPECTED)
+    }
+}
+// Rust: tests/task_control_tiers.rs:295
+#Test("sema_resolves_task_failure_rail_and_core_reachability") {
+    (bundle, dir) :: control.checked_task_bundle("sema")
+    assert(bundle.used_core.contains("core.concurrency::task"), "canonical task syntax must reach the shared Prelude: {bundle.used_core:?}")
+    run :: bundle.modules[bundle.entry].items.iter().find_map(item -> match item {
+        jet.AST.Item.Func(function) -> if function.name == "run" -> Some(function) else -> None,
+        _ -> None
+    }).expect("task fixture run function")
+    debug :: "{run:?}"
+    assert(debug.contains("TaskFailure"), "sema must publish TaskFailure on the task result rail: {debug}")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/task_control_tiers.rs:319
+#Test("sema_resolves_direct_nested_task_control_bindings") {
+    // The compiler command thread's normal stack is required for nested inference.
+    thread.Builder.new().name("task-nested-sema").stack_size(8 * 1024 * 1024).spawn(() -> {
+        (bundle, dir) :: control.checked_task_bundle_for("nested", control.NESTED_SOURCE)
+        assert(bundle.used_core.contains("core.concurrency::task"))
+        // Strict native execution replaces resident-JIT safety/trace introspection.
+        loop tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+            result :: common.execute_bundle(&bundle, tier).expect("nested task source must execute natively")
+            assert_eq((result.exit_code, result.stdout, result.stderr), (0, "[2, 4]\n", ""))
+        }
+        _ :: fs.remove_dir_all(dir)
+        interpreted :: control.run_forced_interpreter("nested", control.NESTED_SOURCE)
+        assert_eq(interpreted, "[2, 4]\n")
+        (code, stdout, stderr) :: run_default_multi("task_nested", "main.jet", [("main.jet", control.NESTED_SOURCE)])
+        assert_eq(code, 0, "default tier: {stderr}")
+        assert_eq(stdout, interpreted, "default tier output drifted: {stderr}")
+        if have_rustc() {
+            (code, stdout) :: build_and_run("task_nested", control.NESTED_SOURCE)
+            assert_eq(code, 0)
+            assert_eq(stdout, interpreted, "AOT output drifted")
+        }
+    }).expect("nested sema proof thread").join().expect("nested sema proof must not abort")
+}
+// Rust: tests/task_control_tiers.rs:364
+#Test("task_control_plane_matches_on_default_run") {
+    (code, stdout, stderr) :: run_default_multi("task_control", "main.jet", [("main.jet", control.SOURCE)])
+    assert_eq(code, 0, "default `jet run` must succeed\n{stdout}\n{stderr}")
+    assert(!stderr.contains("E0956"), "no tier gap may reach the surface for the ratified set\n{stderr}")
+    assert_eq(control.strip_tier_trace(stdout), control.EXPECTED, "stderr:\n{stderr}")
+}
+// Rust: tests/task_control_tiers.rs:380
+#Test("task_control_plane_matches_under_aot") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("task_control", control.SOURCE)
+    assert_eq(code, 0, "AOT build must run\n{stdout}")
+    assert_eq(stdout, control.EXPECTED)
+}
+// Rust: tests/task_control_tiers.rs:390
+#Test("explicit_group_limit_matches_aot_jit_and_interpreter") {
+    loop limit in [I64{1}, I64{0}, I64{-3}] {
+        source :: control.limit_source(limit)
+        expected :: "2\n3\n"
+        if have_rustc() {
+            (aot_code, aot_stdout) :: build_and_run("task_group_limit_{limit}", source)
+            assert_eq(aot_code, 0)
+            assert_eq(aot_stdout, expected)
+        }
+        (code, stdout, stderr) :: run_default_multi("task_group_limit_{limit}", "main.jet", [("main.jet", source)])
+        assert_eq(code, 0, "{stderr}")
+        assert_eq(stdout, expected, "default tier drifted for limit {limit}: {stderr}")
+        (bundle, dir) :: control.checked_task_bundle_for("limit_{limit}", source)
+        loop tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+            result :: common.execute_bundle(&bundle, tier).expect("task group limit must execute")
+            assert_eq((result.exit_code, result.stdout, result.stderr), (0, expected, ""))
+        }
+        _ :: fs.remove_dir_all(dir)
+        interpreted :: control.run_forced_interpreter("limit_{limit}", source)
+        assert_eq(interpreted, expected, "forced interpreter drifted for limit {limit}")
+    }
+}
+// Rust: tests/task_control_tiers.rs:422
+#Test("task_combinators_cancel_losers_on_every_tier") {
+    expected :: "1\n1\n1\n1\n"
+    interpreted :: control.run_forced_interpreter("loser_cleanup", control.LOSER_CLEANUP_SOURCE)
+    assert_eq(interpreted, expected)
+    (code, stdout, stderr) :: run_default_multi("task_loser_cleanup", "main.jet", [("main.jet", control.LOSER_CLEANUP_SOURCE)])
+    assert_eq(code, 0, "default tier: {stderr}")
+    assert_eq(stdout, expected, "default tier output drifted: {stderr}")
+    (bundle, dir) :: control.checked_task_bundle_for("loser_cleanup", control.LOSER_CLEANUP_SOURCE)
+    loop tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+        result :: common.execute_bundle(&bundle, tier).expect("loser cleanup must execute")
+        assert_eq((result.exit_code, result.stdout, result.stderr), (0, expected, ""))
+    }
+    _ :: fs.remove_dir_all(dir)
+    if have_rustc() {
+        (code, stdout) :: build_and_run("task_loser_cleanup", control.LOSER_CLEANUP_SOURCE)
+        assert_eq(code, 0)
+        assert_eq(stdout, expected)
+    }
+}

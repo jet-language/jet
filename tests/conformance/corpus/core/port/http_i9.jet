@@ -192,1310 +192,625 @@ fn serve_hostile_http_response(stream: &TcpStream, request: [U8], gzip_body: [U8
     _ :: stream.flush()
 }
 
-//RS 
-//RS const FORCED_DEOPT: &str = r#"
-//RS use core.http.client as http_client
-//RS use core.http.server as http_server
-//RS use core.text as text
-//RS 
-//RS #Codable
-//RS struct Reading {
-//RS     city: String
-//RS     degrees: Int
-//RS }
-//RS 
-//RS fn any_origins() -> HTTPCorsOrigins {
-//RS     return .Any
-//RS }
-//RS 
-//RS fn run() {
-//RS     print(text.casefold("Straße"))
-//RS     mux :: http_server.mux()
-//RS     mux.get("/health", () -> Ok(http_server.response(204, "")))
-//RS     policy :: http_server.cors_policy(["https://app.example"]) ?? panic("cors")
-//RS     http_server.cors(mux, policy)
-//RS     http_server.static_files(mux, "/assets", "/tmp")
-//RS     response :: http_server.json(201, Reading{city: "Reno", degrees: 32})
-//RS     response_text :: http_server.response(200, "hello")
-//RS     decoded :: response.json<Reading>() ?? panic("response")
-//RS     request :: http_client.request("POST", "http://example.test/")
-//RS         .json(Reading{city: "Reno", degrees: 31})
-//RS     request_decoded :: request.json<Reading>() ?? panic("request")
-//RS     request_content_type :: &request.header("content-type") ?? "missing"
-//RS     print("{decoded.city}|{request_decoded.degrees}|{request_content_type}|{response_text.text() ?? "invalid body"}")
-//RS     malformed :: http_client.request("POST", "http://example.test/").body("{{")
-//RS     if malformed.json<Reading>() == {
-//RS         .Ok(_) -> print("accepted")
-//RS         .Err(error) -> print(error)
-//RS         else -> print("unexpected")
-//RS     }
-//RS     if http_server.cors_policy(any_origins(), [], [], true) == {
-//RS         .Ok(_) -> print("accepted")
-//RS         .Err(error) -> print(error)
-//RS         else -> print("unexpected")
-//RS     }
-//RS }
-//RS "#;
-//RS 
-//RS const ROUTE_HANDLERS: &str = r#"
-//RS use core.http.client as http
-//RS use core.http.server as server
-//RS use core.net as net
-//RS 
-//RS struct HandlerState {
-//RS     label: String
-//RS }
-//RS 
-//RS fn route_error(req: HTTPRequest) -> HTTPResponse HTTPError! {
-//RS     if req.path() == "/error" -> return Err(.InvalidFraming)
-//RS     return Err(.InvalidFraming)
-//RS }
-//RS 
-//RS fn run() (HTTPError | NetError | TaskFailure)! {
-//RS     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
-//RS     address :: listener.local_addr() ?? panic("address")
-//RS     state :: shared HandlerState{label: "before registration"}
-//RS     mux :: server.mux()
-//RS     mux.get("/zero", () -> Ok(server.response(200, "zero")))
-//RS     mux.get("/items/:id", (req: HTTPRequest) HTTPResponse HTTPError! -> {
-//RS         header :: &req.header("x-state") ?? "missing"
-//RS         id :: req.param("id") ?? "missing"
-//RS         path :: req.path()
-//RS         return Ok(server.response(200, "{path}|{id}|{header}|{state.label}"))
-//RS     })
-//RS     mux.get("/error", route_error)
-//RS     state.label = "captured"
-//RS     t :: task {
-//RS         server.serve_once_listener(listener, mux) ?? panic("serve")
-//RS         server.serve_once_listener(listener, mux) ?? panic("serve")
-//RS         server.serve_once_listener(listener, mux) ?? panic("serve")
-//RS     }
-//RS     zero :: http.request("GET", "http://{address}/zero").send() ?? panic("zero")
-//RS     print(zero.text() ?? "zero body")
-//RS     detail :: http.request("GET", "http://{address}/items/42")
-//RS         .header("x-state", "captured-header")
-//RS         .send() ?? panic("detail")
-//RS     print(detail.text() ?? "detail body")
-//RS     failed :: http.request("GET", "http://{address}/error").send() ?? panic("error")
-//RS     print(failed.status())
-//RS     t.join() ?? panic("join")
-//RS }
-//RS "#;
-//RS const HTTP_SERVICE_GET_PUT_GET: &str = r#"
-//RS use core.http.client as http
-//RS use core.http.server as server
-//RS use core.net as net
-//RS 
-//RS fn reply(status: Int, body: String) -> HTTPResponse HTTPError! {
-//RS     return Ok(server.response(status, body).header("content-type", "application/json"))
-//RS }
-//RS 
-//RS fn kv(
-//RS     key: String,
-//RS     req: HTTPRequest,
-//RS     store: Shared<[String:String]>,
-//RS     put: Bool,
-//RS ) -> HTTPResponse HTTPError! {
-//RS     if put {
-//RS         value :: req.body().text(8388608) ?? ""
-//RS         store.guard_edit().value[key] = value
-//RS         return reply(200, "{{\"stored\":\"{key}\"}}")
-//RS     }
-//RS     stored :: store.guard_read().value.get(key) ?? return reply(404, "{{\"error\":\"not found\"}}")
-//RS     return reply(200, "{{\"key\":\"{key}\",\"value\":\"{stored}\"}}")
-//RS }
-//RS 
-//RS fn run() (HTTPError | NetError | TaskFailure)! {
-//RS     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
-//RS     address :: listener.local_addr() ?? panic("address")
-//RS     store :: shared [String:String]{}
-//RS     mux :: server.mux()
-//RS     mux.get("/health", () -> reply(200, "{{\"status\":\"ok\"}}"))
-//RS     mux.put("/kv/:key", (req: HTTPRequest) -> kv(req.param("key") ?? "", req, store, true))
-//RS     mux.get("/kv/:key", (req: HTTPRequest) -> kv(req.param("key") ?? "", req, store, false))
-//RS     mux.get("/shutdown", () -> reply(200, "{{\"bye\":true}}"))
-//RS     server_task :: task {
-//RS         server.serve_once_listener(listener, mux) ?? panic("serve")
-//RS         server.serve_once_listener(listener, mux) ?? panic("serve")
-//RS         server.serve_once_listener(listener, mux) ?? panic("serve")
-//RS         server.serve_once_listener(listener, mux) ?? panic("serve")
-//RS         server.serve_once_listener(listener, mux) ?? panic("serve")
-//RS     }
-//RS     health :: http.request("GET", "http://{address}/health").send() ?? panic("health")
-//RS     print("{health.status()}|{health.text() ?? "health body"}")
-//RS     put :: http.request("PUT", "http://{address}/kv/alpha").body("one").send() ?? panic("put")
-//RS     print("{put.status()}|{put.text() ?? "put body"}")
-//RS     get :: http.request("GET", "http://{address}/kv/alpha").send() ?? panic("get")
-//RS     print("{get.status()}|{get.text() ?? "get body"}")
-//RS     missing :: http.request("GET", "http://{address}/kv/nope").send() ?? panic("missing")
-//RS     print("{missing.status()}|{missing.text() ?? "missing body"}")
-//RS     shutdown :: http.request("GET", "http://{address}/shutdown").send() ?? panic("shutdown")
-//RS     print("{shutdown.status()}|{shutdown.text() ?? "shutdown body"}")
-//RS     server_task.join() ?? panic("join")
-//RS }
-//RS "#;
-//RS 
-//RS const HOSTILE_URLS: &str = r#"
-//RS use core.http.client as http_client
-//RS use core.net.ws as ws
-//RS 
-//RS fn run() {
-//RS     if http_client.get("__HTTP_URL__/path\nInjected: yes") == {
-//RS         .Ok(_) -> print("http url accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidURL -> print("http url rejected")
-//RS             else -> print("http url wrong")
-//RS         }
-//RS         else -> print("http url unexpected")
-//RS     }
-//RS     method :: http_client.request("GET\nInjected", "__HTTP_URL__/method")
-//RS     if method.send() == {
-//RS         .Ok(_) -> print("method accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidHeader -> print("method rejected")
-//RS             else -> print("method wrong")
-//RS         }
-//RS         else -> print("method unexpected")
-//RS     }
-//RS     header_name :: http_client.request("GET", "__HTTP_URL__/header-name")
-//RS         .header("x-bad\nname", "value")
-//RS     if header_name.send() == {
-//RS         .Ok(_) -> print("header name accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidHeader -> print("header name rejected")
-//RS             else -> print("header name wrong")
-//RS         }
-//RS         else -> print("header name unexpected")
-//RS     }
-//RS     header_value :: http_client.request("GET", "__HTTP_URL__/header-value")
-//RS         .header("x-safe", "bad\nvalue")
-//RS     if header_value.send() == {
-//RS         .Ok(_) -> print("header value accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidHeader -> print("header value rejected")
-//RS             else -> print("header value wrong")
-//RS         }
-//RS         else -> print("header value unexpected")
-//RS     }
-//RS     content_length :: http_client.request("POST", "__HTTP_URL__/content-length")
-//RS         .header("Content-Length", "0")
-//RS         .body("body")
-//RS     if content_length.send() == {
-//RS         .Ok(_) -> print("content length accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidFraming -> print("content length rejected")
-//RS             else -> print("content length wrong")
-//RS         }
-//RS         else -> print("content length unexpected")
-//RS     }
-//RS     transfer_encoding :: http_client.request("POST", "__HTTP_URL__/transfer-encoding")
-//RS         .header("Transfer-Encoding", "chunked")
-//RS         .body("body")
-//RS     if transfer_encoding.send() == {
-//RS         .Ok(_) -> print("transfer encoding accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidFraming -> print("transfer encoding rejected")
-//RS             else -> print("transfer encoding wrong")
-//RS         }
-//RS         else -> print("transfer encoding unexpected")
-//RS     }
-//RS     duplicate_host :: http_client.request("GET", "__HTTP_URL__/duplicate-host")
-//RS         .header("Host", "one")
-//RS         .header("hOsT", "two")
-//RS     if duplicate_host.send() == {
-//RS         .Ok(_) -> print("duplicate host accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidFraming -> print("duplicate host rejected")
-//RS             else -> print("duplicate host wrong")
-//RS         }
-//RS         else -> print("duplicate host unexpected")
-//RS     }
-//RS     connection_host :: http_client.request("GET", "__HTTP_URL__/connection-host")
-//RS         .header("cOnNeCtIoN", "hOsT")
-//RS     if connection_host.send() == {
-//RS         .Ok(_) -> print("connection host accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidFraming -> print("connection host rejected")
-//RS             else -> print("connection host wrong")
-//RS         }
-//RS         else -> print("connection host unexpected")
-//RS     }
-//RS     connection_length :: http_client.request("POST", "__HTTP_URL__/connection-length")
-//RS         .header("Connection", "Content-Length")
-//RS         .body("body")
-//RS     if connection_length.send() == {
-//RS         .Ok(_) -> print("connection length accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidFraming -> print("connection length rejected")
-//RS             else -> print("connection length wrong")
-//RS         }
-//RS         else -> print("connection length unexpected")
-//RS     }
-//RS     connection_transfer :: http_client.request("POST", "__HTTP_URL__/connection-transfer")
-//RS         .header("Connection", "tRaNsFeR-EnCoDiNg")
-//RS         .body("body")
-//RS     if connection_transfer.send() == {
-//RS         .Ok(_) -> print("connection transfer accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidFraming -> print("connection transfer rejected")
-//RS             else -> print("connection transfer wrong")
-//RS         }
-//RS         else -> print("connection transfer unexpected")
-//RS     }
-//RS     proxy_connection :: http_client.request("GET", "__HTTP_URL__/proxy-connection")
-//RS         .header("pRoXy-CoNnEcTiOn", "keep-alive")
-//RS     if proxy_connection.send() == {
-//RS         .Ok(_) -> print("proxy connection accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidFraming -> print("proxy connection rejected")
-//RS             else -> print("proxy connection wrong")
-//RS         }
-//RS         else -> print("proxy connection unexpected")
-//RS     }
-//RS     keep_alive :: http_client.request("GET", "__HTTP_URL__/keep-alive")
-//RS         .header("Keep-Alive", "timeout=5")
-//RS     if keep_alive.send() == {
-//RS         .Ok(_) -> print("keep-alive accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidFraming -> print("keep-alive rejected")
-//RS             else -> print("keep-alive wrong")
-//RS         }
-//RS         else -> print("keep-alive unexpected")
-//RS     }
-//RS     te :: http_client.request("GET", "__HTTP_URL__/te")
-//RS         .header("TE", "trailers")
-//RS     if te.send() == {
-//RS         .Ok(_) -> print("te accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidFraming -> print("te rejected")
-//RS             else -> print("te wrong")
-//RS         }
-//RS         else -> print("te unexpected")
-//RS     }
-//RS     trailer :: http_client.request("GET", "__HTTP_URL__/trailer")
-//RS         .header("Trailer", "x-trailer")
-//RS     if trailer.send() == {
-//RS         .Ok(_) -> print("trailer accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidFraming -> print("trailer rejected")
-//RS             else -> print("trailer wrong")
-//RS         }
-//RS         else -> print("trailer unexpected")
-//RS     }
-//RS     upgrade :: http_client.request("GET", "__HTTP_URL__/upgrade")
-//RS         .header("Upgrade", "websocket")
-//RS     if upgrade.send() == {
-//RS         .Ok(_) -> print("upgrade accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidFraming -> print("upgrade rejected")
-//RS             else -> print("upgrade wrong")
-//RS         }
-//RS         else -> print("upgrade unexpected")
-//RS     }
-//RS     proxy_authenticate :: http_client.request("GET", "__HTTP_URL__/proxy-authenticate")
-//RS         .header("Proxy-Authenticate", "Basic")
-//RS     if proxy_authenticate.send() == {
-//RS         .Ok(_) -> print("proxy authenticate accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidFraming -> print("proxy authenticate rejected")
-//RS             else -> print("proxy authenticate wrong")
-//RS         }
-//RS         else -> print("proxy authenticate unexpected")
-//RS     }
-//RS     proxy_authorization :: http_client.request("GET", "__HTTP_URL__/proxy-authorization")
-//RS         .header("pRoXy-AuThOrIzAtIoN", "Basic secret")
-//RS     if proxy_authorization.send() == {
-//RS         .Ok(_) -> print("proxy authorization accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidFraming -> print("proxy authorization rejected")
-//RS             else -> print("proxy authorization wrong")
-//RS         }
-//RS         else -> print("proxy authorization unexpected")
-//RS     }
-//RS     if ws.connect("__WS_URL__/path\nInjected: yes") == {
-//RS         .Ok(_) -> print("ws accepted")
-//RS         .Err(error) -> {
-//RS             if error == .InvalidURL -> print("ws rejected")
-//RS             else -> print("ws wrong error")
-//RS         }
-//RS         else -> print("ws unexpected")
-//RS     }
-//RS }
-//RS "#;
-//RS const HTTP_TEXT_ERROR_BODIES: &str = r#"
-//RS use core.http.client as http
-//RS 
-//RS fn response_text_default(response: HTTPResponse) -> String Never! {
-//RS     if response.text() == {
-//RS         .Ok(text) -> return "ok:{text.len()}"
-//RS         .Err(error) -> {
-//RS             if error == {
-//RS                 .BodyTooLarge(limit) -> return "err:BodyTooLarge:{limit}"
-//RS                 .UnsupportedEncoding -> return "err:UnsupportedEncoding"
-//RS                 .IO(operation) -> return "err:IO:{operation}"
-//RS                 .BodyConsumed -> return "err:BodyConsumed"
-//RS                 else -> return "err:other"
-//RS             }
-//RS         }
-//RS         else -> return "err:unexpected"
-//RS     }
-//RS }
-//RS 
-//RS fn response_text_explicit(response: HTTPResponse) -> String Never! {
-//RS     if response.text(5) == {
-//RS         .Ok(text) -> return "ok:{text}"
-//RS         .Err(error) -> {
-//RS             if error == {
-//RS                 .BodyTooLarge(limit) -> return "err:BodyTooLarge:{limit}"
-//RS                 .BodyConsumed -> return "err:BodyConsumed"
-//RS                 else -> return "err:other"
-//RS             }
-//RS         }
-//RS         else -> return "err:unexpected"
-//RS     }
-//RS }
-//RS 
-//RS fn response_text_consumed(response: HTTPResponse) -> String Never! {
-//RS     if response.text() == {
-//RS         .Ok(_) -> {
-//RS             if response.text() == {
-//RS                 .Ok(_) -> return "ok:reused"
-//RS                 .Err(error) -> {
-//RS                     if error == {
-//RS                         .BodyConsumed -> return "err:BodyConsumed"
-//RS                         else -> return "err:other"
-//RS                     }
-//RS                 }
-//RS                 else -> return "err:unexpected"
-//RS             }
-//RS         }
-//RS         .Err(_) -> return "err:first-read"
-//RS         else -> return "err:first-read"
-//RS     }
-//RS }
-//RS 
-//RS fn response_text_stream(response: HTTPResponse) -> String Never! {
-//RS     if response.text() == {
-//RS         .Ok(text) -> return "ok:{text}"
-//RS         .Err(error) -> {
-//RS             if error == {
-//RS                 .BodyConsumed -> return "err:BodyConsumed"
-//RS                 else -> return "err:other"
-//RS             }
-//RS         }
-//RS         else -> return "err:unexpected"
-//RS     }
-//RS }
-//RS 
-//RS fn run() {
-//RS     if http.get("__URL__/default") == {
-//RS         .Ok(response) -> print("default={response_text_default(response)}")
-//RS         .Err(_) -> print("default=request-error")
-//RS         else -> print("default=unexpected")
-//RS     }
-//RS     if http.get("__URL__/explicit") == {
-//RS         .Ok(response) -> print("explicit={response_text_explicit(response)}")
-//RS         .Err(_) -> print("explicit=request-error")
-//RS         else -> print("explicit=unexpected")
-//RS     }
-//RS     if http.get("__URL__/consumed") == {
-//RS         .Ok(response) -> print("consumed={response_text_consumed(response)}")
-//RS         .Err(_) -> print("consumed=request-error")
-//RS         else -> print("consumed=unexpected")
-//RS     }
-//RS     if http.get("__URL__/stream") == {
-//RS         .Ok(response) -> print("stream={response_text_stream(response)}")
-//RS         .Err(_) -> print("stream=request-error")
-//RS         else -> print("stream=unexpected")
-//RS     }
-//RS     if http.get("__URL__/over") == {
-//RS         .Ok(over) -> print("over={response_text_default(over)}")
-//RS         .Err(_) -> print("over=request-error")
-//RS         else -> print("over=unexpected")
-//RS     }
-//RS     if http.get("__URL__/binary") == {
-//RS         .Ok(binary) -> print("binary={response_text_default(binary)}")
-//RS         .Err(_) -> print("binary=request-error")
-//RS         else -> print("binary=unexpected")
-//RS     }
-//RS     if http.get("__URL__/truncated") == {
-//RS         .Ok(truncated) -> print("truncated={response_text_default(truncated)}")
-//RS         .Err(_) -> print("truncated=request-error")
-//RS         else -> print("truncated=unexpected")
-//RS     }
-//RS }
-//RS "#;
-//RS const HTTP_RESPONSE_SINKS: &str = r#"
-//RS use core.http.client as http
-//RS 
-//RS fn consume(response: HTTPResponse) -> String Never! {
-//RS     loop chunk in response.body().chunks(65536) {
-//RS         if chunk == {
-//RS             .Ok(_) -> {}
-//RS             .Err(error) -> {
-//RS                 if error == .InvalidFraming -> return "rejected:InvalidFraming"
-//RS                 else -> return "wrong-error"
-//RS             }
-//RS             else -> return "unexpected"
-//RS         }
-//RS     }
-//RS     return "accepted"
-//RS }
-//RS 
-//RS fn run() {
-//RS     if http.get("__URL__/close-get") == {
-//RS         .Ok(response) -> print("close-get={consume(response)}")
-//RS         .Err(_) -> print("close-get=request-error")
-//RS         else -> print("close-get=unexpected")
-//RS     }
-//RS     close_request :: http.request("GET", "__URL__/close-request").read_timeout(30000)
-//RS     if close_request.send() == {
-//RS         .Ok(response) -> print("close-request={consume(response)}")
-//RS         .Err(_) -> print("close-request=request-error")
-//RS         else -> print("close-request=unexpected")
-//RS     }
-//RS     if http.get("__URL__/chunked-get") == {
-//RS         .Ok(response) -> print("chunked-get={consume(response)}")
-//RS         .Err(_) -> print("chunked-get=request-error")
-//RS         else -> print("chunked-get=unexpected")
-//RS     }
-//RS     chunked_request :: http.request("GET", "__URL__/chunked-request").read_timeout(30000)
-//RS     if chunked_request.send() == {
-//RS         .Ok(response) -> print("chunked-request={consume(response)}")
-//RS         .Err(_) -> print("chunked-request=request-error")
-//RS         else -> print("chunked-request=unexpected")
-//RS     }
-//RS     if http.get("__URL__/gzip-get") == {
-//RS         .Ok(response) -> print("gzip-get={consume(response)}")
-//RS         .Err(_) -> print("gzip-get=request-error")
-//RS         else -> print("gzip-get=unexpected")
-//RS     }
-//RS     gzip_request :: http.request("GET", "__URL__/gzip-request").read_timeout(30000)
-//RS     if gzip_request.send() == {
-//RS         .Ok(response) -> print("gzip-request={consume(response)}")
-//RS         .Err(_) -> print("gzip-request=request-error")
-//RS         else -> print("gzip-request=unexpected")
-//RS     }
-//RS }
-//RS "#;
-//RS const HTTP_REQUEST_TEXT: &str = r#"
-//RS use core.http.server as server
-//RS use core.net as net
-//RS 
-//RS fn request_text_default(req: HTTPRequest) -> String Never! {
-//RS     if req.text() == {
-//RS         .Ok(text) -> return "default={text}"
-//RS         .Err(_) -> return "default=wrong-error"
-//RS         else -> return "default=unexpected"
-//RS     }
-//RS }
-//RS 
-//RS fn request_text_explicit(req: HTTPRequest) -> String Never! {
-//RS     if req.text(5) == {
-//RS         .Ok(text) -> return "explicit={text}"
-//RS         .Err(error) -> {
-//RS             if error == {
-//RS                 .BodyTooLarge(limit) -> return "explicit=BodyTooLarge:{limit}"
-//RS                 else -> return "explicit=wrong-error"
-//RS             }
-//RS         }
-//RS         else -> return "explicit=unexpected"
-//RS     }
-//RS }
-//RS 
-//RS fn request_text_over(req: HTTPRequest) -> String Never! {
-//RS     if req.text(4) == {
-//RS         .Ok(_) -> return "over=accepted"
-//RS         .Err(error) -> {
-//RS             if error == {
-//RS                 .BodyTooLarge(limit) -> return "over=BodyTooLarge:{limit}"
-//RS                 else -> return "over=wrong-error"
-//RS             }
-//RS         }
-//RS         else -> return "over=unexpected"
-//RS     }
-//RS }
-//RS 
-//RS fn request_text_consumed(req: HTTPRequest) -> String Never! {
-//RS     if req.text() == {
-//RS         .Ok(_) -> {
-//RS             if req.text() == {
-//RS                 .Ok(_) -> return "consumed=reused"
-//RS                 .Err(error) -> {
-//RS                     if error == {
-//RS                         .BodyConsumed -> return "consumed=BodyConsumed"
-//RS                         else -> return "consumed=wrong-error"
-//RS                     }
-//RS                 }
-//RS                 else -> return "consumed=unexpected"
-//RS             }
-//RS         }
-//RS         .Err(_) -> return "consumed=first-read-error"
-//RS         else -> return "consumed=first-read-error"
-//RS     }
-//RS }
-//RS 
-//RS fn request_text_binary(req: HTTPRequest) -> String Never! {
-//RS     if req.text() == {
-//RS         .Ok(_) -> return "binary=accepted"
-//RS         .Err(error) -> {
-//RS             if error == {
-//RS                 .UnsupportedEncoding -> return "binary=UnsupportedEncoding"
-//RS                 else -> return "binary=wrong-error"
-//RS             }
-//RS         }
-//RS         else -> return "binary=unexpected"
-//RS     }
-//RS }
-//RS 
-//RS fn request_text_classify(req: HTTPRequest) -> String Never! {
-//RS     path :: req.path()
-//RS     if path == "/default" -> return request_text_default(req)
-//RS     if path == "/explicit" -> return request_text_explicit(req)
-//RS     if path == "/over" -> return request_text_over(req)
-//RS     if path == "/consumed" -> return request_text_consumed(req)
-//RS     if path == "/binary" -> return request_text_binary(req)
-//RS     return "unknown"
-//RS }
-//RS 
-//RS fn request_text_handler(req: HTTPRequest) -> HTTPResponse HTTPError! {
-//RS     return Ok(server.response(200, request_text_classify(req)))
-//RS }
-//RS 
-//RS fn run() (HTTPError | NetError | TaskFailure)! {
-//RS     listener :: net.tcp_listen("127.0.0.1:__PORT__") ?? panic("listen")
-//RS     mux :: server.mux()
-//RS     mux.post("/default", request_text_handler)
-//RS     mux.post("/explicit", request_text_handler)
-//RS     mux.post("/over", request_text_handler)
-//RS     mux.post("/consumed", request_text_handler)
-//RS     mux.post("/binary", request_text_handler)
-//RS     server_task :: task {
-//RS         server.serve_once_listener(listener, mux) ?? panic("serve")
-//RS         server.serve_once_listener(listener, mux) ?? panic("serve")
-//RS         server.serve_once_listener(listener, mux) ?? panic("serve")
-//RS         server.serve_once_listener(listener, mux) ?? panic("serve")
-//RS         server.serve_once_listener(listener, mux) ?? panic("serve")
-//RS     }
-//RS     server_task.join() ?? panic("join")
-//RS }
-//RS "#;
-//RS 
-//RS 
-//RS 
-//RS #[test]
-//RS fn http_text_projections_preserve_default_limits_and_body_lifecycle_on_all_supported_tiers() {
-//RS     let has_cranelift = jet_jit::cranelift_host_supported();
-//RS     let has_rustc = common::have_rustc();
-//RS     let tier_count = 1 + usize::from(has_cranelift) + usize::from(has_rustc);
-//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-//RS     let address = listener.local_addr().expect("address");
-//RS     let server = std::thread::spawn(move || {
-//RS         for _ in 0..(tier_count * 7) {
-//RS             let (mut stream, _) = listener.accept().expect("client connection");
-//RS             let request = read_http_request(&mut stream);
-//RS             if request
-//RS                 .windows(b"/over".len())
-//RS                 .any(|window| window == b"/over")
-//RS             {
-//RS                 stream
-//RS                     .write_all(
-//RS                         b"HTTP/1.1 200 OK\r\nContent-Length: 1048577\r\nConnection: close\r\n\r\n",
-//RS                     )
-//RS                     .unwrap();
-//RS             } else if request
-//RS                 .windows(b"/binary".len())
-//RS                 .any(|window| window == b"/binary")
-//RS             {
-//RS                 stream
-//RS                     .write_all(
-//RS                         b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\n",
-//RS                     )
-//RS                     .unwrap();
-//RS                 stream.write_all(&[0, 0xff, 1]).unwrap();
-//RS             } else if request
-//RS                 .windows(b"/stream".len())
-//RS                 .any(|window| window == b"/stream")
-//RS             {
-//RS                 stream
-//RS                     .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nhello")
-//RS                     .unwrap();
-//RS             } else if request
-//RS                 .windows(b"/truncated".len())
-//RS                 .any(|window| window == b"/truncated")
-//RS             {
-//RS                 stream
-//RS                     .write_all(
-//RS                         b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nno",
-//RS                     )
-//RS                     .unwrap();
-//RS             } else {
-//RS                 stream
-//RS                     .write_all(
-//RS                         b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello",
-//RS                     )
-//RS                     .unwrap();
-//RS             }
-//RS             stream.flush().unwrap();
-//RS         }
-//RS     });
-//RS     let source = HTTP_TEXT_ERROR_BODIES.replace("__URL__", &format!("http://{address}"));
-//RS     let expected = "default=ok:5\n\
-//RS explicit=ok:hello\n\
-//RS consumed=err:BodyConsumed\n\
-//RS stream=ok:hello\n\
-//RS over=err:BodyTooLarge:1048576\n\
-//RS binary=err:UnsupportedEncoding\n\
-//RS truncated=err:IO:transport\n";
-//RS     on_large_stack(|| {
-//RS         if has_cranelift {
-//RS             let output = run_with_mode(&source, "http_i9_text_contract_jit", false);
-//RS             assert_eq!(output.stdout, expected);
-//RS             assert_eq!(output.stderr, "");
-//RS             assert_eq!(output.exit_code, 0);
-//RS         }
-//RS         let output = run_with_mode(&source, "http_i9_text_contract_interpreter", true);
-//RS         assert_eq!(output.stdout, expected);
-//RS         assert_eq!(output.stderr, "");
-//RS         assert_eq!(output.exit_code, 0);
-//RS         if has_rustc {
-//RS             let (exit_code, stdout, stderr) =
-//RS                 common::build_and_run("http_i9_text_contract", "aot", &source);
-//RS             assert_eq!(stdout, expected);
-//RS             assert_eq!(stderr, "");
-//RS             assert_eq!(exit_code, 0);
-//RS         }
-//RS     });
-//RS     server.join().expect("server");
-//RS }
-//RS 
-//RS #[test]
-//RS fn http_web_defaults_forced_deopt_uses_prelude_ambient() {
-//RS     on_large_stack(|| {
-//RS         let output = run(FORCED_DEOPT, "http_i9_forced_deopt");
-//RS         assert_eq!(output.stderr, "");
-//RS         assert_eq!(output.exit_code, 0);
-//RS         assert!(output
-//RS             .stdout
-//RS             .starts_with("strasse\nReno|31|application/json|hello\nInvalidFraming\nPolicy { reason: "));
-//RS         assert!(output
-//RS             .stdout
-//RS             .contains("CORS credentials need named origins."));
-//RS         assert!(jet_jit::deopt_invoked_for_test());
-//RS         assert!(!jet_jit::fallback_invoked_for_test());
-//RS     });
-//RS }
-//RS 
-//RS #[test]
-//RS fn http_route_handlers_preserve_arity_context_and_errors_on_both_dev_tiers() {
-//RS     if skip_if_cranelift_host_unsupported() {
-//RS         return;
-//RS     }
-//RS     on_large_stack(|| {
-//RS         for (use_interpreter, name) in [
-//RS             (false, "http_i9_routes_jit"),
-//RS             (true, "http_i9_routes_interpreter"),
-//RS         ] {
-//RS             let output = run_with_mode(ROUTE_HANDLERS, name, use_interpreter);
-//RS             assert_eq!(output.stdout, "zero\n/items/42|42|captured-header|captured\n400\n");
-//RS             assert_eq!(output.stderr, "");
-//RS             assert_eq!(output.exit_code, 0);
-//RS         }
-//RS     });
-//RS }
-//RS 
-//RS #[test]
-//RS fn http_service_get_put_get_404_matches_across_aot_run_and_interpreter() {
-//RS     let has_cranelift = jet_jit::cranelift_host_supported();
-//RS     let has_rustc = common::have_rustc();
-//RS     let mut modes = vec![(true, false, "http_i9_service_interpreter")];
-//RS     if has_cranelift {
-//RS         modes.insert(0, (false, false, "http_i9_service_jit"));
-//RS     }
-//RS     if has_rustc {
-//RS         modes.push((false, true, "http_i9_service_aot"));
-//RS     }
-//RS     let expected = "200|{\"status\":\"ok\"}\n\
-//RS 200|{\"stored\":\"alpha\"}\n\
-//RS 200|{\"key\":\"alpha\",\"value\":\"one\"}\n\
-//RS 404|{\"error\":\"not found\"}\n\
-//RS 200|{\"bye\":true}\n";
-//RS     on_large_stack(|| {
-//RS         for (use_interpreter, use_aot, name) in modes {
-//RS             let output = if use_aot {
-//RS                 let (exit_code, stdout, stderr) =
-//RS                     common::build_and_run("http_i9_service_get_put_get", "aot", HTTP_SERVICE_GET_PUT_GET);
-//RS                 Output {
-//RS                     stdout,
-//RS                     stderr,
-//RS                     exit_code,
-//RS                 }
-//RS             } else {
-//RS                 run_with_mode(HTTP_SERVICE_GET_PUT_GET, name, use_interpreter)
-//RS             };
-//RS             assert_eq!(output.stdout, expected);
-//RS             assert_eq!(output.stderr, "");
-//RS             assert_eq!(output.exit_code, 0);
-//RS         }
-//RS     });
-//RS }
-//RS 
-//RS #[test]
-//RS fn hostile_http_and_websocket_urls_are_rejected_on_both_dev_tiers() {
-//RS     let modes = if jet_jit::cranelift_host_supported() {
-//RS         vec![
-//RS             (false, "http_i9_hostile_jit"),
-//RS             (true, "http_i9_hostile_interpreter"),
-//RS         ]
-//RS     } else if std::env::var("JET_REQUIRE_CRANELIFT_HOST").as_deref() == Ok("1") {
-//RS         panic!("Cranelift host required but unavailable");
-//RS     } else {
-//RS         vec![(true, "http_i9_hostile_interpreter")]
-//RS     };
-//RS     on_large_stack(|| {
-//RS         for (use_interpreter, name) in modes {
-//RS             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-//RS             listener.set_nonblocking(true).unwrap();
-//RS             let address = listener.local_addr().unwrap();
-//RS             let observer = std::thread::spawn(move || {
-//RS                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
-//RS                 loop {
-//RS                     match listener.accept() {
-//RS                         Ok(_) => return true,
-//RS                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-//RS                             if std::time::Instant::now() >= deadline {
-//RS                                 return false;
-//RS                             }
-//RS                             std::thread::yield_now();
-//RS                         }
-//RS                         Err(_) => return false,
-//RS                     }
-//RS                 }
-//RS             });
-//RS             let source = HOSTILE_URLS
-//RS                 .replace("__HTTP_URL__", &format!("http://{address}"))
-//RS                 .replace("__WS_URL__", &format!("ws://{address}"));
-//RS             let output = run_with_mode(&source, name, use_interpreter);
-//RS             assert_eq!(
-//RS                 output.stdout,
-//RS                 "http url rejected\nmethod rejected\nheader name rejected\nheader value rejected\ncontent length rejected\ntransfer encoding rejected\nduplicate host rejected\nconnection host rejected\nconnection length rejected\nconnection transfer rejected\nproxy connection rejected\nkeep-alive rejected\nte rejected\ntrailer rejected\nupgrade rejected\nproxy authenticate rejected\nproxy authorization rejected\nws rejected\n"
-//RS             );
-//RS             assert_eq!(output.stderr, "");
-//RS             assert_eq!(output.exit_code, 0);
-//RS             assert!(
-//RS                 !observer.join().unwrap(),
-//RS                 "{name} reached the socket for a hostile request"
-//RS             );
-//RS         }
-//RS     });
-//RS }
-//RS 
-//RS const HTTP_SOURCE_FRAMING: &str = r#"
-//RS use core.http as http
-//RS use core.http.client as client
-//RS use core.http.[HTTPError]
-//RS 
-//RS fn request_dispatch(raw: [U8]) -> String HTTPError! {
-//RS     if http.parse_request(raw) == {
-//RS         .Ok(request) -> return Ok("dispatched:{request.path()}")
-//RS         .Err(error) -> {
-//RS             if error == {
-//RS                 .InvalidFraming -> return Ok("rejected:InvalidFraming")
-//RS                 else -> return Ok("rejected:other")
-//RS             }
-//RS         }
-//RS         else -> return Ok("unexpected")
-//RS     }
-//RS }
-//RS 
-//RS fn response_result(raw: [U8]) -> String HTTPError! {
-//RS     if http.parse_response("http://example.test/", raw) == {
-//RS         .Ok(response) -> return Ok("accepted:{response.status()}")
-//RS         .Err(error) -> {
-//RS             if error == {
-//RS                 .InvalidFraming -> return Ok("rejected:InvalidFraming")
-//RS                 else -> return Ok("rejected:other")
-//RS             }
-//RS         }
-//RS         else -> return Ok("unexpected")
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn invalid_request_header(name: String, value: String) -[Net, Time.Wait]> String {
-//RS     req :: client.request("GET", "http://example.test/").header(name, value)
-//RS     if req.send() == {
-//RS         .Err(error) -> {
-//RS             if error == {
-//RS                 .InvalidHeader -> return "rejected:InvalidHeader"
-//RS                 else -> return "rejected:other"
-//RS             }
-//RS         }
-//RS         else -> return "unexpected"
-//RS     }
-//RS }
-//RS 
-//RS fn run() -[IO, Net, Time.Wait]> {
-//RS     crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
-//RS     bad_request :: "POST /secret HTTP/1.1{crlf}Host: local{crlf}Content-Length: 2{crlf}Transfer-Encoding: chunked{crlf}{crlf}ok".bytes()
-//RS     good_request :: "POST /safe HTTP/1.1{crlf}Host: local{crlf}Content-Length: 2{crlf}{crlf}ok".bytes()
-//RS     bad_response :: "HTTP/1.1 200 OK{crlf}Content-Length: 2{crlf}Transfer-Encoding: chunked{crlf}{crlf}ok".bytes()
-//RS     bad_204 :: "HTTP/1.1 204 No Content{crlf}Content-Length: 0{crlf}{crlf}".bytes()
-//RS     valid_304 :: "HTTP/1.1 304 Not Modified{crlf}Content-Length: 17{crlf}{crlf}".bytes()
-//RS     good_response :: "HTTP/1.1 200 OK{crlf}Content-Length: 2{crlf}{crlf}ok".bytes()
-//RS     malformed_request :: request_dispatch(bad_request) ?? panic("unexpected typed HTTP error")
-//RS     valid_request :: request_dispatch(good_request) ?? panic("unexpected typed HTTP error")
-//RS     malformed_response :: response_result(bad_response) ?? panic("unexpected typed HTTP error")
-//RS     invalid_204 :: response_result(bad_204) ?? panic("unexpected typed HTTP error")
-//RS     valid_304_result :: response_result(valid_304) ?? panic("unexpected typed HTTP error")
-//RS     valid_response :: response_result(good_response) ?? panic("unexpected typed HTTP error")
-//RS     bad_header_value :: String.from_bytes([U8]{97, 10, 98}) ?? panic("header value")
-//RS     invalid_header_value :: invalid_request_header("X-Test", bad_header_value)
-//RS     invalid_header :: invalid_request_header("bad name", "value")
-//RS     print("malformed-request={malformed_request}")
-//RS     print("valid-request={valid_request}")
-//RS     print("malformed-response={malformed_response}")
-//RS     print("invalid-204={invalid_204}")
-//RS     print("valid-304={valid_304_result}")
-//RS     print("valid-response={valid_response}")
-//RS     print("invalid-header={invalid_header}")
-//RS     print("invalid-header-value={invalid_header_value}")
-//RS }
-//RS "#;
-//RS 
-//RS #[test]
-//RS fn source_http_message_framing_is_status_aware_on_all_supported_tiers() {
-//RS     let has_cranelift = jet_jit::cranelift_host_supported();
-//RS     let has_rustc = common::have_rustc();
-//RS     let mut modes = vec![(true, false, "http_i9_message_framing_interpreter")];
-//RS     if has_cranelift {
-//RS         modes.insert(0, (false, false, "http_i9_message_framing_jit"));
-//RS     }
-//RS     if has_rustc {
-//RS         modes.push((false, true, "http_i9_message_framing_aot"));
-//RS     }
-//RS     let expected = "malformed-request=rejected:InvalidFraming\n\
-//RS valid-request=dispatched:/safe\n\
-//RS malformed-response=rejected:InvalidFraming\n\
-//RS invalid-204=rejected:InvalidFraming\n\
-//RS valid-304=accepted:304\n\
-//RS valid-response=accepted:200\n\
-//RS invalid-header=rejected:InvalidHeader\n\
-//RS invalid-header-value=rejected:InvalidHeader\n";
-//RS     on_large_stack(|| {
-//RS         for (use_interpreter, use_aot, name) in modes {
-//RS             let output = if use_aot {
-//RS                 let (exit_code, stdout, stderr) =
-//RS                     common::build_and_run("http_i9_message_framing", "aot", HTTP_SOURCE_FRAMING);
-//RS                 Output {
-//RS                     stdout,
-//RS                     stderr,
-//RS                     exit_code,
-//RS                 }
-//RS             } else {
-//RS                 let output = run_with_mode(HTTP_SOURCE_FRAMING, name, use_interpreter);
-//RS                 if name == "http_i9_message_framing_jit" {
-//RS                     assert!(
-//RS                         jet_jit::jit_executed_for_test(),
-//RS                         "{name} did not execute in resident Cranelift"
-//RS                     );
-//RS                     assert!(
-//RS                         !jet_jit::deopt_invoked_for_test()
-//RS                             && !jet_jit::fallback_invoked_for_test(),
-//RS                         "{name} deopted to the interpreter or used fallback"
-//RS                     );
-//RS                 }
-//RS                 output
-//RS             };
-//RS             assert_eq!(
-//RS                 output.stdout,
-//RS                 expected,
-//RS                 "{name}: exit_code={} stderr={:?}",
-//RS                 output.exit_code,
-//RS                 output.stderr
-//RS             );
-//RS             assert_eq!(output.stderr, "");
-//RS             assert_eq!(output.exit_code, 0);
-//RS         }
-//RS     });
-//RS }
-//RS 
-//RS const HTTP_SOURCE_SHORT_CIRCUIT: &str = r#"
-//RS fn short_or(raw: [U8]) -> Bool {
-//RS     raw.len() == 0 || raw[0] == (U8{47})
-//RS }
-//RS 
-//RS fn short_and(raw: [U8]) -> Bool {
-//RS     raw.len() > 0 && raw[0] == (U8{47})
-//RS }
-//RS 
-//RS fn run() {
-//RS     empty_bytes :: "".bytes()
-//RS     slash_bytes :: "/".bytes()
-//RS     other_bytes :: "x".bytes()
-//RS     print("short-or-empty={short_or(empty_bytes)}")
-//RS     print("short-or-slash={short_or(slash_bytes)}")
-//RS     print("short-or-other={short_or(other_bytes)}")
-//RS     print("short-and-empty={short_and(empty_bytes)}")
-//RS     print("short-and-slash={short_and(slash_bytes)}")
-//RS     print("short-and-other={short_and(other_bytes)}")
-//RS }
-//RS "#;
-//RS 
-//RS #[test]
-//RS fn source_boolean_short_circuit_guards_are_lazy_on_all_supported_tiers() {
-//RS     let has_cranelift = jet_jit::cranelift_host_supported();
-//RS     let has_rustc = common::have_rustc();
-//RS     let mut modes = vec![(true, false, "http_i9_short_circuit_interpreter")];
-//RS     if has_cranelift {
-//RS         modes.insert(0, (false, false, "http_i9_short_circuit_jit"));
-//RS     }
-//RS     if has_rustc {
-//RS         modes.push((false, true, "http_i9_short_circuit_aot"));
-//RS     }
-//RS     let expected = "short-or-empty=true\n\
-//RS short-or-slash=true\n\
-//RS short-or-other=false\n\
-//RS short-and-empty=false\n\
-//RS short-and-slash=true\n\
-//RS short-and-other=false\n";
-//RS     on_large_stack(|| {
-//RS         for (use_interpreter, use_aot, name) in modes {
-//RS             let output = if use_aot {
-//RS                 let (exit_code, stdout, stderr) =
-//RS                     common::build_and_run("http_i9_short_circuit", "aot", HTTP_SOURCE_SHORT_CIRCUIT);
-//RS                 Output {
-//RS                     stdout,
-//RS                     stderr,
-//RS                     exit_code,
-//RS                 }
-//RS             } else {
-//RS                 let output = run_with_mode(HTTP_SOURCE_SHORT_CIRCUIT, name, use_interpreter);
-//RS                 if name == "http_i9_short_circuit_jit" {
-//RS                     assert!(
-//RS                         jet_jit::jit_executed_for_test(),
-//RS                         "{name} did not execute in resident Cranelift"
-//RS                     );
-//RS                     assert!(
-//RS                         !jet_jit::deopt_invoked_for_test()
-//RS                             && !jet_jit::fallback_invoked_for_test(),
-//RS                         "{name} deopted to the interpreter or used fallback"
-//RS                     );
-//RS                 }
-//RS                 output
-//RS             };
-//RS             assert_eq!(
-//RS                 output.stdout,
-//RS                 expected,
-//RS                 "{name}: exit_code={} stderr={:?}",
-//RS                 output.exit_code,
-//RS                 output.stderr
-//RS             );
-//RS             assert_eq!(output.stderr, "");
-//RS             assert_eq!(output.exit_code, 0);
-//RS         }
-//RS     });
-//RS }
-//RS 
-//RS #[test]
-//RS fn hostile_http_response_lengths_are_rejected_on_both_dev_tiers() {
-//RS     if skip_if_cranelift_host_unsupported() {
-//RS         return;
-//RS     }
-//RS 
-//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-//RS     let address = listener.local_addr().expect("address");
-//RS     let server = std::thread::spawn(move || {
-//RS         const RESPONSE_BYTES: usize = 64 * 1024 * 1024 + 1;
-//RS         let response = format!(
-//RS             "HTTP/1.1 200 OK\r\nContent-Length: {RESPONSE_BYTES}\r\nConnection: close\r\n\r\n"
-//RS         );
-//RS         for _ in 0..4 {
-//RS             let (mut stream, _) = listener.accept().expect("client connection");
-//RS             let _ = std::io::Write::write_all(&mut stream, response.as_bytes());
-//RS             let _ = std::io::Write::flush(&mut stream);
-//RS         }
-//RS     });
-//RS     let url = format!("http://{address}/oversized");
-//RS     let source = r#"
-//RS use core.http.client as http
-//RS 
-//RS fn run() {
-//RS     if http.get("__URL__") == {
-//RS         .Ok(_) -> print("simple accepted")
-//RS         .Err(_) -> print("simple rejected")
-//RS         else -> print("simple unexpected")
-//RS     }
-//RS     request :: http.request("GET", "__URL__")
-//RS     if request.send() == {
-//RS         .Ok(_) -> print("request accepted")
-//RS         .Err(_) -> print("request rejected")
-//RS         else -> print("request unexpected")
-//RS     }
-//RS }
-//RS "#
-//RS     .replace("__URL__", &url);
-//RS 
-//RS     on_large_stack(|| {
-//RS         for (use_interpreter, name) in [
-//RS             (false, "http_i9_oversized_response_jit"),
-//RS             (true, "http_i9_oversized_response_interpreter"),
-//RS         ] {
-//RS             let output = run_with_mode(&source, name, use_interpreter);
-//RS             assert_eq!(output.stdout, "simple rejected\nrequest rejected\n");
-//RS             assert_eq!(output.stderr, "");
-//RS             assert_eq!(output.exit_code, 0);
-//RS         }
-//RS     });
-//RS     server.join().expect("server");
-//RS }
-//RS 
-//RS // The sink witnesses below intentionally use cleartext HTTP/1.1. `http.get`
-//RS // and `HTTPRequest.send` take the default `h2c = false` path, so this
-//RS // source-level fixture cannot negotiate H2. The direct H2C bridge harness in
-//RS // `tests/http_client_law.rs` covers that separate, protocol-configured path.
-//RS #[test]
-//RS fn hostile_http_response_sinks_reject_streamed_overruns_on_both_dev_tiers() {
-//RS     let modes = if jet_jit::cranelift_host_supported() {
-//RS         vec![
-//RS             (false, "http_i9_response_sinks_jit"),
-//RS             (true, "http_i9_response_sinks_interpreter"),
-//RS         ]
-//RS     } else if std::env::var("JET_REQUIRE_CRANELIFT_HOST").as_deref() == Ok("1") {
-//RS         panic!("Cranelift host required but unavailable");
-//RS     } else {
-//RS         vec![(true, "http_i9_response_sinks_interpreter")]
-//RS     };
-//RS 
-//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-//RS     let address = listener.local_addr().expect("address");
-//RS     let gzip_body = gzip_fixed_repeat_bomb(GZIP_RESPONSE_BODY_LIMIT + 1, b'x');
-//RS     assert!(
-//RS         gzip_body.len() < 1024 * 1024,
-//RS         "gzip expansion witness must stay compact"
-//RS     );
-//RS     let connection_count = modes.len() * 6;
-//RS     let server = std::thread::spawn(move || {
-//RS         for _ in 0..connection_count {
-//RS             let (mut stream, _) = listener.accept().expect("client connection");
-//RS             stream
-//RS                 .set_write_timeout(Some(std::time::Duration::from_secs(10)))
-//RS                 .expect("write timeout");
-//RS             let request = read_http_request(&mut stream);
-//RS             serve_hostile_http_response(&mut stream, &request, &gzip_body);
-//RS         }
-//RS     });
-//RS 
-//RS     let source = HTTP_RESPONSE_SINKS.replace("__URL__", &format!("http://{address}"));
-//RS     let expected = "close-get=rejected:InvalidFraming\n\
-//RS close-request=rejected:InvalidFraming\n\
-//RS chunked-get=rejected:InvalidFraming\n\
-//RS chunked-request=rejected:InvalidFraming\n\
-//RS gzip-get=rejected:InvalidFraming\n\
-//RS gzip-request=rejected:InvalidFraming\n";
-//RS 
-//RS     on_large_stack(|| {
-//RS         for (use_interpreter, name) in modes {
-//RS             let started = std::time::Instant::now();
-//RS             let output = run_with_mode(&source, name, use_interpreter);
-//RS             assert!(
-//RS                 started.elapsed() < std::time::Duration::from_secs(45),
-//RS                 "{name} response sink did not terminate promptly"
-//RS             );
-//RS             assert_eq!(output.stdout, expected);
-//RS             assert_eq!(output.stderr, "");
-//RS             assert_eq!(output.exit_code, 0);
-//RS         }
-//RS     });
-//RS     server.join().expect("server");
-//RS }
-//RS 
-//RS #[test]
-//RS fn hostile_chunked_body_deadline_ends_request_on_both_dev_tiers() {
-//RS     if skip_if_cranelift_host_unsupported() {
-//RS         return;
-//RS     }
-//RS 
-//RS     on_large_stack(|| {
-//RS         for (use_interpreter, name) in [
-//RS             (false, "http_i9_chunked_deadline_jit"),
-//RS             (true, "http_i9_chunked_deadline_interpreter"),
-//RS         ] {
-//RS             let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind port");
-//RS             let port = listener.local_addr().expect("port address").port();
-//RS             drop(listener);
-//RS             let source = format!(
-//RS                 r#"
-//RS use core.http.server as server
-//RS use core.net as net
-//RS 
-//RS fn run() (HTTPError | NetError | TaskFailure)! {{
-//RS     listener :: net.tcp_listen("127.0.0.1:{port}") ?? panic("listen")
-//RS     mux :: server.mux()
-//RS     mux.post("/", (req: HTTPRequest) HTTPResponse HTTPError! -> {{
-//RS         body :: req.body().text(1024) ?? "rejected"
-//RS         return Ok(server.response(200, body))
-//RS     }})
-//RS     server_task :: task {{
-//RS         server.serve_once_listener(listener, mux) ?? panic("serve")
-//RS     }}
-//RS     server_task.join() ?? panic("serve")
-//RS }}
-//RS "#
-//RS             );
-//RS             let tier_name = name.to_string();
-//RS             let runner = std::thread::spawn(move || run_with_mode(&source, &tier_name, use_interpreter));
-//RS             let started = std::time::Instant::now();
-//RS             let mut client = loop {
-//RS                 match std::net::TcpStream::connect(("127.0.0.1", port)) {
-//RS                     Ok(stream) => break stream,
-//RS                     Err(error) if started.elapsed() < std::time::Duration::from_secs(30) => {
-//RS                         let _ = error;
-//RS                         std::thread::sleep(std::time::Duration::from_millis(100));
-//RS                     }
-//RS                     Err(error) => {
-//RS                         let _ = runner.join();
-//RS                         panic!("chunked server did not start: {error}");
-//RS                     }
-//RS                 }
-//RS             };
-//RS             client
-//RS                 .write_all(
-//RS                     b"POST / HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nTrailer: X-Test\r\nConnection: close\r\n\r\n1\r\nx\r\n0\r\n",
-//RS                 )
-//RS                 .expect("write chunked prefix");
-//RS             client.flush().expect("flush chunked prefix");
-//RS             client
-//RS                 .set_read_timeout(Some(std::time::Duration::from_secs(35)))
-//RS                 .expect("set response timeout");
-//RS             let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS             let writer_stop = stop.clone();
-//RS             let mut trickle = client.try_clone().expect("clone client");
-//RS             let writer = std::thread::spawn(move || {
-//RS                 let trailer = b"X-Test: value\r\n";
-//RS                 for (index, byte) in trailer.iter().copied().enumerate() {
-//RS                     if writer_stop.load(std::sync::atomic::Ordering::Acquire)
-//RS                         || trickle.write_all(&[byte]).is_err()
-//RS                     {
-//RS                         return;
-//RS                     }
-//RS                     let _ = trickle.flush();
-//RS                     if index + 1 < trailer.len() {
-//RS                         for _ in 0..80 {
-//RS                             if writer_stop.load(std::sync::atomic::Ordering::Acquire) {
-//RS                                 return;
-//RS                             }
-//RS                             std::thread::sleep(std::time::Duration::from_millis(100));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             });
-//RS             let mut response = Vec::new();
-//RS             let read_result = std::io::Read::read_to_end(&mut client, &mut response);
-//RS             stop.store(true, std::sync::atomic::Ordering::Release);
-//RS             drop(client);
-//RS             writer.join().expect("trickle writer");
-//RS             let output = runner.join().expect("chunked server");
-//RS             assert!(
-//RS                 read_result.is_ok() && response.starts_with(b"HTTP/1.1 "),
-//RS                 "chunked request was not ended by the body deadline after {:?}: read={read_result:?}, response={response:?}, stderr={}",
-//RS                 started.elapsed(),
-//RS                 output.stderr
-//RS             );
-//RS             assert!(started.elapsed() < std::time::Duration::from_secs(35));
-//RS             assert_eq!(output.stderr, "");
-//RS             assert_eq!(output.exit_code, 0);
-//RS         }
-//RS     });
-//RS }
-//RS #[test]
-//RS fn http_request_text_projections_preserve_body_contract_on_all_supported_tiers() {
-//RS     let has_cranelift = jet_jit::cranelift_host_supported();
-//RS     let has_rustc = common::have_rustc();
-//RS     let mut modes = vec![(true, false, "http_i9_request_text_interpreter")];
-//RS     if has_cranelift {
-//RS         modes.insert(0, (false, false, "http_i9_request_text_jit"));
-//RS     }
-//RS     if has_rustc {
-//RS         modes.push((false, true, "http_i9_request_text_aot"));
-//RS     }
-//RS     let cases: [(&str, &[u8], &str); 5] = [
-//RS         ("/default", b"hello", "default=hello"),
-//RS         ("/explicit", b"hello", "explicit=hello"),
-//RS         ("/over", b"hello", "over=BodyTooLarge:4"),
-//RS         ("/consumed", b"hello", "consumed=BodyConsumed"),
-//RS         ("/binary", &[0, 0xff, 1], "binary=UnsupportedEncoding"),
-//RS     ];
-//RS     on_large_stack(|| {
-//RS         for (use_interpreter, use_aot, name) in modes {
-//RS             let reservation = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-//RS             let port = reservation.local_addr().expect("port address").port();
-//RS             drop(reservation);
-//RS             let source = HTTP_REQUEST_TEXT.replace("__PORT__", &port.to_string());
-//RS             let tier_name = name.to_string();
-//RS             let runner = std::thread::spawn(move || {
-//RS                 if use_aot {
-//RS                     let (exit_code, stdout, stderr) =
-//RS                         common::build_and_run("http_i9_request_text", "aot", &source);
-//RS                     Output {
-//RS                         stdout,
-//RS                         stderr,
-//RS                         exit_code,
-//RS                     }
-//RS                 } else {
-//RS                     run_with_mode(&source, &tier_name, use_interpreter)
-//RS                 }
-//RS             });
-//RS             let started = std::time::Instant::now();
-//RS             for &(path, body, expected) in &cases {
-//RS                 let mut client = loop {
-//RS                     match std::net::TcpStream::connect(("127.0.0.1", port)) {
-//RS                         Ok(stream) => break stream,
-//RS                         Err(error) if started.elapsed() < std::time::Duration::from_secs(30) => {
-//RS                             let _ = error;
-//RS                             std::thread::sleep(std::time::Duration::from_millis(100));
-//RS                         }
-//RS                         Err(error) => {
-//RS                             let _ = runner.join();
-//RS                             panic!("request-text server did not start: {error}");
-//RS                         }
-//RS                     }
-//RS                 };
-//RS                 client
-//RS                     .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-//RS                     .expect("set response timeout");
-//RS                 let header = format!(
-//RS                     "POST {path} HTTP/1.1\r\nHost: local\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-//RS                     body.len()
-//RS                 );
-//RS                 client.write_all(header.as_bytes()).expect("write request header");
-//RS                 client.write_all(body).expect("write request body");
-//RS                 client.flush().expect("flush request");
-//RS                 let mut response = Vec::new();
-//RS                 let read_result = client.read_to_end(&mut response);
-//RS                 if let Err(error) = read_result {
-//RS                     assert_eq!(
-//RS                         error.kind(),
-//RS                         std::io::ErrorKind::ConnectionReset,
-//RS                         "request-text response read failed for {path}: {error}, response={response:?}"
-//RS                     );
-//RS                 }
-//RS                 let response = String::from_utf8(response).expect("UTF-8 HTTP response");
-//RS                 assert!(
-//RS                     response.starts_with("HTTP/1.1 200"),
-//RS                     "request-text handler returned unexpected response: {response:?}"
-//RS                 );
-//RS                 let (_, response_body) = response
-//RS                     .split_once("\r\n\r\n")
-//RS                     .expect("request-text response headers");
-//RS                 assert_eq!(response_body, expected, "request-text case {path}");
-//RS             }
-//RS             let output = runner.join().expect("request-text server");
-//RS             assert_eq!(output.stdout, "");
-//RS             assert_eq!(output.stderr, "");
-//RS             assert_eq!(output.exit_code, 0);
-//RS         }
-//RS     });
-//RS }
-// END-PORT-PENDING 1071 tests/http_i9.rs:1-1573
+// Rust: tests/http_i9.rs:270
+FORCED_DEOPT :: `
+use core.http.client as http_client
+use core.http.server as http_server
+use core.text as text
+#Codable
+struct Reading { city: String, degrees: Int }
+fn any_origins() -> HTTPCorsOrigins { return .Any }
+fn run() -> {
+    print(text.casefold("Straße"))
+    mux :: http_server.mux()
+    mux.get("/health", () -> Ok(http_server.response(204, "")))
+    policy :: http_server.cors_policy(["https://app.example"]) ?? panic("cors")
+    http_server.cors(mux, policy)
+    http_server.static_files(mux, "/assets", "/tmp")
+    response :: http_server.json(201, Reading{city: "Reno", degrees: 32})
+    response_text :: http_server.response(200, "hello")
+    decoded :: response.json<Reading>() ?? panic("response")
+    request :: http_client.request("POST", "http://example.test/").json(Reading{city: "Reno", degrees: 31})
+    request_decoded :: request.json<Reading>() ?? panic("request")
+    request_content_type :: &request.header("content-type") ?? "missing"
+    print("{decoded.city}|{request_decoded.degrees}|{request_content_type}|{response_text.text() ?? "invalid body"}")
+    malformed :: http_client.request("POST", "http://example.test/").body("{{")
+    if malformed.json<Reading>() == {
+        .Ok(_) -> print("accepted")
+        .Err(error) -> print(error)
+        else -> print("unexpected")
+    }
+    if http_server.cors_policy(any_origins(), [], [], true) == {
+        .Ok(_) -> print("accepted")
+        .Err(error) -> print(error)
+        else -> print("unexpected")
+    }
+}
+`
+// Rust: tests/http_i9.rs:314
+ROUTE_HANDLERS :: `
+use core.http.client as http
+use core.http.server as server
+use core.net as net
+struct HandlerState { label: String }
+fn route_error(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    if req.path() == "/error" -> return Err(.InvalidFraming)
+    return Err(.InvalidFraming)
+}
+fn run() -> (HTTPError | NetError | TaskFailure)! {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: listener.local_addr() ?? panic("address")
+    state :: shared HandlerState{label: "before registration"}
+    mux :: server.mux()
+    mux.get("/zero", () -> Ok(server.response(200, "zero")))
+    mux.get("/items/:id", (req: HTTPRequest) HTTPResponse HTTPError! -> {
+        header :: &req.header("x-state") ?? "missing"
+        id :: req.param("id") ?? "missing"
+        path :: req.path()
+        return Ok(server.response(200, "{path}|{id}|{header}|{state.label}"))
+    })
+    mux.get("/error", route_error)
+    state.label = "captured"
+    t :: task {
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+    }
+    zero :: http.request("GET", "http://{address}/zero").send() ?? panic("zero")
+    print(zero.text() ?? "zero body")
+    detail :: http.request("GET", "http://{address}/items/42").header("x-state", "captured-header").send() ?? panic("detail")
+    print(detail.text() ?? "detail body")
+    failed :: http.request("GET", "http://{address}/error").send() ?? panic("error")
+    print(failed.status())
+    t.join() ?? panic("join")
+}
+`
+// Rust: tests/http_i9.rs:358
+HTTP_SERVICE_GET_PUT_GET :: `
+use core.http.client as http
+use core.http.server as server
+use core.net as net
+fn reply(status: Int, body: String) -> HTTPResponse HTTPError! {
+    return Ok(server.response(status, body).header("content-type", "application/json"))
+}
+fn kv(key: String, req: HTTPRequest, store: Shared<[String:String]>, put: Bool) -> HTTPResponse HTTPError! {
+    if put {
+        value :: req.body().text(8388608) ?? ""
+        store.guard_edit().value[key] = value
+        return reply(200, "{{\"stored\":\"{key}\"}}")
+    }
+    stored :: store.guard_read().value.get(key) ?? return reply(404, "{{\"error\":\"not found\"}}")
+    return reply(200, "{{\"key\":\"{key}\",\"value\":\"{stored}\"}}")
+}
+fn run() -> (HTTPError | NetError | TaskFailure)! {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: listener.local_addr() ?? panic("address")
+    store :: shared [String:String]{}
+    mux :: server.mux()
+    mux.get("/health", () -> reply(200, "{{\"status\":\"ok\"}}"))
+    mux.put("/kv/:key", (req: HTTPRequest) -> kv(req.param("key") ?? "", req, store, true))
+    mux.get("/kv/:key", (req: HTTPRequest) -> kv(req.param("key") ?? "", req, store, false))
+    mux.get("/shutdown", () -> reply(200, "{{\"bye\":true}}"))
+    server_task :: task {
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+    }
+    health :: http.request("GET", "http://{address}/health").send() ?? panic("health")
+    print("{health.status()}|{health.text() ?? "health body"}")
+    put :: http.request("PUT", "http://{address}/kv/alpha").body("one").send() ?? panic("put")
+    print("{put.status()}|{put.text() ?? "put body"}")
+    get :: http.request("GET", "http://{address}/kv/alpha").send() ?? panic("get")
+    print("{get.status()}|{get.text() ?? "get body"}")
+    missing :: http.request("GET", "http://{address}/kv/nope").send() ?? panic("missing")
+    print("{missing.status()}|{missing.text() ?? "missing body"}")
+    shutdown :: http.request("GET", "http://{address}/shutdown").send() ?? panic("shutdown")
+    print("{shutdown.status()}|{shutdown.text() ?? "shutdown body"}")
+    server_task.join() ?? panic("join")
+}
+`
+// Rust: tests/http_i9.rs:412
+HOSTILE_URLS :: `
+use core.http.client as http_client
+use core.net.ws as ws
+fn run() -> {
+    if http_client.get("__HTTP_URL__/path\nInjected: yes") == {
+        .Ok(_) -> print("http url accepted")
+        .Err(error) -> {
+            if error == .InvalidURL -> print("http url rejected")
+            else -> print("http url wrong")
+        }
+        else -> print("http url unexpected")
+    }
+    method :: http_client.request("GET\nInjected", "__HTTP_URL__/method")
+    if method.send() == {
+        .Ok(_) -> print("method accepted")
+        .Err(error) -> {
+            if error == .InvalidHeader -> print("method rejected")
+            else -> print("method wrong")
+        }
+        else -> print("method unexpected")
+    }
+    header_name :: http_client.request("GET", "__HTTP_URL__/header-name").header("x-bad\nname", "value")
+    if header_name.send() == {
+        .Ok(_) -> print("header name accepted")
+        .Err(error) -> {
+            if error == .InvalidHeader -> print("header name rejected")
+            else -> print("header name wrong")
+        }
+        else -> print("header name unexpected")
+    }
+    header_value :: http_client.request("GET", "__HTTP_URL__/header-value").header("x-safe", "bad\nvalue")
+    if header_value.send() == {
+        .Ok(_) -> print("header value accepted")
+        .Err(error) -> {
+            if error == .InvalidHeader -> print("header value rejected")
+            else -> print("header value wrong")
+        }
+        else -> print("header value unexpected")
+    }
+    content_length :: http_client.request("POST", "__HTTP_URL__/content-length").header("Content-Length", "0").body("body")
+    if content_length.send() == {
+        .Ok(_) -> print("content length accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("content length rejected")
+            else -> print("content length wrong")
+        }
+        else -> print("content length unexpected")
+    }
+    transfer_encoding :: http_client.request("POST", "__HTTP_URL__/transfer-encoding").header("Transfer-Encoding", "chunked").body("body")
+    if transfer_encoding.send() == {
+        .Ok(_) -> print("transfer encoding accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("transfer encoding rejected")
+            else -> print("transfer encoding wrong")
+        }
+        else -> print("transfer encoding unexpected")
+    }
+    duplicate_host :: http_client.request("GET", "__HTTP_URL__/duplicate-host").header("Host", "one").header("hOsT", "two")
+    if duplicate_host.send() == {
+        .Ok(_) -> print("duplicate host accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("duplicate host rejected")
+            else -> print("duplicate host wrong")
+        }
+        else -> print("duplicate host unexpected")
+    }
+    connection_host :: http_client.request("GET", "__HTTP_URL__/connection-host").header("cOnNeCtIoN", "hOsT")
+    if connection_host.send() == {
+        .Ok(_) -> print("connection host accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("connection host rejected")
+            else -> print("connection host wrong")
+        }
+        else -> print("connection host unexpected")
+    }
+    connection_length :: http_client.request("POST", "__HTTP_URL__/connection-length").header("Connection", "Content-Length").body("body")
+    if connection_length.send() == {
+        .Ok(_) -> print("connection length accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("connection length rejected")
+            else -> print("connection length wrong")
+        }
+        else -> print("connection length unexpected")
+    }
+    connection_transfer :: http_client.request("POST", "__HTTP_URL__/connection-transfer").header("Connection", "tRaNsFeR-EnCoDiNg").body("body")
+    if connection_transfer.send() == {
+        .Ok(_) -> print("connection transfer accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("connection transfer rejected")
+            else -> print("connection transfer wrong")
+        }
+        else -> print("connection transfer unexpected")
+    }
+    proxy_connection :: http_client.request("GET", "__HTTP_URL__/proxy-connection").header("pRoXy-CoNnEcTiOn", "keep-alive")
+    if proxy_connection.send() == {
+        .Ok(_) -> print("proxy connection accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("proxy connection rejected")
+            else -> print("proxy connection wrong")
+        }
+        else -> print("proxy connection unexpected")
+    }
+    keep_alive :: http_client.request("GET", "__HTTP_URL__/keep-alive").header("Keep-Alive", "timeout=5")
+    if keep_alive.send() == {
+        .Ok(_) -> print("keep-alive accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("keep-alive rejected")
+            else -> print("keep-alive wrong")
+        }
+        else -> print("keep-alive unexpected")
+    }
+    te :: http_client.request("GET", "__HTTP_URL__/te").header("TE", "trailers")
+    if te.send() == {
+        .Ok(_) -> print("te accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("te rejected")
+            else -> print("te wrong")
+        }
+        else -> print("te unexpected")
+    }
+    trailer :: http_client.request("GET", "__HTTP_URL__/trailer").header("Trailer", "x-trailer")
+    if trailer.send() == {
+        .Ok(_) -> print("trailer accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("trailer rejected")
+            else -> print("trailer wrong")
+        }
+        else -> print("trailer unexpected")
+    }
+    upgrade :: http_client.request("GET", "__HTTP_URL__/upgrade").header("Upgrade", "websocket")
+    if upgrade.send() == {
+        .Ok(_) -> print("upgrade accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("upgrade rejected")
+            else -> print("upgrade wrong")
+        }
+        else -> print("upgrade unexpected")
+    }
+    proxy_authenticate :: http_client.request("GET", "__HTTP_URL__/proxy-authenticate").header("Proxy-Authenticate", "Basic")
+    if proxy_authenticate.send() == {
+        .Ok(_) -> print("proxy authenticate accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("proxy authenticate rejected")
+            else -> print("proxy authenticate wrong")
+        }
+        else -> print("proxy authenticate unexpected")
+    }
+    proxy_authorization :: http_client.request("GET", "__HTTP_URL__/proxy-authorization").header("pRoXy-AuThOrIzAtIoN", "Basic secret")
+    if proxy_authorization.send() == {
+        .Ok(_) -> print("proxy authorization accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("proxy authorization rejected")
+            else -> print("proxy authorization wrong")
+        }
+        else -> print("proxy authorization unexpected")
+    }
+    if ws.connect("__WS_URL__/path\nInjected: yes") == {
+        .Ok(_) -> print("ws accepted")
+        .Err(error) -> {
+            if error == .InvalidURL -> print("ws rejected")
+            else -> print("ws wrong error")
+        }
+        else -> print("ws unexpected")
+    }
+}
+`
+// Rust: tests/http_i9.rs:599
+HTTP_TEXT_ERROR_BODIES :: `
+use core.http.client as http
+fn response_text_default(response: HTTPResponse) -> String Never! {
+    if response.text() == {
+        .Ok(text) -> return "ok:{text.len()}"
+        .Err(error) -> {
+            if error == {
+                .BodyTooLarge(limit) -> return "err:BodyTooLarge:{limit}"
+                .UnsupportedEncoding -> return "err:UnsupportedEncoding"
+                .IO(operation) -> return "err:IO:{operation}"
+                .BodyConsumed -> return "err:BodyConsumed"
+                else -> return "err:other"
+            }
+        }
+        else -> return "err:unexpected"
+    }
+}
+fn response_text_explicit(response: HTTPResponse) -> String Never! {
+    if response.text(5) == {
+        .Ok(text) -> return "ok:{text}"
+        .Err(error) -> {
+            if error == {
+                .BodyTooLarge(limit) -> return "err:BodyTooLarge:{limit}"
+                .BodyConsumed -> return "err:BodyConsumed"
+                else -> return "err:other"
+            }
+        }
+        else -> return "err:unexpected"
+    }
+}
+fn response_text_consumed(response: HTTPResponse) -> String Never! {
+    if response.text() == {
+        .Ok(_) -> {
+            if response.text() == {
+                .Ok(_) -> return "ok:reused"
+                .Err(error) -> {
+                    if error == {
+                        .BodyConsumed -> return "err:BodyConsumed"
+                        else -> return "err:other"
+                    }
+                }
+                else -> return "err:unexpected"
+            }
+        }
+        .Err(_) -> return "err:first-read"
+        else -> return "err:first-read"
+    }
+}
+fn response_text_stream(response: HTTPResponse) -> String Never! {
+    if response.text() == {
+        .Ok(text) -> return "ok:{text}"
+        .Err(error) -> {
+            if error == {
+                .BodyConsumed -> return "err:BodyConsumed"
+                else -> return "err:other"
+            }
+        }
+        else -> return "err:unexpected"
+    }
+}
+fn run() -> {
+    if http.get("__URL__/default") == {
+        .Ok(response) -> print("default={response_text_default(response)}")
+        .Err(_) -> print("default=request-error")
+        else -> print("default=unexpected")
+    }
+    if http.get("__URL__/explicit") == {
+        .Ok(response) -> print("explicit={response_text_explicit(response)}")
+        .Err(_) -> print("explicit=request-error")
+        else -> print("explicit=unexpected")
+    }
+    if http.get("__URL__/consumed") == {
+        .Ok(response) -> print("consumed={response_text_consumed(response)}")
+        .Err(_) -> print("consumed=request-error")
+        else -> print("consumed=unexpected")
+    }
+    if http.get("__URL__/stream") == {
+        .Ok(response) -> print("stream={response_text_stream(response)}")
+        .Err(_) -> print("stream=request-error")
+        else -> print("stream=unexpected")
+    }
+    if http.get("__URL__/over") == {
+        .Ok(over) -> print("over={response_text_default(over)}")
+        .Err(_) -> print("over=request-error")
+        else -> print("over=unexpected")
+    }
+    if http.get("__URL__/binary") == {
+        .Ok(binary) -> print("binary={response_text_default(binary)}")
+        .Err(_) -> print("binary=request-error")
+        else -> print("binary=unexpected")
+    }
+    if http.get("__URL__/truncated") == {
+        .Ok(truncated) -> print("truncated={response_text_default(truncated)}")
+        .Err(_) -> print("truncated=request-error")
+        else -> print("truncated=unexpected")
+    }
+}
+`
+// Rust: tests/http_i9.rs:702
+HTTP_RESPONSE_SINKS :: `
+use core.http.client as http
+fn consume(response: HTTPResponse) -> String Never! {
+    loop chunk in response.body().chunks(65536) {
+        if chunk == {
+            .Ok(_) -> {}
+            .Err(error) -> {
+                if error == .InvalidFraming -> return "rejected:InvalidFraming"
+                else -> return "wrong-error"
+            }
+            else -> return "unexpected"
+        }
+    }
+    return "accepted"
+}
+fn run() -> {
+    if http.get("__URL__/close-get") == {
+        .Ok(response) -> print("close-get={consume(response)}")
+        .Err(_) -> print("close-get=request-error")
+        else -> print("close-get=unexpected")
+    }
+    close_request :: http.request("GET", "__URL__/close-request").read_timeout(30000)
+    if close_request.send() == {
+        .Ok(response) -> print("close-request={consume(response)}")
+        .Err(_) -> print("close-request=request-error")
+        else -> print("close-request=unexpected")
+    }
+    if http.get("__URL__/chunked-get") == {
+        .Ok(response) -> print("chunked-get={consume(response)}")
+        .Err(_) -> print("chunked-get=request-error")
+        else -> print("chunked-get=unexpected")
+    }
+    chunked_request :: http.request("GET", "__URL__/chunked-request").read_timeout(30000)
+    if chunked_request.send() == {
+        .Ok(response) -> print("chunked-request={consume(response)}")
+        .Err(_) -> print("chunked-request=request-error")
+        else -> print("chunked-request=unexpected")
+    }
+    if http.get("__URL__/gzip-get") == {
+        .Ok(response) -> print("gzip-get={consume(response)}")
+        .Err(_) -> print("gzip-get=request-error")
+        else -> print("gzip-get=unexpected")
+    }
+    gzip_request :: http.request("GET", "__URL__/gzip-request").read_timeout(30000)
+    if gzip_request.send() == {
+        .Ok(response) -> print("gzip-request={consume(response)}")
+        .Err(_) -> print("gzip-request=request-error")
+        else -> print("gzip-request=unexpected")
+    }
+}
+`
+// Rust: tests/http_i9.rs:755
+HTTP_REQUEST_TEXT :: `
+use core.http.server as server
+use core.net as net
+fn request_text_default(req: HTTPRequest) -> String Never! {
+    if req.text() == {
+        .Ok(text) -> return "default={text}"
+        .Err(_) -> return "default=wrong-error"
+        else -> return "default=unexpected"
+    }
+}
+fn request_text_explicit(req: HTTPRequest) -> String Never! {
+    if req.text(5) == {
+        .Ok(text) -> return "explicit={text}"
+        .Err(error) -> {
+            if error == {
+                .BodyTooLarge(limit) -> return "explicit=BodyTooLarge:{limit}"
+                else -> return "explicit=wrong-error"
+            }
+        }
+        else -> return "explicit=unexpected"
+    }
+}
+fn request_text_over(req: HTTPRequest) -> String Never! {
+    if req.text(4) == {
+        .Ok(_) -> return "over=accepted"
+        .Err(error) -> {
+            if error == {
+                .BodyTooLarge(limit) -> return "over=BodyTooLarge:{limit}"
+                else -> return "over=wrong-error"
+            }
+        }
+        else -> return "over=unexpected"
+    }
+}
+fn request_text_consumed(req: HTTPRequest) -> String Never! {
+    if req.text() == {
+        .Ok(_) -> {
+            if req.text() == {
+                .Ok(_) -> return "consumed=reused"
+                .Err(error) -> {
+                    if error == {
+                        .BodyConsumed -> return "consumed=BodyConsumed"
+                        else -> return "consumed=wrong-error"
+                    }
+                }
+                else -> return "consumed=unexpected"
+            }
+        }
+        .Err(_) -> return "consumed=first-read-error"
+        else -> return "consumed=first-read-error"
+    }
+}
+fn request_text_binary(req: HTTPRequest) -> String Never! {
+    if req.text() == {
+        .Ok(_) -> return "binary=accepted"
+        .Err(error) -> {
+            if error == {
+                .UnsupportedEncoding -> return "binary=UnsupportedEncoding"
+                else -> return "binary=wrong-error"
+            }
+        }
+        else -> return "binary=unexpected"
+    }
+}
+fn request_text_classify(req: HTTPRequest) -> String Never! {
+    path :: req.path()
+    if path == "/default" -> return request_text_default(req)
+    if path == "/explicit" -> return request_text_explicit(req)
+    if path == "/over" -> return request_text_over(req)
+    if path == "/consumed" -> return request_text_consumed(req)
+    if path == "/binary" -> return request_text_binary(req)
+    return "unknown"
+}
+fn request_text_handler(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    return Ok(server.response(200, request_text_classify(req)))
+}
+fn run() -> (HTTPError | NetError | TaskFailure)! {
+    listener :: net.tcp_listen("127.0.0.1:__PORT__") ?? panic("listen")
+    mux :: server.mux()
+    mux.post("/default", request_text_handler)
+    mux.post("/explicit", request_text_handler)
+    mux.post("/over", request_text_handler)
+    mux.post("/consumed", request_text_handler)
+    mux.post("/binary", request_text_handler)
+    server_task :: task {
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+    }
+    server_task.join() ?? panic("join")
+}
+`
 
+// Rust: tests/http_i9.rs:1067
+HTTP_SOURCE_FRAMING :: `
+use core.http as http
+use core.http.client as client
+use core.http.[HTTPError]
+fn request_dispatch(raw: [U8]) -> String HTTPError! {
+    if http.parse_request(raw) == {
+        .Ok(request) -> return Ok("dispatched:{request.path()}")
+        .Err(error) -> {
+            if error == {
+                .InvalidFraming -> return Ok("rejected:InvalidFraming")
+                else -> return Ok("rejected:other")
+            }
+        }
+        else -> return Ok("unexpected")
+    }
+}
+fn response_result(raw: [U8]) -> String HTTPError! {
+    if http.parse_response("http://example.test/", raw) == {
+        .Ok(response) -> return Ok("accepted:{response.status()}")
+        .Err(error) -> {
+            if error == {
+                .InvalidFraming -> return Ok("rejected:InvalidFraming")
+                else -> return Ok("rejected:other")
+            }
+        }
+        else -> return Ok("unexpected")
+    }
+}
+fn invalid_request_header(name: String, value: String) -[Net, Time.Wait]> String {
+    req :: client.request("GET", "http://example.test/").header(name, value)
+    if req.send() == {
+        .Err(error) -> {
+            if error == {
+                .InvalidHeader -> return "rejected:InvalidHeader"
+                else -> return "rejected:other"
+            }
+        }
+        else -> return "unexpected"
+    }
+}
+fn run() -[IO, Net, Time.Wait]> {
+    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    bad_request :: "POST /secret HTTP/1.1{crlf}Host: local{crlf}Content-Length: 2{crlf}Transfer-Encoding: chunked{crlf}{crlf}ok".bytes()
+    good_request :: "POST /safe HTTP/1.1{crlf}Host: local{crlf}Content-Length: 2{crlf}{crlf}ok".bytes()
+    bad_response :: "HTTP/1.1 200 OK{crlf}Content-Length: 2{crlf}Transfer-Encoding: chunked{crlf}{crlf}ok".bytes()
+    bad_204 :: "HTTP/1.1 204 No Content{crlf}Content-Length: 0{crlf}{crlf}".bytes()
+    valid_304 :: "HTTP/1.1 304 Not Modified{crlf}Content-Length: 17{crlf}{crlf}".bytes()
+    good_response :: "HTTP/1.1 200 OK{crlf}Content-Length: 2{crlf}{crlf}ok".bytes()
+    malformed_request :: request_dispatch(bad_request) ?? panic("unexpected typed HTTP error")
+    valid_request :: request_dispatch(good_request) ?? panic("unexpected typed HTTP error")
+    malformed_response :: response_result(bad_response) ?? panic("unexpected typed HTTP error")
+    invalid_204 :: response_result(bad_204) ?? panic("unexpected typed HTTP error")
+    valid_304_result :: response_result(valid_304) ?? panic("unexpected typed HTTP error")
+    valid_response :: response_result(good_response) ?? panic("unexpected typed HTTP error")
+    bad_header_value :: String.from_bytes([U8]{97, 10, 98}) ?? panic("header value")
+    invalid_header_value :: invalid_request_header("X-Test", bad_header_value)
+    invalid_header :: invalid_request_header("bad name", "value")
+    print("malformed-request={malformed_request}")
+    print("valid-request={valid_request}")
+    print("malformed-response={malformed_response}")
+    print("invalid-204={invalid_204}")
+    print("valid-304={valid_304_result}")
+    print("valid-response={valid_response}")
+    print("invalid-header={invalid_header}")
+    print("invalid-header-value={invalid_header_value}")
+}
+`
+// Rust: tests/http_i9.rs:1197
+HTTP_SOURCE_SHORT_CIRCUIT :: `
+fn short_or(raw: [U8]) -> Bool {
+    raw.len() == 0 || raw[0] == (U8{47})
+}
+fn short_and(raw: [U8]) -> Bool {
+    raw.len() > 0 && raw[0] == (U8{47})
+}
+fn run() -> {
+    empty_bytes :: "".bytes()
+    slash_bytes :: "/".bytes()
+    other_bytes :: "x".bytes()
+    print("short-or-empty={short_or(empty_bytes)}")
+    print("short-or-slash={short_or(slash_bytes)}")
+    print("short-or-other={short_or(other_bytes)}")
+    print("short-and-empty={short_and(empty_bytes)}")
+    print("short-and-slash={short_and(slash_bytes)}")
+    print("short-and-other={short_and(other_bytes)}")
+}
+`
+// Rust: tests/http_i9.rs:861-1573 — all eleven tests live in http_i9Tests.jet.

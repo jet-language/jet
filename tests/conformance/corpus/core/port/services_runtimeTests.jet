@@ -1,0 +1,331 @@
+use tests.conformance.corpus.core.port.services_runtime.*
+use tests.tir_support.[build_and_run, build_and_run_full, have_rustc, interpreter_run, run_default_multi]
+use std.fs as fs
+use std.env as env
+
+// Rust: tests/services_runtime.rs:19
+#Test("service_runtime_exports_typed_counters_on_all_tiers") {
+    if !have_rustc() { return }
+    source_path :: OSPath.from(env.manifest_dir()).join("Examples/features/tooling/service_runtime/run.jet")
+    source :: fs.read_to_string(source_path).unwrap()
+    expected :: fs.read_to_string(OSPath.from(env.manifest_dir()).join("Examples/features/expected/tooling/service_runtime.out")).unwrap()
+    (aot_code, aot_stdout, aot_stderr) :: build_and_run_full("services_observability", "service_runtime", source)
+    assert_eq(aot_code, 0, "AOT observability dogfood failed: {aot_stderr}")
+    assert_eq(aot_stdout, expected, "AOT observability dogfood diverged from its golden")
+    (jit_code, jit_stdout, jit_stderr) :: run_default_multi("services_observability_jit", "main.jet", [("main.jet", source.as_str())])
+    assert_eq(jit_code, 0, "default observability dogfood failed: {jit_stderr}")
+    assert_eq(jit_stdout, expected, "default observability dogfood diverged from AOT/golden\n{jit_stderr}")
+    (interpreter_code, interpreter_stdout, interpreter_stderr) :: interpreter_run("services_observability_interpreter", source)
+    assert_eq(interpreter_code, 0, "interpreter observability dogfood failed: {interpreter_stderr}")
+    assert_eq(interpreter_stdout, expected, "interpreter observability dogfood diverged from AOT/golden\n{interpreter_stderr}")
+}
+
+// Rust: tests/services_runtime.rs:143
+#Test("service_authority_receipts_survive_reopen_and_lifecycle") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("services_authority", AUTHORITY_SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, "audit:true:1\nfirst:accepted\nrecovered:accepted\ndelivered:order\ncommitted:ok\nrestarted:1\nduplicate:delivered\nretain:accepted\nretry:accepted\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n")
+}
+
+// Rust: tests/services_runtime.rs:156
+#Test("service_authority_receipts_match_default_run") {
+    (code, stdout, stderr) :: run_default_multi("services_authority_jit", "main.jet", [("main.jet", AUTHORITY_SOURCE)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, "first:accepted\nrecovered:accepted\ndelivered:order\ncommitted:ok\nrestarted:1\nduplicate:delivered\nretain:accepted\nretry:accepted\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n")
+}
+
+// Rust: tests/services_runtime.rs:170
+#Test("service_authority_receipts_match_interpreter") {
+    (code, stdout, stderr) :: interpreter_run("services_authority_interpreter", AUTHORITY_SOURCE)
+    assert_eq(code, 0, "interpreter service authority run failed: {stderr}")
+    assert_eq(stdout, "first:accepted\nrecovered:accepted\ndelivered:order\ncommitted:ok\nrestarted:1\nduplicate:delivered\nretain:accepted\nretry:accepted\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n")
+}
+
+// Rust: tests/services_runtime.rs:236
+#Test("durable_lifecycle_audit_matches_aot_default_and_interpreter") {
+    if !have_rustc() { return }
+    (aot_code, aot_stdout) :: build_and_run("services_durable_audit", DURABLE_AUDIT_SOURCE)
+    assert_eq(aot_code, 0)
+    assert_eq(aot_stdout, DURABLE_AUDIT_OUTPUT)
+    (jit_code, jit_stdout, jit_stderr) :: run_default_multi("services_durable_audit_jit", "main.jet", [("main.jet", DURABLE_AUDIT_SOURCE)])
+    assert_eq(jit_code, 0, "default durable audit failed: {jit_stderr}")
+    assert_eq(jit_stdout, DURABLE_AUDIT_OUTPUT)
+    (interpreter_code, interpreter_stdout, interpreter_stderr) :: interpreter_run("services_durable_audit_interpreter", DURABLE_AUDIT_SOURCE)
+    assert_eq(interpreter_code, 0, "interpreter durable audit failed: {interpreter_stderr}")
+    assert_eq(interpreter_stdout, DURABLE_AUDIT_OUTPUT)
+}
+
+// Rust: tests/services_runtime.rs:428
+#Test("service_authority_recovers_pending_delivery_across_process_restart") {
+    if !have_rustc() { return }
+    (dir, bin) :: compile_restart_binary(RESTART_SOURCE)
+    store :: dir.join("authority.log")
+    id_out :: run_restart_process(&bin, &store, "send", None)
+    id := id_out.trim() // #4303
+    assert(!id.is_empty(), "send process did not return a receipt id")
+    assert_eq(run_restart_process(&bin, &store, "recover", Some(id)), "restarted:1\naccepted\norder\n")
+    default_store :: dir.join("authority-default.log")
+    default_id_out :: run_restart_default_process(&dir, &default_store, "send", None)
+    default_id := default_id_out.trim() // #4303
+    assert(!default_id.is_empty(), "default send process did not return a receipt id")
+    assert_eq(run_restart_process(&bin, &default_store, "recover", Some(default_id)), "restarted:1\naccepted\norder\n")
+    aot_store :: dir.join("authority-aot-to-default.log")
+    aot_id_out :: run_restart_process(&bin, &aot_store, "send", None)
+    aot_id := aot_id_out.trim() // #4303
+    assert(!aot_id.is_empty(), "AOT send process did not return a receipt id")
+    assert_eq(run_restart_default_process(&dir, &aot_store, "recover", Some(aot_id)), "restarted:1\naccepted\norder\n")
+    // Receipt SHA-256 identity and acceptance HMAC must not alias altered immutable facts.
+    corrupt_store :: dir.join("authority-corrupt.log")
+    corrupt_id :: run_restart_process(&bin, &corrupt_store, "send", None)
+    corrupt := fs.read(&corrupt_store).unwrap()
+    pipes :: corrupt.iter().enumerate().filter_map((index, byte) -> if byte == b'|' { Some(index) } else { None }).collect::<[USize]>()
+    assert(pipes.len() >= 10, "receipt record did not contain its framed fields")
+    expires_start :: pipes[8] + 1
+    expires_end :: pipes[9]
+    expires_colon :: corrupt[expires_start..expires_end].iter().position(byte -> byte == b':').expect("receipt expiry field was not length framed")
+    expiry_hex :: expires_start + expires_colon + 1
+    corrupt[expiry_hex] = if corrupt[expiry_hex] == b'0' { b'1' } else { b'0' }
+    fs.write(&corrupt_store, ^corrupt).unwrap()
+    corrupt_id_trimmed := corrupt_id.trim() // #4303
+    assert(!restart_status(&bin, &corrupt_store, "recover", corrupt_id_trimmed).success(), "a receipt with altered immutable facts was accepted")
+    // A complete record without its final commit terminator is truncated history.
+    truncated_store :: dir.join("authority-truncated.log")
+    truncated_id :: run_restart_process(&bin, &truncated_store, "send", None)
+    truncated := fs.read(&truncated_store).unwrap()
+    assert_eq(truncated.pop(), Some(b'\n'))
+    fs.write(&truncated_store, ^truncated).unwrap()
+    truncated_id_trimmed := truncated_id.trim() // #4303
+    assert(!restart_status(&bin, &truncated_store, "recover", truncated_id_trimmed).success(), "a truncated authority log was accepted")
+}
+
+// Rust: tests/services_runtime.rs:520
+#Test("service_authority_replays_cancelled_delivery_without_requeue_or_pin") {
+    if !have_rustc() { return }
+    (dir, bin) :: compile_restart_binary(CANCELLED_RESTART_SOURCE)
+    store :: dir.join("cancelled.log")
+    assert_eq(run_restart_process(&bin, &store, "send", None), "send:Cancelled\n")
+    assert_eq(run_restart_process(&bin, &store, "recover", None), "recover:Cancelled:2\nreceipt:ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=)\n")
+}
+
+// Rust: tests/services_runtime.rs:575
+#Test("rollout_identity_and_receipt_survive_process_restart") {
+    if !have_rustc() { return }
+    (dir, bin) :: compile_restart_binary(ROLLOUT_RESTART_SOURCE)
+    store :: dir.join("rollout.log")
+    assert_eq(run_restart_process(&bin, &store, "write", None), "handoff:2\n")
+    assert_eq(run_restart_process(&bin, &store, "recover", None), ROLLOUT_RESTART_OUTPUT)
+    default_store :: dir.join("rollout-default.log")
+    assert_eq(run_restart_default_process(&dir, &default_store, "write", None), "handoff:2\n")
+    assert_eq(run_restart_process(&bin, &default_store, "recover", None), ROLLOUT_RESTART_OUTPUT)
+    aot_to_default_store :: dir.join("rollout-aot-to-default.log")
+    assert_eq(run_restart_process(&bin, &aot_to_default_store, "write", None), "handoff:2\n")
+    assert_eq(run_restart_default_process(&dir, &aot_to_default_store, "recover", None), ROLLOUT_RESTART_OUTPUT)
+}
+
+// Rust: tests/services_runtime.rs:612
+#Test("forged_rollout_generation_is_rejected_on_restart") {
+    if !have_rustc() { return }
+    (dir, bin) :: compile_restart_binary(ROLLOUT_RESTART_SOURCE)
+    store :: dir.join("rollout-forged.log")
+    assert_eq(run_restart_process(&bin, &store, "write", None), "handoff:2\n")
+    rollout :: OSPath.from("{store.display()}.rollout")
+    journal :: fs.read_to_string(&rollout).unwrap()
+    forged :: journal.replace("generation:2\n", "generation:99\n")
+        .replace("upgrade_to:2\n", "upgrade_to:99\n")
+        .replace("worker_generation:2\n", "worker_generation:99\n")
+        .replace("directory_generation:2\n", "directory_generation:99\n")
+    assert_ne(journal, forged, "rollout journal fixture was not changed")
+    fs.write(&rollout, forged).unwrap()
+    assert(!restart_status(&bin, &store, "recover", "").success(), "a coherently forged rollout generation was accepted")
+}
+
+// Rust: tests/services_runtime.rs:690-693
+// Restart distinguishes a durable store from an in-process cache.
+#Test("state_adapters_survive_process_restart") {
+    if !have_rustc() { return }
+    (dir, bin) :: compile_restart_binary(STATE_RESTART_SOURCE)
+    events :: dir.join("events.log")
+    assert_eq(run_restart_process(&bin, &events, "write", Some("event-log")), "wrote:2\n")
+    assert_eq(run_restart_default_process(&dir, &events, "read", Some("event-log")), "count:2\nreplay:first|second\nappended:first|second|third\n")
+    events_reversed :: dir.join("events-default-to-aot.log")
+    assert_eq(run_restart_default_process(&dir, &events_reversed, "write", Some("event-log")), "wrote:2\n")
+    assert_eq(run_restart_process(&bin, &events_reversed, "read", Some("event-log")), "count:2\nreplay:first|second\nappended:first|second|third\n")
+    snapshot :: dir.join("snapshot.log")
+    assert_eq(run_restart_process(&bin, &snapshot, "write", Some("snapshot")), "wrote:state-v1\n")
+    assert_eq(run_restart_default_process(&dir, &snapshot, "read", Some("snapshot")), "restored:state-v1\nrecommitted:state-v2\n")
+    snapshot_reversed :: dir.join("snapshot-default-to-aot.log")
+    assert_eq(run_restart_default_process(&dir, &snapshot_reversed, "write", Some("snapshot")), "wrote:state-v1\n")
+    assert_eq(run_restart_process(&bin, &snapshot_reversed, "read", Some("snapshot")), "restored:state-v1\nrecommitted:state-v2\n")
+    // Schema/version drift and torn append must fail closed, not shorten history.
+    drift :: dir.join("events-drift.log")
+    assert_eq(run_restart_process(&bin, &drift, "write", Some("event-log")), "wrote:2\n")
+    loop adapter in ["schema-drift", "version-drift"] {
+        assert(!restart_status(&bin, &drift, "read", adapter).success(), "a store opened under a mismatched {adapter}")
+    }
+    torn :: dir.join("events-torn.log")
+    assert_eq(run_restart_process(&bin, &torn, "write", Some("event-log")), "wrote:2\n")
+    bytes :: fs.read(&torn).unwrap()
+    fs.write(&torn, bytes[..bytes.len() - 3]).unwrap()
+    assert(!restart_status(&bin, &torn, "read", "event-log").success(), "a truncated state store was accepted")
+}
+
+// Rust: tests/services_runtime.rs:866-869
+// Durable workflow reads must reproduce the writer's runs, steps and version conflicts.
+#Test("workflow_history_survives_process_restart") {
+    if !have_rustc() { return }
+    (dir, bin) :: compile_restart_binary(WORKFLOW_RESTART_SOURCE)
+    store :: dir.join("workflow.log")
+    assert_eq(run_restart_process(&bin, &store, "write", None), "run:1\n")
+    assert_eq(run_restart_process(&bin, &store, "read", None), WORKFLOW_RESTART_HISTORY)
+    default_store :: dir.join("workflow-default.log")
+    assert_eq(run_restart_default_process(&dir, &default_store, "write", None), "run:1\n")
+    assert_eq(run_restart_default_process(&dir, &default_store, "read", None), WORKFLOW_RESTART_HISTORY)
+    crossed :: dir.join("workflow-aot-to-default.log")
+    assert_eq(run_restart_process(&bin, &crossed, "write", None), "run:1\n")
+    assert_eq(run_restart_default_process(&dir, &crossed, "read", None), WORKFLOW_RESTART_HISTORY)
+    reversed :: dir.join("workflow-default-to-aot.log")
+    assert_eq(run_restart_default_process(&dir, &reversed, "write", None), "run:1\n")
+    assert_eq(run_restart_process(&bin, &reversed, "read", None), WORKFLOW_RESTART_HISTORY)
+    // A torn tail must be refused, not silently drop the unreadable run.
+    corrupt :: dir.join("workflow-corrupt.log")
+    assert_eq(run_restart_process(&bin, &corrupt, "write", None), "run:1\n")
+    log :: corrupt.with_extension("log.workflows")
+    bytes :: fs.read(&log).unwrap()
+    fs.write(&log, bytes[..bytes.len() - 4]).unwrap()
+    failed := std.process.Command.new(&bin)
+    failed.env("JET_SERVICE_AUTH_STORE", &corrupt).env("JET_SERVICE_AUTH_PHASE", "read")
+    output :: failed.output().unwrap()
+    assert(!output.status.success(), "a truncated workflow log was accepted: {String.from_utf8_lossy(output.stdout)}")
+    // Recovery must also number and persist a new run, visible to the third process.
+    extended :: dir.join("workflow-extended.log")
+    assert_eq(run_restart_process(&bin, &extended, "write", None), "run:1\n")
+    assert_eq(run_restart_process(&bin, &extended, "extend", None), "{WORKFLOW_RESTART_HISTORY}refund:2\n")
+    assert_eq(run_restart_default_process(&dir, &extended, "final", None), "{WORKFLOW_RESTART_HISTORY}refund_history:start@v1|step:credit\n")
+}
+
+// Rust: tests/services_runtime.rs:952
+#Test("workflow_body_replay_reuses_recorded_steps") {
+    if !have_rustc() { return }
+    (dir, bin) :: compile_restart_binary(WORKFLOW_REPLAY_SOURCE)
+    store :: dir.join("workflow-replay.log")
+    assert_eq(run_restart_process(&bin, &store, "write", None), "written:{WORKFLOW_REPLAY_HISTORY}")
+    assert_eq(run_restart_process(&bin, &store, "read", None), "replayed:{WORKFLOW_REPLAY_HISTORY}")
+    assert(!restart_status(&bin, &store, "mismatch", "").success())
+    assert(!restart_status(&bin, &store, "activity-mismatch", "").success())
+    assert(!restart_status(&bin, &store, "completion-mismatch", "").success())
+    default_store :: dir.join("workflow-replay-default.log")
+    assert_eq(run_restart_default_process(&dir, &default_store, "write", None), "written:{WORKFLOW_REPLAY_HISTORY}")
+    assert_eq(run_restart_default_process(&dir, &default_store, "read", None), "replayed:{WORKFLOW_REPLAY_HISTORY}")
+    crossed :: dir.join("workflow-replay-crossed.log")
+    assert_eq(run_restart_process(&bin, &crossed, "write", None), "written:{WORKFLOW_REPLAY_HISTORY}")
+    assert_eq(run_restart_default_process(&dir, &crossed, "read", None), "replayed:{WORKFLOW_REPLAY_HISTORY}")
+}
+
+// Rust: tests/services_runtime.rs:1066-1069
+// Typed wait methods publish effects through sema, with no source-text markers.
+#Test("workflow_wait_methods_publish_typed_effects") {
+    root :: tests.common.unique_tmp("jet_service_workflow_wait_effects")
+    fs.create_dir_all(&root).unwrap()
+    entry :: root.join("main.jet")
+    fs.write(&entry, """
+fn time_wait(workflow: ServiceWorkflow, duration: Duration) -[Time]> {
+    workflow.sleep(duration) ?? return
+}
+fn activity_wait(workflow: ServiceWorkflow) -[IO]> {
+    workflow.activity("charge", "charge-1") ?? return
+    workflow.all(["charge-1"]) ?? return
+}
+fn run() {}
+""").unwrap()
+    (diagnostics, _, facts) :: jet.Driver.check_file_with_effect_facts(entry.to_str().unwrap(), None, false)
+    assert(!diagnostics.iter().any(diagnostic -> diagnostic.severity == jet.Diagnostics.Severity.Error),
+        "typed workflow effects should satisfy their declared rows: {diagnostics}")
+    assert(facts.summaries["time_wait"].direct.contains("Time"))
+    assert(facts.summaries["activity_wait"].direct.contains("IO"))
+}
+
+// Rust: tests/services_runtime.rs:1101-1104
+// Record each wait once; body replay must neither sleep nor redeliver.
+#Test("workflow_wait_methods_replay_their_history") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("services_workflow_wait", WORKFLOW_WAIT_SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, "history:{WORKFLOW_WAIT_HISTORY}replay:{WORKFLOW_WAIT_HISTORY}")
+    (jit_code, jit_stdout, jit_stderr) :: run_default_multi("services_workflow_wait_jit", "main.jet", [("main.jet", WORKFLOW_WAIT_SOURCE)])
+    assert_eq(jit_code, 0, "default workflow wait run failed: {jit_stderr}")
+    assert_eq(jit_stdout, stdout, "default workflow wait replay diverged")
+    (interpreter_code, interpreter_stdout, interpreter_stderr) :: interpreter_run("services_workflow_wait_interpreter", WORKFLOW_WAIT_SOURCE)
+    assert_eq(interpreter_code, 0, "interpreter workflow wait run failed: {interpreter_stderr}")
+    assert_eq(interpreter_stdout, stdout, "interpreter workflow wait replay diverged")
+}
+
+// Rust: tests/services_runtime.rs:1177-1180
+// Cancellation must stop the timer and durably record its result.
+#Test("workflow_sleep_cancellation_is_recorded") {
+    if !have_rustc() { return }
+    expected :: "cancelled\nhistory:start@v1|sleep:10000000000|sleep-cancelled\n"
+    (code, stdout) :: build_and_run("services_workflow_sleep_cancel", WORKFLOW_SLEEP_CANCEL_SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, expected)
+    (jit_code, jit_stdout, jit_stderr) :: run_default_multi("services_workflow_sleep_cancel_jit", "main.jet", [("main.jet", WORKFLOW_SLEEP_CANCEL_SOURCE)])
+    assert_eq(jit_code, 0, "default workflow cancellation failed: {jit_stderr}")
+    assert_eq(jit_stdout, stdout, "default workflow cancellation diverged")
+    (interpreter_code, interpreter_stdout, interpreter_stderr) :: interpreter_run("services_workflow_sleep_cancel_interpreter", WORKFLOW_SLEEP_CANCEL_SOURCE)
+    assert_eq(interpreter_code, 0, "interpreter workflow cancellation failed: {interpreter_stderr}")
+    assert_eq(interpreter_stdout, stdout, "interpreter workflow cancellation diverged")
+}
+
+// Rust: tests/services_runtime.rs:1218-1221
+// Activity retry and terminal outcomes stay typed across AOT/default process restarts.
+#Test("workflow_activity_outcome_survives_process_restart") {
+    if !have_rustc() { return }
+    (dir, bin) :: compile_restart_binary(WORKFLOW_OUTCOME_SOURCE)
+    store :: dir.join("workflow-outcome.log")
+    assert_eq(run_restart_process(&bin, &store, "write", None),
+        "scheduled:Running\nretry:Paused\ncompleted:Finished\nrun:Finished\nobserve:Observe(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=1,statuses={{running:0,paused:1,cancel_requested:0}},outcomes={{pending:0,finished:1,panicked:0,cancelled:0,deadline_blown:0}})\nhistory:{WORKFLOW_OUTCOME_HISTORY}")
+    assert_eq(run_restart_process(&bin, &store, "read", None),
+        "replay:Finished\nobserve:Observe(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=1,statuses={{running:0,paused:1,cancel_requested:0}},outcomes={{pending:0,finished:1,panicked:0,cancelled:0,deadline_blown:0}})\nsame:Finished\nversion_after_terminal:2\nversion_history:start@v2\nhistory:{WORKFLOW_OUTCOME_HISTORY}")
+    default_store :: dir.join("workflow-outcome-default.log")
+    assert_eq(run_restart_default_process(&dir, &default_store, "write", None),
+        "scheduled:Running\nretry:Paused\ncompleted:Finished\nrun:Finished\nobserve:Observe(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=1,statuses={{running:0,paused:1,cancel_requested:0}},outcomes={{pending:0,finished:1,panicked:0,cancelled:0,deadline_blown:0}})\nhistory:{WORKFLOW_OUTCOME_HISTORY}")
+    assert_eq(run_restart_default_process(&dir, &default_store, "read", None),
+        "replay:Finished\nobserve:Observe(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=1,statuses={{running:0,paused:1,cancel_requested:0}},outcomes={{pending:0,finished:1,panicked:0,cancelled:0,deadline_blown:0}})\nsame:Finished\nversion_after_terminal:2\nversion_history:start@v2\nhistory:{WORKFLOW_OUTCOME_HISTORY}")
+}
+
+// Rust: tests/services_runtime.rs:1302
+#Test("services_reject_duplicate_conflicts_full_mailboxes_and_drained_receive_aot") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("services_failure_paths", SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, "conflict:rejected\nfull:rejected\ndead_letters:1\ndrained_receive:rejected\n")
+}
+
+// Rust: tests/services_runtime.rs:1315
+#Test("services_failure_paths_match_default_run") {
+    (code, stdout, stderr) :: run_default_multi("services_failure_paths_jit", "main.jet", [("main.jet", SOURCE)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, "conflict:rejected\nfull:rejected\ndead_letters:1\ndrained_receive:rejected\n")
+}
+
+// Rust: tests/services_runtime.rs:1364
+#Test("service_rollout_drain_handoff_orders_endpoint_gate_and_new_generation_aot") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("services_drain_handoff", DRAIN_HANDOFF_SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, DRAIN_HANDOFF_OUTPUT)
+}
+
+// Rust: tests/services_runtime.rs:1374
+#Test("service_rollout_drain_handoff_orders_endpoint_gate_and_new_generation_default_run") {
+    (code, stdout, stderr) :: run_default_multi("services_drain_handoff_jit", "main.jet", [("main.jet", DRAIN_HANDOFF_SOURCE)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, DRAIN_HANDOFF_OUTPUT)
+}
+
+// Rust: tests/services_runtime.rs:1385
+#Test("service_rollout_drain_handoff_orders_endpoint_gate_and_new_generation_interpreter") {
+    (code, stdout, stderr) :: interpreter_run("services_drain_handoff_interpreter", DRAIN_HANDOFF_SOURCE)
+    assert_eq(code, 0, "interpreter run failed: {stderr}")
+    assert_eq(stdout, DRAIN_HANDOFF_OUTPUT)
+}

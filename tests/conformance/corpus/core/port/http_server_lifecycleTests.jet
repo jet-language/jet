@@ -1,0 +1,631 @@
+use tests.conformance.corpus.core.port.http_server_lifecycle.*
+use std.net.[TcpListener, TcpStream, SocketAddr, Shutdown]
+use std.io.[Read, Write, Cursor]
+use std.sync.[Arc, Barrier]
+use std.sync.atomic.[AtomicUsize, AtomicBool, Ordering]
+use std.thread as thread
+use std.time.[Duration, Instant]
+use core.http.runtime.top_http_message.*
+use core.http.runtime.top_http_route.*
+use core.http.runtime.top_http_client.*
+use core.http.runtime.top_http_server.*
+use jet_foundation.[TEXT_NUL]
+// GATE #4494: real threads, atomics, sockets and timed native waits; no Rust callbacks.
+
+// Rust: tests/http_server_lifecycle.rs:481
+#Test("lazy_bridge_body_closes_once_after_concurrent_final_drops") {
+    HTTP_BODY_CLOSES.store(0, Ordering.SeqCst)
+    loop round in 0..64 {
+        body :: JetHTTPBody.bridge(round, 1, unread_bridge_body, close_unread_bridge_body)
+        owners :: (0..8).map(_ -> { body.clone() }).collect()
+        drop(^body)
+        barrier :: Arc.new(Barrier.new(owners.len() + 1))
+        threads :: owners.into_iter().map(owner -> {
+            barrier :: barrier.clone()
+            thread.spawn(() -> { barrier.wait(); drop(^owner) })
+        }).collect()
+        assert_eq(HTTP_BODY_CLOSES.load(Ordering.SeqCst), round, "body closed before its final owners were released")
+        barrier.wait()
+        loop worker in threads { worker.join().unwrap() }
+        assert_eq(HTTP_BODY_CLOSES.load(Ordering.SeqCst), round + 1, "concurrent final drops must close exactly once")
+    }
+}
+// Rust: tests/http_server_lifecycle.rs:612
+#Test("shared_headers_preserve_repeats_validate_and_redact") {
+    headers := JetHTTPHeaders.new()
+    headers.append("X-Trace", "one").unwrap()
+    headers.append("x-trace", "two").unwrap()
+    headers.append("Authorization", "Bearer secret").unwrap()
+    assert_eq(headers.first("X-TRACE"), Some("one"))
+    assert_eq(headers.all("x-trace"), ["one", "two"])
+    assert(headers.append("bad name", "x").is_err())
+    assert(headers.append("x-safe", "bad\r\nvalue").is_err())
+    loop invalid in ["vertical\u{000b}tab", "form\u{000c}feed", "nonbreaking\u{00a0}space", "delete\u{007f}"] {
+        assert(headers.append("x-safe", invalid).is_err(), "accepted {invalid}")
+    }
+    assert_eq(jet_http_validate_headers("GET / HTTP/1.1\r\nBad Name: value".bytes()).unwrap_err().status, 400)
+    assert_eq(jet_http_validate_headers("GET / HTTP/1.1\r\nX-Safe: bad{TEXT_NUL}value".bytes()).unwrap_err().status, 400)
+    shown :: headers.jet_debug()
+    assert(!shown.contains("Bearer secret"), "secret header leaked: {shown}")
+}
+// Rust: tests/http_server_lifecycle.rs:652
+#Test("shared_http_body_streams_bytes_once_and_uses_closed_errors") {
+    body :: JetHTTPBody.reader(Cursor.new([0 as U8, 255, 1, 2]), 4)
+    alias :: body.clone()
+    chunks :: body.chunks(2).expect("first body consumer").collect().expect("stream chunks")
+    assert_eq(chunks, [[0, 255], [1, 2]])
+    assert_eq(alias.bytes(8).unwrap_err(), JetHTTPError.BodyConsumed, "a cloned message must not make a move-only body reusable")
+    oversized :: JetHTTPBody.from_bytes([1, 2, 3])
+    assert_eq(oversized.bytes(2).unwrap_err(), JetHTTPError.BodyTooLarge{limit: 2})
+    assert_eq(JetHTTPBody.from_bytes([0xff]).text(8).unwrap_err(), JetHTTPError.UnsupportedEncoding)
+    streamed := JetHTTPBody.reader(Cursor.new("abcdef".bytes()), None).chunks(2).unwrap()
+    observed := [] as [U8]
+    loop {
+        chunk :: streamed.next()
+        if chunk == None { break }
+        observed.extend(chunk!.unwrap())
+    }
+    assert_eq(observed, "abcdef".bytes())
+    capped :: JetHTTPBody.from_reader_with_length(JetFileReader{inner: Cursor.new("abcdef".bytes())}, 3).unwrap()
+    capped :: capped.chunks(8).unwrap().collect().unwrap()
+    assert_eq(capped, ["abc".bytes()])
+}
+// Rust: tests/http_server_lifecycle.rs:701
+#Test("shared_http_body_multipart_boundary_is_bounded_and_collision_free") {
+    values :: ["jet-http-boundary-0000000000000001\r\nname": "jet-http-boundary-0000000000000000"]
+    body :: JetHTTPBody.from_multipart(values)
+    assert_eq(body.content_type(), Some("multipart/form-data; boundary=jet-http-boundary-0000000000000002"))
+    encoded :: body.text(1024).unwrap()
+    assert(encoded.starts_with("--jet-http-boundary-0000000000000002\r\n"))
+    assert(encoded.contains("name=\"jet-http-boundary-0000000000000001%0D%0Aname\""))
+    assert(encoded.contains("jet-http-boundary-0000000000000000"))
+}
+// Rust: tests/http_server_lifecycle.rs:718
+#Test("client_request_and_response_use_the_shared_headers") {
+    req :: jet_http_client_request_header(jet_http_client_request_header(jet_http_client_request_new("GET", "http://local/"), "X-Trace", "one"), "x-trace", "two")
+    assert_eq(req.headers.all("X-TRACE"), ["one", "two"])
+    invalid :: jet_http_client_request_header(req, "bad name", "value")
+    assert(invalid.header_error.is_some())
+    headers :: JetHTTPHeaders.from_flat(["Set-Cookie", "a=1", "set-cookie", "b=2"]).unwrap()
+    response :: jet_http_srv_response_with_headers(200, "", headers)
+    assert_eq(jet_http_response_cookies(&response), ["a=1", "b=2"])
+    invalid_response :: jet_http_srv_response_header(jet_http_srv_response(200, "secret"), "bad name", "value")
+    assert_eq(invalid_response.status, 500)
+    assert_eq(invalid_response.body, "500 Internal Server Error")
+    assert(invalid_response.headers.to_flat().is_empty())
+}
+// Rust: tests/http_server_lifecycle.rs:754
+#Test("live_server_round_trips_repeated_headers_in_order") {
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    listener.set_nonblocking(true).expect("nonblocking")
+    addr :: listener.local_addr().expect("address")
+    mux :: jet_http_mux_new()
+    jet_http_mux_add(&mux, "GET", "/headers", req -> {
+        assert_eq(req.headers.all("x-tag"), ["one", "two"])
+        headers := JetHTTPHeaders.new()
+        headers.append("Set-Cookie", "a=1").unwrap()
+        headers.append("set-cookie", "b=2").unwrap()
+        jet_http_srv_response_with_headers(200, "ok", headers)
+    })
+    client :: thread.spawn(() -> { request(addr, "GET /headers HTTP/1.1\r\nHost: local\r\nX-Tag: one\r\nx-tag: two\r\n\r\n".bytes()) })
+    jet_http_mux_serve_once_listener(&JetTCPListener{inner: listener}, &mux).expect("serve once")
+    response :: client.join().expect("client")
+    first :: response.find("Set-Cookie: a=1\r\n").expect("first repeated header")
+    second :: response.find("set-cookie: b=2\r\n").expect("second repeated header")
+    assert(first < second, "repeated header order changed: {response}")
+}
+// Rust: tests/http_server_lifecycle.rs:785
+#Test("live_shared_messages_round_trip_binary_and_stream_unknown_length") {
+    // Rust: tests/http_server_lifecycle.rs:788
+    fn takes_canonical_request(_: JetHTTPRequest) -> {}
+    // Rust: tests/http_server_lifecycle.rs:789
+    fn takes_canonical_response(_: JetHTTPResponse) -> {}
+    takes_canonical_request(jet_http_client_request_new("POST", "http://local/binary"))
+    takes_canonical_response(jet_http_srv_response(200, ""))
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    listener.set_nonblocking(true).unwrap()
+    addr :: listener.local_addr().unwrap()
+    mux :: jet_http_mux_new()
+    jet_http_mux_add(&mux, "POST", "/binary", req -> {
+        assert_eq(req.headers.all("x-repeat"), ["one", "two"])
+        assert_eq(req.body.bytes(8).unwrap(), [0, 255])
+        response := jet_http_srv_response_with_headers(200, "", [("X-Repeat", "alpha"), ("x-repeat", "beta")].into_iter().collect())
+        response.body = JetHTTPBody.reader(Cursor.new([255 as U8, 0, 1]), None)
+        response
+    })
+    client :: thread.spawn(() -> {
+        stream := TcpStream.connect(addr).unwrap()
+        wire := "POST /binary HTTP/1.1\r\nHost: local\r\nX-Repeat: one\r\nx-repeat: two\r\nContent-Length: 2\r\nConnection: close\r\n\r\n".bytes()
+        wire.extend([0, 255])
+        stream.write_all(wire).unwrap()
+        response := [] as [U8]
+        stream.read_to_end(&response).unwrap()
+        response
+    })
+    jet_http_mux_serve_once_listener(&JetTCPListener{inner: listener}, &mux).unwrap()
+    response :: client.join().unwrap()
+    header_end :: response.windows(4).position(bytes -> { bytes == "\r\n\r\n".bytes() }).unwrap()
+    headers :: String.from_utf8(response[..header_end]).unwrap()
+    assert(headers.contains("Transfer-Encoding: chunked\r\n"), "{headers}")
+    first :: headers.find("X-Repeat: alpha").unwrap_or_else(() -> { panic("{headers}") })
+    second :: headers.find("x-repeat: beta").unwrap_or_else(() -> { panic("{headers}") })
+    assert(first < second, "{headers}")
+    assert_eq(response[header_end + 4..], [51,13,10,255,0,1,13,10,48,13,10,13,10])
+}
+// Rust: tests/http_server_lifecycle.rs:850
+#Test("http1_streams_request_response_bodies_and_bounded_declared_trailers") {
+    // Rust: tests/http_server_lifecycle.rs:854
+    fn exchange(addr: SocketAddr, request: [U8]) -> String {
+        stream := TcpStream.connect(addr).expect("connect")
+        stream.write_all(request).expect("request write")
+        stream.shutdown(Shutdown.Write).expect("finish request")
+        response := [] as [U8]
+        stream.read_to_end(&response).expect("response read")
+        String.from_utf8(response).expect("response UTF-8")
+    }
+    forbidden_response :: jet_http_srv_response(200, "body")
+    forbidden_trailers := JetHTTPHeaders.new()
+    forbidden_trailers.append("Content-Length", "4").unwrap()
+    assert_eq(jet_http_srv_response_trailers(forbidden_response, forbidden_trailers).unwrap_err(), JetHTTPError.InvalidHeader)
+    forbidden_response := jet_http_srv_response(200, "body")
+    forbidden_response.trailers.append("Content-Length", "4").unwrap()
+    unpublished := [] as [U8]
+    assert_eq(jet_http_srv_write_response(&unpublished, &forbidden_response, "HTTP/1.1", true).unwrap_err(), JetHTTPError.InvalidHeader)
+    assert(unpublished.is_empty(), "forbidden trailers published response headers")
+    http10_trailers := JetHTTPHeaders.new()
+    http10_trailers.append("X-Checksum", "done").unwrap()
+    http10_response :: jet_http_srv_response_trailers(jet_http_srv_response(200, "body"), http10_trailers).unwrap()
+    assert_eq(jet_http_srv_write_response(&unpublished, &http10_response, "HTTP/1.0", true).unwrap_err(), JetHTTPError.InvalidFraming)
+    assert(unpublished.is_empty(), "HTTP/1.0 trailers published response headers")
+    http10_stream := jet_http_srv_response(200, "")
+    http10_stream.body = JetHTTPBody.reader(Cursor.new("close-body".bytes()), None)
+    http10_wire := [] as [U8]
+    jet_http_srv_write_response(&http10_wire, &http10_stream, "HTTP/1.0", false).unwrap()
+    http10_wire :: String.from_utf8(http10_wire).unwrap()
+    assert(!http10_wire.contains("Content-Length"), "{http10_wire}")
+    assert(!http10_wire.contains("Transfer-Encoding"), "{http10_wire}")
+    assert(http10_wire.contains("Connection: close\r\n"), "{http10_wire}")
+    assert(http10_wire.ends_with("\r\n\r\nclose-body"), "{http10_wire}")
+    streamed_head := jet_http_srv_response(200, "")
+    streamed_head.body = JetHTTPBody.reader(Cursor.new("hidden".bytes()), None)
+    streamed_head.trailers.append("X-Checksum", "hidden").unwrap()
+    streamed_head :: jet_http_srv_head_response(streamed_head, true)
+    head_wire := [] as [U8]
+    jet_http_srv_write_response(&head_wire, &streamed_head, "HTTP/1.1", true).unwrap()
+    head_wire :: String.from_utf8(head_wire).unwrap()
+    assert(!head_wire.contains("Transfer-Encoding"), "{head_wire}")
+    assert(!head_wire.contains("Trailer:"), "{head_wire}")
+    assert(head_wire.ends_with("\r\n\r\n"), "{head_wire}")
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    addr :: listener.local_addr().expect("address")
+    mux :: jet_http_mux_new()
+    calls :: Arc.new(AtomicUsize.new(0))
+    handler_calls :: calls.clone()
+    jet_http_mux_add_handler(&mux, "POST", "/trailers", Arc.new(req -> {
+        assert_eq(jet_http_srv_req_trailers(&req).unwrap_err(), JetHTTPError.InvalidFraming)
+        body :: req.body.text(1024)?
+        trailers :: jet_http_srv_req_trailers(&req)?
+        assert_eq(trailers.first("x-checksum"), Some("abc123"))
+        assert_eq(trailers.all("x-trace"), ["one", "two"])
+        _ :: handler_calls.fetch_add(1, Ordering.AcqRel)
+        response := jet_http_srv_response(200, "")
+        response.body = JetHTTPBody.reader(Cursor.new("stream:{body}"), None)
+        trailers := JetHTTPHeaders.new()
+        trailers.append("X-Checksum", "done").unwrap()
+        trailers.append("X-Trace", "first").unwrap()
+        trailers.append("x-trace", "second").unwrap()
+        jet_http_srv_response_trailers(response, trailers)
+    }))
+    jet_http_mux_add(&mux, "GET", "/next", _ -> { jet_http_srv_response(200, "next") })
+    jet_http_mux_add(&mux, "GET", "/stream10", _ -> {
+        response := jet_http_srv_response(200, "")
+        response.body = JetHTTPBody.reader(Cursor.new("close-body".bytes()), None)
+        response
+    })
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: shutdown.clone()
+    options := JetHTTPServerOptions.safe()
+    options.workers = 1
+    options.admission_queue = 8
+    options.read_body_timeout = Duration.from_secs(2)
+    server :: thread.spawn(() -> { jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server") })
+    valid :: exchange(addr, "POST /trailers HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nTrailer: X-Checksum, X-Trace\r\n\r\n5\r\nhello\r\n0\r\nX-Checksum: abc123\r\nX-Trace: one\r\nx-trace: two\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes())
+    assert_eq(valid.matches("HTTP/1.1 200 OK").count(), 2, "{valid}")
+    assert(valid.contains("Transfer-Encoding: chunked\r\n"), "{valid}")
+    assert(valid.contains("Trailer: X-Checksum, X-Trace\r\n"), "{valid}")
+    assert(valid.contains("c\r\nstream:hello\r\n0\r\nX-Checksum: done\r\nX-Trace: first\r\nx-trace: second\r\n\r\n"), "{valid}")
+    assert(valid.find("stream:hello").unwrap() < valid.rfind("\r\n\r\nnext").unwrap())
+    undeclared :: exchange(addr, "POST /trailers HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nTrailer: X-Checksum\r\nConnection: close\r\n\r\n1\r\nx\r\n0\r\nX-Other: hidden\r\n\r\n".bytes())
+    assert(undeclared.starts_with("HTTP/1.1 400 Bad Request"), "{undeclared}")
+    forbidden :: exchange(addr, "POST /trailers HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nTrailer: Content-Length\r\nConnection: close\r\n\r\n0\r\nContent-Length: 0\r\n\r\n".bytes())
+    assert(forbidden.starts_with("HTTP/1.1 400 Bad Request"), "{forbidden}")
+    excessive := "POST /trailers HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nTrailer: X-Large\r\nConnection: close\r\n\r\n0\r\nX-Large: ".bytes()
+    excessive.extend([120 as U8; 32 * 1024])
+    excessive.extend_from_slice("\r\n\r\n".bytes())
+    excessive :: exchange(addr, excessive)
+    assert(excessive.starts_with("HTTP/1.1 413 Payload Too Large"), "{excessive}")
+    http10 :: exchange(addr, "GET /stream10 HTTP/1.0\r\nHost: local\r\nConnection: keep-alive\r\n\r\nGET /next HTTP/1.0\r\nHost: local\r\nConnection: close\r\n\r\n".bytes())
+    assert_eq(http10.matches("HTTP/1.0 200 OK").count(), 1, "{http10}")
+    assert(http10.contains("Connection: close\r\n"), "{http10}")
+    assert(http10.ends_with("\r\n\r\nclose-body"), "{http10}")
+    assert_eq(calls.load(Ordering.Acquire), 1, "invalid trailers completed a handler")
+    shutdown.store(true, Ordering.Release)
+    report :: server.join().expect("server join")
+    assert_eq(report.user_accepted, 5)
+    assert_eq(report.user_completed, 5)
+}
+// Rust: tests/http_server_lifecycle.rs:1039
+#Test("http1_streaming_response_backpressure_cancels_its_source") {
+    // Rust: tests/http_server_lifecycle.rs:1043
+    struct Endless { reads: Arc<AtomicUsize> }
+    // Rust: tests/http_server_lifecycle.rs:1047
+    impl Endless.Read {
+        // Rust: tests/http_server_lifecycle.rs:1048
+        fn read(self: &Self, output: &[U8]) -> Int IOError! {
+            _ :: self.reads.fetch_add(1, Ordering.AcqRel)
+            output.fill(120)
+            output.len()
+        }
+    }
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    addr :: listener.local_addr().expect("address")
+    mux :: jet_http_mux_new()
+    reads :: Arc.new(AtomicUsize.new(0))
+    source_reads :: reads.clone()
+    closes :: Arc.new(AtomicUsize.new(0))
+    source_closes :: closes.clone()
+    jet_http_mux_add(&mux, "GET", "/stream", _ -> {
+        response := jet_http_srv_response(200, "")
+        source_closes :: source_closes.clone()
+        response.body = JetHTTPBody.reader_cancellable(Endless{reads: source_reads.clone()}, None, () -> {
+            _ :: source_closes.fetch_add(1, Ordering.AcqRel)
+        })
+        response
+    })
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: shutdown.clone()
+    options := JetHTTPServerOptions.safe()
+    options.workers = 1
+    options.admission_queue = 1
+    options.write_idle_timeout = Duration.from_millis(50)
+    server :: thread.spawn(() -> { jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server") })
+    client := TcpStream.connect(addr).expect("connect")
+    client.write_all("GET /stream HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes()).expect("request")
+    deadline :: Instant.now() + Duration.from_secs(3)
+    loop closes.load(Ordering.Acquire) == 0 && Instant.now() < deadline { thread.sleep(Duration.from_millis(5)) }
+    assert_eq(closes.load(Ordering.Acquire), 1, "timed-out stream source was not cancelled")
+    count :: reads.load(Ordering.Acquire)
+    assert(count >= 2 && count <= 1024, "server pulled an unbounded response ahead of the blocked socket: {count} chunks")
+    _ :: client.shutdown(Shutdown.Both)
+    shutdown.store(true, Ordering.Release)
+    report :: server.join().expect("server join")
+    assert_eq(report.user_accepted, 1)
+    assert_eq(report.user_completed, 1)
+}
+// Rust: tests/http_server_lifecycle.rs:1116
+#Test("live_server_body_starts_before_the_large_slow_upload_finishes") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    listener.set_nonblocking(true).unwrap()
+    addr :: listener.local_addr().unwrap()
+    mux :: jet_http_mux_new()
+    (first_chunk_tx, first_chunk_rx) :: std.sync.mpsc.channel()
+    jet_http_mux_add(&mux, "POST", "/slow", req -> {
+        chunks := req.body.chunks(4096).unwrap()
+        first :: chunks.next().unwrap().unwrap()
+        first_chunk_tx.send(first.len()).unwrap()
+        total := first.len()
+        loop chunk in chunks { total += chunk.unwrap().len() }
+        jet_http_srv_response(200, total.to_string())
+    })
+    server :: thread.spawn(() -> { jet_http_mux_serve_once_listener(&JetTCPListener{inner: listener}, &mux).unwrap() })
+    length :: 512 * 1024
+    stream := TcpStream.connect(addr).unwrap()
+    stream.write_all("POST /slow HTTP/1.1\r\nHost: local\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n".bytes()).unwrap()
+    chunk :: [7 as U8; 4096]
+    stream.write_all(chunk).unwrap()
+    assert_eq(first_chunk_rx.recv_timeout(Duration.from_secs(2)).expect("handler must pull before the upload finishes"), 4096)
+    loop _ in 1..length / 4096 { stream.write_all(chunk).unwrap() }
+    response := ""
+    stream.read_to_string(&response).unwrap()
+    server.join().unwrap()
+    assert(response.ends_with(length.to_string()), "{response}")
+}
+// Rust: tests/http_server_lifecycle.rs:1162
+#Test("parser_and_framing_share_validated_headers") {
+    request :: jet_http_srv_parse("GET / HTTP/1.1\r\nHost:local\r\nX-Tag:\tvalue\r\n\r\n".bytes()).expect("optional header whitespace")
+    assert_eq(request.headers.first("host"), Some("local"))
+    assert_eq(request.headers.first("x-tag"), Some("value"))
+    assert_eq(jet_http_srv_parse("GET / HTTP/1.1\r\nBad Name:value\r\n\r\n".bytes()).err().expect("invalid header name").status, 400)
+    assert_eq(jet_http_srv_parse("GET / HTTP/1.1\r\nX-Safe:bad{TEXT_NUL}value\r\n\r\n".bytes()).err().expect("invalid header value").status, 400)
+    response :: jet_http_srv_response_header(jet_http_srv_response_header(jet_http_srv_response_header(jet_http_srv_response_header(jet_http_srv_response(200, "ok"), "Content-Length", "999"), "Transfer-Encoding", "chunked"), "Connection", "X-Smuggle"), "X-Smuggle", "leak")
+    wire :: jet_http_srv_format(&response)
+    assert_eq(wire.matches("Content-Length:").count(), 1, "{wire}")
+    assert(wire.contains("Content-Length: 2\r\n"), "{wire}")
+    assert_eq(wire.matches("Connection:").count(), 1, "{wire}")
+    assert(wire.contains("Connection: close\r\n"), "{wire}")
+    assert(!wire.to_ascii_lowercase().contains("transfer-encoding:"), "{wire}")
+    assert(!wire.to_ascii_lowercase().contains("x-smuggle:"), "{wire}")
+    loop status in [100, 199, 204, 304] {
+        forbidden :: jet_http_srv_format_connection(&jet_http_srv_response(status, "must-not-publish"), "HTTP/1.1", false)
+        (headers, body) :: forbidden.split_once("\r\n\r\n").expect("response framing")
+        assert(!headers.to_ascii_lowercase().contains("content-length:"), "{forbidden}")
+        assert(body.is_empty(), "status {status} published a body: {forbidden}")
+    }
+}
+// Rust: tests/http_server_lifecycle.rs:1229
+#Test("serve_once_waits_for_nonblocking_listener_readiness") {
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    listener.set_nonblocking(true).expect("nonblocking")
+    addr :: listener.local_addr().expect("address")
+    mux :: jet_http_mux_new()
+    jet_http_mux_add(&mux, "GET", "/ready", _ -> { jet_http_srv_response(200, "ready") })
+    client :: thread.spawn(() -> {
+        thread.sleep(Duration.from_millis(20))
+        stream := TcpStream.connect(addr).expect("connect")
+        stream.write_all("GET /ready HTTP/1.1\r\nHost:".bytes()).expect("request header prefix")
+        thread.sleep(Duration.from_millis(20))
+        stream.write_all(" local\r\n\r\n".bytes()).expect("request header suffix")
+        read_response(&stream)
+    })
+    jet_http_mux_serve_once_listener(&JetTCPListener{inner: listener}, &mux).expect("serve once")
+    assert(client.join().expect("client").contains("ready"))
+}
+// Rust: tests/http_server_lifecycle.rs:1256
+#Test("serve_once_accept_has_a_deadline") {
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    listener.set_nonblocking(true).expect("nonblocking")
+    started :: Instant.now()
+    error :: jet_http_accept_once(&JetTCPListener{inner: listener}, Duration.from_millis(20)).expect_err("accept should time out")
+    assert(error.contains("timed out"), "{error}")
+    assert(started.elapsed() < Duration.from_millis(250))
+}
+// Rust: tests/http_server_lifecycle.rs:1270
+#Test("plain_http11_keepalive_pipelines_in_order_and_closes_at_boundaries") {
+    // Rust: tests/http_server_lifecycle.rs:1273
+    fn exchange(addr: SocketAddr, request: [U8]) -> String {
+        stream := TcpStream.connect(addr).expect("connect")
+        stream.write_all(request).expect("request write")
+        stream.shutdown(Shutdown.Write).expect("finish request write")
+        response := ""
+        stream.read_to_string(&response).expect("response read")
+        response
+    }
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    addr :: listener.local_addr().expect("local addr")
+    mux :: jet_http_mux_new()
+    jet_http_mux_add(&mux, "POST", "/one", req -> { jet_http_srv_response(200, req.body.text(1024 * 1024).unwrap()) })
+    jet_http_mux_add(&mux, "GET", "/two", _ -> { jet_http_srv_response(200, "two") })
+    jet_http_mux_add(&mux, "GET", "/empty", _ -> { jet_http_srv_response(204, "forbidden") })
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: shutdown.clone()
+    options := JetHTTPServerOptions.safe()
+    options.workers = 1
+    options.admission_queue = 5
+    options.read_header_timeout = Duration.from_millis(40)
+    options.read_idle_timeout = Duration.from_millis(40)
+    server :: thread.spawn(() -> { jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server") })
+    pipelined :: exchange(addr, "POST /one HTTP/1.1\r\nHost: local\r\nContent-Length: 3\r\n\r\noneGET /two HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes())
+    one :: pipelined.find("\r\n\r\none").expect("first response")
+    two :: pipelined.find("\r\n\r\ntwo").expect("second response")
+    assert(one < two, "pipelined responses reordered: {pipelined}")
+    assert_eq(pipelined.matches("HTTP/1.1 200 OK").count(), 2, "{pipelined}")
+    assert_eq(pipelined.matches("Connection: close").count(), 1, "{pipelined}")
+    http10 :: exchange(addr, "GET /two HTTP/1.0\r\nHost: local\r\n\r\nGET /two HTTP/1.0\r\nHost: local\r\n\r\n".bytes())
+    assert_eq(http10.matches("HTTP/1.0 200 OK").count(), 1, "{http10}")
+    assert_eq(http10.matches("Connection: close").count(), 1, "{http10}")
+    http10_keepalive :: exchange(addr, "GET /two HTTP/1.0\r\nHost: local\r\nConnection: keep-alive\r\n\r\nGET /two HTTP/1.0\r\nHost: local\r\nConnection: close\r\n\r\n".bytes())
+    assert_eq(http10_keepalive.matches("HTTP/1.0 200 OK").count(), 2, "{http10_keepalive}")
+    assert_eq(http10_keepalive.matches("Connection: close").count(), 1, "{http10_keepalive}")
+    capped_request :: "GET /two HTTP/1.1\r\nHost: local\r\n\r\n".repeat(1001)
+    capped :: exchange(addr, capped_request.bytes())
+    assert_eq(capped.matches("HTTP/1.1 200 OK").count(), 1000, "{capped}")
+    assert_eq(capped.matches("Connection: close").count(), 1, "{capped}")
+    partial := TcpStream.connect(addr).expect("partial connect")
+    partial.set_read_timeout(Duration.from_secs(1)).expect("partial read timeout")
+    partial.write_all("GET /two HTTP/1.1\r\nHost: local\r\n\r\nGET /two HTTP/1.1\r\nHost:".bytes()).expect("partial pipeline write")
+    partial_response := ""
+    partial.read_to_string(&partial_response).expect("partial pipeline response")
+    assert_eq(partial_response.matches("HTTP/1.1 200 OK").count(), 1, "{partial_response}")
+    assert_eq(partial_response.matches("HTTP/1.1 408 Request Timeout").count(), 1, "{partial_response}")
+    assert(partial_response.ends_with("Connection: close\r\n\r\n"), "{partial_response}")
+    body_forbidden :: exchange(addr, "GET /empty HTTP/1.1\r\nHost: local\r\n\r\nGET /two HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes())
+    next_response :: body_forbidden.find("HTTP/1.1 200 OK").expect("response after 204")
+    no_content := body_forbidden[..next_response] // #4303
+    assert(no_content.starts_with("HTTP/1.1 204 No Content\r\n"), "{body_forbidden}")
+    assert(!no_content.to_ascii_lowercase().contains("content-length:"), "{body_forbidden}")
+    assert(!body_forbidden.contains("forbidden"), "{body_forbidden}")
+    assert(body_forbidden.ends_with("\r\n\r\ntwo"), "{body_forbidden}")
+    loop version in ["HTTP/2.0", "garbage"] {
+        invalid :: exchange(addr, "GET /two {version}\r\nHost: local\r\n\r\nGET /two HTTP/1.1\r\nHost: local\r\n\r\n".bytes())
+        assert_eq(invalid.matches("HTTP/1.1 505 HTTP Version Not Supported").count(), 1, "{invalid}")
+        assert(!invalid.contains("200 OK"), "unsupported version persisted: {invalid}")
+        assert(invalid.ends_with("Connection: close\r\n\r\n"), "{invalid}")
+    }
+    shutdown.store(true, Ordering.Release)
+    report :: server.join().expect("server join")
+    assert_eq(report.user_accepted, 8)
+    assert_eq(report.user_completed, 8)
+    assert_eq(JET_HTTP_KEEPALIVE_IDLE_TIMEOUT, Duration.from_secs(60))
+    assert_eq(JET_HTTP_MAX_REQUESTS_PER_CONNECTION, 1000)
+}
+// Rust: tests/http_server_lifecycle.rs:1434
+#Test("head_preserves_representation_length_without_a_wire_body") {
+    // Rust: tests/http_server_lifecycle.rs:1438
+    fn exchange(addr: SocketAddr, request: [U8]) -> String {
+        stream := TcpStream.connect(addr).expect("connect")
+        stream.write_all(request).expect("request write")
+        stream.shutdown(Shutdown.Write).expect("finish request")
+        response := ""
+        stream.read_to_string(&response).expect("response read")
+        response
+    }
+    // Rust: tests/http_server_lifecycle.rs:1449
+    fn assert_head(response: String, status: String, length: Int) -> {
+        (headers, body) :: response.split_once("\r\n\r\n").expect("response framing")
+        assert(headers.starts_with(status), "{response}")
+        assert(headers.contains("Content-Length: {length}\r\n"), "{response}")
+        assert(body.is_empty(), "HEAD emitted representation bytes: {response}")
+    }
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    addr :: listener.local_addr().expect("address")
+    mux :: jet_http_mux_new()
+    calls :: Arc.new(AtomicUsize.new(0))
+    implicit_calls :: calls.clone()
+    jet_http_mux_add(&mux, "GET", "/implicit", _ -> {
+        _ :: implicit_calls.fetch_add(1, Ordering.AcqRel)
+        jet_http_srv_response_header(jet_http_srv_response(200, "hello"), "x-origin", "get")
+    })
+    explicit_calls :: calls.clone()
+    jet_http_mux_add(&mux, "HEAD", "/explicit", _ -> {
+        _ :: explicit_calls.fetch_add(1, Ordering.AcqRel)
+        jet_http_srv_response(200, "explicit")
+    })
+    jet_http_mux_add(&mux, "POST", "/post", _ -> { jet_http_srv_response(200, "posted") })
+    empty_calls :: calls.clone()
+    jet_http_mux_add(&mux, "GET", "/empty", _ -> {
+        _ :: empty_calls.fetch_add(1, Ordering.AcqRel)
+        jet_http_srv_response(204, "forbidden")
+    })
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: shutdown.clone()
+    options := JetHTTPServerOptions.safe()
+    options.workers = 1
+    options.admission_queue = 8
+    server :: thread.spawn(() -> { jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server") })
+    implicit :: exchange(addr, "HEAD /implicit HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes())
+    assert_head(implicit, "HTTP/1.1 200 OK", 5)
+    assert(implicit.contains("x-origin: get\r\n"), "HEAD lost GET metadata: {implicit}")
+    explicit :: exchange(addr, "HEAD /explicit HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes())
+    assert_head(explicit, "HTTP/1.1 200 OK", 8)
+    missing :: exchange(addr, "HEAD /missing HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes())
+    assert_head(missing, "HTTP/1.1 404 Not Found", 13)
+    bad_route :: exchange(addr, "HEAD /%FF HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes())
+    assert_head(bad_route, "HTTP/1.1 400 Bad Request", 15)
+    not_allowed :: exchange(addr, "HEAD /post HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes())
+    assert_head(not_allowed, "HTTP/1.1 405 Method Not Allowed", 22)
+    no_content :: exchange(addr, "HEAD /empty HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes())
+    (no_content_headers, no_content_body) :: no_content.split_once("\r\n\r\n").expect("204 framing")
+    assert(no_content_headers.starts_with("HTTP/1.1 204 No Content"), "{no_content}")
+    assert(!no_content_headers.to_ascii_lowercase().contains("content-length:"), "{no_content}")
+    assert(no_content_body.is_empty(), "{no_content}")
+    pipelined :: exchange(addr, "HEAD /implicit HTTP/1.1\r\nHost: local\r\n\r\nGET /implicit HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes())
+    second :: pipelined[1..].find("HTTP/1.1 200 OK").map(index -> { index + 1 }).expect("second response")
+    first_response := pipelined[..second] // #4303
+    assert(first_response.contains("Content-Length: 5\r\n"), "{pipelined}")
+    assert(first_response.ends_with("\r\n\r\n"), "HEAD body shifted pipeline: {pipelined}")
+    assert(pipelined[second..].ends_with("\r\n\r\nhello"), "GET response missing after HEAD: {pipelined}")
+    assert_eq(calls.load(Ordering.Acquire), 5)
+    shutdown.store(true, Ordering.Release)
+    report :: server.join().expect("server join")
+    assert_eq(report.user_accepted, 7)
+    assert_eq(report.user_completed, 7)
+}
+// Rust: tests/http_server_lifecycle.rs:1580
+#Test("reset_content_has_zero_length_and_preserves_pipeline_boundaries") {
+    // Rust: tests/http_server_lifecycle.rs:1584
+    fn exchange(addr: SocketAddr, request: [U8]) -> String {
+        stream := TcpStream.connect(addr).expect("connect")
+        stream.write_all(request).expect("request write")
+        stream.shutdown(Shutdown.Write).expect("finish request")
+        response := ""
+        stream.read_to_string(&response).expect("response read")
+        response
+    }
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    addr :: listener.local_addr().expect("address")
+    mux :: jet_http_mux_new()
+    calls :: Arc.new(AtomicUsize.new(0))
+    reset_calls :: calls.clone()
+    jet_http_mux_add(&mux, "GET", "/reset", _ -> {
+        _ :: reset_calls.fetch_add(1, Ordering.AcqRel)
+        jet_http_srv_response_header(jet_http_srv_response_header(jet_http_srv_response_header(jet_http_srv_response(205, "must-not-publish"), "Content-Length", "999"), "Transfer-Encoding", "chunked"), "X-Origin", "reset")
+    })
+    next_calls :: calls.clone()
+    jet_http_mux_add(&mux, "GET", "/next", _ -> {
+        _ :: next_calls.fetch_add(1, Ordering.AcqRel)
+        jet_http_srv_response(200, "next")
+    })
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: shutdown.clone()
+    options := JetHTTPServerOptions.safe()
+    options.workers = 1
+    options.admission_queue = 8
+    server :: thread.spawn(() -> { jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server") })
+    pipelined :: exchange(addr, "GET /reset HTTP/1.1\r\nHost: local\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes())
+    second :: pipelined.find("HTTP/1.1 200 OK").expect("successor response")
+    reset := pipelined[..second] // #4303
+    assert(reset.starts_with("HTTP/1.1 205 Reset Content"), "wrong 205 status: {pipelined}")
+    assert(reset.contains("Content-Length: 0\r\n"), "205 was not zero-length: {pipelined}")
+    assert(!reset.to_ascii_lowercase().contains("transfer-encoding:"), "205 retained custom framing: {pipelined}")
+    assert(reset.contains("X-Origin: reset\r\n"), "205 lost representation metadata: {pipelined}")
+    assert(reset.ends_with("\r\n\r\n"), "205 body shifted pipeline: {pipelined}")
+    assert(pipelined[second..].ends_with("\r\n\r\nnext"), "successor response misaligned: {pipelined}")
+    head :: exchange(addr, "HEAD /reset HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes())
+    (head_headers, head_body) :: head.split_once("\r\n\r\n").expect("HEAD 205 framing")
+    assert(head_headers.starts_with("HTTP/1.1 205 Reset Content"), "{head}")
+    assert(head_headers.contains("Content-Length: 0\r\n"), "HEAD metadata overrode 205: {head}")
+    assert(head_body.is_empty(), "HEAD 205 emitted body bytes: {head}")
+    assert_eq(calls.load(Ordering.Acquire), 3)
+    shutdown.store(true, Ordering.Release)
+    report :: server.join().expect("server join")
+    assert_eq(report.user_accepted, 2)
+    assert_eq(report.user_completed, 2)
+}
+// Rust: tests/http_server_lifecycle.rs:1687
+#Test("invalid_response_statuses_fail_closed_without_breaking_pipelines") {
+    // Rust: tests/http_server_lifecycle.rs:1691
+    fn exchange(addr: SocketAddr, request: [U8]) -> String {
+        stream := TcpStream.connect(addr).expect("connect")
+        stream.write_all(request).expect("request write")
+        stream.shutdown(Shutdown.Write).expect("finish request")
+        response := ""
+        stream.read_to_string(&response).expect("response read")
+        response
+    }
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    addr :: listener.local_addr().expect("address")
+    mux :: jet_http_mux_new()
+    calls :: Arc.new(AtomicUsize.new(0))
+    loop (path, status) in [("/low", 99), ("/high", 600)] {
+        handler_calls :: calls.clone()
+        jet_http_mux_add(&mux, "GET", path, _ -> {
+            _ :: handler_calls.fetch_add(1, Ordering.AcqRel)
+            jet_http_srv_response(status, "secret-status-{status}")
+        })
+    }
+    next_calls :: calls.clone()
+    jet_http_mux_add(&mux, "GET", "/next", _ -> {
+        _ :: next_calls.fetch_add(1, Ordering.AcqRel)
+        jet_http_srv_response(200, "next")
+    })
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: shutdown.clone()
+    options := JetHTTPServerOptions.safe()
+    options.workers = 1
+    options.admission_queue = 8
+    server :: thread.spawn(() -> { jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server") })
+    loop path in ["/low", "/high"] {
+        response :: exchange(addr, "GET {path} HTTP/1.1\r\nHost: local\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes())
+        assert(response.starts_with("HTTP/1.1 500 Internal Server Error"), "invalid status reached wire: {response}")
+        assert(response.contains("Content-Length: 25\r\n"), "invalid status did not use generic 500 framing: {response}")
+        assert(!response.contains("secret-status"), "invalid response body leaked: {response}")
+        assert_eq(response.matches("HTTP/1.1").count(), 2, "invalid status broke response boundary: {response}")
+        assert(response.ends_with("\r\n\r\nnext"), "successor response misaligned: {response}")
+    }
+    assert_eq(calls.load(Ordering.Acquire), 4)
+    shutdown.store(true, Ordering.Release)
+    report :: server.join().expect("server join")
+    assert_eq(report.user_accepted, 2)
+    assert_eq(report.user_completed, 2)
+    loop status in [100, 205, 299, 599] {
+        response :: jet_http_srv_response(status, "valid")
+        assert_eq(response.status, status)
+        assert_eq(response.body, "valid")
+    }
+    loop status in [I64.MIN, -1, 0, 99, 600, 1000, I64.MAX] {
+        response :: jet_http_srv_response(status, "private")
+        assert_eq(response.status, 500, "invalid status {status} survived")
+        assert_eq(response.body, "500 Internal Server Error")
+        assert(response.headers.to_flat().is_empty())
+    }
+}

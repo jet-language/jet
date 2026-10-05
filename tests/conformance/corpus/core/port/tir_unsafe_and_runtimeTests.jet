@@ -1,0 +1,287 @@
+use core.fs
+use core.env
+use core.process
+use jet.[compile, compile_with_path, render_diagnostics]
+use jet_foundation.Registry
+use common.unsafe_keyword_columns
+use tir_support.[assert_tiers_agree, assert_tiers_agree_with_application_policy, build_and_run, build_and_run_full, have_rustc, write_test_package, TIR_TEST_PACKAGE, strip_vetted_prelude_modules, jit_run, interpreter_run]
+use tir_unsafe_and_runtime.FROM_ADDR_SOURCE
+
+// Rust: tests/tir_unsafe_and_runtime.rs:35
+#Test("unsafe_fn_block_and_ptr_ops") {
+    if !have_rustc() { return }
+    src :: """
+use core.mem
+#Unsafe("reads through a raw pointer; addr must be a live, valid Int")
+fn read_reg(addr: Int) -> Int {
+    p :: mem.Ptr<Int>.from_addr(addr)
+    return mem.volatile_read(p)
+}
+fn run() {
+cell :: 1337
+    addr :: mem.address_of(cell)
+    #Unsafe("addr is the address of `cell`, a live Int on this stack frame") {
+        p :: mem.Ptr<Int>.from_addr(addr)
+        seen :: mem.volatile_read(p)
+        print(seen)
+        again :: read_reg(addr)
+        print(again)
+    }
+}
+"""
+    (code, stdout) :: build_and_run("tir_unsafe_lowlevel", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1337\n1337\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:77
+#Test("mem_address_of_never_folds_plain_or_parenthesized") {
+    if !have_rustc() { return }
+    for (name, addr_init) in [("tir_addr_of_plain", "mem.address_of(cell)"), ("tir_addr_of_paren", "(mem.address_of(cell))")] {
+        src :: """
+use core.mem
+#Unsafe("reads through a raw pointer; addr must be a live, valid Int")
+fn read_reg(addr: Int) -> Int {
+    p :: mem.Ptr<Int>.from_addr(addr)
+    return mem.volatile_read(p)
+}
+fn run() {
+    cell :: 1337
+    addr :: ADDRESS_INITIALIZER
+    #Unsafe("addr is the address of `cell`, a live Int on this stack frame") {
+        print(read_reg(addr))
+    }
+}
+""".replace("ADDRESS_INITIALIZER", addr_init)
+        (code, stdout) :: build_and_run(name, src)
+        assert_eq(code, 0, "case {name}")
+        assert_eq(stdout, "1337\n", "case {name}")
+    }
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:114
+#Test("mem_address_of_known_binding_is_a_compile_error_not_a_silent_bake") {
+    src :: """
+use core.mem
+fn run() {
+    cell_value :: prep { 1337 }
+    address :: prep { mem.address_of(cell_value) }
+    print(address)
+}
+"""
+    diags :: compile(src).expect_err("@ mem.address_of must not silently fold")
+    assert(diags.iter().any(d -> d.code == "E0956"), "expected E0956 (can't run at compile time), got: {diags}")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:135
+#Test("unsafe_tier_emit_is_byte_exact") {
+    src :: """
+use core.mem
+#Unsafe("reads through a raw pointer; addr must be valid")
+fn read_reg(addr: Int) -> Int {
+    p :: mem.Ptr<Int>.from_addr(addr)
+    return mem.volatile_read(p)
+}
+fn run() {
+cell :: 1337
+    addr :: mem.address_of(cell)
+    #Unsafe("safe: cell is live") {
+        seen :: read_reg(addr)
+        print("{seen}")
+    }
+}
+"""
+    // GATE #4494: native temporary directory and process identity.
+    dir :: env.temp_dir().join("jet_tir_unsafe_{process.id()}")
+    fs.create_dir_all(dir).unwrap()
+    jet_path :: dir.join("unsafe.jet")
+    fs.write(jet_path, src).unwrap()
+    shown :: jet_path.to_string_lossy().into_owned()
+    out :: compile_with_path(src, shown).unwrap_or_else(diags -> panic("front end rejected:\n{render_diagnostics(shown, src, diags)}"))
+    assert(out.rust.contains("pub unsafe fn __jet_read_reg(__jet_addr: i64) -> JetOutcome<i64, JetErr> {"), "unsafe fn signature not byte-exact (D-FAIL-CARRIER1=A):\n{out.rust}")
+    assert(out.rust.contains("let __jet_p: *mut i64 = ((__jet_addr) as usize as *mut i64);"), "PtrFromAddr not byte-exact:\n{out.rust}")
+    assert(out.rust.contains("return Ok(jet_mem::jet_sentry_volatile_read((__jet_p), \"valid_ptr\"));"), "volatile_read sentry wrapper missing (D-FAIL-CARRIER1=A):\n{out.rust}")
+    assert(out.rust.contains("let __jet_addr: i64 = jet_mem::jet_sentry_stack_address_of((&(__jet_cell) as *const _));"), "address_of sentry wrapper missing:\n{out.rust}")
+    assert(out.rust.contains("let _jet_sentry_frame = jet_mem::jet_sentry_frame();"), "stack address function lacks the shared lifetime hook:\n{out.rust}")
+    assert(out.rust.contains("    unsafe {\n"), "unsafe block not emitted:\n{out.rust}")
+    assert(out.rust.contains("jet_mem::jet_sentry_scope(true"), "unsafe block must carry its sentry gate:\n{out.rust}")
+    assert(out.rust.contains("safe: cell is live"), "unsafe gate reason must reach the sentry Prelude:\n{out.rust}")
+    user :: strip_vetted_prelude_modules(out.rust)
+    for line in user.lines() {
+        for col in unsafe_keyword_columns(line) {
+            after := line[col + "unsafe".len()..].trim_start() // #4303
+            assert(after.starts_with("{") || after.starts_with("fn "), "I1: ungated `unsafe` in generated code: {line.trim()}")
+        }
+    }
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:236
+#Test("ffi_capability_edge_uses_shared_sentry_prelude") {
+    src :: """
+extern rust "std" {
+    fn borrow(s: &String) -> String = "std::mem::take"
+}
+fn run() {
+    value := "hi"
+    #Unsafe("the foreign call may write through the borrowed value") {
+        print(borrow(&value))
+    }
+}
+"""
+    // GATE #4494
+    dir :: env.temp_dir().join("jet_tir_ffi_sentry_{process.id()}")
+    fs.create_dir_all(dir).unwrap()
+    path :: dir.join("ffi_sentry.jet")
+    fs.write(path, src).unwrap()
+    shown :: path.to_string_lossy().into_owned()
+    out :: compile_with_path(src, shown).unwrap_or_else(diags -> panic("front end rejected:\n{render_diagnostics(shown, src, diags)}"))
+    assert(out.rust.contains("jet_mem::jet_sentry_foreign_ref"), "foreign capability did not use the shared sentry adapter:\n{out.rust}")
+    assert(out.rust.contains("jet_ffi_borrow(&mut"), "foreign capability lost its exclusive call shape:\n{out.rust}")
+    assert(out.rust.contains("the foreign call may write through the borrowed value"), "foreign gate reason was not carried into generated Rust:\n{out.rust}")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:279
+#Test("volatile_write_emit_is_byte_exact") {
+    src :: """
+use core.mem
+#Unsafe("UART TX register is mapped by the target machine")
+fn write_reg(value: Int) {
+    p :: mem.Ptr<Int>.from_addr(0x40000100)
+    mem.volatile_write(p, value)
+}
+fn run() {
+}
+"""
+    // GATE #4494
+    dir :: env.temp_dir().join("jet_tir_volatile_write_{process.id()}")
+    fs.create_dir_all(dir).unwrap()
+    path :: dir.join("volatile_write.jet")
+    fs.write(path, src).unwrap()
+    shown :: path.to_string_lossy().into_owned()
+    out :: compile_with_path(src, shown).unwrap_or_else(diags -> panic("front end rejected:\n{render_diagnostics(shown, src, diags)}"))
+    assert(out.rust.contains("let __jet_p: *mut i64 = ((1073742080i64) as usize as *mut i64);"), "PtrFromAddr constant not byte-exact:\n{out.rust}")
+    assert(out.rust.contains("jet_mem::jet_sentry_volatile_write((__jet_p), __jet_value, \"valid_ptr\");"), "volatile_write sentry wrapper missing:\n{out.rust}")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:320
+#Test("sentry_kernel_is_shared_by_aot_and_runtime_adapters") {
+    root :: OSPath.from(env.CARGO_MANIFEST_DIR)
+    kernel :: fs.read_to_string(root.join("crates/jet-foundation/src/MemSentry.rs")).expect("shared sentry kernel must be readable")
+    prelude :: fs.read_to_string(root.join("crates/jet-codegen/src/Prelude/Mem.rs")).expect("AOT memory Prelude must be readable")
+    for duplicate in ["struct SentryGate", "struct SentryAllocation", "static SENTRY_ALLOCATIONS", "static SENTRY_HARDENED", "fn sentry_allocations", "fn sentry_runtime_available", "fn sentry_enabled", "fn jet_sentry_scope_inner"] {
+        assert(!prelude.contains(duplicate), "memory Prelude still owns duplicate sentry machinery: {duplicate}")
+    }
+    assert(prelude.contains("sentry_kernel::jet_sentry_check"))
+    for code in ["R0801", "R0802", "R0803"] {
+        row :: Registry.diagnostic(code).unwrap_or_else(-> panic("missing registered sentry diagnostic {code}"))
+        assert(!row.what.is_empty(), "{code} is missing What text")
+        assert(!row.why.is_empty(), "{code} is missing Why text")
+        assert(!row.fix.is_empty(), "{code} is missing Fix text")
+    }
+    emitted :: tir_support.compile("unsafe_sentries_shared_kernel", fs.read_to_string(root.join("Examples/features/memory/unsafe_sentries_source_off.jet")).unwrap())
+    assert(emitted.contains("mod jet_sentry {"))
+    trimmed := kernel.trim() // #4303
+    assert(emitted.contains(trimmed), "AOT must embed the exact Foundation sentry kernel")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:364
+#Test("sentry_source_policy_off_is_tier_parity") {
+    source :: fs.read_to_string(OSPath.from(env.CARGO_MANIFEST_DIR).join("Examples/features/memory/unsafe_sentries_source_off.jet")).unwrap().replace("use core.mem", "use core.mem as _mem")
+    (jit_code, jit_out, jit_err) :: jit_run("unsafe_sentries_source_off", source)
+    assert_eq(jit_code, 0, "default JIT failed:\n{jit_err}")
+    assert_eq(jit_out, "41\n", "default JIT output drifted:\n{jit_err}")
+    (interpreter_code, interpreter_out, interpreter_err) :: interpreter_run("unsafe_sentries_source_off", source)
+    assert_eq(interpreter_code, jit_code, "forced interpreter/default JIT exit codes disagree:\n{interpreter_err}")
+    assert_eq(interpreter_out, jit_out, "forced interpreter/default JIT stdout disagrees:\n{interpreter_err}")
+    assert_eq(interpreter_err, jit_err, "forced interpreter/default JIT stderr disagrees")
+    if have_rustc() {
+        (aot_code, aot_out, aot_err) :: build_and_run_full("jet_tir_sentry", "unsafe_sentries_source_off", source)
+        assert_eq(aot_code, jit_code, "AOT/default JIT exit codes disagree:\n{aot_err}")
+        assert_eq(aot_out, jit_out, "AOT/default JIT stdout disagrees:\n{aot_err}")
+        assert_eq(aot_err, jit_err, "AOT/default JIT stderr disagrees")
+    }
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:402
+#Test("from_addr_sentry_is_tier_parity") {
+    (jit_code, jit_out, jit_err) :: jit_run("core_mem_from_addr", FROM_ADDR_SOURCE)
+    assert_eq(jit_code, 0, "default JIT failed:\n{jit_err}")
+    assert_eq(jit_out, "7\n", "default JIT output drifted:\n{jit_err}")
+    (interpreter_code, interpreter_out, interpreter_err) :: interpreter_run("core_mem_from_addr", FROM_ADDR_SOURCE)
+    assert_eq(interpreter_code, jit_code, "forced interpreter/default JIT exit codes disagree:\n{interpreter_err}")
+    assert_eq(interpreter_out, jit_out, "forced interpreter/default JIT stdout disagrees:\n{interpreter_err}")
+    assert_eq(interpreter_err, jit_err, "forced interpreter/default JIT stderr disagrees")
+    if have_rustc() {
+        (aot_code, aot_out, aot_err) :: build_and_run_full("jet_tir_from_addr", "core_mem_from_addr", FROM_ADDR_SOURCE)
+        assert_eq(aot_code, jit_code, "AOT/default JIT exit codes disagree:\n{aot_err}")
+        assert_eq(aot_out, jit_out, "AOT/default JIT stdout disagrees:\n{aot_err}")
+        assert_eq(aot_err, jit_err, "AOT/default JIT stderr disagrees")
+    }
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:439
+#Test("sentry_faults_are_tier_parity") {
+    misaligned_source :: """
+use core.mem
+fn run() {
+    cell :: (x: 1, y: 2)
+    #Unsafe("the tuple storage is live but this raw Int is misaligned") {
+        pointer :: mem.Ptr<Int>.from_addr(mem.address_of(cell) + 1)
+        print(pointer.*)
+    }
+}
+"""
+    expired_stack_source :: """
+use core.mem
+fn leak() -> Int {
+    cell :: 1337
+    return mem.address_of(cell)
+}
+fn run() {
+    addr :: leak()
+    #Unsafe("the returned address outlives its owning Jet frame") {
+        pointer :: mem.Ptr<Int>.from_addr(addr)
+        print(pointer.*)
+    }
+}
+"""
+    expired_recursive_source :: """
+use core.mem
+fn leak(depth: Int) -> Int {
+    cell :: depth
+    if depth == 0 {
+        return mem.address_of(cell)
+    }
+    return leak(depth - 1)
+}
+fn run() {
+    addr :: leak(2)
+    #Unsafe("the recursive address outlives its owning Jet frame") {
+        pointer :: mem.Ptr<Int>.from_addr(addr)
+        print(pointer.*)
+    }
+}
+"""
+    root :: OSPath.from(env.CARGO_MANIFEST_DIR)
+    cases :: [
+        ("unsafe_sentries_provenance", fs.read_to_string(root.join("Examples/features/memory/unsafe_sentries_provenance.jet")).unwrap(), "R0801", "The pointer is outside the allocation provenance"),
+        ("unsafe_sentries_quarantine", fs.read_to_string(root.join("Examples/features/memory/unsafe_sentries.jet")).unwrap(), "R0802", "storage after its lifetime ended"),
+        ("unsafe_sentries_alignment", misaligned_source, "R0803", "misaligned raw `read`"),
+        ("unsafe_sentries_expired_stack", expired_stack_source, "R0802", "owning Jet frame expired"),
+        ("unsafe_sentries_expired_recursive_stack", expired_recursive_source, "R0802", "owning Jet frame expired")
+    ]
+    aot_available :: have_rustc()
+    for (name, src, code, detail) in cases {
+        tiers := [("default JIT", jit_run(name, src)), ("forced interpreter", interpreter_run(name, src))]
+        if aot_available { tiers.push(("AOT", build_and_run_full("jet_tir_sentry", name, src))) }
+        for (tier, (exit_code, stdout, stderr)) in tiers {
+            assert_eq(exit_code, 70, "{tier} changed {code} exit status: {stderr}")
+            assert(stdout.is_empty(), "{tier} leaked stdout for {code}: {stdout}")
+            for marker in ["Runtime fault [{code}]", "{name}.jet:", detail, "obligation `valid_ptr` was not met on this run"] {
+                assert(stderr.contains(marker), "D-CASE-PROSE1=A: {tier} missing `{marker}` for {code}: {stderr}")
+            }
+        }
+    }
+}

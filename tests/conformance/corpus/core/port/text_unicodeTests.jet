@@ -1,0 +1,504 @@
+use tests.conformance.corpus.core.port.text_unicode.*
+use tests.common as common
+use tests.tir_support as tir_support
+use std.fs as fs
+use std.path.Path
+use std.process.Command
+use jet
+// GATE #4494: real native process and file operations, canonical execution-tier provider.
+
+// Rust: tests/text_unicode.rs:66
+#Test("pinned_unicode_tables_regenerate_byte_identically") {
+    root :: Path.new(env("CARGO_MANIFEST_DIR"))
+    checksums :: Command.new("sha256sum").args(["--check", "SHA256SUMS"]).current_dir(root.join("tests/data/unicode")).output().expect("verify vendored Unicode inputs")
+    assert(checksums.status.success(), "vendored Unicode checksum mismatch:\n{String.from_utf8_lossy(checksums.stdout)}{String.from_utf8_lossy(checksums.stderr)}")
+    output :: Command.new("node").args(["Tools/agent/gen-unicode-tables.mjs", "--check", "tests/data/unicode/ucd"]).current_dir(root).output().expect("run pinned Unicode generator")
+    assert(output.status.success(), "pinned Unicode tables do not regenerate byte-identically:\n{String.from_utf8_lossy(output.stdout)}{String.from_utf8_lossy(output.stderr)}")
+}
+
+// Rust: tests/text_unicode.rs:97
+#Test("generated_rust_emits_only_the_unicode_tier_the_program_needs") {
+    // Retired emitted-Rust table census is replaced by the same two programs' behavior
+    // on O0/O1/O2/Web; no Rust prelude representation is part of the Jet contract.
+    for (name, source, expected) in [
+        ("hello", `fn run() { print("hello") }`, "hello\n"),
+        ("text", `use core.text as text
+fn run() { print(text.nfc("é")) }`, "é\n")
+    ] {
+        scratch :: common.Scratch.new("unicode_tier_{name}")
+        tir_support.write_test_package(scratch.path, tir_support.TIR_TEST_PACKAGE)
+        entry :: scratch.join("main.jet")
+        fs.write(entry, source).unwrap()
+        bundle :: jet.Loader.load_entry(entry.to_str().unwrap()).unwrap()
+        for tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+            result :: common.execute_bundle(bundle, tier).expect("Unicode tier program executes")
+            assert_eq(result.exit_code, 0, "Unicode {name} tier {tier:?}: {result.stderr}")
+            assert_eq(result.stdout, expected)
+            assert_eq(result.stderr, "")
+        }
+    }
+}
+
+// Rust: tests/text_unicode.rs:152
+#Test("aot_prelude_passes_full_unicode_corpora") {
+    // The full corpus obligations now execute canonical core.text, not a Rust prelude extraction.
+    root :: Path.new(env("CARGO_MANIFEST_DIR"))
+    root_text :: root.to_string_lossy().replace('\\', "\\\\")
+    source :: `
+use core.text as text
+
+// Rust: tests/text_unicode.rs:169 (corpus harness)
+fn cps(field: String) -> String {
+    field.split_whitespace().filter_map(hex -> U32.from_str_radix(hex, 16).ok()).filter_map(Char.from_u32).collect()
+}
+// Rust: tests/text_unicode.rs:176 (corpus harness)
+fn parse_break(line: String) -> (String, [String])? {
+    full := ""
+    segments: [String] := []
+    current := ""
+    any := false
+    for token in line.split_whitespace() {
+        match token {
+            "÷" -> { if !current.is_empty() { segments.push(^current); current = "" } }
+            "×" -> {}
+            hex -> {
+                ch :: Char.from_u32(U32.from_str_radix(hex, 16).ok()?)?
+                full.push(ch)
+                current.push(ch)
+                any = true
+            }
+        }
+    }
+    if !current.is_empty() { segments.push(^current) }
+    if any { Val((^full, ^segments)) } else { None }
+}
+// Rust: tests/text_unicode.rs:197 (corpus harness)
+fn check_break(corpus: String, segment: (String) -> [String]) -> USize {
+    checked := 0
+    for raw in corpus.lines() {
+        line := raw.split('#').next().unwrap_or("").trim() // #4303
+        parsed :: parse_break(line)
+        if parsed.is_none() { continue }
+        (full, expected) :: parsed.unwrap()
+        assert_eq(segment(full), expected, "break mismatch: {raw}")
+        checked += 1
+    }
+    checked
+}
+// Rust: tests/text_unicode.rs:208 (corpus harness entry)
+fn run() -> {
+    normalization :: include_str("__ROOT__/tests/data/unicode/NormalizationTest.txt")
+    normalization_lines := 0
+    for raw in normalization.lines() {
+        line := raw.split('#').next().unwrap_or("").trim() // #4303
+        if line.is_empty() || line.starts_with('@') { continue }
+        fields :: line.split(';').collect::<[String]>()
+        if fields.len() < 5 { continue }
+        c1 :: cps(fields[0]); c2 :: cps(fields[1]); c3 :: cps(fields[2])
+        c4 :: cps(fields[3]); c5 :: cps(fields[4])
+        for input in [c1, c2, c3] {
+            assert_eq(text.nfc(input), c2)
+            assert_eq(text.nfd(input), c3)
+        }
+        for input in [c4, c5] {
+            assert_eq(text.nfc(input), c4)
+            assert_eq(text.nfd(input), c5)
+        }
+        for input in [c1, c2, c3, c4, c5] {
+            assert_eq(text.nfkc(input), c4)
+            assert_eq(text.nfkd(input), c5)
+        }
+        normalization_lines += 1
+    }
+    folding :: include_str("__ROOT__/tests/data/unicode/ucd/CaseFolding.txt")
+    fold_lines := 0
+    for raw in folding.lines() {
+        line := raw.split('#').next().unwrap_or("").trim() // #4303
+        if line.is_empty() { continue }
+        fields :: line.split(';').map(field -> field.trim()).collect::<[String]>()
+        if fields.len() < 3 || (fields[1] != "C" && fields[1] != "F") { continue }
+        assert_eq(text.casefold(cps(fields[0])), cps(fields[2]), "fold mismatch: {raw}")
+        fold_lines += 1
+    }
+    lower: [U32:String] := [:]
+    upper: [U32:String] := [:]
+    for raw in include_str("__ROOT__/tests/data/unicode/ucd/UnicodeData.txt").lines() {
+        fields :: raw.split(';').collect::<[String]>()
+        if fields.len() < 14 { continue }
+        cp :: U32.from_str_radix(fields[0], 16).unwrap()
+        if !fields[12].is_empty() { _ :: upper.insert(cp, cps(fields[12])) }
+        if !fields[13].is_empty() { _ :: lower.insert(cp, cps(fields[13])) }
+    }
+    for raw in include_str("__ROOT__/tests/data/unicode/ucd/SpecialCasing.txt").lines() {
+        line := raw.split('#').next().unwrap_or("").trim() // #4303
+        if line.is_empty() { continue }
+        fields :: line.split(';').map(field -> field.trim()).collect::<[String]>()
+        if fields.len() < 5 || !fields[4].is_empty() { continue }
+        cp :: U32.from_str_radix(fields[0], 16).unwrap()
+        _ :: lower.insert(cp, cps(fields[1])); _ :: upper.insert(cp, cps(fields[3]))
+    }
+    casing_scalars := 0
+    for cp in 0..=0x10ffff {
+        scalar :: Char.from_u32(cp)
+        if scalar.is_none() { continue }
+        input :: scalar.unwrap().to_string()
+        assert_eq(text.lower(input), lower.get(cp).unwrap_or(input))
+        assert_eq(text.upper(input), upper.get(cp).unwrap_or(input))
+        casing_scalars += 1
+    }
+    assert_eq(text.lower("ΟΣ"), "ος")
+    grapheme :: check_break(include_str("__ROOT__/tests/data/unicode/GraphemeBreakTest.txt"), text.graphemes)
+    word :: check_break(include_str("__ROOT__/tests/data/unicode/WordBreakTest.txt"), text.word_segments)
+    sentence :: check_break(include_str("__ROOT__/tests/data/unicode/SentenceBreakTest.txt"), text.sentence_segments)
+    assert(normalization_lines > 15000 && fold_lines > 1500)
+    assert(grapheme > 500 && word > 500 && sentence > 100)
+    print("{normalization_lines} {fold_lines} {casing_scalars} {grapheme} {word} {sentence}")
+}
+`.replace("__ROOT__", root_text)
+    scratch :: common.Scratch.new("jet_unicode_aot_corpora")
+    tir_support.write_test_package(scratch.path, tir_support.TIR_TEST_PACKAGE)
+    entry :: scratch.join("unicode_aot.jet")
+    fs.write(entry, source).unwrap()
+    bundle :: jet.Loader.load_entry(entry.to_str().unwrap()).unwrap()
+    for tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+        result :: common.execute_bundle(bundle, tier).expect("Unicode corpus executes")
+        assert_eq(result.exit_code, 0, "Unicode corpus {tier:?} failed: {result.stderr}")
+        assert_eq(result.stdout, "19965 1557 1112064 1093 1826 512\n")
+        assert_eq(result.stderr, "")
+    }
+}
+
+// Rust: tests/text_unicode.rs:327
+#Test("unicode_text_behavior_matches_comptime_and_aot") {
+    source :: `
+use core.text as text
+use core.regex as re
+FOLDED :: prep { text.casefold("Straßeİς") }
+LOWERED :: prep { text.lower("ΟΣ") }
+UPPERED :: prep { text.upper("ßև") }
+METHOD_LOWERED :: prep { "__PINNED_UPPER__".to_lower() }
+METHOD_UPPERED :: prep { "__PINNED_LOWER__".to_upper() }
+METHOD_TRIMMED :: prep { "__PINNED_SPACE__jet__PINNED_SPACE__".trim() }
+KEYCAP :: prep { text.display_width("1️⃣") }
+EMOJI :: prep { text.display_width("©️") }
+IGNORABLE :: prep { text.display_width("́‍") }
+CLASSES :: prep { text.is_alphabetic("Ж") && text.is_numeric("٣") && text.is_whitespace(" ") }
+REGEX_SPACE :: prep { re.is_match(.{"\s"}, " ") }
+fn run() -> {
+    runtime_folded :: text.casefold("Straßeİς")
+    runtime_lowered :: text.lower("ΟΣ")
+    runtime_uppered :: text.upper("ßև")
+    runtime_method_lowered :: "__PINNED_UPPER__".to_lower()
+    runtime_method_uppered :: "__PINNED_LOWER__".to_upper()
+    runtime_method_trimmed :: "__PINNED_SPACE__jet__PINNED_SPACE__".trim()
+    runtime_keycap :: text.display_width("1️⃣")
+    runtime_emoji :: text.display_width("©️")
+    runtime_ignorable :: text.display_width("́‍")
+    runtime_classes :: text.is_alphabetic("Ж") && text.is_numeric("٣") && text.is_whitespace(" ")
+    runtime_regex_space :: re.is_match(.{"\s"}, " ")
+    regex_alpha :: re.is_match(.{"\p{{Alphabetic}}+"}, "Ж")
+    regex_number :: re.is_match(.{"\p{{Number}}+"}, "٣")
+    regex_whitespace :: re.is_match(.{"\p{{White_Space}}+"}, " ")
+    insensitive :: re.compile_with("k", re.flags(true, false, false)) ?? panic("regex")
+    print("{FOLDED}|{runtime_folded}")
+    print("{LOWERED}|{runtime_lowered}")
+    print("{UPPERED}|{runtime_uppered}")
+    print(METHOD_LOWERED == "__PINNED_LOWER__" && runtime_method_lowered == "__PINNED_LOWER__")
+    print(METHOD_UPPERED == "__PINNED_UPPER__" && runtime_method_uppered == "__PINNED_UPPER__")
+    print("{METHOD_TRIMMED}|{runtime_method_trimmed}")
+    print("{KEYCAP}|{runtime_keycap}")
+    print("{EMOJI}|{runtime_emoji}")
+    print("{IGNORABLE}|{runtime_ignorable}")
+    print("{CLASSES}|{runtime_classes}")
+    print("{REGEX_SPACE}|{runtime_regex_space}")
+    print(regex_alpha && regex_number && regex_whitespace && insensitive.is_match("K"))
+}
+`.replace("__PINNED_UPPER__", Char.from_u32(0xA7CE).unwrap().to_string()).replace("__PINNED_LOWER__", Char.from_u32(0xA7CF).unwrap().to_string()).replace("__PINNED_SPACE__", Char.from_u32(0x2003).unwrap().to_string())
+    tir_support.assert_tiers_agree("jet_text_unicode_parity", source, "strassei̇σ|strassei̇σ\nος|ος\nSSԵՒ|SSԵՒ\ntrue\ntrue\njet|jet\n2|2\n2|2\n0|0\ntrue|true\ntrue|true\ntrue\n")
+}
+
+// Rust: tests/text_unicode.rs:399
+#Test("scalar_inspector_names_invisible_codepoints") {
+    root :: Path.new(env("CARGO_MANIFEST_DIR"))
+    root_text :: root.to_string_lossy().replace('\\', "\\\\")
+    source :: `
+use core.text as text
+// Rust: tests/text_unicode.rs:416 (inspector harness)
+fn run() -> {
+    checked := 0
+    for raw in include_str("__ROOT__/tests/data/unicode/ucd/UnicodeData.txt").lines() {
+        fields :: raw.split(';').collect::<[String]>()
+        if fields.len() < 14 { continue }
+        cp :: U32.from_str_radix(fields[0], 16).unwrap()
+        name := fields[1]
+        if name.ends_with(", First>") || name.ends_with(", Last>") { continue }
+        if name == "<control>" { name = fields[10] }
+        if name.is_empty() || name.starts_with('<') { continue }
+        scalar :: Char.from_u32(cp)
+        if scalar.is_none() { continue }
+        expected :: "U+{cp:04X} {name}"
+        got :: text.inspect(scalar.unwrap().to_string()).into_iter().next().unwrap()
+        assert_eq(got, expected, "name mismatch for U+{cp:04X}")
+        checked += 1
+    }
+    assert(checked > 30000, "pinned UnicodeData name rows unexpectedly low: {checked}")
+    assert_eq(text.inspect("👨‍👩‍👦")[1], "U+200D ZERO WIDTH JOINER")
+    print(checked)
+}
+`.replace("__ROOT__", root_text)
+    scratch :: common.Scratch.new("jet_scalar_inspector")
+    tir_support.write_test_package(scratch.path, tir_support.TIR_TEST_PACKAGE)
+    entry :: scratch.join("scalar_inspector.jet")
+    fs.write(entry, source).unwrap()
+    bundle :: jet.Loader.load_entry(entry.to_str().unwrap()).unwrap()
+    for tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+        result :: common.execute_bundle(bundle, tier).expect("scalar inspector executes")
+        assert_eq(result.exit_code, 0, "scalar inspector {tier:?} failed: {result.stderr}")
+        assert_eq(result.stdout, "40074\n")
+        assert_eq(result.stderr, "")
+    }
+}
+
+// Rust: tests/text_unicode.rs:480
+#Test("unicode_grapheme_zwj_requires_pictographic_context_on_all_run_tiers") {
+    source :: `
+use core.text as text
+fn run() -> {
+    unrelated := text.graphemes("a‍👨")
+    print(unrelated.len())
+    loop part in unrelated -> print(part)
+    pictographic := text.graphemes("👨‍👩")
+    print(pictographic.len())
+    loop part in pictographic -> print(part)
+    extended := text.graphemes("👨́‍👩")
+    print(extended.len())
+    loop part in extended -> print(part)
+}
+`
+    scratch :: common.Scratch.new("unicode_grapheme_zwj_context")
+    program :: scratch.join("grapheme_zwj_context.jet")
+    fs.write(program, source).expect("write ZWJ context fixture")
+    fs.write(scratch.join("package.jet"), "name: \"grapheme_zwj_context\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n").expect("write ZWJ context authority")
+    bundle :: jet.Loader.load_entry(program.to_str().unwrap()).unwrap()
+    for tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+        result :: common.execute_bundle(bundle, tier).expect("spawn ZWJ context fixture")
+        assert_eq(result.exit_code, 0, "ZWJ context fixture failed in {tier:?} tier:\n{result.stderr}")
+        assert_eq(result.stdout, "2\na‍\n👨\n1\n👨‍👩\n1\n👨́‍👩\n", "ZWJ context segmentation differed in {tier:?} tier")
+        assert_eq(result.stderr, "")
+    }
+}
+
+// Rust: tests/text_unicode.rs:543
+#Test("unicode_text_audit_matches_golden_on_all_run_tiers") {
+    root :: Path.new(env("CARGO_MANIFEST_DIR"))
+    example :: root.join("Examples/features/text/unicode_text_audit.jet")
+    expected :: fs.read(root.join("Examples/features/expected/text/unicode_text_audit.out")).expect("read Unicode text audit golden")
+    bundle :: jet.Loader.load_entry(example.to_str().unwrap()).unwrap()
+    for tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+        result :: common.execute_bundle(bundle, tier).expect("spawn Unicode audit")
+        assert_eq(result.exit_code, 0, "Unicode audit {tier:?} tier failed:\n{result.stderr}")
+        assert_eq(result.stdout.as_bytes(), expected, "Unicode audit {tier:?} tier did not match golden")
+        assert_eq(result.stderr, "")
+    }
+}
+
+// Rust: tests/text_unicode.rs:584
+#Test("wrap_semantics_audit_matches_golden_on_all_run_tiers") {
+    root :: Path.new(env("CARGO_MANIFEST_DIR"))
+    example :: root.join("Examples/features/text/wrap_semantics_audit.jet")
+    expected :: fs.read(root.join("Examples/features/expected/text/wrap_semantics_audit.out")).expect("read textwrap semantics audit golden")
+    bundle :: jet.Loader.load_entry(example.to_str().unwrap()).unwrap()
+    for tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+        result :: common.execute_bundle(bundle, tier).expect("spawn textwrap semantics audit")
+        assert_eq(result.exit_code, 0, "textwrap semantics audit {tier:?} tier failed:\n{result.stderr}")
+        assert_eq(result.stdout.as_bytes(), expected, "textwrap semantics audit {tier:?} tier did not match golden")
+        assert_eq(result.stderr, "")
+    }
+}
+
+// Rust: tests/text_unicode.rs:627
+#Test("string_from_bytes_matches_golden_on_all_run_tiers") {
+    root :: Path.new(env("CARGO_MANIFEST_DIR"))
+    example :: root.join("Examples/features/strings/from_bytes.jet")
+    expected :: fs.read(root.join("Examples/features/expected/strings/from_bytes.out")).expect("read String.from_bytes golden")
+    bundle :: jet.Loader.load_entry(example.to_str().unwrap()).unwrap()
+    for tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+        result :: common.execute_bundle(bundle, tier).expect("spawn String.from_bytes")
+        assert_eq(result.exit_code, 0, "String.from_bytes {tier:?} tier failed:\n{result.stderr}")
+        assert_eq(result.stdout.as_bytes(), expected, "String.from_bytes {tier:?} tier did not match golden")
+        assert_eq(result.stderr, "")
+    }
+}
+
+// Rust: tests/text_unicode.rs:668
+#Test("text_parser_helpers_preserve_optional_failure_across_tiers") {
+    files :: [("main.jet", TEXT_PARSER_HELPERS_SOURCE), ("combinators.jet", include_str("../Core/text/combinators.jet"))]
+    scratch :: common.Scratch.new("text_parser_helpers_tiers")
+    tir_support.write_test_package(scratch.path, tir_support.TIR_TEST_PACKAGE)
+    for (name, source) in files { fs.write(scratch.path.join(name), source).unwrap() }
+    entry :: scratch.path.join("main.jet")
+    bundle :: jet.Loader.load_entry(entry.to_str().unwrap()).unwrap()
+    for tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+        result :: common.execute_bundle(bundle, tier).expect("text parser helper fixture executes")
+        assert_eq(result.exit_code, 0, "{tier:?} helper fixture failed:\n{result.stderr}")
+        assert_eq(result.stdout, TEXT_PARSER_HELPERS_GOLDEN, "{tier:?} helper output")
+        assert_eq(result.stderr, "", "{tier:?} helper stderr")
+    }
+}
+
+// Rust: tests/time_format_tiers.rs:5
+#Test("checked_time_format_grammar_and_diagnostics_match_across_tiers") {
+    source :: `
+use core.time as time
+fn run() -> {
+    datetime :: time.datetime(2024, 3, 9, 12, 34, 56)
+    zoned :: time.zoned(datetime, time.utc())
+    if datetime.format_checked("yyyy-MM-dd HH:mm:ss.SSSSSSSSS") == {
+        .Ok(text) -> { print("tokens:ok:{text}") }
+        .Err(_) -> { print("tokens:err:unexpected") }
+    }
+    if datetime.format_checked("'day' EEEE 'month' MMMM") == {
+        .Ok(text) -> { print("names:ok:{text}") }
+        .Err(_) -> { print("names:err:unexpected") }
+    }
+    if datetime.format_checked("%F %T %A %B") == {
+        .Ok(text) -> { print("percent:ok:{text}") }
+        .Err(_) -> { print("percent:err:unexpected") }
+    }
+    if zoned.format_checked("VV XXX") == {
+        .Ok(text) -> { print("zone-ok:ok:{text}") }
+        .Err(_) -> { print("zone-ok:err:unexpected") }
+    }
+    if zoned.format_checked("yyyy|MM|dd|DDD|HH|mm|ss|SSS|SSSSSS|SSSSSSSSS|EEE|EEEE|MMM|MMMM|VV|XXX") == {
+        .Ok(text) -> { print("all-jet:ok:{text}") }
+        .Err(_) -> { print("all-jet:err:unexpected") }
+    }
+    if zoned.format_checked("%%|%A|%a|%B|%b|%Y|%y|%m|%d|%e|%j|%H|%I|%M|%S|%p|%z|%Z|%F|%T|%R|%D|%f") == {
+        .Ok(text) -> { print("all-percent:ok:{text}") }
+        .Err(_) -> { print("all-percent:err:unexpected") }
+    }
+    if datetime.format_checked("'broken") == {
+        .Ok(text) -> { print("unterminated:ok:{text}") }
+        .Err(error) -> { print("unterminated:err:{error:Debug}") }
+    }
+    if datetime.format_checked("%") == {
+        .Ok(text) -> { print("dangling-percent:ok:{text}") }
+        .Err(error) -> { print("dangling-percent:err:{error:Debug}") }
+    }
+    if datetime.format_checked("%Q") == {
+        .Ok(text) -> { print("unknown-percent:ok:{text}") }
+        .Err(error) -> { print("unknown-percent:err:{error:Debug}") }
+    }
+    if datetime.format_checked("qq") == {
+        .Ok(text) -> { print("unknown-token:ok:{text}") }
+        .Err(error) -> { print("unknown-token:err:{error:Debug}") }
+    }
+    if datetime.format_checked("%z") == {
+        .Ok(text) -> { print("missing-zone-percent:ok:{text}") }
+        .Err(error) -> { print("missing-zone-percent:err:{error:Debug}") }
+    }
+    if datetime.format_checked("VV") == {
+        .Ok(text) -> { print("missing-zone-token:ok:{text}") }
+        .Err(error) -> { print("missing-zone-token:err:{error:Debug}") }
+    }
+    return
+}
+`
+    expected :: "tokens:ok:2024-03-09 12:34:56.000000000\n" +
+        "names:ok:day Saturday month March\n" +
+        "percent:ok:2024-03-09 12:34:56 Saturday March\n" +
+        "zone-ok:ok:UTC +00:00\n" +
+        "all-jet:ok:2024|03|09|069|12|34|56|000|000000|000000000|Sat|Saturday|Mar|March|UTC|+00:00\n" +
+        "all-percent:ok:%|Saturday|Sat|March|Mar|2024|24|03|09| 9|069|12|12|34|56|PM|+00:00|UTC|2024-03-09|12:34:56|12:34|03/09/24|000000000\n" +
+        "unterminated:err:E2703: unterminated format literal\n" +
+        "dangling-percent:err:E2703: format ends after `%`\n" +
+        "unknown-percent:err:E2703: unsupported format token `%Q`\n" +
+        "unknown-token:err:E2703: unsupported format token `q`\n" +
+        "missing-zone-percent:err:E2703: format token `%z` requires a zone\n" +
+        "missing-zone-token:err:E2703: format token `VV` requires a zone\n"
+    tir_support.assert_tiers_agree("time_format_checked", source, expected)
+}
+
+// Rust: tests/time_format_tiers.rs:84
+#Test("local_date_display_with_trait_signature_matches_across_tiers") {
+    source :: `
+use core.time as time
+trait BusinessCalendar {
+    fn is_business_day(self, date: LocalDate) -> Bool
+}
+fn run() -> {
+    date :: time.new(2024, 1, 2)
+    print(date)
+}
+`
+    tir_support.assert_tiers_agree("local_date_display_trait_signature", source, "2024-01-02\n")
+}
+
+// Rust: tests/time_format_tiers.rs:105
+#Test("epoch_precision_round_trips_and_reports_overflow_across_tiers") {
+    source :: `
+use core.time as time
+fn run() -> {
+    exact :: time.from_unix_nanoseconds(1710502245123456789)
+    negative :: time.from_unix_nanoseconds(-1710502245123456789)
+    too_large :: time.from_unix_seconds(10000000000000)
+    print("seconds:{exact.to_unix_s()}")
+    if exact.to_unix_us() == {
+        .Ok(number) -> { print("microseconds:ok:{number}") }
+        .Err(_) -> { print("microseconds:err:unexpected") }
+    }
+    if exact.to_unix_ns() == {
+        .Ok(number) -> { print("nanoseconds:ok:{number}") }
+        .Err(_) -> { print("nanoseconds:err:unexpected") }
+    }
+    if negative.to_unix_us() == {
+        .Ok(number) -> { print("negative-microseconds:ok:{number}") }
+        .Err(_) -> { print("negative-microseconds:err:unexpected") }
+    }
+    if negative.to_unix_ns() == {
+        .Ok(number) -> { print("negative-nanoseconds:ok:{number}") }
+        .Err(_) -> { print("negative-nanoseconds:err:unexpected") }
+    }
+    if too_large.to_unix_us() == {
+        .Ok(number) -> { print("overflow-microseconds:ok:{number}") }
+        .Err(error) -> { print("overflow-microseconds:err:{error:Debug}") }
+    }
+    if too_large.to_unix_ns() == {
+        .Ok(number) -> { print("overflow-nanoseconds:ok:{number}") }
+        .Err(error) -> { print("overflow-nanoseconds:err:{error:Debug}") }
+    }
+    return
+}
+`
+    expected :: "seconds:1710502245\n" +
+        "microseconds:ok:1710502245123456\n" +
+        "nanoseconds:ok:1710502245123456789\n" +
+        "negative-microseconds:ok:-1710502245123457\n" +
+        "negative-nanoseconds:ok:-1710502245123456789\n" +
+        "overflow-microseconds:err:E2704: Unix epoch microseconds do not fit in Int\n" +
+        "overflow-nanoseconds:err:E2704: Unix epoch nanoseconds do not fit in Int\n"
+    tir_support.assert_tiers_agree("time_epoch_precision", source, expected)
+}
+
+// Rust: tests/time_format_tiers.rs:157
+#Test("unix_nanosecond_endpoints_preserve_value_and_fraction_across_tiers") {
+    source :: `
+use core.time as time
+fn run() -> {
+    maximum :: time.from_unix_nanoseconds(9223372036854775807)
+    minimum :: time.from_unix_nanoseconds(-9223372036854775808)
+    print(maximum.format_rfc3339())
+    print(minimum.format_rfc3339())
+    if maximum.to_unix_ns() == {
+        .Ok(number) -> { print(number) }
+        .Err(error) -> { print("unexpected: {error:Debug}") }
+    }
+    if minimum.to_unix_ns() == {
+        .Ok(number) -> { print(number) }
+        .Err(error) -> { print("unexpected: {error:Debug}") }
+    }
+}
+`
+    tir_support.assert_tiers_agree("unix_nanosecond_endpoints", source,
+        "2262-04-11T23:47:16.854775807Z\n1677-09-21T00:12:43.145224192Z\n9223372036854775807\n-9223372036854775808\n")
+}

@@ -1,982 +1,212 @@
-// PORT-PENDING 1154 tests-shared-guards-module-group: tests/shared_guards.rs:1-362
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-SHAREDGUARD1=A: expert Shared guards keep one meaning across execution tiers.
-//RS 
-//RS mod common;
-//RS 
-//RS use jet::JitBackend::JitBackend;
-//RS use std::fs;
-//RS use std::process::Command;
-//RS 
-//RS const QUEUE: &str = include_str!("../Examples/features/memory/shared_guard_queue.jet");
-//RS 
-//RS const CANCEL_WAIT: &str = r#"
-//RS fn mark_started(started: Shared<Int>, began: Condition) {
-//RS     started_guard :: started.guard_edit()
-//RS     started_guard.value = 1
-//RS     began.notify_all()
-//RS }
-//RS 
-//RS fn wait_until_cancel(
-//RS     handle: Shared<Int>,
-//RS     changed: Condition,
-//RS     started: Shared<Int>,
-//RS     began: Condition
-//RS ) -> Int {
-//RS     mark_started(started, began)
-//RS     guard :: handle.guard_edit()
-//RS     guard.wait(changed, value -> value == 1) ?? panic("wait failed")
-//RS     return 1
-//RS }
-//RS 
-//RS fn finish_after_start(started: Shared<Int>, began: Condition) -> Int {
-//RS     started_guard :: started.guard_edit()
-//RS     started_guard.wait(began, value -> value == 1) ?? panic("start failed")
-//RS     return 7
-//RS }
-//RS 
-//RS fn run() {
-//RS     cell := shared 0
-//RS     changed := Condition.new()
-//RS     started := shared 0
-//RS     began := Condition.new()
-//RS     task.group workers {
-//RS         print((task.race {
-//RS             wait_until_cancel(cell, changed, started, began),
-//RS             finish_after_start(started, began)
-//RS         }) ?? panic("race failed"))
-//RS     }
-//RS     reacquired :: cell.guard_edit()
-//RS     reacquired.value += 1
-//RS     print(reacquired.value)
-//RS }
-//RS "#;
-//RS 
-//RS const EARLY_EXITS: &str = r#"
-//RS #Error
-//RS enum EarlyExitError {
-//RS     Stop
-//RS }
-//RS 
-//RS fn return_early(handle: Shared<Int>) {
-//RS     guard :: handle.guard_edit()
-//RS     guard.value += 1
-//RS     return
-//RS }
-//RS 
-//RS fn fail_early(handle: Shared<Int>) -> Int EarlyExitError! {
-//RS     guard :: handle.guard_edit()
-//RS     guard.value += 1
-//RS     return .Err(EarlyExitError.Stop)
-//RS }
-//RS 
-//RS fn run() {
-//RS     cell := shared 0
-//RS     return_early(cell)
-//RS     _ :: fail_early(cell) ?? 0
-//RS     guard :: cell.guard_edit()
-//RS     guard.value += 1
-//RS     print(guard.value)
-//RS }
-//RS "#;
-//RS 
-//RS const HELPERS: &str = r#"
-//RS fn inspect(guard: SharedGuard<Int>) -> Int {
-//RS     return guard.value
-//RS }
-//RS 
-//RS fn bump(&guard: SharedGuard<Int>) {
-//RS     guard.value += 1
-//RS }
-//RS 
-//RS fn run() {
-//RS     cell := shared 4
-//RS     guard := cell.guard_edit()
-//RS     print(inspect(guard))
-//RS     bump(&guard)
-//RS     print(guard.value)
-//RS }
-//RS "#;
-//RS 
-//RS const RETURNED_GUARD: &str = r#"
-//RS fn acquire(handle: Shared<Int>) -> SharedGuard<Int> {
-//RS     return handle.guard_edit()
-//RS }
-//RS 
-//RS fn read_returned(handle: Shared<Int>) -> Int {
-//RS     guard :: acquire(handle)
-//RS     return guard.value
-//RS }
-//RS 
-//RS fn bump(handle: Shared<Int>) {
-//RS     guard :: handle.guard_edit()
-//RS     guard.value += 1
-//RS }
-//RS 
-//RS fn run() {
-//RS     cell := shared 6
-//RS     print(read_returned(cell))
-//RS     bump(cell)
-//RS     print(cell.guard_read().value)
-//RS }
-//RS "#;
-//RS 
-//RS const TRANSACTION_DELTAS: &str = r#"
-//RS struct Counter {
-//RS     value: Int
-//RS }
-//RS 
-//RS fn increment(counter: Shared<Counter>) {
-//RS     #Transact(tx) {
-//RS         print("transaction-body")
-//RS         counter.value += 1
-//RS     }
-//RS }
-//RS 
-//RS fn run() {
-//RS     counter := shared Counter{ value: 0 }
-//RS     task.group workers {
-//RS         first := task increment(counter)
-//RS         second := task increment(counter)
-//RS         first.join() ?? panic("task failed")
-//RS         second.join() ?? panic("task failed")
-//RS     }
-//RS     guard := counter.guard_read()
-//RS     print(guard.value.value)
-//RS }
-//RS "#;
-//RS 
-//RS const MAP_AND_SPLIT: &str = r#"
-//RS struct Pair {
-//RS     left: Int,
-//RS     right: Int,
-//RS }
-//RS 
-//RS fn map_left(handle: Shared<Pair>) {
-//RS     mapped := handle.guard_edit().map(value -> value.left)
-//RS     mapped.value += 10
-//RS }
-//RS 
-//RS fn split_pair(handle: Shared<Pair>) {
-//RS     (left, right) := handle.guard_edit().split(
-//RS         value -> value.left,
-//RS         value -> value.right
-//RS     )
-//RS     left.value += 1
-//RS     right.value += 2
-//RS }
-//RS 
-//RS fn run() {
-//RS     mapped := shared Pair{ left: 1, right: 2 }
-//RS     map_left(mapped)
-//RS     print(mapped.left + mapped.right)
-//RS 
-//RS     split := shared Pair{ left: 3, right: 4 }
-//RS     split_pair(split)
-//RS     print(split.left + split.right)
-//RS }
-//RS "#;
-//RS 
-//RS const STORED_GUARDS: &str = r#"
-//RS struct HeldGuard {
-//RS     stored: (lease: SharedGuard<Int>, marker: Int),
-//RS }
-//RS 
-//RS enum Held {
-//RS     Guard(SharedGuard<Int>)
-//RS }
-//RS 
-//RS fn ignore_union(value: SharedGuard<Int> | Int) -> Int {
-//RS     return 0
-//RS }
-//RS 
-//RS fn read_stored(handle: Shared<Int>) -> Int {
-//RS     HeldGuard{ stored } :: HeldGuard{
-//RS         stored: (lease: handle.guard_edit(), marker: 0),
-//RS     }
-//RS     (lease, marker) :: stored
-//RS     return lease.value + marker
-//RS }
-//RS 
-//RS fn acquire_pair(
-//RS     first: Shared<Int>,
-//RS     second: Shared<Int>
-//RS ) (left: SharedGuard<Int>, right: SharedGuard<Int>) -> {
-//RS     return (left: first.guard_edit(), right: second.guard_edit())
-//RS }
-//RS 
-//RS fn read_pair(first: Shared<Int>, second: Shared<Int>) -> Int {
-//RS     (left, right) :: acquire_pair(first, second)
-//RS     return left.value + right.value
-//RS }
-//RS 
-//RS fn run() {
-//RS     first := shared 8
-//RS     second := shared 2
-//RS     print(read_stored(first))
-//RS     print(read_pair(first, second))
-//RS     bumped :: first.guard_edit()
-//RS     bumped.value += 1
-//RS     print(bumped.value)
-//RS }
-//RS "#;
-//RS 
-//RS fn fixture(tag: &str, source: &str) -> (std::path::PathBuf, std::path::PathBuf) {
-//RS     let root = common::unique_tmp(tag);
-//RS     fs::create_dir_all(&root).unwrap();
-//RS     let path = root.join("main.jet");
-//RS     fs::write(&path, source).unwrap();
-//RS     (root, path)
-//RS }
-//RS 
-//RS fn assert_native_and_default(source: &str, expected: &str, tag: &str) {
-//RS     assert!(common::have_rustc(), "SharedGuard parity proof needs rustc");
-//RS 
-//RS     let (native_root, native_path) = fixture(&format!("{tag}_native"), source);
-//RS     let compiled = jet::compile_with_path(source, native_path.to_str().unwrap()).unwrap_or_else(
-//RS         |diagnostics| {
-//RS             panic!(
-//RS                 "{}",
-//RS                 jet::render_diagnostics(native_path.to_str().unwrap(), source, &diagnostics)
-//RS             )
-//RS         },
-//RS     );
-//RS     let rust_path = native_root.join("main.rs");
-//RS     let native_bin = native_root.join("main");
-//RS     fs::write(&rust_path, compiled.rust).unwrap();
-//RS     let built = Command::new("rustc")
-//RS         .args(["--edition", "2021"])
-//RS         .arg(&rust_path)
-//RS         .arg("-o")
-//RS         .arg(&native_bin)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         built.status.success(),
-//RS         "rustc rejected SharedGuard output:\n{}",
-//RS         String::from_utf8_lossy(&built.stderr)
-//RS     );
-//RS     let native = Command::new(native_bin).output().unwrap();
-//RS     assert!(native.status.success(), "{native:?}");
-//RS     assert_eq!(String::from_utf8(native.stdout).unwrap(), expected);
-//RS 
-//RS     let (_, default_path) = fixture(&format!("{tag}_default"), source);
-//RS     let mut bundle = jet::Loader::load_entry(default_path.to_str().unwrap()).unwrap();
-//RS     let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-//RS         .into_iter()
-//RS         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
-//RS         .collect::<Vec<_>>();
-//RS     assert!(errors.is_empty(), "{errors:?}");
-//RS 
-//RS     let policy = common::development_policy();
-//RS     let mut backend = jet_jit::CraneliftBackend::new();
-//RS     let plan = common::cranelift_tier_plan(&bundle);
-//RS     jet_jit::reset_jit_trace_for_test();
-//RS     match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
-//RS         jet::Interpreter::RunOutcome::Ran { stdout, .. } => {
-//RS             assert!(
-//RS                 !jet_jit::deopt_invoked_for_test(),
-//RS                 "{plan:?} strict={:?}",
-//RS                 common::cranelift_strict_run(&bundle, &policy)
-//RS             );
-//RS             assert!(!jet_jit::fallback_invoked_for_test());
-//RS             assert_eq!(stdout, expected);
-//RS         }
-//RS         jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-//RS             panic!("default SharedGuard tier failed: {diagnostics:?}")
-//RS         }
-//RS     }
-//RS 
-//RS     match jet::Interpreter::dev_iteration(default_path.to_str().unwrap(), false, true) {
-//RS         jet::Interpreter::RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, expected),
-//RS         jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-//RS             panic!("forced SharedGuard interpreter failed: {diagnostics:?}")
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn with_compiler_stack(test: impl FnOnce() + Send + 'static) {
-//RS     std::thread::Builder::new()
-//RS         .name("shared-guard-parity".into())
-//RS         .stack_size(32 * 1024 * 1024)
-//RS         .spawn(test)
-//RS         .unwrap()
-//RS         .join()
-//RS         .unwrap();
-//RS }
-//RS 
-//RS #[test]
-//RS fn shared_guard_queue_matches_native_and_default_tiers() {
-//RS     with_compiler_stack(|| assert_native_and_default(QUEUE, "7\n", "jet_shared_guard_queue"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn cancelling_condition_wait_unregisters_and_releases_guard() {
-//RS     with_compiler_stack(|| {
-//RS         assert_native_and_default(CANCEL_WAIT, "7\n1\n", "jet_shared_guard_cancel")
-//RS     });
-//RS }
-//RS 
-//RS #[test]
-//RS fn return_and_error_paths_release_guard() {
-//RS     with_compiler_stack(|| {
-//RS         assert_native_and_default(EARLY_EXITS, "3\n", "jet_shared_guard_early_exit")
-//RS     });
-//RS }
-//RS 
-//RS #[test]
-//RS fn named_guard_spans_read_and_write_helpers_on_all_tiers() {
-//RS     with_compiler_stack(|| {
-//RS         assert_native_and_default(HELPERS, "4\n5\n", "jet_shared_guard_helpers")
-//RS     });
-//RS }
-//RS 
-//RS #[test]
-//RS fn returned_named_guard_reads_and_releases_on_all_tiers() {
-//RS     with_compiler_stack(|| {
-//RS         assert_native_and_default(RETURNED_GUARD, "6\n7\n", "jet_shared_guard_returned")
-//RS     });
-//RS }
-//RS 
-//RS #[test]
-//RS fn concurrent_transaction_deltas_apply_to_fresh_locked_state_on_all_tiers() {
-//RS     with_compiler_stack(|| {
-//RS         assert_native_and_default(
-//RS             TRANSACTION_DELTAS,
-//RS             "transaction-body\ntransaction-body\n2\n",
-//RS             "jet_shared_guard_transaction_deltas",
-//RS         )
-//RS     });
-//RS }
-//RS 
-//RS #[test]
-//RS fn mapped_and_split_guards_write_disjoint_fields_on_all_tiers() {
-//RS     with_compiler_stack(|| {
-//RS         assert_native_and_default(MAP_AND_SPLIT, "13\n10\n", "jet_shared_guard_projection")
-//RS     });
-//RS }
-//RS 
-//RS #[test]
-//RS fn stored_and_returned_guards_move_as_read_capabilities_on_all_tiers() {
-//RS     with_compiler_stack(|| {
-//RS         assert_native_and_default(STORED_GUARDS, "8\n10\n9\n", "jet_shared_guard_storage")
-//RS     });
-//RS }
-// END-PORT-PENDING 1154 tests/shared_guards.rs:1-362
+// D-SHAREDGUARD1=A: expert Shared guards keep one meaning across execution tiers.
+use tests.common as common
+use std.fs as fs
+use std.process.Command
+use std.thread
+// GATE #4494: real compiler-stack threads and native subprocesses.
 
-// PORT-PENDING 1154 tests-shared-guards-module-group: tests/shared_transaction.rs:1-20
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS #[test]
-//RS fn shared_plain_access_repl_uses_the_same_value_surface() {
-//RS     let output = jet::REPL::run_transcript(
-//RS         &[
-//RS             "struct Counter { value: Int }",
-//RS             "cell := shared Counter{ value: 0 }",
-//RS             "cell.value += 1",
-//RS             "cell.value",
-//RS         ],
-//RS         None,
-//RS     );
-//RS     assert!(
-//RS         output.contains("1 : Int"),
-//RS         "REPL shared access drifted: {output}"
-//RS     );
-//RS     assert!(
-//RS         !output.contains("E1116"),
-//RS         "REPL used the retired closure form: {output}"
-//RS     );
-//RS }
-// END-PORT-PENDING 1154 tests/shared_transaction.rs:1-20
+// Rust: tests/shared_guards.rs:9
+QUEUE :: include_str("../Examples/features/memory/shared_guard_queue.jet")
+// Rust: tests/shared_guards.rs:11
+CANCEL_WAIT :: `
+fn mark_started(started: Shared<Int>, began: Condition) -> {
+    started_guard :: started.guard_edit()
+    started_guard.value = 1
+    began.notify_all()
+}
+fn wait_until_cancel(handle: Shared<Int>, changed: Condition, started: Shared<Int>, began: Condition) -> Int {
+    mark_started(started, began)
+    guard :: handle.guard_edit()
+    guard.wait(changed, value -> value == 1) ?? panic("wait failed")
+    return 1
+}
+fn finish_after_start(started: Shared<Int>, began: Condition) -> Int {
+    started_guard :: started.guard_edit()
+    started_guard.wait(began, value -> value == 1) ?? panic("start failed")
+    return 7
+}
+fn run() -> {
+    cell := shared 0
+    changed := Condition.new()
+    started := shared 0
+    began := Condition.new()
+    task.group workers {
+        print((task.race {
+            wait_until_cancel(cell, changed, started, began),
+            finish_after_start(started, began)
+        }) ?? panic("race failed"))
+    }
+    reacquired :: cell.guard_edit()
+    reacquired.value += 1
+    print(reacquired.value)
+}
+`
+// Rust: tests/shared_guards.rs:53
+EARLY_EXITS :: `
+#Error
+enum EarlyExitError { Stop }
+fn return_early(handle: Shared<Int>) -> {
+    guard :: handle.guard_edit()
+    guard.value += 1
+    return
+}
+fn fail_early(handle: Shared<Int>) -> Int EarlyExitError! {
+    guard :: handle.guard_edit()
+    guard.value += 1
+    return .Err(EarlyExitError.Stop)
+}
+fn run() -> {
+    cell := shared 0
+    return_early(cell)
+    _ :: fail_early(cell) ?? 0
+    guard :: cell.guard_edit()
+    guard.value += 1
+    print(guard.value)
+}
+`
+// Rust: tests/shared_guards.rs:81
+HELPERS :: `
+fn inspect(guard: SharedGuard<Int>) -> Int { return guard.value }
+fn bump(&guard: SharedGuard<Int>) -> { guard.value += 1 }
+fn run() -> {
+    cell := shared 4
+    guard := cell.guard_edit()
+    print(inspect(guard))
+    bump(&guard)
+    print(guard.value)
+}
+`
+// Rust: tests/shared_guards.rs:99
+RETURNED_GUARD :: `
+fn acquire(handle: Shared<Int>) -> SharedGuard<Int> { return handle.guard_edit() }
+fn read_returned(handle: Shared<Int>) -> Int {
+    guard :: acquire(handle)
+    return guard.value
+}
+fn bump(handle: Shared<Int>) -> {
+    guard :: handle.guard_edit()
+    guard.value += 1
+}
+fn run() -> {
+    cell := shared 6
+    print(read_returned(cell))
+    bump(cell)
+    print(cell.guard_read().value)
+}
+`
+// Rust: tests/shared_guards.rs:122
+TRANSACTION_DELTAS :: `
+struct Counter { value: Int }
+fn increment(counter: Shared<Counter>) -> {
+    #Transact(tx) {
+        print("transaction-body")
+        counter.value += 1
+    }
+}
+fn run() -> {
+    counter := shared Counter{ value: 0 }
+    task.group workers {
+        first := task increment(counter)
+        second := task increment(counter)
+        first.join() ?? panic("task failed")
+        second.join() ?? panic("task failed")
+    }
+    guard := counter.guard_read()
+    print(guard.value.value)
+}
+`
+// Rust: tests/shared_guards.rs:147
+MAP_AND_SPLIT :: `
+struct Pair { left: Int, right: Int }
+fn map_left(handle: Shared<Pair>) -> {
+    mapped := handle.guard_edit().map(value -> value.left)
+    mapped.value += 10
+}
+fn split_pair(handle: Shared<Pair>) -> {
+    (left, right) := handle.guard_edit().split(value -> value.left, value -> value.right)
+    left.value += 1
+    right.value += 2
+}
+fn run() -> {
+    mapped := shared Pair{ left: 1, right: 2 }
+    map_left(mapped)
+    print(mapped.left + mapped.right)
+    split := shared Pair{ left: 3, right: 4 }
+    split_pair(split)
+    print(split.left + split.right)
+}
+`
+// Rust: tests/shared_guards.rs:178
+STORED_GUARDS :: `
+struct HeldGuard { stored: (lease: SharedGuard<Int>, marker: Int) }
+enum Held { Guard(SharedGuard<Int>) }
+fn ignore_union(value: SharedGuard<Int> | Int) -> Int { return 0 }
+fn read_stored(handle: Shared<Int>) -> Int {
+    HeldGuard{ stored } :: HeldGuard{ stored: (lease: handle.guard_edit(), marker: 0) }
+    (lease, marker) :: stored
+    return lease.value + marker
+}
+fn acquire_pair(first: Shared<Int>, second: Shared<Int>) -> (left: SharedGuard<Int>, right: SharedGuard<Int>) {
+    return (left: first.guard_edit(), right: second.guard_edit())
+}
+fn read_pair(first: Shared<Int>, second: Shared<Int>) -> Int {
+    (left, right) :: acquire_pair(first, second)
+    return left.value + right.value
+}
+fn run() -> {
+    first := shared 8
+    second := shared 2
+    print(read_stored(first))
+    print(read_pair(first, second))
+    bumped :: first.guard_edit()
+    bumped.value += 1
+    print(bumped.value)
+}
+`
+// Rust: tests/shared_guards.rs:222
+fn fixture(tag: String, source: String) -> (OSPath, OSPath) {
+    root :: common.unique_tmp(tag)
+    fs.create_dir_all(root).unwrap()
+    path :: root.join("main.jet")
+    fs.write(path, source).unwrap()
+    (root, path)
+}
+// Rust: tests/shared_guards.rs:230
+fn assert_native_and_default(source: String, expected: String, tag: String) -> {
+    assert(common.have_rustc(), "SharedGuard parity proof needs rustc")
+    (native_root, native_path) :: fixture("{tag}_native", source)
+    compiled :: jet.compile_with_path(source, native_path.to_str().unwrap()).unwrap_or_else(diagnostics -> {
+        panic("{jet.render_diagnostics(native_path.to_str().unwrap(), source, diagnostics)}")
+    })
+    rust_path :: native_root.join("main.rs")
+    native_bin :: native_root.join("main")
+    fs.write(rust_path, compiled.rust).unwrap()
+    built :: Command.new("rustc").args(["--edition", "2021"]).arg(rust_path).arg("-o").arg(native_bin).output().unwrap()
+    assert(built.status.success(), "rustc rejected SharedGuard output:\n{String.from_utf8_lossy(built.stderr)}")
+    native :: Command.new(native_bin).output().unwrap()
+    assert(native.status.success(), "{native:?}")
+    assert_eq(String.from_utf8(native.stdout).unwrap(), expected)
+    (_, default_path) :: fixture("{tag}_default", source)
+    bundle := jet.Loader.load_entry(default_path.to_str().unwrap()).unwrap()
+    errors :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run).into_iter()
+        .filter(diagnostic -> diagnostic.severity == jet.Diagnostics.Severity.Error).collect::<[jet.Diagnostics.Diagnostic]>()
+    assert(errors.is_empty(), "{errors:?}")
+    // Retired Cranelift/deopt assertions become strict O0/O1/O2/Web behavioral parity.
+    loop tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+        result :: common.execute_bundle(&bundle, tier).expect("default SharedGuard tier must execute")
+        assert_eq(result.exit_code, 0)
+        assert_eq(result.stdout, expected)
+        assert_eq(result.stderr, "")
+    }
+    match jet.Interpreter.dev_iteration(default_path.to_str().unwrap(), false, true) {
+        jet.Interpreter.RunOutcome.Ran{stdout, ..} -> assert_eq(stdout, expected),
+        jet.Interpreter.RunOutcome.Problems(diagnostics) -> panic("forced SharedGuard interpreter failed: {diagnostics:?}")
+    }
+}
+// Rust: tests/shared_guards.rs:296
+fn with_compiler_stack(test: fn() -> Unit) -> {
+    thread.Builder.new().name("shared-guard-parity").stack_size(32 * 1024 * 1024)
+        .spawn(test).unwrap().join().unwrap()
+}
 
-// PORT-PENDING 1154 tests-shared-guards-module-group: tests/shared_weak.rs:1-130
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-SHARED-CYCLE1=C: Shared.Weak cycles — I9 parity + free-or-leak proof.
-//RS 
-//RS mod common;
-//RS 
-//RS use jet::JitBackend::JitBackend;
-//RS use std::fs;
-//RS use std::process::Command;
-//RS use std::sync::atomic::{AtomicUsize, Ordering};
-//RS use std::sync::{Arc, Weak};
-//RS 
-//RS const EXAMPLE: &str = include_str!("../Examples/features/memory/shared_weak_cycle.jet");
-//RS const EXPECTED: &str = include_str!("../Examples/features/expected/memory/shared_weak_cycle.out");
-//RS 
-//RS fn fixture(tag: &str, source: &str) -> (std::path::PathBuf, std::path::PathBuf) {
-//RS     let root = common::unique_tmp(tag);
-//RS     fs::create_dir_all(&root).unwrap();
-//RS     let path = root.join("main.jet");
-//RS     fs::write(&path, source).unwrap();
-//RS     (root, path)
-//RS }
-//RS 
-//RS fn with_compiler_stack(test: impl FnOnce() + Send + 'static) {
-//RS     std::thread::Builder::new()
-//RS         .name("shared-weak-parity".into())
-//RS         .stack_size(32 * 1024 * 1024)
-//RS         .spawn(test)
-//RS         .unwrap()
-//RS         .join()
-//RS         .unwrap();
-//RS }
-//RS 
-//RS /// Prelude free-or-leak law: weak-only cycles free when strong roots drop.
-//RS #[test]
-//RS fn weak_only_cycle_frees_when_strong_roots_drop() {
-//RS     use std::sync::Mutex;
-//RS 
-//RS     struct DropCount(Arc<AtomicUsize>);
-//RS     impl Drop for DropCount {
-//RS         fn drop(&mut self) {
-//RS             self.0.fetch_add(1, Ordering::SeqCst);
-//RS         }
-//RS     }
-//RS     struct Node {
-//RS         _drop: DropCount,
-//RS         peer: Mutex<Option<Weak<Node>>>,
-//RS     }
-//RS 
-//RS     let drops = Arc::new(AtomicUsize::new(0));
-//RS     {
-//RS         let a = Arc::new(Node {
-//RS             _drop: DropCount(drops.clone()),
-//RS             peer: Mutex::new(None),
-//RS         });
-//RS         let b = Arc::new(Node {
-//RS             _drop: DropCount(drops.clone()),
-//RS             peer: Mutex::new(None),
-//RS         });
-//RS         *a.peer.lock().unwrap() = Some(Arc::downgrade(&b));
-//RS         *b.peer.lock().unwrap() = Some(Arc::downgrade(&a));
-//RS         assert_eq!(Arc::strong_count(&a), 1);
-//RS         assert!(a.peer.lock().unwrap().as_ref().unwrap().upgrade().is_some());
-//RS         drop(a);
-//RS         drop(b);
-//RS     }
-//RS     assert_eq!(drops.load(Ordering::SeqCst), 2, "weak cycle must free");
-//RS }
-//RS 
-//RS #[test]
-//RS fn orphan_weak_upgrade_is_none_after_strong_drop() {
-//RS     let w = {
-//RS         let a = Arc::new(7_i64);
-//RS         Arc::downgrade(&a)
-//RS     };
-//RS     assert!(w.upgrade().is_none());
-//RS }
-//RS 
-//RS #[test]
-//RS fn shared_weak_cycle_matches_aot_and_default_tiers() {
-//RS     with_compiler_stack(|| {
-//RS         assert!(common::have_rustc(), "Shared.Weak parity proof needs rustc");
-//RS         let expected = EXPECTED;
-//RS         let source = EXAMPLE;
-//RS 
-//RS         let (native_root, native_path) = fixture("jet_shared_weak_native", source);
-//RS         let compiled = jet::compile_with_path(source, native_path.to_str().unwrap())
-//RS             .unwrap_or_else(|diagnostics| {
-//RS                 panic!(
-//RS                     "{}",
-//RS                     jet::render_diagnostics(native_path.to_str().unwrap(), source, &diagnostics)
-//RS                 )
-//RS             });
-//RS         let rust_path = native_root.join("main.rs");
-//RS         let native_bin = native_root.join("main");
-//RS         fs::write(&rust_path, compiled.rust).unwrap();
-//RS         let built = Command::new("rustc")
-//RS             .args(["--edition", "2021"])
-//RS             .arg(&rust_path)
-//RS             .arg("-o")
-//RS             .arg(&native_bin)
-//RS             .output()
-//RS             .unwrap();
-//RS         assert!(
-//RS             built.status.success(),
-//RS             "rustc rejected Shared.Weak output:\n{}",
-//RS             String::from_utf8_lossy(&built.stderr)
-//RS         );
-//RS         let native = Command::new(&native_bin).output().unwrap();
-//RS         assert!(native.status.success(), "{native:?}");
-//RS         assert_eq!(String::from_utf8(native.stdout).unwrap(), expected);
-//RS 
-//RS         let (_, default_path) = fixture("jet_shared_weak_default", source);
-//RS         let mut bundle = jet::Loader::load_entry(default_path.to_str().unwrap()).unwrap();
-//RS         let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-//RS             .into_iter()
-//RS             .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
-//RS             .collect::<Vec<_>>();
-//RS         assert!(errors.is_empty(), "{errors:?}");
-//RS 
-//RS         let policy = common::development_policy();
-//RS         let mut backend = jet_jit::CraneliftBackend::new();
-//RS         match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
-//RS             jet::Interpreter::RunOutcome::Ran { stdout, .. } => {
-//RS                 assert_eq!(stdout, expected);
-//RS             }
-//RS             jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-//RS                 panic!("default Shared.Weak tier failed: {diagnostics:?}")
-//RS             }
-//RS         }
-//RS     });
-//RS }
-// END-PORT-PENDING 1154 tests/shared_weak.rs:1-130
-
-// PORT-PENDING 1154 tests-shared-guards-module-group: tests/task_control_tiers.rs:1-454
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-CONC-SPAWN1=D + D-COROUTINE1=A (card #1685): the canonical task surface
-//RS //! means the same thing on every execution tier.
-//RS 
-//RS #[path = "common/mod.rs"]
-//RS mod common;
-//RS #[path = "tir_support/mod.rs"]
-//RS mod tir_support;
-//RS 
-//RS use std::{fs, thread};
-//RS use tir_support::{build_and_run, have_rustc, run_default_multi};
-//RS 
-//RS const SOURCE: &str = r#"
-//RS use core.time as time
-//RS 
-//RS fn slow_three() -> Int {
-//RS     time.sleep(25ms)
-//RS     return 3
-//RS }
-//RS 
-//RS fn slow_six() -> Int {
-//RS     time.sleep(25ms)
-//RS     return 6
-//RS }
-//RS 
-//RS fn run() {
-//RS     handle :: task 7
-//RS     handle.pause()
-//RS     handle.resume()
-//RS     print(handle.join() ?? 0)
-//RS     task.group workers(limit: 2) {
-//RS         child :: task 9
-//RS         print(child.join() ?? 0)
-//RS     }
-//RS     print((task.all { 1, 2 }) ?? [])
-//RS     print((task.race { slow_three(), 4 }) ?? 0)
-//RS     print((task.any { slow_six(), 5 }) ?? 0)
-//RS }
-//RS "#;
-//RS 
-//RS const EXPECTED: &str = "\
-//RS 7
-//RS 9
-//RS [1, 2]
-//RS 4
-//RS 5
-//RS ";
-//RS 
-//RS const STREAM_SOURCE: &str = include_str!("../Examples/features/streams/generators.jet");
-//RS const STREAM_EXPECTED: &str = include_str!("../Examples/features/expected/streams/generators.out");
-//RS 
-//RS const NESTED_SOURCE: &str = r#"
-//RS use core.time as time
-//RS 
-//RS fn slow_one() -> Int {
-//RS     time.sleep(100ms)
-//RS     return 1
-//RS }
-//RS 
-//RS fn slow_three() -> Int {
-//RS     time.sleep(100ms)
-//RS     return 3
-//RS }
-//RS 
-//RS fn run() {
-//RS     task.group workers {
-//RS         nested :: task.all {
-//RS             task.race { slow_one(), 2 } ?? 0,
-//RS             task.any { slow_three(), 4 } ?? 0
-//RS         } ?? []
-//RS         print(nested)
-//RS     }
-//RS }
-//RS "#;
-//RS 
-//RS const LOSER_CLEANUP_SOURCE: &str = r#"
-//RS use core.time as time
-//RS 
-//RS struct Mark { step: Int }
-//RS 
-//RS fn win(state: Shared<Mark>) -> Int {
-//RS     state.step = 1
-//RS     return 1
-//RS }
-//RS 
-//RS fn lose(state: Shared<Mark>) -> Int {
-//RS     time.sleep(100ms)
-//RS     state.step = 2
-//RS     return 2
-//RS }
-//RS 
-//RS fn run() {
-//RS     race_state :: shared Mark{ step: 0 }
-//RS     any_state :: shared Mark{ step: 0 }
-//RS     task.group workers {
-//RS         race_result :: (task.race { win(race_state), lose(race_state) }) ?? 0
-//RS         any_result :: (task.any { win(any_state), lose(any_state) }) ?? 0
-//RS         time.sleep(200ms)
-//RS         print(race_result)
-//RS         print(race_state.step)
-//RS         print(any_result)
-//RS         print(any_state.step)
-//RS     }
-//RS }
-//RS "#;
-//RS 
-//RS fn limit_source(limit: i64) -> String {
-//RS     format!(
-//RS         r#"
-//RS use core.tasks as tasks
-//RS use core.time as time
-//RS 
-//RS fn run() {{
-//RS     (sender, receiver) :: channel<Int>()
-//RS     second_sender :: ~sender
-//RS     task.group limited(limit: {limit}) {{
-//RS         first :: task {{
-//RS             sender.send(1)
-//RS             time.sleep(25ms)
-//RS             sender.send(2)
-//RS         }}
-//RS         receiver.receive() ?? 0
-//RS         second :: task {{
-//RS             second_sender.send(3)
-//RS         }}
-//RS         print(receiver.receive() ?? 0)
-//RS         print(receiver.receive() ?? 0)
-//RS         first.join() ?? panic("first task failed")
-//RS         second.join() ?? panic("second task failed")
-//RS     }}
-//RS }}
-//RS "#
-//RS     )
-//RS }
-//RS 
-//RS #[test]
-//RS fn parser_accepts_one_keyword_task_family() {
-//RS     let lexed = jet::Compiler::lex_source(SOURCE);
-//RS     assert!(
-//RS         lexed.diagnostics.is_empty(),
-//RS         "lexer diagnostics: {:?}",
-//RS         lexed.diagnostics
-//RS     );
-//RS     for spelling in ["task", "all", "race", "any", "group"] {
-//RS         assert!(
-//RS             lexed.tokens.iter().any(|token| token.text == spelling),
-//RS             "canonical task surface must lex `{spelling}`"
-//RS         );
-//RS     }
-//RS     let parsed = jet::Compiler::parse_source(SOURCE);
-//RS     assert!(
-//RS         parsed.diagnostics.is_empty(),
-//RS         "parser diagnostics: {:?}",
-//RS         parsed.diagnostics
-//RS     );
-//RS }
-//RS 
-//RS fn checked_task_bundle_for(
-//RS     name: &str,
-//RS     source: &str,
-//RS ) -> (jet::AST::ProgramBundle, std::path::PathBuf) {
-//RS     let dir = std::env::temp_dir().join(format!(
-//RS         "jet_task_control_frontend_{name}_{}",
-//RS         std::process::id()
-//RS     ));
-//RS     fs::create_dir_all(&dir).unwrap();
-//RS     let path = dir.join("main.jet");
-//RS     fs::write(&path, source).unwrap();
-//RS     let shown = path.to_string_lossy().into_owned();
-//RS     let mut bundle = jet::Loader::load_entry(&shown).expect("task source must load");
-//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS     let errors = diagnostics
-//RS         .iter()
-//RS         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
-//RS         .collect::<Vec<_>>();
-//RS     assert!(errors.is_empty(), "sema diagnostics: {errors:?}");
-//RS     (bundle, dir)
-//RS }
-//RS 
-//RS fn checked_task_bundle(name: &str) -> (jet::AST::ProgramBundle, std::path::PathBuf) {
-//RS     checked_task_bundle_for(name, SOURCE)
-//RS }
-//RS 
-//RS #[test]
-//RS fn stream_drop_uses_task_cancel_cleanup_path() {
-//RS     let (bundle, dir) = checked_task_bundle_for("stream", STREAM_SOURCE);
-//RS     let _ = fs::remove_dir_all(dir);
-//RS 
-//RS     let interpreted = run_forced_interpreter("stream", STREAM_SOURCE);
-//RS     assert_eq!(interpreted, STREAM_EXPECTED);
-//RS 
-//RS     let (code, stdout, stderr) =
-//RS         run_default_multi("stream_cancel", "main.jet", &[("main.jet", STREAM_SOURCE)]);
-//RS     assert_eq!(code, 0, "default JIT: {stderr}");
-//RS     assert_eq!(
-//RS         strip_tier_trace(&stdout),
-//RS         STREAM_EXPECTED,
-//RS         "JIT drifted: {stderr}"
-//RS     );
-//RS     assert!(
-//RS         stderr.lines().any(|line| line.contains("tier1 native")),
-//RS         "stream fixture did not execute in resident JIT: {stderr}"
-//RS     );
-//RS 
-//RS     if have_rustc() {
-//RS         let (code, stdout) = build_and_run("stream_cancel", STREAM_SOURCE);
-//RS         assert_eq!(code, 0);
-//RS         assert_eq!(stdout, STREAM_EXPECTED);
-//RS     }
-//RS }
-//RS 
-//RS /// A generator whose `yield` sits inside `#Shield`. The consumer's `break`
-//RS /// cancels the producer child while it is parked at that yield.
-//RS const SHIELDED_STREAM_SOURCE: &str = r#"
-//RS fn shielded_tail() -> Stream<Int> {
-//RS     #Shield {
-//RS         yield 1
-//RS         print("shielded: after")
-//RS     }
-//RS     print("unshielded: after")
-//RS     yield 2
-//RS }
-//RS 
-//RS fn run() {
-//RS     loop x in shielded_tail() {
-//RS         print("consumer: {x}")
-//RS         break
-//RS     }
-//RS     print("closed")
-//RS }
-//RS "#;
-//RS 
-//RS const SHIELDED_STREAM_EXPECTED: &str = "consumer: 1\nshielded: after\nclosed\n";
-//RS 
-//RS /// D-CONC-STREAM1=A + D-CANCELMODEL1=C: `yield` is a wait point and drop-close
-//RS /// is a cancel, so a cancel that arrives while the producer is inside `#Shield`
-//RS /// is DEFERRED to the region exit — exactly as for any other cancelled task.
-//RS /// The shielded tail runs, the unshielded tail never does, and the consumer's
-//RS /// `break` is still ordinary completion, not a program error.
-//RS ///
-//RS /// This is the case a stream-local shutdown law got wrong: it stopped the
-//RS /// producer at the yield and skipped the shielded tail, because it read a
-//RS /// stream-only cancellation fact instead of the task wait policy. One law
-//RS /// cannot disagree with itself, so all three tiers print the same transcript.
-//RS #[test]
-//RS fn a_shielded_yield_defers_the_consumer_cancel_on_every_tier() {
-//RS     let interpreted = run_forced_interpreter("shielded_stream", SHIELDED_STREAM_SOURCE);
-//RS     assert_eq!(interpreted, SHIELDED_STREAM_EXPECTED);
-//RS 
-//RS     let (code, stdout, stderr) = run_default_multi(
-//RS         "shielded_stream",
-//RS         "main.jet",
-//RS         &[("main.jet", SHIELDED_STREAM_SOURCE)],
-//RS     );
-//RS     assert_eq!(code, 0, "default JIT: {stderr}");
-//RS     assert_eq!(
-//RS         strip_tier_trace(&stdout),
-//RS         SHIELDED_STREAM_EXPECTED,
-//RS         "JIT drifted: {stderr}"
-//RS     );
-//RS 
-//RS     if have_rustc() {
-//RS         let (code, stdout) = build_and_run("shielded_stream", SHIELDED_STREAM_SOURCE);
-//RS         assert_eq!(code, 0);
-//RS         assert_eq!(stdout, SHIELDED_STREAM_EXPECTED);
-//RS     }
-//RS }
-//RS 
-//RS fn run_forced_interpreter(name: &str, source: &str) -> String {
-//RS     let dir = std::env::temp_dir().join(format!(
-//RS         "jet_task_control_interp_{name}_{}",
-//RS         std::process::id()
-//RS     ));
-//RS     fs::create_dir_all(&dir).unwrap();
-//RS     let path = dir.join("main.jet");
-//RS     fs::write(&path, source).unwrap();
-//RS     let result = match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
-//RS         jet::Interpreter::RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => {
-//RS             assert_eq!(exit_code, 0, "forced interpreter: {stderr}");
-//RS             assert_eq!(stderr, "", "forced interpreter diagnostics: {stderr}");
-//RS             stdout
-//RS         }
-//RS         jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-//RS             panic!("forced interpreter rejected {name}: {diagnostics:?}");
-//RS         }
-//RS     };
-//RS     let _ = fs::remove_dir_all(dir);
-//RS     result
-//RS }
-//RS 
-//RS #[test]
-//RS fn sema_resolves_task_failure_rail_and_core_reachability() {
-//RS     let (bundle, dir) = checked_task_bundle("sema");
-//RS     assert!(
-//RS         bundle.used_core.contains("core.concurrency::task"),
-//RS         "canonical task syntax must reach the shared Prelude: {:?}",
-//RS         bundle.used_core
-//RS     );
-//RS     let run = bundle.modules[bundle.entry]
-//RS         .items
-//RS         .iter()
-//RS         .find_map(|item| match item {
-//RS             jet::AST::Item::Func(function) if function.name == "run" => Some(function),
-//RS             _ => None,
-//RS         })
-//RS         .expect("task fixture run function");
-//RS     let debug = format!("{run:?}");
-//RS     assert!(
-//RS         debug.contains("TaskFailure"),
-//RS         "sema must publish TaskFailure on the task result rail: {debug}"
-//RS     );
-//RS     let _ = fs::remove_dir_all(dir);
-//RS }
-//RS 
-//RS #[test]
-//RS fn sema_resolves_direct_nested_task_control_bindings() {
-//RS     // Direct nested task controls bind as branch expressions without wrapper
-//RS     // parentheses, across sema, the interpreter, resident JIT, and AOT.
-//RS     // Nested combinator inference walks the same branch/type tables as the
-//RS     // compiler's command thread. Give this focused frontend proof that normal
-//RS     // command-sized stack so the test harness's small worker stack does not
-//RS     // turn a valid program into a harness abort.
-//RS     thread::Builder::new()
-//RS         .name("task-nested-sema".to_string())
-//RS         .stack_size(8 * 1024 * 1024)
-//RS         .spawn(|| {
-//RS             let (bundle, dir) = checked_task_bundle_for("nested", NESTED_SOURCE);
-//RS             assert!(bundle.used_core.contains("core.concurrency::task"));
-//RS             assert!(
-//RS                 common::cranelift_resident_safe(&bundle),
-//RS                 "nested task source must stay resident-JIT safe: {}",
-//RS                 common::cranelift_resident_safe_detail(&bundle)
-//RS             );
-//RS             let _ = fs::remove_dir_all(dir);
-//RS 
-//RS             let interpreted = run_forced_interpreter("nested", NESTED_SOURCE);
-//RS             assert_eq!(interpreted, "[2, 4]\n");
-//RS 
-//RS             let (code, stdout, stderr) =
-//RS                 run_default_multi("task_nested", "main.jet", &[("main.jet", NESTED_SOURCE)]);
-//RS             assert_eq!(code, 0, "resident JIT: {stderr}");
-//RS             assert_eq!(stdout, interpreted, "resident JIT output drifted: {stderr}");
-//RS             assert!(
-//RS                 stderr.lines().any(|line| line.contains("tier1 native")),
-//RS                 "nested task source did not execute in resident JIT: {stderr}"
-//RS             );
-//RS 
-//RS             if have_rustc() {
-//RS                 let (code, stdout) = build_and_run("task_nested", NESTED_SOURCE);
-//RS                 assert_eq!(code, 0);
-//RS                 assert_eq!(stdout, interpreted, "AOT output drifted");
-//RS             }
-//RS         })
-//RS         .expect("nested sema proof thread")
-//RS         .join()
-//RS         .expect("nested sema proof must not abort");
-//RS }
-//RS 
-//RS 
-//RS #[test]
-//RS fn task_control_plane_matches_on_default_run() {
-//RS     let (code, stdout, stderr) =
-//RS         run_default_multi("task_control", "main.jet", &[("main.jet", SOURCE)]);
-//RS     assert_eq!(
-//RS         code, 0,
-//RS         "default `jet run` must succeed\n{stdout}\n{stderr}"
-//RS     );
-//RS     // The canonical keyword and nested combinators must stay on one path.
-//RS     assert!(
-//RS         !stderr.contains("E0956"),
-//RS         "no tier gap may reach the surface for the ratified set\n{stderr}"
-//RS     );
-//RS     assert_eq!(strip_tier_trace(&stdout), EXPECTED, "stderr:\n{stderr}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn task_control_plane_matches_under_aot() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (code, stdout) = build_and_run("task_control", SOURCE);
-//RS     assert_eq!(code, 0, "AOT build must run\n{stdout}");
-//RS     assert_eq!(stdout, EXPECTED);
-//RS }
-//RS 
-//RS #[test]
-//RS fn explicit_group_limit_matches_aot_jit_and_interpreter() {
-//RS     for limit in [1, 0, -3] {
-//RS         let source = limit_source(limit);
-//RS         let expected = "2\n3\n";
-//RS 
-//RS         if have_rustc() {
-//RS             let (aot_code, aot_stdout) =
-//RS                 build_and_run(&format!("task_group_limit_{limit}"), &source);
-//RS             assert_eq!(aot_code, 0);
-//RS             assert_eq!(aot_stdout, expected);
-//RS         }
-//RS 
-//RS         let (jit_code, jit_stdout, jit_stderr) = run_default_multi(
-//RS             &format!("task_group_limit_{limit}"),
-//RS             "main.jet",
-//RS             &[("main.jet", source.as_str())],
-//RS         );
-//RS         assert_eq!(jit_code, 0, "{jit_stderr}");
-//RS         assert_eq!(
-//RS             jit_stdout, expected,
-//RS             "resident JIT drifted for limit {limit}: {jit_stderr}"
-//RS         );
-//RS 
-//RS         let interpreted = run_forced_interpreter(&format!("limit_{limit}"), &source);
-//RS         assert_eq!(
-//RS             interpreted, expected,
-//RS             "forced interpreter drifted for limit {limit}"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn task_combinators_cancel_losers_on_every_tier() {
-//RS     let expected = "1\n1\n1\n1\n";
-//RS     let interpreted = run_forced_interpreter("loser_cleanup", LOSER_CLEANUP_SOURCE);
-//RS     assert_eq!(interpreted, expected);
-//RS 
-//RS     let (code, stdout, stderr) = run_default_multi(
-//RS         "task_loser_cleanup",
-//RS         "main.jet",
-//RS         &[("main.jet", LOSER_CLEANUP_SOURCE)],
-//RS     );
-//RS     assert_eq!(code, 0, "resident JIT: {stderr}");
-//RS     assert_eq!(stdout, expected, "resident JIT output drifted: {stderr}");
-//RS     assert!(
-//RS         stderr.lines().any(|line| line.contains("tier1 native")),
-//RS         "loser-cleanup source did not execute in resident JIT: {stderr}"
-//RS     );
-//RS 
-//RS     if have_rustc() {
-//RS         let (code, stdout) = build_and_run("task_loser_cleanup", LOSER_CLEANUP_SOURCE);
-//RS         assert_eq!(code, 0);
-//RS         assert_eq!(stdout, expected);
-//RS     }
-//RS }
-//RS 
-//RS /// `run_default_multi` passes `--trace-tiers`, which may prefix diagnostics of
-//RS /// its own on stdout. Keep only the program's transcript.
-//RS fn strip_tier_trace(stdout: &str) -> String {
-//RS     stdout
-//RS         .lines()
-//RS         .filter(|line| !line.starts_with("[tier"))
-//RS         .map(|line| format!("{line}\n"))
-//RS         .collect()
-//RS }
-// END-PORT-PENDING 1154 tests/task_control_tiers.rs:1-454
 

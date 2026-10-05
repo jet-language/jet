@@ -1,0 +1,11 @@
+use tests.common as common
+use tests.conformance.corpus.core.port.corelib_parts.support.build_and_run
+use std.fs as fs
+// Rust: tests/network_core_contract.rs:7
+#Test("network_core_contract_example_covers_reserved_cidr_and_mime_boundaries") {
+    dir :: common.unique_tmp("network_core_contract")
+    source :: fs.read_to_string("Examples/features/net/network_core_contract.jet").unwrap()
+    (code, stdout, stderr) :: build_and_run(dir, "network_core_contract", source, [], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "reserved-global:false\nnetwork:192.0.2.0/24\nbroadcast:192.0.2.255\nmime:rejected\n")
+}

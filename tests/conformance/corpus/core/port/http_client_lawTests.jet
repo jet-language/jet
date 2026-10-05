@@ -648,3 +648,573 @@ fn run() -> {
     server.join().unwrap()
     assert_eq(code, 0, "stderr:\n{stderr}")
 }
+
+// Rust: tests/http_client_law.rs:979
+#Test("explicit_h2c_negotiates_hpack_and_reuses_one_session") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        stream.set_read_timeout(Some(Duration.from_secs(5))).unwrap()
+        preface := [U8].repeat(0, 24)
+        stream.read_exact(&preface).unwrap()
+        assert_eq(preface, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".as_bytes())
+        assert_eq(read_h2_frame(&stream).0, 4)
+        write_h2_frame(&stream, 4, 0, 0, [])
+        request :: loop {
+            frame :: read_h2_frame(&stream)
+            if frame.0 == 1 { break frame }
+        }
+        assert_eq(request.2, 1)
+        assert_ne(request.1 & 4, 0)
+        // :status 200 plus content-length: 2, HPACK-Huffman encoded.
+        response :: [U8]{0x88, 0x0f, 0x0d, 0x81, 0x17}
+        write_h2_frame(&stream, 1, 4, 1, response)
+        write_h2_frame(&stream, 0, 1, 1, "w0".as_bytes())
+        // Await both open streams before final HEADERS to expose mutex deadlocks.
+        requests := [(U8, U8, U32, [U8])]{}
+        loop requests.len() < 2 {
+            frame :: read_h2_frame(&stream)
+            if frame.0 == 6 && frame.1 & 1 == 0 {
+                write_h2_frame(&stream, 6, 1, 0, frame.3)
+                continue
+            }
+            if frame.0 == 1 { requests.push(frame) }
+        }
+        requests.sort_by_key(frame -> frame.2)
+        assert_eq(requests.iter().map(frame -> frame.2).collect::<[U32]>(), [U32]{3, 5})
+        write_h2_frame(&stream, 1, 4, 5, response)
+        write_h2_frame(&stream, 1, 4, 3, response)
+        write_h2_frame(&stream, 0, 1, 5, "b2".as_bytes())
+        write_h2_frame(&stream, 0, 1, 3, "a1".as_bytes())
+        drop(stream)
+        // Retire a stale pooled session before writing; reconnect exactly once.
+        listener.set_nonblocking(true).unwrap()
+        deadline :: Instant.now() + Duration.from_secs(5)
+        (stream, _) := loop {
+            match listener.accept() {
+                Ok(connection) -> break connection,
+                Err(error) -> {
+                    if error.kind() == ErrorKind.WouldBlock {
+                        assert(Instant.now() < deadline, "client did not reconnect stale HTTP/2 session")
+                        thread.yield_now()
+                    } else { panic("second HTTP/2 accept failed: {error}") }
+                }
+            }
+        }
+        stream.set_read_timeout(Some(Duration.from_secs(5))).unwrap()
+        stream.read_exact(&preface).unwrap()
+        assert_eq(preface, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".as_bytes())
+        assert_eq(read_h2_frame(&stream).0, 4)
+        write_h2_frame(&stream, 4, 0, 0, [])
+        request :: loop {
+            frame :: read_h2_frame(&stream)
+            if frame.0 == 1 { break frame }
+        }
+        assert_eq(request.2, 1)
+        write_h2_frame(&stream, 1, 4, 1, response)
+        write_h2_frame(&stream, 0, 1, 1, "c3".as_bytes())
+        settings_ack :: read_h2_frame(&stream)
+        assert_eq((settings_ack.0, settings_ack.1, settings_ack.2), (4, 1, 0))
+    })
+    dir :: std.env.temp_dir().join("jet_http_client_h2_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    shown :: dir.join("seed.jet")
+    source :: "use core.http.client as http\nfn run() -> { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n"
+    fs.write(shown, source).unwrap()
+    compiled :: jet.compile_with_path(source, shown.to_str().unwrap()).unwrap()
+    link :: compiled.ffi.expect("HTTP client bridge")
+    harness :: dir.join("h2.rs")
+    bin :: dir.join("h2")
+    // Rust comparator fixture: generated native bridge remains the peer.
+    fs.write(harness, `
+fn main() {
+    let url = std::env::args().nth(1).unwrap();
+    let root = bridge::jet_http_client_new_impl();
+    let client = bridge::jet_http_client_protocols_impl(root, true, false, true).unwrap();
+    let warm = bridge::jet_http_client_send_with_impl(
+        client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
+    ).unwrap();
+    assert_eq!(bridge::jet_http_client_body_read_impl(warm.body_handle, 64).unwrap(), Some(b"w0".to_vec()));
+    assert_eq!(bridge::jet_http_client_body_read_impl(warm.body_handle, 64).unwrap(), None);
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+    let send = |barrier: std::sync::Arc<std::sync::Barrier>, url: String| std::thread::spawn(move || {
+        barrier.wait();
+        let response = bridge::jet_http_client_send_with_impl(
+            client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
+        ).unwrap();
+        let body = bridge::jet_http_client_body_read_impl(response.body_handle, 64).unwrap().unwrap();
+        assert_eq!(bridge::jet_http_client_body_read_impl(response.body_handle, 64).unwrap(), None);
+        (response, body)
+    });
+    let first = send(barrier.clone(), url.clone());
+    let second = send(barrier.clone(), url.clone());
+    barrier.wait();
+    let first = first.join().unwrap();
+    let second = second.join().unwrap();
+    let mut bodies = vec![first.1, second.1];
+    bodies.sort();
+    assert_eq!(bodies, vec![b"a1".to_vec(), b"b2".to_vec()]);
+    let third = bridge::jet_http_client_send_with_impl(
+        client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
+    ).unwrap();
+    assert_eq!(bridge::jet_http_client_body_read_impl(third.body_handle, 64).unwrap(), Some(b"c3".to_vec()));
+    assert_eq!(bridge::jet_http_client_body_read_impl(third.body_handle, 64).unwrap(), None);
+    assert_eq!(warm.context.protocol, "HTTP/2");
+    assert_eq!(first.0.context.protocol, "HTTP/2");
+    assert_eq!(second.0.context.protocol, "HTTP/2");
+    assert_eq!(third.context.protocol, "HTTP/2");
+    assert!(!warm.context.reused_connection);
+    assert!(first.0.context.reused_connection);
+    assert!(second.0.context.reused_connection);
+    assert!(!third.context.reused_connection);
+}
+`).unwrap()
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021", harness.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+    rustc.arg("--extern").arg("bridge={link.rlib_path.display()}")
+    loop dependency in link.dependency_dirs().filter(path -> path.is_dir()) {
+        rustc.arg("-L").arg("dependency={dependency.display()}")
+    }
+    built :: rustc.output().unwrap()
+    assert(built.status.success(), "bridge harness compile failed:\n{String.from_utf8_lossy(built.stderr)}")
+    output :: Command.new(bin).arg("http://{addr}/h2").output().unwrap()
+    server.join().unwrap()
+    assert(output.status.success(), "bridge harness failed:\n{String.from_utf8_lossy(output.stderr)}")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/http_client_law.rs:1163
+#Test("h2_response_body_overrun_is_rejected_at_64_mib") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        stream.set_read_timeout(Some(Duration.from_secs(10))).unwrap()
+        stream.set_write_timeout(Some(Duration.from_secs(10))).unwrap()
+        preface := [U8].repeat(0, 24)
+        stream.read_exact(&preface).unwrap()
+        assert_eq(preface, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".as_bytes())
+        assert_eq(read_h2_frame(&stream).0, 4)
+        write_h2_frame(&stream, 4, 0, 0, [])
+        loop {
+            request :: read_h2_frame(&stream)
+            if request.0 == 1 {
+                assert_eq(request.2, 1)
+                break
+            }
+        }
+        // No content-length: exercise the cumulative DATA-byte guard.
+        write_h2_frame(&stream, 1, 4, 1, [U8]{0x88})
+        chunk :: [U8].repeat(120, 64 * 1024)
+        loop _ in 0..1024 { write_h2_frame(&stream, 0, 0, 1, chunk) }
+        write_h2_frame(&stream, 0, 1, 1, "x".as_bytes())
+    })
+    dir :: std.env.temp_dir().join("jet_http_client_h2_overrun_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    shown :: dir.join("seed.jet")
+    source :: "use core.http.client as http\nfn run() -> { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n"
+    fs.write(shown, source).unwrap()
+    compiled :: jet.compile_with_path(source, shown.to_str().unwrap()).unwrap()
+    link :: compiled.ffi.expect("HTTP client bridge")
+    harness :: dir.join("h2_overrun.rs")
+    bin :: dir.join("h2_overrun")
+    fs.write(harness, `
+fn main() {
+    let url = std::env::args().nth(1).unwrap();
+    let root = bridge::jet_http_client_new_impl();
+    let client = bridge::jet_http_client_protocols_impl(root, true, false, true).unwrap();
+    let response = bridge::jet_http_client_send_with_impl(
+        client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
+    ).unwrap();
+    assert_eq!(response.status, 200);
+    let mut received = 0usize;
+    loop {
+        match bridge::jet_http_client_body_read_impl(response.body_handle, 64 * 1024) {
+            Ok(Some(chunk)) => received += chunk.len(),
+            Ok(None) => panic!("HTTP/2 body overrun was accepted"),
+            Err(error) => {
+                assert_eq!(error, bridge::JetHTTPBridgeError::InvalidFraming);
+                break;
+            }
+        }
+    }
+    assert_eq!(received, 64 * 1024 * 1024);
+    bridge::jet_http_client_body_close_impl(response.body_handle);
+    bridge::jet_http_client_drop_impl(client);
+}
+`).unwrap()
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021", harness.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+    rustc.arg("--extern").arg("bridge={link.rlib_path.display()}")
+    loop dependency in link.dependency_dirs().filter(path -> path.is_dir()) {
+        rustc.arg("-L").arg("dependency={dependency.display()}")
+    }
+    built :: rustc.output().unwrap()
+    assert(built.status.success(), "bridge harness compile failed:\n{String.from_utf8_lossy(built.stderr)}")
+    output :: Command.new(bin).arg("http://{addr}/h2").output().unwrap()
+    server.join().unwrap()
+    assert(output.status.success(), "bridge harness failed:\n{String.from_utf8_lossy(output.stderr)}")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/http_client_law.rs:1278
+#Test("https_negotiates_h2_with_an_explicit_root") {
+    // GATE #4494: explicit-root TLS provider and real ALPN negotiation.
+    dir :: std.env.temp_dir().join("jet_http_client_tls_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    shown :: dir.join("seed.jet")
+    source :: "use core.http.client as http\nfn run() -> { req :: http.request(\"GET\", \"https://127.0.0.1/\") }\n"
+    fs.write(shown, source).unwrap()
+    compiled :: jet.compile_with_path(source, shown.to_str().unwrap()).unwrap()
+    link :: compiled.ffi.expect("HTTP client bridge")
+    harness :: dir.join("tls_h2.rs")
+    bin :: dir.join("tls_h2")
+    fs.write(harness, `
+use std::io::{Read, Write};
+
+fn pem(path: &str) -> Vec<u8> {
+    let text = std::fs::read_to_string(path).unwrap();
+    let encoded: String = text.lines().filter(|line| !line.starts_with("-----")).collect();
+    let mut out = Vec::new();
+    let mut bits = 0u32;
+    let mut count = 0u8;
+    for byte in encoded.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' => break,
+            _ => continue,
+        };
+        bits = bits << 6 | u32::from(value);
+        count += 6;
+        if count >= 8 {
+            count -= 8;
+            out.push((bits >> count) as u8);
+            bits &= (1u32 << count).wrapping_sub(1);
+        }
+    }
+    out
+}
+
+fn read_frame(stream: &mut impl Read) -> (u8, u8, u32, Vec<u8>) {
+    let mut head = [0; 9];
+    stream.read_exact(&mut head).unwrap();
+    let length = usize::from(head[0]) << 16 | usize::from(head[1]) << 8 | usize::from(head[2]);
+    let id = u32::from_be_bytes(head[5..9].try_into().unwrap()) & 0x7fff_ffff;
+    let mut payload = vec![0; length];
+    stream.read_exact(&mut payload).unwrap();
+    (head[3], head[4], id, payload)
+}
+
+fn write_frame(stream: &mut impl Write, kind: u8, flags: u8, id: u32, payload: &[u8]) {
+    let length = (payload.len() as u32).to_be_bytes();
+    let mut head = [0; 9];
+    head[..3].copy_from_slice(&length[1..]);
+    head[3] = kind;
+    head[4] = flags;
+    head[5..].copy_from_slice(&id.to_be_bytes());
+    stream.write_all(&head).unwrap();
+    stream.write_all(payload).unwrap();
+}
+
+fn main() {
+    let cert = pem(&std::env::args().nth(1).unwrap());
+    let key = pem(&std::env::args().nth(2).unwrap());
+    let root_cert = pem(&std::env::args().nth(3).unwrap());
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mut server = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![rustls::pki_types::CertificateDer::from(cert.clone())],
+            rustls::pki_types::PrivateKeyDer::Pkcs8(
+                rustls::pki_types::PrivatePkcs8KeyDer::from(key),
+            ),
+        )
+        .unwrap();
+    server.alpn_protocols = vec![b"h2".to_vec()];
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (socket, _) = listener.accept().unwrap();
+        socket.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        let connection = rustls::ServerConnection::new(std::sync::Arc::new(server)).unwrap();
+        let mut stream = rustls::StreamOwned::new(connection, socket);
+        let mut preface = [0; 24];
+        stream.read_exact(&mut preface).unwrap();
+        assert_eq!(&preface, b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
+        assert_eq!(stream.conn.alpn_protocol(), Some(b"h2".as_slice()));
+        assert_eq!(read_frame(&mut stream).0, 4);
+        write_frame(&mut stream, 4, 0, 0, &[]);
+        let request = loop {
+            let frame = read_frame(&mut stream);
+            if frame.0 == 1 { break frame; }
+        };
+        write_frame(&mut stream, 1, 4, request.2, &[0x88, 0x0f, 0x0d, 0x01, b'2']);
+        write_frame(&mut stream, 0, 1, request.2, b"ok");
+        stream.flush().unwrap();
+        let settings_ack = read_frame(&mut stream);
+        assert_eq!((settings_ack.0, settings_ack.1, settings_ack.2), (4, 1, 0));
+    });
+    let root = bridge::jet_http_client_new_impl();
+    let rooted = bridge::jet_http_client_root_certificate_impl(root, &root_cert, false).unwrap();
+    let client = bridge::jet_http_client_protocols_impl(rooted, true, false, false).unwrap();
+    let url = format!("https://localhost:{}/tls", address.port());
+    let response = bridge::jet_http_client_send_with_impl(
+        client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
+    ).unwrap();
+    assert_eq!(response.context.protocol, "HTTP/2");
+    assert_eq!(bridge::jet_http_client_body_read_impl(response.body_handle, 64).unwrap(), Some(b"ok".to_vec()));
+    assert_eq!(bridge::jet_http_client_body_read_impl(response.body_handle, 64).unwrap(), None);
+    server.join().unwrap();
+}
+`).unwrap()
+    dependency_dirs :: link.dependency_dirs().filter(path -> path.is_dir()).collect::<[OSPath]>()
+    rustls :: dependency_dirs.iter()
+        .flat_map(directory -> fs.read_dir(directory).unwrap())
+        .filter_map(result -> result.ok())
+        .map(entry -> entry.path())
+        .find(path -> path.file_name().and_then(name -> name.to_str())
+            .is_some_and(name -> name.starts_with("librustls-") && name.ends_with(".rlib")))
+        .expect("generated bridge rustls dependency")
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021", harness.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+    rustc.arg("--extern").arg("bridge={link.rlib_path.display()}")
+        .arg("--extern").arg("rustls={rustls.display()}")
+    loop dependency in dependency_dirs {
+        rustc.arg("-L").arg("dependency={dependency.display()}")
+    }
+    built :: rustc.output().unwrap()
+    assert(built.status.success(), "bridge TLS harness compile failed:\n{String.from_utf8_lossy(built.stderr)}")
+    output :: Command.new(bin)
+        .arg(fs.canonicalize("tests/fixtures/tls/smtp.server.cert.pem").unwrap())
+        .arg(fs.canonicalize("tests/fixtures/tls/smtp.server.key.pem").unwrap())
+        .arg(fs.canonicalize("tests/fixtures/tls/smtp.ca.cert.pem").unwrap())
+        .output().unwrap()
+    assert(output.status.success(), "bridge TLS harness failed:\n{String.from_utf8_lossy(output.stderr)}")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/http_client_law.rs:1452
+#Test("h2_rejects_invalid_hpack_names_padding_and_body_lengths") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        loop case in 0..3 {
+            (stream, _) := listener.accept().unwrap()
+            stream.set_read_timeout(Some(Duration.from_secs(5))).unwrap()
+            preface := [U8].repeat(0, 24)
+            stream.read_exact(&preface).unwrap()
+            assert_eq(preface, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".as_bytes())
+            assert_eq(read_h2_frame(&stream).0, 4)
+            write_h2_frame(&stream, 4, 0, 0, [])
+            request :: loop {
+                frame :: read_h2_frame(&stream)
+                if frame.0 == 1 { break frame }
+            }
+            match case {
+                0 -> write_h2_frame(&stream, 1, 5, request.2, [U8]{0x88, 0x00, 0x01, 88, 0x01, 121}),
+                1 -> write_h2_frame(&stream, 1, 5, request.2, [U8]{0x88, 0x0f, 0x0d, 0x81, 0xff}),
+                _ -> {
+                    write_h2_frame(&stream, 1, 4, request.2, [U8]{0x88, 0x0f, 0x0d, 0x01, 50})
+                    write_h2_frame(&stream, 0, 1, request.2, "x".as_bytes())
+                }
+            }
+            _settings_ack :: read_h2_frame(&stream)
+        }
+    })
+    dir :: std.env.temp_dir().join("jet_http_client_h2_hostile_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    shown :: dir.join("seed.jet")
+    source :: "use core.http.client as http\nfn run() -> { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n"
+    fs.write(shown, source).unwrap()
+    compiled :: jet.compile_with_path(source, shown.to_str().unwrap()).unwrap()
+    link :: compiled.ffi.expect("HTTP client bridge")
+    harness :: dir.join("h2_hostile.rs")
+    bin :: dir.join("h2_hostile")
+    fs.write(harness, `
+fn client() -> i64 {
+    let root = bridge::jet_http_client_new_impl();
+    bridge::jet_http_client_protocols_impl(root, true, false, true).unwrap()
+}
+fn main() {
+    let url = std::env::args().nth(1).unwrap();
+    println!("{:?}", bridge::jet_http_client_send_with_impl(
+        client(), "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
+    ).unwrap_err());
+    println!("{:?}", bridge::jet_http_client_send_with_impl(
+        client(), "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
+    ).unwrap_err());
+    let response = bridge::jet_http_client_send_with_impl(
+        client(), "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
+    ).unwrap();
+    println!("{:?}", bridge::jet_http_client_body_read_impl(response.body_handle, 64).unwrap_err());
+}
+`).unwrap()
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021", harness.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+    rustc.arg("--extern").arg("bridge={link.rlib_path.display()}")
+    loop dependency in link.dependency_dirs().filter(path -> path.is_dir()) {
+        rustc.arg("-L").arg("dependency={dependency.display()}")
+    }
+    built :: rustc.output().unwrap()
+    assert(built.status.success(), "bridge harness compile failed:\n{String.from_utf8_lossy(built.stderr)}")
+    output :: Command.new(bin).arg("http://{addr}/h2").output().unwrap()
+    server.join().unwrap()
+    assert(output.status.success(), "bridge harness failed:\n{String.from_utf8_lossy(output.stderr)}")
+    assert_eq(String.from_utf8_lossy(output.stdout), "InvalidHeader\nProtocol\nInvalidFraming\n")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/http_client_law.rs:1578
+#Test("upload_streams_before_the_body_source_finishes") {
+    use std.sync.atomic.AtomicBool
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    dir :: std.env.temp_dir().join("jet_http_client_upload_stream_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fifo :: dir.join("upload.fifo")
+    assert(Command.new("mkfifo").arg(fifo).status().unwrap().success(), "mkfifo failed")
+    accepted :: Arc.new(AtomicBool.new(false))
+    accepted_flag :: accepted.clone()
+    seen_first_chunk :: Arc.new(AtomicBool.new(false))
+    seen_flag :: seen_first_chunk.clone()
+    body_len :: 200 * 1024
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        accepted_flag.store(true, Ordering.SeqCst)
+        head :: request_head(&stream)
+        assert(head.starts_with("POST /upload HTTP/1.1\r\n".as_bytes()))
+        head_text :: String.from_utf8_lossy(head)
+        assert(head_text.to_ascii_lowercase().contains("content-length: {body_len}"), "missing content-length: {head_text}")
+        got := 0
+        buf := [U8].repeat(0, 4096)
+        loop got < body_len {
+            read :: stream.read(&buf).unwrap()
+            assert_ne(read, 0, "upload ended early at {got}")
+            got += read
+            if got >= 64 * 1024 { seen_flag.store(true, Ordering.SeqCst) }
+        }
+        stream.write_all("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".as_bytes()).unwrap()
+        got
+    })
+    fifo_writer :: fifo.clone()
+    writer :: thread.spawn(() -> {
+        file := fs.OpenOptions.new().write(true).open(fifo_writer).unwrap()
+        first :: [U8].repeat(97, 32 * 1024)
+        file.write_all(first).unwrap()
+        deadline :: Instant.now() + Duration.from_secs(5)
+        loop !accepted.load(Ordering.SeqCst) {
+            assert(Instant.now() < deadline, "client buffered the upload before connecting")
+            thread.yield_now()
+        }
+        rest :: [U8].repeat(98, body_len - first.len())
+        file.write_all(rest).unwrap()
+    })
+    fifo_path :: fifo.to_string_lossy().replace("\\", "\\\\").replace("\"", "\\\"")
+    src :: `
+use core.http.client as http
+use core.http as message
+use core.files as files
+fn run() -> {
+    input :: files.open("{fifo_path}") ?? panic("open")
+    body :: message.Body.reader(^input, {body_len}) ?? panic("reader")
+    req :: http.request("POST", "http://{addr}/upload").body(body).redirects(0)
+    resp :: req.send() ?? panic("send")
+    print(resp.body().text(8) ?? panic("body"))
+}
+`.replace("{fifo_path}", fifo_path).replace("{body_len}", body_len.to_string()).replace("{addr}", addr.to_string())
+    (code, stdout, stderr) :: common.build_and_run("jet_http_client_law", "upload_stream", src)
+    got :: server.join().unwrap()
+    writer.join().unwrap()
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "ok\n")
+    assert_eq(got, body_len)
+    assert(seen_first_chunk.load(Ordering.SeqCst), "server never saw a 64KiB upload boundary")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/http_client_law.rs:1682
+#Test("post_307_replays_streamed_body_under_redirect_tee_cap") {
+    use std.sync.atomic.AtomicBool
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    dir :: std.env.temp_dir().join("jet_http_client_post_307_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fifo :: dir.join("upload.fifo")
+    assert(Command.new("mkfifo").arg(fifo).status().unwrap().success(), "mkfifo failed")
+    body_len :: 96 * 1024
+    seen_first :: Arc.new(AtomicBool.new(false))
+    seen_first_flag :: seen_first.clone()
+    seen_replay :: Arc.new(AtomicBool.new(false))
+    seen_replay_flag :: seen_replay.clone()
+    server :: thread.spawn(() -> {
+        (first, _) := listener.accept().unwrap()
+        head :: request_head(&first)
+        assert(head.starts_with("POST /from HTTP/1.1\r\n".as_bytes()))
+        head_text :: String.from_utf8_lossy(head)
+        assert(head_text.to_ascii_lowercase().contains("content-length: {body_len}"), "missing content-length: {head_text}")
+        got := 0
+        buf := [U8].repeat(0, 4096)
+        loop got < body_len {
+            read :: first.read(&buf).unwrap()
+            assert_ne(read, 0, "first upload ended early at {got}")
+            got += read
+            if got >= 64 * 1024 { seen_first_flag.store(true, Ordering.SeqCst) }
+        }
+        first.write_all("HTTP/1.1 307 Temporary Redirect\r\nLocation: /to\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".as_bytes()).unwrap()
+        drop(first)
+        (second, _) := listener.accept().unwrap()
+        head :: request_head(&second)
+        assert(head.starts_with("POST /to HTTP/1.1\r\n".as_bytes()), "307 must preserve POST: {String.from_utf8_lossy(head)}")
+        head_text :: String.from_utf8_lossy(head).to_ascii_lowercase()
+        assert(head_text.contains("content-length: {body_len}"), "replay missing content-length: {head_text}")
+        got = 0
+        loop got < body_len {
+            read :: second.read(&buf).unwrap()
+            assert_ne(read, 0, "replayed upload ended early at {got}")
+            got += read
+        }
+        assert_eq(got, body_len)
+        seen_replay_flag.store(true, Ordering.SeqCst)
+        second.write_all("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".as_bytes()).unwrap()
+    })
+    fifo_writer :: fifo.clone()
+    writer :: thread.spawn(() -> {
+        file := fs.OpenOptions.new().write(true).open(fifo_writer).unwrap()
+        payload :: [U8].repeat(112, body_len)
+        file.write_all(payload).unwrap()
+    })
+    fifo_path :: fifo.to_string_lossy().replace("\\", "\\\\").replace("\"", "\\\"")
+    src :: `
+use core.http.client as http
+use core.http as message
+use core.files as files
+fn run() -> {
+    input :: files.open("{fifo_path}") ?? panic("open")
+    body :: message.Body.reader(^input, {body_len}) ?? panic("reader")
+    // Default redirect_limit (>0) must tee POST so 307 can replay the body.
+    req :: http.request("POST", "http://{addr}/from").body(body)
+    resp :: req.send() ?? panic("send")
+    print(resp.body().text(8) ?? panic("body"))
+    print(resp.redirect_history().len())
+}
+`.replace("{fifo_path}", fifo_path).replace("{body_len}", body_len.to_string()).replace("{addr}", addr.to_string())
+    (code, stdout, stderr) :: common.build_and_run("jet_http_client_law", "post_307_replay", src)
+    server.join().unwrap()
+    writer.join().unwrap()
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "ok\n1\n")
+    assert(seen_first.load(Ordering.SeqCst), "first POST never streamed a 64KiB boundary before 307")
+    assert(seen_replay.load(Ordering.SeqCst), "307 follow never received the teed POST body")
+    _ :: fs.remove_dir_all(dir)
+}

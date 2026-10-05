@@ -1,0 +1,421 @@
+use tests.conformance.corpus.core.port.tir_core_and_closures.*
+use tests.common as common
+use tests.tir_support as tir_support
+use tests.tir_support.[assert_tiers_agree, build_and_run, build_and_run_full_with_cfg, build_and_run_multi, have_rustc]
+use std.fs as fs
+use std.process.[Command]
+use jet.[compile]
+// GATE #4494: real FS/process/native scheduler fixtures. OS paths remain native.
+
+// Rust: tests/tir_core_and_closures.rs:23
+#Test("core_math_path_crypto_calls") {
+    if !have_rustc() { return }
+    src :: `use core.math as math
+use core.crypto as crypto
+fn calc(a: Float) -> Float {
+    r :: math.sqrt(a)
+    f :: math.floor(r)
+    c :: math.ceil(r)
+    return (f + c)
+}
+fn make_path(a: String, b: String) -> String { return Path.from(a).join(b).to_string() }
+fn hash(s: String) -> String { return crypto.sha256(s.bytes()).hex() }
+fn run() -> {
+    print(calc(16.0))
+    print(make_path("/usr", "bin"))
+    print(hash("hello"))
+}
+`
+    (code, stdout) :: build_and_run("tir_core_math_path_crypto", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "8.0\n/usr/bin\n2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\n")
+}
+// Rust: tests/tir_core_and_closures.rs:58
+#Test("core_crypto_typed_digests_match_every_tier") {
+    if !have_rustc() { return }
+    src :: `use core.crypto as crypto
+fn run() -> {
+    input :: [U8]{0x61, 0x62, 0x63}
+    sha256 :: crypto.sha256(input)
+    print(sha256.hex())
+    print(sha256.bytes() == [U8]{0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad})
+    sha512 :: crypto.sha512(input)
+    print(sha512.hex())
+    print(sha512.bytes() == [U8]{0xdd, 0xaf, 0x35, 0xa1, 0x93, 0x61, 0x7a, 0xba, 0xcc, 0x41, 0x73, 0x49, 0xae, 0x20, 0x41, 0x31, 0x12, 0xe6, 0xfa, 0x4e, 0x89, 0xa9, 0x7e, 0xa2, 0x0a, 0x9e, 0xee, 0xe6, 0x4b, 0x55, 0xd3, 0x9a, 0x21, 0x92, 0x99, 0x2a, 0x27, 0x4f, 0xc1, 0xa8, 0x36, 0xba, 0x3c, 0x23, 0xa3, 0xfe, 0xeb, 0xbd, 0x45, 0x4d, 0x44, 0x23, 0x64, 0x3c, 0xe8, 0x0e, 0x2a, 0x9a, 0xc9, 0x4f, 0xa5, 0x4c, 0xa4, 0x9f})
+    blake3 :: crypto.blake3(input)
+    print(blake3.hex())
+    print(blake3.bytes() == [U8]{0x64, 0x37, 0xb3, 0xac, 0x38, 0x46, 0x51, 0x33, 0xff, 0xb6, 0x3b, 0x75, 0x27, 0x3a, 0x8d, 0xb5, 0x48, 0xc5, 0x58, 0x46, 0x5d, 0x79, 0xdb, 0x03, 0xfd, 0x35, 0x9c, 0x6c, 0xd5, 0xbd, 0x9d, 0x85})
+}
+`
+    assert_tiers_agree("tir_core_crypto_typed_digests", src, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\ntrue\nddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f\ntrue\n6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85\ntrue\n")
+}
+// Rust: tests/tir_core_and_closures.rs:92
+#Test("core_files_read_with_fallback") {
+    if !have_rustc() { return }
+    src :: `use core.files as fs
+fn read_or(p: String) -> String { return (fs.read(~p) ?? "missing") }
+fn run() -> { print(read_or("/no/such/file/at/all/xyzzy")) }
+`
+    (code, stdout) :: build_and_run("tir_core_fs_fallback", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "missing\n")
+}
+// Rust: tests/tir_core_and_closures.rs:111
+#Test("core_files_absolute_matches_every_tier") {
+    if !have_rustc() { return }
+    src :: `use core.files as fs
+fn run() -> {
+    path :: fs.absolute(Path.from(".")) ?? panic("absolute")
+    print(path != ".")
+}
+`
+    assert_tiers_agree("tir_core_fs_absolute", src, "true\n")
+}
+// Rust: tests/tir_core_and_closures.rs:138
+#Test("core_files_absolute_path_read_matches_every_tier") {
+    if !have_rustc() { return }
+    repo :: OSPath.from_text(std.env.manifest_dir())
+    dogfood_root :: OSPath.from_native(std.env.var_os("HOME").expect("HOME")).join(".cache/jet-dogfood").join("tir-absolute-path-read-{std.process.id()}")
+    cache_root :: common.test_scratch_root("tir-core-fs-absolute-path").join(std.process.id().to_string())
+    if cache_root.exists() { common.make_tree_writable(cache_root); fs.remove_dir_all(cache_root).unwrap() }
+    fs.create_dir_all(cache_root).unwrap()
+    fixture_source :: repo.join("dogfood/jetpack/tests/fixtures/phase1")
+    fixture_root :: cache_root.join("phase1")
+    stage_jetpack_phase1(fixture_source, fixture_root)
+    outputs := [] as [(String, String)]
+    loop (mode, release, interpret) in [("release", true, false), ("default", false, false), ("interpret", false, true)] {
+        command := Command.new(std.env.cargo_bin_exe("jet"))
+        command.arg("run")
+        if release { command.arg("--release") }
+        if interpret { command.arg("--interpret") }
+        output :: command.arg("dogfood/jetpack").arg("--").args(["plan", "--json", "--offline"]).current_dir(repo).env("JET_STORE_DIR", cache_root.join("cache-{mode}")).env("JETPACK_DOGFOOD_ROOT", dogfood_root).env("JETPACK_PROJECT_ROOT", fixture_root).env("JETPACK_OFFLINE", "1").env("NO_COLOR", "1").output().unwrap()
+        stdout :: String.from_utf8_lossy(output.stdout)
+        stderr :: String.from_utf8_lossy(output.stderr)
+        assert(output.status.success(), "{mode} absolute path read failed:\nstdout:\n{stdout}\nstderr:\n{stderr}")
+        outputs.push((mode, stdout))
+    }
+    assert_eq(outputs[1].1, outputs[0].1, "default disagreed with release")
+    assert_eq(outputs[2].1, outputs[0].1, "interpreter disagreed with release")
+    common.make_tree_writable(cache_root)
+    fs.remove_dir_all(cache_root).unwrap()
+}
+// Rust: tests/tir_core_and_closures.rs:217
+#Test("closure_collection_methods") {
+    if !have_rustc() { return }
+    src :: `fn calc() -> Int {
+    base := 10
+    nums := [1, 2, 3, 4, 5]
+    squares := nums.map((n: Int) -> (n * n))
+    big := squares.filter((n: Int) -> (n > 5))
+    shifted := nums.map((n: Int) -> (n + base))
+    total := nums.reduce(0, (acc: Int, n: Int) -> (acc + n))
+    has := nums.any((n: Int) -> (n > 4))
+    every := nums.all((n: Int) -> (n > 0))
+    print(big)
+    print(shifted)
+    print(has)
+    print(every)
+    return total
+}
+fn run() -> { print(calc()) }
+`
+    (code, stdout) :: build_and_run("tir_closure_methods", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "[9, 16, 25]\n[11, 12, 13, 14, 15]\ntrue\ntrue\n15\n")
+}
+// Rust: tests/tir_core_and_closures.rs:250
+#Test("refined_collection_types_survive_tir_chains") {
+    if !have_rustc() { return }
+    src :: `fn use_float(value: Float) -> Float { return value + approx(1) / Float{4.0} }
+fn run() -> {
+    print(use_float([1, 2].fold(approx(1) / Float{2.0}, (a: Float, n: Int) -> a + approx(1) / Float{2.0})))
+    print(use_float([1, 2].reduce(approx(1) / Float{2.0}, (a: Float, n: Int) -> a + approx(1) / Float{2.0})))
+    print(use_float([1, 2].para_fold(() -> approx(1) / Float{2.0}, (a: Float, n: Int) -> a + approx(1) / Float{2.0}, (left: Float, right: Float) -> left + right)))
+    print(use_float([1, 2].scan(approx(1) / Float{2.0}, (a: Float, n: Int) -> a + approx(1) / Float{2.0}).sum()))
+    print(use_float([1, 2].map((n: Int) -> approx(3) / Float{2.0}).sum()))
+    print(use_float(["1.5", "bad", "2.5"].filter_map((s: String) -> Float.parse(s)).sum()))
+    print(use_float([1, 2].flat_map((n: Int) -> [approx(3) / Float{2.0}]).sum()))
+    print([1, 2, 3].group_by((n: Int) -> n % 2 == 0).has_key(true))
+    print([1, 2, 3].count_by((n: Int) -> n % 2).has_key(1))
+    print([1, 2, 3].group_by((n: Int) -> "x").get("x"))
+    print([1, 2, 3].count_by((n: Int) -> "x").get("x"))
+}
+`
+    (code, stdout) :: build_and_run("tir_refined_collection_types", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1.75\n1.75\n1.75\n2.75\n3.25\n4.25\n3.25\ntrue\ntrue\n[1, 2, 3]\n3\n")
+}
+// Rust: tests/tir_core_and_closures.rs:283
+#Test("parallel_collection_adapters_use_stable_bounded_chunks") {
+    if !have_rustc() { return }
+    values :: (0..130).map(n -> { n.to_string() }).collect().join(", ")
+    src :: "fn double(n: Int) -> Int { return n * 2 }\nfn one() -> Int { return 1 }\nfn add_item(acc: Int, n: Int) -> Int { return acc + n }\nfn merge_decimal(left: Int, right: Int) -> Int { return left * 10000 + right }\nfn run() -> {\n    values :: [Int]{ {values} }\n" + `
+    offset :: 1
+    mapped :: values.para_map((n: Int) -> n * 2 + offset)
+    named :: values.para_map(double)
+    kept :: values.para_filter((n: Int) -> n % 32 == 0)
+    split :: values.para_partition((n: Int) -> n % 32 == 0)
+    fixed :: [Int#4]{ 1, 2, 3, 4 }
+    fixed_split :: fixed.para_partition((n: Int) -> n % 2 == 0)
+    empty :: [Int]{}
+    // Deliberately non-associative internal tree-shape probe.
+    folded :: values.para_fold(() -> 1, (acc: Int, n: Int) -> acc + n, (left: Int, right: Int) -> left * 10000 + right)
+    named_fold :: values.para_fold(one, add_item, merge_decimal)
+    print("{mapped.len()}|{mapped.first()}|{mapped.last()}")
+    print(named.last())
+    print(kept)
+    print(split.true_)
+    print("{split.false_.len()}|{split.false_.first()}|{split.false_.last()}")
+    print(fixed.para_map((n: Int) -> n + 1))
+    print(fixed_split.false_)
+    print(fixed_split.true_)
+    print(empty.para_fold(() -> 7, (acc: Int, n: Int) -> acc + n, (left: Int, right: Int) -> left + right))
+    print(folded)
+    print(named_fold)
+}
+`
+    (code, stdout) :: build_and_run("tir_parallel_collection_chunks", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "130|1|259\n258\n[0, 32, 64, 96, 128]\n[0, 32, 64, 96, 128]\n125|1|129\n[2, 3, 4, 5]\n[1, 3]\n[2, 4]\n7\n201761130258\n201761130258\n")
+}
+// Rust: tests/tir_core_and_closures.rs:335
+#Test("parallel_collection_adapters_keep_single_chunk_fold_shape") {
+    if !have_rustc() { return }
+    src :: `fn run() -> {
+    values :: [Int]{1, 2, 3, 4}
+    folded :: values.para_fold(() -> 1, (acc: Int, n: Int) -> acc + n, (left: Int, right: Int) -> left * 100 + right)
+    print(folded)
+}
+`
+    (code, stdout) :: build_and_run("tir_parallel_single_chunk_fold", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "11\n")
+}
+// Rust: tests/tir_core_and_closures.rs:360
+#Test("parallel_collection_adapters_report_lowest_input_failure") {
+    if !have_rustc() { return }
+    values :: (0..130).map(n -> { n.to_string() }).collect().join(", ")
+    loop (method, callback, call) in [
+        ("map", "fn callback(n: Int) -> Int {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i in 0..200000 { ignored :: i } assert(false, \"map-low\") }\n    if n == 65 { assert(false, \"map-high\") }\n    return n\n}\n", "ignored :: values.para_map(callback)"),
+        ("filter", "fn callback(n: Int) -> Bool {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i in 0..200000 { ignored :: i } assert(false, \"filter-low\") }\n    if n == 65 { assert(false, \"filter-high\") }\n    return true\n}\n", "ignored :: values.para_filter(callback)"),
+        ("partition", "fn callback(n: Int) -> Bool {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i in 0..200000 { ignored :: i } assert(false, \"partition-low\") }\n    if n == 65 { assert(false, \"partition-high\") }\n    return true\n}\n", "ignored :: values.para_partition(callback)"),
+        ("fold", "fn step(acc: Int, n: Int) -> Int {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i in 0..200000 { ignored :: i } assert(false, \"fold-low\") }\n    if n == 65 { assert(false, \"fold-high\") }\n    return acc + n\n}\n", "ignored :: values.para_fold(() -> 0, step, (left: Int, right: Int) -> left + right)")
+    ] {
+        src :: "{callback}\nfn run() -> {\n    values :: [Int]{ {values} }\n    {call}\n}\n"
+        (code, stdout, stderr) :: build_and_run_full_with_cfg("jet_para_failure", "para_{method}_failure", src, "jet_para_test_workers")
+        assert_eq(code, 70, "{method} stdout={stdout} stderr={stderr}")
+        loop marker in ["worker-0-start", "worker-1-start", "worker-2-complete"] { assert(stdout.contains(marker), "{method} missed {marker}: {stdout}") }
+        assert_eq(stderr.lines().next(), Some("Stop [E3001]: `panic: {method}-low`"), "{stderr}")
+        assert_eq(stderr.matches("{method}-low").count(), 2, "{stderr}")
+        assert(!stderr.contains("{method}-high"), "{stderr}")
+        assert(!stderr.contains("worker panicked"), "{stderr}")
+    }
+}
+// Rust: tests/tir_core_and_closures.rs:413
+#Test("parallel_collection_adapters_select_across_runtime_failure_carriers") {
+    if !have_rustc() { return }
+    values :: (0..130).map(n -> { n.to_string() }).collect().join(", ")
+    src :: "use core.time as time\n#Pre(n != 65, \"contract-high\") fn checked(n: Int) -> Int { return n }\nfn callback(n: Int) -> Int {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { #Context(deadline: time.now() - 1) { time.sleep(1ms) } }\n    if n == 65 { return checked(n) }\n    return n\n}\nfn run() -> {\n    values :: [Int]{ {values} }\n    ignored :: values.para_map(callback)\n}\n"
+    (code, stdout, stderr) :: build_and_run_full_with_cfg("jet_para_failure", "para_cross_carrier_failure", src, "jet_para_test_workers")
+    assert_eq(code, 70, "stdout={stdout} stderr={stderr}")
+    loop marker in ["worker-0-start", "worker-1-start", "worker-2-complete"] { assert(stdout.contains(marker), "missed {marker}: {stdout}") }
+    assert_eq(stderr, "Error [E3003]: Deadline exceeded while waiting in time sleep\n Why: This wait point observed the task context deadline from `#Context(deadline: …)`\n Fix: Raise the deadline budget or shorten the work before this wait point\nMore: jet-lang.dev/e/E3003\n")
+    assert(!stderr.contains("contract-high"), "{stderr}")
+}
+// Rust: tests/tir_core_and_closures.rs:455
+#Test("parallel_collection_adapters_work_in_imported_modules") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run_multi("tir_parallel_collection_module", "main.jet", [("main.jet", "use worker\nfn run() -> { print(worker.double_all([1, 2, 3])) }\n"), ("worker.jet", "pub fn double_all(values: [Int]) -> [Int] {\n    return values.para_map((n: Int) -> n * 2)\n}\n")])
+    assert_eq(code, 0)
+    assert_eq(stdout, "[2, 4, 6]\n")
+}
+// Rust: tests/tir_core_and_closures.rs:478
+#Test("option_map_callback_receives_read_borrow") {
+    if !have_rustc() { return }
+    src :: `fn run() -> {
+    value :: Val("borrowed")
+    size :: value.map((text: String) -> text.len())
+    print(size)
+}
+`
+    (code, stdout) :: build_and_run("tir_option_map_read_borrow", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "8\n")
+}
+// Rust: tests/tir_core_and_closures.rs:498
+#Test("fnmut_each_closure") {
+    if !have_rustc() { return }
+    src :: `fn calc() -> Int {
+    nums := [1, 2, 3, 4]
+    total := 0
+    nums.each((n: Int) -> { total = (total + n) })
+    return total
+}
+fn run() -> { print(calc()) }
+`
+    (code, stdout) :: build_and_run("tir_fnmut_each", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "10\n")
+}
+// Rust: tests/tir_core_and_closures.rs:520
+#Test("card_2819_nested_index_field_assignment_tier_parity") {
+    src :: `struct Parcel { score: Int }
+fn run() -> {
+    rows := [[Parcel{score: 1}]]
+    rows[0][0].score = 17
+    print(rows[0][0].score)
+}
+`
+    assert_tiers_agree("card_2819_nested_index_field_assignment", src, "17\n")
+}
+// Rust: tests/tir_core_and_closures.rs:534
+#Test("card_2820_captured_nested_index_assignment_tier_parity") {
+    src :: `fn run() -> {
+    rows := [[1]]
+    bump :: () Int -> {
+        rows[0][0] = rows[0][0] + 4
+        rows[0][0]
+    }
+    print(bump())
+    print(rows[0][0])
+}
+`
+    assert_tiers_agree("card_2820_captured_nested_index_assignment", src, "5\n5\n")
+}
+// Rust: tests/tir_core_and_closures.rs:551
+#Test("card_2824_map_index_field_assignment_tier_parity") {
+    src :: `struct Parcel { score: Int }
+fn run() -> {
+    parcels := [String:Parcel]{"x": Parcel{score: 2}}
+    parcels["x"].score = 12
+    print(parcels["x"].score)
+}
+`
+    assert_tiers_agree("card_2824_map_index_field_assignment", src, "12\n")
+}
+// Rust: tests/tir_core_and_closures.rs:564
+#Test("nested_fallback_restores_outer_error_binding") {
+    src :: `fn fail(message: String) -> Int Err! { return Err(message) }
+fn run() -> {
+    value :: fail("outer") ?? {
+        print(err.message)
+        inner :: fail("inner") ?? {
+            print(err.message)
+            0
+        }
+        read_outer :: () String -> err.message
+        print(read_outer())
+        inner + 1
+    }
+    print(value)
+}
+`
+    assert_tiers_agree("nested_fallback_error_scope", src, "outer\ninner\nouter\n1\n")
+}
+// Rust: tests/tir_core_and_closures.rs:588
+#Test("card_2825_nested_range_view_source_tier_parity") {
+    src :: `fn run() -> {
+    rows := [[1, 2, 3]]
+    window :: rows[0][0..1]
+    print(window[1])
+}
+`
+    assert_tiers_agree("card_2825_nested_range_view_source", src, "2\n")
+}
+// Rust: tests/tir_core_and_closures.rs:602
+#Test("sort_by_closure") {
+    if !have_rustc() { return }
+    src :: `fn calc() -> Int {
+    nums := [3, 1, 2]
+    nums.sort_by((n: Int) -> n)
+    return nums[0]
+}
+fn run() -> { print(calc()) }
+`
+    (code, stdout) :: build_and_run("tir_sort_by", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1\n")
+}
+// Rust: tests/tir_core_and_closures.rs:623
+#Test("infallible_sort_callback_is_tier_stable") {
+    src :: `fn sort_key(n: Int) -> String Never! { "{n}" }
+fn run() -> {
+    ascending := [3, 1, 2]
+    ascending.sort_by((n: Int) -> sort_key(n))
+    descending := [3, 1, 2]
+    descending.sort_by_desc((n: Int) -> sort_key(n))
+    print("{ascending}|{descending}")
+}
+`
+    assert_tiers_agree("tir_infallible_sort_by", src, "[1, 2, 3]|[3, 2, 1]\n")
+}
+// Rust: tests/tir_core_and_closures.rs:640
+#Test("try_sort_by_is_atomic_and_tier_stable") {
+    src :: `fn sort_key(n: Int) -> String Never! { "{n}" }
+fn stopping_sort_key(n: Int, seen: &String) -> String Err! {
+    seen += "{n}"
+    if n == 1 { return Err("stop", code: "E_SORT") }
+    return "{n}"
+}
+fn unit() -> {}
+fn run() -> {
+    ascending := [3, 1, 2]
+    ascending.sort_by((n: Int) -> sort_key(n))
+    descending := [3, 1, 2]
+    descending.sort_by_desc((n: Int) -> sort_key(n))
+    values := [3, 1, 2]
+    seen := ""
+    recovered := false
+    values.sort_by((n: Int) -> stopping_sort_key(n, &seen)) ?? {
+        print("{err.code}:{err.message}")
+        recovered = true
+        unit()
+    }
+    print("{ascending}|{descending}")
+    print(seen)
+    print(values)
+    print(recovered)
+}
+`
+    assert_tiers_agree("tir_try_sort_by", src, "E_SORT:stop\n[1, 2, 3]|[3, 2, 1]\n31\n[3, 1, 2]\ntrue\n")
+}
+// Rust: tests/tir_core_and_closures.rs:679
+#Test("stable_partition_and_sort_keep_ties_in_order") {
+    src :: `fn run() -> {
+    values := [1, 3, 2, 4]
+    sorted := [1, 3, 2, 4]
+    sorted.sort_by((n: Int) -> n % 2)
+    split := values.partition((n: Int) -> n % 2 == 0)
+    print("{sorted}|{split.false_}|{split.true_}")
+}
+`
+    assert_tiers_agree("tir_stable_partition_sort", src, "[2, 4, 1, 3]|[1, 3]|[2, 4]\n")
+}
+// Rust: tests/tir_core_and_closures.rs:700
+#Test("fn_typed_param_call_routes_through_tir") {
+    if !have_rustc() { return }
+    src :: `fn apply(f: fn(Int) -> Int, x: Int) -> Int { return f(x) }
+fn run() -> { print(apply((n: Int) -> (n + 1), 41)) }
+`
+    (code, stdout) :: build_and_run("tir_fn_param_excluded", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "42\n")
+}
+// Rust: tests/tir_core_and_closures.rs:722
+#Test("block_lambda_preserves_value_tail_and_void_behavior") {
+    if !have_rustc() { return }
+    src :: `fn apply(f: fn(Int) -> Int, x: Int) -> Int { return f(x) }
+fn visit(f: fn(Int), x: Int) -> { f(x) }
+fn plus_one(x: Int) -> Int { return x + 1 }
+fn run() -> {
+    print(apply((n: Int) -> {
+        doubled :: (n * 2)
+        plus_one(doubled)
+    }, 20))
+    visit((n: Int) -> { print("seen {n}") }, 7)
+}
+`
+    (code, stdout) :: build_and_run("tir_block_lambda_tail", src)
+    assert_eq(code, 0, "block lambda generated Rust must compile")
+    assert_eq(stdout, "41\nseen 7\n")
+}

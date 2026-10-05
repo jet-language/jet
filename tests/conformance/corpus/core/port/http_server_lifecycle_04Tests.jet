@@ -5,11 +5,19 @@ use std.io as io
 use std.env as env
 use std.process.Command
 use std.sync.[Arc, Mutex, Condvar]
-use std.sync.atomic.[AtomicUsize, AtomicBool, Ordering]
+use std.sync.atomic.[AtomicUsize, AtomicBool, AtomicU64, Ordering]
 use std.sync.mpsc as mpsc
 use std.net.[TcpListener, TcpStream]
 use std.time.[Duration, Instant]
 use std.thread as thread
+use tests.conformance.corpus.core.port.http_server_tls_runtime as http_server_tls_runtime
+use std.net.SocketAddr
+// GATE #4494: actual TLS provider and fixture connections, not plaintext substitutes.
+use std.fs as fs
+use std.process as process
+use std.time.[SystemTime, UNIX_EPOCH]
+use core.sys.target
+// GATE #4483: symlink assertions dispatch on selected target family.
 // GATE #4494: native sockets, process isolation, channels, atomics and cancellable blocking body.
 // GATE #4409: preserve Interrupted from the cancelled body producer.
 
@@ -357,4 +365,770 @@ use std.thread as thread
     client.flush().unwrap()
     server_stream.set_read_timeout(Val(Duration.from_secs(1))).unwrap()
     assert(jet_http2_serve(&server_stream, empty_mux, JetHTTPServerOptions.safe(), AtomicBool.new(false), None, None).is_err())
+}
+
+// Rust: tests/http_server_lifecycle.rs:5958
+#Test("http2_shutdown_sends_goaway_with_last_stream_and_drains_active") {
+    mux :: jet_http_mux_new()
+    (entered_tx, entered_rx) :: mpsc.channel()
+    jet_http_mux_add_handler(mux, "POST", "/slow", Arc.new(request -> {
+        entered_tx.send(()).expect("entered")
+        assert_eq(request.body.text(64)?, "")
+        assert_eq(jet_http_srv_req_trailers(request)?.first("x-drain"), Val("done"))
+        Ok(jet_http_srv_response(200, "drained"))
+    }))
+    jet_http_mux_add(mux, "GET", "/late", _ -> jet_http_srv_response(200, "too late"))
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    client := TcpStream.connect(addr).unwrap()
+    (server_stream, _) := listener.accept().unwrap()
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: shutdown.clone()
+    options := JetHTTPServerOptions.safe()
+    options.workers = 1
+    options.admission_queue = 1
+    options.shutdown_grace = Duration.from_secs(2)
+    options.read_idle_timeout = Duration.from_secs(2)
+    server :: thread.spawn(() -> jet_http2_serve(&server_stream, mux, options, server_shutdown, None, None))
+    client.set_read_timeout(Val(Duration.from_millis(50))).unwrap()
+    client.write_all(JET_HTTP2_PREFACE).unwrap()
+    client.write_all(h2_frame(4, 0, 0, [])).unwrap()
+    client.write_all(h2_frame(1, 0x4, 1, h2_request_headers(0x83, "/slow"))).unwrap()
+    client.flush().unwrap()
+    // Rust: tests/http_server_lifecycle.rs:6016
+    read_frame :: (stream: &TcpStream) -> (U8, U8, U32, [U8])? {
+        header := [U8]{0}.repeat(9)
+        match stream.read_exact(&header) {
+            Ok(()) -> {}
+            Err(error) -> {
+                if error.kind() == io.ErrorKind.WouldBlock || error.kind() == io.ErrorKind.TimedOut { return None }
+                panic("frame header: {error}")
+            }
+        }
+        length :: (USize(header[0]) << 16) | (USize(header[1]) << 8) | USize(header[2])
+        payload := [U8]{0}.repeat(length)
+        stream.read_exact(&payload).expect("frame payload")
+        Val((header[3], header[4], U32.from_be_bytes(header[5..9].try_into().unwrap()) & 0x7fff_ffff, ^payload))
+    }
+    saw_server_settings := false
+    deadline :: Instant.now() + Duration.from_secs(1)
+    loop !saw_server_settings {
+        assert(Instant.now() < deadline, "missing SETTINGS")
+        frame :: read_frame(&client)
+        if frame.is_none() { continue }
+        (kind, flags, stream, _) :: frame.unwrap()
+        if kind == 4 && stream == 0 {
+            saw_server_settings = true
+            if flags & 0x1 == 0 { client.write_all(h2_frame(4, 0x1, 0, [])).unwrap() }
+        }
+    }
+    entered_rx.recv_timeout(Duration.from_secs(1)).expect("handler entered")
+    shutdown.store(true, Ordering.Release)
+    goaway_last: U32? := None
+    saw_body := false
+    refused_late := false
+    trailing_sent := false
+    late_headers_sent := false
+    late_data_sent := false
+    drain_deadline :: Instant.now() + Duration.from_secs(2)
+    loop Instant.now() < drain_deadline && (goaway_last.is_none() || !saw_body || !refused_late) {
+        if goaway_last.is_some() && !trailing_sent {
+            client.write_all(h2_frame(1, 0x5, 1, h2_literal_named_header("x-drain", "done"))).unwrap()
+            client.flush().unwrap()
+            trailing_sent = true
+        }
+        if goaway_last.is_some() && !late_headers_sent {
+            // HEADERS after GOAWAY must RST immediately (flushed).
+            client.write_all(h2_frame(1, 0x5, 3, h2_request_headers(0x82, "/late"))).unwrap()
+            client.flush().unwrap()
+            late_headers_sent = true
+        }
+        if refused_late && !late_data_sent {
+            // DATA on a higher/unknown stream must be discarded, not kill drain.
+            client.write_all(h2_frame(0, 0x1, 5, "late".as_bytes())).unwrap()
+            client.flush().unwrap()
+            late_data_sent = true
+        }
+        frame :: read_frame(&client)
+        if frame.is_none() { continue }
+        (kind, _, stream, payload) :: frame.unwrap()
+        match kind {
+            7 -> {
+                assert_eq(stream, 0)
+                assert(payload.len() >= 8, "GOAWAY payload too short")
+                last :: U32.from_be_bytes(payload[..4].try_into().unwrap()) & 0x7fff_ffff
+                error :: U32.from_be_bytes(payload[4..8].try_into().unwrap())
+                assert_eq(error, 0, "GOAWAY should be NO_ERROR")
+                goaway_last = Val(last)
+            }
+            0 if stream == 1 -> {
+                if payload.windows(7).any(part -> part == "drained".as_bytes()) { saw_body = true }
+            }
+            3 if stream == 3 -> {
+                assert_eq(payload.len(), 4)
+                assert_eq(U32.from_be_bytes(payload[..4].try_into().unwrap()), 7)
+                assert(!saw_body, "RST refuse must flush before the active handler finishes")
+                refused_late = true
+            }
+            _ -> {}
+        }
+    }
+    assert_eq(goaway_last, Val(1), "GOAWAY must advertise the accepted last stream")
+    assert(saw_body, "active request must drain after GOAWAY")
+    assert(refused_late, "streams after GOAWAY must be refused")
+    assert(trailing_sent, "accepted stream trailers must be exercised after GOAWAY")
+    assert(late_data_sent, "late DATA after GOAWAY must be exercised")
+    server.join().expect("server join").expect("http2 serve must survive discarded late DATA")
+}
+
+// Rust: tests/http_server_lifecycle.rs:6145
+#Test("http2_goaway_discards_orphan_continuation_without_aborting_drain") {
+    mux :: jet_http_mux_new()
+    (entered_tx, entered_rx) :: mpsc.channel()
+    release :: Arc.new(AtomicBool.new(false))
+    handler_release :: release.clone()
+    jet_http_mux_add(mux, "GET", "/slow", _ -> {
+        entered_tx.send(()).expect("entered")
+        deadline :: Instant.now() + Duration.from_secs(2)
+        loop !handler_release.load(Ordering.Acquire) {
+            assert(Instant.now() < deadline, "release timed out")
+            thread.sleep(Duration.from_millis(5))
+        }
+        jet_http_srv_response(200, "drained")
+    })
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    client := TcpStream.connect(addr).unwrap()
+    (server_stream, _) := listener.accept().unwrap()
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: shutdown.clone()
+    options := JetHTTPServerOptions.safe()
+    options.workers = 1
+    options.admission_queue = 1
+    options.shutdown_grace = Duration.from_secs(2)
+    options.read_idle_timeout = Duration.from_secs(2)
+    server :: thread.spawn(() -> jet_http2_serve(&server_stream, mux, options, server_shutdown, None, None))
+    client.set_read_timeout(Val(Duration.from_millis(50))).unwrap()
+    client.write_all(JET_HTTP2_PREFACE).unwrap()
+    client.write_all(h2_frame(4, 0, 0, [])).unwrap()
+    client.write_all(h2_frame(1, 0x5, 1, h2_request_headers(0x82, "/slow"))).unwrap()
+    client.flush().unwrap()
+    // Rust: tests/http_server_lifecycle.rs:6197
+    read_frame :: (stream: &TcpStream) -> (U8, U8, U32, [U8])? {
+        header := [U8]{0}.repeat(9)
+        match stream.read_exact(&header) {
+            Ok(()) -> {}
+            Err(error) -> {
+                if error.kind() == io.ErrorKind.WouldBlock || error.kind() == io.ErrorKind.TimedOut { return None }
+                panic("frame header: {error}")
+            }
+        }
+        length :: (USize(header[0]) << 16) | (USize(header[1]) << 8) | USize(header[2])
+        payload := [U8]{0}.repeat(length)
+        stream.read_exact(&payload).expect("frame payload")
+        Val((header[3], header[4], U32.from_be_bytes(header[5..9].try_into().unwrap()) & 0x7fff_ffff, ^payload))
+    }
+    saw_server_settings := false
+    deadline :: Instant.now() + Duration.from_secs(1)
+    loop !saw_server_settings {
+        assert(Instant.now() < deadline, "missing SETTINGS")
+        frame :: read_frame(&client)
+        if frame.is_none() { continue }
+        (kind, flags, stream, _) :: frame.unwrap()
+        if kind == 4 && stream == 0 {
+            saw_server_settings = true
+            if flags & 0x1 == 0 { client.write_all(h2_frame(4, 0x1, 0, [])).unwrap() }
+        }
+    }
+    entered_rx.recv_timeout(Duration.from_secs(1)).expect("handler entered")
+    shutdown.store(true, Ordering.Release)
+    goaway_last: U32? := None
+    saw_body := false
+    refused_partial := false
+    partial_headers_sent := false
+    continuation_sent := false
+    released := false
+    drain_deadline :: Instant.now() + Duration.from_secs(2)
+    loop Instant.now() < drain_deadline && (goaway_last.is_none() || !saw_body || !continuation_sent) {
+        if goaway_last.is_some() && !partial_headers_sent {
+            // Refuse partial HEADERS, then discard orphan CONTINUATION without aborting drain.
+            client.write_all(h2_frame(1, 0x0, 3, h2_request_headers(0x82, "/late"))).unwrap()
+            client.flush().unwrap()
+            partial_headers_sent = true
+        }
+        if refused_partial && !continuation_sent {
+            client.write_all(h2_frame(9, 0x4, 3, [])).unwrap()
+            client.flush().unwrap()
+            continuation_sent = true
+        }
+        if continuation_sent && !released {
+            release.store(true, Ordering.Release)
+            released = true
+        }
+        frame :: read_frame(&client)
+        if frame.is_none() { continue }
+        (kind, _, stream, payload) :: frame.unwrap()
+        match kind {
+            7 -> {
+                assert_eq(stream, 0)
+                assert(payload.len() >= 8, "GOAWAY payload too short")
+                last :: U32.from_be_bytes(payload[..4].try_into().unwrap()) & 0x7fff_ffff
+                error :: U32.from_be_bytes(payload[4..8].try_into().unwrap())
+                assert_eq(error, 0, "GOAWAY should be NO_ERROR")
+                goaway_last = Val(last)
+            }
+            0 if stream == 1 -> {
+                if payload.windows(7).any(part -> part == "drained".as_bytes()) { saw_body = true }
+            }
+            3 if stream == 3 -> {
+                assert_eq(payload.len(), 4)
+                assert_eq(U32.from_be_bytes(payload[..4].try_into().unwrap()), 7)
+                refused_partial = true
+            }
+            _ -> {}
+        }
+    }
+    assert_eq(goaway_last, Val(1), "GOAWAY must advertise the accepted last stream")
+    assert(refused_partial, "partial HEADERS after GOAWAY must be refused")
+    assert(continuation_sent, "orphan CONTINUATION after GOAWAY must be exercised")
+    assert(saw_body, "active request must drain after orphan CONTINUATION")
+    release.store(true, Ordering.Release)
+    server.join().expect("server join").expect("http2 serve must survive post-GOAWAY orphan CONTINUATION")
+}
+
+// Rust: tests/http_server_lifecycle.rs:6320
+#Test("http2_serve_honors_dynamic_grace_over_options_shutdown_grace") {
+    mux :: jet_http_mux_new()
+    (entered_tx, entered_rx) :: mpsc.channel()
+    hold :: Arc.new(AtomicBool.new(true))
+    handler_hold :: hold.clone()
+    jet_http_mux_add(mux, "GET", "/slow", _ -> {
+        _ :: entered_tx.send(())
+        loop handler_hold.load(Ordering.Acquire) { thread.sleep(Duration.from_millis(5)) }
+        jet_http_srv_response(200, "late")
+    })
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    client := TcpStream.connect(addr).unwrap()
+    (server_stream, _) := listener.accept().unwrap()
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: shutdown.clone()
+    grace_ms :: Arc.new(AtomicU64.new(45))
+    server_grace :: grace_ms.clone()
+    options := JetHTTPServerOptions.safe()
+    options.workers = 1
+    options.admission_queue = 1
+    // Ignoring dynamic_grace_ms would wait five seconds.
+    options.shutdown_grace = Duration.from_secs(5)
+    options.read_idle_timeout = Duration.from_secs(2)
+    server :: thread.spawn(() -> jet_http2_serve(&server_stream, mux, options, server_shutdown, Val(server_grace.as_ref()), None))
+    client.set_read_timeout(Val(Duration.from_millis(40))).unwrap()
+    client.write_all(JET_HTTP2_PREFACE).unwrap()
+    client.write_all(h2_frame(4, 0, 0, [])).unwrap()
+    client.write_all(h2_frame(1, 0x5, 1, h2_request_headers(0x82, "/slow"))).unwrap()
+    client.flush().unwrap()
+    deadline :: Instant.now() + Duration.from_secs(1)
+    loop {
+        assert(Instant.now() < deadline, "missing SETTINGS")
+        frame :: h2_try_read_frame(&client)
+        if frame.is_none() { continue }
+        (kind, flags, stream, _) :: frame.unwrap()
+        if kind == 4 && stream == 0 {
+            if flags & 0x1 == 0 { client.write_all(h2_frame(4, 0x1, 0, [])).unwrap() }
+            break
+        }
+    }
+    entered_rx.recv_timeout(Duration.from_secs(1)).expect("handler entered")
+    started :: Instant.now()
+    shutdown.store(true, Ordering.Release)
+    server.join().expect("join").expect("serve ok")
+    elapsed :: started.elapsed()
+    assert(elapsed < Duration.from_millis(800), "dynamic grace ignored; waited options.shutdown_grace: {elapsed:?}")
+    hold.store(false, Ordering.Release)
+}
+
+// Rust: tests/http_server_lifecycle.rs:6402
+#Test("http2_server_api_shutdown_grace_reaches_h2_drain") {
+    // A completed report while the handler is held proves H2 grace rather than TCP kill.
+    mux :: jet_http_mux_new()
+    (entered_tx, entered_rx) :: mpsc.channel()
+    hold :: Arc.new(AtomicBool.new(true))
+    handler_hold :: hold.clone()
+    jet_http_mux_add(mux, "GET", "/slow", _ -> {
+        _ :: entered_tx.send(())
+        loop handler_hold.load(Ordering.Acquire) { thread.sleep(Duration.from_millis(5)) }
+        jet_http_srv_response(200, "late")
+    })
+    server :: jet_http_server_bind("127.0.0.1:0", mux, None, None).expect("bind")
+    addr :: jet_http_server_local_addr(server).expect("local addr")
+    serving :: server.clone()
+    serve :: thread.spawn(() -> jet_http_server_serve(serving))
+    client := TcpStream.connect(addr).expect("connect")
+    client.set_read_timeout(Val(Duration.from_millis(40))).unwrap()
+    client.write_all(JET_HTTP2_PREFACE).unwrap()
+    client.write_all(h2_frame(4, 0, 0, [])).unwrap()
+    client.write_all(h2_frame(1, 0x5, 1, h2_request_headers(0x82, "/slow"))).unwrap()
+    client.flush().unwrap()
+    deadline :: Instant.now() + Duration.from_secs(1)
+    loop {
+        assert(Instant.now() < deadline, "missing SETTINGS before shutdown")
+        frame :: h2_try_read_frame(&client)
+        if frame.is_none() { continue }
+        (kind, flags, stream, _) :: frame.unwrap()
+        if kind == 4 && stream == 0 && flags & 0x1 == 0 {
+            client.write_all(h2_frame(4, 0x1, 0, [])).unwrap()
+            break
+        }
+    }
+    entered_rx.recv_timeout(Duration.from_secs(1)).expect("handler entered")
+    started :: Instant.now()
+    report :: jet_http_server_shutdown(server, jet_std.Duration{ms: 250}).expect("shutdown")
+    elapsed :: started.elapsed()
+    assert(hold.load(Ordering.Acquire), "handler must still be held — completion must come from H2 grace cancel, not a finished response")
+    assert_eq(report.user_cancelled, 0, "listener force-closed the socket; H2 did not honor Server.shutdown grace: {report:?}")
+    assert_eq(report.user_completed, report.user_accepted, "H2 drain must complete within Server.shutdown grace without TCP kill: {report:?}")
+    assert(report.user_accepted >= 1, "{report:?}")
+    assert(elapsed < Duration.from_millis(1500), "Server.shutdown(grace) did not bound H2 drain: {elapsed:?}")
+    assert(elapsed > Duration.from_millis(50), "shutdown returned too fast to prove grace drain: {elapsed:?}")
+    saw_goaway := false
+    observe :: Instant.now() + Duration.from_millis(400)
+    loop !saw_goaway && Instant.now() < observe {
+        if h2_try_read_frame(&client) == .Val((kind, _, stream, payload)) {
+            if kind == 7 && stream == 0 && payload.len() >= 8 {
+                last :: U32.from_be_bytes(payload[..4].try_into().unwrap()) & 0x7fff_ffff
+                error :: U32.from_be_bytes(payload[4..8].try_into().unwrap())
+                assert_eq(last, 1, "Server API GOAWAY must carry last-stream")
+                assert_eq(error, 0, "Server API GOAWAY must be NO_ERROR")
+                saw_goaway = true
+            }
+        }
+    }
+    assert(saw_goaway, "Server.shutdown must drive H2 GOAWAY")
+    hold.store(false, Ordering.Release)
+    _ :: serve.join().expect("serve join")
+}
+
+// Rust: tests/http_server_lifecycle.rs:6532
+#Test("tls_chunk_framing_scan_is_incremental_and_bounded") {
+    valid :: "POST / HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nTrailer: X-Checksum\r\n\r\n1 ; name=value\r\nx\r\n0\r\nX-Checksum: done\r\n\r\n".as_bytes()
+    (status, end, inspected) :: http_server_tls_runtime.framing_probe(valid)
+    assert_eq((status, end), (1, valid.len()))
+    assert(inspected <= valid.len() * 4, "valid scan was not linear: {inspected}")
+    repeated_length :: "POST / HTTP/1.1\r\nHost: local\r\nContent-Length: 1, 1\r\n\r\nx".as_bytes()
+    assert_eq(http_server_tls_runtime.framing_probe(repeated_length).0, 1, "valid repeated Content-Length was rejected")
+    hostile := "POST / HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n".as_bytes().to_vec()
+    hostile.extend([U8]{102}.repeat(32 * 1024 + 1))
+    (status, consumed, inspected) :: http_server_tls_runtime.framing_probe(hostile)
+    assert_eq(status, 2, "unbounded chunk-size line was not rejected")
+    assert(consumed <= hostile.len())
+    assert(inspected <= consumed * 4, "hostile scan was not linear: {inspected}/{consumed}")
+}
+
+// Rust: tests/http_server_lifecycle.rs:6560
+#Test("tls_oversized_content_length_chunk_and_framing_return_413") {
+    mux :: jet_http_mux_new()
+    calls :: Arc.new(AtomicUsize.new(0))
+    handler_calls :: calls.clone()
+    jet_http_mux_add(mux, "POST", "/", _ -> {
+        _ :: handler_calls.fetch_add(1, Ordering.AcqRel)
+        jet_http_srv_response(200, "unexpected")
+    })
+    cert :: include_str("../tests/fixtures/tls/localhost.cert.pem").to_string()
+    key :: include_str("../tests/fixtures/tls/localhost.key.pem").to_string()
+    server :: jet_http_server_bind_tls("127.0.0.1:0", mux, JetHTTPServerTls{cert_pem: cert, key_pem: key},
+        (cert, key) -> http_server_tls_runtime.jet_http_server_tls_validate_impl(cert, key),
+        (cert, key, stream, on_request, on_h2, should_stop) -> http_server_tls_runtime.jet_http_server_tls_session_impl(cert, key, stream, on_request, on_h2, should_stop)
+    ).expect("bind rustls tls")
+    addr: SocketAddr :: jet_http_server_local_addr(server).expect("addr").parse().expect("parse")
+    serving :: server.clone()
+    serve :: thread.spawn(() -> jet_http_server_serve(serving))
+    requests := [
+        "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1048577\r\n\r\n".as_bytes().to_vec(),
+        "POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n100001\r\n".as_bytes().to_vec()
+    ]
+    long_line := "POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n".as_bytes().to_vec()
+    long_line.extend([U8]{102}.repeat(32 * 1024 + 1))
+    requests.push(^long_line)
+    for request in requests {
+        started :: Instant.now()
+        client := rustls_fixture_client(addr)
+        response :: rustls_exchange(&client, request)
+        assert(response.starts_with("HTTP/1.1 413 Payload Too Large"), "{response}")
+        assert(started.elapsed() < Duration.from_secs(2))
+    }
+    assert_eq(calls.load(Ordering.Acquire), 0, "oversized TLS body reached handler")
+    _ :: jet_http_server_shutdown(server, jet_std.Duration{ms: 200}).expect("shutdown")
+    _ :: serve.join().expect("serve join")
+}
+
+// Rust: tests/http_server_lifecycle.rs:6628
+#Test("tls_rustls_keep_alive_and_server_shutdown") {
+    // Real TLS: bind → keep-alive reuse → shutdown prevents another request.
+    mux :: jet_http_mux_new()
+    jet_http_srv_install_request_id(mux)
+    calls :: Arc.new(AtomicUsize.new(0))
+    handler_calls :: calls.clone()
+    jet_http_mux_add(mux, "GET", "/", _ -> {
+        n :: handler_calls.fetch_add(1, Ordering.AcqRel) + 1
+        jet_http_srv_response(200, "ok{n}")
+    })
+    encoded_calls :: calls.clone()
+    jet_http_mux_add_handler(mux, "POST", "/encoded", Arc.new(req -> {
+        assert_eq(req.headers.first("content-encoding"), None)
+        assert_eq(req.headers.first("content-length"), None)
+        body :: req.body.text(1024)?
+        _ :: encoded_calls.fetch_add(1, Ordering.AcqRel)
+        Ok(jet_http_srv_response(200, body))
+    }))
+    trailer_calls :: calls.clone()
+    jet_http_mux_add_handler(mux, "POST", "/trailers", Arc.new(req -> {
+        assert(matches(jet_http_srv_req_trailers(req), Err(JetHTTPError.InvalidFraming)))
+        body :: req.body.text(1024)?
+        trailers :: jet_http_srv_req_trailers(req)?
+        assert_eq(trailers.first("x-checksum"), Val("tls-in"))
+        _ :: trailer_calls.fetch_add(1, Ordering.AcqRel)
+        response := jet_http_srv_response(200, "")
+        response.body = JetHTTPBody.reader(io.Cursor.new(^body), None)
+        trailers := JetHTTPHeaders.new()
+        trailers.append("X-Checksum", "tls-out").unwrap()
+        jet_http_srv_response_trailers(^response, ^trailers)
+    }))
+    jet_http_mux_add_handler(mux, "GET", "/error", Arc.new(_ -> Err(JetHTTPError.Internal{incident_id: "private-tls-handler-error"})))
+    cert :: include_str("../tests/fixtures/tls/localhost.cert.pem").to_string()
+    key :: include_str("../tests/fixtures/tls/localhost.key.pem").to_string()
+    tls :: JetHTTPServerTls{cert_pem: cert, key_pem: key}
+    server :: jet_http_server_bind_tls("127.0.0.1:0", mux, tls,
+        (cert, key) -> http_server_tls_runtime.jet_http_server_tls_validate_impl(cert, key),
+        (cert, key, stream, on_request, on_h2, should_stop) -> http_server_tls_runtime.jet_http_server_tls_session_impl(cert, key, stream, on_request, on_h2, should_stop)
+    ).expect("bind rustls tls")
+    addr: SocketAddr :: jet_http_server_local_addr(server).expect("addr").parse().expect("parse")
+    serving :: server.clone()
+    serve :: thread.spawn(() -> jet_http_server_serve(serving))
+    client := rustls_fixture_client(addr)
+    first :: rustls_exchange(&client, "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".as_bytes())
+    second :: rustls_exchange(&client, "GET / HTTP/1.1\r\nHost: localhost\r\nX-Request-Id: tls-client-id\r\n\r\n".as_bytes())
+    encoded_request := "POST /encoded HTTP/1.1\r\nHost: localhost\r\nContent-Encoding: gzip\r\nContent-Length: {HELLO_GZIP.len()}\r\n\r\n".into_bytes()
+    encoded_request.extend_from_slice(HELLO_GZIP)
+    encoded :: rustls_exchange(&client, encoded_request)
+    trailers :: rustls_exchange(&client, "POST /trailers HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\nTrailer: X-Checksum\r\n\r\n3\r\ntls\r\n0\r\nX-Checksum: tls-in\r\n\r\n".as_bytes())
+    failed :: rustls_exchange(&client, "GET /error HTTP/1.1\r\nHost: localhost\r\n\r\n".as_bytes())
+    assert(first.contains("\r\n\r\nok1"), "{first}")
+    assert(second.contains("\r\n\r\nok2"), "{second}")
+    assert(second.to_ascii_lowercase().contains("x-request-id: tls-client-id\r\n"), "{second}")
+    assert(encoded.contains("\r\n\r\nhello gzip"), "{encoded}")
+    assert(trailers.contains("Trailer: X-Checksum\r\n"), "{trailers}")
+    assert(trailers.ends_with("3\r\ntls\r\n0\r\nX-Checksum: tls-out\r\n\r\n"), "{trailers}")
+    assert(failed.starts_with("HTTP/1.1 500 Internal Server Error"), "{failed}")
+    assert(failed.lines().any(line -> line.to_ascii_lowercase().starts_with("x-request-id: req-")), "uncorrelated TLS failure: {failed}")
+    assert(!failed.contains("private"), "private TLS failure leaked: {failed}")
+    assert_eq(calls.load(Ordering.Acquire), 4)
+    started :: Instant.now()
+    report :: jet_http_server_shutdown(server, jet_std.Duration{ms: 200}).expect("shutdown")
+    _ :: client.write_all("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".as_bytes())
+    _ :: client.flush()
+    thread.sleep(Duration.from_millis(40))
+    assert_eq(calls.load(Ordering.Acquire), 4, "Server.shutdown must stop rustls keep-alive reuse without client Connection: close")
+    assert(started.elapsed() < Duration.from_millis(1500), "{report:?}")
+    assert_eq(report.user_accepted, 1, "{report:?}")
+    assert_eq(report.user_completed + report.user_cancelled, report.user_accepted, "{report:?}")
+    _ :: serve.join().expect("serve join")
+}
+
+// Rust: tests/http_server_lifecycle.rs:6793
+#Test("tls_rustls_alpn_serves_native_http2_streams_trailers_and_shutdown") {
+    mux :: jet_http_mux_new()
+    calls :: Arc.new(AtomicUsize.new(0))
+    trailer_calls :: calls.clone()
+    jet_http_mux_add_handler(mux, "POST", "/trailers", Arc.new(request -> {
+        assert(matches(jet_http_srv_req_trailers(request), Err(JetHTTPError.InvalidFraming)))
+        body :: request.body.text(64)?
+        incoming :: jet_http_srv_req_trailers(request)?
+        assert_eq(incoming.all("x-trace"), ["one", "two"])
+        _ :: trailer_calls.fetch_add(1, Ordering.AcqRel)
+        trailers := JetHTTPHeaders.new()
+        trailers.append("X-Trace", "first").unwrap()
+        trailers.append("x-trace", "second").unwrap()
+        jet_http_srv_response_trailers(jet_http_srv_response(200, "tls-h2:{body}"), ^trailers)
+    }))
+    fast_calls :: calls.clone()
+    jet_http_mux_add(mux, "GET", "/fast", _ -> {
+        _ :: fast_calls.fetch_add(1, Ordering.AcqRel)
+        jet_http_srv_response(200, "fast")
+    })
+    cert :: include_str("../tests/fixtures/tls/localhost.cert.pem").to_string()
+    key :: include_str("../tests/fixtures/tls/localhost.key.pem").to_string()
+    server :: jet_http_server_bind_tls("127.0.0.1:0", mux, JetHTTPServerTls{cert_pem: cert, key_pem: key},
+        (cert, key) -> http_server_tls_runtime.jet_http_server_tls_validate_impl(cert, key),
+        (cert, key, stream, on_request, on_h2, should_stop) -> http_server_tls_runtime.jet_http_server_tls_session_impl(cert, key, stream, on_request, on_h2, should_stop)
+    ).expect("bind rustls h2")
+    addr: SocketAddr :: jet_http_server_local_addr(server).expect("addr").parse().expect("parse")
+    serving :: server.clone()
+    serve :: thread.spawn(() -> jet_http_server_serve(serving))
+    // Two concurrent streams share one negotiated TLS connection.
+    client := rustls_fixture_client_with_alpn(addr, ["h2".as_bytes()])
+    client.write_all(JET_HTTP2_PREFACE).unwrap()
+    client.write_all(h2_frame(4, 0, 0, [])).unwrap()
+    client.write_all(h2_frame(1, 0x4, 1, h2_request_headers(0x83, "/trailers"))).unwrap()
+    client.write_all(h2_frame(1, 0x5, 3, h2_request_headers(0x82, "/fast"))).unwrap()
+    client.write_all(h2_frame(0, 0, 1, "body".as_bytes())).unwrap()
+    request_trailers := h2_literal_named_header("x-trace", "one")
+    request_trailers.extend_from_slice(h2_literal_named_header("x-trace", "two"))
+    client.write_all(h2_frame(1, 0x5, 1, request_trailers)).unwrap()
+    client.flush().unwrap()
+    assert_eq(client.conn.alpn_protocol(), Val("h2".as_bytes()))
+    stream_one_body: [U8] := []
+    stream_one_trailers: [(String, String)] := []
+    stream_one_done := false
+    stream_three_body: [U8] := []
+    stream_three_done := false
+    decoder := JetHTTP2Hpack.new()
+    loop !stream_one_done || !stream_three_done {
+        frame :: jet_http2_read_frame(&client).unwrap()
+        if frame.stream == 1 && frame.kind == 0 {
+            stream_one_body.extend_from_slice(frame.payload)
+            assert_eq(frame.flags & 0x1, 0, "TLS H2 DATA ended before trailers")
+        } else if frame.stream == 1 && frame.kind == 1 {
+            headers :: jet_http2_decode_headers(&decoder, frame.payload).unwrap()
+            if frame.flags & 0x1 != 0 {
+                stream_one_trailers = ^headers
+                stream_one_done = true
+            }
+        } else if frame.stream == 3 && frame.kind == 0 {
+            stream_three_body.extend_from_slice(frame.payload)
+            stream_three_done = frame.flags & 0x1 != 0
+        }
+    }
+    assert_eq(stream_one_body, "tls-h2:body".as_bytes())
+    assert_eq(stream_three_body, "fast".as_bytes())
+    assert_eq(stream_one_trailers.into_iter().filter_map((name, value) -> if name == "x-trace" { Val(^value) } else { None }).collect(), ["first", "second"])
+    assert_eq(calls.load(Ordering.Acquire), 2)
+    client.write_all(h2_frame(7, 0, 0, [U8]{0}.repeat(8))).unwrap()
+    client.flush().unwrap()
+    drop(^client)
+    // An oversized frame on a second TLS connection closes before handler completion.
+    bounded := rustls_fixture_client_with_alpn(addr, ["h2".as_bytes()])
+    bounded.write_all(JET_HTTP2_PREFACE).unwrap()
+    bounded.write_all(h2_frame(4, 0, 0, [])).unwrap()
+    bounded.write_all(h2_frame(1, 0x4, 1, h2_request_headers(0x83, "/trailers"))).unwrap()
+    bounded.write_all(h2_frame(0, 0, 1, [U8]{0}.repeat(JET_HTTP2_MAX_FRAME + 1))).unwrap()
+    bounded.flush().unwrap()
+    assert_eq(bounded.conn.alpn_protocol(), Val("h2".as_bytes()))
+    bounded_goaway := false
+    bounded_closed := false
+    for _ in 0..4 {
+        match jet_http2_read_frame(&bounded) {
+            Ok(frame) if frame.kind == 7 -> {
+                bounded_goaway = true
+                assert_eq(frame.payload[..4], U32{1}.to_be_bytes())
+                assert_eq(frame.payload[4..8], U32{1}.to_be_bytes())
+            }
+            Ok(_) -> {}
+            Err(_) -> { bounded_closed = true; break }
+        }
+    }
+    assert(bounded_goaway, "oversized TLS H2 frame omitted protocol GOAWAY")
+    assert(bounded_closed, "oversized TLS H2 frame did not close the connection")
+    assert_eq(calls.load(Ordering.Acquire), 2, "bounded request completed a handler")
+    // An open request proves shutdown sends GOAWAY and respects its grace.
+    draining := rustls_fixture_client_with_alpn(addr, ["h2".as_bytes()])
+    draining.write_all(JET_HTTP2_PREFACE).unwrap()
+    draining.write_all(h2_frame(4, 0, 0, [])).unwrap()
+    draining.write_all(h2_frame(1, 0x4, 1, h2_request_headers(0x83, "/trailers"))).unwrap()
+    draining.write_all(h2_frame(0, 0, 1, "partial".as_bytes())).unwrap()
+    draining.flush().unwrap()
+    assert_eq(draining.conn.alpn_protocol(), Val("h2".as_bytes()))
+    loop {
+        frame :: jet_http2_read_frame(&draining).unwrap()
+        if frame.kind == 4 && frame.stream == 0 { break }
+    }
+    started :: Instant.now()
+    report :: jet_http_server_shutdown(server, jet_std.Duration{ms: 40}).expect("shutdown")
+    assert(started.elapsed() < Duration.from_millis(1500), "{report:?}")
+    saw_goaway := false
+    loop {
+        result :: jet_http2_read_frame(&draining)
+        if result.is_err() { break }
+        frame :: result.unwrap()
+        if frame.kind == 7 {
+            saw_goaway = true
+            assert_eq(frame.payload[..4], U32{1}.to_be_bytes())
+            break
+        }
+    }
+    assert(saw_goaway, "TLS H2 shutdown omitted GOAWAY")
+    assert_eq(report.user_accepted, 3, "{report:?}")
+    assert_eq(report.user_completed + report.user_cancelled, report.user_accepted, "{report:?}")
+    assert_eq(calls.load(Ordering.Acquire), 2, "partial request completed during shutdown")
+    _ :: serve.join().expect("serve join")
+}
+
+// Rust: tests/http_server_lifecycle.rs:7146
+#Test("builtin_middleware_timeout_body_limit_cors_compress_and_access_log") {
+    HTTP_ACCESS_LOG_LINES.get_or_init(() -> Mutex.new([])).lock().unwrap().clear()
+    slow :: jet_http_mw_timeout(jet_std.Duration{ms: 30}, Arc.new(_ -> {
+        thread.sleep(Duration.from_millis(120))
+        Ok(jet_http_srv_response(200, "slow"))
+    }))
+    timed :: slow(JetHTTPRequest.server("GET", "/slow", [], JetHTTPHeaders.new()))
+    assert_eq(timed.unwrap().status, 504)
+    limited :: jet_http_mw_body_limit(4, Arc.new(_ -> Ok(jet_http_srv_response(200, "ok"))))
+    big := JetHTTPRequest.server("POST", "/", [U8]{0}.repeat(8), JetHTTPHeaders.new())
+    big.body = JetHTTPBody.from_bytes([U8]{0}.repeat(8))
+    assert(matches(limited(^big), Err(JetHTTPError.BodyTooLarge{limit: 4})))
+    policy :: jet_http_cors_policy(JetHTTPCorsOrigins.List(["https://app.example"]), [], [], false, 86_400).unwrap()
+    cors :: jet_http_mw_cors(policy, Arc.new(_ -> Ok(jet_http_srv_response(200, "ok"))))
+    preflight_headers := JetHTTPHeaders.new()
+    preflight_headers.append("origin", "https://app.example").unwrap()
+    preflight_headers.append("access-control-request-method", "POST").unwrap()
+    preflight :: cors(JetHTTPRequest.server("OPTIONS", "/api", [], ^preflight_headers)).unwrap()
+    assert_eq(preflight.status, 204)
+    assert_eq(preflight.headers.get("access-control-allow-origin"), Val("https://app.example"))
+    compress :: jet_http_mw_compress(JetHTTPCompressEncoding.Gzip, Arc.new(_ -> Ok(jet_http_srv_response(200, "compressible"))))
+    gzip_headers := JetHTTPHeaders.new()
+    gzip_headers.append("accept-encoding", "gzip").unwrap()
+    gzip :: compress(JetHTTPRequest.server("GET", "/", [], ^gzip_headers)).unwrap()
+    assert_eq(gzip.headers.get("content-encoding"), Val("gzip"))
+    assert(gzip.body.bytes(64).unwrap().starts_with([0x1f, 0x8b]))
+    logged :: jet_http_mw_access_log(Arc.new(_ -> Ok(jet_http_srv_response(201, "x"))))
+    req := JetHTTPRequest.server("GET", "/logs/1", [], JetHTTPHeaders.new())
+    req.route_template = Val("/logs/:id")
+    assert_eq(logged(^req).unwrap().status, 201)
+    lines :: HTTP_ACCESS_LOG_LINES.get().unwrap().lock().unwrap()
+    assert_eq(lines.len(), 1)
+    assert(lines[0].contains("route=/logs/:id"))
+    assert(lines[0].contains("status=201"))
+    assert(!lines[0].contains("secret"))
+}
+
+// Rust: tests/http_server_lifecycle.rs:7241
+#Test("static_files_handler_serves_root_index_and_rejects_traversal") {
+    root :: env.temp_dir().join("jet-http-static-handler-{process.id()}-{SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()}")
+    fs.create_dir_all(root.join("nested")).unwrap()
+    fs.write(root.join("index.html"), "index".as_bytes()).unwrap()
+    fs.write(root.join("nested/data.bin"), [U8]{1, 2, 3}).unwrap()
+    handler :: jet_http_srv_static_files_handler("", root.to_string_lossy().into_owned(), JetHTTPStaticOptions.safe())
+    ok :: handler(JetHTTPRequest.server("GET", "/nested/data.bin", [], JetHTTPHeaders.new())).unwrap()
+    assert_eq(ok.status, 200)
+    assert_eq(ok.body.bytes(16).unwrap(), [U8]{1, 2, 3})
+    index :: handler(JetHTTPRequest.server("GET", "/", [], JetHTTPHeaders.new())).unwrap()
+    assert_eq(index.body.bytes(16).unwrap(), "index".as_bytes())
+    blocked :: handler(JetHTTPRequest.server("GET", "/../secret", [], JetHTTPHeaders.new())).unwrap()
+    assert_eq(blocked.status, 404)
+    fs.remove_dir_all(root).unwrap()
+}
+
+// Rust: tests/http_server_lifecycle.rs:7289
+// D-HTTP-STATIC-FILES1=A: defaults refuse hostile paths; expert options open exactly one.
+#Test("static_files_mount_refuses_escapes_dotfiles_and_link_escapes") {
+    base :: env.temp_dir().join("jet-http-static-hostile-{process.id()}-{SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()}")
+    root :: base.join("public")
+    fs.create_dir_all(root.join("nested")).unwrap()
+    fs.write(base.join("secret.txt"), "outside".as_bytes()).unwrap()
+    fs.write(root.join("index.html"), "index".as_bytes()).unwrap()
+    fs.write(root.join(".env"), "TOKEN=private".as_bytes()).unwrap()
+    fs.write(root.join("nested/app.css"), "body{}".as_bytes()).unwrap()
+    if target.selected_family() == "unix" {
+        std.os.unix.fs.symlink(base.join("secret.txt"), root.join("escape.txt")).unwrap()
+        std.os.unix.fs.symlink(root.join("nested/app.css"), root.join("inside.css")).unwrap()
+    }
+    get :: (path: String) -> JetHTTPRequest.server("GET", path.to_string(), [], JetHTTPHeaders.new())
+    serve :: (path: String, options: JetHTTPStaticOptions) -> jet_http_srv_static_files(get(path), "/assets", root, options).unwrap()
+    safe :: JetHTTPStaticOptions.safe()
+    assert_eq(serve("/assets/nested/app.css", safe).status, 200)
+    assert_eq(serve("/assets/", safe).body.bytes(64).unwrap(), "index".as_bytes())
+    assert_eq(serve("/nested/app.css", safe).status, 404)
+    assert_eq(serve("/assetsother/app.css", safe).status, 404)
+    assert_eq(serve("/assets/../secret.txt", safe).status, 404)
+    assert_eq(serve("/assets/nested/../../secret.txt", safe).status, 404)
+    assert_eq(serve("/assets/%2e%2e/secret.txt", safe).status, 404)
+    assert_eq(serve("/assets/%2fsecret.txt", safe).status, 404)
+    assert_eq(serve("/assets/.env", safe).status, 404)
+    dotfiles := safe
+    dotfiles.dotfiles = true
+    assert_eq(serve("/assets/.env", dotfiles).status, 200)
+    if target.selected_family() == "unix" {
+        assert_eq(serve("/assets/escape.txt", safe).status, 404)
+        assert_eq(serve("/assets/inside.css", safe).status, 404)
+        links := safe
+        links.follow_links = true
+        assert_eq(serve("/assets/escape.txt", links).status, 404)
+        assert_eq(serve("/assets/inside.css", links).status, 200)
+    }
+    no_index := safe
+    no_index.index = false
+    assert_eq(serve("/assets/", no_index).status, 404)
+    mux :: jet_http_mux_new()
+    jet_http_srv_static_files_mount(mux, "/assets", root.to_string_lossy().into_owned(), safe)
+    served :: jet_http_mux_dispatch(mux, get("/assets/nested/app.css")).unwrap()
+    assert_eq(served.status, 200)
+    assert_eq(served.headers.get("content-type"), Val("text/css; charset=utf-8"))
+    head :: jet_http_mux_dispatch(mux, JetHTTPRequest.server("HEAD", "/assets/nested/app.css", [], JetHTTPHeaders.new())).unwrap()
+    assert_eq(head.status, 200)
+    assert_eq(jet_http_mux_dispatch(mux, get("/assets/.env")).unwrap().status, 404)
+    fs.remove_dir_all(base).unwrap()
+}
+
+// Rust: tests/http_server_lifecycle.rs:7397
+// D-HTTP-CORS1=A: absent policy adds no headers; credentialed Any is refused.
+#Test("cors_policy_rejects_any_origin_with_credentials_and_stamps_named_origins") {
+    refused :: jet_http_cors_policy(JetHTTPCorsOrigins.Any, [], [], true, 86_400)
+    reason :: match refused {
+        Err(JetHTTPError.Policy{reason}) -> ^reason
+        _ -> panic("`.Any` origins with credentials must be refused")
+    }
+    assert(reason.contains("CORS credentials need named origins"))
+    assert(reason.contains("set credentials to false"))
+    bare :: jet_http_mux_new()
+    jet_http_mux_add(bare, "GET", "/api", _ -> jet_http_srv_response(200, "ok"))
+    origin_headers := JetHTTPHeaders.new()
+    origin_headers.append("origin", "https://app.example").unwrap()
+    plain :: jet_http_mux_dispatch(bare, JetHTTPRequest.server("GET", "/api", [], origin_headers.clone())).unwrap()
+    assert_eq(plain.headers.get("access-control-allow-origin"), None)
+    policy :: jet_http_cors_policy(JetHTTPCorsOrigins.List(["https://app.example"]), ["GET", "POST"], ["content-type"], true, 600).unwrap()
+    mux :: jet_http_mux_new()
+    jet_http_srv_install_cors(mux, policy)
+    jet_http_mux_add(mux, "GET", "/api", _ -> {
+        response := jet_http_srv_response(200, "ok")
+        _ :: response.headers.set("vary", "accept-encoding")
+        response
+    })
+    preflight_headers := origin_headers.clone()
+    preflight_headers.append("access-control-request-method", "POST").unwrap()
+    preflight :: jet_http_mux_dispatch(mux, JetHTTPRequest.server("OPTIONS", "/api", [], ^preflight_headers)).unwrap()
+    assert_eq(preflight.status, 204)
+    assert_eq(preflight.headers.get("access-control-allow-origin"), Val("https://app.example"))
+    assert_eq(preflight.headers.get("access-control-allow-methods"), Val("GET, POST"))
+    assert_eq(preflight.headers.get("access-control-allow-headers"), Val("content-type"))
+    assert_eq(preflight.headers.get("access-control-allow-credentials"), Val("true"))
+    assert_eq(preflight.headers.get("access-control-max-age"), Val("600"))
+    allowed :: jet_http_mux_dispatch(mux, JetHTTPRequest.server("GET", "/api", [], ^origin_headers)).unwrap()
+    assert_eq(allowed.headers.get("access-control-allow-origin"), Val("https://app.example"))
+    assert_eq(allowed.headers.get("vary"), Val("accept-encoding, origin"))
+    other := JetHTTPHeaders.new()
+    other.append("origin", "https://evil.example").unwrap()
+    denied :: jet_http_mux_dispatch(mux, JetHTTPRequest.server("GET", "/api", [], ^other)).unwrap()
+    assert_eq(denied.status, 200)
+    assert_eq(denied.headers.get("access-control-allow-origin"), None)
+    any :: jet_http_cors_policy(JetHTTPCorsOrigins.Any, [], [], false, 0).unwrap()
+    any_mux :: jet_http_mux_new()
+    jet_http_srv_install_cors(any_mux, any)
+    jet_http_mux_add(any_mux, "GET", "/api", _ -> jet_http_srv_response(200, "ok"))
+    anywhere := JetHTTPHeaders.new()
+    anywhere.append("origin", "https://anywhere.example").unwrap()
+    wide :: jet_http_mux_dispatch(any_mux, JetHTTPRequest.server("GET", "/api", [], ^anywhere)).unwrap()
+    assert_eq(wide.headers.get("access-control-allow-origin"), Val("*"))
+}
+
+// Rust: tests/http_server_lifecycle.rs:7530
+// D-HTTP-JSON1=A: JSON content type and shared body framing cap.
+#Test("server_json_sets_the_content_type_and_the_body_cap_still_holds") {
+    response :: jet_http_srv_json(201, "payload")
+    assert_eq(response.status, 201)
+    assert_eq(response.headers.get("content-type"), Val("application/json; charset=utf-8"))
+    assert_eq(response.body.bytes(64).unwrap(), "{\"ok\":true}".as_bytes())
+    body :: JetHTTPBody.from_text("{\"a\":1}")
+    decoded: String :: jet_http_body_json(body, 64).unwrap()
+    assert_eq(decoded, "{\"a\":1}")
+    oversized :: JetHTTPBody.from_text("{\"a\":1}")
+    assert(matches(jet_http_body_json::<String>(oversized, 2), Err(JetHTTPError.BodyTooLarge{limit: 2})))
 }
