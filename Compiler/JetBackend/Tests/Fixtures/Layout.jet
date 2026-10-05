@@ -1,0 +1,156 @@
+// Record layout, variant identity and fixed-word boundary fixtures
+// (Core-Host-Native fix specs 1, 3 and 7): a computed field takes no slot,
+// variant tags are declaration ordinals whatever their authored numbers, a
+// fixed remainder by -1 is 0 and a fixed negation of the minimum stops.
+use jet_foundation.[
+    MIRBinaryDispatch,
+    MIRBinaryOp,
+    MIRBinaryOverflow,
+    MIRBlockID,
+    MIRCallArg,
+    MIRAccess,
+    MIRCallee,
+    MIRConstant,
+    MIRDropKind,
+    MIREnumArg,
+    MIRField,
+    MIRFieldValue,
+    MIRFunction,
+    MIRIntegerWidth,
+    MIROperation,
+    MIRProgram,
+    MIRShapeFieldNames,
+    MIRTerminator,
+    MIRType,
+    MIRTypeDef,
+    MIRTypeDefKind,
+    MIRTypeKind,
+    MIRUnaryOp,
+    MIRValueID,
+    MIRVariant,
+    MIRVariantPayload,
+    MIRFunctionID,
+    mir_copy_ownership,
+    mir_field_id,
+    mir_function_id,
+    mir_owned_ownership,
+    mir_type_from_kind,
+    mir_type_id,
+]
+
+fn fx_i64() -> MIRType Never! { mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 64}) }
+
+fn fx_i64_const(b: &FxBuilder, value: Int) -> MIRValueID Never! {
+    fx_copy(&b, fx_i64(), MIROperation.Constant{value: MIRConstant.Int{value: value, width: Val(MIRIntegerWidth{signed: true, bits: 64}), spelling: None}})
+}
+
+fn fx_stored_or_computed(owner: String, name: String, ty: MIRType, computed: Bool) -> MIRField Never! {
+    MIRField{
+        id: mir_field_id("{owner}.{name}"),
+        name: name,
+        shape_names: MIRShapeFieldNames{text: name, json: None, cbor: None, csv: None, toml: None, yaml: None, xml: None, args: name, env: name, db: None, layout: None},
+        skip: false,
+        ty: ty,
+        span: fx_span(),
+        public: true,
+        package_public: true,
+        computed: computed,
+        has_default: false,
+        redact: false,
+    }
+}
+
+fn fx_call_i64(b: &FxBuilder, name: String, args: [MIRValueID]) -> MIRValueID Never! {
+    call_args := [MIRCallArg]{}
+    loop arg in args -> &call_args.push(fx_arg(arg, MIRAccess.Read))
+    fx_copy(&b, fx_i64(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id(name)}, args: call_args, type_args: [MIRType]{}})
+}
+
+// struct Derived {
+//     n: I64
+//     description: String -> "computed"
+//     label: String
+// }
+// enum Kind { First = 1, Second }
+// fn rem(value: I64, by: I64) -> I64 { value % by }
+// fn run() {
+//     d :: Derived{n: I64{7}, label: "kept"}
+//     print(d.n)
+//     e :: d.clone()
+//     print(e.label)
+//     k :: Kind.First
+//     print(k == .Second)
+//     print(k == .First)
+//     print(rem(I64.MIN, I64{-1}))
+//     print(rem(I64{7}, I64{-1}))
+//     print(rem(I64{-7}, I64{3}))
+// }
+// expect-stdout layout: "7\nkept\nfalse\ntrue\n0\n0\n-1\n"
+fn fx_layout() -> MIRProgram Never! {
+    derived :: fx_named("Derived")
+    kind :: fx_named("Kind")
+    types :: [MIRTypeDef]{
+        fx_type_def("Derived", MIRTypeDefKind.Struct{fields: [MIRField]{
+            fx_stored_or_computed("Derived", "n", fx_i64(), false),
+            fx_stored_or_computed("Derived", "description", fx_string(), true),
+            fx_stored_or_computed("Derived", "label", fx_string(), false),
+        }, methods: [MIRFunctionID]{}}),
+        fx_type_def("Kind", MIRTypeDefKind.Enum{variants: [MIRVariant]{
+            MIRVariant{name: "First", wire_name: "First", span: fx_span(), payload: MIRVariantPayload.Unit, discriminant: Val(1)},
+            MIRVariant{name: "Second", wire_name: "Second", span: fx_span(), payload: MIRVariantPayload.Unit, discriminant: None},
+        }, methods: [MIRFunctionID]{}}),
+    }
+
+    q := fx_builder()
+    value :: fx_param(&q, "value", fx_i64(), mir_copy_ownership())
+    by :: fx_param(&q, "by", fx_i64(), mir_copy_ownership())
+    remainder :: fx_copy(&q, fx_i64(), MIROperation.Binary{op: MIRBinaryOp.Rem, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Trap, left: value, right: by})
+    fx_block(&q, 0, MIRTerminator.Return{value: Val(remainder)})
+
+    r := fx_builder()
+    seven :: fx_i64_const(&r, 7)
+    kept :: fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "kept"}})
+    d :: fx_owned(&r, derived, MIROperation.Struct{type_id: mir_type_id("Derived"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("Derived.n"), value: seven}, MIRFieldValue{field: mir_field_id("Derived.label"), value: kept}}})
+    n :: fx_copy(&r, fx_i64(), MIROperation.Field{base: d, field: mir_field_id("Derived.n")})
+    fx_print(&r, n)
+    e :: fx_owned(&r, derived, MIROperation.Copy{value: d, fact: MIRCopyFact.Explicit})
+    label :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.Field{base: e, field: mir_field_id("Derived.label")})
+    fx_print(&r, label)
+    fx_do(&r, MIROperation.Drop{value: d, kind: MIRDropKind.Value})
+    fx_do(&r, MIROperation.Drop{value: e, kind: MIRDropKind.Value})
+    k :: fx_copy(&r, kind, MIROperation.Enum{type_id: mir_type_id("Kind"), variant: "First", args: [MIREnumArg]{}})
+    is_second :: fx_compare_value(&r, MIROperation.EnumIs{subject: k, owner: mir_type_id("Kind"), variant: "Second"})
+    fx_print(&r, is_second)
+    is_first :: fx_compare_value(&r, MIROperation.EnumIs{subject: k, owner: mir_type_id("Kind"), variant: "First"})
+    fx_print(&r, is_first)
+    minimum :: fx_i64_const(&r, -9223372036854775807 - 1)
+    minus_one :: fx_i64_const(&r, -1)
+    first_rem :: fx_call_i64(&r, "rem", [MIRValueID]{minimum, minus_one})
+    fx_print(&r, first_rem)
+    second_rem :: fx_call_i64(&r, "rem", [MIRValueID]{seven, minus_one})
+    fx_print(&r, second_rem)
+    minus_seven :: fx_i64_const(&r, -7)
+    three :: fx_i64_const(&r, 3)
+    third_rem :: fx_call_i64(&r, "rem", [MIRValueID]{minus_seven, three})
+    fx_print(&r, third_rem)
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("rem", q, fx_i64()), fx_function("run", r, fx_unit())}, ^types)
+}
+
+// fn negate(value: I64) -> I64 { -value }
+// fn run() { print(negate(I64.MIN)) }
+// expect-stdout negate-min: ""
+// expect-exit negate-min: 70
+fn fx_negate_min() -> MIRProgram Never! {
+    g := fx_builder()
+    value :: fx_param(&g, "value", fx_i64(), mir_copy_ownership())
+    negated :: fx_copy(&g, fx_i64(), MIROperation.Unary{op: MIRUnaryOp.Neg, value: value})
+    fx_block(&g, 0, MIRTerminator.Return{value: Val(negated)})
+
+    r := fx_builder()
+    minimum :: fx_i64_const(&r, -9223372036854775807 - 1)
+    negated_min :: fx_call_i64(&r, "negate", [MIRValueID]{minimum})
+    fx_print(&r, negated_min)
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("negate", g, fx_i64()), fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}

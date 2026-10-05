@@ -161,8 +161,10 @@ by `node Compiler/Bootstrap/generate-core-sources.mjs`, which
 holds current.
 
 `jet build` writes `.jet/build/<stem>` in that source root. The default and
-`--profile debug` builds use the Jet-native backend (`lir_lower_program` and a
-static x86-64 executable); a program that backend cannot lower yet is refused
+`--profile debug` builds use the Jet-native backend: `lir_lower_entry` lowers
+the functions `fn run` reaches to a relocatable object, and the in-process
+linker binds it to the runtime pack shipped beside `jet` into a static x86-64
+executable. A program that backend cannot lower yet is refused
 with E2104. `--release` (or `--profile release`) compiles the emitted Rust with
 rustc and the release profile flags. Other build flags and profiles are
 refused with E2104 until they are ported.

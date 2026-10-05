@@ -1,0 +1,370 @@
+// Dependency discovery for Mono's queue (Mono.jet): what one concrete body,
+// type or render reaches. Bodies are visited as they are, borrowed originals
+// or materialized instances, so every type and callee here is concrete.
+use jet_foundation.[
+    MIRCallArg, MIRCallFallibility, MIRCallee, MIRConstant,
+    MIRFailureCarrier, MIRFunction, MIRFunctionID,
+    MIROperation, MIRProgram, MIRSemanticOp, MIRType,
+    MIRValueID,
+]
+
+fn lower_reach_optional(p: MIRProgram, q: &LowerPrepared, id: MIRFunctionID?, parent: Int, site: String) Never! {
+    if id == .Val(function) -> lower_mono_request(p, &q, function, None, [MIRType]{}, parent, site).drop("dependency request")
+}
+
+fn lower_reach_failure(q: &LowerPrepared, failure: MIRFailureCarrier, parent: Int) Never! {
+    if failure == {
+        .Infallible -> {}
+        .Result(success, error) -> {
+            lower_mono_intern_type(&q, success, parent)
+            lower_mono_intern_type(&q, error, parent)
+        }
+        .Optional(value) | .Diverges(value) -> lower_mono_intern_type(&q, value, parent)
+    }
+}
+
+fn lower_reach_fallibility(q: &LowerPrepared, fallibility: MIRCallFallibility, parent: Int) Never! {
+    if fallibility == .Failure(failure) -> lower_reach_failure(&q, failure, parent)
+}
+
+fn lower_reach_constant(q: &LowerPrepared, value: MIRConstant, parent: Int) Never! {
+    if value == {
+        .List(values) -> { loop item in values -> lower_reach_constant(&q, item, parent) }
+        .Map(entries) -> { loop entry in entries -> lower_reach_constant(&q, entry.value, parent) }
+        .Struct(_, fields) -> { loop field in fields -> lower_reach_constant(&q, field.value, parent) }
+        .Enum(_, _, args) -> { loop arg in args -> lower_reach_constant(&q, arg.value, parent) }
+        .Present(inner) -> lower_reach_constant(&q, inner, parent)
+        .Failed(report) -> {
+            if report == {
+                .Clean(ty) -> lower_mono_intern_type(&q, ty, parent)
+                .Told(inner) -> lower_reach_constant(&q, inner, parent)
+            }
+        }
+        else -> {}
+    }
+}
+
+fn lower_reach_id(q: &LowerPrepared, id: U64, parent: Int) Never! {
+    row :: q.checked_types.rows.get(id) ?? return
+    ty :: ~q.checked_types.types[row]
+    lower_mono_intern_type(&q, ty, parent)
+}
+
+fn lower_reach_arg(q: &LowerPrepared, arg: MIRCallArg, parent: Int) Never! {
+    if arg.fn_coercion == .Val(value) -> lower_mono_intern_type(&q, value.ty, parent)
+    if arg.box_as_trait == .Val(id) -> lower_reach_id(&q, id.value, parent)
+    if arg.widen_to_union == .Val(value) -> lower_reach_id(&q, value.union.value, parent)
+}
+
+fn lower_reach_callback(p: MIRProgram, q: &LowerPrepared, callback: U64, parent: Int, site: String) Never! {
+    row :: q.callbacks.get(callback) ?? return
+    if q.callbacks_seen.get(callback) != None -> return
+    &q.callbacks_seen.add(callback, true).drop("checked absent above")
+    adapter :: p.callbacks[row]
+    loop param in adapter.params -> lower_mono_intern_type(&q, param.ty, parent)
+    if adapter.return_type == .Val(ty) -> lower_mono_intern_type(&q, ty, parent)
+    lower_mono_request(p, &q, adapter.function, None, [MIRType]{}, parent, site).drop("callback request")
+}
+
+fn lower_reach_callee(p: MIRProgram, q: &LowerPrepared, callee: MIRCallee, type_args: [MIRType], parent: Int, site: String) Never! {
+    loop ty in type_args -> lower_mono_intern_type(&q, ty, parent)
+    if callee == {
+        .User(id) -> lower_mono_request(p, &q, id, None, type_args, parent, site).drop("direct call")
+        .Associated(id, owner) | .Method(id, owner) -> {
+            lower_mono_intern_type(&q, owner, parent)
+            lower_mono_request(p, &q, id, Val(owner), type_args, parent, site).drop("direct call")
+        }
+        .TraitMethod(method, _, receiver) -> {
+            lower_mono_intern_type(&q, receiver, parent)
+            if q.trait_seen.get(method.value) == None {
+                &q.trait_seen.add(method.value, true).drop("checked absent above")
+                first :: q.trait_targets.get(method.value) ?? -1
+                lower_reach_edges(p, &q, first, parent, site)
+            }
+        }
+        .Foreign(id) -> {
+            row :: q.foreign_rows.get(id.value) ?? return
+            if q.foreign_seen.get(id.value) != None -> return
+            &q.foreign_seen.add(id.value, true).drop("checked absent above")
+            foreign :: p.foreign[row]
+            loop param in foreign.params -> lower_mono_intern_type(&q, param.ty, parent)
+            if foreign.return_type == .Val(ty) -> lower_mono_intern_type(&q, ty, parent)
+            lower_reach_optional(p, &q, foreign.close_function, parent, site)
+            lower_reach_optional(p, &q, foreign.undo_function, parent, site)
+            if foreign.callback == .Val(callback) -> lower_reach_callback(p, &q, callback.value, parent, site)
+        }
+        .Core(_) | .Prelude(_) | .Indirect(_) -> {}
+    }
+}
+
+// Print renders through Show, interpolation through Display: the rendered
+// type's selected implementation method, or its structural components.
+// `facts` indexes the body's value facts by value ID.
+fn lower_reach_render_value(q: &LowerPrepared, function: MIRFunction, facts: [U64:Int], value: MIRValueID, show: Bool, parent: Int) Never! {
+    index :: facts.get(value.value) ?? return
+    lower_reach_render_child(&q, function.values[index].ty, show, parent)
+}
+
+fn lower_reach_render_child(q: &LowerPrepared, ty: MIRType, show: Bool, parent: Int) Never! {
+    lower_mono_intern_type(&q, ty, parent)
+    fingerprint :: lower_mono_fingerprint(ty)
+    row :: q.type_rows.get(fingerprint) ?? return
+    key :: "{show}:{fingerprint}"
+    if q.render_seen.get(key) != None -> return
+    &q.render_seen.add(key, true).drop("checked absent above")
+    &q.pending.push(LowerMonoPending.Render{row: row, show: show})
+}
+
+fn lower_reach_operation(p: MIRProgram, q: &LowerPrepared, function: MIRFunction, facts: [U64:Int], operation: MIROperation, bindings: LowerBindings, parent: Int, site: String) Never! {
+    if operation == {
+        .Constant(value) -> lower_reach_constant(&q, value, parent)
+        .Convert(_, _, target, conversion) -> {
+            lower_mono_intern_type(&q, target, parent)
+            if conversion == .Prelude(_, _, fallibility) -> lower_reach_fallibility(&q, fallibility, parent)
+        }
+        .Call(callee, args, type_args) -> {
+            loop arg in args -> lower_reach_arg(&q, arg, parent)
+            lower_reach_callee(p, &q, callee, type_args, parent, site)
+        }
+        .IndirectCall(_, args, type_args) -> {
+            loop ty in type_args -> lower_mono_intern_type(&q, ty, parent)
+            loop arg in args -> lower_reach_arg(&q, arg, parent)
+        }
+        .Closure(id, _, _) -> lower_mono_dependency(p, &q, id, bindings, parent, site)
+        .Global(name) -> {
+            named := q.constant_rows.get("key:{name}")
+            if named == None -> named = q.constant_rows.get("name:{name}")
+            row :: named ?? return
+            if q.constants_seen.get(row) != None -> return
+            &q.constants_seen.add(row, true).drop("checked absent above")
+            lower_mono_intern_type(&q, p.constants[row].ty, parent)
+            lower_reach_constant(&q, p.constants[row].value, parent)
+        }
+        .PtrFromAddr(_, element) -> lower_mono_intern_type(&q, element, parent)
+        .CoreCall(_, _, args, type_args, fallibility, plan) -> {
+            loop ty in type_args -> lower_mono_intern_type(&q, ty, parent)
+            loop arg in args -> lower_reach_arg(&q, arg, parent)
+            lower_reach_fallibility(&q, fallibility, parent)
+            if plan == .Val(data) {
+                loop node in data.logical {
+                    lower_mono_intern_type(&q, node.row_type, parent)
+                    loop column in node.columns -> lower_mono_intern_type(&q, column.ty, parent)
+                    if node.callable == .Val(callable) {
+                        lower_mono_intern_type(&q, callable.parameter, parent)
+                        lower_mono_intern_type(&q, callable.result, parent)
+                    }
+                }
+            }
+        }
+        .Todo(_, _, expected) -> { if expected == .Val(ty) -> lower_mono_intern_type(&q, ty, parent) }
+        .TraitBox(_, target) -> lower_reach_id(&q, target.value, parent)
+        .BuildList(_, target) -> { if target == .Val(id) -> lower_reach_id(&q, id.value, parent) }
+        .BuildString(parts) -> {
+            loop part in parts {
+                if part.kind == .Interpolation(value, format) {
+                    if format == .Display -> lower_reach_render_value(&q, function, facts, value, false, parent)
+                }
+            }
+        }
+        .Semantic(semantic) -> lower_reach_semantic(p, &q, function, facts, semantic, parent, site)
+        else -> {}
+    }
+}
+
+fn lower_reach_semantic(p: MIRProgram, q: &LowerPrepared, function: MIRFunction, facts: [U64:Int], operation: MIRSemanticOp, parent: Int, site: String) Never! {
+    if operation == {
+        .Print(_, value) -> lower_reach_render_value(&q, function, facts, value, true, parent)
+        .BuiltinMethod(call, receiver, _, _, _) -> {
+            // `list.join` shows every element (Lists.jet lower_helper_list_join).
+            if lower_prelude_row(p, call) == .Val(row) {
+                if row.member == "join" -> lower_reach_render_value(&q, function, facts, receiver, true, parent)
+            }
+        }
+        .CCallback(_, callback, _) -> lower_reach_callback(p, &q, callback.value, parent, site)
+        .StaticPreludeCall(_, args, owners, types) -> {
+            loop arg in args -> lower_reach_arg(&q, arg, parent)
+            loop owner in owners {
+                if owner == .Type(ty) -> lower_mono_intern_type(&q, ty, parent)
+            }
+            loop ty in types -> lower_mono_intern_type(&q, ty, parent)
+        }
+        .HardwareCall(_, hardware, _, args) -> {
+            loop arg in args -> lower_reach_arg(&q, arg, parent)
+            if hardware == {
+                .DMAStart(_, _, ty) | .DMAWait(_, _, ty) -> lower_mono_intern_type(&q, ty, parent)
+                else -> {}
+            }
+        }
+        .AllocNew(_, _, _, args) | .ClosureMethod(_, args, _) | .HostCall(_, args) -> { loop arg in args -> lower_reach_arg(&q, arg, parent) }
+        .HostBorrowCallback(_, types) -> { loop ty in types -> lower_mono_intern_type(&q, ty, parent) }
+        .MathBuiltin(id, _, _) | .PreciseBuiltin(id, _, _) -> lower_reach_id(&q, id.value, parent)
+        .StructLiteral(_, _, _, target, _) -> { if target == .Val(id) -> lower_reach_id(&q, id.value, parent) }
+        .TextPatternMatch(_, _, parts) | .CursorTakePattern(_, _, parts) -> {
+            loop part in parts {
+                if part == .Hole(_, ty, _) -> lower_reach_id(&q, ty.value, parent)
+            }
+        }
+        .BinaryPatternMatch(_, _, parts) | .ReaderTakePattern(_, _, parts) -> {
+            loop part in parts {
+                if part == {
+                    .Bits(_, ty, _, _) | .Rest(ty, _) -> lower_reach_id(&q, ty.value, parent)
+                    else -> {}
+                }
+            }
+        }
+        else -> {}
+    }
+}
+
+// Everything one concrete body reaches. `bindings` are the instance's (empty
+// for an original): closures and decision rows inherit them.
+fn lower_reach_body(p: MIRProgram, q: &LowerPrepared, function: MIRFunction, bindings: LowerBindings, parent: Int) Never! {
+    lower_mono_intern_type(&q, function.return_type, parent)
+    if function.declared_return == .Val(ty) -> lower_mono_intern_type(&q, ty, parent)
+    lower_reach_failure(&q, function.failure, parent)
+    if function.form == {
+        .Method(owner, _) | .TraitMethod(owner, _, _, _) -> lower_mono_intern_type(&q, owner, parent)
+        .TopLevel -> {}
+    }
+    loop param in function.params -> lower_mono_intern_type(&q, param.ty, parent)
+    loop capture in function.capture_params -> lower_mono_intern_type(&q, capture.ty, parent)
+    loop local in function.locals -> lower_mono_intern_type(&q, local.ty, parent)
+    loop place in function.places -> lower_mono_intern_type(&q, place.ty, parent)
+    if function.generator == .Val(generator) -> lower_mono_intern_type(&q, generator.item, parent)
+    loop decision in function.optimization.decision_rows {
+        if decision.function == .Val(id) -> lower_mono_dependency(p, &q, id, bindings, parent, function.key)
+    }
+    facts := [U64:Int]{}
+    loop (index, value) in function.values {
+        lower_mono_intern_type(&q, value.ty, parent)
+        &facts.add(value.id.value, index).drop("value ids are unique")
+    }
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.ty == .Val(ty) -> lower_mono_intern_type(&q, ty, parent)
+            lower_reach_operation(p, &q, function, facts, instruction.operation, bindings, parent, function.key)
+        }
+    }
+}
+
+// A concrete type's lifecycle edges (handle close/undo functions and their
+// shared close adapters) and its stored components.
+fn lower_reach_concrete_type(p: MIRProgram, q: &LowerPrepared, ty: MIRType, parent: Int) Never! {
+    fingerprint :: lower_mono_fingerprint(ty)
+    first :: q.lifecycle.get(fingerprint) ?? -1
+    lower_reach_edges(p, &q, first, parent, "lifecycle of {mir_type_display_name(ty)}")
+    if ty.kind == {
+        .Apply(_, args) -> {
+            loop arg in args -> lower_mono_intern_type(&q, arg, parent)
+            definition :: lower_type_def(p, ty) ?? return
+            if definition.cli == .Val(entry) {
+                loop input in entry.inputs -> lower_mono_intern_type(&q, input.ty, parent)
+                loop command in entry.commands {
+                    loop input in command.inputs -> lower_mono_intern_type(&q, input.ty, parent)
+                }
+            }
+            if definition.kind == {
+                .Struct(fields, _) -> {
+                    loop field in fields {
+                        if !field.computed -> lower_mono_intern_type(&q, field.ty, parent)
+                    }
+                }
+                .Enum(variants, _) -> {
+                    loop variant in variants {
+                        if variant.payload == {
+                            .Unit -> {}
+                            .Single(inner) -> lower_mono_intern_type(&q, inner, parent)
+                            .Named(fields) -> {
+                                loop field in fields {
+                                    if !field.computed -> lower_mono_intern_type(&q, field.ty, parent)
+                                }
+                            }
+                        }
+                    }
+                }
+                .Alias(inner) | .Distinct(inner, _) -> lower_mono_intern_type(&q, inner, parent)
+                .UnitFamily(_) -> {}
+            }
+        }
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> lower_mono_intern_type(&q, inner, parent)
+        .Map(left, right) | .Result(left, right) -> {
+            lower_mono_intern_type(&q, left, parent)
+            lower_mono_intern_type(&q, right, parent)
+        }
+        .Tuple(fields) -> { loop field in fields -> lower_mono_intern_type(&q, field.ty, parent) }
+        .Union(members) -> { loop member in members -> lower_mono_intern_type(&q, member, parent) }
+        .Fn(signature) -> {
+            loop param in signature.params -> lower_mono_intern_type(&q, param, parent)
+            if signature.ret == .Val(ret) -> lower_mono_intern_type(&q, ret, parent)
+        }
+        .SendFn(params, ret, _) -> {
+            loop param in params -> lower_mono_intern_type(&q, param, parent)
+            if ret == .Val(result) -> lower_mono_intern_type(&q, result, parent)
+        }
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .TraitObject(_) | .Measure(_) -> {}
+    }
+}
+
+// The render Display.jet's lower_render_value performs for `ty`: the selected
+// Printable/Display implementation's method for this concrete receiver, else
+// the structural rendering of its components.
+fn lower_reach_render_type(p: MIRProgram, q: &LowerPrepared, ty: MIRType, show: Bool, parent: Int) Never! {
+    loop implementation in p.impls {
+        if !lower_render_impl_selected(p, implementation, ty, show) -> next
+        id :: lower_render_method(p, implementation, show) ?? return lower_mono_issue(&q, "selected display implementation for {mir_type_display_name(ty)} has no method")
+        lower_mono_request(p, &q, id, Val(ty), [MIRType]{}, parent, "render of {mir_type_display_name(ty)}").drop("render request")
+        return
+    }
+    if ty.kind == {
+        .Option(inner) | .List(inner) | .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> lower_reach_render_child(&q, inner, show, parent)
+        .Result(left, right) | .Map(left, right) -> {
+            lower_reach_render_child(&q, left, show, parent)
+            lower_reach_render_child(&q, right, show, parent)
+        }
+        .Tuple(fields) -> { loop field in fields -> lower_reach_render_child(&q, field.ty, show, parent) }
+        else -> {
+            definition :: lower_type_def(p, ty) ?? return
+            if definition.kind == {
+                .Struct(fields, _) -> {
+                    loop field in fields {
+                        if !field.computed -> lower_reach_render_child(&q, field.ty, show, parent)
+                    }
+                }
+                .Enum(variants, _) -> {
+                    loop variant in variants {
+                        if variant.payload == {
+                            .Unit -> {}
+                            .Single(inner) -> lower_reach_render_child(&q, inner, show, parent)
+                            .Named(fields) -> {
+                                loop field in fields {
+                                    if !field.computed -> lower_reach_render_child(&q, field.ty, show, parent)
+                                }
+                            }
+                        }
+                    }
+                }
+                .Alias(inner) | .Distinct(inner, _) -> lower_reach_render_child(&q, inner, show, parent)
+                .UnitFamily(_) -> {}
+            }
+        }
+    }
+}
+
+fn lower_reach_edges(p: MIRProgram, q: &LowerPrepared, first: Int, parent: Int, site: String) Never! {
+    pending := [Int]{first}
+    cursor := 0
+    loop cursor < pending.len() {
+        edge :: pending[cursor]
+        cursor += 1
+        if edge < 0 || q.edges_seen.get(edge) != None -> next
+        &q.edges_seen.add(edge, true).drop("checked absent above")
+        function :: q.edges[edge].function
+        branch :: q.edges[edge].branch
+        following :: q.edges[edge].next
+        if following >= 0 -> &pending.push(following)
+        if branch >= 0 -> &pending.push(branch)
+        if function == .Val(id) {
+            if !lower_mono_template(p, q, id) -> lower_mono_request(p, &q, id, None, [MIRType]{}, parent, site).drop("lifecycle or trait dependency")
+        }
+    }
+}

@@ -8,23 +8,28 @@
 // Compiler/Bootstrap/sources.list.
 //
 //     jet run --allow=FFI load.jet <name> <path to libjet_runtime_c.so>
-use jet_backend.[X64MemoryImage, x64_load_image, x64_run_image, x64_runtime_open]
+use jet_backend.[X64ImageDataReloc, X64MemoryImage, x64_load_image, x64_run_image, x64_runtime_open]
 use core.files as files
 use core.process as process
 
-// The manifest is `entry <offset>`, then `import <slot offset> <symbol>` lines.
+// The manifest is `align <origin>`, `entry <offset>`, then `import <slot
+// offset> <symbol>` and `reloc <at> <target offset>` lines.
 fn li_image(name: String) -> X64MemoryImage? {
     text :: files.read_bytes("{name}.image") ?? return None
     manifest :: files.read("{name}.mem") ?? return None
-    image := X64MemoryImage{text: text, entry: -1, imports: [String]{}, slots: [Int]{}, errors: [String]{}}
+    image := X64MemoryImage{text: text, align: 0, entry: -1, imports: [String]{}, slots: [Int]{}, relocs: [X64ImageDataReloc]{}, errors: [String]{}}
     loop line in manifest.split("\n").to_list() {
         if line.len() == 0 -> next
         words :: line.split(" ").to_list()
         if {
+            words[0] == "align" && words.len() == 2 -> image.align = Int.parse(words[1]) ?? return None
             words[0] == "entry" && words.len() == 2 -> image.entry = Int.parse(words[1]) ?? return None
             words[0] == "import" && words.len() == 3 -> {
                 &image.slots.push(Int.parse(words[1]) ?? return None)
                 &image.imports.push(words[2])
+            }
+            words[0] == "reloc" && words.len() == 3 -> {
+                &image.relocs.push(X64ImageDataReloc{at: Int.parse(words[1]) ?? return None, target: Int.parse(words[2]) ?? return None})
             }
             else -> return None
         }

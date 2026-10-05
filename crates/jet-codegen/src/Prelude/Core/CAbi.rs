@@ -23,12 +23,12 @@
 mod jet_c_abi {
     use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 
-    type JetCString = *mut String;
+    pub(crate) type JetCString = *mut String;
 
     /// Run one export body; a caught unwind ends the process through the AOT
     /// entry boundary's report carriers instead of entering generated frames.
     #[inline(always)]
-    fn guard<T>(run: impl FnOnce() -> T) -> T {
+    pub(crate) fn guard<T>(run: impl FnOnce() -> T) -> T {
         match catch_unwind(AssertUnwindSafe(run)) {
             Ok(value) => value,
             Err(payload) => stop(payload),
@@ -59,11 +59,11 @@ mod jet_c_abi {
         String::from_utf8_lossy(bytes(ptr, len))
     }
 
-    fn handle(value: String) -> JetCString {
+    pub(crate) fn handle(value: String) -> JetCString {
         Box::into_raw(Box::new(value))
     }
 
-    fn view<'a>(value: JetCString) -> &'a str {
+    pub(crate) fn view<'a>(value: JetCString) -> &'a str {
         // SAFETY: `value` is a live handle from `handle` that the caller owns
         // for the duration of this call.
         unsafe { (*value).as_str() }
@@ -85,7 +85,7 @@ mod jet_c_abi {
     }
 
     /// `native_int_input`: an exact Int a native kernel receives as `i64`.
-    fn native(value: i64) -> i64 {
+    pub(crate) fn native(value: i64) -> i64 {
         crate::jet_std::jet_int_to_i64(value).unwrap_or_else(|| {
             super::jet_arithmetic_stop("<core.prelude>", 0, "native Int argument exceeds host range")
         })
@@ -100,6 +100,39 @@ mod jet_c_abi {
             super::jet_runtime_boundary(|| entry());
             0
         })
+    }
+
+    // Entry error edge (MIRRust.rs entry_error_exit): a failing entry ends
+    // the process with its report and exit status 1.
+
+    /// A runtime `Err` from the backend's general `Err`: `message` and the
+    /// optional `code` (null, or the Option box whose first word is the
+    /// String handle) are borrowed; `cause` (null or from this function) is
+    /// taken.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_err_new(message: JetCString, code: *const JetCString, cause: *mut super::JetErr) -> *mut super::JetErr {
+        guard(|| {
+            // SAFETY: a non-null `code` is a live Option box holding a String handle.
+            let code = if code.is_null() { Err(super::JetAbsent) } else { Ok(view(unsafe { *code }).to_owned()) };
+            // SAFETY: a non-null `cause` is an owned error from this function.
+            let cause = if cause.is_null() { Err(super::JetAbsent) } else { Ok(*unsafe { Box::from_raw(cause) }) };
+            Box::into_raw(Box::new(super::jet_err(view(message).to_owned(), code, cause)))
+        })
+    }
+
+    /// Ends the process with the report of `error` (taken, from jet_rt_err_new).
+    #[no_mangle]
+    pub extern "C" fn jet_rt_entry_error_exit_err(error: *mut super::JetErr) {
+        // SAFETY: the caller transfers its owned error from jet_rt_err_new.
+        let error = *unsafe { Box::from_raw(error) };
+        guard(move || -> () { super::jet_entry_error_exit_jet(error) })
+    }
+
+    /// Ends the process with the entry report of an error's Printable text.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_entry_error_exit(text: JetCString) {
+        let text = view(text).to_owned();
+        guard(move || -> () { super::jet_entry_error_exit(text) })
     }
 
     // Memory for boxes owned by generated code.
@@ -271,6 +304,16 @@ mod jet_c_abi {
         guard(|| super::jet_arithmetic_stop("<core.prelude>", 0, &super::jet_list_bounds_message(len, native(index))))
     }
 
+    /// A View window outside its receiver (Core.rs jet_view_new's
+    /// jet_checked_view_window), checked inline; native bounds, called only
+    /// when the check failed, so it always stops.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_view_window_stop(start: i64, end: i64, exclusive: u8, len: i64, file_ptr: *const u8, file_len: usize, line: i64) {
+        guard(|| {
+            super::jet_checked_view_window(start, end, exclusive != 0, len, &text(file_ptr, file_len), line_of(line));
+        })
+    }
+
     #[no_mangle]
     pub extern "C" fn jet_rt_unreachable(ptr: *const u8, len: usize) {
         let reason = text(ptr, len).into_owned();
@@ -284,6 +327,53 @@ mod jet_c_abi {
     pub extern "C" fn jet_rt_panic_message(ptr: *const u8, len: usize) {
         let message = text(ptr, len).into_owned();
         guard(move || -> () { super::jet_panic("<core.prelude>", 0, &message) })
+    }
+
+    /// `#require_eq` String operand: Rust Debug quoting (`JetDebug for str`).
+    #[no_mangle]
+    pub extern "C" fn jet_rt_require_debug_string(value: JetCString) -> JetCString {
+        guard(|| handle(super::JetDebug::jet_debug(view(value))))
+    }
+
+    /// `#require` / `#require_eq` / `#panic` stop (kind 0/1/2) over the Prelude
+    /// functions generated Rust calls. `descriptor` is eleven read-only words:
+    /// file ptr/len, line, function ptr/len, source line ptr/len, column,
+    /// caret, then the pre-rendered context ptr/len that only the freestanding
+    /// image reads. Kind 0 and 2 read `message`, kind 1 reads `left` and
+    /// `right` (Debug text); `locals` may be null.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_require_stop(
+        kind: i64,
+        descriptor: *const usize,
+        message: JetCString,
+        left: JetCString,
+        right: JetCString,
+        locals: JetCString,
+    ) {
+        guard(|| {
+            // SAFETY: the caller passes eleven initialized read-only words that
+            // outlive this call (static data emitted by the backend).
+            let d = unsafe { std::slice::from_raw_parts(descriptor, 11) };
+            let file = text(d[0] as *const u8, d[1]);
+            let line = line_of(d[2] as i64);
+            let function = text(d[3] as *const u8, d[4]);
+            let source = text(d[5] as *const u8, d[6]);
+            let column = line_of(d[7] as i64);
+            let caret = line_of(d[8] as i64);
+            let locals = if locals.is_null() { "" } else { view(locals) };
+            match kind {
+                0 => super::jet_require(false, view(message), &file, line, &function, &source, column, caret, locals),
+                1 => super::jet_require_eq(false, view(left), view(right), &file, line, &function, &source, column, caret, locals),
+                _ => super::jet_panic_rich(&file, line, &function, &source, column, caret, view(message), locals),
+            }
+        })
+    }
+
+    /// A fixed-width arithmetic stop (E3010) that generated code checks inline,
+    /// at its Jet source location.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_numeric_stop(file_ptr: *const u8, file_len: usize, line: i64, message_ptr: *const u8, message_len: usize) {
+        guard(|| super::jet_arithmetic_stop(&text(file_ptr, file_len), line_of(line), &text(message_ptr, message_len)))
     }
 
     // Prelude routes: the C name is the last `::` segment of the MIR symbol.
@@ -307,11 +397,18 @@ mod jet_c_abi {
     }
 
     exact_int_binary!(jet_int_add, jet_int_sub, jet_int_mul, jet_int_bit_and, jet_int_bit_or, jet_int_bit_xor, jet_int_compare);
-    exact_int_located!(jet_int_div, jet_int_rem, jet_int_floor_div, jet_int_mod, jet_int_pow, jet_int_shl, jet_int_shr);
+    exact_int_located!(jet_int_div, jet_int_rem, jet_int_floor_div, jet_int_mod, jet_int_pow, jet_int_shl, jet_int_shr, jet_int_div_euclid, jet_int_rem_euclid);
 
     #[no_mangle]
     pub extern "C" fn jet_int_owned_from_i64(value: i64) -> i64 {
         guard(|| crate::jet_std::jet_int_owned_from_i64(value).into_raw())
+    }
+
+    /// An exact Int constant beyond the inline word range, from its decimal
+    /// text (MIR `BigInt` constants; the JetBackend builds them at use).
+    #[no_mangle]
+    pub extern "C" fn jet_rt_int_from_static(ptr: *const u8, len: usize) -> i64 {
+        guard(|| crate::jet_std::jet_int_from_str(&text(ptr, len)).unwrap_or_else(|message| panic!("{message}")))
     }
 
     #[no_mangle]

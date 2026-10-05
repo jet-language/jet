@@ -541,6 +541,7 @@ export function jetDecoder(schema) {
       if (type.name === "String") return "mird_string(&r)";
       if (type.name === "Bool") return "mird_bool(&r)";
       if (type.name === "Float") return "mird_float(&r)";
+      if (type.name === "U64") return "mird_u64(&r)";
       if (PRIMITIVES.has(type.name)) return `${type.name}{mird_int(&r)}`;
       return `mird_${snake(type.name)}(&r)`;
     }

@@ -1,0 +1,107 @@
+// Function values and closures (Lower/Closures.jet): a named function as a
+// value (through its thunk), a by-value capture and a by-reference capture
+// the creating function reads back.
+use jet_foundation.[
+    MIRAccess, MIRBinaryOp, MIRCallArg, MIRCallee, MIRCaptureFacts,
+    MIRCaptureOperand, MIRCaptureParam, MIRDropKind, MIRFunction,
+    MIRFunctionSignature, MIROperation, MIRPlace, MIRPlaceBase, MIRPlaceID,
+    MIRProgram, MIRProjection, MIRTerminator, MIRType, MIRTypeDef, MIRTypeKind,
+    MIRValueID, mir_function_id, mir_owned_ownership, mir_ownership_from_access,
+    mir_type_from_kind,
+]
+
+fn fx_fn_int_type() -> MIRType Never! {
+    mir_type_from_kind(MIRTypeKind.Fn{signature: MIRFunctionSignature{params: [MIRType]{fx_int()}, ret: Val(fx_int()), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}})
+}
+
+fn fx_capture_facts() -> MIRCaptureFacts Never! {
+    MIRCaptureFacts{escapes: false, needs_fn_mut: false, mutable: [String]{}, cloned: [String]{}, frozen: [String]{}, materialized: [String]{}, moved: [String]{}}
+}
+
+// A place whose root is the captured value `value` (a closure body's view
+// of capture slot `value`'s Capture instruction).
+fn fx_capture_place(b: &FxBuilder, value: MIRValueID, ty: MIRType, access: MIRAccess) -> MIRPlaceID Never! {
+    place :: MIRPlaceID{value: fx_word(U64{500}, b.places.len())}
+    &b.places.push(MIRPlace{id: place, span: fx_span(), ty: ty, base: MIRPlaceBase.Capture{value: value}, projections: [MIRProjection]{}, access: access, persist_key: None})
+    place
+}
+
+// fn add_one(n: Int) -> Int { n + 1 }
+// fn apply(f: fn(Int) -> Int, n: Int) -> Int { f(n) }
+// fn run() {
+//     print(apply(add_one, 9))
+//     base :: 5
+//     print(apply((n: Int) -> n + base, 9))
+//     total := 0
+//     add :: (n: Int) -> { total += n }
+//     add(2)
+//     add(3)
+//     print(total)
+// }
+// expect-stdout closures: "10\n14\n5\n"
+fn fx_closures() -> MIRProgram Never! {
+    fn_ty :: fx_fn_int_type()
+
+    a := fx_builder()
+    n :: fx_param(&a, "n", fx_int(), mir_copy_ownership())
+    one :: fx_int_const(&a, 1)
+    plus :: fx_int_op(&a, MIRBinaryOp.Add, "add", n, one)
+    fx_block(&a, 0, MIRTerminator.Return{value: Val(plus)})
+
+    y := fx_builder()
+    f :: fx_param(&y, "f", fn_ty, mir_ownership_from_access(MIRAccess.Read))
+    m :: fx_param(&y, "n", fx_int(), mir_copy_ownership())
+    applied :: fx_copy(&y, fx_int(), MIROperation.IndirectCall{callee: f, args: [MIRCallArg]{fx_arg(m, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_block(&y, 0, MIRTerminator.Return{value: Val(applied)})
+
+    // (n: Int) -> n + base, base by value.
+    lb := fx_builder()
+    base_value :: fx_copy(&lb, fx_int(), MIROperation.Capture{slot: 0})
+    base_place :: fx_capture_place(&lb, base_value, fx_int(), MIRAccess.Read)
+    k :: fx_param(&lb, "n", fx_int(), mir_copy_ownership())
+    base_now :: fx_copy(&lb, fx_int(), MIROperation.ReadPlace{place: base_place})
+    sum :: fx_int_op(&lb, MIRBinaryOp.Add, "add", k, base_now)
+    fx_block(&lb, 0, MIRTerminator.Return{value: Val(sum)})
+    lambda_base := fx_function("lambda_base", lb, fx_int())
+    lambda_base.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "base", span: fx_span(), ty: fx_int(), access: MIRAccess.Read, ownership: mir_owned_ownership()}}
+
+    // (n: Int) -> { total += n }, total by reference.
+    la := fx_builder()
+    total_value :: fx_copy(&la, fx_int(), MIROperation.Capture{slot: 0})
+    total_place :: fx_capture_place(&la, total_value, fx_int(), MIRAccess.Write)
+    j :: fx_param(&la, "n", fx_int(), mir_copy_ownership())
+    total_old :: fx_copy(&la, fx_int(), MIROperation.ReadPlace{place: total_place})
+    total_new :: fx_int_op(&la, MIRBinaryOp.Add, "add", total_old, j)
+    fx_do(&la, MIROperation.WritePlace{place: total_place, value: total_new})
+    fx_block(&la, 0, MIRTerminator.Return{value: None})
+    lambda_add := fx_function("lambda_add", la, fx_unit())
+    lambda_add.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "total", span: fx_span(), ty: fx_int(), access: MIRAccess.Write, ownership: mir_ownership_from_access(MIRAccess.Write)}}
+
+    r := fx_builder()
+    base :: fx_local(&r, "base", fx_int(), mir_copy_ownership())
+    total :: fx_local(&r, "total", fx_int(), mir_copy_ownership())
+    nine :: fx_int_const(&r, 9)
+    named :: fx_owned(&r, fn_ty, MIROperation.Closure{function: mir_function_id("add_one"), captures: [MIRCaptureOperand]{}, facts: fx_capture_facts()})
+    first :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("apply")}, args: [MIRCallArg]{fx_arg(named, MIRAccess.Read), fx_arg(nine, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_print(&r, first)
+    fx_do(&r, MIROperation.Drop{value: named, kind: MIRDropKind.Value})
+    five :: fx_int_const(&r, 5)
+    fx_do(&r, MIROperation.WritePlace{place: base, value: five})
+    base_read :: fx_copy(&r, fx_int(), MIROperation.ReadPlace{place: base})
+    adder :: fx_owned(&r, fn_ty, MIROperation.Closure{function: mir_function_id("lambda_base"), captures: [MIRCaptureOperand]{MIRCaptureOperand.Value{value: base_read}}, facts: fx_capture_facts()})
+    second :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("apply")}, args: [MIRCallArg]{fx_arg(adder, MIRAccess.Read), fx_arg(nine, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_print(&r, second)
+    fx_do(&r, MIROperation.Drop{value: adder, kind: MIRDropKind.Value})
+    zero :: fx_int_const(&r, 0)
+    fx_do(&r, MIROperation.WritePlace{place: total, value: zero})
+    add :: fx_owned(&r, fn_ty, MIROperation.Closure{function: mir_function_id("lambda_add"), captures: [MIRCaptureOperand]{MIRCaptureOperand.Place{place: total}}, facts: fx_capture_facts()})
+    two :: fx_int_const(&r, 2)
+    _ := fx_copy(&r, fx_unit(), MIROperation.IndirectCall{callee: add, args: [MIRCallArg]{fx_arg(two, MIRAccess.Read)}, type_args: [MIRType]{}})
+    three :: fx_int_const(&r, 3)
+    _ := fx_copy(&r, fx_unit(), MIROperation.IndirectCall{callee: add, args: [MIRCallArg]{fx_arg(three, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_do(&r, MIROperation.Drop{value: add, kind: MIRDropKind.Value})
+    total_now :: fx_copy(&r, fx_int(), MIROperation.ReadPlace{place: total})
+    fx_print(&r, total_now)
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("add_one", a, fx_int()), fx_function("apply", y, fx_int()), lambda_base, lambda_add, fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}

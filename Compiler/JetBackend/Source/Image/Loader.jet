@@ -54,9 +54,36 @@ pub fn x64_load_image(image: X64MemoryImage, runtime: X64Runtime) -> X64LoadedIm
         if address == 0 -> return x64_loaded_failure([String]{"unresolved runtime symbol {symbol}"})
         &addresses.push(address)
     }
+    loop reloc in image.relocs {
+        if reloc.at < 0 || reloc.at % 8 != 0 || reloc.at > size - 8 -> return x64_loaded_failure([String]{"data relocation {reloc.at} is not an aligned word inside the image"})
+        if reloc.target < 0 || reloc.target >= size -> return x64_loaded_failure([String]{"data relocation target {reloc.target} is outside the image"})
+    }
 
-    base :: os_map(size, OS_PROT_READ + OS_PROT_WRITE)
-    if os_failed(base) -> return x64_loaded_failure([String]{"mmap of {size} bytes failed (errno {-base})"})
+    if image.align < 16 || (image.align & (image.align - 1)) != 0 -> return x64_loaded_failure([String]{"image origin alignment {image.align} is not a power of two at least 16"})
+    // Over-map by the origin alignment, then trim whole pages on both sides,
+    // so the kept mapping starts at an address aligned for the image's data.
+    mapping_size :: os_page_round(size)
+    origin_align :: if image.align > OS_PAGE_SIZE -> image.align else -> OS_PAGE_SIZE
+    reserved_size :: mapping_size + origin_align - OS_PAGE_SIZE
+    mapping :: os_map(reserved_size, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(mapping) -> return x64_loaded_failure([String]{"mmap of {reserved_size} bytes failed (errno {-mapping})"})
+    prefix :: (origin_align - mapping % origin_align) % origin_align
+    base :: mapping + prefix
+    suffix :: reserved_size - prefix - mapping_size
+    if prefix > 0 {
+        released :: os_unmap(mapping, prefix)
+        if os_failed(released) {
+            _ := os_unmap(mapping, reserved_size)
+            return x64_loaded_failure([String]{"munmap alignment prefix failed (errno {-released})"})
+        }
+    }
+    if suffix > 0 {
+        released :: os_unmap(base + mapping_size, suffix)
+        if os_failed(released) {
+            _ := os_unmap(base, reserved_size - prefix)
+            return x64_loaded_failure([String]{"munmap alignment suffix failed (errno {-released})"})
+        }
+    }
     os_copy_in(base, image.text)
     slots := [Int]{}
     loop (index, at) in image.slots {
@@ -64,6 +91,11 @@ pub fn x64_load_image(image: X64MemoryImage, runtime: X64Runtime) -> X64LoadedIm
             os_store_word(base + at, addresses[index])
         }
         &slots.push(base + at)
+    }
+    loop reloc in image.relocs {
+        #Unsafe("the relocation is an aligned word inside the writable mapping, checked above") {
+            os_store_word(base + reloc.at, base + reloc.target)
+        }
     }
     protected :: os_protect(base, size, OS_PROT_READ + OS_PROT_EXEC)
     if os_failed(protected) {

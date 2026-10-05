@@ -30,6 +30,10 @@ pub fn lir_lint_module(program: LIRModule) -> [LIRLintIssue] Never! {
     loop (index, data) in program.data {
         if data.id.value != index -> &issues.push(LIRLintIssue{function: "", block: -1, message: "data {index} carries ID {data.id.value}"})
         if data.align <= 0 || (data.align & (data.align - 1)) != 0 -> &issues.push(LIRLintIssue{function: "", block: -1, message: "data {index} has an invalid alignment"})
+        loop reloc in data.relocs {
+            if reloc.offset < 0 || reloc.offset % 8 != 0 || reloc.offset > data.bytes.len() - 8 -> &issues.push(LIRLintIssue{function: "", block: -1, message: "data {index} relocation {reloc.offset} is not an aligned word in bounds"})
+            if reloc.target.value < 0 || reloc.target.value >= program.data.len() -> &issues.push(LIRLintIssue{function: "", block: -1, message: "data {index} relocation names missing data {reloc.target.value}"})
+        }
     }
     loop (index, function) in program.functions {
         if function.id.value != index -> &issues.push(LIRLintIssue{function: function.name, block: -1, message: "function {index} carries ID {function.id.value}"})
@@ -221,6 +225,7 @@ fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst) -> [S
                 if op != .Add && op != .Sub && op != .Mul && op != .Div && op != .Xor -> &messages.push("Float result v{dst.value} of an operator other than Add, Sub, Mul, Div or Xor")
             } else {
                 if !lir_lint_is_integer(layout) -> &messages.push("arithmetic result v{dst.value} is not an integer")
+                if (op == .UAdd || op == .USub || op == .UMul || op == .UDiv || op == .URem || op == .UShr) && layout != lir_layout_word() -> &messages.push("unsigned arithmetic result v{dst.value} is not a word")
             }
             if function.values[left.value].layout != layout || function.values[right.value].layout != layout -> &messages.push("arithmetic operands of v{dst.value} do not match its layout")
             if function.values[dst.value].drop != .Trivial -> &messages.push("arithmetic result v{dst.value} has drop glue")
@@ -230,6 +235,7 @@ fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst) -> [S
             left_layout :: function.values[left.value].layout
             pointers :: left_layout.class == .Pointer && (condition == .Eq || condition == .Ne)
             if (!lir_lint_is_integer(left_layout) && !lir_lint_is_float(left_layout) && !pointers) || function.values[right.value].layout != left_layout -> &messages.push("comparison operands of v{dst.value} are not matching integers or Floats")
+            if (condition == .ULt || condition == .ULe || condition == .UGt || condition == .UGe) && !lir_lint_is_integer(left_layout) -> &messages.push("unsigned comparison operands of v{dst.value} are not integers")
         }
         .Move(dst, src) -> {
             if function.values[dst.value].layout != function.values[src.value].layout || function.values[dst.value].drop != function.values[src.value].drop -> &messages.push("move v{src.value} -> v{dst.value} changes layout or drop glue")
@@ -249,6 +255,7 @@ fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst) -> [S
                     }
                 }
                 .Runtime(symbol) -> { if symbol == "" -> &messages.push("runtime call names an empty symbol") }
+                .Value(target) -> { if function.values[target.value].layout != lir_layout_pointer() -> &messages.push("indirect call target v{target.value} is not a pointer") }
             }
             if args.len() != signature.params.len() {
                 &messages.push("call passes {args.len()} arguments for {signature.params.len()} parameters")
@@ -274,15 +281,21 @@ fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst) -> [S
         }
         .Overflows(dst, op, left, right) -> {
             if function.values[dst.value].layout != lir_layout_bool() -> &messages.push("overflow test v{dst.value} is not a Bool")
-            if op != .Add && op != .Sub && op != .Mul -> &messages.push("overflow test v{dst.value} is not of Add, Sub or Mul")
+            if op != .Add && op != .Sub && op != .Mul && op != .UAdd && op != .USub && op != .UMul -> &messages.push("overflow test v{dst.value} is not of Add, Sub, Mul, UAdd, USub or UMul")
             left_layout :: function.values[left.value].layout
             if !lir_lint_is_integer(left_layout) || function.values[right.value].layout != left_layout -> &messages.push("overflow test operands of v{dst.value} are not matching integers")
+            if (op == .UAdd || op == .USub || op == .UMul) && left_layout != lir_layout_word() -> &messages.push("unsigned overflow test operands of v{dst.value} are not words")
         }
         .Load(dst, base, offset) -> {
             if function.values[base.value].layout.class != .Pointer -> &messages.push("load base v{base.value} is not a pointer")
             layout :: function.values[dst.value].layout
             if layout.class == .Memory -> &messages.push("load into v{dst.value} reads a memory-class value")
             if offset < 0 || offset % layout.align != 0 -> &messages.push("load into v{dst.value} reads misaligned offset {offset}")
+        }
+        .PointerAdd(dst, base, offset) -> {
+            if function.values[dst.value].layout != lir_layout_pointer() || function.values[base.value].layout != lir_layout_pointer() -> &messages.push("pointer arithmetic v{dst.value} does not have pointer result and base")
+            if function.values[offset.value].layout != lir_layout_word() -> &messages.push("pointer arithmetic offset v{offset.value} is not a word")
+            if function.values[dst.value].drop != .Trivial -> &messages.push("pointer arithmetic result v{dst.value} has drop glue")
         }
         .Store(base, offset, value) -> {
             if function.values[base.value].layout.class != .Pointer -> &messages.push("store base v{base.value} is not a pointer")
@@ -294,12 +307,23 @@ fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst) -> [S
             if function.values[dst.value].layout != lir_layout_pointer() -> &messages.push("data address v{dst.value} is not a pointer")
             if data.value < 0 || data.value >= program.data.len() -> &messages.push("data address v{dst.value} names missing data {data.value}")
         }
+        .FunctionAddress(dst, target) -> {
+            if function.values[dst.value].layout != lir_layout_pointer() -> &messages.push("function address v{dst.value} is not a pointer")
+            if function.values[dst.value].drop != .Trivial -> &messages.push("function address v{dst.value} has drop glue")
+            if target.value < 0 || target.value >= program.functions.len() -> &messages.push("function address v{dst.value} names missing function {target.value}")
+        }
         .Convert(dst, src) -> {
             from :: function.values[src.value].layout
             to :: function.values[dst.value].layout
             word_to_float :: from == lir_layout_word() && lir_lint_is_float(to)
             float_to_word :: lir_lint_is_float(from) && to == lir_layout_word()
             if !word_to_float && !float_to_word -> &messages.push("conversion v{src.value} -> v{dst.value} is not between a word and a Float")
+        }
+        .StackSlot(dst, size, align) -> {
+            if function.values[dst.value].layout != lir_layout_pointer() -> &messages.push("stack slot v{dst.value} is not a pointer")
+            if function.values[dst.value].drop != .Trivial -> &messages.push("stack slot v{dst.value} has drop glue")
+            if size <= 0 -> &messages.push("stack slot v{dst.value} has size {size}")
+            if align != 1 && align != 2 && align != 4 && align != 8 && align != 16 -> &messages.push("stack slot v{dst.value} has alignment {align}")
         }
     }
     messages

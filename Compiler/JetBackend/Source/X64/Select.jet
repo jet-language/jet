@@ -1,16 +1,20 @@
 // x86-64 System V instruction selection for LIR, after linear-scan allocation.
 //
 // Frame: `push rbp; mov rbp, rsp`, then the callee-saved registers the
-// allocator used, then `sub rsp` for spill slots, padded so rsp stays 16-byte
-// aligned at every call. Slot k lives at [rbp - 8 * (saved + k + 1)]. Every
-// return restores rsp with `lea rsp, [rbp - 8 * saved]`, pops, and returns.
+// allocator used, then `sub rsp` for spill slots and StackSlot storage,
+// padded so rsp stays 16-byte aligned at every call. Spill slot k lives at
+// [rbp - 8 * (saved + k + 1)]; StackSlot storage lies below the spill slots,
+// each at the next multiple of its alignment (rbp is 16-byte aligned after
+// the push). Every return restores rsp with `lea rsp, [rbp - 8 * saved]`,
+// pops, and returns.
 //
 // Block parameters are filled by parallel moves on each edge; a conditional
 // branch whose taken edge needs moves gets a small edge stub after the
 // fall-through path. A comparison whose only use is the block's branch is
 // fused into `cmp` + `jcc`. Calls into the module and into the compiled
-// runtime are `call rel32`, and data addresses are `lea [rip + disp32]`, each
-// with a relocation the image linker resolves. `Div`/`Rem` need rax and rdx,
+// runtime are `call rel32`, and data and function addresses are
+// `lea [rip + disp32]`, each with a relocation the image linker resolves;
+// a call through a code pointer is `call r10`. `Div`/`Rem` need rax and rdx,
 // and shifts need cl: rdx and rcx are saved around them with push/pop, so the
 // allocator may keep values there.
 
@@ -52,6 +56,29 @@ struct X64Emitter {
     pub relocs: [X64Reloc]
     pub fixups: [X64BlockFixup]
     pub saved: [Int]
+    // LIR value -> rbp displacement of its StackSlot storage (0 for none).
+    pub stack: [Int]
+}
+
+struct X64Frame { pub stack: [Int], pub bytes: Int }
+
+// The displacement of every StackSlot's storage, and the bytes `sub rsp`
+// reserves below the callee-saved registers for spills and storage.
+fn x64_frame(function: LIRFunction, saved: Int, spills: Int) -> X64Frame Never! {
+    stack := [Int]{}
+    loop _ in function.values -> &stack.push(0)
+    depth := 8 * (saved + spills)
+    loop block in function.blocks {
+        loop inst in block.insts {
+            if inst == .StackSlot(dst, size, align) {
+                depth = depth + size
+                if depth % align != 0 -> depth = depth + align - depth % align
+                stack[dst.value] = 0 - depth
+            }
+        }
+    }
+    if depth % 16 != 0 -> depth = depth + 16 - depth % 16
+    X64Frame{stack: stack, bytes: depth - 8 * saved}
 }
 
 fn x64_slot_disp(saved: Int, slot: Int) -> Int Never! {
@@ -151,6 +178,10 @@ fn x64_condition(condition: LIRCondition) -> X64Cond Never! {
         .Le -> X64Cond.LE
         .Gt -> X64Cond.G
         .Ge -> X64Cond.GE
+        .ULt -> X64Cond.B
+        .ULe -> X64Cond.BE
+        .UGt -> X64Cond.A
+        .UGe -> X64Cond.AE
     }
 }
 
@@ -211,11 +242,23 @@ fn x64_is_float(function: LIRFunction, value: LIRValueID) -> Bool Never! {
     function.values[value.value].layout.class == .Float
 }
 
+// What a call jumps to: a relocated `call rel32`, or `call r10` through a
+// code pointer value (loaded into r10 first: argument setup only uses rax and
+// r11 as scratch).
+enum X64CallTarget {
+    Direct(target: X64RelocTarget)
+    Pointer(value: LIRValueID)
+}
+
 // Stack arguments are pushed last to first (with 8 bytes of padding first for
 // an odd count, keeping rsp 16-byte aligned at the call), then Float
 // arguments go to their xmm registers, then the general-register arguments
 // move in parallel. A Float result comes back in xmm0.
-fn x64_emit_call(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, target: X64RelocTarget, args: [LIRValueID], dst: LIRValueID?) Never! {
+fn x64_emit_call(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, target: X64CallTarget, args: [LIRValueID], dst: LIRValueID?) Never! {
+    if target == .Pointer(code) {
+        reg :: x64_operand(&emitter, allocation.locations[code.value], X64_R10)
+        if reg != X64_R10 -> x64_mov_rr(&emitter.code, X64_R10, reg)
+    }
     plan :: x64_arg_plan(x64_value_layouts(function, args))
     pad :: plan.stack.len() % 2
     if pad == 1 -> x64_alu_ri(&emitter.code, X64Alu.Sub, X64_RSP, 8)
@@ -236,8 +279,13 @@ fn x64_emit_call(emitter: &X64Emitter, function: LIRFunction, allocation: X64All
         }
     }
     x64_emit_parallel_moves(&emitter, moves)
-    at :: x64_call_rel32(&emitter.code)
-    &emitter.relocs.push(X64Reloc{at: at, target: target})
+    if target == {
+        .Direct(relocated) -> {
+            at :: x64_call_rel32(&emitter.code)
+            &emitter.relocs.push(X64Reloc{at: at, target: relocated})
+        }
+        .Pointer(_) -> x64_call_reg(&emitter.code, X64_R10)
+    }
     if plan.stack.len() + pad > 0 -> x64_alu_ri(&emitter.code, X64Alu.Add, X64_RSP, 8 * (plan.stack.len() + pad))
     if dst == .Val(result) {
         layout :: function.values[result.value].layout
@@ -299,13 +347,13 @@ pub fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Com
     if gaps.len() > 0 -> return X64CompileResult{function: None, errors: gaps}
     allocation :: x64_allocate(function)
     uses :: x64_use_counts(function)
-    emitter := X64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, fixups: [X64BlockFixup]{}, saved: allocation.callee_saved}
+    frame :: x64_frame(function, allocation.callee_saved.len(), allocation.spill_slots)
+    emitter := X64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, fixups: [X64BlockFixup]{}, saved: allocation.callee_saved, stack: frame.stack}
 
     x64_push(&emitter.code, X64_RBP)
     x64_mov_rr(&emitter.code, X64_RBP, X64_RSP)
     loop reg in allocation.callee_saved -> x64_push(&emitter.code, reg)
-    frame_slots :: allocation.spill_slots + (allocation.callee_saved.len() + allocation.spill_slots) % 2
-    if frame_slots > 0 -> x64_alu_ri(&emitter.code, X64Alu.Sub, X64_RSP, 8 * frame_slots)
+    if frame.bytes > 0 -> x64_alu_ri(&emitter.code, X64Alu.Sub, X64_RSP, frame.bytes)
     // Parameters: general registers move in parallel first, then Float
     // parameters leave their xmm registers and stack parameters are loaded
     // from above the return address.
@@ -326,8 +374,25 @@ pub fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Com
     loop (slot, position) in plan.stack {
         dst :: allocation.locations[entry_params[position].value]
         reg :: x64_result_register(dst, X64_R11)
-        x64_load(&emitter.code, reg, X64_RBP, 16 + 8 * slot)
+        if function.values[entry_params[position].value].layout == lir_layout_bool() {
+            x64_load_u8(&emitter.code, reg, X64_RBP, 16 + 8 * slot)
+        } else {
+            x64_load(&emitter.code, reg, X64_RBP, 16 + 8 * slot)
+        }
         x64_finish_result(&emitter, dst, reg)
+    }
+    // Only the low byte belongs to an incoming Bool. Normalize after every
+    // parallel/Float/stack import so no pending source register is destroyed.
+    loop param in entry_params {
+        if function.values[param.value].layout != lir_layout_bool() -> next
+        dst :: allocation.locations[param.value]
+        if dst == {
+            .Reg(reg) -> x64_movzx_r8(&emitter.code, reg, reg)
+            .Stack(slot) -> {
+                x64_load_u8(&emitter.code, X64_R11, X64_RBP, x64_slot_disp(emitter.saved.len(), slot))
+                x64_store_slot(&emitter, slot, X64_R11)
+            }
+        }
     }
 
     block_offsets := [Int]{}
@@ -368,6 +433,8 @@ fn x64_float_compare(emitter: &X64Emitter, condition: LIRCondition, left: Int, r
         .Le | .Ge -> X64Cond.AE
         .Eq -> X64Cond.E
         .Ne -> X64Cond.NE
+        // LIR lint rejects unsigned conditions on Float operands.
+        .ULt | .ULe | .UGt | .UGe -> X64Cond.A
     }
     x64_setcc(&emitter.code, cond, reg)
     x64_movzx_r8(&emitter.code, reg, reg)
@@ -403,20 +470,26 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
                 x64_movq_from_xmm(&emitter.code, reg, 0)
                 return x64_finish_result(&emitter, locations[dst.value], reg)
             }
-            if op == .Div || op == .Rem || op == .Shl || op == .Shr {
+            if op == .Div || op == .Rem || op == .UDiv || op == .URem || op == .Shl || op == .Shr || op == .UShr {
                 // Work in rax with the right operand in r11, so rdx and rcx can be saved first.
                 x64_mov_rr(&emitter.code, X64_RAX, left_reg)
                 if right_reg != X64_R11 -> x64_mov_rr(&emitter.code, X64_R11, right_reg)
-                if op == .Div || op == .Rem {
+                if op == .Div || op == .Rem || op == .UDiv || op == .URem {
                     x64_push(&emitter.code, X64_RDX)
-                    x64_cqo(&emitter.code)
-                    x64_idiv(&emitter.code, X64_R11)
-                    if op == .Rem -> x64_mov_rr(&emitter.code, X64_RAX, X64_RDX)
+                    if op == .UDiv || op == .URem {
+                        x64_alu_rr(&emitter.code, X64Alu.Xor, X64_RDX, X64_RDX)
+                        x64_div(&emitter.code, X64_R11)
+                    } else {
+                        x64_cqo(&emitter.code)
+                        x64_idiv(&emitter.code, X64_R11)
+                    }
+                    if op == .Rem || op == .URem -> x64_mov_rr(&emitter.code, X64_RAX, X64_RDX)
                     x64_pop(&emitter.code, X64_RDX)
                 } else {
                     x64_push(&emitter.code, X64_RCX)
                     x64_mov_rr(&emitter.code, X64_RCX, X64_R11)
-                    x64_shift_cl(&emitter.code, if op == .Shl -> X64Shift.Shl else -> X64Shift.Sar, X64_RAX)
+                    shift :: if op == .Shl -> X64Shift.Shl else if op == .UShr -> X64Shift.Shr else -> X64Shift.Sar
+                    x64_shift_cl(&emitter.code, shift, X64_RAX)
                     x64_pop(&emitter.code, X64_RCX)
                 }
                 return x64_emit_move(&emitter, X64Loc.Reg{reg: X64_RAX}, locations[dst.value])
@@ -424,9 +497,9 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             reg :: x64_result_register(locations[dst.value], X64_RAX)
             if reg != left_reg -> x64_mov_rr(&emitter.code, reg, left_reg)
             if op == {
-                .Add -> x64_alu_rr(&emitter.code, X64Alu.Add, reg, right_reg)
-                .Sub -> x64_alu_rr(&emitter.code, X64Alu.Sub, reg, right_reg)
-                .Mul -> x64_imul_rr(&emitter.code, reg, right_reg)
+                .Add | .UAdd -> x64_alu_rr(&emitter.code, X64Alu.Add, reg, right_reg)
+                .Sub | .USub -> x64_alu_rr(&emitter.code, X64Alu.Sub, reg, right_reg)
+                .Mul | .UMul -> x64_imul_rr(&emitter.code, reg, right_reg)
                 .And -> x64_alu_rr(&emitter.code, X64Alu.And, reg, right_reg)
                 .Or -> x64_alu_rr(&emitter.code, X64Alu.Or, reg, right_reg)
                 .Xor -> x64_alu_rr(&emitter.code, X64Alu.Xor, reg, right_reg)
@@ -463,29 +536,38 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
         .Copy(dst, src) -> x64_emit_move(&emitter, locations[src.value], locations[dst.value])
         .Call(dst, _, callee, args) -> {
             target :: if callee == {
-                .Function(id) -> X64RelocTarget.Function{id: id}
-                .Runtime(symbol) -> X64RelocTarget.Runtime{symbol: symbol}
+                .Function(id) -> X64CallTarget.Direct{target: X64RelocTarget.Function{id: id}}
+                .Runtime(symbol) -> X64CallTarget.Direct{target: X64RelocTarget.Runtime{symbol: symbol}}
+                .Value(code) -> X64CallTarget.Pointer{value: code}
             }
             x64_emit_call(&emitter, function, allocation, target, args, dst)
         }
         .Drop(value) -> {
             if function.values[value.value].drop == {
-                .Runtime(symbol) -> x64_emit_call(&emitter, function, allocation, X64RelocTarget.Runtime{symbol: symbol}, [LIRValueID]{value}, None)
-                .Function(id) -> x64_emit_call(&emitter, function, allocation, X64RelocTarget.Function{id: id}, [LIRValueID]{value}, None)
+                .Runtime(symbol) -> x64_emit_call(&emitter, function, allocation, X64CallTarget.Direct{target: X64RelocTarget.Runtime{symbol: symbol}}, [LIRValueID]{value}, None)
+                .Function(id) -> x64_emit_call(&emitter, function, allocation, X64CallTarget.Direct{target: X64RelocTarget.Function{id: id}}, [LIRValueID]{value}, None)
                 .Trivial -> {}
             }
         }
         .Overflows(dst, op, left, right) -> {
             left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
             right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
+            // MUL's carry tests unsigned range; IMUL's overflow tests signed
+            // range (FixedArithmetic.rs:318-326). Preserve allocated rdx.
+            if op == .UMul && right_reg != X64_R11 -> x64_mov_rr(&emitter.code, X64_R11, right_reg)
             x64_mov_rr(&emitter.code, X64_RAX, left_reg)
+            if op == .UMul -> x64_push(&emitter.code, X64_RDX)
             if op == {
-                .Add -> x64_alu_rr(&emitter.code, X64Alu.Add, X64_RAX, right_reg)
-                .Sub -> x64_alu_rr(&emitter.code, X64Alu.Sub, X64_RAX, right_reg)
+                .Add | .UAdd -> x64_alu_rr(&emitter.code, X64Alu.Add, X64_RAX, right_reg)
+                .Sub | .USub -> x64_alu_rr(&emitter.code, X64Alu.Sub, X64_RAX, right_reg)
+                .UMul -> x64_mul(&emitter.code, X64_R11)
                 else -> x64_imul_rr(&emitter.code, X64_RAX, right_reg)
             }
+            // POP does not alter MUL's carry flag.
+            if op == .UMul -> x64_pop(&emitter.code, X64_RDX)
             reg :: x64_result_register(locations[dst.value], X64_RAX)
-            x64_setcc(&emitter.code, X64Cond.O, reg)
+            unsigned :: op == .UAdd || op == .USub || op == .UMul
+            x64_setcc(&emitter.code, if unsigned -> X64Cond.B else -> X64Cond.O, reg)
             x64_movzx_r8(&emitter.code, reg, reg)
             x64_finish_result(&emitter, locations[dst.value], reg)
         }
@@ -499,6 +581,14 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             }
             x64_finish_result(&emitter, locations[dst.value], reg)
         }
+        .PointerAdd(dst, base, offset) -> {
+            base_reg :: x64_operand(&emitter, locations[base.value], X64_R10)
+            offset_reg :: x64_operand(&emitter, locations[offset.value], X64_R11)
+            reg :: x64_result_register(locations[dst.value], X64_RAX)
+            if reg != base_reg -> x64_mov_rr(&emitter.code, reg, base_reg)
+            x64_alu_rr(&emitter.code, X64Alu.Add, reg, offset_reg)
+            x64_finish_result(&emitter, locations[dst.value], reg)
+        }
         .Store(base, offset, value) -> {
             base_reg :: x64_operand(&emitter, locations[base.value], X64_R10)
             value_reg :: x64_operand(&emitter, locations[value.value], X64_R11)
@@ -508,10 +598,21 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
                 x64_store(&emitter.code, base_reg, offset, value_reg)
             }
         }
+        .StackSlot(dst, _, _) -> {
+            reg :: x64_result_register(locations[dst.value], X64_RAX)
+            x64_lea(&emitter.code, reg, X64_RBP, emitter.stack[dst.value])
+            x64_finish_result(&emitter, locations[dst.value], reg)
+        }
         .DataAddress(dst, data) -> {
             reg :: x64_result_register(locations[dst.value], X64_RAX)
             at :: x64_lea_rip(&emitter.code, reg)
             &emitter.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Data{id: data}})
+            x64_finish_result(&emitter, locations[dst.value], reg)
+        }
+        .FunctionAddress(dst, target) -> {
+            reg :: x64_result_register(locations[dst.value], X64_RAX)
+            at :: x64_lea_rip(&emitter.code, reg)
+            &emitter.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Function{id: target}})
             x64_finish_result(&emitter, locations[dst.value], reg)
         }
     }

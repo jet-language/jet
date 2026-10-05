@@ -1,0 +1,626 @@
+// A List is an inline [len, cap, data] header (24 bytes) in its holder's
+// storage, like a struct: the value is the header's address, and List drop
+// glue frees the buffer, never the header. Elements occupy
+// `lower_list_stride` bytes each (a whole number of words; an inline
+// aggregate element is its bytes) in a separately allocated buffer; growth
+// moves elements, not owners.
+use jet_foundation.[
+    MIRAccess, MIRIndexKind, MIRInstruction, MIRPanicLoc, MIRPlaceID, MIRPreludeCall,
+    MIRPreludeFamily, MIRProgram, MIRType, MIRTypeID, MIRValueID, mir_type_display_name,
+]
+
+fn lower_list_element(ty: MIRType) -> MIRType? {
+    if ty.kind == {
+        .List(elem) -> Val(elem)
+        .Tagged(_, inner) -> lower_list_element(inner)
+        .InlineRange(inner, _, _) -> lower_list_element(inner)
+        else -> lower_view_element(ty)
+    }
+}
+
+// View<T> / ViewMut<T> (MIRRust.rs: `&[T]` / `&mut [T]`, D-DYNARRAY1) is a
+// borrowed window into a List's buffer, laid out as the List header
+// [len, 0, data] in its holder's storage, data at the window's first
+// element. The zero capacity marks a buffer the header does not own (as for a
+// frozen List, Statics.jet): a window owns neither buffer nor elements, so it
+// has no drop glue and a copy is its three words. List reads (index, len,
+// iteration, display, route arguments) read it unchanged, and ViewMut writes
+// land in the owner's buffer. A View<str> is text (Strings.jet).
+fn lower_view_element(ty: MIRType) -> MIRType? {
+    if lower_string_view(ty) -> return None
+    if ty.kind == .Apply(name, args) {
+        if (name.name == "View" || name.name == "ViewMut") && args.len() == 1 -> return Val(args[0])
+    }
+    None
+}
+
+fn lower_list_repr(p: MIRProgram, ty: MIRType, elem: MIRType) -> LowerRepr Never! {
+    repr :: lower_repr(p, elem)
+    if repr == .Unsupported(reason) -> return LowerRepr.Unsupported{reason: "List element {reason}"}
+    LowerRepr.Inline{ty: ty}
+}
+
+fn lower_list_word(f: &LowerFunction, base: LIRValueID, offset: Int) -> LIRValueID Never! {
+    dst :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: dst, base: base, offset: offset})
+    dst
+}
+
+fn lower_list_data(f: &LowerFunction, list: LIRValueID) -> LIRValueID Never! {
+    data :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: data, base: list, offset: 16})
+    data
+}
+
+fn lower_list_address(f: &LowerFunction, data: LIRValueID, index: LIRValueID, stride: Int) -> LIRValueID Never! {
+    bytes :: lower_word(&f)
+    width :: lower_const(&f, stride)
+    lower_emit(&f, LIRInst.Binary{dst: bytes, op: LIRBinaryOp.Mul, left: index, right: width})
+    address :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.PointerAdd{dst: address, base: data, offset: bytes})
+    address
+}
+
+fn lower_list_buffer(m: &LowerModule, f: &LowerFunction, cap: LIRValueID, stride: Int) -> LIRValueID Never! {
+    zero :: lower_const(&f, 0)
+    empty :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: empty, condition: LIRCondition.Eq, left: cap, right: zero})
+    absent :: lower_new_block(&f)
+    allocate :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: empty, then_target: lower_target(absent, [LIRValueID]{}), else_target: lower_target(allocate, [LIRValueID]{})})
+    lower_start(&f, absent, [LIRValueID]{})
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{null})})
+    lower_start(&f, allocate, [LIRValueID]{})
+    bytes :: lower_word(&f)
+    width :: lower_const(&f, stride)
+    lower_emit(&f, LIRInst.Binary{dst: bytes, op: LIRBinaryOp.Mul, left: cap, right: width})
+    eight :: lower_const(&f, 8)
+    data :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_alloc", [LIRValueID]{bytes, eight}, Val(data))
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{data})})
+    result :: lower_pointer(&f)
+    lower_start(&f, done, [LIRValueID]{result})
+    result
+}
+
+fn lower_list_free_buffer(m: &LowerModule, f: &LowerFunction, data: LIRValueID, cap: LIRValueID, stride: Int) Never! {
+    zero :: lower_const(&f, 0)
+    empty :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: empty, condition: LIRCondition.Eq, left: cap, right: zero})
+    release :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: empty, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(release, [LIRValueID]{})})
+    lower_start(&f, release, [LIRValueID]{})
+    bytes :: lower_word(&f)
+    width :: lower_const(&f, stride)
+    lower_emit(&f, LIRInst.Binary{dst: bytes, op: LIRBinaryOp.Mul, left: cap, right: width})
+    eight :: lower_const(&f, 8)
+    lower_call_runtime(&m, &f, "jet_rt_free", [LIRValueID]{data, bytes, eight}, None)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+}
+
+// MIRRust.rs:build_list moves the supplied element values into the new List.
+fn lower_build_list(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, values: [MIRValueID], trait_coercion: MIRTypeID?) Never! {
+    if trait_coercion != None -> return lower_fail(&m, &f, "List trait coercion is not lowered at O0 yet")
+    ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "List construction without a checked type is not lowered at O0 yet")
+    elem :: lower_list_element(ty) ?? return lower_fail(&m, &f, "non-List BuildList is not lowered at O0 yet")
+    stride :: lower_list_stride(p, elem)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_storage_into(p, &f, dst, ty)
+    count :: lower_const(&f, values.len())
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: count})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: count})
+    data :: lower_pointer(&f)
+    if values.len() == 0 {
+        lower_emit(&f, LIRInst.Const{dst: data, value: 0})
+    } else {
+        lower_alloc(&m, &f, data, stride * values.len())
+    }
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: data})
+    loop (index, value) in values -> lower_store_value(p, &m, &f, data, stride * index, value, elem)
+}
+
+fn lower_index_address(p: MIRProgram, m: &LowerModule, f: &LowerFunction, list: LIRValueID, list_ty: MIRType, index: MIRValueID) -> LowerFieldAddress? {
+    elem :: lower_list_element(list_ty) ?? {
+        lower_fail(&m, &f, "non-List indexed place is not lowered at O0 yet")
+        return None
+    }
+    at :: lower_use(&m, &f, index) ?? return None
+    if lower_value_layout(f, at) != lir_layout_word() {
+        lower_fail(&m, &f, "non-word List index is not lowered at O0 yet")
+        return None
+    }
+    length :: lower_list_word(&f, list, 0)
+    negative :: lower_flag(&f)
+    past :: lower_flag(&f)
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Compare{dst: negative, condition: LIRCondition.Lt, left: at, right: zero})
+    lower_emit(&f, LIRInst.Compare{dst: past, condition: LIRCondition.Ge, left: at, right: length})
+    invalid :: lower_flag(&f)
+    lower_logic(&f, invalid, false, negative, past)
+    stop :: lower_new_block(&f)
+    valid :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: invalid, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(valid, [LIRValueID]{})})
+    lower_start(&f, stop, [LIRValueID]{})
+    lower_noreturn_call(&m, &f, "jet_rt_panic_list_bounds", [LIRValueID]{length, at})
+    lower_start(&f, valid, [LIRValueID]{})
+    data :: lower_list_data(&f, list)
+    Val(LowerFieldAddress{base: lower_list_address(&f, data, at, lower_list_stride(p, elem)), offset: 0})
+}
+
+// A borrowed indexed element never inherits the List's ownership. An owned
+// result clones handles/boxes, just as an owned Copy does (MIRRust.rs:index);
+// an owned inline element is cloned into storage of its own.
+fn lower_list_index(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, base: MIRValueID, index: MIRValueID, kind: MIRIndexKind, access: MIRAccess) Never! {
+    if kind != .List || access != .Read -> return lower_fail(&m, &f, "this indexed access is not lowered at O0 yet")
+    list :: lower_use(&m, &f, base) ?? return
+    ty :: lower_value_type(c, base) ?? return lower_fail(&m, &f, "List index without a checked base type is not lowered at O0 yet")
+    elem :: lower_list_element(ty) ?? return lower_fail(&m, &f, "non-List indexed access is not lowered at O0 yet")
+    address :: lower_index_address(p, &m, &f, list, ty, index) ?? return
+    lower_index_result(p, c, &m, &f, instruction, base, address.base, elem)
+}
+
+// The result of an indexed read of the element of `elem` stored at `address`
+// (a List element or a Map value).
+fn lower_index_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, base: MIRValueID, address: LIRValueID, elem: MIRType) Never! {
+    if lower_repr(p, elem) == .Absent -> return lower_alias_absent(&f, instruction)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    if lower_value_owned(c, instruction.result ?? base) {
+        if lower_repr(p, elem) == {
+            .Handle(_, clone) -> {
+                if clone == "" -> return lower_fail(&m, &f, "List element clone is not lowered at O0 yet")
+                source :: lower_pointer(&f)
+                lower_emit(&f, LIRInst.Load{dst: source, base: address, offset: 0})
+                lower_call_runtime(&m, &f, clone, [LIRValueID]{source}, Val(dst))
+                return
+            }
+            .Boxed(inner) -> {
+                source :: lower_pointer(&f)
+                lower_emit(&f, LIRInst.Load{dst: source, base: address, offset: 0})
+                lower_call_clone_glue(&m, &f, inner, source, dst)
+                return
+            }
+            .Inline(aggregate) -> {
+                lower_storage_into(p, &f, dst, aggregate)
+                lower_inline_clone(p, &m, &f, address, dst, aggregate)
+                return
+            }
+            else -> {}
+        }
+    }
+    lower_read_into(p, &f, dst, address, 0, elem)
+}
+
+// The [len, cap, data] header a mutating builtin method's Write receiver
+// place names (a List or Map), None when reported.
+fn lower_receiver_header(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, receiver_place: MIRPlaceID?, what: String) -> LIRValueID? {
+    place :: receiver_place ?? {
+        lower_fail(&m, &f, "{what} mutation without a Write receiver place is not lowered at O0 yet")
+        return None
+    }
+    row_place :: lower_place_row(c.mir, place) ?? {
+        lower_fail(&m, &f, "{what} receiver place is missing")
+        return None
+    }
+    slot :: c.place_slots.get(place.value) ?? {
+        lower_fail(&m, &f, "{what} receiver place has no lowered root")
+        return None
+    }
+    root :: lower_slot_root(p, c, &m, &f, slot) ?? {
+        lower_fail(&m, &f, "{what} receiver place has no value")
+        return None
+    }
+    if row_place.projections.len() == 0 -> return Val(root)
+    address :: lower_walk_projections(p, &m, &f, root, c.slots[slot].ty, row_place.projections) ?? return None
+    Val(lower_address(&f, address.base, address.offset))
+}
+
+// Route identities come from BuiltinMethods.jet:142,163,477,485, not display names.
+fn lower_list_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, receiver: MIRValueID, receiver_place: MIRPlaceID?, args: [MIRValueID]) -> Bool Never! {
+    ty :: lower_value_type(c, receiver) ?? return false
+    _ := lower_list_element(ty) ?? return false
+    if row.family != .BuiltinMethod || row.module_name != "core.builtin" -> return false
+    symbol :: lower_runtime_symbol(row)
+    if (row.member == "view_new" && symbol == "jet_view_new") || (row.member == "view_mut_new" && symbol == "jet_view_mut_new") {
+        lower_view_new(p, c, &m, &f, instruction, receiver, ty, receiver_place, args)
+        return true
+    }
+    length_route :: row.member == "len" && symbol == "jet_list_len"
+    empty_route :: row.member == "is_empty" && symbol == "jet_list_is_empty"
+    push_route :: row.member == "list_push" && symbol == "jet_list_push"
+    pop_route :: row.member == "list_pop" && symbol == "jet_list_pop_kernel"
+    join_route :: row.member == "join" && symbol == "jet_list_join"
+    if !length_route && !empty_route && !push_route && !pop_route && !join_route -> return false
+    if args.len() != (if push_route || join_route -> 1 else -> 0) {
+        lower_fail(&m, &f, "this List method arity is not lowered at O0 yet")
+        return true
+    }
+    list := LIRValueID{value: -1}
+    if push_route || pop_route {
+        list = lower_receiver_header(p, c, &m, &f, receiver_place, "List") ?? return true
+    } else {
+        list = lower_use(&m, &f, receiver) ?? return true
+    }
+    if push_route {
+        value :: args[0]
+        elem :: lower_list_element(ty) ?? return true
+        if lower_repr(p, elem) == .Absent {
+            lower_call_helper(&m, &f, "list.push", ty, [LIRValueID]{list}, None)
+        } else {
+            lowered :: lower_use(&m, &f, value) ?? return true
+            lower_call_helper(&m, &f, "list.push", ty, [LIRValueID]{list, lowered}, None)
+        }
+        lower_alias_absent(&f, instruction)
+    } else if pop_route {
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+        lower_call_helper(&m, &f, "list.pop", ty, [LIRValueID]{list}, Val(dst))
+    } else if join_route {
+        separator :: lower_use(&m, &f, args[0]) ?? return true
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+        lower_call_helper(&m, &f, "list.join", ty, [LIRValueID]{list, separator}, Val(dst))
+    } else {
+        length :: lower_list_word(&f, list, 0)
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+        if length_route {
+            lower_emit(&f, LIRInst.Move{dst: dst, src: length})
+        } else {
+            zero :: lower_const(&f, 0)
+            lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: length, right: zero})
+        }
+    }
+    true
+}
+
+// MIRRust.rs:29480 `jet_view_new(_range)` / `jet_view_mut_new(_range)`
+// (Core.rs:2496-2543): the receiver's elements from `start` to `end`, `end`
+// exclusive when the Range says so (two bare bounds are inclusive), checked
+// like jet_checked_view_window, whose stop names the enclosing function's
+// line (MIRRust.rs function_stack_context).
+fn lower_view_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, receiver_ty: MIRType, receiver_place: MIRPlaceID?, args: [MIRValueID]) Never! {
+    elem :: lower_list_element(receiver_ty) ?? return lower_fail(&m, &f, "a view of a non-List is not lowered at O0 yet")
+    ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "a view without a checked type is not lowered at O0 yet")
+    if lower_view_element(ty) == None -> return lower_fail(&m, &f, "a view of type {mir_type_display_name(ty)} is not lowered at O0 yet")
+    bounds := [LIRValueID]{}
+    bound_types := [MIRType]{}
+    exclusive := LIRValueID{value: -1}
+    if args.len() == 2 {
+        loop arg in args {
+            bound_ty :: lower_value_type(c, arg) ?? return lower_fail(&m, &f, "a view bound without a checked type is not lowered at O0 yet")
+            bound :: lower_use(&m, &f, arg) ?? return
+            &bounds.push(bound)
+            &bound_types.push(bound_ty)
+        }
+        exclusive = lower_const_flag(&f, 0)
+    } else if args.len() == 1 {
+        range_ty :: lower_value_type(c, args[0]) ?? return lower_fail(&m, &f, "a view range without a checked type is not lowered at O0 yet")
+        range :: lower_use(&m, &f, args[0]) ?? return
+        members :: lower_inline_members(p, range_ty)
+        names :: [String]{"start", "end", "exclusive"}
+        loop name in names {
+            found := -1
+            loop (index, member) in members { if member.name == name -> found = index }
+            if found < 0 -> return lower_fail(&m, &f, "a view range of type {mir_type_display_name(range_ty)} is not lowered at O0 yet")
+            member :: members[found]
+            value :: lower_read_at(p, &f, range, member.offset, member.ty) ?? return lower_fail(&m, &f, "a view range field without a layout is not lowered at O0 yet")
+            if name == "exclusive" {
+                exclusive = value
+            } else {
+                &bounds.push(value)
+                &bound_types.push(member.ty)
+            }
+        }
+    } else {
+        return lower_fail(&m, &f, "this view_new arity is not lowered at O0 yet")
+    }
+    if lower_value_layout(f, exclusive) != lir_layout_bool() -> return lower_fail(&m, &f, "a non-Bool view range end flag is not lowered at O0 yet")
+    natives := [LIRValueID]{}
+    loop (index, bound) in bounds {
+        if lower_value_layout(f, bound) != lir_layout_word() -> return lower_fail(&m, &f, "a non-word view bound is not lowered at O0 yet")
+        if lower_is_exact_int(bound_types[index]) {
+            native :: lower_word(&f)
+            lower_convert_exact(&m, &f, native, bound, "jet_int_owned_to_i64", false)
+            &natives.push(native)
+        } else {
+            &natives.push(bound)
+        }
+    }
+    start :: natives[0]
+    end :: natives[1]
+    list := LIRValueID{value: -1}
+    if receiver_place != None {
+        list = lower_receiver_header(p, c, &m, &f, receiver_place, "View") ?? return
+    } else {
+        list = lower_use(&m, &f, receiver) ?? return
+    }
+    length :: lower_list_word(&f, list, 0)
+    zero :: lower_const(&f, 0)
+    one :: lower_const(&f, 1)
+    widen :: lower_numeric_choose(&f, exclusive, zero, one)
+    stop_at :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: stop_at, op: LIRBinaryOp.Add, left: end, right: widen})
+    // RangeBounds.rs jet_range_bounds: start < 0, end < 0, start > end, an
+    // inclusive end overflowing, or an end past the receiver.
+    failed := lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Lt, left: start, right: zero})
+    failed = lower_view_failed_when(&f, failed, LIRCondition.Lt, end, zero)
+    failed = lower_view_failed_when(&f, failed, LIRCondition.Gt, start, end)
+    failed = lower_view_failed_when(&f, failed, LIRCondition.Lt, stop_at, end)
+    failed = lower_view_failed_when(&f, failed, LIRCondition.Gt, stop_at, length)
+    stop :: lower_new_block(&f)
+    valid :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(valid, [LIRValueID]{})})
+    lower_start(&f, stop, [LIRValueID]{})
+    stop_args := [LIRValueID]{start, end, exclusive, length}
+    site :: MIRPanicLoc{file: c.mir.source_file, line: lower_source_line(p, &m, c.mir.source_file, c.mir.span.start), column: 0}
+    loop arg in lower_location(p, &m, &f, site) -> &stop_args.push(arg)
+    lower_noreturn_call(&m, &f, "jet_rt_view_window_stop", stop_args)
+    lower_start(&f, valid, [LIRValueID]{})
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_storage_into(p, &f, dst, ty)
+    count :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: count, op: LIRBinaryOp.Sub, left: stop_at, right: start})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: count})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: zero})
+    data :: lower_list_data(&f, list)
+    first :: lower_list_address(&f, data, start, lower_list_stride(p, elem))
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: first})
+}
+
+// `failed`, or else whether `left condition right` holds.
+fn lower_view_failed_when(f: &LowerFunction, failed: LIRValueID, condition: LIRCondition, left: LIRValueID, right: LIRValueID) -> LIRValueID Never! {
+    check :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: check, condition: condition, left: left, right: right})
+    either :: lower_flag(&f)
+    lower_logic(&f, either, false, failed, check)
+    either
+}
+
+// Moves one element's value (an inline aggregate's bytes) from `from` to `to`.
+fn lower_list_move(p: MIRProgram, f: &LowerFunction, to: LIRValueID, from: LIRValueID, elem: MIRType) Never! {
+    value :: lower_read_at(p, &f, from, 0, elem) ?? return
+    lower_write_at(p, &f, to, 0, value, elem)
+}
+
+// The same element walk serves drop and clone. Trivial elements use their
+// actual layout, including byte Bool and float; Unit occupies an unused slot.
+fn lower_list_drop_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem: MIRType) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
+    list :: ~f.open_params[0]
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    empty :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: empty, condition: LIRCondition.Eq, left: list, right: null})
+    done :: lower_new_block(&f)
+    live :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: empty, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(live, [LIRValueID]{})})
+    lower_start(&f, live, [LIRValueID]{})
+    cap :: lower_list_word(&f, list, 8)
+    data :: lower_list_data(&f, list)
+    lower_static_list_drop_guard(&f, cap, data, done)
+    stride :: lower_list_stride(p, elem)
+    if lower_needs_drop(p, elem) {
+        length :: lower_list_word(&f, list, 0)
+        zero :: lower_const(&f, 0)
+        head :: lower_new_block(&f)
+        body :: lower_new_block(&f)
+        release :: lower_new_block(&f)
+        at :: lower_word(&f)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{zero})})
+        lower_start(&f, head, [LIRValueID]{at})
+        more :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: length})
+        lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(release, [LIRValueID]{})})
+        lower_start(&f, body, [LIRValueID]{})
+        address :: lower_list_address(&f, data, at, stride)
+        lower_drop_stored(p, &m, &f, address, 0, elem)
+        next_at :: lower_word(&f)
+        one :: lower_const(&f, 1)
+        lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_at})})
+        lower_start(&f, release, [LIRValueID]{})
+    }
+    lower_list_free_buffer(&m, &f, data, cap, stride)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+// Inline clone glue: fills the header at `target` with a copy of `source`.
+fn lower_list_clone_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem: MIRType) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
+    source :: ~f.open_params[0]
+    target :: ~f.open_params[1]
+    length :: lower_list_word(&f, source, 0)
+    source_data :: lower_list_data(&f, source)
+    lower_emit(&f, LIRInst.Store{base: target, offset: 0, value: length})
+    lower_emit(&f, LIRInst.Store{base: target, offset: 8, value: length})
+    stride :: lower_list_stride(p, elem)
+    target_data :: lower_list_buffer(&m, &f, length, stride)
+    lower_emit(&f, LIRInst.Store{base: target, offset: 16, value: target_data})
+    zero :: lower_const(&f, 0)
+    at :: lower_word(&f)
+    head :: lower_new_block(&f)
+    body :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{zero})})
+    lower_start(&f, head, [LIRValueID]{at})
+    more :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: length})
+    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, body, [LIRValueID]{})
+    from :: lower_list_address(&f, source_data, at, stride)
+    to :: lower_list_address(&f, target_data, at, stride)
+    lower_list_move(p, &f, to, from, elem)
+    if lower_needs_drop(p, elem) -> lower_glue_clone_fields(p, &m, &f, from, to, [LowerGlueField]{LowerGlueField{offset: 0, ty: elem}})
+    next_at :: lower_word(&f)
+    one :: lower_const(&f, 1)
+    lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_at})})
+    lower_start(&f, done, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+// `list.join(separator)`: every element shown (Printable, as MIRRust.rs
+// jet_list_join's JetShow) with the separator between them.
+fn lower_helper_list_join(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    elem :: lower_list_element(glue.ty) ?? panic("list.join helper has no List type")
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_pointer()))
+    list :: ~f.open_params[0]
+    separator :: ~f.open_params[1]
+    builder :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
+    length :: lower_list_word(&f, list, 0)
+    data :: lower_list_data(&f, list)
+    stride :: lower_list_stride(p, elem)
+    zero :: lower_const(&f, 0)
+    at :: lower_word(&f)
+    head :: lower_new_block(&f)
+    body :: lower_new_block(&f)
+    between :: lower_new_block(&f)
+    item :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{zero})})
+    lower_start(&f, head, [LIRValueID]{at})
+    more :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: length})
+    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, body, [LIRValueID]{})
+    first :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: first, condition: LIRCondition.Eq, left: at, right: zero})
+    lower_seal(&f, LIRTerminator.Branch{condition: first, then_target: lower_target(item, [LIRValueID]{}), else_target: lower_target(between, [LIRValueID]{})})
+    lower_start(&f, between, [LIRValueID]{})
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, separator}, None)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(item, [LIRValueID]{})})
+    lower_start(&f, item, [LIRValueID]{})
+    address :: lower_list_address(&f, data, at, stride)
+    value :: lower_render_load(p, &f, address, 0, elem, false)
+    lower_render_push(p, &m, &f, builder, elem, value, true)
+    next_at :: lower_word(&f)
+    one :: lower_const(&f, 1)
+    lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_at})})
+    lower_start(&f, done, [LIRValueID]{})
+    text :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(text))
+    lower_seal(&f, LIRTerminator.Return{value: Val(text)})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_helper_list_push(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    elem :: lower_list_element(glue.ty) ?? panic("list.push helper has no List type")
+    params := [LIRLayout]{lir_layout_pointer()}
+    if lower_repr_layout(lower_repr(p, elem)) == .Val(layout) -> &params.push(layout)
+    f := lower_helper_start(&m, glue, params, None)
+    list :: ~f.open_params[0]
+    incoming :: if f.open_params.len() == 2 -> Val(~f.open_params[1]) else -> None
+    length :: lower_list_reserve(p, &m, &f, list, elem)
+    data :: lower_list_data(&f, list)
+    address :: lower_list_address(&f, data, length, lower_list_stride(p, elem))
+    if incoming == .Val(value) -> lower_write_at(p, &f, address, 0, value, elem)
+    new_length :: lower_word(&f)
+    increment :: lower_const(&f, 1)
+    lower_emit(&f, LIRInst.Binary{dst: new_length, op: LIRBinaryOp.Add, left: length, right: increment})
+    lower_emit(&f, LIRInst.Store{base: list, offset: 0, value: new_length})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+// Makes room for one more element of `elem` in the [len, cap, data] header at
+// `list`, doubling a full buffer (moving its elements); returns the length,
+// with the open block continuing once the room exists.
+fn lower_list_reserve(p: MIRProgram, m: &LowerModule, f: &LowerFunction, list: LIRValueID, elem: MIRType) -> LIRValueID Never! {
+    stride :: lower_list_stride(p, elem)
+    length :: lower_list_word(&f, list, 0)
+    cap :: lower_list_word(&f, list, 8)
+    old_data :: lower_list_data(&f, list)
+    full :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: full, condition: LIRCondition.Eq, left: length, right: cap})
+    grow :: lower_new_block(&f)
+    append :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: full, then_target: lower_target(grow, [LIRValueID]{}), else_target: lower_target(append, [LIRValueID]{})})
+    lower_start(&f, grow, [LIRValueID]{})
+    // Keep capacities byte-addressable in signed word arithmetic before doubling.
+    limit :: lower_const(&f, 576460752303423487)
+    too_large :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: too_large, condition: LIRCondition.Gt, left: cap, right: limit})
+    lower_check(&m, &f, too_large, "jet_rt_panic_overflow")
+    zero :: lower_const(&f, 0)
+    is_zero :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: is_zero, condition: LIRCondition.Eq, left: cap, right: zero})
+    nonempty :: lower_new_block(&f)
+    empty :: lower_new_block(&f)
+    allocate :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: is_zero, then_target: lower_target(empty, [LIRValueID]{}), else_target: lower_target(nonempty, [LIRValueID]{})})
+    lower_start(&f, empty, [LIRValueID]{})
+    one_cap :: lower_const(&f, 1)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(allocate, [LIRValueID]{one_cap})})
+    lower_start(&f, nonempty, [LIRValueID]{})
+    doubled :: lower_word(&f)
+    two :: lower_const(&f, 2)
+    lower_emit(&f, LIRInst.Binary{dst: doubled, op: LIRBinaryOp.Mul, left: cap, right: two})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(allocate, [LIRValueID]{doubled})})
+    new_cap :: lower_word(&f)
+    lower_start(&f, allocate, [LIRValueID]{new_cap})
+    new_data :: lower_list_buffer(&m, &f, new_cap, stride)
+    at :: lower_word(&f)
+    head :: lower_new_block(&f)
+    body :: lower_new_block(&f)
+    moved :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{zero})})
+    lower_start(&f, head, [LIRValueID]{at})
+    more :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: length})
+    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(moved, [LIRValueID]{})})
+    lower_start(&f, body, [LIRValueID]{})
+    from :: lower_list_address(&f, old_data, at, stride)
+    to :: lower_list_address(&f, new_data, at, stride)
+    lower_list_move(p, &f, to, from, elem)
+    next_at :: lower_word(&f)
+    one :: lower_const(&f, 1)
+    lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_at})})
+    lower_start(&f, moved, [LIRValueID]{})
+    lower_list_free_buffer(&m, &f, old_data, cap, stride)
+    lower_emit(&f, LIRInst.Store{base: list, offset: 8, value: new_cap})
+    lower_emit(&f, LIRInst.Store{base: list, offset: 16, value: new_data})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(append, [LIRValueID]{})})
+    lower_start(&f, append, [LIRValueID]{})
+    length
+}
+
+// Collections.rs:jet_list_pop_kernel transfers the last element into Option.
+fn lower_helper_list_pop(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    elem :: lower_list_element(glue.ty) ?? panic("list.pop helper has no List type")
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    list :: ~f.open_params[0]
+    length :: lower_list_word(&f, list, 0)
+    zero :: lower_const(&f, 0)
+    is_empty :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: is_empty, condition: LIRCondition.Eq, left: length, right: zero})
+    empty :: lower_new_block(&f)
+    present :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: is_empty, then_target: lower_target(empty, [LIRValueID]{}), else_target: lower_target(present, [LIRValueID]{})})
+    lower_start(&f, empty, [LIRValueID]{})
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    lower_seal(&f, LIRTerminator.Return{value: Val(null)})
+    lower_start(&f, present, [LIRValueID]{})
+    last :: lower_word(&f)
+    one :: lower_const(&f, 1)
+    lower_emit(&f, LIRInst.Binary{dst: last, op: LIRBinaryOp.Sub, left: length, right: one})
+    lower_emit(&f, LIRInst.Store{base: list, offset: 0, value: last})
+    stride :: lower_list_stride(p, elem)
+    result :: lower_pointer(&f)
+    lower_alloc(&m, &f, result, lower_option_box_size(p, elem))
+    data :: lower_list_data(&f, list)
+    address :: lower_list_address(&f, data, last, stride)
+    lower_list_move(p, &f, result, address, elem)
+    lower_seal(&f, LIRTerminator.Return{value: Val(result)})
+    lir_builder_finish(f.builder)
+}

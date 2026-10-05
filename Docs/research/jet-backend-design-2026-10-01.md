@@ -60,14 +60,55 @@ the shape of drop glue. `LIR/Print.jet` prints the text form used in tests.
 
 ## MIR -> LIR lowering
 
-`lir_lower_program(program: MIRProgram) -> LIRLowering` lowers every MIR
-function of a checked program into one `LIRModule`, appends the generated drop
-glue, and runs the LIR lint on the result. `LIRLowering.issues` names the
-function and the construct for everything the lowering cannot express yet, and
-carries the lint findings; the module may only be handed to a code generator
-when `issues` is empty. The lowering never decides meaning again (D-TIER-ONEIR1):
-every decision below reads facts MIR already carries (checked types, ownership,
+`lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering`
+lowers the functions the entry reaches into one `LIRModule`, appends the
+generated drop glue, and runs the LIR lint on the result; `LIRLowering.entry`
+is the entry's LIR function. `LIRLowering.issues` names the function and the
+construct for everything the lowering cannot express yet, and carries the lint
+findings; the module may only be handed to a code generator when `issues` is
+empty. The lowering never decides meaning again (D-TIER-ONEIR1): every
+decision below reads facts MIR already carries (checked types, ownership,
 Prelude routes, phis, drop operations).
+
+### Entry-rooted monomorphization
+
+`Lower/Mono.jet` and `Lower/Reach.jet` prepare the executable inventory in one
+FIFO that discovers functions, concrete types and render edges together
+(`lower_prepare_entry`). A generic function, and every method of a generic
+type, is instantiated once per distinct concrete binding a reached direct call
+supplies: the same instances rustc monomorphizes from the Rust emitter's
+generic output. The binding is the callee owner's applied arguments (a method
+of `Pair<Int>` binds Pair's parameters) followed by the call's own type
+arguments. An instance's body is the original's with every type-bearing row
+substituted and every local ID (block, value, place, op) kept; originals stay
+borrowed from the program.
+
+MIR function IDs are stable. An original keeps its ID; an instance's ID is
+`stable_id("mir-function-instance", key)` over its original ID and its bound
+types' structural fingerprints (nominal declaration IDs, ordered arguments,
+leaf facts; no checked identities), so the lowering derives every direct call
+target from the call site (`lower_instance_id`) and keeps no target table.
+LIR rows are the reached originals in declaration order, then instances in
+first-request order, then glue. Instance LIR functions are named
+`<key><bound types>` (`identity<Int>`); no instance crosses the runtime ABI.
+A substituted type whose shape changed, and an identity-less bound type that
+replaces a checked binder, take the identity
+`mir_type_id("mono:" + fingerprint)`, so ID-only type operands resolve to the
+instance, except a tuple, which keeps its checked
+identity because its MIR field IDs derive from it. A generic declaration's
+concrete definition (`lower_type_def`) substitutes its fields, payloads and
+alias or distinct base and keeps its declaration and field IDs. Glue is keyed
+by role and fingerprint, so two declarations of one display name never share
+glue. Render edges select the Printable/Display implementation whose receiver
+matches the rendered type exactly or is the generic template of its
+declaration, and reach that method's instance for the receiver.
+
+Generic ancestry (each new function or type specialization along a request
+chain) is limited to 128, rustc's default recursion limit: polymorphic
+recursion such as `fn expand<T>() { expand<List<T>>() }` is a compile issue
+naming the leaf request and its chain. A missing target, an owner or function
+type-argument arity mismatch or an unbound type parameter is an issue too, and
+a failed preparation lowers nothing.
 
 ### What Cranelift does today
 
@@ -106,19 +147,46 @@ IR with these choices, which the Jet lowering keeps or replaces as noted:
 | `Unit`, `Never` | no LIR value | — | — |
 | `String` | runtime handle | `ptr` | `jet_rt_string_drop` |
 | `RangeCursor`, `IterCursor` | runtime handle | `ptr` | `jet_loop_cursor_drop` |
-| struct | heap box, field k at offset 8k | `ptr` | generated glue |
+| struct, tuple | inline aggregate: pointer to storage holding the stored fields at natural offsets (`Lower/Values.jet`) | `ptr` | generated glue on the storage (frees nothing) |
 | enum, every variant without payload | discriminant word | `i64` | none |
-| enum with a payload variant | heap box: discriminant at 0, payload slot k at 8(k+1) | `ptr` | generated glue |
-| `T?` | null for absent, else one-slot box holding the value | `ptr` | generated glue (null-safe) |
+| enum with a payload variant | heap box: discriminant word at 0, payload members at natural offsets from 8 | `ptr` | generated glue |
+| `T?` | null for absent, else a box holding the value's bytes at 0 | `ptr` | generated glue (null-safe) |
 | `Result<T, E>` | box: 1 (Ok) or 0 (Err) at 0, payload at 8 | `ptr` | generated glue |
+| `[T]` | box: `[len, cap, data]`, elements `max(8, size(T))` bytes apart | `ptr` | generated glue |
+| `[K:V]` | the `[T]` header over `(key, value)` entry tuples in ascending key order (BTreeMap's); lookups are a binary search (`Lower/Maps.jet`); keys are exact Int, String or word-sized scalars | `ptr` | `[T]` glue over the entries |
+| `View<T>`, `ViewMut<T>` | the `[T]` header `[len, 0, data]` in its holder's storage, `data` at the window's first element of the owner's buffer (`Lower/Lists.jet` lower_view_element); capacity 0 marks a buffer it does not own; List reads read it unchanged; a materializing `Copy` into `[T]` clones the elements | `ptr` | none |
+| `View<str>` | an owned String handle holding the window's text: the `_view` kernels run their owned twins (`jet_string_after`, `jet_string_before`, `jet_unicode_trim`); costs one allocation the zero-copy `&str` avoids, otherwise unobservable (a window is only read) | `ptr` | `jet_rt_string_drop` |
 | `Distinct`/`Alias` types | as their base | — | — |
 
-Every box slot is one 8-byte word; a Bool field is stored in the low byte of
-its slot. Boxes come from `jet_rt_alloc(size, align)` and return to
-`jet_rt_free(ptr, size, align)`. A variant's discriminant is its declared
-`discriminant` or its index. Narrow fixed-width integers, floats, lists, maps,
-tuples, unions, trait objects, closures and generic instances are not lowered
-yet and are reported.
+Sizes: a word, handle or box pointer is 8 bytes (align 8), a Bool 1 byte, Unit
+0. An inline aggregate is 8-aligned and padded to whole words, so copies move
+words; a member sits at the next multiple of its alignment, and a recursive
+(declared boxed) edge is one pointer to a wrapper with the present Option
+layout. Box payloads and list elements use the same byte layout, so an inline
+aggregate stored in one is its bytes. Boxes come from `jet_rt_alloc(size,
+align)` and return to `jet_rt_free(ptr, size, align)` with the same size (one
+size function per box kind serves construction and glue). A variant's
+discriminant is its index. Unions and trait objects are not lowered yet and
+are reported; generic instances lower as their concrete instances
+(above). Function values are closure boxes ("Closures" below).
+
+Inline aggregates. A `Struct`/`Tuple` builds into a fresh `StackSlot`. The
+storage's holder owns it: the value never frees it, and MIR `Drop`/`Copy` of an
+inline value call its drop glue (`drop.<key>`, `(ptr)`, drops the owned members,
+null-safe) or clone glue (`clone.<key>`, `(source, target)`, copies the words
+then replaces owned members by copies into storage the caller supplies). Root
+writes, reads and moves pass the pointer, as for boxes; only a loop can make a
+`StackSlot` overwrite a live value, so every inline slot and phi gets frame
+storage of its own in the entry block, and each back edge (to a block of lower
+or equal reverse-postorder rank) copies the carried inline values into that
+storage (through temporaries when several are copied, so swaps are safe; a
+slot's null placeholder stays null; a conditional back edge gets a block of
+its own for the copies). Moving an inline member out of a projection copies
+it to storage of its own and zeroes it in the parent so glue skips its owners.
+Inline parameters pass the pointer; an inline result is written through a
+hidden first parameter pointing at the caller's storage (the callee returns
+nothing). A Write argument of inline type passes its storage, which the
+callee updates in place.
 
 A value's drop action comes from its MIR ownership fact: owned values
 (`drop != NoDrop`, not a read or write borrow) carry the type's drop; borrows,
@@ -126,10 +194,11 @@ copies and every value of a type without drop carry none. MIR `Drop(value)`
 becomes LIR `Drop` when the value carries a drop action and nothing otherwise.
 
 Drop glue is one LIR function per box type, `drop.<canonical type key>`,
-taking the box pointer and returning nothing (`LIRDrop.Function`). It loads and
-drops every owned slot of the active shape (testing the discriminant for
-enums and Results, and skipping null for Options), then frees the box. Glue
-for nested boxes names further glue; the list grows while it is generated.
+taking the box pointer and returning nothing (`LIRDrop.Function`). It drops
+every owned member of the active shape (testing the discriminant for enums and
+Results, and skipping null for Options), then frees the box. Glue for nested
+boxes and inline members names further glue; the list grows while it is
+generated.
 
 ### Locals, places and SSA
 
@@ -170,7 +239,7 @@ function parameters and jumps to it (LIR forbids jumps to the entry).
 | `Parameter(i)` | the entry block's parameter for MIR parameter i (Unit parameters have none) |
 | `Constant` Int/Bool/Char | `Const` (an Int literal outside the inline range is reported) |
 | `Constant` String | `DataAddress` of the literal's bytes, `Const` length, call `jet_rt_string_from_static(ptr, len) -> String` |
-| `Copy` | the same value for word, flag and tag carriers; `jet_rt_string_clone` for a String; boxes need clone glue (reported) |
+| `Copy` | the same value for word, flag and tag carriers; `jet_rt_string_clone` for a String; clone glue for boxes; a fresh `StackSlot` filled by clone glue for an owned inline aggregate (a borrowing copy names the source) |
 | `Move`, `AttachTag`, transparent `Convert` | the same value |
 | exact-Int `+ - *` (Prelude route, arity 2) | inline test (`(x ^ (x << 1)) >= 0` on both operands), native op (Mul also checks `Overflows`), inline test of the result, else the route's runtime symbol; joined in a block parameter |
 | exact-Int other ops (division family, pow, shifts, bit ops) | call of the route's runtime symbol with `(left, right)`, plus `(file_ptr, file_len, line)` for routes of arity 4 |
@@ -183,15 +252,15 @@ function parameters and jumps to it (LIR forbids jumps to the entry).
 | `And`/`Or` on Bools | a branch on the left operand joining the right operand or the decided constant |
 | `Unary Neg` | exact Int: `0 - x` with the exact fast path; word: `Sub` |
 | `Unary Not` | Bool: `Compare Eq x, 0`; word: `Xor x, -1` |
-| `Struct` | `jet_rt_alloc`, one `Store` per field at its declaration slot |
-| `Field`, field `ReadPlace` | `Load` at the field's slot |
-| `Enum` | tag enum: `Const` discriminant; payload enum: box, `Store` discriminant and payload slots |
-| `EnumIs` | `Compare Eq` of the discriminant (loaded from slot 0 for boxes) |
-| `EnumPayload(index)` | `Load` slot `index + 1` |
-| `Present(v)` / `Absent` | one-slot box holding v / null pointer `Const 0` |
-| `OptionIsSome` / `OptionValue` | `Compare Ne` against null / `Load` slot 0 |
-| `ResultOk` / `ResultErr` | two-slot box, slot 0 = 1 / 0, slot 1 = payload |
-| `ResultIsOk` / `ResultValue` | `Load` slot 0 and `Compare Ne 0` / `Load` slot 1 |
+| `Struct`, `Tuple` | `StackSlot` of the aggregate's size, each field moved in at its offset (bytes copied for inline members) |
+| `Field`, field `ReadPlace` | `Load` at the field's offset; an inline member is its address (`PointerAdd`) |
+| `Enum` | tag enum: `Const` discriminant; payload enum: box, `Store` discriminant, payload members moved in at their offsets |
+| `EnumIs` | `Compare Eq` of the discriminant (loaded from offset 0 for boxes) |
+| `EnumPayload(index)` | read of the member at its offset (an inline member's address) |
+| `Present(v)` / `Absent` | box holding v's bytes / null pointer `Const 0` |
+| `OptionIsSome` / `OptionValue` | `Compare Ne` against null / read at offset 0 |
+| `ResultOk` / `ResultErr` | box, word at 0 = 1 / 0, payload at 8 |
+| `ResultIsOk` / `ResultValue` | `Load` offset 0 and `Compare Ne 0` / read at offset 8 |
 | `BuildString(parts)` | `jet_rt_string_builder_new`, `..._push_static(b, ptr, len)` per literal, `..._push(b, text)` per Display interpolation, `..._finish(b) -> String` |
 | `Semantic(Print(call, v))` | Display text of v (the String itself, or `jet_rt_int_to_string` / `jet_rt_i64_to_string` / `jet_rt_char_to_string` / `jet_rt_bool_to_string`, dropped after the call), then the route's symbol (`jet_term_write_stdout_line`) with `(text, flush = 1)` |
 | `Call` of a user function, method or associated function | `Call Function(id)` with the callee's signature; Unit arguments are omitted |
@@ -201,10 +270,36 @@ function parameters and jumps to it (LIR forbids jumps to the entry).
 | `ScopeEnter`/`ScopeExit` | nothing for Unsafe, Impure, AssumeDeterministic, Layout and DebugOnly scopes; others are reported |
 | `Drop(v)` | LIR `Drop` when v carries a drop action |
 | `InitializeUninit` | nothing |
+| `Closure(f, captures)` | a closure box (below) with the code and release helper addresses (`FunctionAddress`) |
+| `IndirectCall(v, args)` | `Load` of the box's code word, then `Call` through it (`LIRCallee.Value`) with the box first |
+| `BuildMap(entries)` / Map `Index` / `m[k] = v` | an empty header, then per-type helpers `map.set` / `map.find` (a missing key stops) / `map.set` with a copy of the borrowed key; `get`, `has_key`, `insert`, `pop`, `len`, `is_empty` call `map.get`, `map.find`, `map.insert`, `map.remove` or read the length |
+| `Capture(slot)` | the capture's box field (by value) or the address it holds (by reference) |
 
-Every other operation (lists, maps, indexing, closures, trait objects, Core
-calls, pattern captures, the remaining semantic operations) is reported as not
-lowered yet, by name.
+Every other operation (the remaining Map methods, trait objects, pattern
+captures, the remaining semantic operations) is reported as not lowered yet,
+by name.
+
+### Closures
+
+A function value is a pointer to a heap box `[reference count, code
+address, release helper, captures...]` (Lower/Closures.jet). The code takes
+the box as a hidden first parameter. A closure body (a function with capture
+parameters) is the code; any other function used as a value runs through a
+generated thunk that ignores the box. Clone glue counts a reference; drop
+glue runs the release helper on the last one, which drops the by-value
+captures and frees the box. A capture parameter that borrows (ReadBorrow,
+WriteBorrow or Write access) is stored as its place's address. Captured
+places are memory cells: in the body the box field or referenced storage, in
+the creating function frame storage every read and write goes through, so
+both see one value. On x86-64 `FunctionAddress` is `lea [rip + disp32]` and an
+indirect call is `call r10`.
+
+Closure-taking methods (MIR `ClosureMethod`, Lower/Combinators.jet) are
+loops over the borrowed receiver that call the box with each element
+borrowed, as the Prelude kernels call `f(&item)`: List `filter` (kept
+elements copied), `map`, `count_where`, `fold` with an accumulator that owns
+nothing, and Option `map`. A closure moved into the method is dropped after
+the loop. Other closure methods are reported.
 
 ### Calls into the compiled runtime
 
@@ -252,7 +347,9 @@ The lowering added to LIR: `Div Rem And Or Xor Shl Shr` binary operators;
 `Overflows(dst, op, l, r)` (Bool: signed Add/Sub/Mul overflow);
 `Load(dst, base, offset)` and `Store(base, offset, value)` through a Pointer;
 `DataAddress(dst, data)` with `LIRModule.data` (read-only bytes);
-`LIRTerminator.Unreachable`; `LIRDrop.Function(id)` for generated glue; and
+`LIRTerminator.Unreachable`; `LIRDrop.Function(id)` for generated glue;
+`StackSlot(dst, size, align)` (the address of frame storage of its own, live
+until the function returns; Write-argument cells use it); and
 `lir_layout_pointer()`. The lint checks each of them, accepts a null pointer
 `Const 0` and pointer `Eq`/`Ne` comparisons, and checks that drop glue takes
 one pointer and returns nothing.
@@ -311,8 +408,11 @@ whole-interval spills for compile speed, and O1 is where splitting belongs.
 ## Frames
 
 `push rbp; mov rbp, rsp`, then the callee-saved registers the allocator used,
-then `sub rsp, 8 * n` for spill slots, padded so rsp is 16-byte aligned at
-every call. Slot k lives at `[rbp - 8 * (saved + k + 1)]`. Every return
+then one `sub rsp` for spill slots and StackSlot storage, padded so rsp is
+16-byte aligned at every call. Spill slot k lives at
+`[rbp - 8 * (saved + k + 1)]`. StackSlot storage lies below the spill slots,
+each at the next multiple of its alignment (rbp is 16-byte aligned after the
+push), and a StackSlot is `lea reg, [rbp - disp]`. Every return
 restores rsp with `lea rsp, [rbp - 8 * saved]`, pops the saved registers and
 rbp, and returns. Entry parameters arrive in the System V argument registers
 and are moved (in parallel) to their allocated homes. The frame keeps rbp as
@@ -326,18 +426,22 @@ symbol, or module data (`X64RelocTarget`). `Image/Link.jet`
 runtime functions and data after them, and patches every rel32. The result is
 position-independent, so the same bytes serve every image kind:
 
-- **Static executable** (`Image/ELF.jet`, `x64_static_executable`): one
-  read+execute `PT_LOAD` segment at 0x400000 holding the headers, code and
-  data; no writable segment, no section headers. `_start` calls the entry
-  function and passes its word result (or 0) to `exit_group`. Runtime calls
-  link against the freestanding image runtime below.
+- **Static executable** (`Image/ELF.jet`, `x64_static_executable`): a
+  read+execute `PT_LOAD` segment at 0x400000 holding the headers and code,
+  and, when the module has data, a read+write `PT_LOAD` for it (the linker
+  starts the data on a page of its own, so no page is writable and
+  executable; startup fixups store String handles into it); no section
+  headers. `_start` calls the entry function and passes its word result (or
+  0) to `exit_group`. Runtime calls link against the freestanding image
+  runtime below.
 - **Relocatable object** (`Image/Object.jet`, `x64_relocatable_object`): an
   ELF64 `ET_REL` with `.text`, `.rodata`, `.rela.text`, `.symtab`, `.strtab`
   and an empty `.note.GNU-stack`. A global `main` calls
   `jet_rt_main(entry)`; every runtime call is an undefined global with an
   `R_X86_64_PLT32` relocation and every data address an `R_X86_64_PC32`
-  relocation against `.rodata`, so `cc program.o libjet_runtime_c.a
-  -lpthread -ldl -lm` binds the program to the one compiled runtime.
+  relocation against `.rodata`. The in-process linker below binds it to the
+  one compiled runtime; `cc program.o libjet_runtime_c.a -lpthread -ldl -lm`
+  remains the external reference.
 - **In-memory image** (`Image/Memory.jet`, `x64_memory_image`, for `jet run`
   and tiered execution): the linked block of the module's functions, one
   import stub per runtime symbol the code calls, and the data. A stub is
@@ -352,6 +456,128 @@ position-independent, so the same bytes serve every image kind:
   once; this matches what cranelift-jit's `finalize_definitions` does today.
   `Tests/load-memory-image.c` performs the same steps in C, out of process,
   as the reference the Jet loader is checked against.
+
+## In-process linking
+
+`Image/StaticLink.jet` (`x64_link_executable(names, bufs)`, #4549) links
+relocatable objects with the prebuilt runtime archive set into a static
+x86-64 executable without a system linker, compiler or child process.
+`Image/Archive.jet` reads GNU `ar` archives in place (member table, `/` and
+`/SYM64/` symbol indexes, `//` long names); inputs are told apart by their
+magic bytes.
+
+The runtime archive set is what the compiled runtime needs at the final
+link: the runtime rlib (the `jet_runtime` crate with its C-ABI exports, one
+object per codegen unit), the Rust standard library rlibs of the same rustc,
+musl's `libc.a` and `libgcc_eh.a`/`libgcc.a`. The rlibs target
+`x86_64-unknown-linux-gnu`; on x86-64 musl's static libc serves them once
+the linker supplies the few glibc-only names below. What the linker does:
+
+- **Resolution.** All given objects are loaded, then archive members are
+  pulled through the indexes for every strong undefined reference until none
+  can be satisfied (all archives form one group). Weak definitions yield to
+  strong ones, common symbols are allocated in `.bss`, the first copy of a
+  COMDAT group wins and the members of later copies are discarded. Objects
+  with more than 65279 sections (the runtime's codegen units have ~63k) use
+  extended section numbering (`e_shnum == 0`, `SHN_XINDEX` and
+  `.symtab_shndx`).
+- **Synthesis.** When the archives provide musl's `__libc_start_main` and no
+  object defines `_start`, the linker adds its startup object: `_start`
+  passes `__jet_link_main` to `__libc_start_main`; `__jet_link_main`
+  registers `.eh_frame` with libgcc (`__register_frame_info`), runs every
+  `.init_array` entry with glibc's `(argc, argv, envp)` arguments (the
+  gnu-target std captures `argv` there; musl's own init loop sees an empty
+  array) and tail-calls the program's `main`, which calls `jet_rt_main`.
+  The startup object also defines `__dso_handle`. For references still
+  undefined after resolution the linker writes the allocator shim rustc
+  emits at its final link (`__rust_alloc`/`dealloc`/`realloc`/`alloc_zeroed`
+  jump to the default allocator's `__rdl_*` in the same mangled `__rustc`
+  crate; `__rust_no_alloc_shim_is_unstable_v2` returns), aliases glibc's
+  LFS64 names (`fstat64` -> `fstat`, identical on x86-64) and answers
+  `_dl_find_object` with "not found" so libgcc's unwinder uses the
+  registered tables. The gnu-target std's resolver names two glibc functions
+  musl lacks: `__res_init` returns 0 (musl rereads resolv.conf on every
+  lookup) and `gnu_get_libc_version` returns "2.26", the first glibc that
+  does the same, so std never needs the reload. Synthetic code is written as
+  an ELF relocatable object and loaded through the same path as every input.
+- **Collection.** Sections live from `_start`, the init/fini arrays,
+  `SHF_GNU_RETAIN` sections and the CIEs' personality references, following
+  relocations. `.eh_frame` is split into CIE and FDE records; an FDE is kept
+  exactly when the function it describes is live (and its LSDA then is), and
+  every kept FDE's CIE pointer is recomputed. The same pass over each live
+  section's relocations assigns GOT slots and reports undefined symbols.
+- **Layout.** ET_EXEC at 0x400000 with file offset = address - base, three
+  page-aligned `PT_LOAD` segments: read-only (headers, `.rodata*`,
+  `.gcc_except_table*`, the kept unwind records plus a zero terminator),
+  read+execute (`.text*`, padded with `int3`), read+write (`.tdata`, the
+  init/fini arrays, `.data.rel.ro*`, the GOT, `.data*`, then `.bss*` and
+  common symbols), plus `PT_TLS` (`.tdata` + `.tbss`) and `PT_GNU_STACK`. No
+  section headers.
+- **Relocation.** `R_X86_64_64`, `PC32`, `PLT32`, `32`, `32S`, `PC64`,
+  `GOTPCREL`, `GOTPCRELX`, `REX_GOTPCRELX`, `GOTPC32`, `GOTOFF64`, `TLSGD`,
+  `TLSLD`, `DTPOFF32/64`, `GOTTPOFF`, `TPOFF32/64` and `SIZE32/64`; anything
+  else is a link error. Static-executable relaxations, chosen as GNU ld
+  chooses them for a static non-PIE executable: TLS general- and
+  local-dynamic sequences become local-exec (`mov rax, fs:0`), initial-exec
+  loads become immediates; a REX.W `mov` through the GOT becomes `lea` (any
+  GOT type) or, for `REX_GOTPCRELX`, `mov reg, imm32`; `call`/`jmp` through
+  the GOT become `addr32 call`/`jmp; nop` only for `GOTPCRELX`, so rustc's
+  plain `GOTPCREL` calls keep their slot. Thread-pointer offsets follow
+  variant II: an address minus the end of the aligned TLS block. On the
+  hello/stop/unwind probes the code the linker writes disassembles to the
+  same instruction sequence as GNU ld's output from the same inputs (only
+  addresses and padding differ).
+
+### Runtime packs
+
+Linking against the archive set reads ~100 MB and ~1M section headers per
+link. `Image/RuntimePack.jet` (`x64_link_runtime_pack(names, bufs,
+extra_roots)`) does everything that does not depend on the program once per
+toolchain and writes the result as one self-contained ELF relocatable
+object, the runtime pack, shipped beside the runtime archive; a program link
+is `x64_link_executable([program.o, pack])` and reads nothing else.
+`Tools/packaging/prebuild-runtime.sh` writes it as
+`jet-runtime/<key>/jet_runtime.pack.o` beside `jet`, in the directory of the
+release-profile runtime rlib it was linked from (the runtime cache's prebuilt
+layout), and records that key in `jet-runtime/native.key`. The key covers the
+runtime's Rust text and `rustc -vV`, neither of which the native build has, so
+the Jet-hosted `jet build` reads the key from that file in one place
+(`jet_cli_runtime_key`) and refuses the build with E2105 when it is missing.
+
+- Resolution is finished: members are pulled for the roots (the C ABI the
+  runtime archive defines, `_start`, `__jet_link_main`, `__tls_get_addr`,
+  and the caller's extra names such as `memcpy`), COMDATs, weak and common
+  symbols, the allocator shim, the LFS64 aliases and the libc shims are
+  settled, and the startup object is included. Only the roots stay global;
+  every other definition becomes a local symbol, so the pack's symbol table
+  is its export table plus its imports (`main`, the linker-defined names,
+  weak references).
+- Only the sections reachable from the roots are kept, each still its own
+  section with its relocations rewritten against the pack's symbols, so the
+  program link still collects what the program does not reach. Section
+  names are reduced to what classification and init-array priority read.
+- One `.eh_frame` holds the FDEs of kept sections and the CIEs they use;
+  `.note.GNU-stack` marks the stack non-executable.
+
+The program link recognizes the startup object by the pack's
+`__jet_link_main` export. Because the pack is plain ELF, GNU ld links it too
+(`ld -static -e _start program.o pack.o` plus `--defsym` for the
+`__jet_*`/`__EH_FRAME_BEGIN__` names), which is how the relaxations above
+were compared. For the current runtime the pack is 3.0 MB (8998 section
+headers, 66 exports); hello-world keeps 3136 of its sections.
+
+Link time, measured with the linker compiled by `jet build --release` (the
+Rust-emitting tier; not yet measured as Jet-backend output), inputs
+already in memory: hello-world 67 ms, the runtime-stop probe 89 ms, against
+13.5 s for hello-world linked from the archive set in the `jet run` tier
+(~0.5 s from the pack there). Building the pack takes 0.55 s in the release
+tier. Collection and relocation dominate, about equally; both are linear in
+the live sections' relocations.
+
+`Tests/run-link.mjs <outdir>` assembles `Tests/LinkRuntime.jet` with the
+linker sources; `jet run unit.jet <output> <inputs>...` links and
+`jet run unit.jet -- --pack <output> <archives>...` builds a pack, each
+reporting read, link and write times.
 
 ## Freestanding image runtime
 
@@ -711,7 +937,13 @@ Examples/features golden with an expected stdout, runs it with `jet run` and
 Rust Debug form; inert when unset), converts the dump into the Jet MIR schema
 with `Tests/mir-debug.mjs` (field and variant correspondence of the bootstrap
 codec; the functions the entry reaches), lowers every case in one
-interpreted unit (`Tests/GoldenLower.jet` plus a decoder generated from the
-schema), links each object with `JET_RUNTIME_C_LIB` and compares stdout with
-the golden. `<outdir>/summary.txt` counts pass, wrong, unsupported and harness
-verdicts and ranks the blockers by how many goldens each one stops.
+unit (`Tests/GoldenLower.jet`, the backend files exactly as
+`run-lower-fixtures.mjs` assembles them, plus a decoder generated from the
+schema) and writes `<case>.o` and, when the freestanding image runtime serves
+every import, the static executable `<case>.elf` that native `jet build`
+writes. The run stage executes the static executable when there is one (no C
+library, no rustc), otherwise links the object with `JET_RUNTIME_C_LIB`, and
+compares stdout with the golden; each verdict names its leg (`static` or
+`hosted`). `--stage` and `--until` bound the stages that run.
+`<outdir>/summary.txt` counts pass, wrong, unsupported and harness verdicts and
+ranks the blockers by how many goldens each one stops.

@@ -1,0 +1,24 @@
+// Fallible functions: a bare return from a function whose success type is
+// Unit returns Ok(()) (Lower.jet lower_return_implicit_ok).
+use jet_foundation.[
+    MIRCallArg, MIRCallee, MIRFailureCarrier, MIRFunction, MIROperation,
+    MIRProgram, MIRTerminator, MIRType, MIRTypeDef, MIRTypeKind,
+    mir_function_id, mir_type_from_kind,
+]
+
+// fn check() String! {}
+// fn run() { print(check() is Ok) }
+// expect-stdout implicit-ok: "true\n"
+fn fx_implicit_ok() -> MIRProgram Never! {
+    result_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: fx_unit(), err: fx_string()})
+    g := fx_builder()
+    fx_block(&g, 0, MIRTerminator.Return{value: None})
+    check := fx_function("check", g, result_ty)
+    check.failure = MIRFailureCarrier.Result{success: fx_unit(), error: fx_string()}
+    r := fx_builder()
+    called :: fx_owned(&r, result_ty, MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("check")}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    ok :: fx_copy(&r, fx_bool(), MIROperation.ResultIsOk{subject: called})
+    fx_print(&r, ok)
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{check, fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}

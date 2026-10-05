@@ -1,21 +1,32 @@
 // Image linking: lay compiled x86-64 functions, the runtime functions and the
-// module's read-only data out in one block and resolve every rel32
-// relocation. Function targets name a compiled function by ID, runtime
-// targets name a runtime function by symbol, and data targets name a module
-// data object. All references are relative, so the block runs at any address:
-// a static image maps it at a fixed base, an in-memory image wherever the
-// mapping lands.
+// module's data out in one block. Code references are rel32; pointer words in
+// data are rebased at the static ELF or memory image origin.
+
+pub struct X64ImageDataReloc { pub at: Int, pub target: Int }
 
 pub struct X64LinkedText {
     pub text: [U8]
+    // Required alignment of the block's absolute origin; relative alignment
+    // alone cannot guarantee aligned function or data addresses.
+    pub align: Int
     // offsets[i] is where functions[i] starts in `text`, runtime_offsets[i]
     // where runtime[i] starts.
     pub offsets: [Int]
     pub runtime_offsets: [Int]
+    // Where the data starts in `text` (text.len() without data).
+    pub data_offset: Int
+    pub data_relocs: [X64ImageDataReloc]
     pub errors: [String]
 }
 
 X64_FUNCTION_ALIGN :: prep { 16 }
+X64_PAGE_SIZE :: prep { 4096 }
+
+fn x64_data_align(data: [LIRData]) -> Int Never! {
+    align := 1
+    loop object in data { if object.align > align -> align = object.align }
+    align
+}
 
 fn x64_link_place(text: &[U8], function: X64CompiledFunction) -> Int Never! {
     loop text.len() % X64_FUNCTION_ALIGN != 0 -> x64_int3(&text)
@@ -24,18 +35,42 @@ fn x64_link_place(text: &[U8], function: X64CompiledFunction) -> Int Never! {
     at
 }
 
-pub fn x64_link_text(functions: [X64CompiledFunction], runtime: [X64CompiledFunction], data: [LIRData]) -> X64LinkedText Never! {
+// `data_page` starts the data on a page of its own (and the block on a page
+// boundary), so a static executable can map it writable apart from the code.
+pub fn x64_link_text(functions: [X64CompiledFunction], runtime: [X64CompiledFunction], data: [LIRData], data_page: Bool) -> X64LinkedText Never! {
+    data_align :: x64_data_align(data)
+    align := if data_align > X64_FUNCTION_ALIGN -> data_align else -> X64_FUNCTION_ALIGN
+    paged :: data_page && data.len() > 0
+    if paged && align < X64_PAGE_SIZE -> align = X64_PAGE_SIZE
     text := [U8]{}
     offsets := [Int]{}
     errors := [String]{}
     loop function in functions -> &offsets.push(x64_link_place(&text, function))
     runtime_offsets := [Int]{}
     loop function in runtime -> &runtime_offsets.push(x64_link_place(&text, function))
+    if paged {
+        loop text.len() % X64_PAGE_SIZE != 0 -> x64_int3(&text)
+    }
+    data_offset :: text.len()
     data_offsets := [Int]{}
     loop object in data {
         loop text.len() % object.align != 0 -> &text.push(U8{0})
         &data_offsets.push(text.len())
         loop byte in object.bytes -> &text.push(byte)
+    }
+    data_relocs := [X64ImageDataReloc]{}
+    loop (index, object) in data {
+        loop reloc in object.relocs {
+            if reloc.offset < 0 || reloc.offset % 8 != 0 || reloc.offset > object.bytes.len() - 8 {
+                &errors.push("data {index}: relocation offset {reloc.offset} is not an aligned word in bounds")
+                next
+            }
+            if reloc.target.value < 0 || reloc.target.value >= data_offsets.len() {
+                &errors.push("data {index}: relocation target {reloc.target.value} is not in the image")
+                next
+            }
+            &data_relocs.push(X64ImageDataReloc{at: data_offsets[index] + reloc.offset, target: data_offsets[reloc.target.value] + reloc.addend})
+        }
     }
     // Every function with its start, compiled functions first.
     placed := [X64CompiledFunction]{}
@@ -82,5 +117,18 @@ pub fn x64_link_text(functions: [X64CompiledFunction], runtime: [X64CompiledFunc
             if target >= 0 -> x64_patch_rel32(&text, at, target)
         }
     }
-    X64LinkedText{text: text, offsets: offsets, runtime_offsets: runtime_offsets, errors: errors}
+    X64LinkedText{text: text, align: align, offsets: offsets, runtime_offsets: runtime_offsets, data_offset: data_offset, data_relocs: data_relocs, errors: errors}
+}
+
+fn x64_link_absolute(text: &[U8], relocs: [X64ImageDataReloc], base: Int) Never! {
+    loop reloc in relocs {
+        value :: base + reloc.target
+        loop byte in 0..<8 -> text[reloc.at + byte] = U8{(value >> (8 * byte)) & 255}
+    }
+}
+
+// Match ELF.jet's absolute-origin padding without coupling memory images to it.
+fn x64_link_static_text(linked: &X64LinkedText) Never! {
+    origin :: ELF64_BASE_ADDRESS + elf64_text_offset(linked.align, linked.data_offset < linked.text.len())
+    x64_link_absolute(&linked.text, linked.data_relocs, origin)
 }

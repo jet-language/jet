@@ -11,7 +11,8 @@
 // MIR.jet names three Foundation items (Span, Effect, ParamZone with
 // param_zone_name) whose files pull in the whole diagnostics registry; their
 // exact definitions are copied out of those files instead.
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,7 +22,17 @@ if (!outDir) {
   console.error("usage: run-lower-fixtures.mjs <outdir>");
   process.exit(64);
 }
-const read = (path) => readFileSync(`${repo}/${path}`, "utf8");
+// While other edits are in flight: FX_HEAD (comma-separated repo paths) reads
+// those files as committed at HEAD, and FX_EXCLUDE (comma-separated file
+// names without `.jet`) leaves those Lower and Fixtures files out.
+const headPaths = new Set((process.env.FX_HEAD ?? "").split(",").filter(Boolean));
+const excluded = new Set((process.env.FX_EXCLUDE ?? "").split(",").filter(Boolean).map((name) => `${name}.jet`));
+// FX_ONLY (comma-separated fixture names) keeps only those one-line
+// fx_report* calls in run(), for a small probe of one fixture.
+const only = new Set((process.env.FX_ONLY ?? "").split(",").filter(Boolean));
+const read = (path) => headPaths.has(path)
+  ? execFileSync("git", ["show", `HEAD:${path}`], { cwd: repo, encoding: "utf8", maxBuffer: 1 << 28 })
+  : readFileSync(`${repo}/${path}`, "utf8");
 
 // The top-level item starting at the line that begins with `head`, through its
 // closing `}` at column 0 (or the line itself for a one-line item).
@@ -54,11 +65,16 @@ function body(path) {
       coreUses.add(line);
       continue;
     }
+    const report = /fx_report\w*\("([\w-]+)"/.exec(line);
+    if (only.size > 0 && report && !only.has(report[1])) continue;
     kept.push(line);
   }
   return `// [unit source: ${path}]\n${kept.join("\n")}\n`;
 }
 
+// Every lowering file (Lower.jet and its sibling family files) and every
+// fixture file under Tests/Fixtures, in name order.
+const sorted = (dir) => existsSync(`${repo}/${dir}`) ? readdirSync(`${repo}/${dir}`).filter((name) => name.endsWith(".jet") && !excluded.has(name)).sort().map((name) => `${dir}/${name}`) : [];
 const parts = [
   "// [unit source: Foundation items named by MIR.jet]",
   item("Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet", "pub struct Span {"),
@@ -67,19 +83,22 @@ const parts = [
   item("Compiler/JetFoundation/Source/Types/Types.jet", "pub fn param_zone_name("),
   "",
   body("Compiler/JetFoundation/Source/MIR/MIR.jet"),
+  body("Compiler/JetFoundation/Source/Text/RustDebug.jet"),
   body("Compiler/JetBackend/Source/LIR/LIR.jet"),
   body("Compiler/JetBackend/Source/LIR/Lint.jet"),
   body("Compiler/JetBackend/Source/LIR/Print.jet"),
-  body("Compiler/JetBackend/Source/Lower/Lower.jet"),
+  ...sorted("Compiler/JetBackend/Source/Lower").map(body),
   body("Compiler/JetBackend/Source/X64/Encoder.jet"),
   body("Compiler/JetBackend/Source/X64/RegAlloc.jet"),
   body("Compiler/JetBackend/Source/X64/Select.jet"),
   body("Compiler/JetBackend/Source/Image/Link.jet"),
   body("Compiler/JetBackend/Source/Image/Runtime.jet"),
+  body("Compiler/JetBackend/Source/Image/RuntimeStrings.jet"),
   body("Compiler/JetBackend/Source/Image/ELF.jet"),
   body("Compiler/JetBackend/Source/Image/Object.jet"),
   body("Compiler/JetBackend/Source/Image/Memory.jet"),
   body("Compiler/JetBackend/Tests/LowerFixtures.jet"),
+  ...sorted("Compiler/JetBackend/Tests/Fixtures").map(body),
 ];
 mkdirSync(outDir, { recursive: true });
 writeFileSync(`${outDir}/unit.jet`, [...coreUses, "", ...parts].join("\n"));

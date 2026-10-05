@@ -1,0 +1,495 @@
+// Runtime packs (#4549, #3954): the prebuilt runtime archive set (the
+// compiled runtime rlib, the Rust standard library rlibs, musl's libc.a,
+// libgcc_eh.a and libgcc.a) linked once per toolchain into one
+// self-contained x86-64 ELF relocatable object, written next to the runtime
+// archive. A program link then reads only the program's objects and the
+// pack, never the ~1M-section archives: `x64_link_executable([program.o,
+// pack])`.
+//
+// The pack is the archive set after everything a link can decide without
+// the program has been decided, in the format the linker already reads:
+//
+// - Resolution: every archive member the runtime's C ABI can reach is
+//   pulled; COMDAT groups, weak and common symbols, the allocator shim, the
+//   LFS64 aliases and the libc shims (StaticLink.jet link_shims) are
+//   settled; the linker's startup object (`_start`, `__jet_link_main`) is
+//   included. Only the roots (the runtime's C ABI, `_start`,
+//   `__jet_link_main`, `__tls_get_addr` and the
+//   requested extra names) stay global; every other definition becomes a
+//   local symbol, so the pack's symbol table is its export table plus its
+//   imports (`main`, the linker-defined names, weak references).
+// - Liveness: only the sections reachable from the roots are kept, each as
+//   its own section with its relocations rewritten against the pack's
+//   symbols, so the program link still collects what this program does not
+//   reach. Section names are reduced to what classification needs.
+// - Unwind tables: one `.eh_frame` holding the FDEs of kept sections and the
+//   CIEs they use, with CIE pointers recomputed.
+//
+// Everything that depends on the program (its symbols, the layout, GOT
+// slots, TLS offsets and the instruction relaxations) stays in the program
+// link. The file is plain ELF, so `readelf`/`objdump` read it and it can be
+// mapped as is.
+
+struct LinkPack {
+    // Kept sections in input order: live row per ordinal, ordinal per live
+    // row, and the output section header index per ordinal.
+    pub ord_row: [Int]
+    pub row_ord: [Int]
+    pub sec_out: [Int]
+    // Named local symbols, by file symbol id (locals) or -1 - global id
+    // (localized definitions): name, info, output section index (or
+    // 0xfff1), value and size.
+    pub local_index: [Int:Int]
+    pub l_name: [String]
+    pub l_info: [Int]
+    pub l_shndx: [Int]
+    pub l_value: [Int]
+    pub l_size: [Int]
+    // Global symbols by final global id.
+    pub global_index: [Int:Int]
+    pub gl_id: [Int]
+    pub exports: [Int:Bool]
+    // Relocation rows: offset, type, symbol reference (>= 0: local symbol
+    // index; < 0: -1 - global ordinal) and addend.
+    pub r_off: [Int]
+    pub r_type: [Int]
+    pub r_sym: [Int]
+    pub r_add: [Int]
+}
+
+// Whether `name` is a plain C identifier and not a Rust-mangled name (v0
+// `_R...` or legacy `_ZN...`): the runtime's C ABI.
+fn link_pack_c_abi(name: String) -> Bool Never! {
+    if name.starts_with("_R") || name.starts_with("_ZN") || name.len() == 0 -> return false
+    loop (k, byte) in name.bytes() {
+        code :: Int.from_u8(byte)
+        letter :: (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+        if !letter && (k == 0 || code < 48 || code > 57) -> return false
+    }
+    true
+}
+
+// ELF symbol type for a definition in section `s`: TLS, function or object.
+fn link_pack_sym_type(c: LinkContext, s: Int) -> Int Never! {
+    flags :: link_sec_flags(c, link_obj_of(c, s), s)
+    if (flags & 0x400) != 0 -> return 6
+    if (flags & 4) != 0 -> return 2
+    1
+}
+
+// Output section index of section `s`, or -1 when it is not kept.
+fn link_pack_out(c: LinkContext, p: LinkPack, s: Int) -> Int Never! {
+    row :: link_live_row(c, s)
+    if row >= 0 -> return p.sec_out[p.row_ord[row]]
+    return -1
+}
+
+fn link_pack_local(p: &LinkPack, key: Int, name: String, info: Int, shndx: Int, value: Int, size: Int) -> Int Never! {
+    if p.local_index.get(key) == .Val(found) -> return 1 + p.ord_row.len() + found
+    j :: p.l_name.len()
+    &p.local_index.add(key, j).drop("checked absent above")
+    &p.l_name.push(name)
+    &p.l_info.push(info)
+    &p.l_shndx.push(shndx)
+    &p.l_value.push(value)
+    &p.l_size.push(size)
+    1 + p.ord_row.len() + j
+}
+
+fn link_pack_global(p: &LinkPack, f: Int) -> Int Never! {
+    if p.global_index.get(f) == .Val(found) -> return -1 - found
+    j :: p.gl_id.len()
+    &p.global_index.add(f, j).drop("checked absent above")
+    &p.gl_id.push(f)
+    return -1 - j
+}
+
+// The pack symbol reference for symbol `k` of object `obj`.
+fn link_pack_symbol(c: &LinkContext, p: &LinkPack, obj: Int, k: Int) -> Int Never! {
+    if k == 0 -> return 0
+    g :: link_global_of(c, obj, k)
+    if g >= 0 {
+        f :: link_final(c, g)
+        kind :: ~c.g_kind[f]
+        if kind != LINK_G_FILE || p.exports.get(f) != None -> return link_pack_global(&p, f)
+        s :: ~c.g_section[f]
+        name :: ~c.g_name[f]
+        if s == LINK_ABS -> return link_pack_local(&p, -1 - f, name, 0, 0xfff1, c.g_value[f], c.g_size[f])
+        out :: link_pack_out(c, p, s)
+        if out < 0 {
+            site :: link_section_label(c, s)
+            link_error(&c, "runtime pack: `{name}` is defined in {site}, which was collected")
+            return 0
+        }
+        value :: ~c.g_value[f]
+        size :: ~c.g_size[f]
+        return link_pack_local(&p, -1 - f, name, link_pack_sym_type(c, s), out, value, size)
+    }
+    s :: link_sym_shndx(c, obj, k)
+    b :: ~c.obj_buffer[obj]
+    at :: link_sym_at(c, obj, k)
+    info :: link_u8(c.bufs, b, at + 4)
+    value :: link_u64(c.bufs, b, at + 8)
+    size :: link_u64(c.bufs, b, at + 16)
+    file_symbol :: c.obj_first_symbol[obj] + k
+    if s == LINK_ABS -> return link_pack_local(&p, file_symbol, link_cstr(c.bufs, b, c.obj_strtab[obj] + link_u32(c.bufs, b, at)), info & 15, 0xfff1, value, size)
+    if s < 0 {
+        object :: ~c.obj_name[obj]
+        link_error(&c, "runtime pack: {object} refers to local symbol {k}, whose section was discarded")
+        return 0
+    }
+    out :: link_pack_out(c, p, s)
+    if out < 0 {
+        object :: ~c.obj_name[obj]
+        site :: link_section_label(c, s)
+        link_error(&c, "runtime pack: {object} refers to {site}, which was collected")
+        return 0
+    }
+    if (info & 15) == 3 && value == 0 -> return 1 + p.row_ord[link_live_row(c, s)]
+    link_pack_local(&p, file_symbol, link_cstr(c.bufs, b, c.obj_strtab[obj] + link_u32(c.bufs, b, at)), info & 15, out, value, size)
+}
+
+// Append the rewritten relocation rows `first..<end` of the RELA table at
+// `table` (object `obj`), offsets shifted by `shift`.
+fn link_pack_relocs(c: &LinkContext, p: &LinkPack, obj: Int, table: Int, first: Int, end: Int, shift: Int) Never! {
+    b :: ~c.obj_buffer[obj]
+    loop k in first..<end {
+        at :: table + 24 * k
+        &p.r_off.push(link_u64(c.bufs, b, at) + shift)
+        &p.r_type.push(link_u32(c.bufs, b, at + 8))
+        symbol :: link_u32(c.bufs, b, at + 12)
+        reference :: link_pack_symbol(&c, &p, obj, symbol)
+        &p.r_sym.push(reference)
+        &p.r_add.push(link_s64(c.bufs, b, at + 16))
+    }
+}
+
+// The name a kept section carries in the pack: what classification and
+// init-array ordering read (Image/StaticLink.jet link_class, link_priority).
+fn link_pack_section_name(c: LinkContext, class: Int, s: Int) -> String Never! {
+    if class == LINK_PREINIT || class == LINK_INIT || class == LINK_FINI {
+        obj :: link_obj_of(c, s)
+        return link_cstr(c.bufs, c.obj_buffer[obj], link_sec_name(c, obj, s))
+    }
+    if class == LINK_TEXT -> return ".text"
+    if class == LINK_TDATA -> return ".tdata"
+    if class == LINK_TBSS -> return ".tbss"
+    if class == LINK_RELRO -> return ".data.rel.ro"
+    if class == LINK_DATA -> return ".data"
+    if class == LINK_BSS -> return ".bss"
+    ".rodata"
+}
+
+// Symbol table entry; `xindex` collects the extended section indexes.
+fn link_pack_sym(symtab: &[U8], xindex: &[U8], name: Int, info: Int, shndx: Int, value: Int, size: Int) Never! {
+    elf64_u32(&symtab, name)
+    &symtab.push(U8{info})
+    &symtab.push(U8{0})
+    if shndx >= 0xff00 && shndx < 0xfff1 {
+        elf64_u16(&symtab, 0xffff)
+        elf64_u32(&xindex, shndx)
+    } else {
+        elf64_u16(&symtab, shndx)
+        elf64_u32(&xindex, 0)
+    }
+    elf64_u64(&symtab, value)
+    elf64_u64(&symtab, size)
+}
+
+fn link_pack_rela(bytes: &[U8], p: LinkPack, first: Int, end: Int, first_global: Int) Never! {
+    loop k in first..<end {
+        ref :: p.r_sym[k]
+        symbol :: if ref >= 0 -> ref else -> first_global + (-1 - ref)
+        elf64_u64(&bytes, p.r_off[k])
+        elf64_u64(&bytes, (symbol << 32) | p.r_type[k])
+        elf64_u64(&bytes, p.r_add[k])
+    }
+}
+
+struct LinkPackHeaders {
+    pub name: [Int]
+    pub kind: [Int]
+    pub flags: [Int]
+    pub offset: [Int]
+    pub size: [Int]
+    pub link: [Int]
+    pub info: [Int]
+    pub align: [Int]
+    pub entry_size: [Int]
+}
+
+fn link_pack_header(h: &LinkPackHeaders, name: Int, kind: Int, flags: Int, offset: Int, size: Int, link: Int, info: Int, align: Int, entry_size: Int) Never! {
+    &h.name.push(name)
+    &h.kind.push(kind)
+    &h.flags.push(flags)
+    &h.offset.push(offset)
+    &h.size.push(size)
+    &h.link.push(link)
+    &h.info.push(info)
+    &h.align.push(align)
+    &h.entry_size.push(entry_size)
+}
+
+fn link_pack_shstr(table: &[U8], seen: &[String:Int], name: String) -> Int Never! {
+    if seen.get(name) == .Val(at) -> return at
+    at :: elf64_string(&table, name)
+    &seen.add(name, at).drop("checked absent above")
+    at
+}
+
+// Write the pack for the collected context `c` whose roots are `exports`
+// (final global ids).
+fn link_pack_write(c: &LinkContext, exports: [Int]) -> [U8] Never! {
+    ord_row :: link_rows_in_order(c)
+    row_ord := [Int]{}
+    loop _ in ord_row -> &row_ord.push(0)
+    loop (ord, row) in ord_row -> row_ord[row] = ord
+    // Header indexes: each kept section, followed by its RELA section when it
+    // has relocations; `.eh_frame` and its RELA; the symbol tables.
+    sec_out := [Int]{}
+    rela_out := [Int]{}
+    next_index := 1
+    loop row in ord_row {
+        s :: c.live_secs[row]
+        obj :: link_obj_of(c, s)
+        &sec_out.push(next_index)
+        next_index += 1
+        if link_rel_count(c, obj, s) > 0 {
+            &rela_out.push(next_index)
+            next_index += 1
+        } else {
+            &rela_out.push(-1)
+        }
+    }
+    p := LinkPack{
+        ord_row: ord_row, row_ord: row_ord, sec_out: sec_out,
+        local_index: [Int:Int]{}, l_name: [String]{}, l_info: [Int]{}, l_shndx: [Int]{}, l_value: [Int]{}, l_size: [Int]{},
+        global_index: [Int:Int]{}, gl_id: [Int]{}, exports: [Int:Bool]{},
+        r_off: [Int]{}, r_type: [Int]{}, r_sym: [Int]{}, r_add: [Int]{},
+    }
+    loop f in exports {
+        &p.exports.add(f, true).drop("exports are unique")
+        _ := link_pack_global(&p, f)
+    }
+    // Relocation rows of every kept section, then of `.eh_frame`.
+    rel_first := [Int]{}
+    order :: ~p.ord_row
+    loop row in order {
+        s :: ~c.live_secs[row]
+        obj :: link_obj_of(c, s)
+        &rel_first.push(p.r_off.len())
+        table :: link_rel_table(c, obj, s)
+        count :: link_rel_count(c, obj, s)
+        link_pack_relocs(&c, &p, obj, table, 0, count, 0)
+    }
+    eh_rel_first :: p.r_off.len()
+    // Unwind records: kept FDEs and the CIEs they use, in input order (a CIE
+    // precedes its FDEs).
+    cie_used := [Int:Bool]{}
+    loop piece in 0..<c.ep_sec.len() {
+        if c.ep_cie[piece] >= 0 && c.ep_keep[piece] -> &cie_used.add(c.ep_cie[piece], true).drop("a set")
+    }
+    eh := [U8]{}
+    eh_out := [Int:Int]{}
+    loop piece in 0..<c.ep_sec.len() {
+        cie :: ~c.ep_cie[piece]
+        if cie >= 0 && !c.ep_keep[piece] -> next
+        if cie < 0 && cie_used.get(piece) == None -> next
+        s :: ~c.ep_sec[piece]
+        obj :: ~c.ep_obj[piece]
+        start :: link_sec_offset(c, obj, s) + c.ep_start[piece]
+        out :: eh.len()
+        &eh_out.add(piece, out).drop("pieces are visited once")
+        &eh.extend(c.bufs[c.obj_buffer[obj]][start..<start + c.ep_len[piece]])
+        first :: ~c.ep_first_reloc[piece]
+        end :: first + c.ep_reloc_count[piece]
+        shift :: out - c.ep_start[piece]
+        table :: link_rel_table(c, obj, s)
+        link_pack_relocs(&c, &p, obj, table, first, end, shift)
+        if cie >= 0 -> link_put32(&eh, out + 4, out + 4 - (eh_out.get(cie) ?? 0))
+    }
+    eh_rel_end :: p.r_off.len()
+    eh_index :: if eh.len() > 0 -> next_index else -> -1
+    if eh.len() > 0 -> next_index += 1
+    if eh_rel_end > eh_rel_first -> next_index += 1
+    // An empty `.note.GNU-stack`: the code needs no executable stack.
+    next_index += 1
+    symtab_index :: next_index
+    shnum_symbols :: symtab_index + 1
+    // The extended index table exists only when some index needs it.
+    extended :: shnum_symbols + 3 > 0xff00
+    // `.symtab_shndx` (when extended) is header shnum_symbols.
+    strtab_index :: if extended -> shnum_symbols + 1 else -> shnum_symbols
+    shstrtab_index :: strtab_index + 1
+    shnum :: shstrtab_index + 1
+    // Symbols: the null symbol, one section symbol per kept section, the
+    // named locals, then the globals.
+    symtab := [U8]{}
+    xindex := [U8]{}
+    strtab := [U8]{U8{0}}
+    link_pack_sym(&symtab, &xindex, 0, 0, 0, 0, 0)
+    loop out in p.sec_out -> link_pack_sym(&symtab, &xindex, 0, 3, out, 0, 0)
+    loop (j, name) in p.l_name -> link_pack_sym(&symtab, &xindex, elf64_string(&strtab, name), p.l_info[j], p.l_shndx[j], p.l_value[j], p.l_size[j])
+    first_global :: 1 + p.sec_out.len() + p.l_name.len()
+    loop f in p.gl_id {
+        name_at :: elf64_string(&strtab, c.g_name[f])
+        kind :: c.g_kind[f]
+        if kind == LINK_G_FILE {
+            s :: c.g_section[f]
+            bind :: if c.g_weak_def[f] -> 2 else -> 1
+            if s == LINK_ABS {
+                link_pack_sym(&symtab, &xindex, name_at, bind << 4, 0xfff1, c.g_value[f], c.g_size[f])
+            } else {
+                link_pack_sym(&symtab, &xindex, name_at, (bind << 4) | link_pack_sym_type(c, s), link_pack_out(c, p, s), c.g_value[f], c.g_size[f])
+            }
+        } else if kind == LINK_G_COMMON {
+            link_pack_sym(&symtab, &xindex, name_at, 0x11, 0xfff2, c.g_common_align[f], c.g_common_size[f])
+        } else {
+            bind :: if c.g_strong_ref[f] -> 1 else -> 2
+            link_pack_sym(&symtab, &xindex, name_at, bind << 4, 0, 0, 0)
+        }
+    }
+    // The file: header, contents, section headers.
+    bytes := [U8]{}
+    ident :: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    loop byte in ident -> &bytes.push(U8{byte})
+    elf64_u16(&bytes, 1)
+    elf64_u16(&bytes, 62)
+    elf64_u32(&bytes, 1)
+    elf64_u64(&bytes, 0)
+    elf64_u64(&bytes, 0)
+    shoff_at :: bytes.len()
+    elf64_u64(&bytes, 0)
+    elf64_u32(&bytes, 0)
+    elf64_u16(&bytes, LINK_EHDR_SIZE)
+    elf64_u16(&bytes, 0)
+    elf64_u16(&bytes, 0)
+    elf64_u16(&bytes, 64)
+    elf64_u16(&bytes, if shnum >= 0xff00 -> 0 else -> shnum)
+    elf64_u16(&bytes, if shstrtab_index >= 0xff00 -> 0xffff else -> shstrtab_index)
+    h := LinkPackHeaders{name: [Int]{}, kind: [Int]{}, flags: [Int]{}, offset: [Int]{}, size: [Int]{}, link: [Int]{}, info: [Int]{}, align: [Int]{}, entry_size: [Int]{}}
+    shstrtab := [U8]{U8{0}}
+    shstr_seen := [String:Int]{}
+    link_pack_header(&h, 0, 0, 0, 0, if shnum >= 0xff00 -> shnum else -> 0, if shstrtab_index >= 0xff00 -> shstrtab_index else -> 0, 0, 0, 0)
+    rela_name :: link_pack_shstr(&shstrtab, &shstr_seen, ".rela")
+    loop (ord, row) in p.ord_row {
+        s :: c.live_secs[row]
+        obj :: link_obj_of(c, s)
+        kind :: link_sec_type(c, obj, s)
+        align :: link_sec_align(c, obj, s)
+        size :: link_sec_size(c, obj, s)
+        elf64_pad(&bytes, align)
+        offset :: bytes.len()
+        if kind != LINK_SHT_NOBITS {
+            start :: link_sec_offset(c, obj, s)
+            &bytes.extend(c.bufs[c.obj_buffer[obj]][start..<start + size])
+        }
+        name_at :: link_pack_shstr(&shstrtab, &shstr_seen, link_pack_section_name(c, c.live_class[row], s))
+        flags :: link_sec_flags(c, obj, s)
+        // SHF_GROUP: the groups are settled.
+        link_pack_header(&h, name_at, kind, flags - (flags & 0x200), offset, size, 0, 0, align, 0)
+        if rela_out[ord] >= 0 {
+            elf64_pad(&bytes, 8)
+            rela_at :: bytes.len()
+            end :: if ord + 1 < rel_first.len() -> rel_first[ord + 1] else -> eh_rel_first
+            link_pack_rela(&bytes, p, rel_first[ord], end, first_global)
+            link_pack_header(&h, rela_name, LINK_SHT_RELA, 0x40, rela_at, bytes.len() - rela_at, symtab_index, p.sec_out[ord], 8, 24)
+        }
+    }
+    if eh_index >= 0 {
+        elf64_pad(&bytes, 8)
+        eh_at :: bytes.len()
+        &bytes.extend(eh)
+        link_pack_header(&h, link_pack_shstr(&shstrtab, &shstr_seen, ".eh_frame"), LINK_SHT_PROGBITS, 2, eh_at, eh.len(), 0, 0, 8, 0)
+        if eh_rel_end > eh_rel_first {
+            elf64_pad(&bytes, 8)
+            rela_at :: bytes.len()
+            link_pack_rela(&bytes, p, eh_rel_first, eh_rel_end, first_global)
+            link_pack_header(&h, rela_name, LINK_SHT_RELA, 0x40, rela_at, bytes.len() - rela_at, symtab_index, eh_index, 8, 24)
+        }
+    }
+    link_pack_header(&h, link_pack_shstr(&shstrtab, &shstr_seen, ".note.GNU-stack"), LINK_SHT_PROGBITS, 0, bytes.len(), 0, 0, 0, 1, 0)
+    elf64_pad(&bytes, 8)
+    symtab_at :: bytes.len()
+    &bytes.extend(symtab)
+    link_pack_header(&h, link_pack_shstr(&shstrtab, &shstr_seen, ".symtab"), LINK_SHT_SYMTAB, 0, symtab_at, symtab.len(), strtab_index, first_global, 8, 24)
+    if extended {
+        elf64_pad(&bytes, 8)
+        xindex_at :: bytes.len()
+        &bytes.extend(xindex)
+        link_pack_header(&h, link_pack_shstr(&shstrtab, &shstr_seen, ".symtab_shndx"), LINK_SHT_SYMTAB_SHNDX, 0, xindex_at, xindex.len(), symtab_index, 0, 4, 4)
+    }
+    strtab_at :: bytes.len()
+    &bytes.extend(strtab)
+    link_pack_header(&h, link_pack_shstr(&shstrtab, &shstr_seen, ".strtab"), 3, 0, strtab_at, strtab.len(), 0, 0, 1, 0)
+    shstrtab_name :: link_pack_shstr(&shstrtab, &shstr_seen, ".shstrtab")
+    shstrtab_at :: bytes.len()
+    &bytes.extend(shstrtab)
+    link_pack_header(&h, shstrtab_name, 3, 0, shstrtab_at, shstrtab.len(), 0, 0, 1, 0)
+    elf64_pad(&bytes, 8)
+    shoff :: bytes.len()
+    loop shift in 0..<8 -> bytes[shoff_at + shift] = U8{(shoff >> (8 * shift)) & 255}
+    loop k in 0..<h.name.len() {
+        elf64_section_header(&bytes, h.name[k], h.kind[k], h.flags[k], h.offset[k], h.size[k], h.link[k], h.info[k], h.align[k], h.entry_size[k])
+    }
+    bytes
+}
+
+// Link the runtime archive set `bufs` (names[i] names bufs[i] in reports;
+// the first archive is the runtime itself) into a runtime pack. The roots
+// are the C ABI the first archive defines plus `extra_roots` (names a
+// program object may reference directly, such as `memcpy`).
+pub fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) -> X64ExecutableResult Never! {
+    c := link_context(^bufs)
+    link_load_inputs(&c, names)
+    if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
+    if c.archives.len() == 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"runtime pack: no archive among the inputs"}}
+    root_names := [String]{}
+    seen := [String:Bool]{}
+    loop name in c.archives[0].symbol_names {
+        if link_pack_c_abi(name) && seen.get(name) == None {
+            &seen.add(name, true).drop("checked absent above")
+            &root_names.push(name)
+        }
+    }
+    loop name in extra_roots {
+        if seen.get(name) == None {
+            &seen.add(name, true).drop("checked absent above")
+            &root_names.push(name)
+        }
+    }
+    loop name in root_names {
+        g :: link_intern(&c, name)
+        link_reference(&c, g, false)
+    }
+    entry_g :: link_resolve_program(&c)
+    entry_section :: link_entry_section(&c, entry_g)
+    if entry_section < 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
+    // Exported too: the entry, the startup marker (StaticLink.jet
+    // link_has_startup), and `__tls_get_addr`, which a linker checks a TLS
+    // general/local-dynamic call sequence against by name.
+    optional :: [String]{"__jet_link_main", "__tls_get_addr"}
+    &root_names.push("_start")
+    loop name in optional -> &root_names.push(name)
+    exports := [Int]{}
+    sections := [Int]{entry_section}
+    loop name in root_names {
+        g :: c.g_index.get(name) ?? next
+        f :: link_final(c, g)
+        if c.g_kind[f] != LINK_G_FILE {
+            if !optional.contains(name) -> link_error(&c, "runtime pack: the archive set does not define the root `{name}`")
+            next
+        }
+        if c.g_section[f] >= 0 -> &sections.push(c.g_section[f])
+        &exports.push(f)
+    }
+    // The program provides `main`; the program link defines the rest.
+    imports := [String:Bool]{}
+    &imports.add("main", true).drop("a fresh map")
+    loop name in link_linker_names() -> &imports.add(name, true).drop("names are unique")
+    link_collect(&c, sections, imports)
+    if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
+    bytes :: link_pack_write(&c, exports)
+    if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
+    X64ExecutableResult{bytes: bytes, errors: [String]{}}
+}

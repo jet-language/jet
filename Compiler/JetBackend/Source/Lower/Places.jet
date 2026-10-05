@@ -1,0 +1,277 @@
+// Addressable projections and recursive enum edges in the native byte layout.
+use jet_foundation.[
+    MIREnumArg, MIRInstruction, MIRPayloadKind, MIRProgram, MIRProjection,
+    MIRType, MIRTypeDef, MIRTypeID, MIRValueID, MIRVariant,
+    mir_type_display_name,
+]
+
+struct LowerPayloadInfo {
+    pub offset: Int
+    pub ty: MIRType
+    pub boxed: Bool
+}
+
+fn lower_declared_boxed_edge(definition: MIRTypeDef, edge: String) -> Bool Never! {
+    loop candidate in definition.boxed_edges {
+        if candidate == edge -> return true
+    }
+    false
+}
+
+// MIRRust.rs:payload_pattern (28961), declared_boxed_edge (24181): Single
+// edges use the variant name; Named edges use "Variant.field", not field IDs.
+// `index` counts payload fields in declaration order (as MIR EnumPayload and
+// Enum arguments do: MIRRust.rs enum_value/enum_payload); a computed field
+// has no storage.
+fn lower_enum_payload_info(p: MIRProgram, definition: MIRTypeDef, variant: MIRVariant, index: Int) -> LowerPayloadInfo? {
+    members :: lower_variant_members(p, definition, variant)
+    if variant.payload == {
+        .Unit -> None
+        .Single(_) -> {
+            if index != 0 || members.len() != 1 -> return None
+            Val(LowerPayloadInfo{offset: members[0].offset, ty: members[0].ty, boxed: members[0].boxed})
+        }
+        .Named(fields) -> {
+            if index < 0 || index >= fields.len() || fields[index].computed -> return None
+            loop member in members {
+                if member.id == fields[index].id -> return Val(LowerPayloadInfo{offset: member.offset, ty: member.ty, boxed: member.boxed})
+            }
+            None
+        }
+    }
+}
+
+fn lower_payload_info(p: MIRProgram, ty: MIRType, kind: MIRPayloadKind) -> LowerPayloadInfo? {
+    if kind == {
+        .Option -> if ty.kind == .Option(inner) -> Val(LowerPayloadInfo{offset: 0, ty: inner, boxed: false}) else -> None
+        .Result(ok) -> if ty.kind == .Result(success, failure) -> Val(LowerPayloadInfo{offset: 8, ty: if ok -> success else -> failure, boxed: false}) else -> None
+        .Enum(owner, variant, index) -> {
+            definition :: lower_owned_def(p, owner, Val(ty)) ?? return None
+            found :: lower_variant(definition, variant) ?? return None
+            lower_enum_payload_info(p, definition, found.variant, index)
+        }
+    }
+}
+
+// The storage a projected place names: its value of type `ty` lives at
+// base + offset. Nested inline members add offsets; a box (payload enum,
+// Option, Result, List) or a recursive edge's wrapper is entered by loading
+// its pointer. A checked payload place is entered only after its variant test.
+fn lower_walk_projections(p: MIRProgram, m: &LowerModule, f: &LowerFunction, root: LIRValueID, root_ty: MIRType, projections: [MIRProjection]) -> LowerFieldAddress? {
+    walked :: lower_walk_place(p, &m, &f, root, root_ty, projections) ?? return None
+    Val(walked.address)
+}
+
+struct LowerPlaceAddress {
+    pub address: LowerFieldAddress
+    pub ty: MIRType
+}
+
+// lower_walk_projections with the type of the named value.
+fn lower_walk_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, root: LIRValueID, root_ty: MIRType, projections: [MIRProjection]) -> LowerPlaceAddress? {
+    base := root
+    ty := root_ty
+    offset := -1
+    loop projection in projections {
+        if offset >= 0 && !lower_is_inline(p, ty) {
+            // Enter the box (or wrapper) whose pointer the location holds;
+            // nested inline members stay in the same storage.
+            next_base :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.Load{dst: next_base, base: base, offset: offset})
+            base = next_base
+            offset = 0
+        }
+        if offset < 0 -> offset = 0
+        if projection == {
+            .Field(id, _) -> {
+                found :: lower_struct_field(p, ty, id) ?? {
+                    lower_fail(&m, &f, "field {id.value} of {mir_type_display_name(ty)} is not lowered at O0 yet")
+                    return None
+                }
+                address :: lower_struct_storage_address(&f, base, LowerFieldInfo{offset: offset + found.offset, ty: found.ty, boxed: found.boxed})
+                base = address.base
+                offset = address.offset
+                ty = found.ty
+            }
+            .Payload(kind, _) -> {
+                found :: lower_payload_info(p, ty, kind) ?? {
+                    lower_fail(&m, &f, "payload projection of {mir_type_display_name(ty)} is not lowered at O0 yet")
+                    return None
+                }
+                offset = found.offset
+                ty = found.ty
+                if found.boxed {
+                    wrapper :: lower_pointer(&f)
+                    lower_emit(&f, LIRInst.Load{dst: wrapper, base: base, offset: offset})
+                    base = wrapper
+                    offset = 0
+                }
+            }
+            .Index(kind, index, _, _, _, _, _) -> {
+                header :: lower_address(&f, base, offset)
+                if kind == .Map {
+                    base = lower_map_value_address(p, &m, &f, header, ty, index) ?? return None
+                    ty = lower_map_value_type(ty) ?? return None
+                    offset = 0
+                } else if kind == .List {
+                    found :: lower_index_address(p, &m, &f, header, ty, index) ?? return None
+                    ty = lower_list_element(ty) ?? return None
+                    base = found.base
+                    offset = found.offset
+                } else {
+                    lower_fail(&m, &f, "non-List, non-Map index projection is not lowered at O0 yet")
+                    return None
+                }
+            }
+            else -> {
+                lower_fail(&m, &f, "Deref or Range projection is not lowered at O0 yet")
+                return None
+            }
+        }
+    }
+    if offset < 0 -> offset = 0
+    Val(LowerPlaceAddress{address: LowerFieldAddress{base: base, offset: offset}, ty: ty})
+}
+
+// MIRRust.rs:plan_partial_moves (16915), move_projected_place (28734),
+// move_partial_field (17123): only Field-only paths leave a partial owner.
+// Its consuming storage is zeroed (lower_clear_at): glue skips the null
+// owners there, while retaining all unmoved siblings.
+fn lower_projected_move_supported(m: &LowerModule, f: &LowerFunction, projections: [MIRProjection]) -> Bool Never! {
+    loop projection in projections {
+        if projection == {
+            .Field(_, _) -> {}
+            else -> {
+                lower_fail(&m, &f, "moving out of a non-Field projection is not lowered at O0 yet")
+                return false
+            }
+        }
+    }
+    true
+}
+
+fn lower_enum(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, type_id: MIRTypeID, variant: String, args: [MIREnumArg]) Never! {
+    definition :: lower_owned_def(p, type_id, lower_checked_type(c, instruction)) ?? return lower_fail(&m, &f, "enum type {type_id.value} is missing")
+    found :: lower_variant(definition, variant) ?? return lower_fail(&m, &f, "{definition.name} has no variant {variant}")
+    // Check every payload has storage before allocating or storing any part
+    // of the enum. The declared boxed edges decide boxing, not the argument's
+    // flag (MIRRust.rs enum_value: declared_boxed_edge).
+    loop (index, _) in args {
+        if lower_enum_payload_info(p, definition, found.variant, index) == None -> return lower_fail(&m, &f, "{definition.name}.{variant} has no stored payload {index}")
+    }
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    discriminant :: lower_discriminant(found.index)
+    if lower_value_layout(f, dst) != lir_layout_pointer() -> return lower_emit(&f, LIRInst.Const{dst: dst, value: discriminant})
+    lower_alloc(&m, &f, dst, lower_enum_box_size(p, definition))
+    lower_store_word(&f, dst, 0, discriminant)
+    loop (index, arg) in args {
+        info :: lower_enum_payload_info(p, definition, found.variant, index) ?? return
+        if info.boxed {
+            wrapper :: lower_pointer(&f)
+            lower_alloc(&m, &f, wrapper, lower_option_box_size(p, info.ty))
+            lower_store_value(p, &m, &f, wrapper, 0, arg.value, info.ty)
+            lower_emit(&f, LIRInst.Store{base: dst, offset: info.offset, value: wrapper})
+        } else {
+            lower_store_value(p, &m, &f, dst, info.offset, arg.value, info.ty)
+        }
+    }
+}
+
+fn lower_enum_payload(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, subject: MIRValueID, owner: MIRTypeID, variant: String, index: Int) Never! {
+    definition :: lower_owned_def(p, owner, lower_value_type(c, subject)) ?? return lower_fail(&m, &f, "enum type {owner.value} is missing")
+    found :: lower_variant(definition, variant) ?? return lower_fail(&m, &f, "{definition.name} has no variant {variant}")
+    info :: lower_enum_payload_info(p, definition, found.variant, index) ?? return lower_fail(&m, &f, "{definition.name}.{variant} has no stored payload {index}")
+    boxed :: lower_use(&m, &f, subject) ?? return
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    if info.boxed {
+        wrapper :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Load{dst: wrapper, base: boxed, offset: info.offset})
+        lower_read_member(p, c, &m, &f, instruction, subject, dst, wrapper, 0, info.ty)
+    } else {
+        lower_read_member(p, c, &m, &f, instruction, subject, dst, boxed, info.offset, info.ty)
+    }
+}
+
+// A recursive-edge wrapper has exactly the present Option layout: one box
+// holding the value. Reusing that shape makes clone/drop recurse and release
+// its allocation without a second wrapper representation or runtime symbol.
+fn lower_enum_glue_shape(p: MIRProgram, definition: MIRTypeDef, variant: MIRVariant, index: Int) -> LowerGlueShape Never! {
+    rows := [LowerGlueField]{}
+    loop member in lower_variant_members(p, definition, variant) -> &rows.push(LowerGlueField{offset: member.offset, ty: lower_member_storage_type(member)})
+    LowerGlueShape{selector: lower_discriminant(index), fields: rows}
+}
+
+// Drops the owned value of `ty` stored at base + offset. Null is an absent
+// split field, never a handle to pass to the runtime; an inline member's
+// glue drops its own members.
+fn lower_drop_stored(p: MIRProgram, m: &LowerModule, f: &LowerFunction, base: LIRValueID, offset: Int, ty: MIRType) Never! {
+    repr :: lower_repr(p, ty)
+    if repr == .Unsupported(reason) -> return lower_fail(&m, &f, "drop glue field of {reason} is not lowered at O0 yet")
+    if repr == .Inline(_) {
+        address :: lower_address(&f, base, offset)
+        return lower_inline_drop(p, &m, &f, address, ty)
+    }
+    layout :: lower_repr_layout(repr) ?? return
+    drop :: lower_drop(&m, repr, true)
+    if drop == .Trivial -> return
+    value :: lower_new_value(&f, layout, drop, ty.identity)
+    lower_emit(&f, LIRInst.Load{dst: value, base: base, offset: offset})
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    absent :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: absent, condition: LIRCondition.Eq, left: value, right: null})
+    body :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(body, [LIRValueID]{})})
+    lower_start(&f, body, [LIRValueID]{})
+    lower_emit(&f, LIRInst.Drop{value: value})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+}
+
+fn lower_glue_drop_fields(p: MIRProgram, m: &LowerModule, f: &LowerFunction, boxed: LIRValueID, fields: [LowerGlueField]) Never! {
+    loop field in fields -> lower_drop_stored(p, &m, &f, boxed, field.offset, field.ty)
+}
+
+// After a word copy of the whole storage, replaces every owned member of
+// the target by its own copy.
+fn lower_glue_clone_fields(p: MIRProgram, m: &LowerModule, f: &LowerFunction, source: LIRValueID, target: LIRValueID, fields: [LowerGlueField]) Never! {
+    loop field in fields {
+        repr :: lower_repr(p, field.ty)
+        if repr == .Unsupported(reason) -> return lower_fail(&m, &f, "clone glue field of {reason} is not lowered at O0 yet")
+        if repr == .Inline(_) {
+            if lower_needs_drop(p, field.ty) {
+                from :: lower_address(&f, source, field.offset)
+                to :: lower_address(&f, target, field.offset)
+                lower_inline_clone(p, &m, &f, from, to, field.ty)
+            }
+            next
+        }
+        if repr == {
+            .Handle(_, _) | .Boxed(_) -> {}
+            else -> next
+        }
+        value :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Load{dst: value, base: source, offset: field.offset})
+        null :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+        absent :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: absent, condition: LIRCondition.Eq, left: value, right: null})
+        body :: lower_new_block(&f)
+        done :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(body, [LIRValueID]{})})
+        lower_start(&f, body, [LIRValueID]{})
+        duplicate :: lower_pointer(&f)
+        if repr == {
+            .Handle(_, clone) -> {
+                if clone == "" -> return lower_fail(&m, &f, "{mir_type_display_name(field.ty)} cannot be copied")
+                lower_call_runtime(&m, &f, clone, [LIRValueID]{value}, Val(duplicate))
+            }
+            .Boxed(inner) -> lower_call_clone_glue(&m, &f, inner, value, duplicate)
+            else -> {}
+        }
+        lower_emit(&f, LIRInst.Store{base: target, offset: field.offset, value: duplicate})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, done, [LIRValueID]{})
+    }
+}

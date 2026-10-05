@@ -1,0 +1,157 @@
+// The function the executable starts.
+//
+// When the program's entry needs nothing around it, that is the entry itself.
+// Otherwise a generated function ("entry" helper) first fills the String
+// slots of the frozen statics (Statics.jet lower_static_fixups), then calls
+// the entry and handles its failure carrier the way generated Rust's main
+// does (MIRRust.rs entry call + entry_error_exit): an `Err` result ends the
+// process with the error's report and exit status 1 (the general `Err`
+// through jet_entry_error_exit_jet, any other error through its Printable
+// text and jet_entry_error_exit), a `None` result with "entry returned no
+// value"; success drops the result and returns.
+use jet_foundation.[MIRProgram, MIRType, mir_type_display_name]
+
+fn lower_entry_id(p: MIRProgram, m: &LowerModule, row: Int) -> LIRFunctionID Never! {
+    source :: lower_row_source(p, m, row)
+    if source.params.len() > 0 -> return LIRFunctionID{value: row}
+    carrier :: if source.return_type.kind == {
+        .Result(_, _) | .Option(_) -> true
+        else -> false
+    }
+    if !carrier && m.static_fixups.len() == 0 -> return LIRFunctionID{value: row}
+    lower_closure_helper_id(&m, "entry", row, source)
+}
+
+fn lower_entry_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{}, None)
+    lower_static_fixups(&m, &f)
+    signature :: ~m.mir_signatures[glue.function]
+    target :: ~m.signatures[signature.value]
+    entry :: LIRFunctionID{value: glue.function}
+    ty :: glue.ty
+    layout :: target.result ?? {
+        lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Function{id: entry}, args: [LIRValueID]{}})
+        lower_seal(&f, LIRTerminator.Return{value: None})
+        return lir_builder_finish(f.builder)
+    }
+    if m.mir_results[glue.function] > 0 || target.params.len() > 0 {
+        lower_fail(&m, &f, "an entry returning {mir_type_display_name(ty)} is not lowered at O0 yet")
+        lower_seal(&f, LIRTerminator.Unreachable)
+        return lir_builder_finish(f.builder)
+    }
+    result :: lower_new_value(&f, layout, lower_drop(&m, lower_repr(p, ty), true), ty.identity)
+    lower_emit(&f, LIRInst.Call{dst: Val(result), signature: signature, callee: LIRCallee.Function{id: entry}, args: [LIRValueID]{}})
+    failed :: lower_flag(&f)
+    if ty.kind == {
+        .Result(_, _) -> {
+            // Result boxes hold the tag word first: 0 is Err.
+            verdict :: lower_word(&f)
+            lower_emit(&f, LIRInst.Load{dst: verdict, base: result, offset: 0})
+            zero :: lower_const(&f, 0)
+            lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: verdict, right: zero})
+        }
+        .Option(_) -> {
+            null :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+            lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: result, right: null})
+        }
+        else -> {
+            lower_fail(&m, &f, "an entry returning {mir_type_display_name(ty)} is not lowered at O0 yet")
+            lower_seal(&f, LIRTerminator.Unreachable)
+            return lir_builder_finish(f.builder)
+        }
+    }
+    error_block :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(error_block, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, error_block, [LIRValueID]{})
+    if ty.kind == .Result(_, err) {
+        error :: lower_render_load(p, &f, result, 8, err, false)
+        lower_entry_error_exit(p, &m, &f, err, error)
+    } else {
+        args :: lower_static_text(&m, &f, "entry returned no value")
+        text :: lower_render_string(&f)
+        lower_call_runtime(&m, &f, "jet_rt_string_from_static", args, Val(text))
+        lower_noreturn_call(&m, &f, "jet_rt_entry_error_exit", [LIRValueID]{text})
+    }
+    lower_start(&f, done, [LIRValueID]{})
+    lower_emit(&f, LIRInst.Drop{value: result})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_entry_is_err(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    definition :: lower_type_def(p, ty) ?? return false
+    lower_render_name(definition.name) == "Err" && definition.kind == .Struct(_, _)
+}
+
+// Ends the open block: reports `error` (of type `ty`, borrowed) and exits 1.
+fn lower_entry_error_exit(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, error: LIRValueID?) Never! {
+    if lower_entry_is_err(p, ty) {
+        operand :: error ?? {
+            lower_fail(&m, &f, "an entry Err without storage is not lowered at O0 yet")
+            return lower_seal(&f, LIRTerminator.Unreachable)
+        }
+        converted :: lower_pointer(&f)
+        lower_call_helper(&m, &f, "entry.err", ty, [LIRValueID]{operand}, Val(converted))
+        return lower_noreturn_call(&m, &f, "jet_rt_entry_error_exit_err", [LIRValueID]{converted})
+    }
+    text :: lower_render_value(p, &m, &f, ty, error, true) ?? return lower_seal(&f, LIRTerminator.Unreachable)
+    lower_noreturn_call(&m, &f, "jet_rt_entry_error_exit", [LIRValueID]{text.value})
+}
+
+// The runtime's own error (jet_rt_err_new) for the general `Err` at the
+// pointer parameter: message, optional code and, recursively, the cause.
+fn lower_entry_err_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    err :: ~f.open_params[0]
+    message := LIRValueID?{None}
+    code := LIRValueID?{None}
+    cause := LIRValueID?{None}
+    cause_ty := MIRType?{None}
+    definition :: lower_type_def(p, glue.ty) ?? panic("lower_entry_is_err checked the definition")
+    if definition.kind == .Struct(fields, _) {
+        loop field in fields {
+            if field.computed -> next
+            info :: lower_struct_field(p, glue.ty, field.id) ?? next
+            value :: lower_render_load(p, &f, err, info.offset, field.ty, info.boxed)
+            if field.name == "message" && field.ty.kind == .String -> message = value
+            if field.name == "code" && field.ty.kind == .Option(inner) {
+                if inner.kind == .String -> code = value
+            }
+            if field.name == "cause" && field.ty.kind == .Option(inner) {
+                if lower_entry_is_err(p, inner) {
+                    cause = value
+                    cause_ty = Val(inner)
+                }
+            }
+        }
+    }
+    if message == None || code == None || cause == None {
+        lower_fail(&m, &f, "this Err shape is not lowered at O0 yet")
+        lower_seal(&f, LIRTerminator.Unreachable)
+        return lir_builder_finish(f.builder)
+    }
+    cause_word :: ~cause ?? panic("checked above")
+    inner_ty :: ~cause_ty ?? panic("checked above")
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    absent :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: absent, condition: LIRCondition.Eq, left: cause_word, right: null})
+    present :: lower_new_block(&f)
+    join :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(join, [LIRValueID]{null}), else_target: lower_target(present, [LIRValueID]{})})
+    lower_start(&f, present, [LIRValueID]{})
+    inner :: lower_read_at(p, &f, cause_word, 0, inner_ty) ?? panic("an Err is stored inline")
+    converted :: lower_pointer(&f)
+    lower_call_helper(&m, &f, "entry.err", inner_ty, [LIRValueID]{inner}, Val(converted))
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{converted})})
+    runtime_cause :: lower_pointer(&f)
+    lower_start(&f, join, [LIRValueID]{runtime_cause})
+    made :: lower_pointer(&f)
+    message_value :: (~message) ?? null
+    code_value :: (~code) ?? null
+    lower_call_runtime(&m, &f, "jet_rt_err_new", [LIRValueID]{message_value, code_value, runtime_cause}, Val(made))
+    lower_seal(&f, LIRTerminator.Return{value: Val(made)})
+    lir_builder_finish(f.builder)
+}

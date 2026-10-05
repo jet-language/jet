@@ -1,0 +1,198 @@
+// Payload places, recursive enum wrapper boxes, and partial field ownership.
+use jet_foundation.[
+    MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRBlockID, MIRCallee,
+    MIRCallArg, MIRConstant, MIRDropKind, MIREnumArg, MIRField, MIRFieldValue,
+    MIRFunction, MIRFunctionID, MIROperation, MIRPayloadKind, MIRPlace,
+    MIRPlaceBase, MIRPlaceID, MIRProgram, MIRProjection, MIRTerminator,
+    MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeKind, MIRValueID, MIRVariant,
+    MIRVariantPayload, mir_field_id, mir_function_id, mir_owned_ownership,
+    mir_type_from_kind, mir_type_id,
+]
+
+fn fx_payload_place(b: &FxBuilder, root: MIRPlaceID, kind: MIRPayloadKind, ty: MIRType, access: MIRAccess) -> MIRPlaceID Never! {
+    base := MIRPlaceBase.Static{name: ""}
+    projections := [MIRProjection]{}
+    loop row in b.places {
+        if row.id == root {
+            base = row.base
+            projections = row.projections
+        }
+    }
+    &projections.push(MIRProjection.Payload{kind: kind, span: fx_span()})
+    place :: MIRPlaceID{value: fx_word(U64{500}, b.places.len())}
+    &b.places.push(MIRPlace{id: place, span: fx_span(), ty: ty, base: base, projections: projections, access: access, persist_key: None})
+    place
+}
+
+fn fx_payload_cons(b: &FxBuilder, head: MIRValueID, tail: MIRValueID) -> MIRValueID Never! {
+    fx_owned(&b, fx_named("Chain"), MIROperation.Enum{type_id: mir_type_id("Chain"), variant: "Cons", args: [MIREnumArg]{
+        MIREnumArg{field: Val(mir_field_id("Chain.Cons.head")), value: head, boxed: false},
+        MIREnumArg{field: Val(mir_field_id("Chain.Cons.tail")), value: tail, boxed: true},
+    }})
+}
+
+// enum Chain { Nil, Cons(head: Int, tail: Chain) } // recursive tail boxed
+// fn sum(xs: Chain) -> Int {
+//     if xs is .Nil -> return 0
+//     xs.head + sum(xs.tail)
+// }
+// fn set(&opt: Int?) { if opt is present -> opt.value = 9 }
+// fn rename(&opt: String?) { if opt is present -> opt.value = "new" }
+// fn run() {
+//     xs := Chain.Cons(3, Chain.Cons(4, Chain.Nil))
+//     print(sum(xs))
+//     ys := copy xs
+//     ys.tail.head = 8
+//     print(sum(ys))
+//     print(sum(xs))
+//     opt := present(1); set(&opt); print(opt.value)
+//     text := present("old"); rename(&text); print(text.value)
+//     result := Ok(2); result.value = 5; print(result.value)
+//     failure := Err("fault"); failure.value = "fixed"; print(failure.value)
+// }
+// expect-stdout payload: "7\n11\n7\n9\nnew\n5\nfixed\n"
+fn fx_payload() -> MIRProgram Never! {
+    chain :: fx_named("Chain")
+    maybe :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()})
+    text_maybe :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_string()})
+    result_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: fx_int(), err: fx_string()})
+    definition := fx_type_def("Chain", MIRTypeDefKind.Enum{variants: [MIRVariant]{
+        fx_variant("Nil", MIRVariantPayload.Unit),
+        fx_variant("Cons", MIRVariantPayload.Named{fields: [MIRField]{fx_field("Chain.Cons", "head", fx_int()), fx_field("Chain.Cons", "tail", chain)}}),
+    }, methods: [MIRFunctionID]{}})
+    definition.boxed_edges = [String]{"Cons.tail"}
+
+    s := fx_builder()
+    xs :: fx_param(&s, "xs", chain, fx_borrow())
+    nil :: fx_copy(&s, fx_bool(), MIROperation.EnumIs{subject: xs, owner: mir_type_id("Chain"), variant: "Nil"})
+    fx_block(&s, 0, MIRTerminator.Branch{condition: nil, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+    zero :: fx_int_const(&s, 0)
+    fx_block(&s, 1, MIRTerminator.Return{value: Val(zero)})
+    head :: fx_copy(&s, fx_int(), MIROperation.EnumPayload{subject: xs, owner: mir_type_id("Chain"), variant: "Cons", index: 0})
+    tail :: fx_value(&s, chain, fx_borrow(), MIROperation.EnumPayload{subject: xs, owner: mir_type_id("Chain"), variant: "Cons", index: 1})
+    rest :: fx_copy(&s, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("sum_chain")}, args: [MIRCallArg]{fx_arg(tail, MIRAccess.Read)}, type_args: [MIRType]{}})
+    total :: fx_int_op(&s, MIRBinaryOp.Add, "add", head, rest)
+    fx_block(&s, 2, MIRTerminator.Return{value: Val(total)})
+
+    e := fx_builder()
+    parameter :: fx_write_param(&e, "opt", maybe)
+    window :: fx_payload_place(&e, parameter, MIRPayloadKind.Option, fx_int(), MIRAccess.Write)
+    nine :: fx_int_const(&e, 9)
+    fx_do(&e, MIROperation.WritePlace{place: window, value: nine})
+    fx_block(&e, 0, MIRTerminator.Return{value: None})
+
+    n := fx_builder()
+    text_parameter :: fx_write_param(&n, "opt", text_maybe)
+    text_window :: fx_payload_place(&n, text_parameter, MIRPayloadKind.Option, fx_string(), MIRAccess.Write)
+    fresh :: fx_owned(&n, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "new"}})
+    fx_do(&n, MIROperation.ReplacePlace{place: text_window, value: fresh})
+    fx_block(&n, 0, MIRTerminator.Return{value: None})
+
+    r := fx_builder()
+    local :: fx_local(&r, "xs", chain, mir_owned_ownership())
+    end :: fx_owned(&r, chain, MIROperation.Enum{type_id: mir_type_id("Chain"), variant: "Nil", args: [MIREnumArg]{}})
+    four :: fx_int_const(&r, 4)
+    last :: fx_payload_cons(&r, four, end)
+    three :: fx_int_const(&r, 3)
+    first :: fx_payload_cons(&r, three, last)
+    fx_do(&r, MIROperation.WritePlace{place: local, value: first})
+    borrowed :: fx_value(&r, chain, fx_borrow(), MIROperation.ReadPlace{place: local})
+    sum :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("sum_chain")}, args: [MIRCallArg]{fx_arg(borrowed, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_print(&r, sum)
+    duplicate :: fx_owned(&r, chain, MIROperation.Copy{value: borrowed, fact: MIRCopyFact.Explicit})
+    other :: fx_local(&r, "ys", chain, mir_owned_ownership())
+    fx_do(&r, MIROperation.WritePlace{place: other, value: duplicate})
+    tail_place :: fx_payload_place(&r, other, MIRPayloadKind.Enum{owner: mir_type_id("Chain"), variant: "Cons", index: 1}, chain, MIRAccess.Write)
+    head_place :: fx_payload_place(&r, tail_place, MIRPayloadKind.Enum{owner: mir_type_id("Chain"), variant: "Cons", index: 0}, fx_int(), MIRAccess.Write)
+    eight :: fx_int_const(&r, 8)
+    fx_do(&r, MIROperation.WritePlace{place: head_place, value: eight})
+    changed :: fx_value(&r, chain, fx_borrow(), MIROperation.ReadPlace{place: other})
+    changed_sum :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("sum_chain")}, args: [MIRCallArg]{fx_arg(changed, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_print(&r, changed_sum)
+    original_sum :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("sum_chain")}, args: [MIRCallArg]{fx_arg(borrowed, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_print(&r, original_sum)
+    other_gone :: fx_owned(&r, chain, MIROperation.MovePlace{place: other})
+    fx_do(&r, MIROperation.Drop{value: other_gone, kind: MIRDropKind.Value})
+    local_gone :: fx_owned(&r, chain, MIROperation.MovePlace{place: local})
+    fx_do(&r, MIROperation.Drop{value: local_gone, kind: MIRDropKind.Value})
+
+    opt :: fx_local(&r, "opt", maybe, mir_owned_ownership())
+    one :: fx_int_const(&r, 1)
+    present :: fx_owned(&r, maybe, MIROperation.Present{value: one})
+    fx_do(&r, MIROperation.WritePlace{place: opt, value: present})
+    fx_call_write(&r, "set_payload", opt, maybe)
+    payload :: fx_payload_place(&r, opt, MIRPayloadKind.Option, fx_int(), MIRAccess.Read)
+    now :: fx_copy(&r, fx_int(), MIROperation.ReadPlace{place: payload})
+    fx_print(&r, now)
+    opt_gone :: fx_owned(&r, maybe, MIROperation.MovePlace{place: opt})
+    fx_do(&r, MIROperation.Drop{value: opt_gone, kind: MIRDropKind.Value})
+
+    text_opt :: fx_local(&r, "text", text_maybe, mir_owned_ownership())
+    old :: fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "old"}})
+    text_present :: fx_owned(&r, text_maybe, MIROperation.Present{value: old})
+    fx_do(&r, MIROperation.WritePlace{place: text_opt, value: text_present})
+    fx_call_write(&r, "rename_payload", text_opt, text_maybe)
+    text_payload :: fx_payload_place(&r, text_opt, MIRPayloadKind.Option, fx_string(), MIRAccess.Read)
+    text_now :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.ReadPlace{place: text_payload})
+    fx_print(&r, text_now)
+    text_gone :: fx_owned(&r, text_maybe, MIROperation.MovePlace{place: text_opt})
+    fx_do(&r, MIROperation.Drop{value: text_gone, kind: MIRDropKind.Value})
+
+    result :: fx_local(&r, "result", result_ty, mir_owned_ownership())
+    two :: fx_int_const(&r, 2)
+    ok :: fx_owned(&r, result_ty, MIROperation.ResultOk{value: two})
+    fx_do(&r, MIROperation.WritePlace{place: result, value: ok})
+    result_payload :: fx_payload_place(&r, result, MIRPayloadKind.Result{ok: true}, fx_int(), MIRAccess.Write)
+    five :: fx_int_const(&r, 5)
+    fx_do(&r, MIROperation.ReplacePlace{place: result_payload, value: five})
+    result_now :: fx_copy(&r, fx_int(), MIROperation.ReadPlace{place: result_payload})
+    fx_print(&r, result_now)
+    result_gone :: fx_owned(&r, result_ty, MIROperation.MovePlace{place: result})
+    fx_do(&r, MIROperation.Drop{value: result_gone, kind: MIRDropKind.Value})
+    failure :: fx_local(&r, "failure", result_ty, mir_owned_ownership())
+    bad :: fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "fault"}})
+    err :: fx_owned(&r, result_ty, MIROperation.ResultErr{value: bad})
+    fx_do(&r, MIROperation.WritePlace{place: failure, value: err})
+    err_payload :: fx_payload_place(&r, failure, MIRPayloadKind.Result{ok: false}, fx_string(), MIRAccess.Write)
+    fixed :: fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "fixed"}})
+    fx_do(&r, MIROperation.ReplacePlace{place: err_payload, value: fixed})
+    err_now :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.ReadPlace{place: err_payload})
+    fx_print(&r, err_now)
+    failure_gone :: fx_owned(&r, result_ty, MIROperation.MovePlace{place: failure})
+    fx_do(&r, MIROperation.Drop{value: failure_gone, kind: MIRDropKind.Value})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("sum_chain", s, fx_int()), fx_function("set_payload", e, fx_unit()), fx_function("rename_payload", n, fx_unit()), fx_function("run", r, fx_unit())}, ^[MIRTypeDef]{definition})
+}
+
+// struct Pair { first: String, second: String }
+// fn run() {
+//     pair := Pair{"moved", "kept"}
+//     text :: move pair.first
+//     print(text); print(pair.second)
+//     drop text; drop pair // only the live second field is dropped
+// }
+// expect-stdout payload-move: "moved\nkept\n"
+fn fx_payload_move() -> MIRProgram Never! {
+    pair :: fx_named("MovePair")
+    types :: [MIRTypeDef]{fx_type_def("MovePair", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("MovePair", "first", fx_string()), fx_field("MovePair", "second", fx_string())}, methods: [MIRFunctionID]{}})}
+    b := fx_builder()
+    local :: fx_local(&b, "pair", pair, mir_owned_ownership())
+    first :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "moved"}})
+    second :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "kept"}})
+    value :: fx_owned(&b, pair, MIROperation.Struct{type_id: mir_type_id("MovePair"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("MovePair.first"), value: first}, MIRFieldValue{field: mir_field_id("MovePair.second"), value: second}}})
+    fx_do(&b, MIROperation.WritePlace{place: local, value: value})
+    moved_place :: fx_field_place(&b, local, "MovePair.first", fx_string())
+    loop (index, row) in b.places {
+        if row.id == moved_place -> b.places[index].access = MIRAccess.Move
+    }
+    kept_place :: fx_field_place(&b, local, "MovePair.second", fx_string())
+    moved :: fx_owned(&b, fx_string(), MIROperation.MovePlace{place: moved_place})
+    fx_print(&b, moved)
+    kept :: fx_value(&b, fx_string(), fx_borrow(), MIROperation.ReadPlace{place: kept_place})
+    fx_print(&b, kept)
+    fx_do(&b, MIROperation.Drop{value: moved, kind: MIRDropKind.Value})
+    gone :: fx_owned(&b, pair, MIROperation.MovePlace{place: local})
+    fx_do(&b, MIROperation.Drop{value: gone, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^types)
+}
