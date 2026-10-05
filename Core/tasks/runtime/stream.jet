@@ -38,7 +38,7 @@ pub fn jet_stream_task<T: Send>(producer: fn(&JetStreamSender<T>) -> ()) -> JetS
                 // Cleanup ran under Shield; deliver deferred cancellation at its exit.
                 sender.leave_cancel_shield()
             }))
-            if result is Err(payload) {
+            if result == .Err(payload) {
                 if !jet_scheduler_is_cancel_unwind(payload.as_ref()) { sender.fail() }
                 resume_unwind(^payload)
             }
@@ -73,7 +73,7 @@ impl JetStreamTask {
     // Rust: crates/jet-codegen/src/Prelude/Stream.rs:106
     fn cancel(self: &Self) -> { self.control.cancel() }
     // Rust: crates/jet-codegen/src/Prelude/Stream.rs:110
-    fn drain(self: Self) -> { if self.drain.take() is Val(drain) { drain() } }
+    fn drain(self: Self) -> { if self.drain.take() == .Val(drain) { drain() } }
 }
 impl<T: Send> JetStream<T> {
     // Rust: crates/jet-codegen/src/Prelude/Stream.rs:120
@@ -102,7 +102,7 @@ impl<T: Send> JetStream<T> {
     pub fn pull_checked(self: &Self) -> T? {
         value :: self.pull()
         if value.is_none() && self.failed() {
-            if self.failure_report() is Val(report) { jet_scheduler_runtime_stop_with_report(^report) }
+            if self.failure_report() == .Val(report) { jet_scheduler_runtime_stop_with_report(^report) }
             jet_scheduler_runtime_stop("stream producer failed")
         }
         ^value
@@ -113,7 +113,7 @@ impl<T: Send> JetStream<T> {
         match completion.receive() {
             Val(.Failed(report)) -> {
                 self.failed = true
-                if report is Val(report) {
+                if report == .Val(report) {
                     // GATE #4565: kernel primitive
                     #Unsafe("publish received producer failure under the shared failure-report mutex") {
                         *self.failure_report.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }) = Val(^report)
@@ -151,12 +151,12 @@ impl<T> Drop for JetStream<T> {
     fn drop(self: &Self) -> {
         // Cancel, close, then join. Shielded producer cleanup requires endpoint close before join.
         producer :: self.producer_task.take()
-        if producer.as_ref() is Val(task) { task.cancel() }
+        if producer.as_ref() == .Val(task) { task.cancel() }
         _ :: self.acknowledgements.take()
         _ :: self.values.take()
-        if producer is Val(task) { task.drain() }
+        if producer == .Val(task) { task.drain() }
         // Child has joined: consume queued completion without parking if sender Drop did not run.
-        if self.completion.take() is Val(completion) { _ :: completion.try_receive() }
+        if self.completion.take() == .Val(completion) { _ :: completion.try_receive() }
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/Stream.rs:255
@@ -180,8 +180,14 @@ impl<T: Send> JetStreamSender<T> {
             sent :: catch_unwind(AssertUnwindSafe(fn() { self.send_stream(^value) }))
             match sent {
                 Ok(true) -> true
-                Ok(false) -> { self.enter_cancel_shield(); false }
-                Err(payload) if jet_scheduler_is_cancel_unwind(payload.as_ref()) -> { self.enter_cancel_shield(); false }
+                Ok(false) -> {
+                    self.enter_cancel_shield()
+                    false
+                }
+                Err(payload) if jet_scheduler_is_cancel_unwind(payload.as_ref()) -> {
+                    self.enter_cancel_shield()
+                    false
+                }
                 Err(payload) -> resume_unwind(^payload)
             }
         }

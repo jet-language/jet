@@ -136,7 +136,10 @@ impl<K: Clone + PartialEq, T> JetEventTimeState<K, T> {
         if was_late {
             return match self.late_disposition {
                 .Drop -> JetStreamEventDisposition.Dropped
-                .SideOutput -> { &self.side_output.push(^event); JetStreamEventDisposition.SideOutput }
+                .SideOutput -> {
+                    &self.side_output.push(^event)
+                    JetStreamEventDisposition.SideOutput
+                }
             }
         }
         key_index :: &self.key_index(key)
@@ -287,7 +290,10 @@ pub fn jet_keyed_stream_window<K: Clone + PartialEq + Send, T: Send, D: JetStrea
     jet_stream_task(fn(sender) {
         windows := match stream.window(window_ns, watermark_ns, late_disposition) {
             Ok(value) -> value
-            Err(error) -> { sender.fail_with(error); return }
+            Err(error) -> {
+                sender.fail_with(error)
+                return
+            }
         }
         loop {
             window :: &windows.pull_window()

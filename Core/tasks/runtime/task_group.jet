@@ -67,7 +67,7 @@ pub fn jet_task_failure_abi(failure: JetTaskFailure) -> (I64, String?) {
     match failure {
         JetTaskFailure.Cancelled -> (0, None)
         JetTaskFailure.DeadlineBlown -> (1, None)
-        JetTaskFailure.Panicked(reason) -> (2, Val(^reason))
+        .Panicked(reason) -> (2, Val(^reason))
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/TaskGroup.rs:88
@@ -123,7 +123,10 @@ impl JetTaskGroupSlots {
         #Unsafe("upgrade each live waiter only during synchronized notification") {
             waiters := self.waiters.lock().unwrap()
             waiters.retain(fn(waiter) {
-                if waiter.upgrade() is Val(waiter) { waiter.wake(); true } else { false }
+                if waiter.upgrade() == .Val(waiter) {
+                    waiter.wake()
+                    true
+                } else { false }
             })
         }
     }
@@ -140,7 +143,10 @@ impl JetTaskGroupSlots {
                     *active += 1
                     return Ok(Val(JetTaskGroupPermit{slots: self.clone()}))
                 }
-                if !registered { self.register_waiter(wake_waiter.clone()); registered = true }
+                if !registered {
+                    self.register_waiter(wake_waiter.clone())
+                    registered = true
+                }
                 drop(^active)
                 wait(&waiter)?
                 active = self.active.lock().unwrap()
@@ -200,7 +206,7 @@ impl<T> JetTaskGroupRuntime<T> {
         // GATE #4565: kernel primitive
         #Unsafe("only the first close owns draining; closed admission permits nested child registration without blocking") {
             if self.closing.swap(true, Ordering.AcqRel) { return false }
-            if self.slots is Val(slots) { slots.close() }
+            if self.slots == .Val(slots) { slots.close() }
             true
         }
     }
@@ -262,7 +268,7 @@ pub fn jet_task_deadline_if_expired(remaining_ms: I64?, wait_kind: String) -> Je
 // Rust: crates/jet-codegen/src/Prelude/TaskGroup.rs:359
 pub fn jet_task_wait_policy<D>(deadline: D?, cancelled: Bool, shielded: Bool) -> Result<(), JetTaskWaitInterrupt<D>> {
     if shielded { return Ok(()) }
-    if deadline is Val(deadline) { return Err(JetTaskWaitInterrupt.Deadline(^deadline)) }
+    if deadline == .Val(deadline) { return Err(JetTaskWaitInterrupt.Deadline(^deadline)) }
     if cancelled { return Err(JetTaskWaitInterrupt.Cancelled) }
     Ok(())
 }
@@ -315,7 +321,7 @@ pub fn jet_task_select<Task, T, E>(tasks: [Task], mode: JetTaskSelectMode,
     pending_tasks := tasks.into_iter().map(fn(task) { Val(^task) }).collect::<[Task?]>()
     policy := JetTaskSelectPolicy.new(mode, pending_tasks.len())
     loop {
-        if wait_check() is Err(error) {
+        if wait_check() == .Err(error) {
             for task in pending_tasks.iter().flatten() { cancel(task) }
             for task in pending_tasks.into_iter().flatten() { drain(^task) }
             return Err(^error)
@@ -326,10 +332,10 @@ pub fn jet_task_select<Task, T, E>(tasks: [Task], mode: JetTaskSelectMode,
         }).min()
         if next is Val((order, index)) {
             result :: pending_tasks[index].as_mut().and_then(&try_complete)
-            if result is Val(result) {
+            if result == .Val(result) {
                 pending_tasks[index] = None
-                if policy.settle(order, index, ^result) is JetTaskDecision.Finish(result) {
-                    if result.is_err() || !(mode is JetTaskSelectMode.All) {
+                if policy.settle(order, index, ^result) == .Finish(result) {
+                    if result.is_err() || !(mode == JetTaskSelectMode.All) {
                         for task in pending_tasks.iter().flatten() { cancel(task) }
                     }
                     for task in pending_tasks.into_iter().flatten() { drain(^task) }

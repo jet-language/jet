@@ -163,9 +163,9 @@ impl<T: JetCellOptionLike> JetCellEditGuard<T> {
     pub fn store_option_value(self, value: T.Value) -> Unit { self.edit(slot -> slot.store(^value)) }
 }
 // Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:214
-pub struct JetCellReadGuard<T: ?Sized> { loan: Rc<JetCellLoan>, ptr: NonNull<T> }
+pub struct JetCellReadGuard<T: Sized?> { loan: Rc<JetCellLoan>, ptr: NonNull<T> }
 // Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:219
-impl<T: ?Sized> JetCellReadGuard<T> {
+impl<T: Sized?> JetCellReadGuard<T> {
     // Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:220
     pub fn read<F: FnOnce(@T) -> R, R>(self, f: F) -> R {
         // GATE #4565: kernel primitive
@@ -174,7 +174,7 @@ impl<T: ?Sized> JetCellReadGuard<T> {
     // Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:228
     pub fn get(self) -> T where T: Clone + Sized { self.read(value -> value.clone()) }
     // Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:235
-    pub fn map<U: ?Sized, F: FnOnce(@T) -> @U>(self: ^Self, project: F) -> JetCellReadGuard<U> {
+    pub fn map<U: Sized?, F: FnOnce(@T) -> @U>(self: ^Self, project: F) -> JetCellReadGuard<U> {
         // GATE #4565: kernel primitive
         #Unsafe("project within shared root loan then transfer its retained token to the mapped static view") {
             ptr :: NonNull.from(project(self.ptr.as_ref()))
@@ -182,7 +182,7 @@ impl<T: ?Sized> JetCellReadGuard<T> {
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:247
-    pub fn split<A: ?Sized, B: ?Sized, F: FnOnce(@T) -> (@A, @B)>(self: ^Self, project: F) -> (JetCellReadGuard<A>, JetCellReadGuard<B>) {
+    pub fn split<A: Sized?, B: Sized?, F: FnOnce(@T) -> (@A, @B)>(self: ^Self, project: F) -> (JetCellReadGuard<A>, JetCellReadGuard<B>) {
         // GATE #4565: kernel primitive
         #Unsafe("both shared projections retain the same loan; only the last token drop releases root access") {
             (a, b) :: project(self.ptr.as_ref())
@@ -191,7 +191,7 @@ impl<T: ?Sized> JetCellReadGuard<T> {
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:269
-pub struct JetCellEditGuard<T: ?Sized> { loan: Rc<JetCellLoan>, ptr: NonNull<T>, access: Cell<ISize> }
+pub struct JetCellEditGuard<T: Sized?> { loan: Rc<JetCellLoan>, ptr: NonNull<T>, access: Cell<ISize> }
 // Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:275
 struct JetCellGuardAccess { state: @Cell<ISize>, write: Bool }
 // Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:280
@@ -212,7 +212,7 @@ impl JetCellGuardAccess.Drop {
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:293
-impl<T: ?Sized> JetCellEditGuard<T> {
+impl<T: Sized?> JetCellEditGuard<T> {
     // Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:294
     pub fn read<F: FnOnce(@T) -> R, R>(self, f: F) -> R {
         // GATE #4565: kernel primitive
@@ -239,7 +239,7 @@ impl<T: ?Sized> JetCellEditGuard<T> {
     // Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:337
     pub fn set(self, value: T) -> Unit where T: Sized { self.edit(slot -> { slot = ^value }) }
     // Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:344
-    pub fn map<U: ?Sized, F: FnOnce(&T) -> &U>(self: ^Self, project: F) -> JetCellEditGuard<U> {
+    pub fn map<U: Sized?, F: FnOnce(&T) -> &U>(self: ^Self, project: F) -> JetCellEditGuard<U> {
         // GATE #4565: kernel primitive
         #Unsafe("exclusive root loan transfers to projected static path without an intervening competing access") {
             ptr :: NonNull.from(project(&*self.ptr.as_ptr()))
@@ -247,7 +247,7 @@ impl<T: ?Sized> JetCellEditGuard<T> {
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:357
-    pub fn split<A: ?Sized, B: ?Sized, F: FnOnce(&T) -> (&A, &B)>(self: ^Self, project: F) -> (JetCellEditGuard<A>, JetCellEditGuard<B>) {
+    pub fn split<A: Sized?, B: Sized?, F: FnOnce(&T) -> (&A, &B)>(self: ^Self, project: F) -> (JetCellEditGuard<A>, JetCellEditGuard<B>) {
         // GATE #4565: kernel primitive
         #Unsafe("sema proves projected mutable paths disjoint; both retained tokens keep the original exclusive loan live") {
             (a, b) :: project(&*self.ptr.as_ptr())

@@ -217,8 +217,8 @@ fn jet_scheduler_panic_message(payload: &(Any + Send)) -> String {
 fn jet_report_caught_unwind(payload: Box<Any + Send>) -> () {
     // GATE #4565: kernel primitive
     #Unsafe("report the real caught native payload without re-raising across the interrupt boundary") {
-        if payload.downcast_ref<JetDeadlineUnwind>() == Some(deadline) { io.eprintln(deadline.rendered) }
-        else if payload.downcast_ref<String>() == Some(message) { jet_runtime_caught_stop(message) }
+        if payload.downcast_ref<JetDeadlineUnwind>() == .Val(deadline) { io.eprintln(deadline.rendered) }
+        else if payload.downcast_ref<String>() == .Val(message) { jet_runtime_caught_stop(message) }
         else if payload.downcast_ref<&String>() == Some(message) { jet_runtime_caught_stop(message) }
     }
 }
@@ -273,7 +273,10 @@ pub fn jet_scheduler_wait_without_unwind<T>(f: fn() -> T) -> JetSchedulerWait<T>
             ^result
         })
     }
-    if result == { Ok(value) -> .Ready(^value); Err(payload) -> jet_scheduler_classify_unwind<T>(^payload) }
+    if result == {
+        Ok(value) -> .Ready(^value)
+        Err(payload) -> jet_scheduler_classify_unwind<T>(^payload)
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:387
 // GATE #4565: kernel primitive
@@ -303,17 +306,25 @@ pub fn jet_scheduler_shield_leave_status() -> JetShieldExit {
     if current_task_control().is_none() { return .None }
     // GATE #4565: kernel primitive
     landed :: #Unsafe("balance local shield depth without raising during cleanup") {
-        SHIELD_DEPTH.with((d) -> { n :: d.get().saturating_sub(1); d.set(n); n == 0 })
+        SHIELD_DEPTH.with((d) -> {
+            n :: d.get().saturating_sub(1)
+            d.set(n)
+            n == 0
+        })
     }
     if landed && !jet_scheduler_unwind_in_flight() {
-        if jet_deadline_remaining_ms() == Some(ms) { if ms <= 0 { return .Deadline } }
+        if jet_deadline_remaining_ms() == .Val(ms) { if ms <= 0 { return .Deadline } }
         if jet_scheduler_task_cancelled() { return .Cancelled }
     }
     .None
 }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:455
 pub fn jet_scheduler_deliver_shield_exit(exit: JetShieldExit) -> () {
-    if exit == { .None -> {}; .Deadline -> jet_deadline_exceeded("shield exit"); .Cancelled -> jet_task_unwind_cancel() }
+    if exit == {
+        .None -> {}
+        .Deadline -> jet_deadline_exceeded("shield exit")
+        .Cancelled -> jet_task_unwind_cancel()
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:464
 pub fn jet_scheduler_shield_leave() -> () { jet_scheduler_deliver_shield_exit(jet_scheduler_shield_leave_status()) }
@@ -350,7 +361,7 @@ impl ParkSlot {
             if self.notified.swap(false, Ordering.Acquire) { return }
             _ :: METRIC_PARK_BLOCKS.fetch_add(1, Ordering.Relaxed)
             if timeout == {
-                Some(timeout) -> {
+                .Val(timeout) -> {
                     deadline :: Instant.now() + timeout
                     loop {
                         remaining :: deadline.saturating_duration_since(Instant.now())
@@ -390,7 +401,7 @@ impl Drop for JetTaskCancelCallbackGuard {
     fn drop(self: &Self) -> () {
         // GATE #4565: kernel primitive
         #Unsafe("weak control upgrade permits removing this callback without retaining a task indefinitely") {
-            if self.control.upgrade() == Some(control) {
+            if self.control.upgrade() == .Val(control) {
                 _ :: control.cancel_callbacks.lock().unwrap_or_else((poisoned) -> poisoned.into_inner()).remove(&self.id)
             }
         }
@@ -427,7 +438,10 @@ impl JetTaskControl {
             invoke_now :: {
                 callbacks := self.cancel_callbacks.lock().unwrap_or_else((poisoned) -> poisoned.into_inner())
                 if self.cancelled.load(Ordering.Acquire) { true }
-                else { _ :: callbacks.insert(id, callback.clone()); false }
+                else {
+                    _ :: callbacks.insert(id, callback.clone())
+                    false
+                }
             }
             if invoke_now { callback() }
             JetTaskCancelCallbackGuard{control: Arc.downgrade(self), id: id}
@@ -441,9 +455,9 @@ impl JetTaskControl {
         #Unsafe("publish pause state and update payload-free observation record") {
             self.pause_mode.store(mode, Ordering.Relaxed)
             self.paused.store(true, Ordering.Relaxed)
-            if jet_observe_registry() == Some(registry) {
+            if jet_observe_registry() == .Val(registry) {
                 id :: self.observe_id.load(Ordering.Relaxed)
-                if registry.tasks.lock().unwrap().get_mut(&id) == Some(task) { task.state = "paused" }
+                if registry.tasks.lock().unwrap().get_mut(&id) == .Val(task) { task.state = "paused" }
             }
         }
     }
@@ -452,9 +466,9 @@ impl JetTaskControl {
         // GATE #4565: kernel primitive
         #Unsafe("clear pause before waking blocked task and updating observation state") {
             self.paused.store(false, Ordering.Relaxed)
-            if jet_observe_registry() == Some(registry) {
+            if jet_observe_registry() == .Val(registry) {
                 id :: self.observe_id.load(Ordering.Relaxed)
-                if registry.tasks.lock().unwrap().get_mut(&id) == Some(task) { task.state = "running" }
+                if registry.tasks.lock().unwrap().get_mut(&id) == .Val(task) { task.state = "running" }
             }
             self.park.wake()
         }
@@ -464,9 +478,9 @@ impl JetTaskControl {
         // GATE #4565: kernel primitive
         #Unsafe("record cancellation before waking all waiters; detach callback map before invoking foreign code") {
             self.cancelled.store(true, Ordering.Release)
-            if jet_observe_registry() == Some(registry) {
+            if jet_observe_registry() == .Val(registry) {
                 id :: self.observe_id.load(Ordering.Relaxed)
-                if registry.tasks.lock().unwrap().get_mut(&id) == Some(task) { task.cancelled = true }
+                if registry.tasks.lock().unwrap().get_mut(&id) == .Val(task) { task.cancelled = true }
             }
             self.park.wake()
             loop waiter in self.cancel_waiters.lock().unwrap().drain(..) {
@@ -655,7 +669,7 @@ impl JetDeterministicWorld {
             state := self.state.lock().unwrap_or_else((error) -> error.into_inner())
             if waiting {
                 removed :: slot.and_then((slot) -> state.timers.iter().position((timer) -> Arc.ptr_eq(&timer.slot, slot)))
-                if removed == Some(index) { _ :: state.timers.swap_remove(index) }
+                if removed == .Val(index) { _ :: state.timers.swap_remove(index) }
                 else { state.runnable_tasks = state.runnable_tasks.saturating_sub(1) }
             } else { state.runnable_tasks = state.runnable_tasks.saturating_sub(1) }
             state.live_tasks = state.live_tasks.saturating_sub(1)
@@ -683,7 +697,7 @@ impl JetDeterministicWorld {
         #Unsafe("early wake removes exact timer once and restores runnable count") {
             state := self.state.lock().unwrap_or_else((error) -> error.into_inner())
             removed :: state.timers.iter().position((timer) -> Arc.ptr_eq(&timer.slot, slot))
-            if removed == Some(index) {
+            if removed == .Val(index) {
                 _ :: state.timers.swap_remove(index)
                 state.runnable_tasks = state.runnable_tasks.saturating_add(1)
                 self.waiters.notify_all()
@@ -757,7 +771,10 @@ pub fn jet_scheduler_world_reject_uncontrolled(effect: String) -> () {
 pub fn jet_scheduler_world_rng_next() -> U64? { jet_scheduler_current_world().map((world) -> world.rng_next()) }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1060
 pub fn jet_scheduler_world_rng_seed(seed: I64) -> Bool {
-    if jet_scheduler_current_world() == Some(world) { world.rng_seed(seed); true } else { false }
+    if jet_scheduler_current_world() == .Val(world) {
+        world.rng_seed(seed)
+        true
+    } else { false }
 }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1068
 pub struct JetWorldScope { previous: JetDeterministicWorld?, previous_provider: JetMonotonicProvider? }
@@ -782,7 +799,7 @@ impl JetDeterministicWorld {
                 world.replace(self.clone())
             })
         }
-        previous_provider :: jet_time_monotonic_provider_set(Some(jet_scheduler_world_monotonic_now_ns))
+        previous_provider :: jet_time_monotonic_provider_set(Val(jet_scheduler_world_monotonic_now_ns))
         JetWorldScope{previous: ^previous, previous_provider: previous_provider}
     }
 }
@@ -810,7 +827,7 @@ fn jet_scheduler_world_task_enter(world: JetDeterministicWorld?) -> JetWorldTask
     #Unsafe("worker owns world/provider TLS until completion scope drops") {
         world.map((world) -> {
             previous :: JET_ACTIVE_WORLD.with((active) -> active.borrow_mut().replace(world.clone()))
-            previous_provider :: jet_time_monotonic_provider_set(Some(jet_scheduler_world_monotonic_now_ns))
+            previous_provider :: jet_time_monotonic_provider_set(Val(jet_scheduler_world_monotonic_now_ns))
             JET_WORLD_TASK_ACTIVE.with((active) -> active.set(true))
             JET_WORLD_TASK_WAITING.with((waiting) -> waiting.set(false))
             JET_WORLD_TASK_SLOT.with((slot) -> { *slot.borrow_mut() = None })
@@ -824,7 +841,7 @@ fn jet_scheduler_world_park(world: &JetDeterministicWorld, duration: Duration, s
     // GATE #4565: kernel primitive
     #Unsafe("record task virtual timer for cancellation/completion balancing") {
         JET_WORLD_TASK_WAITING.with((waiting) -> waiting.set(true))
-        JET_WORLD_TASK_SLOT.with((current) -> { *current.borrow_mut() = Some(^slot) })
+        JET_WORLD_TASK_SLOT.with((current) -> { *current.borrow_mut() = Val(^slot) })
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1146
@@ -837,7 +854,7 @@ fn jet_scheduler_world_begin_wait(world: &JetDeterministicWorld, slot: Arc<ParkS
         drop(^state)
         world.waiters.notify_all()
         JET_WORLD_TASK_WAITING.with((waiting) -> waiting.set(true))
-        JET_WORLD_TASK_SLOT.with((current) -> { *current.borrow_mut() = Some(^slot) })
+        JET_WORLD_TASK_SLOT.with((current) -> { *current.borrow_mut() = Val(^slot) })
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1160
@@ -878,7 +895,7 @@ pub fn jet_scheduler_root_task_control() -> Arc<JetTaskControl> {
     #Unsafe("replace cancelled root while retaining shared current root for the whole invocation") {
         root := JET_ROOT_TASK_CONTROL.lock().unwrap_or_else((error) -> error.into_inner())
         replace :: root.as_ref().map_or(true, (control) -> control.cancelled.load(Ordering.Relaxed))
-        if replace { *root = Some(JetTaskControl.new()) }
+        if replace { *root = Val(JetTaskControl.new()) }
         root.as_ref().expect("root task control must be initialized").clone()
     }
 }
@@ -896,7 +913,7 @@ pub fn jet_scheduler_with_root_control<T>(body: fn() -> T) -> T {
     if current_task_control().is_some() { return body() }
     control :: jet_scheduler_root_task_control()
     // GATE #4565: kernel primitive
-    previous :: #Unsafe("install canonical program-root capability on this thread") { TASK_CONTROL.with((slot) -> slot.replace(Some(^control))) }
+    previous :: #Unsafe("install canonical program-root capability on this thread") { TASK_CONTROL.with((slot) -> slot.replace(Val(^control))) }
     scope :: JetRootTaskControlScope{previous: ^previous}
     body()
 }
@@ -919,7 +936,7 @@ impl JetSchedulerTaskCompletionScope {
                 if cleanups.is_empty() { break }
                 loop cleanup in cleanups.into_iter().rev() {
                     if panic.catch_unwind(panic.AssertUnwindSafe(^cleanup)) == Err(payload) {
-                        if first_panic.is_none() { first_panic = Some(^payload) }
+                        if first_panic.is_none() { first_panic = Val(^payload) }
                     }
                 }
             }
@@ -962,17 +979,17 @@ pub fn jet_scheduler_task_completion_register(cleanup: fn() -> ()) -> () {
     // GATE #4565: kernel primitive
     #Unsafe("register owned cleanup only into current frame; no frame means no retained callback") {
         TASK_COMPLETION_FRAMES.with((frames) -> {
-            if frames.borrow_mut().last_mut() == Some(frame) { frame.push(Box.new(^cleanup)) }
+            if frames.borrow_mut().last_mut() == .Val(frame) { frame.push(Box.new(^cleanup)) }
         })
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1337
 pub fn jet_scheduler_wait_while_paused() -> () {
-    if current_task_control() == Some(control) { control.wait_while_paused() }
+    if current_task_control() == .Val(control) { control.wait_while_paused() }
 }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1345
 pub fn jet_scheduler_loop_pause_check() -> () {
-    if current_task_control() == Some(ctrl) {
+    if current_task_control() == .Val(ctrl) {
         // GATE #4565: kernel primitive
         #Unsafe("CheckLoops mode alone honors pause at loop back-edge on every engine") {
             if ctrl.pause_mode.load(Ordering.Relaxed) != 1 { return }
@@ -985,7 +1002,7 @@ pub fn jet_scheduler_loop_pause_check() -> () {
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1361
 pub fn jet_scheduler_yield(wait_kind: &String, slot: &Arc<ParkSlot>, timeout: Duration?) -> () {
     active_world :: jet_scheduler_current_world()
-    if active_world.as_ref() == Some(world) {
+    if active_world.as_ref() == .Val(world) {
         if current_task_control().is_some() { jet_scheduler_world_begin_wait(world, slot.clone()) }
     }
     observe_task :: current_task_control().is_some()
@@ -996,9 +1013,15 @@ pub fn jet_scheduler_yield(wait_kind: &String, slot: &Arc<ParkSlot>, timeout: Du
     #Unsafe("cancel registration makes every blocked event reachable; shield defers both cancellation and deadline") {
         if ctrl.as_ref() == Some(ctrl) {
             if !shielded {
-                if ctrl.cancelled.load(Ordering.Relaxed) { jet_task_deliver_cancel(); return }
+                if ctrl.cancelled.load(Ordering.Relaxed) {
+                    jet_task_deliver_cancel()
+                    return
+                }
                 ctrl.wait_while_paused()
-                if ctrl.cancelled.load(Ordering.Relaxed) { jet_task_deliver_cancel(); return }
+                if ctrl.cancelled.load(Ordering.Relaxed) {
+                    jet_task_deliver_cancel()
+                    return
+                }
                 ctrl.register_cancel_waiter(slot)
             } else { ctrl.wait_while_paused() }
         }
@@ -1007,15 +1030,15 @@ pub fn jet_scheduler_yield(wait_kind: &String, slot: &Arc<ParkSlot>, timeout: Du
             // Virtual waits have no real timeout except immediate cooperative yield.
             slot.park(if timeout.is_some_and((duration) -> duration.is_zero()) { timeout } else { None })
         } else if shielded { slot.park(timeout) }
-        else if jet_deadline_remaining_ms() == Some(remaining) {
+        else if jet_deadline_remaining_ms() == .Val(remaining) {
             if remaining <= 0 {
                 if ctrl.as_ref() == Some(ctrl) { ctrl.remove_cancel_waiter(slot) }
                 jet_deadline_exceeded(wait_kind)
             }
             cap :: Duration.from_millis(remaining as U64)
             wait :: timeout.map((t) -> t.min(cap)).unwrap_or(cap)
-            slot.park(Some(wait))
-            if jet_deadline_remaining_ms() == Some(left) {
+            slot.park(Val(wait))
+            if jet_deadline_remaining_ms() == .Val(left) {
                 if left <= 0 {
                     if ctrl.as_ref() == Some(ctrl) { ctrl.remove_cancel_waiter(slot) }
                     jet_deadline_exceeded(wait_kind)
@@ -1025,7 +1048,10 @@ pub fn jet_scheduler_yield(wait_kind: &String, slot: &Arc<ParkSlot>, timeout: Du
         if ctrl.as_ref() == Some(ctrl) {
             if !shielded {
                 ctrl.remove_cancel_waiter(slot)
-                if ctrl.cancelled.load(Ordering.Relaxed) { jet_task_deliver_cancel(); return }
+                if ctrl.cancelled.load(Ordering.Relaxed) {
+                    jet_task_deliver_cancel()
+                    return
+                }
             }
             ctrl.wait_while_paused()
         }
@@ -1038,7 +1064,7 @@ pub fn jet_scheduler_task_group_wait(waiter: &Arc<ParkSlot>) -> () {
     deadline :: jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "task admission")
     if jet_task_wait_policy(deadline, jet_scheduler_task_cancelled(), jet_scheduler_shielded()) == {
         Ok(()) -> jet_scheduler_yield("task admission", waiter, None)
-        Err(JetTaskWaitInterrupt.Deadline(_)) -> jet_deadline_exceeded("task admission")
+        Err(.Deadline(_)) -> jet_deadline_exceeded("task admission")
         Err(JetTaskWaitInterrupt.Cancelled) -> jet_task_deliver_cancel()
     }
 }
@@ -1071,7 +1097,7 @@ pub fn jet_scheduler_blocking_wait_enter() -> () {
 pub fn jet_scheduler_blocking_wait_leave() -> () {
     // GATE #4565: kernel primitive
     active :: #Unsafe("pop matching blocking compensation nesting level") { JET_BLOCKING_WAIT_COMPENSATION.with((stack) -> stack.borrow_mut().pop()) }
-    if active == Some(true) { scheduler().blocking_wait_leave() }
+    if active == true { scheduler().blocking_wait_leave() }
 }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1505
 pub fn jet_scheduler_blocking_wait_stats() -> (USize,USize,USize) {
@@ -1105,7 +1131,10 @@ impl TimerWheel {
                 {
                     entries := self.entries.lock().unwrap()
                     entries.retain((e) -> {
-                        if e.wake_at <= now { due.push(e.slot.clone()); false } else { true }
+                        if e.wake_at <= now {
+                            due.push(e.slot.clone())
+                            false
+                        } else { true }
                     })
                 }
                 loop slot in due { slot.wake() }
@@ -1160,7 +1189,7 @@ pub fn jet_scheduler_owner_deadline_pop_due(now_ns: I64) -> U64? {
             queue := queue.borrow_mut()
             index :: queue.entries.iter().enumerate().filter((pair) -> pair.1.deadline_ns <= now_ns)
                 .min_by_key((pair) -> (pair.1.deadline_ns, pair.1.task_id)).map((pair) -> pair.0)?
-            Some(queue.entries.swap_remove(index).task_id)
+            Val(queue.entries.swap_remove(index).task_id)
         })
     }
 }
@@ -1184,7 +1213,7 @@ pub fn jet_scheduler_sleep_ms(millis: U64) -> () { jet_scheduler_park_duration("
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1651
 pub fn jet_scheduler_park_duration(wait_kind: String, duration: Duration) -> () {
     if duration.is_zero() { return }
-    if jet_scheduler_current_world() == Some(world) {
+    if jet_scheduler_current_world() == .Val(world) {
         // GATE #4565: kernel primitive
         active :: #Unsafe("virtual sleep requires a controlled worker task") { JET_WORLD_TASK_ACTIVE.with((active) -> active.get()) }
         if !active { jet_scheduler_fatal("deterministic world sleep requires a controlled scheduler task") }
@@ -1197,7 +1226,7 @@ pub fn jet_scheduler_park_duration(wait_kind: String, duration: Duration) -> () 
     // GATE #4565: kernel primitive
     wake_at :: #Unsafe("schedule real monotonic deadline only outside controlled world") { Instant.now() + duration }
     timer_wheel().schedule(wake_at, slot.clone())
-    jet_scheduler_yield(wait_kind, &slot, Some(duration))
+    jet_scheduler_yield(wait_kind, &slot, Val(duration))
 }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1673
 pub fn jet_scheduler_park_ms(wait_kind: String, millis: U64) -> () { jet_scheduler_park_duration(wait_kind, Duration.from_millis(millis)) }
@@ -1220,13 +1249,13 @@ fn jet_task_sleep_duration_defaulted(duration: Duration) -> () {
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1723
 pub fn jet_scheduler_yield_now() -> () {
     slot :: ParkSlot.new()
-    jet_scheduler_yield("task yield", &slot, Some(Duration.ZERO))
+    jet_scheduler_yield("task yield", &slot, Val(Duration.ZERO))
 }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1729
 pub fn jet_scheduler_current_task_trace() -> String {
     // GATE #4565: kernel primitive
     #Unsafe("copy current control-plane flags; idle trace has both false") {
-        if current_task_control() == Some(ctrl) {
+        if current_task_control() == .Val(ctrl) {
             jet_task_control_trace(ctrl.paused.load(Ordering.Relaxed), ctrl.cancelled.load(Ordering.Relaxed))
         } else { jet_task_control_trace(false, false) }
     }

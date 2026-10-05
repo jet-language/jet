@@ -51,7 +51,10 @@ impl IOPoller {
     // GATE #4565: kernel primitive
     #Unsafe("epoll owns native registration set and initialized C-layout result buffer")
     fn run_linux_epoll(self: Arc<Self>) -> {
-        if target.selected_os() != .Linux || jet_scheduler_io_backend() != "epoll" { self.run_portable_poll(); return }
+        if target.selected_os() != .Linux || jet_scheduler_io_backend() != "epoll" {
+            self.run_portable_poll()
+            return
+        }
         // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1889
         #Layout(c)
         #Derive(Clone, Copy)
@@ -102,7 +105,7 @@ impl IOPoller {
                 _ :: METRIC_POLLER_WAKE.fetch_add(n as USize, Ordering.Relaxed)
                 for ev in &events[..n as USize] {
                     fd :: ev.data as I32
-                    if fd_slots.remove(&fd) is Val(slot) {
+                    if fd_slots.remove(&fd) == .Val(slot) {
                         _ :: epoll_ctl(epfd, EPOLL_CTL_DEL, fd, ptr.null())
                         interests := self.interests.lock().unwrap()
                         interests.retain(fn(i) { not Arc.ptr_eq(&i.slot, &slot) })
@@ -117,7 +120,10 @@ impl IOPoller {
     // GATE #4565: kernel primitive
     #Unsafe("kqueue owns one-shot native interests and bounded initialized event array")
     fn run_kqueue(self: Arc<Self>) -> {
-        if jet_scheduler_io_backend() != "kqueue" { self.run_portable_poll(); return }
+        if jet_scheduler_io_backend() != "kqueue" {
+            self.run_portable_poll()
+            return
+        }
         // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1996
         #Layout(c)
         #Derive(Clone, Copy)
@@ -171,7 +177,7 @@ impl IOPoller {
                 _ :: METRIC_POLLER_WAKE.fetch_add(n as USize, Ordering.Relaxed)
                 for ev in &events[..n as USize] {
                     fd :: ev.ident as I32
-                    if fd_slots.remove(&fd) is Val(slot) {
+                    if fd_slots.remove(&fd) == .Val(slot) {
                         del :: Kevent{ident: ev.ident, filter: ev.filter, flags: EV_DELETE, fflags: 0, data: 0, udata: ptr.null_mut()}
                         _ :: kevent(kq, &del, 1, ptr.null_mut(), 0, ptr.null())
                         interests := self.interests.lock().unwrap()
@@ -187,7 +193,10 @@ impl IOPoller {
     // GATE #4565: kernel primitive
     #Unsafe("IOCP owns retained socket and OVERLAPPED boxes until matching completion; bounded fatal drain retains unreturned kernel ownership")
     fn run_iocp(self: Arc<Self>) -> {
-        if target.selected_os() != .Windows || jet_scheduler_io_backend() != "iocp" { self.run_portable_poll(); return }
+        if target.selected_os() != .Windows || jet_scheduler_io_backend() != "iocp" {
+            self.run_portable_poll()
+            return
+        }
         // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2139
         #Layout(c)
         struct Overlapped { internal: USize, internal_high: USize, offset: U32, offset_high: U32, event: USize }
@@ -256,7 +265,7 @@ impl IOPoller {
                 if associated == 0 {
                     _error :: GetLastError()
                     _ :: METRIC_IO_FAILURES.fetch_add(1, Ordering.Relaxed)
-                    if self.interests.lock().unwrap().iter().find(fn(interest) { interest.stream_id == id }).map(fn(interest) { interest.slot.clone() }) is Val(slot) { slot.wake() }
+                    if self.interests.lock().unwrap().iter().find(fn(interest) { interest.stream_id == id }).map(fn(interest) { interest.slot.clone() }) == .Val(slot) { slot.wake() }
                     self.interests.lock().unwrap().retain(fn(interest) { interest.stream_id != id })
                     _ :: self.streams.lock().unwrap().remove(&id)
                     continue
@@ -273,10 +282,13 @@ impl IOPoller {
                         WSARecv(socket, &buffer, 1, &bytes, &flags, raw, ptr.null_mut())
                     } else { WSASend(socket, &buffer, 1, &bytes, 0, raw, ptr.null_mut()) }
                     if rc == 0 || WSAGetLastError() == WSA_IO_PENDING { operations.push(raw) }
-                    else { drop(Box.from_raw(raw)); _ :: METRIC_IO_RETIRED.fetch_add(1, Ordering.Relaxed) }
+                    else {
+                        drop(Box.from_raw(raw))
+                        _ :: METRIC_IO_RETIRED.fetch_add(1, Ordering.Relaxed)
+                    }
                 }
                 if operations.is_empty() {
-                    if self.interests.lock().unwrap().iter().find(fn(interest) { interest.stream_id == id }).map(fn(interest) { interest.slot.clone() }) is Val(slot) { slot.wake() }
+                    if self.interests.lock().unwrap().iter().find(fn(interest) { interest.stream_id == id }).map(fn(interest) { interest.slot.clone() }) == .Val(slot) { slot.wake() }
                 } else {
                     active[id] = Active{_stream: ^stream, socket: socket, operations: ^operations, cancel_requested: false}
                     _ :: METRIC_IO_ACTIVE.fetch_add(1, Ordering.Relaxed)
@@ -284,7 +296,7 @@ impl IOPoller {
             }
             retiring :: self.retire_requested.lock().unwrap().iter().copied().collect()
             for id in retiring {
-                if active.get_mut(&id) is Val(entry) {
+                if active.get_mut(&id) == .Val(entry) {
                     if not entry.cancel_requested {
                         entry.cancel_requested = true
                         for operation in &entry.operations { _ :: CancelIoEx(entry.socket, *operation) }
@@ -334,7 +346,7 @@ impl IOPoller {
                         drop(Box.from_raw(drain_operation))
                         _ :: METRIC_IO_RETIRED.fetch_add(1, Ordering.Relaxed)
                         owner :: active.iter().find_map(fn((id, entry)) { if entry.operations.contains(&drain_operation) { Val(*id) } else { None } })
-                        if owner is Val(id) {
+                        if owner == .Val(id) {
                             entry := active.get_mut(&id).unwrap()
                             entry.operations.retain(fn(candidate) { *candidate != drain_operation })
                             if entry.operations.is_empty() {
@@ -375,7 +387,7 @@ impl IOPoller {
                 interests.retain(fn(interest) { interest.stream_id != id })
                 ^slot
             }
-            if slot is Val(wake) {
+            if slot == .Val(wake) {
                 _ :: METRIC_POLLER_WAKE.fetch_add(1, Ordering.Relaxed)
                 for pending in &entry.operations { _ :: CancelIoEx(entry.socket, *pending) }
                 wake.wake()
@@ -483,7 +495,7 @@ impl JetRawIoRegistration {
     fn close(self: &Self) -> {
         if not self.active.swap(false, Ordering.AcqRel) { return }
         self.handle.remove_registration(self.id)
-        if self.poller.upgrade() is Val(poller) { poller.unregister(self.id) }
+        if self.poller.upgrade() == .Val(poller) { poller.unregister(self.id) }
         self.slot.wake()
     }
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2514
@@ -553,7 +565,10 @@ impl JetRawIoPoller {
         loop {
             (descriptors, descriptor_ids) := {
                 interests :: self.interests.lock().unwrap()
-                if interests.is_empty() { _guard :: self.notify.wait(interests).unwrap(); continue }
+                if interests.is_empty() {
+                    _guard :: self.notify.wait(interests).unwrap()
+                    continue
+                }
                 descriptors :: interests.iter().map(fn(interest) {
                     PollFd{fd: interest.registration.handle.fd,
                         events: (if interest.readable { POLLIN } else { 0 }) | (if interest.writable { POLLOUT } else { 0 }), revents: 0}
@@ -712,7 +727,7 @@ pub fn jet_scheduler_io_wait(stream: &TcpStream, read: Bool, write: Bool, wait_k
     }
     _registration :: Registration{poller: ^poller, id: id}
     jet_scheduler_yield(wait_kind, &slot, None)
-    if *io_poller().backend_state.lock().unwrap() is IOBackendState.Failed(error) { jet_scheduler_fatal(error) }
+    if *io_poller().backend_state.lock().unwrap() == .Failed(error) { jet_scheduler_fatal(error) }
 }
 
 use core.devtools.runtime.observe.[jet_observe_registry, JetObserveChannel]
@@ -756,7 +771,7 @@ impl<T> Drop for JetSchedulerSendReservation<T> {
             ^waiter
         }
         self.active = false
-        if waiter is Val(slot) { jet_scheduler_wake(&slot) }
+        if waiter == .Val(slot) { jet_scheduler_wake(&slot) }
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2937
@@ -789,7 +804,10 @@ impl<T> Drop for JetSchedulerChannel<T> {
         send_waiters :: {
             st := self.inner.state.lock().unwrap()
             st.receiver_count = st.receiver_count.saturating_sub(1)
-            waiters :: if st.receiver_count == 0 { st.closed = true; mem.take(&st.send_waiters) } else { [] }
+            waiters :: if st.receiver_count == 0 {
+                st.closed = true
+                mem.take(&st.send_waiters)
+            } else { [] }
             jet_observe_channel_update(self.inner.observe_id, &st)
             ^waiters
         }
@@ -834,17 +852,23 @@ impl<T: Send> JetSchedulerChannel<T> {
     #Unsafe("receive transfers queued value once, records wait slot under mutex and parks through scheduler")
     pub fn receive(self: &Self) -> T? {
         loop {
-            if jet_scheduler_task_cancelled() && not jet_scheduler_shielded() { jet_task_deliver_cancel(); return None }
-            if current_task_control() is Val(ctrl) { ctrl.wait_while_paused() }
+            if jet_scheduler_task_cancelled() && not jet_scheduler_shielded() {
+                jet_task_deliver_cancel()
+                return None
+            }
+            if current_task_control() == .Val(ctrl) { ctrl.wait_while_paused() }
             slot :: ParkSlot.new()
             parked :: {
                 st := self.inner.state.lock().unwrap()
-                if st.queue.pop_front() is Val(v) {
-                    if st.send_waiters.pop() is Val(wake) { wake.wake() }
+                if st.queue.pop_front() == .Val(v) {
+                    if st.send_waiters.pop() == .Val(wake) { wake.wake() }
                     jet_observe_channel_update(self.inner.observe_id, &st)
                     return Val(^v)
                 }
-                if st.closed { jet_observe_channel_update(self.inner.observe_id, &st); return None }
+                if st.closed {
+                    jet_observe_channel_update(self.inner.observe_id, &st)
+                    return None
+                }
                 st.recv_waiters.push(slot.clone())
                 jet_observe_channel_update(self.inner.observe_id, &st)
                 true
@@ -863,7 +887,7 @@ impl<T: Send> JetSchedulerChannel<T> {
     pub fn try_receive(self: &Self) -> T? {
         st := self.inner.state.lock().unwrap()
         out :: st.queue.pop_front()
-        if out.is_some() { if st.send_waiters.pop() is Val(slot) { slot.wake() } }
+        if out.is_some() { if st.send_waiters.pop() == .Val(slot) { slot.wake() } }
         jet_observe_channel_update(self.inner.observe_id, &st)
         ^out
     }
@@ -880,7 +904,10 @@ impl<T: Send> JetSchedulerChannel<T> {
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3122
     // GATE #4565: kernel primitive
     pub fn is_ready(self: &Self) -> Bool {
-        #Unsafe("read queue readiness and closed under one lock") { state :: self.inner.state.lock().unwrap(); not state.queue.is_empty() || state.closed }
+        #Unsafe("read queue readiness and closed under one lock") {
+            state :: self.inner.state.lock().unwrap()
+            not state.queue.is_empty() || state.closed
+        }
     }
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3127
     // GATE #4565: kernel primitive
@@ -926,7 +953,10 @@ impl<T> Drop for JetSchedulerSender<T> {
         recv_waiters :: {
             st := self.inner.state.lock().unwrap()
             st.sender_count = st.sender_count.saturating_sub(1)
-            waiters :: if st.sender_count == 0 { st.closed = true; mem.take(&st.recv_waiters) } else { [] }
+            waiters :: if st.sender_count == 0 {
+                st.closed = true
+                mem.take(&st.recv_waiters)
+            } else { [] }
             jet_observe_channel_update(self.inner.observe_id, &st)
             ^waiters
         }
@@ -952,12 +982,18 @@ impl<T: Send> JetSchedulerSender<T> {
     #Unsafe("capacity reservation allocates before caller extracts ownership, honors existing reservations and parks without busy wait")
     pub fn reserve_send(self: &Self) -> JetSchedulerSendReservation<T> JetSchedulerSendReserveError! {
         loop {
-            if jet_scheduler_task_cancelled() && not jet_scheduler_shielded() { jet_task_deliver_cancel(); return Err(.Cancelled) }
-            if current_task_control() is Val(ctrl) { ctrl.wait_while_paused() }
+            if jet_scheduler_task_cancelled() && not jet_scheduler_shielded() {
+                jet_task_deliver_cancel()
+                return Err(.Cancelled)
+            }
+            if current_task_control() == .Val(ctrl) { ctrl.wait_while_paused() }
             slot :: ParkSlot.new()
             reserved :: {
                 state := self.inner.state.lock().unwrap()
-                if state.closed || state.receiver_count == 0 { jet_observe_channel_update(self.inner.observe_id, &state); return Err(.Closed) }
+                if state.closed || state.receiver_count == 0 {
+                    jet_observe_channel_update(self.inner.observe_id, &state)
+                    return Err(.Closed)
+                }
                 occupied :: state.queue.len().checked_add(state.reserved_sends).ok_or(JetSchedulerSendReserveError.ReservationCountExhausted)?
                 if state.capacity.is_some_and(fn(capacity) { occupied >= capacity }) {
                     state.send_waiters.push(slot.clone())
@@ -1009,7 +1045,7 @@ impl<T: Send> JetSchedulerSendReservation<T> {
             jet_observe_channel_update(self.inner.observe_id, &state)
             (^result, ^waiter)
         }
-        if waiter is Val(slot) { jet_scheduler_wake(&slot) }
+        if waiter == .Val(slot) { jet_scheduler_wake(&slot) }
         ^result
     }
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3316
@@ -1043,7 +1079,7 @@ impl<T: Send> JetSchedulerSendReservation<T> {
             (^result, ^waiter)
         }
         drop(^prepare)
-        if waiter is Val(slot) { jet_scheduler_wake(&slot) }
+        if waiter == .Val(slot) { jet_scheduler_wake(&slot) }
         ^result
     }
 }
@@ -1091,7 +1127,7 @@ impl<T> ChannelInner<T> {
     fn try_pop(self: &Self) -> T? {
         st := self.state.lock().unwrap()
         out :: st.queue.pop_front()
-        if out.is_some() { if st.send_waiters.pop() is Val(slot) { slot.wake() } }
+        if out.is_some() { if st.send_waiters.pop() == .Val(slot) { slot.wake() } }
         ^out
     }
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3441
@@ -1099,7 +1135,10 @@ impl<T> ChannelInner<T> {
     fn register_select_waiter(self: &Self, slot: Arc<ParkSlot>) -> { #Unsafe("register shared select slot under queue lock") { self.state.lock().unwrap().recv_waiters.push(^slot) } }
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3445
     // GATE #4565: kernel primitive
-    fn is_closed_and_empty(self: &Self) -> Bool { #Unsafe("atomic closed/empty snapshot") { state :: self.state.lock().unwrap(); state.closed && state.queue.is_empty() } }
+    fn is_closed_and_empty(self: &Self) -> Bool { #Unsafe("atomic closed/empty snapshot") {
+        state :: self.state.lock().unwrap()
+        state.closed && state.queue.is_empty()
+    } }
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3450
     // GATE #4565: kernel primitive
     fn remove_waiter(self: &Self, slot: &ParkSlot) -> {
@@ -1114,7 +1153,7 @@ impl<T> SelectRegistration<T> {
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3466
     fn new(recvs: &[Arc<ChannelInner<T>>], master: Arc<ParkSlot>, cancel_control: Arc<JetTaskControl>?) -> Self {
         for channel in recvs { channel.register_select_waiter(master.clone()) }
-        if cancel_control.as_ref() is Val(control) { control.register_cancel_waiter(&master) }
+        if cancel_control.as_ref() == .Val(control) { control.register_cancel_waiter(&master) }
         Self{recvs: recvs.to_vec(), master: ^master, cancel_control: ^cancel_control}
     }
 }
@@ -1122,7 +1161,7 @@ impl<T> Drop for SelectRegistration<T> {
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3486
     fn drop(self: &Self) -> {
         for channel in &self.recvs { channel.remove_waiter(&self.master) }
-        if self.cancel_control.as_ref() is Val(control) { control.remove_cancel_waiter(&self.master) }
+        if self.cancel_control.as_ref() == .Val(control) { control.remove_cancel_waiter(&self.master) }
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3497
@@ -1130,8 +1169,8 @@ impl<T> Drop for SelectRegistration<T> {
 #Unsafe("shared select slot registered with every channel and cancellation owner; native timers and metrics retain scope")
 fn jet_scheduler_select<T: Send>(recvs: [Arc<ChannelInner<T>>], after_ms: [U64]) -> JetSelectOutcome<T> {
     assert(not recvs.is_empty() || not after_ms.is_empty(), "select: no arms registered")
-    for (i, ch) in recvs.iter().enumerate() { if ch.try_pop() is Val(v) { return .Recv(i, ^v) } }
-    if after_ms.iter().enumerate().find(fn((_, ms)) { **ms == 0 }) is Val((i, _)) { return .After(i) }
+    for (i, ch) in recvs.iter().enumerate() { if ch.try_pop() == .Val(v) { return .Recv(i, ^v) } }
+    if after_ms.iter().enumerate().find(fn((_, ms)) { **ms == 0 }) == .Val((i, _)) { return .After(i) }
     if after_ms.is_empty() && not recvs.is_empty() && recvs.iter().all(fn(ch) { ch.is_closed_and_empty() }) { return .Closed }
     master :: ParkSlot.new()
     cancel_control :: current_task_control()
@@ -1141,12 +1180,15 @@ fn jet_scheduler_select<T: Send>(recvs: [Arc<ChannelInner<T>>], after_ms: [U64])
     if after_ms.is_empty() && not recvs.is_empty() && recvs.iter().all(fn(ch) { ch.is_closed_and_empty() }) { return .Closed }
     for ms in &after_ms { timer_wheel().schedule(Instant.now() + Duration.from_millis(*ms), master.clone()) }
     loop {
-        if jet_scheduler_task_cancelled() && not jet_scheduler_shielded() { jet_task_deliver_cancel(); return .Closed }
+        if jet_scheduler_task_cancelled() && not jet_scheduler_shielded() {
+            jet_task_deliver_cancel()
+            return .Closed
+        }
         _ :: METRIC_PARKED.fetch_add(1, Ordering.Relaxed)
         jet_scheduler_yield("select wait", &master, None)
         _ :: METRIC_PARKED.fetch_sub(1, Ordering.Relaxed)
-        for (i, ch) in recvs.iter().enumerate() { if ch.try_pop() is Val(v) { return .Recv(i, ^v) } }
-        if after_ms.iter().enumerate().find(fn((_, ms)) { started.elapsed() >= Duration.from_millis(**ms) }) is Val((i, _)) { return .After(i) }
+        for (i, ch) in recvs.iter().enumerate() { if ch.try_pop() == .Val(v) { return .Recv(i, ^v) } }
+        if after_ms.iter().enumerate().find(fn((_, ms)) { started.elapsed() >= Duration.from_millis(**ms) }) == .Val((i, _)) { return .After(i) }
         if after_ms.is_empty() && not recvs.is_empty() && recvs.iter().all(fn(ch) { ch.is_closed_and_empty() }) { return .Closed }
     }
 }
@@ -1154,8 +1196,8 @@ fn jet_scheduler_select<T: Send>(recvs: [Arc<ChannelInner<T>>], after_ms: [U64])
 // None means not ready; Closed remains distinct for caller's else-arm policy.
 fn jet_scheduler_try_select<T: Send>(recvs: [Arc<ChannelInner<T>>], after_ms: [U64]) -> JetSelectOutcome<T>? {
     assert(not recvs.is_empty() || not after_ms.is_empty(), "select: no arms registered")
-    for (i, ch) in recvs.iter().enumerate() { if ch.try_pop() is Val(v) { return Val(.Recv(i, ^v)) } }
-    if after_ms.iter().enumerate().find(fn((_, ms)) { **ms == 0 }) is Val((i, _)) { return Val(.After(i)) }
+    for (i, ch) in recvs.iter().enumerate() { if ch.try_pop() == .Val(v) { return Val(.Recv(i, ^v)) } }
+    if after_ms.iter().enumerate().find(fn((_, ms)) { **ms == 0 }) == .Val((i, _)) { return Val(.After(i)) }
     if after_ms.is_empty() && not recvs.is_empty() && recvs.iter().all(fn(ch) { ch.is_closed_and_empty() }) { return Val(.Closed) }
     None
 }

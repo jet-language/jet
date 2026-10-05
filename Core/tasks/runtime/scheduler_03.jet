@@ -135,7 +135,7 @@ impl Scheduler {
                 queue := worker.queue.lock().unwrap()
                 job :: if allow_blocking { queue.pop_front() }
                     else { queue.iter().position(fn(job) { not job.blocking }).map(fn(index) { queue.remove(index).unwrap() }) }
-                if job is Val(job) -> return Val(^job)
+                if job == .Val(job) -> return Val(^job)
             }
         }
         None
@@ -150,7 +150,7 @@ impl Scheduler {
         // GATE #4565: kernel primitive
         #Unsafe("worker owns each removed FnOnce job; blocking idle wait is condvar-based") {
             loop {
-                if self.take_work(id, true) is Val(job) {
+                if self.take_work(id, true) == .Val(job) {
                     _ :: JET_OBSERVE_QUEUED.fetch_sub(1, Ordering.Relaxed)
                     _ :: self.live.fetch_add(1, Ordering.Relaxed)
                     (job.run)()
@@ -209,7 +209,7 @@ impl Scheduler {
                         return
                     }
                 }
-                if self.take_work(0, not reserve) is Val(job) {
+                if self.take_work(0, not reserve) == .Val(job) {
                     _ :: JET_OBSERVE_QUEUED.fetch_sub(1, Ordering.Relaxed)
                     _ :: self.live.fetch_add(1, Ordering.Relaxed)
                     (job.run)()
@@ -256,7 +256,7 @@ fn next_task_completion_order() -> (high: U64, low: U64) {
 fn worker_count() -> USize {
     // GATE #4565: kernel primitive
     #Unsafe("read actual worker override or selected host available parallelism") {
-        if env.var("JET_SCHEDULER_THREADS") is Ok(raw) {
+        if env.var("JET_SCHEDULER_THREADS") == .Ok(raw) {
             if raw.parse<USize>() is Ok(count) -> return count.max(1)
         }
         thread.available_parallelism().map(fn(count) { count.get() }).unwrap_or(4).max(1)
@@ -334,7 +334,10 @@ impl<T> JetSchedulerJoin<T> {
             pending := self.pending.lock().unwrap()
             if pending.is_some() -> return true
             match self.rx.try_recv() {
-                Ok(result) -> { *pending = Val(^result); true }
+                Ok(result) -> {
+                    *pending = Val(^result)
+                    true
+                }
                 Err(.Empty) -> false
                 Err(.Disconnected) -> {
                     *pending = Val(.Panicked(jet_observe_task_failure_message_for_identity(
@@ -427,7 +430,7 @@ fn jet_scheduler_all_wait(probes: [fn() -> JetSchedulerTaskPoll],
                 }
             }
         }
-        if first_failure is Val((_, error)) {
+        if first_failure == .Val((_, error)) {
             loop cancel in &cancels -> cancel()
             loop drain in &drains -> drain()
             return Err(^error)
@@ -555,7 +558,7 @@ pub fn jet_scheduler_spawn_detached_timer(f: fn() -> ()) -> {
     world :: jet_scheduler_current_world()
     // GATE #4565: kernel primitive
     #Unsafe("detached native thread owns its static Send callback and deterministic world scope") {
-        if world is Val(world) {
+        if world == .Val(world) {
             world.task_spawned()
             task_world :: world.clone()
             _ :: thread.spawn(fn() {
@@ -609,7 +612,7 @@ fn jet_scheduler_spawn_with_control_kind<T: Send>(spawn_site: USize, label: &Str
     jet_observe_task_set_label(observe_id, label)
     identity :: jet_observe_task_identity(observe_id)
     world :: jet_scheduler_current_world()
-    if world.as_ref() is Val(world) -> world.task_spawned()
+    if world.as_ref() == .Val(world) -> world.task_spawned()
     // GATE #4565: kernel primitive
     #Unsafe("bounded completion channel and once-published sequence belong to one static Send worker job") {
         (tx, rx) :: sync_channel<JetSchedulerResult<T>>(1)
