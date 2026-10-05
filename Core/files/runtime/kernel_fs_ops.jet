@@ -35,8 +35,8 @@ pub fn jet_fs_scope_read(scope: JetFileScope, path: String) -> [U8] io.Error! {
         // The canonical retained descriptor-relative reader owns every no-follow
         // open; lexical strip_prefix above is not a security boundary.
         if tree.foundation_read_file_nofollow_at_root(root.path().to_string_lossy().to_string(), relative.to_string_lossy().to_string(), @MAX_TREE_FILE_BYTES) == {
-            Ok(bytes) -> return Ok(bytes)
-            Err(error) -> last_error = Val(error)
+            .Ok(bytes) -> return Ok(bytes)
+            .Err(error) -> last_error = Val(error)
         }
     }
     Err(last_error ?? jet_fs_scope_denied())

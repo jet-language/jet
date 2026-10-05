@@ -87,15 +87,15 @@ pub fn jet_fs_walk_parallel_filtered_with_ignore<T, E>(path: String, shown: Stri
                             // matcher's directory-base/source rail, not a second parser.
                             ignore_path :: dir.join(filename)
                             source :: if fs.symlink_metadata(ignore_path) == {
-                                Ok(metadata) -> {
+                                .Ok(metadata) -> {
                                     if metadata.file_type().is_file() {
                                         if fs.read(ignore_path) == {
-                                            Ok(bytes) -> Val(bytes)
-                                            Err(error) -> return Err(make_error(error_path, error))
+                                            .Ok(bytes) -> Val(bytes)
+                                            .Err(error) -> return Err(make_error(error_path, error))
                                         }
                                     } else { None }
                                 }
-                                Err(error) -> {
+                                .Err(error) -> {
                                     if error.kind() != .NotFound -> return Err(make_error(error_path, error))
                                     None
                                 }
