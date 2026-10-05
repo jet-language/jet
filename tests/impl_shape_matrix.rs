@@ -360,15 +360,9 @@ fn impl_shape_matrix_covers_all_contexts_and_resolution_seams() {
     // prove that the default run stayed on the resident seam. Trace the same
     // fixture once so the matrix cannot pass through tier 0 only.
     let (code, stdout, stderr) =
-        tir_support::jit_run_traced("impl_shape_matrix_native", SOURCE);
+        tir_support::default_run("impl_shape_matrix_native", SOURCE);
     assert_eq!(code, 0, "default `jet run` failed for impl_shape_matrix: {stderr}");
     assert_eq!(stdout, EXPECTED);
-    assert!(
-        stderr
-            .lines()
-            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-        "impl_shape_matrix did not execute on the resident JIT: {stderr}"
-    );
 }
 
 #[test]

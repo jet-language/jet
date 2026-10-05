@@ -87,7 +87,7 @@ fn measurement_aot_matches_the_known_result() {
 
 #[test]
 fn measurement_default_jit_matches_the_known_result() {
-    let (code, stdout, stderr) = tir_support::jit_run("measurement_tier_jit", SOURCE);
+    let (code, stdout, stderr) = tir_support::default_run("measurement_tier_jit", SOURCE);
     assert_eq!(code, 0, "default JIT failed: {stderr}");
     assert_eq!(stdout, EXPECTED);
 }

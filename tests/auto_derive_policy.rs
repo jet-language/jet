@@ -1,4 +1,3 @@
-use jet::JitBackend::JitBackend;
 use std::process::Command;
 
 mod common;
@@ -175,8 +174,7 @@ fn run() {
     assert_eq!(impl_count(&rust, "__jet_Equatable", "Mixed"), 0);
 
     let policy = common::development_policy();
-    let mut backend = jet_jit::CraneliftBackend::new();
-    let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
+    let outcome = common::run_interpreted(&bundle, &policy);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("signed auto-derive program did not run: {outcome:?}");
     };
@@ -224,14 +222,13 @@ fn run() {
     }
 
     let policy = common::development_policy();
-    let mut backend = jet_jit::CraneliftBackend::new();
-    let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
+    let outcome = common::run_interpreted(&bundle, &policy);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("plain Codable program did not run in the default JIT: {outcome:?}");
     };
     assert_eq!(stdout, expected);
 
-    let outcome = jet::Interpreter::dev_iteration(
+    let outcome = crate::common::dev_run(
         project_dir("plain_codable")
             .join("main.jet")
             .to_str()
@@ -479,8 +476,7 @@ fn run() {
     assert_eq!(impl_count(&rust, "JetDebug", "Manual"), 1);
 
     let policy = common::development_policy();
-    let mut backend = jet_jit::CraneliftBackend::new();
-    let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
+    let outcome = common::run_interpreted(&bundle, &policy);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("package-off auto-derive program did not run: {outcome:?}");
     };
@@ -489,7 +485,7 @@ fn run() {
         "Enabled { value: 3 }\nEnabled { value: 3 }\ntrue\nmanual\n"
     );
 
-    let outcome = jet::Interpreter::dev_iteration(
+    let outcome = crate::common::dev_run(
         project_dir("package_off")
             .join("main.jet")
             .to_str()
@@ -606,7 +602,7 @@ fn run() {
     }
     for (tier, force_interpreter) in [("JIT", false), ("interpreter", true)] {
         let outcome =
-            jet::Interpreter::dev_iteration(entry.to_str().unwrap(), false, force_interpreter);
+            crate::common::dev_run(entry.to_str().unwrap(), false, force_interpreter);
         let jet::Interpreter::RunOutcome::Problems(diagnostics) = outcome else {
             panic!("{tier} bypassed sema: {outcome:?}");
         };
@@ -916,14 +912,13 @@ true\n";
         assert_eq!(stdout, expected);
     }
     let policy = common::development_policy();
-    let mut backend = jet_jit::CraneliftBackend::new();
-    let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
+    let outcome = common::run_interpreted(&bundle, &policy);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("same-name program did not run in the default JIT: {outcome:?}");
     };
     assert_eq!(stdout, expected);
     let outcome =
-        jet::Interpreter::dev_iteration(app.join("main.jet").to_str().unwrap(), false, true);
+        crate::common::dev_run(app.join("main.jet").to_str().unwrap(), false, true);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("same-name program did not run in the forced interpreter: {outcome:?}");
     };

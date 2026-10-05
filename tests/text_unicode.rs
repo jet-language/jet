@@ -537,7 +537,7 @@ fn run() {
         let output = command
             .arg(&program)
             .current_dir(&scratch.path)
-            .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tier}-run")))
+            .env("JET_STORE_DIR", scratch.join(&format!("{tier}-run")))
             .env("JET_STORE_DIR", scratch.join(&format!("{tier}-build")))
             .env("NO_COLOR", "1")
             .output()
@@ -579,7 +579,7 @@ fn unicode_text_audit_matches_golden_on_all_run_tiers() {
         let output = command
             .arg(&example)
             .current_dir(root)
-            .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tier}-run")))
+            .env("JET_STORE_DIR", scratch.join(&format!("{tier}-run")))
             .env("JET_STORE_DIR", scratch.join(&format!("{tier}-build")))
             .env("NO_COLOR", "1")
             .output()
@@ -622,7 +622,7 @@ fn wrap_semantics_audit_matches_golden_on_all_run_tiers() {
         let output = command
             .arg(&example)
             .current_dir(root)
-            .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tier}-run")))
+            .env("JET_STORE_DIR", scratch.join(&format!("{tier}-run")))
             .env("JET_STORE_DIR", scratch.join(&format!("{tier}-build")))
             .env("NO_COLOR", "1")
             .output()
@@ -663,7 +663,7 @@ fn string_from_bytes_matches_golden_on_all_run_tiers() {
         let output = command
             .arg(&example)
             .current_dir(root)
-            .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tier}-run")))
+            .env("JET_STORE_DIR", scratch.join(&format!("{tier}-run")))
             .env("JET_STORE_DIR", scratch.join(&format!("{tier}-build")))
             .env("NO_COLOR", "1")
             .output()

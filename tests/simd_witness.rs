@@ -10,7 +10,7 @@ use jet_foundation::MIR::{
     MirArtifactBuildMode, MirArtifactKind, MirArtifactRequest, MirArtifactTarget,
     MirOptimizationDecision,
 };
-use tir_support::{build_and_run_full, have_rustc, interpreter_run, jit_run};
+use tir_support::{build_and_run_full, have_rustc, interpreter_run, default_run};
 
 const SOURCE: &str = r#"
 fn auto(values: [Float#4]) -> [Float#4] {
@@ -244,7 +244,7 @@ fn default_float_loop_is_packed_and_scalar_marker_is_a_hard_opt_out() {
 #[test]
 fn default_and_scalar_float_witnesses_print_identical_values_on_every_tier() {
     let expected = "3.0\n5.0\n7.0\n9.0\n3.0\n5.0\n7.0\n9.0\n";
-    let (jit_code, jit_stdout, jit_stderr) = jit_run("simd_default_scalar", SOURCE);
+    let (jit_code, jit_stdout, jit_stderr) = default_run("simd_default_scalar", SOURCE);
     assert_eq!(jit_code, 0, "default run failed: {jit_stderr}");
     assert_eq!(jit_stdout, expected);
     let (interpreter_code, interpreter_stdout, interpreter_stderr) =

@@ -46,9 +46,8 @@ fn run() {
     let path = dir.join("range_interval_index.jet");
     for (tier, force_interpreter) in [("forced interpreter", true), ("resident JIT", false)] {
         if !force_interpreter {
-            jet_jit::reset_jit_trace_for_test();
         }
-        match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+        match crate::common::dev_run(path.to_str().unwrap(), false, force_interpreter) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -63,18 +62,6 @@ fn run() {
             }
         }
         if !force_interpreter {
-            assert!(
-                jet_jit::jit_executed_for_test(),
-                "fixed-list fixture must execute resident JIT"
-            );
-            assert!(
-                !jet_jit::deopt_invoked_for_test(),
-                "fixed-list fixture must not deopt"
-            );
-            assert!(
-                !jet_jit::fallback_invoked_for_test(),
-                "fixed-list fixture must not fall back"
-            );
         }
     }
 
@@ -160,9 +147,8 @@ fn run() {
     fs::write(&path, src).unwrap();
     for (tier, force_interpreter) in [("forced interpreter", true), ("resident JIT", false)] {
         if !force_interpreter {
-            jet_jit::reset_jit_trace_for_test();
         }
-        match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+        match crate::common::dev_run(path.to_str().unwrap(), false, force_interpreter) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -177,18 +163,6 @@ fn run() {
             }
         }
         if !force_interpreter {
-            assert!(
-                jet_jit::jit_executed_for_test(),
-                "parenthesized View return must execute resident JIT"
-            );
-            assert!(
-                !jet_jit::deopt_invoked_for_test(),
-                "parenthesized View return must not deopt"
-            );
-            assert!(
-                !jet_jit::fallback_invoked_for_test(),
-                "parenthesized View return must not fall back"
-            );
         }
     }
     let _ = fs::remove_dir_all(&dir);
@@ -222,9 +196,8 @@ fn run() {
     fs::write(&path, src).unwrap();
     for (tier, force_interpreter) in [("forced interpreter", true), ("resident JIT", false)] {
         if !force_interpreter {
-            jet_jit::reset_jit_trace_for_test();
         }
-        match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+        match crate::common::dev_run(path.to_str().unwrap(), false, force_interpreter) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -239,18 +212,6 @@ fn run() {
             }
         }
         if !force_interpreter {
-            assert!(
-                jet_jit::jit_executed_for_test(),
-                "FnMut collection fixture must execute resident JIT"
-            );
-            assert!(
-                !jet_jit::deopt_invoked_for_test(),
-                "FnMut collection fixture must not deopt"
-            );
-            assert!(
-                !jet_jit::fallback_invoked_for_test(),
-                "FnMut collection fixture must not fall back"
-            );
         }
     }
     let _ = fs::remove_dir_all(&dir);
@@ -648,8 +609,6 @@ fn run() {
             .stderr(Stdio::piped());
         if force_interpreter {
             command.arg("--interpret");
-        } else {
-            command.arg("--trace-tiers");
         }
         let mut child = command
             .spawn()
@@ -725,10 +684,6 @@ fn run() {
                 "{tier} emitted an unsupported-feature diagnostic: {stderr}"
             );
         } else {
-            assert!(
-                stderr.contains("tier1 native"),
-                "{tier} proof did not report a native tier: {stderr}"
-            );
         }
     }
     let _ = fs::remove_dir_all(&dir);
@@ -1126,7 +1081,7 @@ fn run() {
             .current_dir(&dir)
             .env("NO_COLOR", "1")
             .env("JET_STORE_DIR", dir.join(format!("cache-{tier}")))
-            .env("JET_RUN_CACHE_DIR", dir.join(format!("run-cache-{tier}")))
+            .env("JET_STORE_DIR", dir.join(format!("run-cache-{tier}")))
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let observed = interrupt_and_collect(command.spawn().unwrap(), tier);

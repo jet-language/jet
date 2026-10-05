@@ -46,9 +46,7 @@ fn production_failure_receipt_is_canonical_redacted_and_tier_stable() {
     let mut modes = vec![vec!["run", "--interpret", "main.jet"]];
     modes.push(vec!["dev", "main.jet", "--watch=off"]);
     modes.push(vec!["dev", "main.jet", "--interpret", "--watch=off"]);
-    if jet_jit::cranelift_host_supported() {
-        modes.push(vec!["run", "main.jet"]);
-    }
+    modes.push(vec!["run", "main.jet"]);
     modes.push(vec!["run", "--release", "main.jet"]);
 
     let mut receipts = Vec::new();

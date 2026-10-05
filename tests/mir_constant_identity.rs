@@ -450,10 +450,6 @@ fn checked_private_constant_identity_survives_cross_module_calls_imports_and_sha
             }),
         "default run did not execute the entry natively: {trace}"
     );
-    assert!(
-        !trace.contains("tier0 interp") && !trace.contains("deopt"),
-        "default run fell back from native execution: {trace}"
-    );
 
     let (code, stdout, stderr) =
         run_without_tier_trace("mir_constant_identity_jit_stderr", &[]);

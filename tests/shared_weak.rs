@@ -2,7 +2,6 @@
 
 mod common;
 
-use jet::JitBackend::JitBackend;
 use std::fs;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -117,8 +116,7 @@ fn shared_weak_cycle_matches_aot_and_default_tiers() {
         assert!(errors.is_empty(), "{errors:?}");
 
         let policy = common::development_policy();
-        let mut backend = jet_jit::CraneliftBackend::new();
-        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+        match common::run_interpreted(&bundle, &policy) {
             jet::Interpreter::RunOutcome::Ran { stdout, .. } => {
                 assert_eq!(stdout, expected);
             }

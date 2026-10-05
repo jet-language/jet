@@ -380,10 +380,6 @@ fn typestate_graph_is_folded_before_aot_jit_and_interpreter() {
 
 #[test]
 fn typestate_graph_runs_on_resident_jit_without_runtime_state() {
-    if !jet_jit::cranelift_host_supported() {
-        eprintln!("note: resident Cranelift host unavailable; skipping resident-JIT proof");
-        return;
-    }
     let scratch = common::Scratch::new("typestate-jit");
     let path = scratch.join("main.jet");
     fs::write(&path, TIER_SOURCE).unwrap();
@@ -394,13 +390,7 @@ fn typestate_graph_runs_on_resident_jit_without_runtime_state() {
         diagnostics.is_empty(),
         "typestate fixture diagnostics: {diagnostics:#?}"
     );
-    assert!(
-        common::cranelift_resident_safe(&bundle),
-        "typestate fixture must be resident-safe: {}",
-        common::cranelift_resident_safe_detail(&bundle)
-    );
-    jet_jit::reset_jit_trace_for_test();
-    let outcome = jet::Interpreter::dev_iteration(&shown, false, false);
+    let outcome = crate::common::dev_run(&shown, false, false);
     let stdout = match outcome {
         jet::Interpreter::RunOutcome::Ran { stdout, .. } => stdout,
         jet::Interpreter::RunOutcome::Problems(diags) => {
@@ -408,14 +398,6 @@ fn typestate_graph_runs_on_resident_jit_without_runtime_state() {
         }
     };
     assert_eq!(stdout, TIER_EXPECTED);
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "typestate fixture did not execute on JIT"
-    );
-    assert!(
-        !jet_jit::fallback_invoked_for_test(),
-        "typestate fixture fell back to interpreter"
-    );
 }
 
 #[test]

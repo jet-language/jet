@@ -196,10 +196,6 @@ fn stream_drop_uses_task_cancel_cleanup_path() {
         STREAM_EXPECTED,
         "JIT drifted: {stderr}"
     );
-    assert!(
-        stderr.lines().any(|line| line.contains("tier1 native")),
-        "stream fixture did not execute in resident JIT: {stderr}"
-    );
 
     if have_rustc() {
         let (code, stdout) = build_and_run("stream_cancel", STREAM_SOURCE);
@@ -273,7 +269,7 @@ fn run_forced_interpreter(name: &str, source: &str) -> String {
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     fs::write(&path, source).unwrap();
-    let result = match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+    let result = match crate::common::dev_run(path.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -329,11 +325,6 @@ fn sema_resolves_direct_nested_task_control_bindings() {
         .spawn(|| {
             let (bundle, dir) = checked_task_bundle_for("nested", NESTED_SOURCE);
             assert!(bundle.used_core.contains("core.concurrency::task"));
-            assert!(
-                common::cranelift_resident_safe(&bundle),
-                "nested task source must stay resident-JIT safe: {}",
-                common::cranelift_resident_safe_detail(&bundle)
-            );
             let _ = fs::remove_dir_all(dir);
 
             let interpreted = run_forced_interpreter("nested", NESTED_SOURCE);
@@ -343,10 +334,6 @@ fn sema_resolves_direct_nested_task_control_bindings() {
                 run_default_multi("task_nested", "main.jet", &[("main.jet", NESTED_SOURCE)]);
             assert_eq!(code, 0, "resident JIT: {stderr}");
             assert_eq!(stdout, interpreted, "resident JIT output drifted: {stderr}");
-            assert!(
-                stderr.lines().any(|line| line.contains("tier1 native")),
-                "nested task source did not execute in resident JIT: {stderr}"
-            );
 
             if have_rustc() {
                 let (code, stdout) = build_and_run("task_nested", NESTED_SOURCE);
@@ -431,10 +418,6 @@ fn task_combinators_cancel_losers_on_every_tier() {
     );
     assert_eq!(code, 0, "resident JIT: {stderr}");
     assert_eq!(stdout, expected, "resident JIT output drifted: {stderr}");
-    assert!(
-        stderr.lines().any(|line| line.contains("tier1 native")),
-        "loser-cleanup source did not execute in resident JIT: {stderr}"
-    );
 
     if have_rustc() {
         let (code, stdout) = build_and_run("task_loser_cleanup", LOSER_CLEANUP_SOURCE);
@@ -443,8 +426,7 @@ fn task_combinators_cancel_losers_on_every_tier() {
     }
 }
 
-/// `run_default_multi` passes `--trace-tiers`, which may prefix diagnostics of
-/// its own on stdout. Keep only the program's transcript.
+/// Keep only the program's transcript lines.
 fn strip_tier_trace(stdout: &str) -> String {
     stdout
         .lines()

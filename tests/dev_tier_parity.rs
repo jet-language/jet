@@ -1,6 +1,6 @@
 //! Curated per-topic interpreter/JIT/AOT tier batteries (#2020).
 //!
-//! parity: guard tests/dev_tier_parity.rs::io_cli_terminal_and_time_match_interpreter_jit_and_aot
+//! parity: guard tests/dev_tier_parity.rs::io_cli_terminal_and_time_match_interpreter_default_run_and_aot
 #![allow(dead_code, unused_imports)]
 
 mod common;
@@ -13,7 +13,7 @@ fn target_selected_prelude_parity() {
     // JIT, and compiled AOT stdout, stderr, and exit status.
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let hosted = root.join("tests/target_witness/hosted_default.jet");
-    assert_cranelift_three_way(
+    assert_tier_parity(
         hosted.to_string_lossy().as_ref(),
         "target_selected_prelude_parity_hosted",
     );

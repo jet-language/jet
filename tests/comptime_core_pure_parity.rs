@@ -5,7 +5,7 @@ use std::fs;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use jet::Interpreter::{dev_iteration, RunOutcome};
+use jet::Interpreter::RunOutcome;
 use jet::REPL::run_transcript;
 
 mod common;
@@ -870,7 +870,7 @@ fn check_dev_tier_output(label: &str, source: &str, expected: &str, force_interp
     fs::write(&path, source).unwrap();
     let path = path.to_string_lossy();
     for (tier, interpreter_only) in [("interpreter", true), ("default-dev", false)] {
-        match dev_iteration(
+        match crate::common::dev_run(
             &path,
             force_interpreter && interpreter_only,
             interpreter_only,

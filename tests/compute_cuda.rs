@@ -9,7 +9,7 @@ mod common;
 mod tir_support;
 
 use tir_support::{
-    assert_example_cli_tiers_agree, build_and_run_full, have_rustc, interpreter_run, jit_run,
+    assert_example_cli_tiers_agree, build_and_run_full, have_rustc, interpreter_run, default_run,
 };
 
 #[test]
@@ -136,7 +136,7 @@ fn run() {
 }
 "#;
 
-    let (jit_code, jit_stdout, jit_stderr) = jit_run("compute_cuda_backend", source);
+    let (jit_code, jit_stdout, jit_stderr) = default_run("compute_cuda_backend", source);
     assert_eq!(jit_code, 0, "default jet run failed: {jit_stderr}");
     assert!(
         jit_stdout.contains("cuda:unavailable") || jit_stdout.contains("cuda:available"),

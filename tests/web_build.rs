@@ -3244,7 +3244,7 @@ fn run() {
         ),
         (
             "default JIT",
-            tir_support::jit_run("web_two_hop_journey", source),
+            tir_support::default_run("web_two_hop_journey", source),
         ),
         (
             "interpreter",

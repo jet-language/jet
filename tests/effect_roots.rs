@@ -139,7 +139,7 @@ fn i9_aot_runs_the_ffi_leaf_row() {
 
 #[test]
 fn i9_jit_runs_the_ffi_leaf_row() {
-    let (code, stdout, stderr) = tir_support::jit_run("ffi_leaf_jit", FFI_LEAF_SOURCE);
+    let (code, stdout, stderr) = tir_support::default_run("ffi_leaf_jit", FFI_LEAF_SOURCE);
     assert_eq!(code, 0, "JIT stderr: {stderr}");
     assert_eq!(stdout, "ffi leaf\n");
 }

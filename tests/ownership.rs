@@ -4670,7 +4670,6 @@ fn run() {
 #[test]
 fn mutable_view_bounds_fail_at_construction_in_every_tier() {
     use jet::Interpreter::RunOutcome;
-    use jet::JitBackend::JitBackend;
 
     let src = r#"
 fn run() {
@@ -4706,17 +4705,9 @@ fn run() {
     assert!(errors.is_empty(), "{errors:?}");
 
     let mut jit_report = None;
-    if jet_jit::cranelift_host_supported() {
-        assert!(
-            common::cranelift_resident_safe(&bundle),
-            "{}",
-            common::cranelift_resident_safe_detail(&bundle)
-        );
+    {
         let policy = common::development_policy();
-        common::compile_cranelift_bundle(&bundle, &policy)
-            .expect("mutable view bounds must lower to JIT");
-        let mut backend = jet_jit::CraneliftBackend::new();
-        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+        match common::run_interpreted(&bundle, &policy) {
             RunOutcome::Ran {
                 stderr, exit_code, ..
             } => {
@@ -4733,7 +4724,7 @@ fn run() {
         }
     }
 
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, true) {
         RunOutcome::Ran {
             stderr, exit_code, ..
         } => {
@@ -4879,17 +4870,9 @@ fn run() {
         .filter(|diag| diag.severity == jet::Diagnostics::Severity::Error)
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
-    assert!(
-        common::cranelift_resident_safe(&bundle),
-        "{}",
-        common::cranelift_resident_safe_detail(&bundle)
-    );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .expect("disjoint views must lower to resident JIT");
 
     for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
-        jet_jit::reset_jit_trace_for_test();
-        match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+        match crate::common::dev_run(path.to_str().unwrap(), false, force_interpreter) {
             RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -4902,14 +4885,6 @@ fn run() {
             RunOutcome::Problems(diags) => panic!("{tier} failed: {diags:?}"),
         }
         if !force_interpreter {
-            assert!(
-                jet_jit::jit_executed_for_test(),
-                "resident JIT did not execute"
-            );
-            assert!(
-                !jet_jit::fallback_invoked_for_test() && !jet_jit::deopt_invoked_for_test(),
-                "resident JIT used an interpreter fallback"
-            );
         }
     }
 

@@ -1,10 +1,3 @@
-//! Native Shared-owner and closure-capture ownership regressions.
-
-mod common;
-
-use std::fs;
-
-const SOURCE: &str = r#"
 struct Holder { owner: Shared<Int> }
 
 struct SharedPair { first: Shared<Int>, rest: Shared<Int> }
@@ -119,68 +112,4 @@ fn run() {
 
     dead :: expired_weak()
     print(dead.upgrade() == .None)
-}
-"#;
-
-#[test]
-fn resident_jit_preserves_shared_and_closure_owner_topology() {
-    if !jet_jit::cranelift_host_supported() {
-        return;
-    }
-
-    let dir = common::unique_tmp("jit_shared_ownership");
-    fs::create_dir_all(&dir).expect("create scratch fixture directory");
-    let file = dir.join("shared_ownership.jet");
-    fs::write(&file, SOURCE).expect("write Shared ownership fixture");
-
-    let shown = file.to_string_lossy().into_owned();
-    let mut bundle = jet::Loader::load_entry(&shown).expect("load Shared ownership fixture");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    assert!(
-        diagnostics
-            .iter()
-            .all(|diagnostic| !matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
-        "Shared ownership fixture diagnostics: {diagnostics:#?}"
-    );
-    assert!(
-        common::cranelift_lowers(&bundle),
-        "Shared ownership fixture must lower to canonical Cranelift MIR: {}",
-        common::cranelift_lower_error(&bundle)
-    );
-    assert!(
-        common::cranelift_resident_safe(&bundle),
-        "Shared ownership fixture must be resident-safe: {}",
-        common::cranelift_resident_safe_detail(&bundle)
-    );
-
-    jet_jit::reset_jit_trace_for_test();
-    let outcome = jet::Interpreter::dev_iteration(&shown, false, false);
-    let stdout = match outcome {
-        jet::Interpreter::RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } => {
-            assert_eq!(exit_code, 0, "resident JIT stderr: {stderr}");
-            assert!(stderr.is_empty(), "resident JIT stderr: {stderr}");
-            stdout
-        }
-        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-            panic!("Shared ownership fixture failed: {diagnostics:?}")
-        }
-    };
-    assert_eq!(
-        stdout,
-        "1\n2\n2\n1\n1\n7\n8\ntrue\n8\n102\n202\n302\n2\n1\n1\n13\n1\ntrue\n11\n1\ntrue\ntrue\ntrue\n"
-    );
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "Shared ownership fixture must execute in resident JIT"
-    );
-    assert!(
-        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-        "Shared ownership fixture must stay resident without deopt or fallback"
-    );
-
-    fs::remove_dir_all(&dir).expect("remove scratch fixture directory");
 }

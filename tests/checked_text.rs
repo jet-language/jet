@@ -232,7 +232,7 @@ fn dynamic_checked_text_from_keeps_the_shared_error_report() {
     assert!(generated.rust.contains("__jet_errconv_PatternError_to_Err"));
 
     let (jit_code, jit_out, jit_err) =
-        tir_support::jit_run("checked_text_dynamic_error", DYNAMIC_ERROR_SOURCE);
+        tir_support::default_run("checked_text_dynamic_error", DYNAMIC_ERROR_SOURCE);
     assert_eq!(
         jit_code, 1,
         "dynamic checked text failure must escape: {jit_err}"
