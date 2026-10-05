@@ -120,7 +120,7 @@ fn jet_web_query_queue_load(queue: &JetWebQueryQueueState) -> () Err! {
     }
     parsed :: fn() -> () Err! {
         lines := contents.lines()
-        if lines.next() != Val(JET_WEB_QUERY_QUEUE_FORMAT) -> return Err(jet_web_query_durability_error("queue file has an unknown format"))
+        if lines.next() != JET_WEB_QUERY_QUEUE_FORMAT -> return Err(jet_web_query_durability_error("queue file has an unknown format"))
         for line in lines.filter(fn(line) { !line.is_empty() }) {
             fields: [String] :: line.split('\t').collect()
             match fields.as_slice() {

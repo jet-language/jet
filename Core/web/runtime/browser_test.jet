@@ -371,7 +371,7 @@ fn jet_browser_test_drain_events(browser: &JetBrowser) -> [JetBrowserTestEventFa
     loop {
         event :: if jet_browser_next_event(browser, JetBrowserTimeout { milliseconds: 1 }) == {
             .Ok(event) -> event
-            .Err(_) -> break
+            .Err(_) -> { break }
         }
         method :: jet_browser_event_kind(&event)
         kind :: if method.starts_with("log.") || method.contains("console") -> "console"
@@ -686,7 +686,7 @@ pub fn jet_browser_test_watch_changed(path: &String, last_modified_ms: I64) -> B
     #Unsafe("read actual browser-test source modification time") {
         metadata :: if fs.metadata(OSPath.from_text(path)) == {
             .Ok(value) -> value
-            .Err(_) -> return Ok(last_modified_ms >= 0)
+            .Err(_) -> { return Ok(last_modified_ms >= 0) }
         }
         modified_ms :: metadata.modified().ok().and_then(fn(time) { time.duration_since(UNIX_EPOCH).ok() })
             .map(fn(duration) { I64.try_from(duration.as_millis()).unwrap_or(I64.MAX) }).unwrap_or(0)
@@ -753,7 +753,7 @@ impl JetBrowserTestServer {
     fn wait_ready(self: &JetBrowserTestServer, timeout: JetBrowserTimeout) -> Unit JetBrowserError! {
         (host, port) :: if jet_browser_test_host_port(self.url) == {
             .Val(pair) -> pair
-            .None -> return Err(JetBrowserError.new("transport"))
+            .None -> { return Err(JetBrowserError.new("transport")) }
         }
         // GATE #4565: kernel primitive — DNS, socket connection, monotonic time and sleep.
         #Unsafe("probe the real server addresses until the real monotonic deadline") {

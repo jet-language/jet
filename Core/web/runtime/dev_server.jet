@@ -863,7 +863,7 @@ fn jet_devserver_serve_static<W: Write>(stream: &W, path: String, output_root: J
         None -> return jet_devserver_write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", "bad path".as_bytes())
     }
     file_path :: OSPath.from_text(rel)
-    is_index :: file_path.file_name().and_then(f -> f.to_str()) == Val("index.html")
+    is_index :: file_path.file_name().and_then(f -> f.to_str()) == "index.html"
     content_type :: jet_devserver_content_type_for(file_path)
     script :: is_index.then(jet_devserver_live_reload_script)
     read_limit :: script.as_ref().map_or(JET_DEVSERVER_MAX_RESPONSE_BYTES, script -> JET_DEVSERVER_MAX_RESPONSE_BYTES.checked_sub(script.len()).unwrap_or(0))
