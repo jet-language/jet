@@ -50,6 +50,7 @@ use jet_foundation.[
     MIRPreludeCall,
     MIRPreludeCallID,
     MIRPreludeFamily,
+    MIRRuntimeLayer,
     MIRScope,
     MIRScopeID,
     MIRScopeKind,
@@ -290,7 +291,11 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MIRFun
         borrowed && !has_coercion && arg.access == MIRAccess.Read -> {
             already_borrowed = true
             if arg.place == {
-                .Val(place) -> jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Read)
+                .Val(place) -> {
+                    if jet_rust_emit_native_int_local(&ctx, function, place) == .Val(local) {
+                        "&(jet_foundation::Numeric::JetInt::from_i64({jet_rust_emit_native_local_slot(local)}))"
+                    } else -> jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Read)
+                }
                 else -> {
                     // MIRRust call_arg_for_function: a borrowed value with no
                     // argument place borrows the place its definition reads.
@@ -592,15 +597,22 @@ fn jet_rust_emit_exact_int_hot_helper(op: MIRBinaryOp) -> String? {
     }
 }
 
+// MIRRust exact_int_arithmetic: Int arithmetic that exact_int_binary renders,
+// which only reads its operands' raw words.
+fn jet_rust_emit_exact_int_arithmetic(ctx: &JetRustEmitContext, function: MIRFunction, op: MIRBinaryOp, left: MIRValueID, right: MIRValueID) -> Bool Never! {
+    jet_rust_emit_exact_int_helper(op) != None && jet_rust_emit_exact_int_carrier(jet_rust_emit_value_type(ctx, function, left)) && jet_rust_emit_exact_int_carrier(jet_rust_emit_value_type(ctx, function, right))
+}
+
 // MIRRust exact_int_binary: Int arithmetic takes the raw-word hot macro when
 // one exists, else the owned helper; division-like ops carry their source line.
+// It only reads its operands, so a stable read is read in place (#4566).
 fn jet_rust_emit_exact_int_binary(ctx: &JetRustEmitContext, function: MIRFunction, op: MIRBinaryOp, left: MIRValueID, right: MIRValueID, location: MIRPanicLoc?) -> String? {
-    if !jet_rust_emit_exact_int_carrier(jet_rust_emit_value_type(ctx, function, left)) || !jet_rust_emit_exact_int_carrier(jet_rust_emit_value_type(ctx, function, right)) -> return None
+    if !jet_rust_emit_exact_int_arithmetic(&ctx, function, op, left, right) -> return None
     owned :: jet_rust_emit_exact_int_helper(op) ?? return None
     contextual :: op == MIRBinaryOp.Div || op == MIRBinaryOp.FloorDiv || op == MIRBinaryOp.Mod || op == MIRBinaryOp.Rem || op == MIRBinaryOp.Pow || op == MIRBinaryOp.Shl || op == MIRBinaryOp.Shr
     root :: ~ctx.config.root_prefix
-    left_text :: jet_rust_emit_value_reference(ctx, left, false)
-    right_text :: jet_rust_emit_value_reference(ctx, right, false)
+    left_text :: jet_rust_emit_inspected_value_reference(&ctx, function, left)
+    right_text :: jet_rust_emit_inspected_value_reference(&ctx, function, right)
     context := ""
     if contextual {
         loc :: location ?? {
@@ -668,12 +680,15 @@ fn jet_rust_emit_binary(ctx: &JetRustEmitContext, function: MIRFunction, op: MIR
         }
         return "{exact}({rendered.join(", ")})"
     }
+    // MIRRust binary_with_dispatch (#4566 slice 1b): two native operands
+    // compare as i64.
+    if jet_rust_emit_native_int_comparison(op) && ctx.native_ints.values.get(left.value) != None && ctx.native_ints.values.get(right.value) != None -> return jet_rust_emit_native_int_binary_text(op, jet_rust_emit_native_value_slot(left), jet_rust_emit_native_value_slot(right))
     left_ty :: jet_rust_emit_value_type(ctx, function, left)
     right_ty :: jet_rust_emit_value_type(ctx, function, right)
     if op == MIRBinaryOp.Add && left_ty.kind == MIRTypeKind.String && (right_ty.kind == MIRTypeKind.String || jet_rust_emit_is_string_view_type(right_ty)) {
         // The concatenation consumes its left operand: a take at its single
         // use, otherwise an owned read.
-        right_text :: if jet_rust_emit_is_string_view_type(right_ty) -> jet_rust_emit_value_owned(ctx, function, right) else -> jet_rust_emit_value_reference(ctx, right, false)
+        right_text :: if jet_rust_emit_is_string_view_type(right_ty) -> jet_rust_emit_value_owned(ctx, function, right) else -> jet_rust_emit_string_add_operand(ctx, right)
         return "(({jet_rust_emit_value_consume(ctx, function, left)}) + ({right_text}))"
     }
     if op == MIRBinaryOp.Eq || op == MIRBinaryOp.Ne {
@@ -2283,7 +2298,12 @@ fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: M
     }
     generic :: jet_rust_emit_generic_call_args(&ctx, type_args)
     call := if callee == {
-        .User(id) -> jet_rust_emit_split_local_field_borrows("{jet_rust_emit_function_name(&ctx, id)}{generic}", rendered_args)
+        .User(id) -> {
+            // MIRRust call: a return-slot function fills a slot of this
+            // expression's own when the call is not a destination write.
+            filled :: if ctx.return_slots.get(id.value) != None -> jet_rust_emit_return_slot_call(&ctx, function, callee, id, args, "__jet_return_value") else -> ""
+            if filled.len() > 0 -> "{{ let mut __jet_return_value = None; {filled}; __jet_return_value.expect(\"MIR return slot\") }}" else -> jet_rust_emit_split_local_field_borrows("{jet_rust_emit_function_name(&ctx, id)}{generic}", rendered_args)
+        }
         .Associated(id, owner) -> {
             jet_rust_emit_validate_function_dispatch(&ctx, id, owner, false, function.span)
             jet_rust_emit_associated_dispatch(&ctx, id, owner, generic, rendered_args, function.span)
@@ -2321,6 +2341,15 @@ fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: M
         if needs_try -> call = "({call})?"
     }
     call
+}
+
+// MIRRust return_slot_call (#4566): `f__jet_into(args, &mut destination)`, a
+// direct call of the return-slot function `target` that fills `destination`.
+fn jet_rust_emit_return_slot_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: MIRCallee, target: MIRFunctionID, args: [MIRCallArg], destination: String) -> String Never! {
+    mask :: jet_rust_emit_call_borrow_mask(&ctx, callee, function, args)
+    rendered :: jet_rust_emit_call_arguments(&ctx, function, args, mask)
+    with_slot :: if rendered.len() == 0 -> "&mut {destination}" else -> "{rendered}, &mut {destination}"
+    jet_rust_emit_split_local_field_borrows(jet_rust_emit_return_slot_symbol(jet_rust_emit_function_name(&ctx, target)), with_slot)
 }
 
 fn jet_rust_emit_core_shape_expression(ctx: &JetRustEmitContext, function: MIRFunction, module_name: String, member: String, route_info: MIRPreludeCall, args: [MIRCallArg], type_args: [MIRType]) -> String? {
@@ -2647,6 +2676,8 @@ fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MIRFunction,
 }
 
 fn jet_rust_emit_index_operand(ctx: &JetRustEmitContext, function: MIRFunction, index: MIRValueID, location: MIRPanicLoc) -> String Never! {
+    // MIRRust index_operand (#4566 slice 1b): a native index already is the i64.
+    if ctx.native_ints.values.get(index.value) != None -> return jet_rust_emit_native_value_slot(index)
     ty := jet_rust_emit_value_type(ctx, function, index)
     loop {
         if ty.kind == {
@@ -2963,6 +2994,11 @@ fn jet_rust_emit_enum_is(ctx: &JetRustEmitContext, function: MIRFunction, subjec
 // lets the first binding take the subject apart by value.
 fn jet_rust_emit_move_facts(ctx: &JetRustEmitContext, function: MIRFunction) -> JetRustEmitMoveFacts Never! {
     facts := jet_rust_emit_empty_move_facts()
+    if !jet_rust_emit_is_core_layer(&ctx) && !jet_rust_emit_is_no_os(&ctx) {
+        jet_rust_emit_plan_loop_reserves(ctx, function, &facts)
+        // A vectorized loop reads its lists as `Vec`s.
+        if function.optimization.checked_vector_facts.len() == 0 -> jet_rust_emit_plan_inline_lists(ctx, function, &facts)
+    }
     if function.optimization.checked_vector_facts.len() > 0 -> return facts
     def_block := [String:Int]{}
     def_plain := [String:Bool]{}
@@ -3059,7 +3095,642 @@ fn jet_rust_emit_move_facts(ctx: &JetRustEmitContext, function: MIRFunction) -> 
         _ := &facts.payload_groups.add(key, members)
         loop member in members -> _ := &facts.payload_subjects.add("{member.result.value}", key)
     }
+    if !jet_rust_emit_is_core_layer(&ctx) && !jet_rust_emit_has_eligible_vector_fact(function) {
+        jet_rust_emit_plan_string_appends(ctx, function, use_count, &facts)
+    }
     facts
+}
+
+// #4566 in-place append (MIRRust plan_string_appends). `place += text` on a
+// String place is a ReadPlace, a primitive String Add and a WritePlace of
+// the same place, back to back (Codegen/Statements.jet `.Assign`). The old
+// value is dead once the write lands, so when nothing else reads it or the
+// concatenation, the write appends `text` in place. The appended operand
+// must not read the place's own storage, which the append borrows mutably.
+// A literal-only string read only as the right operand of String
+// concatenations is spelled there as its static `&str` literal.
+fn jet_rust_emit_plan_string_appends(ctx: JetRustEmitContext, function: MIRFunction, use_count: [String:Int], facts: &JetRustEmitMoveFacts) Never! {
+    literal_reads := [String:Int]{}
+    literal_order := [String]{}
+    literal_values := [String:MIRValueID]{}
+    loop row in function.blocks {
+        count :: row.instructions.len()
+        loop (index, instruction) in row.instructions {
+            if instruction.operation == .Binary(op, dispatch, _, left, right) {
+                if op == MIRBinaryOp.Add && jet_rust_emit_primitive_dispatch(dispatch) && left != right && jet_rust_emit_string_value(ctx, function, left) && jet_rust_emit_string_value(ctx, function, right) {
+                    key :: "{right.value}"
+                    if literal_reads.get(key) == None {
+                        &literal_order.push(key)
+                        _ := &literal_values.add(key, right)
+                    }
+                    _ := &literal_reads.add(key, (literal_reads.get(key) ?? 0) + 1)
+                }
+            }
+            // `place = ""` (or `place = [T]{}`) on a String (or list) place
+            // that is always initialized (a write parameter, or a field of a
+            // local) empties it and keeps its buffer (MIRRust
+            // plan_string_appends).
+            if instruction.operation == .WritePlace(place, value) {
+                if (use_count.get("{value.value}") ?? 0) == 1 && jet_rust_emit_empty_text_or_list(ctx, function, value) && jet_rust_emit_appendable_place(ctx, function, place) && jet_rust_emit_always_initialized_place(ctx, function, place) {
+                    _ := &facts.clears.add("{value.value}", place)
+                }
+            }
+            if index + 2 >= count -> next
+            concat :: row.instructions[index + 1]
+            write :: row.instructions[index + 2]
+            if instruction.operation == .ReadPlace(place) {
+                if concat.operation == .Binary(op, dispatch, _, left, right) {
+                    if write.operation == .WritePlace(target, value) {
+                        old :: instruction.result ?? next
+                        joined :: concat.result ?? next
+                        if op != MIRBinaryOp.Add || !jet_rust_emit_primitive_dispatch(dispatch) || left != old || value != joined || target != place -> next
+                        if (use_count.get("{old.value}") ?? 0) != 1 || (use_count.get("{joined.value}") ?? 0) != 1 -> next
+                        if !jet_rust_emit_string_value(ctx, function, old) || !jet_rust_emit_string_value(ctx, function, right) -> next
+                        if !jet_rust_emit_appendable_place(ctx, function, place) || jet_rust_emit_reads_place_root(ctx, function, right, place) -> next
+                        _ := &facts.appends.add("{joined.value}", JetRustEmitStringAppend{place: place, text: right})
+                        _ := &facts.append_parts.add("{old.value}", true)
+                        _ := &facts.append_parts.add("{joined.value}", true)
+                    }
+                }
+            }
+        }
+    }
+    loop key in literal_order {
+        if (use_count.get(key) ?? 0) != (literal_reads.get(key) ?? -1) -> next
+        value :: literal_values.get(key) ?? next
+        if jet_rust_emit_literal_string_value(ctx, function, value) == .Val(literal) -> _ := &facts.static_literals.add(key, literal)
+    }
+}
+
+// #4566 loop capacity hints (MIRRust plan_loop_reserves). A preheader that
+// jumps to a loop header whose branch tests a range cursor
+// (LoopRangeHasNext) or a counter against a constant (`counter < end`,
+// counter set to a constant in the preheader) runs its body entry block once
+// per trip. Each `push` in that entry block onto a bare local list that the
+// preheader has initialized (written, not moved since) gets a capacity hint
+// after the cursor or counter initialization. A push behind a branch in the
+// body is never counted, and the runtime caps every hint.
+fn jet_rust_emit_plan_loop_reserves(ctx: JetRustEmitContext, function: MIRFunction, facts: &JetRustEmitMoveFacts) Never! {
+    loop preheader in function.blocks {
+        jump :: if preheader.terminator == {
+            .Jump(target) -> Val(target)
+            else -> MIRBlockID?{None}
+        }
+        target :: jump ?? next
+        header :: jet_rust_emit_reserve_block(ctx, function, target) ?? next
+        if header.terminator == .Branch(condition, then_target, _) {
+            jet_rust_emit_plan_loop_reserve(ctx, function, preheader, header, condition, then_target, &facts)
+        }
+    }
+}
+
+// One preheader -> header -> body entry block of jet_rust_emit_plan_loop_reserves.
+fn jet_rust_emit_plan_loop_reserve(ctx: JetRustEmitContext, function: MIRFunction, preheader: MIRBasicBlock, header: MIRBasicBlock, condition: MIRValueID, body_id: MIRBlockID, facts: &JetRustEmitMoveFacts) Never! {
+    if body_id == header.id || preheader.id == header.id -> return
+    test := MIRInstruction?{None}
+    loop instruction in header.instructions {
+        if instruction.result == (Val(condition)) {
+            test = Val(instruction)
+            break
+        }
+    }
+    found :: test ?? return
+    anchor := -1
+    cursor := MIRValueID?{None}
+    trips := 0
+    if found.operation == {
+        .LoopRangeHasNext(_, range_cursor) -> {
+            loop (index, instruction) in preheader.instructions {
+                if instruction.result == (Val(range_cursor)) {
+                    if instruction.operation == .LoopRangeInit(_, _, _, _, _) {
+                        anchor = index
+                        break
+                    }
+                }
+            }
+            cursor = Val(range_cursor)
+        }
+        .Binary(op, _, _, left, right) -> {
+            if op != MIRBinaryOp.Lt -> return
+            read :: jet_rust_emit_find_value_instruction(ctx, function, left) ?? return
+            read_place := MIRPlaceID?{None}
+            if read.operation == .ReadPlace(place) -> read_place = Val(place)
+            counter_place :: read_place ?? return
+            counter :: jet_rust_emit_reserve_bare_local(ctx, function, counter_place) ?? return
+            end :: jet_rust_emit_reserve_int_constant(ctx, function, right) ?? return
+            start := Int?{None}
+            loop (index, instruction) in preheader.instructions {
+                if instruction.operation == .WritePlace(place, value) {
+                    if jet_rust_emit_reserve_bare_local(ctx, function, place) == (Val(counter)) {
+                        anchor = index
+                        start = jet_rust_emit_reserve_int_constant(ctx, function, value)
+                    }
+                }
+            }
+            if anchor < 0 -> return
+            first :: start ?? return
+            // MIRRust: `end.checked_sub(start)` as a u64 above zero; an
+            // overflowing difference plans no hint.
+            if (first < 0 && end > 9223372036854775807 + first) || (first > 0 && end < first - 9223372036854775807 - 1) -> return
+            trips = end - first
+            if trips <= 0 -> return
+        }
+        else -> return
+    }
+    if anchor < 0 -> return
+    body :: jet_rust_emit_reserve_block(ctx, function, body_id) ?? return
+    key :: "{preheader.id.value}:{anchor}"
+    lists := [U64]{}
+    loop instruction in body.instructions {
+        list :: jet_rust_emit_list_push_place(ctx, instruction.operation) ?? next
+        local :: jet_rust_emit_reserve_bare_local(ctx, function, list) ?? next
+        if lists.contains(local.value) || !jet_rust_emit_reserve_initialized(ctx, function, preheader, anchor, local) -> next
+        &lists.push(local.value)
+        rows := facts.loop_reserves.get(key) ?? [JetRustEmitLoopReserve]{}
+        &rows.push(JetRustEmitLoopReserve{list: list, cursor: cursor, trips: trips})
+        _ := &facts.loop_reserves.add(key, rows)
+    }
+}
+
+// MIRRust list_push_place: the list place a `push` writes: the write receiver
+// of a `jet_list_push` core call, or the receiver place of the `push` builtin
+// method (`&xs.push(v)` lowers to the latter).
+fn jet_rust_emit_list_push_place(ctx: JetRustEmitContext, operation: MIROperation) -> MIRPlaceID? Never! {
+    if operation == {
+        .CoreCall(_, route, args, _, _, _) -> {
+            if args.len() == 0 || args[0].access != MIRAccess.Write -> return None
+            place :: args[0].place ?? return None
+            if jet_rust_emit_reserve_push_route(ctx, route) -> return Val(place)
+        }
+        .Semantic(semantic) -> {
+            if semantic == .BuiltinMethod(call, _, receiver_place, _, _) {
+                place :: receiver_place ?? return None
+                if jet_rust_emit_reserve_push_route(ctx, call) -> return Val(place)
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
+fn jet_rust_emit_reserve_block(ctx: JetRustEmitContext, function: MIRFunction, id: MIRBlockID) -> MIRBasicBlock? Never! {
+    if ctx.body_index.function == (Val(function.id)) {
+        if ctx.body_index.block_positions.get(id.value) == .Val(position) -> return Val(function.blocks[position])
+    }
+    loop block in function.blocks {
+        if block.id == id -> return Val(block)
+    }
+    None
+}
+
+// The local a place names with no projection.
+fn jet_rust_emit_reserve_bare_local(ctx: JetRustEmitContext, function: MIRFunction, place: MIRPlaceID) -> MIRLocalID? Never! {
+    row :: jet_rust_emit_append_place_row(ctx, function, place) ?? return None
+    if row.projections.len() > 0 -> return None
+    if row.base == .Local(local) -> return Val(local)
+    None
+}
+
+fn jet_rust_emit_reserve_int_constant(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Int? Never! {
+    instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return None
+    if instruction.operation == .Constant(constant) {
+        if constant == .Int(number, _, _) -> return Val(number)
+    }
+    None
+}
+
+fn jet_rust_emit_reserve_push_route(ctx: JetRustEmitContext, route: MIRPreludeCallID) -> Bool Never! {
+    loop row in jet_rust_emit_prelude_route_rows(ctx, route) {
+        if row.symbol == .Prelude(name) -> return name == "jet_list_push"
+    }
+    false
+}
+
+// Initialized at the anchor: the last preheader write or move of the list
+// before it is a write.
+fn jet_rust_emit_reserve_initialized(ctx: JetRustEmitContext, function: MIRFunction, preheader: MIRBasicBlock, anchor: Int, local: MIRLocalID) -> Bool Never! {
+    initialized := false
+    loop (index, instruction) in preheader.instructions {
+        if index >= anchor -> break
+        if instruction.operation == {
+            .WritePlace(place, _) -> {
+                if jet_rust_emit_reserve_bare_local(ctx, function, place) == (Val(local)) -> initialized = true
+            }
+            .MovePlace(place) -> {
+                if jet_rust_emit_append_place_row(ctx, function, place) == .Val(row) {
+                    if row.base == .Local(moved) {
+                        if moved == local -> initialized = false
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+    initialized
+}
+
+// MIRRust emit_loop_reserves: the capacity hints planned after `block`'s
+// instruction `index`, one statement each. A list stored as a reference
+// binding, a fixed array, an allocator view or inline storage
+// (jet_rust_emit_plan_inline_lists) has no growable buffer and is skipped.
+fn jet_rust_emit_loop_reserves(ctx: &JetRustEmitContext, function: MIRFunction, block: MIRBlockID, index: Int) -> [String] Never! {
+    lines := [String]{}
+    rows :: ctx.move_facts.loop_reserves.get("{block.value}:{index}") ?? return lines
+    loop row in rows {
+        local :: jet_rust_emit_reserve_bare_local(ctx, function, row.list) ?? next
+        if ctx.ref_bindings.locals.get(local.value) != None || jet_rust_emit_local_uninit_fixed_type(function, local) != None || jet_rust_emit_local_is_allocator_view(function, local) -> next
+        if jet_rust_emit_partial_root_has(ctx, function, MIRPlaceBase.Local{local: local}) || ctx.move_facts.inline_lists.get(local.value) != None -> next
+        target :: jet_rust_emit_place_reference(&ctx, function, row.list, MIRAccess.Write)
+        if row.cursor == .Val(cursor) {
+            &lines.push("jet_list_reserve_for_range({target}, {jet_rust_emit_value_reference(ctx, cursor, false)});")
+        } else {
+            &lines.push("jet_list_reserve_for_loop({target}, {row.trips}u64);")
+        }
+    }
+    lines
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::INLINE_LIST_MAX_VALUES
+// (#4566 slice 8): the most values a list keeps inline in its function's
+// frame; a longer expected length stays a `Vec`.
+JET_RUST_EMIT_INLINE_LIST_MAX_VALUES :: 64
+
+// MIRRust plan_inline_lists (#4566 slice 8 inline storage): a local list of
+// scalars or Strings (jet_rust_emit_reusable_buffer_type) that never leaves
+// the function is stored as `JetInlineList<T, N>`, whose first `N` values live
+// in the frame. Every mention of the local is one of: its one write, of an
+// empty literal read once; a `push` onto it; a read of one element
+// (`list[i]`); a whole read that only `len` / `is_empty` borrow
+// (jet_rust_emit_inline_list_len_read); or a move whose one reader drops it.
+// So the list is never moved, cloned, lent to other code, printed by a
+// require stop or turned into a `Vec`. `N` is the largest constant trip count
+// of a loop that pushes onto it (jet_rust_emit_plan_loop_reserves), at most
+// JET_RUST_EMIT_INLINE_LIST_MAX_VALUES. A push past `N` moves the values to
+// the heap, so `N` is a hint and the list's meaning never depends on it.
+fn jet_rust_emit_plan_inline_lists(ctx: JetRustEmitContext, function: MIRFunction, facts: &JetRustEmitMoveFacts) Never! {
+    capacities := [U64:Int]{}
+    loop block in function.blocks {
+        loop index in 0..<block.instructions.len() {
+            rows :: facts.loop_reserves.get("{block.id.value}:{index}") ?? next
+            loop row in rows {
+                if row.cursor != None || row.trips > JET_RUST_EMIT_INLINE_LIST_MAX_VALUES -> next
+                list_row :: jet_rust_emit_append_place_row(ctx, function, row.list) ?? next
+                if list_row.base == .Local(local) {
+                    if row.trips > (capacities.get(local.value) ?? 0) {
+                        _ := &capacities.add(local.value, row.trips)
+                    }
+                }
+            }
+        }
+    }
+    if capacities.len() == 0 -> return
+    loop row in function.locals {
+        capacity :: capacities.get(row.id.value) ?? next
+        local :: row.id
+        list := false
+        if row.ty.kind == .List(_) -> list = true
+        if row.uninit || !list || !jet_rust_emit_reusable_buffer_type(row.ty) || jet_rust_emit_partial_root_has(ctx, function, MIRPlaceBase.Local{local: local}) -> next
+        // The write: its op, the literal op it replaces and that literal's
+        // value (`wrote`); the drops: each move op, its value and the drop op.
+        wrote := false
+        write_op := 0
+        literal_op := 0
+        literal_value := 0
+        moved_ops := [U64]{}
+        moved_values := [U64]{}
+        drop_ops := [U64]{}
+        kept := true
+        loop block in function.blocks {
+            if !kept -> break
+            loop instruction in block.instructions {
+                if !jet_rust_emit_inline_list_named(ctx, function, instruction.operation, local) -> next
+                kept = false
+                if instruction.operation == {
+                    .WritePlace(place, value) -> {
+                        if !wrote && jet_rust_emit_inline_list_whole(ctx, function, place, local) && jet_rust_emit_empty_text_or_list(ctx, function, value) && jet_rust_emit_value_users(ctx, function, value).len() == 1 {
+                            loop candidate in block.instructions {
+                                if candidate.result == (Val(value)) {
+                                    wrote = true
+                                    write_op = instruction.id.value
+                                    literal_op = candidate.id.value
+                                    literal_value = value.value
+                                    kept = true
+                                    break
+                                }
+                            }
+                        }
+                    }
+                    .CoreCall(_, _, args, _, _, _) -> {
+                        if jet_rust_emit_list_push_place(ctx, instruction.operation) == .Val(receiver_place) {
+                            kept = jet_rust_emit_inline_list_whole(ctx, function, receiver_place, local)
+                        }
+                        loop (position, arg) in args {
+                            if position == 0 -> next
+                            if arg.place == .Val(arg_place) {
+                                if jet_rust_emit_inline_list_rooted(ctx, function, arg_place, local) -> kept = false
+                            }
+                        }
+                    }
+                    // `&list.push(v)`: the receiver place, and the write
+                    // borrow of the list that only such pushes take.
+                    .Semantic(_) -> {
+                        if jet_rust_emit_list_push_place(ctx, instruction.operation) == .Val(receiver_place) {
+                            kept = jet_rust_emit_inline_list_whole(ctx, function, receiver_place, local)
+                        }
+                    }
+                    .AddressOf(place, access) -> {
+                        if access == MIRAccess.Write && jet_rust_emit_inline_list_whole(ctx, function, place, local) && instruction.result == .Val(value) {
+                            kept = jet_rust_emit_inline_list_push_borrow(ctx, function, value, local)
+                        }
+                    }
+                    .ReadPlace(place) -> {
+                        if jet_rust_emit_append_place_row(ctx, function, place) == .Val(place_row) {
+                            if place_row.projections.len() == 0 {
+                                if instruction.result == .Val(value) -> kept = jet_rust_emit_inline_list_len_read(ctx, function, value)
+                            } else if place_row.projections.len() == 1 {
+                                if place_row.projections[0] == .Index(kind, _, _, _, _, _, _) -> kept = kind == MIRIndexKind.List
+                            }
+                        }
+                    }
+                    .MovePlace(place) -> {
+                        if jet_rust_emit_inline_list_whole(ctx, function, place, local) && instruction.result == .Val(value) {
+                            users :: jet_rust_emit_value_users(ctx, function, value)
+                            if users.len() == 1 && users[0].instruction >= 0 {
+                                user :: function.blocks[users[0].block].instructions[users[0].instruction]
+                                if user.operation == .Drop(dropped, kind) {
+                                    if kind == MIRDropKind.Value && dropped == value {
+                                        &moved_ops.push(instruction.id.value)
+                                        &moved_values.push(value.value)
+                                        &drop_ops.push(user.id.value)
+                                        kept = true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else -> {}
+                }
+                if !kept -> break
+            }
+        }
+        if !kept || !wrote -> next
+        _ := &facts.inline_lists.add(local.value, capacity)
+        _ := &facts.inline_writes.add(write_op, local)
+        _ := &facts.inline_skipped.add(literal_op, true)
+        _ := &facts.inline_values.add(literal_value, true)
+        loop (position, moved) in moved_ops {
+            _ := &facts.inline_drops.add(drop_ops[position], local)
+            _ := &facts.inline_skipped.add(moved, true)
+            _ := &facts.inline_values.add(moved_values[position], true)
+        }
+    }
+}
+
+// MIRRust plan_inline_lists `named`: whether `operation` names a place rooted
+// at `local` (operation_named_places, plus a semantic call's argument places),
+// takes it as a map-entries local, or prints it in a require stop.
+fn jet_rust_emit_inline_list_named(ctx: JetRustEmitContext, function: MIRFunction, operation: MIROperation, local: MIRLocalID) -> Bool Never! {
+    places := jet_rust_emit_return_slot_named_places(operation)
+    if operation == .Semantic(semantic) {
+        if semantic == {
+            .StaticPreludeCall(_, args, _, _) | .HardwareCall(_, _, _, args) | .ClosureMethod(_, args, _) | .HostCall(_, args) -> {
+                loop arg in args {
+                    if arg.place == .Val(place) -> &places.push(place)
+                }
+            }
+            .DataEntriesToMap(_, entries) -> {
+                if entries == local -> return true
+            }
+            .RequireStop(_, _, _, _, context, _, _) -> {
+                loop printed in context.locals {
+                    if printed.local == local -> return true
+                }
+            }
+            else -> {}
+        }
+    }
+    loop place in places {
+        if jet_rust_emit_inline_list_rooted(ctx, function, place, local) -> return true
+    }
+    false
+}
+
+// MIRRust place_rooted_at: whether `place` is rooted at `local`.
+fn jet_rust_emit_inline_list_rooted(ctx: JetRustEmitContext, function: MIRFunction, place: MIRPlaceID, local: MIRLocalID) -> Bool Never! {
+    row :: jet_rust_emit_append_place_row(ctx, function, place) ?? return false
+    if row.base == .Local(rooted) -> return rooted == local
+    false
+}
+
+// MIRRust plan_inline_lists `whole`: whether `place` is all of `local`.
+fn jet_rust_emit_inline_list_whole(ctx: JetRustEmitContext, function: MIRFunction, place: MIRPlaceID, local: MIRLocalID) -> Bool Never! {
+    row :: jet_rust_emit_append_place_row(ctx, function, place) ?? return false
+    if row.projections.len() > 0 -> return false
+    if row.base == .Local(rooted) -> return rooted == local
+    false
+}
+
+// MIRRust plan_inline_lists (AddressOf arm): a write borrow of the list that
+// only `push` builtin methods take, as their receiver.
+fn jet_rust_emit_inline_list_push_borrow(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID, local: MIRLocalID) -> Bool Never! {
+    users :: jet_rust_emit_value_users(ctx, function, value)
+    if users.len() == 0 -> return false
+    loop user in users {
+        if user.instruction < 0 -> return false
+        instruction :: function.blocks[user.block].instructions[user.instruction]
+        pushes := false
+        if instruction.operation == .Semantic(semantic) {
+            if semantic == .BuiltinMethod(_, receiver, _, args, _) {
+                if receiver == value && !args.contains(value) {
+                    if jet_rust_emit_list_push_place(ctx, instruction.operation) == .Val(place) -> pushes = jet_rust_emit_inline_list_whole(ctx, function, place, local)
+                }
+            }
+        }
+        if !pushes -> return false
+    }
+    true
+}
+
+// MIRRust inline_list_len_read: a whole read of an inline-list candidate that
+// only `len` / `is_empty` borrow (a core call or the builtin method), so it
+// names the list's place and copies nothing.
+fn jet_rust_emit_inline_list_len_read(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
+    users :: jet_rust_emit_value_users(ctx, function, value)
+    if users.len() == 0 -> return false
+    loop user in users {
+        if user.instruction < 0 -> return false
+        instruction :: function.blocks[user.block].instructions[user.instruction]
+        // The route and the operands in borrow-mask order.
+        route := MIRPreludeCallID?{None}
+        operands := [MIRValueID]{}
+        if instruction.operation == {
+            .CoreCall(_, core_route, args, _, _, _) -> {
+                route = Val(core_route)
+                loop arg in args -> &operands.push(arg.value)
+            }
+            .Semantic(semantic) -> {
+                if semantic == .BuiltinMethod(method_route, receiver, _, args, _) {
+                    route = Val(method_route)
+                    &operands.push(receiver)
+                    loop arg in args -> &operands.push(arg)
+                }
+            }
+            else -> {}
+        }
+        measure_route :: route ?? return false
+        measured := false
+        mask := [Bool]{}
+        loop row in jet_rust_emit_prelude_route_rows(ctx, measure_route) {
+            if row.symbol == .Prelude(name) -> measured = name == "jet_list_len" || name == "jet_list_is_empty"
+            mask = row.signature.borrow_mask
+        }
+        if !measured -> return false
+        loop (position, operand) in operands {
+            if operand == value && !(position < mask.len() && mask[position]) -> return false
+        }
+    }
+    true
+}
+
+fn jet_rust_emit_primitive_dispatch(dispatch: MIRBinaryDispatch) -> Bool Never! {
+    if dispatch == {
+        .Primitive -> true
+        else -> false
+    }
+}
+
+fn jet_rust_emit_string_value(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
+    jet_rust_emit_value_type(ctx, function, value).kind == MIRTypeKind.String
+}
+
+// MIRRust literal_string_value: the text of a literal-only BuildString.
+fn jet_rust_emit_literal_string_value(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String? Never! {
+    instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return None
+    literal := ""
+    if instruction.operation == {
+        .BuildString(parts) -> {
+            loop part in parts {
+                if part.kind == {
+                    .Literal(text) -> literal = "{literal}{text}"
+                    else -> return None
+                }
+            }
+        }
+        else -> return None
+    }
+    Val(literal)
+}
+
+fn jet_rust_emit_append_place_row(ctx: JetRustEmitContext, function: MIRFunction, place: MIRPlaceID) -> MIRPlace? Never! {
+    if ctx.body_index.function == (Val(function.id)) {
+        if ctx.body_index.place_rows.get(place.value) == .Val(row) -> return Val(function.places[row])
+    }
+    loop row in function.places {
+        if row.id == place -> return Val(row)
+    }
+    None
+}
+
+// MIRRust appendable_place: an owned local or a parameter, under record
+// fields only, with no split field slots and no persistence hook on writes.
+fn jet_rust_emit_appendable_place(ctx: JetRustEmitContext, function: MIRFunction, place: MIRPlaceID) -> Bool Never! {
+    row :: jet_rust_emit_append_place_row(ctx, function, place) ?? return false
+    if row.persist_key != None -> return false
+    loop projection in row.projections {
+        if projection == {
+            .Field(_, _) -> {}
+            else -> return false
+        }
+    }
+    if jet_rust_emit_partial_root_has(ctx, function, row.base) -> return false
+    return if row.base == {
+        .Local(local) -> jet_rust_emit_local_uninit_fixed_type(function, local) == None && !jet_rust_emit_local_is_allocator_view(function, local)
+        .Parameter(_) -> true
+        else -> false
+    }
+}
+
+// MIRRust empty_text_or_list: an empty String literal or an empty list
+// literal (no trait-object coercion).
+fn jet_rust_emit_empty_text_or_list(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
+    instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return false
+    kind :: jet_rust_emit_value_type(ctx, function, value).kind
+    if instruction.operation == {
+        .BuildString(_) -> return kind == MIRTypeKind.String && jet_rust_emit_literal_string_value(ctx, function, value) == (Val(""))
+        .BuildList(values, trait_coercion) -> {
+            if kind == {
+                .List(_) -> return values.len() == 0 && trait_coercion == None
+                else -> return false
+            }
+        }
+        else -> return false
+    }
+    false
+}
+
+// MIRRust plan_string_appends: a String place a `place = ""` write may empty
+// in place because it always holds a value there: a write parameter (under
+// any fields) or a field of a local.
+fn jet_rust_emit_always_initialized_place(ctx: JetRustEmitContext, function: MIRFunction, place: MIRPlaceID) -> Bool Never! {
+    row :: jet_rust_emit_append_place_row(ctx, function, place) ?? return false
+    if row.base == {
+        .Local(_) -> return row.projections.len() > 0
+        .Parameter(parameter) -> {
+            instruction :: jet_rust_emit_find_value_instruction(ctx, function, parameter) ?? return false
+            if instruction.operation == .Parameter(index, _) {
+                loop param in function.params {
+                    if param.index == index && param.access == MIRAccess.Write -> return true
+                }
+            }
+        }
+        else -> {}
+    }
+    false
+}
+
+// MIRRust reads_place_root: whether `value` reads, copies or borrows from the
+// storage of `place`'s root (through copies, moves, fields and derefs); a
+// value any other operation produces is its own storage.
+fn jet_rust_emit_reads_place_root(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID, place: MIRPlaceID) -> Bool Never! {
+    target :: jet_rust_emit_append_place_row(ctx, function, place) ?? return true
+    root :: target.base
+    current := value
+    loop {
+        instruction :: jet_rust_emit_find_value_instruction(ctx, function, current) ?? return true
+        if instruction.operation == {
+            .ReadPlace(read) | .MovePlace(read) | .AddressOf(read, _) -> {
+                row :: jet_rust_emit_append_place_row(ctx, function, read) ?? return true
+                if row.base == root -> return true
+                if row.base == {
+                    .Temporary(source) -> current = source
+                    else -> return false
+                }
+            }
+            .Parameter(_, _) | .Capture(_) -> {
+                return if root == {
+                    .Parameter(base) | .Capture(base) -> base == current
+                    else -> false
+                }
+            }
+            .Copy(source, _) | .Move(source) | .Deref(source) | .Field(source, _) -> current = source
+            else -> return false
+        }
+    }
+    true
+}
+
+// MIRRust string_add_operand: the by-reference right operand of a String
+// concatenation or append, or its static literal.
+fn jet_rust_emit_string_add_operand(ctx: JetRustEmitContext, value: MIRValueID) -> String Never! {
+    if ctx.move_facts.static_literals.get("{value.value}") == .Val(literal) -> return jet_rust_emit_quote(literal)
+    jet_rust_emit_value_reference(ctx, value, false)
+}
+
+// MIRRust string_append_part: the read and concatenation of a planned
+// append, or a static literal its consumers spell in place, emit nothing.
+fn jet_rust_emit_string_append_part(ctx: JetRustEmitContext, value: MIRValueID) -> Bool Never! {
+    key :: "{value.value}"
+    ctx.move_facts.append_parts.get(key) != None || ctx.move_facts.static_literals.get(key) != None || ctx.move_facts.clears.get(key) != None
 }
 
 // Whether a moved subject of `owner` may be taken apart by value: a user enum
@@ -4025,7 +4696,13 @@ fn jet_rust_emit_drop_value(ctx: &JetRustEmitContext, function: MIRFunction, val
         }
     }
     if kind == {
-        .Value | .Shared -> return "{{ drop({jet_rust_emit_value_move(ctx, value)}); () }}"
+        .Value -> {
+            // MIRRust drop_expression (#4566): exact-Int storage releases in
+            // bulk (JetIntBulk).
+            if jet_rust_emit_int_bulk_type(ctx, jet_rust_emit_value_type(ctx, function, value)) -> return "{{ {ctx.config.root_prefix}jet_std::JetIntBulk::jet_int_bulk_drop({jet_rust_emit_value_move(ctx, value)}); () }}"
+            return "{{ drop({jet_rust_emit_value_move(ctx, value)}); () }}"
+        }
+        .Shared -> return "{{ drop({jet_rust_emit_value_move(ctx, value)}); () }}"
         .View -> return "{{ drop({jet_rust_emit_value_move(ctx, value)}); () }}"
         .ForeignHandle -> {
             ty :: jet_rust_emit_value_type(ctx, function, value)
@@ -4053,6 +4730,24 @@ fn jet_rust_emit_closure(ctx: &JetRustEmitContext, outer: MIRFunction, target_id
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR closure capture arity is invalid", "checked closure values must preserve the target capture ABI", Val(outer.span))
         return "|| unreachable!(\"MIR closure capture arity\")"
     }
+    closure :: jet_rust_emit_plain_closure(&ctx, outer, target_function, captures)
+    send := false
+    if result == .Val(result_id) {
+        result_type :: jet_rust_emit_value_type(ctx, outer, result_id)
+        if result_type.kind == {
+            .SendFn(_, _, _) -> send = true
+            else -> {}
+        }
+    }
+    return if send -> "std::sync::Arc::new({closure})" else -> "std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({closure}))))"
+}
+
+// MIRRust plain_closure: the host Rust closure of a MIR `Closure`, its
+// captures set up, then a `move` closure calling the lifted function.
+// `jet_rust_emit_closure` wraps it in the callable carrier; an inlined
+// adapter callback (`jet_rust_emit_inline_callback`) hands it to its kernel.
+fn jet_rust_emit_plain_closure(ctx: &JetRustEmitContext, outer: MIRFunction, target_function: MIRFunction, captures: [MIRCaptureOperand]) -> String Never! {
+    target_id :: target_function.id
     setup := ""
     call_args := [String]{}
     loop (index, operand) in captures {
@@ -4112,15 +4807,7 @@ fn jet_rust_emit_closure(ctx: &JetRustEmitContext, outer: MIRFunction, target_id
     if target_function.is_unsafe -> invocation = "unsafe {{ {invocation} }}"
     closure := "move |{params.join(", ")}| {invocation}"
     if setup != "" -> closure = "{{ {setup}{closure} }}"
-    send := false
-    if result == .Val(result_id) {
-        result_type :: jet_rust_emit_value_type(ctx, outer, result_id)
-        if result_type.kind == {
-            .SendFn(_, _, _) -> send = true
-            else -> {}
-        }
-    }
-    return if send -> "std::sync::Arc::new({closure})" else -> "std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({closure}))))"
+    closure
 }
 
 fn jet_rust_emit_shared_guard_map(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, guard: MIRValueID, path: [MIRFieldID], editable: Bool) -> String Never! {
@@ -4380,6 +5067,7 @@ fn jet_rust_emit_closure_call_argument(ctx: &JetRustEmitContext, function: MIRFu
     adapt_unit_result :: symbol == "jet_list_each_ref"
     parallel :: row.member.starts_with("para_")
     if jet_rust_emit_host_borrow_callback_value(&ctx, function, arg.value, adapt_unit_result, parallel) == .Val(callback) -> return callback
+    if jet_rust_emit_inline_callback(ctx, function, arg.value) == .Val(inlined) -> return jet_rust_emit_inline_host_callback(&ctx, function, arg.value, inlined)
     // `.indexed()` rows: `jet_iter_enumerate` calls a host `FnMut(i64, &T)`.
     if row.module_name == "core.builtin" && row.member == "iter_enumerate" && index == 0 -> return jet_rust_emit_host_callback_with_inputs(&ctx, function, arg.value, [Bool]{false, true})
     if jet_rust_emit_closure_route_uses_borrowed_callback(ctx, row, function, arg.value) {
@@ -4633,6 +5321,400 @@ fn jet_rust_emit_view_new(ctx: &JetRustEmitContext, function: MIRFunction, call:
     "unreachable!(\"MIR view route window\")"
 }
 
+// MIRRust fused_split_join (#4566 slice 6): the source and separator of
+// `iterator` when it is a `String.split` iterator whose only use is a `join`
+// later in the same block, with nothing in between that may change a place
+// (only constants, place reads and string builds). The join then splits and
+// joins the source in place (`jet_string_split_join`) and the split
+// instruction is not emitted. The piece sequence, and so the joined text, is
+// the one the iterator would yield.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::fused_split_join
+fn jet_rust_emit_fused_split_join(ctx: JetRustEmitContext, function: MIRFunction, iterator: MIRValueID) -> [MIRValueID] Never! {
+    none :: [MIRValueID]{}
+    if ctx.body_index.function != (Val(function.id)) -> return none
+    block :: ctx.body_index.definition_blocks.get(iterator.value) ?? return none
+    split_at :: ctx.body_index.definition_positions.get(iterator.value) ?? return none
+    users :: jet_rust_emit_value_users(ctx, function, iterator)
+    if users.len() != 1 || users[0].block != block || users[0].instruction <= split_at -> return none
+    join_at :: users[0].instruction
+    instructions :: function.blocks[block].instructions
+    source := MIRValueID?{None}
+    separator := MIRValueID?{None}
+    if instructions[split_at].operation == .Semantic(split) {
+        if split == .BuiltinMethod(call, receiver, receiver_place, args, _) {
+            row :: jet_rust_emit_prelude_route(ctx, call, false) ?? return none
+            if mir_symbol_name(row.symbol) != "jet_iter_string_split" || receiver_place != None || args.len() != 1 -> return none
+            source = Val(receiver)
+            separator = Val(args[0])
+        }
+    }
+    joined := false
+    if instructions[join_at].operation == .Semantic(join) {
+        if join == .BuiltinMethod(call, receiver, receiver_place, _, _) {
+            row :: jet_rust_emit_prelude_route(ctx, call, false) ?? return none
+            joined = mir_symbol_name(row.symbol) == "jet_iter_join" && receiver == iterator && receiver_place == None
+        }
+    }
+    if !joined || !jet_rust_emit_quiet_instructions(instructions, split_at + 1, join_at) -> return none
+    split_source :: source ?? return none
+    split_separator :: separator ?? return none
+    [MIRValueID]{split_source, split_separator}
+}
+
+// MIRRust literal_string_value: the text of a string build made only of
+// literal parts.
+fn jet_rust_emit_literal_text(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String? {
+    instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return None
+    if instruction.operation == .BuildString(parts) {
+        literal := ""
+        loop part in parts {
+            if part.kind == .Literal(text) {
+                literal = "{literal}{text}"
+            } else {
+                return None
+            }
+        }
+        return Val(literal)
+    }
+    None
+}
+
+// MIRRust split_text_operand: a split operand as the `&str` a split kernel
+// reads: a string literal as itself, any other value borrowed.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::split_text_operand
+fn jet_rust_emit_split_text_operand(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String Never! {
+    if jet_rust_emit_literal_text(ctx, function, value) == .Val(literal) -> return jet_rust_emit_quote(literal)
+    jet_rust_emit_borrowed_value_reference(&ctx, function, value, MIRAccess.Read)
+}
+
+// MIRRust split_loop_cursor (#4566 slice 6): the [source, separator] of the
+// loop whose cursor is `cursor` when it walks `text.split(sep)` and the split
+// iterator feeds only that loop, later in its block with only constants,
+// place reads and string builds in between, over a source nothing can change
+// while the loop runs: a string literal, a read parameter, or a read of an
+// immutable local or read parameter. The loop then walks the pieces as views
+// of the borrowed source (`jet_loop_split_*`); the source is never copied and
+// the split instruction is not emitted. The loop owns the split's fresh
+// iterator (by_value); each piece it binds is a fresh String either way.
+// Empty otherwise.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::split_loop_cursor
+fn jet_rust_emit_split_loop_cursor(ctx: JetRustEmitContext, function: MIRFunction, cursor: MIRValueID) -> [MIRValueID] Never! {
+    none :: [MIRValueID]{}
+    init :: jet_rust_emit_find_value_instruction(ctx, function, cursor) ?? return none
+    collection := MIRValueID?{None}
+    if init.operation == .LoopIterInit(_, iterator, step, _, source_kind) {
+        if step == None && source_kind == MIRLoopSourceKind.Plain -> collection = Val(iterator)
+    }
+    split_value :: collection ?? return none
+    positions :: jet_rust_emit_sole_later_use(ctx, function, split_value)
+    if positions.len() != 3 -> return none
+    instructions :: function.blocks[positions[0]].instructions
+    if instructions[positions[2]].result != (Val(cursor)) || !jet_rust_emit_quiet_instructions(instructions, positions[1] + 1, positions[2]) -> return none
+    source := MIRValueID?{None}
+    separator := MIRValueID?{None}
+    if instructions[positions[1]].operation == .Semantic(split) {
+        if split == .BuiltinMethod(call, receiver, receiver_place, args, _) {
+            row :: jet_rust_emit_prelude_route(ctx, call, true) ?? return none
+            if mir_symbol_name(row.symbol) != "jet_iter_string_split" || receiver_place != None || args.len() != 1 -> return none
+            source = Val(receiver)
+            separator = Val(args[0])
+        }
+    }
+    split_source :: source ?? return none
+    split_separator :: separator ?? return none
+    loop user in jet_rust_emit_value_users(ctx, function, cursor) {
+        if user.instruction < 0 -> return none
+        if function.blocks[user.block].instructions[user.instruction].operation == {
+            .LoopIterHasNext(_, used) | .LoopIterValue(_, used) | .LoopIterAdvance(_, used) | .Drop(used, _) -> {
+                if used != cursor -> return none
+            }
+            else -> return none
+        }
+    }
+    if !jet_rust_emit_stable_split_source(ctx, function, split_source) -> return none
+    [MIRValueID]{split_source, split_separator}
+}
+
+fn jet_rust_emit_stable_split_source(ctx: JetRustEmitContext, function: MIRFunction, source: MIRValueID) -> Bool Never! {
+    if jet_rust_emit_literal_text(ctx, function, source) != None -> return true
+    definition :: jet_rust_emit_find_value_instruction(ctx, function, source) ?? return false
+    if definition.operation == {
+        .Parameter(_, _) -> return jet_rust_emit_parameter_access(ctx, function, source) == (Val(MIRAccess.Read))
+        .ReadPlace(place) -> {
+            loop row in function.places {
+                if row.id != place -> next
+                if row.projections.len() != 0 -> return false
+                if row.base == {
+                    .Local(local) -> {
+                        loop binding in function.locals {
+                            if binding.id == local -> return !binding.mutable
+                        }
+                        return false
+                    }
+                    .Parameter(parameter) -> return jet_rust_emit_parameter_access(ctx, function, parameter) == (Val(MIRAccess.Read))
+                    else -> return false
+                }
+            }
+            return false
+        }
+        else -> return false
+    }
+}
+
+// MIRRust split_loop_collection (#4566 slice 6): `value` is a split iterator
+// a views loop walks in its place (`jet_rust_emit_split_loop_cursor`).
+fn jet_rust_emit_split_loop_collection(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
+    positions :: jet_rust_emit_sole_later_use(ctx, function, value)
+    if positions.len() != 3 -> return false
+    result :: function.blocks[positions[0]].instructions[positions[2]].result
+    if result == .Val(cursor) -> return jet_rust_emit_split_loop_cursor(ctx, function, cursor).len() == 2
+    false
+}
+
+// MIRRust quiet_instructions: instructions `first..<end` change no place and
+// have no effect (constants, place reads, string builds), so an operand may
+// be read before or after them alike.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::quiet_instructions
+fn jet_rust_emit_quiet_instructions(instructions: [MIRInstruction], first: Int, end: Int) -> Bool Never! {
+    loop position in first..<end {
+        if instructions[position].operation == {
+            .Constant(_) | .ReadPlace(_) | .BuildString(_) -> {}
+            else -> return false
+        }
+    }
+    true
+}
+
+// MIRRust sole_later_use: the [block, definition, use] positions of `value`
+// when its only use is an instruction later in its own block, else empty.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::sole_later_use
+fn jet_rust_emit_sole_later_use(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> [Int] Never! {
+    none :: [Int]{}
+    if ctx.body_index.function != (Val(function.id)) -> return none
+    block :: ctx.body_index.definition_blocks.get(value.value) ?? return none
+    defined_at :: ctx.body_index.definition_positions.get(value.value) ?? return none
+    users :: jet_rust_emit_value_users(ctx, function, value)
+    if users.len() != 1 || users[0].block != block || users[0].instruction <= defined_at -> return none
+    [Int]{block, defined_at, users[0].instruction}
+}
+
+// MIRRust eager_list_adapter (#4566 slice 5): the receiver and callback of
+// an eager list `map`, `map_mut` or `filter` (D-LOOPMAP1=B), and whether it
+// filters.
+pub struct JetRustEmitEagerAdapter {
+    pub receiver: MIRValueID
+    pub callback: MIRValueID
+    pub filters: Bool
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::eager_list_adapter
+fn jet_rust_emit_eager_list_adapter(ctx: JetRustEmitContext, instruction: MIRInstruction) -> JetRustEmitEagerAdapter? {
+    if instruction.operation == .Semantic(semantic) {
+        if semantic == .ClosureMethod(receiver, args, call) {
+            if args.len() != 1 || args[0].value == receiver -> return None
+            row :: jet_rust_emit_prelude_route(ctx, call, true) ?? return None
+            symbol :: mir_symbol_name(row.symbol)
+            if symbol == "jet_list_map" || symbol == "jet_list_map_mut" -> return Val(JetRustEmitEagerAdapter{receiver: receiver, callback: args[0].value, filters: false})
+            if symbol == "jet_list_filter" -> return Val(JetRustEmitEagerAdapter{receiver: receiver, callback: args[0].value, filters: true})
+        }
+    }
+    None
+}
+
+// MIRRust inline_callback (#4566 slice 5): a closure whose only use is the
+// callback of an eager list adapter later in its block, with only constants,
+// place reads and string builds in between, reaches the adapter's kernel as
+// a plain Rust closure (`jet_rust_emit_plain_closure`): no
+// `Rc<RefCell<Box<dyn FnMut>>>` carrier and no per-element slot
+// take/replace. It must be a local `Fn` whose captures are read-only copies
+// (no write or moved capture) and whose parameters are borrowed or scalar,
+// so the plain closure is `Fn`, takes the kernel's `&T`, and its capture
+// setup reads the same places at the adapter as at the closure. The
+// `Closure` instruction is not emitted.
+pub struct JetRustEmitInlineCallback {
+    pub target: MIRFunction
+    pub captures: [MIRCaptureOperand]
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::inline_callback
+fn jet_rust_emit_inline_callback(ctx: JetRustEmitContext, function: MIRFunction, callable: MIRValueID) -> JetRustEmitInlineCallback? {
+    params := [MIRType]{}
+    if jet_rust_emit_value_type(ctx, function, callable).kind == {
+        .Fn(signature) -> params = signature.params
+        else -> return None
+    }
+    positions :: jet_rust_emit_sole_later_use(ctx, function, callable)
+    if positions.len() != 3 -> return None
+    instructions :: function.blocks[positions[0]].instructions
+    adapter :: jet_rust_emit_eager_list_adapter(ctx, instructions[positions[2]]) ?? return None
+    if adapter.callback != callable || !jet_rust_emit_quiet_instructions(instructions, positions[1] + 1, positions[2]) -> return None
+    if instructions[positions[1]].operation == .Closure(target_id, captures, facts) {
+        if facts.needs_fn_mut -> return None
+        target_index :: jet_rust_emit_function_index(ctx, target_id) ?? return None
+        target :: ctx.program.functions[target_index]
+        loop capture in target.capture_params {
+            if capture.access != MIRAccess.Read -> return None
+        }
+        loop place in target.places {
+            if place.access == MIRAccess.Move && place.base == .Capture(_) -> return None
+        }
+        mask :: jet_rust_emit_indirect_borrow_mask(ctx, function, callable)
+        if mask.len() != params.len() -> return None
+        loop (index, param) in params {
+            // Harness.jet jet_rust_emit_is_scalar, read-only.
+            scalar :: if param.kind == MIRTypeKind.Int -> false else -> mir_type_is_scalar(param) || (param.kind == MIRTypeKind.String && ctx.program.facts.target_dossier.layer == MIRRuntimeLayer.Core)
+            if !mask[index] && !scalar -> return None
+        }
+        return Val(JetRustEmitInlineCallback{target: target, captures: captures})
+    }
+    None
+}
+
+// MIRRust pure_total_callback (#4566 slice 5): a callback with no effect
+// that cannot stop: one block of parameter, capture, constant and place
+// reads and arithmetic, logic or comparisons over `Int`/`Float`/`Bool`
+// operands (the builtin kernels: exact `Int` never overflows; a division only
+// by a non-zero `Int` literal)
+// returning its value. A fused adapter runs it per element right after the
+// earlier stages instead of after all of them; nothing can observe the
+// difference.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::pure_total_callback
+fn jet_rust_emit_pure_total_callback(ctx: JetRustEmitContext, target: MIRFunction) -> Bool Never! {
+    if target.blocks.len() != 1 || !target.is_pure || target.optimization.diverges -> return false
+    block :: target.blocks[0]
+    returns := false
+    if block.terminator == .Return(value) -> returns = value != None
+    if !returns -> return false
+    loop instruction in block.instructions {
+        if instruction.operation == {
+            .Parameter(_, _) | .Capture(_) | .Constant(_) | .ReadPlace(_) | .Copy(_, _) | .Move(_) -> {}
+            .Unary(_, operand) -> {
+                if !jet_rust_emit_primitive_value(ctx, target, operand) -> return false
+            }
+            .Binary(op, _, _, left, right) -> {
+                if !jet_rust_emit_primitive_value(ctx, target, left) || !jet_rust_emit_primitive_value(ctx, target, right) -> return false
+                if op == MIRBinaryOp.Pow || op == MIRBinaryOp.Shl || op == MIRBinaryOp.Shr -> return false
+                divides :: op == MIRBinaryOp.Div || op == MIRBinaryOp.FloorDiv || op == MIRBinaryOp.Mod || op == MIRBinaryOp.Rem
+                if divides && !jet_rust_emit_nonzero_int_literal(ctx, target, right) -> return false
+            }
+            else -> return false
+        }
+    }
+    true
+}
+
+fn jet_rust_emit_primitive_value(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
+    kind :: jet_rust_emit_value_type(ctx, function, value).kind
+    kind == MIRTypeKind.Int || kind == MIRTypeKind.Float || kind == MIRTypeKind.Bool
+}
+
+fn jet_rust_emit_nonzero_int_literal(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
+    instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return false
+    if instruction.operation == .Constant(constant) {
+        if constant == .Int(literal, width, spelling) -> return width == None && spelling == None && literal != 0
+    }
+    false
+}
+
+// Does `callable` take exactly one parameter, by reference?
+fn jet_rust_emit_lends_element(ctx: JetRustEmitContext, function: MIRFunction, callable: MIRValueID) -> Bool Never! {
+    mask :: jet_rust_emit_indirect_borrow_mask(ctx, function, callable)
+    mask.len() == 1 && mask[0]
+}
+
+// MIRRust fused_adapter_receiver (#4566 slice 5): `value` is an eager
+// `map`/`filter` result whose only use is the receiver of the next eager
+// adapter in its block, so the two run as one pass
+// (`jet_rust_emit_fused_adapter_chain`) and the intermediate list is never
+// built. A chain starts at a `map` with an inlined callback; every later
+// stage's callback is inlined, borrows its one element and is pure and
+// total (`jet_rust_emit_pure_total_callback`), so running it per element
+// right after the earlier stages instead of after them all is not
+// observable. Between the two adapters only constants, place reads, string
+// builds and the next stage's inlined closure appear. The adapter
+// instruction itself is not emitted.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::fused_adapter_receiver
+fn jet_rust_emit_fused_adapter_receiver(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
+    positions :: jet_rust_emit_sole_later_use(ctx, function, value)
+    if positions.len() != 3 -> return false
+    instructions :: function.blocks[positions[0]].instructions
+    adapter :: jet_rust_emit_eager_list_adapter(ctx, instructions[positions[1]]) ?? return false
+    consumer :: jet_rust_emit_eager_list_adapter(ctx, instructions[positions[2]]) ?? return false
+    inlined :: jet_rust_emit_inline_callback(ctx, function, adapter.callback) ?? return false
+    consumer_inlined :: jet_rust_emit_inline_callback(ctx, function, consumer.callback) ?? return false
+    stage :: if jet_rust_emit_fused_adapter_receiver(ctx, function, adapter.receiver) -> jet_rust_emit_pure_total_callback(ctx, inlined.target) else -> !adapter.filters
+    if !stage || consumer.receiver != value -> return false
+    first :: positions[1] + 1
+    loop position in first..<positions[2] {
+        if instructions[position].result == (Val(consumer.callback)) -> next
+        if !jet_rust_emit_quiet_instructions(instructions, position, position + 1) -> return false
+    }
+    jet_rust_emit_lends_element(ctx, function, adapter.callback) && jet_rust_emit_lends_element(ctx, function, consumer.callback) && jet_rust_emit_pure_total_callback(ctx, consumer_inlined.target)
+}
+
+// MIRRust fused_adapter_chain (#4566 slice 5): the one-pass form of the
+// eager adapter chain ending in the adapter over `receiver` with `callback`
+// (`jet_rust_emit_fused_adapter_receiver`): each stage's plain closure is
+// bound once, then one host closure maps or drops each borrowed source
+// element through every stage in order. A chain with a filter collects
+// through `jet_list_map_chain`; a chain of maps is one `jet_list_map`.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::fused_adapter_chain
+fn jet_rust_emit_fused_adapter_chain(ctx: &JetRustEmitContext, function: MIRFunction, receiver: MIRValueID, callback: MIRValueID, filters: Bool) -> String Never! {
+    callbacks := [MIRValueID]{callback}
+    filtering := [Bool]{filters}
+    root := receiver
+    loop jet_rust_emit_fused_adapter_receiver(ctx, function, root) {
+        instruction :: jet_rust_emit_find_value_instruction(ctx, function, root) ?? panic("fused adapter receiver has a definition")
+        adapter :: jet_rust_emit_eager_list_adapter(ctx, instruction) ?? panic("fused adapter receiver is an eager adapter")
+        &callbacks.push(adapter.callback)
+        &filtering.push(adapter.filters)
+        root = adapter.receiver
+    }
+    count :: callbacks.len()
+    params :: jet_rust_emit_closure_callback_params(ctx, function, callbacks[count - 1]) ?? panic("fused adapter head callback has a callable signature")
+    if params.len() != 1 -> panic("fused adapter head callback has one element parameter")
+    element :: jet_rust_emit_type(&ctx, params[0])
+    setup := ""
+    body := ""
+    any_filter := false
+    loop index in 0..<count {
+        stage :: count - 1 - index
+        inlined :: jet_rust_emit_inline_callback(ctx, function, callbacks[stage]) ?? panic("fused adapter stage callback is inlined")
+        setup = "{setup}let __jet_stage_{index} = {jet_rust_emit_plain_closure(&ctx, function, inlined.target, inlined.captures)}; "
+        item :: if index == 0 -> "__jet_item" else -> "&__jet_item"
+        if filtering[stage] {
+            any_filter = true
+            body = "{body}if !__jet_stage_{index}({item}) {{ return None; }} "
+        } else {
+            body = "{body}let __jet_item = __jet_stage_{index}({item}); "
+        }
+    }
+    kernel :: if any_filter -> "jet_list_map_chain" else -> "jet_list_map"
+    yielded :: if any_filter -> "Some(__jet_item)" else -> "__jet_item"
+    source :: jet_rust_emit_borrowed_value_reference(&ctx, function, root, MIRAccess.Read)
+    "{ctx.config.root_prefix}{kernel}({source}, {{ {setup}move |__jet_item: &{element}| {{ {body}{yielded} }} }})"
+}
+
+// MIRRust inline_host_callback (#4566 slice 5): the host closure of an
+// inlined adapter callback: the plain closure itself when it takes every
+// kernel argument by reference, else a closure copying each scalar argument
+// out of the kernel's reference.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::inline_host_callback
+fn jet_rust_emit_inline_host_callback(ctx: &JetRustEmitContext, function: MIRFunction, callable: MIRValueID, inlined: JetRustEmitInlineCallback) -> String Never! {
+    closure :: jet_rust_emit_plain_closure(&ctx, function, inlined.target, inlined.captures)
+    mask :: jet_rust_emit_indirect_borrow_mask(ctx, function, callable)
+    if !mask.contains(false) -> return closure
+    params :: jet_rust_emit_closure_callback_params(ctx, function, callable) ?? panic("inline callback has a callable signature")
+    parameters := [String]{}
+    arguments := [String]{}
+    loop (index, ty) in params {
+        &parameters.push("__jet_callback_arg_{index}: &{jet_rust_emit_type(&ctx, ty)}")
+        argument :: if mask[index] -> "__jet_callback_arg_{index}" else -> "*__jet_callback_arg_{index}"
+        &arguments.push(argument)
+    }
+    "{{ let __jet_callback = {closure}; move |{parameters.join(", ")}| __jet_callback({arguments.join(", ")}) }}"
+}
+
 // MIRRust BuiltinMethod / prelude_values_with_receiver: a mutating route
 // writes through its checked receiver place, a borrowing route lends the
 // receiver, and a native-word kernel result re-enters the exact Int carrier.
@@ -4651,6 +5733,17 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
         radix_text :: jet_rust_emit_borrowed_value_reference(&ctx, function, args[0], MIRAccess.Read)
         return "{root}jet_std::jet_int_owned_to_radix({receiver_text}, {radix_text}).unwrap_or_else(|error| {root}jet_arithmetic_stop(\"<mir>\", 0u32, &error))"
     }
+    // MIRRust prelude_values_with_receiver (#4566 slice 6): a join fed only
+    // by a split iterator splits and joins the source in place.
+    if mir_symbol_name(row.symbol) == "jet_iter_join" && receiver_place == None && args.len() == 1 {
+        fused :: jet_rust_emit_fused_split_join(ctx, function, receiver)
+        if fused.len() == 2 {
+            source_text :: jet_rust_emit_split_text_operand(&ctx, function, fused[0])
+            separator_text :: jet_rust_emit_split_text_operand(&ctx, function, fused[1])
+            joiner_text :: jet_rust_emit_borrowed_value_reference(&ctx, function, args[0], MIRAccess.Read)
+            return "{ctx.config.root_prefix}jet_string_split_join({source_text}, {separator_text}, {joiner_text})"
+        }
+    }
     rendered := [String]{}
     if receiver_place == .Val(place) {
         if !row.signature.borrow_mask[0] {
@@ -4664,6 +5757,16 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
         &rendered.push(jet_rust_emit_value_consume(ctx, function, receiver))
     }
     if view_new -> return jet_rust_emit_view_new(&ctx, function, call, row, rendered[0], args)
+    // MIRRust prelude_values_with_receiver (#4566): `[Int]` storage clears in
+    // bulk (`jet_int_list_clear`): one vectorised scan for an element that
+    // owns a node instead of a release test per element.
+    if mir_symbol_name(row.symbol) == "jet_list_clear" && args.len() == 0 {
+        receiver_ty := jet_rust_emit_value_type(ctx, function, receiver)
+        if receiver_place == .Val(place) {
+            if jet_rust_emit_append_place_row(ctx, function, place) == .Val(place_row) -> receiver_ty = place_row.ty
+        }
+        if jet_rust_emit_int_bulk_type(ctx, receiver_ty) -> return "{ctx.config.root_prefix}jet_std::jet_int_list_clear({rendered[0]})"
+    }
     routed := ""
     list_min_max :: row.module_name == "core.list" && row.member == "min_max"
     if row.abi == MIRPreludeABI.Aggregate && (list_min_max || (row.module_name == "core.map" && row.member == "to_list")) {
@@ -5140,7 +6243,21 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                     return "match ({jet_rust_emit_value_owned(ctx, function, left)}, {jet_rust_emit_value_owned(ctx, function, right)}) {{ (Ok(left), Ok(right)) => {emitted}, _ => Err({ctx.config.root_prefix}JetAbsent) }}"
                 }
                 .ClosureMethod(receiver, args, call) -> {
+                    // MIRRust ClosureMethod (#4566 slice 5): an eager adapter
+                    // fed by another runs the chain in one pass; its elements
+                    // come from its callbacks or its receiver, already in
+                    // their declared carriers, so no native Int pass
+                    // re-collects them.
+                    eager := false
+                    filters := false
+                    if jet_rust_emit_prelude_row(&ctx, call) == .Val(route) {
+                        symbol :: mir_symbol_name(route.symbol)
+                        eager = symbol == "jet_list_map" || symbol == "jet_list_map_mut" || symbol == "jet_list_filter"
+                        filters = symbol == "jet_list_filter"
+                    }
+                    if eager && args.len() == 1 && jet_rust_emit_fused_adapter_receiver(ctx, function, receiver) -> return jet_rust_emit_fused_adapter_chain(&ctx, function, receiver, args[0].value, filters)
                     emitted :: jet_rust_emit_prelude_receiver_call(&ctx, function, call, receiver, args, result)
+                    if eager -> return emitted
                     if result == .Val(value) {
                         result_ty :: jet_rust_emit_value_type(ctx, function, value)
                         if jet_rust_emit_native_int_result(&ctx, emitted, result_ty) == .Val(converted) -> return converted
@@ -5195,6 +6312,11 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
             // row index; its element binds a reference to the row.
             if result == .Val(cursor) {
                 if ctx.ref_bindings.cursors.get(cursor.value) == .Val(place) -> return "({jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Read)}, 0usize)"
+                // MIRRust operation_expression (#4566 slice 6): a loop over a
+                // stable source's split walks the pieces as views of the
+                // source (`jet_rust_emit_split_loop_cursor`).
+                split :: jet_rust_emit_split_loop_cursor(ctx, function, cursor)
+                if split.len() == 2 -> return "{ctx.config.root_prefix}jet_loop_split_init({jet_rust_emit_split_text_operand(&ctx, function, split[0])}, {jet_rust_emit_split_text_operand(&ctx, function, split[1])})"
             }
             loc :: location ?? {
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR iterator cursor is missing its instruction source location", "checked iterator cursors carry the location their host-range trap reports", Val(function.span))
@@ -5228,15 +6350,18 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
             return jet_rust_emit_prelude_args_exact(&ctx, function, call, args)
         }
         .LoopIterHasNext(call, cursor) -> {
+            if jet_rust_emit_split_loop_cursor(ctx, function, cursor).len() == 2 -> return "{ctx.config.root_prefix}jet_loop_split_has_next({jet_rust_emit_value_reference(ctx, cursor, false)})"
             if ctx.ref_bindings.cursors.get(cursor.value) != None -> return "{{ let (items, at) = *{jet_rust_emit_value_slot(cursor)}.as_ref().expect(\"MIR value\"); at < items.len() }}"
             if jet_rust_emit_byte_loop_cursor(ctx, function, cursor) -> return "jet_loop_iter_bytes_has_next({jet_rust_emit_value_reference(ctx, cursor, false)})"
             return jet_rust_emit_prelude_cursor_call(&ctx, function, call, cursor, MIRAccess.Read)
         }
         .LoopIterValue(call, cursor) -> {
+            if jet_rust_emit_split_loop_cursor(ctx, function, cursor).len() == 2 -> return "{ctx.config.root_prefix}jet_loop_split_value({jet_rust_emit_value_reference(ctx, cursor, true)})"
             if jet_rust_emit_byte_loop_cursor(ctx, function, cursor) -> return "jet_loop_iter_bytes_value({jet_rust_emit_value_reference(ctx, cursor, true)})"
             return jet_rust_emit_prelude_cursor_call(&ctx, function, call, cursor, MIRAccess.Write)
         }
         .LoopIterAdvance(call, cursor) -> {
+            if jet_rust_emit_split_loop_cursor(ctx, function, cursor).len() == 2 -> return "{ctx.config.root_prefix}jet_loop_split_advance({jet_rust_emit_value_reference(ctx, cursor, true)})"
             if ctx.ref_bindings.cursors.get(cursor.value) != None -> return "{{ {jet_rust_emit_value_slot(cursor)}.as_mut().expect(\"MIR value\").1 += 1; }}"
             if jet_rust_emit_byte_loop_cursor(ctx, function, cursor) -> return "jet_loop_iter_bytes_advance({jet_rust_emit_value_reference(ctx, cursor, true)})"
             return jet_rust_emit_prelude_cursor_call(&ctx, function, call, cursor, MIRAccess.Write)

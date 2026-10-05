@@ -1351,3 +1351,29 @@ fn semantic_corpus_policy_runs_with_the_golden_gate() {
         .check_gate("golden")
         .expect("golden corpus semantic policy");
 }
+
+#[test]
+fn function_boundary_cells_emit_no_user_unsafe() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest = fs::read_to_string(root.join("Tools/perf/function-boundary/cells.tsv"))
+        .expect("function-boundary manifest");
+    let mut checked = 0;
+    for row in manifest.lines().filter(|row| !row.starts_with('#') && !row.is_empty()) {
+        let cell = row.split('\t').next().expect("cell name");
+        if cell == "cell" {
+            continue;
+        }
+        let shown = format!("Tools/perf/function-boundary/{cell}/main.jet");
+        let source = fs::read_to_string(root.join(&shown)).expect("function-boundary Jet source");
+        let compiled = jet::compile_with_path(&source, &shown)
+            .unwrap_or_else(|diags| panic!("{cell}:\n{}", jet::render_diagnostics(&shown, &source, &diags)));
+        let user = strip_vetted_prelude_modules(&compiled.rust);
+        let unsafe_lines: Vec<_> = user.lines().enumerate()
+            .filter(|(_, line)| !unsafe_keyword_columns(line).is_empty())
+            .map(|(i, line)| format!("{}: {}", i + 1, line.trim()))
+            .collect();
+        assert!(unsafe_lines.is_empty(), "{cell}: unsafe outside vetted memory internals:\n{}", unsafe_lines.join("\n"));
+        checked += 1;
+    }
+    assert!(checked > 0, "function-boundary manifest is empty");
+}

@@ -1806,6 +1806,26 @@ fn annotate_return_todo(expr: &Expr, expected: Option<&Type>) -> Option<Expr> {
     Some(annotated)
 }
 
+/// #4567: a plain aggregate's owned temporary moves its stored fields.
+/// `Close` owners and selected computed properties retain the copy path.
+/// A place initializer (name, field, index or view) keeps its value and copies
+/// fields out, except for the existing guard-field ownership rule.
+/// Jet: Compiler/JetSema/Source/Sema/Statements.jet::sema_stmt_destructure_init_is_temporary
+fn destructure_init_is_temporary(init: &Expr) -> bool {
+    match init {
+        Expr::Paren(inner, _) | Expr::Try(inner, _, _, _) => destructure_init_is_temporary(inner),
+        Expr::OrFallback { value, .. } => destructure_init_is_temporary(value),
+        Expr::Call(_)
+        | Expr::CallValue { .. }
+        | Expr::MethodCall { .. }
+        | Expr::TupleLit(..)
+        | Expr::StructLit { .. }
+        | Expr::Place(_, PlaceAccess::Take, _)
+        | Expr::Copy(..) => true,
+        _ => false,
+    }
+}
+
 /// Lower one checked value at a return boundary. Explicit returns and a
 /// value-expected block's final expression share this TIR path so special
 /// return handling cannot drift between the two spellings.
@@ -2689,11 +2709,22 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         .unwrap_or_default(),
                     _ => HashMap::new(),
                 };
-                let move_fields = fields.iter().any(|field| {
-                    field_tys
-                        .get(&field.name)
-                        .is_some_and(|ty| cx.type_contains_shared_guard(ty))
-                });
+                let plain_fields = match &init.ty {
+                    Type::Named(name) | Type::Apply { name, .. } => {
+                        !cx.has_close_type(name)
+                            && !cx.computed_fields.get(name).is_some_and(|computed| {
+                                fields.iter().any(|field| computed.contains(&field.name))
+                            })
+                    }
+                    _ => false,
+                };
+                let move_fields = plain_fields
+                    && (destructure_init_is_temporary(&b.init)
+                        || fields.iter().any(|field| {
+                            field_tys
+                                .get(&field.name)
+                                .is_some_and(|ty| cx.type_contains_shared_guard(ty))
+                        }));
                 let tmp = jet_format!("{jet_prefix}d{}", span.start);
                 let kw = if b.mutable { "let mut" } else { "let" };
                 let mut binds = Vec::new();
@@ -2746,14 +2777,15 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     .collect(),
                     _ => Vec::new(),
                 };
-                let move_fields = canonical.iter().any(|(_, ty)| {
-                    cx.type_contains_shared_guard(ty)
-                        || matches!(
-                            ty,
-                            Type::Apply { name, .. }
-                                if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard")
-                        )
-                });
+                let move_fields = destructure_init_is_temporary(&b.init)
+                    || canonical.iter().any(|(_, ty)| {
+                        cx.type_contains_shared_guard(ty)
+                            || matches!(
+                                ty,
+                                Type::Apply { name, .. }
+                                    if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard")
+                            )
+                    });
                 let tmp = jet_format!("{jet_prefix}d{}", span.start);
                 let kw = if b.mutable { "let mut" } else { "let" };
                 let mut binds = Vec::new();
@@ -4244,14 +4276,18 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             .as_ref()
                             .map(|t| cx.columnar_list_type(t).is_some())
                             .unwrap_or(false);
-                    // #4318 §4 stable loop source: a plain list loop over a place
-                    // (a local or parameter through fields) whose body never
-                    // mentions the source's root walks the list in place.
+                    // #4318 §4 stable loop source: a plain list or fixed-list
+                    // loop over a place (a local or parameter through fields)
+                    // whose body never mentions the source's root walks the
+                    // sequence in place.
                     let source_stable = method_kind.is_none()
                         && step.is_none()
                         && !by_value
                         && !columnar
-                        && matches!(lowered_coll.ty.without_user_tags(), Type::List(_))
+                        && matches!(
+                            lowered_coll.ty.without_user_tags(),
+                            Type::List(_) | Type::FixedList { .. }
+                        )
                         && stable_loop_source_root(collection).is_some_and(|root| {
                             !crate::Sema::block_free_var_reads(body).contains(root)
                         });

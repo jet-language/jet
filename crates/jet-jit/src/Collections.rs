@@ -234,6 +234,12 @@ pub(crate) mod collection_semantics {
     include!("../../jet-codegen/src/Prelude/Core/ParallelKernel.rs");
     include!("../../jet-codegen/src/Prelude/Core/SimdLanes.rs");
     include!("../../jet-codegen/src/Prelude/Core/SortKernel.rs");
+    // #4566 slice 8: the vetted inline-list storage `Collections.rs` names
+    // as `jet_mem::JetInlineList` (AOT embeds it in its `jet_mem`).
+    #[allow(dead_code)]
+    pub(super) mod jet_mem {
+        include!("../../jet-codegen/src/Prelude/InlineList.rs");
+    }
     include!("../../jet-codegen/src/Prelude/Core/Collections.rs");
 
     pub(super) fn list_sort<T: Ord>(xs: &mut Vec<T>) {
@@ -325,7 +331,7 @@ pub(crate) mod collection_semantics {
     where
         F: Fn(&i64) -> i64,
     {
-        jet_list_map(xs, f)
+        jet_list_map(&xs, f)
     }
 
     /// The resident callback must stay on its active runtime thread, so this
@@ -364,21 +370,21 @@ pub(crate) mod collection_semantics {
     where
         F: FnMut(&i64) -> i64,
     {
-        jet_list_map_mut(xs, f)
+        jet_list_map_mut(&xs, f)
     }
 
     pub(super) fn list_closure_map_f64<F>(xs: Vec<i64>, f: F) -> Vec<f64>
     where
         F: Fn(&i64) -> f64,
     {
-        jet_list_map(xs, f)
+        jet_list_map(&xs, f)
     }
 
     pub(super) fn list_closure_map_f64_mut<F>(xs: Vec<i64>, f: F) -> Vec<f64>
     where
         F: FnMut(&i64) -> f64,
     {
-        jet_list_map_mut(xs, f)
+        jet_list_map_mut(&xs, f)
     }
 
     pub(super) fn list_closure_filter<F>(xs: Vec<i64>, f: F) -> Vec<i64>
@@ -1161,6 +1167,73 @@ pub(crate) mod collection_semantics {
         line: u32,
     ) -> Result<JetOutcome<i64, JetAbsent>, String> {
         jet_priority_queue_remove_slot_kernel(pq, index, file, line)
+    }
+
+    #[cfg(test)]
+    mod int_sum_walk_tests {
+        use super::*;
+
+        #[test]
+        fn int_sum_walk_commits_exact_chunks_and_tail() {
+            for count in [32, 33, 255, 256, 257, 600] {
+                let values: Vec<_> = (0..count).map(|i| JetInt::from_i64(i % 21 - 10)).collect();
+                let expected = 19 + (0..count).map(|i| i % 21 - 10).sum::<i64>();
+                let mut acc = JetInt::from_i64(19);
+                let mut cursor = jet_loop_range_init(0, count, 0, false, true);
+                jet_int_sum_walk(&mut cursor, &mut acc, &values);
+                assert_eq!(acc, JetInt::from_i64(expected));
+                assert_eq!(cursor.current, count);
+                assert!(!jet_loop_range_has_next(&cursor));
+            }
+        }
+
+        #[test]
+        fn int_sum_walk_leaves_short_walks_to_exact_loop() {
+            for count in [0, 1, 8, 31] {
+                let values = vec![JetInt::from_i64(2); count as usize];
+                let mut acc = JetInt::from_i64(19);
+                let mut cursor = jet_loop_range_init(0, count, 0, false, true);
+                jet_int_sum_walk(&mut cursor, &mut acc, &values);
+                assert_eq!(acc, JetInt::from_i64(19));
+                assert_eq!(cursor.current, 0);
+            }
+        }
+
+        #[test]
+        fn int_sum_walk_leaves_uncommitted_chunk_for_exact_loop() {
+            let mut values = vec![JetInt::from_i64(1); 513];
+            values[300] = JetInt::from_i64(1 << 52);
+            let mut acc = JetInt::from_i64(0);
+            let mut cursor = jet_loop_range_init(0, 513, 0, false, true);
+            jet_int_sum_walk(&mut cursor, &mut acc, &values);
+            assert_eq!(acc, JetInt::from_i64(256));
+            assert_eq!(jet_loop_range_value(&cursor), 256);
+
+            for seed in [i64::MAX, i64::MIN, 1 << 61, -(1 << 61) - 1] {
+                let mut acc = JetInt::from_i64(seed);
+                let mut cursor = jet_loop_range_init(0, 513, 0, false, true);
+                jet_int_sum_walk(&mut cursor, &mut acc, &values);
+                assert_eq!(acc, JetInt::from_i64(seed));
+                assert_eq!(cursor.current, 0);
+            }
+        }
+
+        #[test]
+        fn int_sum_walk_preserves_noncanonical_ranges_and_bad_index_boundary() {
+            let values = vec![JetInt::from_i64(3); 40];
+            for (start, end, step, exclusive) in [(0, 40, 2, true), (39, -1, -1, true), (-1, 40, 1, true), (0, 39, 1, false)] {
+                let mut acc = JetInt::from_i64(7);
+                let mut cursor = jet_loop_range_init(start, end, step, true, exclusive);
+                jet_int_sum_walk(&mut cursor, &mut acc, &values);
+                assert_eq!(acc, JetInt::from_i64(7));
+                assert_eq!(cursor.current, start);
+            }
+            let mut acc = JetInt::from_i64(7);
+            let mut cursor = jet_loop_range_init(0, 41, 0, false, true);
+            jet_int_sum_walk(&mut cursor, &mut acc, &values);
+            assert_eq!(acc, JetInt::from_i64(127));
+            assert_eq!(jet_loop_range_value(&cursor), 40);
+        }
     }
 }
 /// One lazy line source remains associated with its cursor until the loop
@@ -12072,4 +12145,92 @@ host_fns! {
     canonical_iter_dedup_by: "jet_iter_dedup_by" => jet_jit_iter_dedup_by: sig_closure_value;
     canonical_iter_split_at: "jet_iter_split_at" => jet_jit_iter_split_at: sig_closure_split;
     canonical_iter_chunk_while: "jet_iter_chunk_while" => jet_jit_iter_chunk_while: sig_closure_value;
+}
+
+/// #4566 slice 8: `jet_mem::JetInlineList` (Prelude/InlineList.rs) drops every
+/// value exactly once, inline, across the spill to the heap, and after it.
+#[cfg(test)]
+mod inline_list_tests {
+    use super::collection_semantics::jet_mem::JetInlineList;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    struct Tracked {
+        id: usize,
+        drops: Rc<RefCell<Vec<usize>>>,
+    }
+
+    impl Drop for Tracked {
+        fn drop(&mut self) {
+            self.drops.borrow_mut().push(self.id);
+        }
+    }
+
+    fn fill(count: usize, drops: &Rc<RefCell<Vec<usize>>>) -> JetInlineList<Tracked, 4> {
+        let mut list = JetInlineList::<Tracked, 4>::new();
+        for id in 0..count {
+            list.push(Tracked { id, drops: Rc::clone(drops) });
+        }
+        list
+    }
+
+    #[test]
+    fn inline_list_drops_each_value_once_inline_and_after_spill() {
+        for count in [0, 1, 3, 4, 5, 8, 9, 40] {
+            let drops = Rc::new(RefCell::new(Vec::new()));
+            let list = fill(count, &drops);
+            assert_eq!(list.len(), count);
+            assert!(list.iter().map(|value| value.id).eq(0..count), "push order is kept across the spill");
+            assert!(drops.borrow().is_empty(), "the spill moves values without dropping them");
+            drop(list);
+            let mut seen = drops.borrow().clone();
+            seen.sort_unstable();
+            assert_eq!(seen, (0..count).collect::<Vec<_>>(), "every value drops exactly once");
+        }
+    }
+
+    #[test]
+    fn inline_list_mutation_and_zero_capacity() {
+        let drops = Rc::new(RefCell::new(Vec::new()));
+        let mut list = fill(6, &drops);
+        list[5].id = 50;
+        list[0].id = 10;
+        assert_eq!(list.iter().map(|value| value.id).collect::<Vec<_>>(), vec![10, 1, 2, 3, 4, 50]);
+        drop(list);
+        let mut seen = drops.borrow().clone();
+        seen.sort_unstable();
+        assert_eq!(seen, vec![1, 2, 3, 4, 10, 50]);
+
+        let mut empty = JetInlineList::<String, 0>::new();
+        assert!(empty.is_empty());
+        empty.push("spilled".to_string());
+        empty.push("again".to_string());
+        assert_eq!(&empty[..], ["spilled".to_string(), "again".to_string()]);
+    }
+
+    #[test]
+    fn inline_list_panicking_drop_still_drops_the_rest() {
+        struct Loud {
+            id: usize,
+            drops: Rc<RefCell<Vec<usize>>>,
+        }
+        impl Drop for Loud {
+            fn drop(&mut self) {
+                self.drops.borrow_mut().push(self.id);
+                if self.id == 1 {
+                    panic!("drop of 1");
+                }
+            }
+        }
+        let drops = Rc::new(RefCell::new(Vec::new()));
+        let mut list = JetInlineList::<Loud, 4>::new();
+        for id in 0..3 {
+            list.push(Loud { id, drops: Rc::clone(&drops) });
+        }
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || drop(list)));
+        assert!(unwound.is_err());
+        let mut seen = drops.borrow().clone();
+        seen.sort_unstable();
+        assert_eq!(seen, vec![0, 1, 2], "a panicking element drop leaks no other element");
+    }
 }

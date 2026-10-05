@@ -519,9 +519,177 @@ where the C peer does not use a capability Jet lacks.
   - A call, method call, value call, tuple or struct literal, `^take`, `~copy`,
     or a `?` / `??` over one of these now moves every field. A name, field,
     index or view still copies, which keeps the place intact.
+  - Moving fields also transfers cleanup away from the temporary as a whole.
+    The MIR lowering retires its whole-owner drop flag after extraction and
+    registers field cleanup for omitted fields. Otherwise the temporary's
+    scope-exit `MovePlace` reads a partially moved aggregate and MIR legality
+    correctly rejects it. This belongs in both `tir_to_mir_stmt.rs`/`mir.rs`
+    and JetCodegen `Bindings.jet`, not in a legality-check exception.
 - Repro: `Tools/perf/function-boundary/destructure-move/main.jet`. Before the
   patch, its emitted Rust contains `(_v5…).0.clone()` and `(_v5…).1.clone()`.
 - Pending: release rebuild of `jet` from the worktree (after stage 2 frees
   memory). Then `jet emit --rust destructure-move/main.jet` must show
   `MovePlace` moves and no field `.clone()`, and the `destructure-move` row is
   re-run. Stage-2 bootstrap of the Jet half follows the normal landing path.
+
+### 6.0.1 Boundary ownership and layout follow-through
+
+An owned call-result destructure must transfer both fields and cleanup. The
+temporary's whole-owner cleanup is invalid after any field moves; disabling
+the legality check would hide an actual ownership error. Omitted stored fields
+retain independent scope cleanup, and computed properties own no field storage.
+The source-place spelling still copies and preserves its owner.
+The remainder occupies the original aggregate's automatic-cleanup position,
+not the positions of the newly introduced bindings. Its stored fields release
+in the original aggregate's field order. Rust registers that remainder in
+reverse field order and rotates it into the retired owner's action slot; Jet
+inserts each field action at that slot, then removes the whole-owner action.
+The observable-guard fixture `memory/destructure_drop_order.jet` exercises
+normal and early-return cleanup against other aggregate owners and the retained
+field. Its expected trace is a proof obligation, not a claimed receipt.
+S63/D-SHAPE-RESOURCE1/2 (`syntax-decisions.md:2525`) ratifies scope cleanup;
+`spec.md:843` and `reference/core-library.md:1671` ratify the ordered explicit
+boundary. The field-order fold preserves the original aggregate operation
+rather than deriving a new field order from the order of pattern bindings.
+Fresh-result field moves are restricted to plain aggregate owners and stored
+selected fields. A nominal `Close` implementation keeps whole-owner cleanup:
+fields are copied, and a fresh owner is retained in its generated local until
+the original scope exit, where `Close` runs once with its fields intact.
+Computed selected fields never become `MovePlace` projections. Both frontends
+apply the eligibility gate, and both MIR lowerers retain fresh `Close` owners.
+The fixture also covers call/literal `Close` owners on normal and early exits;
+`close_owner_destructure_keeps_close_once_on_every_tier` is the focused proof.
+
+
+Native Int locals borrowed by a call need no exact shadow carried between
+iterations. An uncoerced `Read` argument can materialize its exact Int temporary
+at the call; writes, moves, trait boxing and representation coercions retain
+their existing ownership paths. Lambdas can use the same range-checked native
+versions as loops. Read captures receive guard indices after ordinary
+parameters, and the cold exact fallback receives every original capture and
+argument unchanged.
+
+The recursion-aggregate profile identifies actual 32-byte result traffic,
+not a by-pointer Stats parameter: `stats` takes two Int references and returns
+Stats by value. Its recursive calls return into stack temporaries, followed by
+`vmovups` into `Option<Stats>` locals (sample addresses `49dab`/`49dbe` and
+`49e7e`/`49eb0`). Leaf and merge return paths copy a full YMM word into the
+ABI return destination (`4a0c1`/`4a0c5`, `4a74a`/`4a753`). The caller-destination
+mechanism therefore also admits closed scalar records above the two-word
+register-return boundary; records with non-scalar storage remain excluded.
+The leaf builder and the lowering's exit local must share that storage too:
+passing a destination only at calls still leaves the leaf's move into the exit
+local. A full scalar-record constructor on another immediate-return branch
+can write the same caller slot as an already-identified unique moved builder.
+This fold rejects later builder accesses, other exit-local uses, cleanup,
+capture and persistence; it does not alias arbitrary local lifetimes.
+
+
+### 6.1 Allocation slices 4, 7b and 8 (worktree `.agent-worktrees/perfalloc`)
+
+Branch `perf/perfalloc`, uncommitted. Every change is emitter-only: MIR is
+unchanged, so the JIT, the interpreter and web keep their meaning (I9), and
+each rule lands in both emitters with the same name (`MIRRust.rs` and
+`Compiler/JetCodegen/Source/Emit`).
+
+- **Slice 4, in-place append and static literals.** `MoveFacts::appends` /
+  `JetRustEmitMoveFacts.appends` (`plan_string_appends` /
+  `jet_rust_emit_plan_string_appends`). The `ReadPlace` / String `Add` /
+  `WritePlace` triple of `s += t` on one String place (an owned local or a
+  parameter, under fields only, no split slots, not persisted) emits
+  `(place).push_str(text)`. When `t` reads the same storage (`s += s`) it
+  keeps the copy form. A literal read only as the right operand of a String
+  concatenation or append is spelled as a `&'static str`. Example:
+  `Examples/features/basics/string_append.jet`.
+- **Slice 7b, no new API.** Core has no `String.clear()`, and `out = ""`
+  already says it. `out = ""` (or `out = [T]{}`) on a place that always
+  holds a value (a `&` parameter, or a field of a local) emits `.clear()` and
+  keeps the buffer. `string-reuse/main.jet` now exists and uses it. Draft
+  ballot: `~/.cache/jet-dev/ballots/READY/D-STRING-EMPTY1.json` (keep
+  `out = ""` as the one spelling; not reviewed).
+- **Slice 8 step 1, loop capacity hints.** `MoveFacts::loop_reserves` /
+  `JetRustEmitMoveFacts.loop_reserves` (`plan_loop_reserves` /
+  `jet_rust_emit_plan_loop_reserves`, printed by `emit_block_instructions` /
+  `jet_rust_emit_block`). A preheader jumps to a header whose branch tests a
+  range cursor (`LoopRangeHasNext`) or `counter < constant` with the counter
+  set to a constant in the preheader. Each `push` in the body's entry block
+  onto a bare local list that the preheader initialized gets
+  `jet_list_reserve_for_range(list, &cursor)` or
+  `jet_list_reserve_for_loop(list, trips)` right after the cursor or counter
+  initialization. Prelude `Collections.rs` caps each hint at 1 MiB of
+  elements, so a loop that breaks early cannot over-reserve without bound,
+  and a push behind a branch is never counted. Contents and order never
+  change. This removes the 4–7 growth reallocations per call in
+  `temp-collection` (16 elements) and `list-fresh` (256). Example:
+  `Examples/features/collections/loop_push.jet` (fixed, runtime, inclusive
+  and strided ends; a seeded list; a `break` out of a 10⁹-trip loop).
+- **Proofs** are queued as `PerfAlloc-s4-{build,golden,cells,iso}` in the
+  proof queue: release build plus emitted-Rust checks; goldens for
+  `basics/`, `strings/`, `text/` and `collections/`; cells `string-fresh`,
+  `string-reuse`, `list-fresh`, `list-reuse`, `temp-collection`; and an
+  isocheck of the Jet half. `PerfAlloc-s4-cells` measured jet-O2/rust
+  string-fresh 11.60, string-reuse 45.65, list-fresh 10.07, list-reuse
+  17.56, temp-collection 3.01: the allocation slices alone do not reach the
+  1.05 gate.
+- **Slice 7, capacity reuse (worktree `.agent-worktrees/perfalloc3`,
+  branch `perf/perfalloc3`: this patch on top of the PerfValues return slot
+  of 4.2 and the slices above).** Emitter-only like the rest, both halves.
+  - Callee: `plan_return_slot` / `jet_rust_emit_plan_return_slot` now also
+    accepts a result of a reusable buffer type (`reusable_buffer_type`: a
+    String, or a list of scalars or Strings, whose drop releases memory and
+    runs nothing else), on hosted targets, when some write puts an empty
+    literal in the return place (`ReturnSlot::reuse`). That write emits
+    `place = jet_reuse_slot(__jet_return_slot)`: the buffer the caller left
+    in the slot, emptied, else a fresh one. The value is an empty list or
+    String either way.
+  - Caller: `plan_call_destinations` admits a destination of that type, and
+    retires (`CallDestinations::retires`) its `drop move local` when control
+    from the drop can reach a call that refills it. The retired drop emits
+    `jet_retire_slot(&mut local)`: the contents drop at the same point as
+    before, and the emptied buffer stays in the slot for the next call.
+    Prelude `Collections.rs` releases a retired buffer past 1 MiB, so a
+    loop keeps at most that much idle capacity. A buffer the caller keeps
+    (moved into another list, assigned elsewhere) leaves the slot and is
+    never touched again.
+  - The per-thread recycler tried before was dropped: the callee cannot
+    know whether its result will die, so every stored small result could
+    keep a large recycled buffer. Destination passing has no such hazard;
+    the buffer only flows back into the binding it came from.
+  - Example: `Examples/features/collections/buffer_reuse.jet` (shrinking
+    results, kept results, Strings, a reuse write behind a branch, `break`).
+    Unit test: `unwrap_value_slot_tests::reuse_writes_empty_the_caller_buffer`.
+  - Proof: `PerfAlloc3-s7` in the proof queue. No numbers yet. With slices 4
+    and 8 step 1, Jet's fresh cells already allocate no more than the plain
+    Rust peers; slice 7 is how Jet beats them **[INFERENCE: not measured
+    yet]**.
+- **Slice 8 step 2, inline storage (worktree `.agent-worktrees/perfalloc4`,
+  branch `perf/perfalloc4`: slice 7 plus this).** Emitter-only, both halves.
+  - Escape fact: `plan_inline_lists` / `jet_rust_emit_plan_inline_lists`
+    (`MoveFacts::inline_*`). A local list of scalars or Strings qualifies
+    when every mention of it is its one write of an empty literal, a `push`
+    onto it, a one-element read `list[i]`, a whole read that only borrowed
+    `len` / `is_empty` take, or a move whose one reader drops it. So it is
+    never moved out, cloned, captured, lent to a call, printed by a
+    `require` stop or turned into a `Vec`. `loop x in list` qualifies: it
+    lowers to `len` plus `list[i]`.
+  - Bound: `N` is the largest constant trip count of a counted loop that
+    pushes onto it (the slice 8 step 1 hints), at most 64
+    (`INLINE_LIST_MAX_VALUES`). The hint for that list is dropped.
+  - Runtime: prelude `Collections.rs` `JetInlineList<T, N>` keeps the first
+    `N` values in a `[MaybeUninit<T>; N]` in the frame and moves them to a
+    heap `Vec` on the first push past `N`, so `N` is a hint and the list's
+    contents never depend on it. Reads see `[T]` (`Deref`), and
+    `JetListSurface` / `JetListPushSurface` serve `len`, `is_empty` and
+    `push`.
+  - Emission: the local is `Option<JetInlineList<T, N>>`, the write is
+    `L = Some(JetInlineList::new())`, the drop is
+    `drop(L.take().expect(..))`; the replaced literal and the move into the
+    drop emit nothing and get no slot.
+  - Example: `Examples/features/collections/inline_list.jet` (within the
+    bound, spill past it, Strings, an emptied list, a list per call).
+  - Proof: `PerfAlloc4-s8` in the proof queue. Target cell
+    `temp-collection` (16 values per call, no heap allocation left).
+- **Found:** with the master binary, `jet run` (JIT) printed wrong output
+  for String `+=` in an early version of `string_append.jet`, while
+  `jet build` was correct. This is a cross-tier (I9) defect, separate from
+  these slices.
