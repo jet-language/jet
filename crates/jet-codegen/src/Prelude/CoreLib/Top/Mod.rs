@@ -494,7 +494,7 @@ mod jet_mod_native {
 
         const RTLD_NOW: i32 = 2;
 
-        pub(super) const EXTENSION: &str = if cfg!(target_os = "macos") { "dylib" } else { "so" };
+        pub(crate) const EXTENSION: &str = if cfg!(target_os = "macos") { "dylib" } else { "so" };
 
         fn last_error() -> String {
             // SAFETY: `dlerror` returns a process-owned NUL-terminated message
@@ -508,7 +508,7 @@ mod jet_mod_native {
             }
         }
 
-        pub(super) fn open(path: &std::path::Path) -> Result<usize, String> {
+        pub(crate) fn open(path: &std::path::Path) -> Result<usize, String> {
             let path_c = CString::new(path.as_os_str().as_bytes())
                 .map_err(|_| "library path contains NUL".to_string())?;
             // SAFETY: the path is NUL-terminated; RTLD_NOW resolves every
@@ -521,7 +521,7 @@ mod jet_mod_native {
             }
         }
 
-        pub(super) fn symbol(handle: usize, symbol: &str) -> Result<usize, String> {
+        pub(crate) fn symbol(handle: usize, symbol: &str) -> Result<usize, String> {
             let symbol = CString::new(symbol)
                 .map_err(|_| "native library symbol contains NUL".to_string())?;
             // SAFETY: both calls receive a live handle and a NUL-terminated symbol.
@@ -536,7 +536,7 @@ mod jet_mod_native {
             }
         }
 
-        pub(super) fn close(handle: usize) {
+        pub(crate) fn close(handle: usize) {
             // SAFETY: the handle came from `dlopen` and is closed exactly once.
             unsafe {
                 let _ = dlclose(handle as *mut c_void);
@@ -557,14 +557,14 @@ mod jet_mod_native {
             fn GetLastError() -> u32;
         }
 
-        pub(super) const EXTENSION: &str = "dll";
+        pub(crate) const EXTENSION: &str = "dll";
 
         fn last_error() -> String {
             // SAFETY: GetLastError is thread-local and has no pointer lifetime.
             std::io::Error::from_raw_os_error(unsafe { GetLastError() } as i32).to_string()
         }
 
-        pub(super) fn open(path: &std::path::Path) -> Result<usize, String> {
+        pub(crate) fn open(path: &std::path::Path) -> Result<usize, String> {
             let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
             wide.push(0);
             // SAFETY: the path is a valid NUL-terminated UTF-16 string.
@@ -576,7 +576,7 @@ mod jet_mod_native {
             }
         }
 
-        pub(super) fn symbol(handle: usize, symbol: &str) -> Result<usize, String> {
+        pub(crate) fn symbol(handle: usize, symbol: &str) -> Result<usize, String> {
             let symbol = CString::new(symbol)
                 .map_err(|_| "native library symbol contains NUL".to_string())?;
             // SAFETY: handle is live and symbol is NUL-terminated ASCII metadata.
@@ -588,7 +588,7 @@ mod jet_mod_native {
             }
         }
 
-        pub(super) fn close(handle: usize) {
+        pub(crate) fn close(handle: usize) {
             // SAFETY: the handle came from LoadLibraryW and is closed exactly once.
             unsafe {
                 let _ = FreeLibrary(handle as *mut c_void);
