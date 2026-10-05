@@ -1091,7 +1091,7 @@ fn db_migration_validate_request(request: &JetMigrationRequest) -> () DBError! {
     Ok(())
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:1939
-const MIGRATION_LEDGER_SCHEMA: String = "CREATE TABLE IF NOT EXISTS __jet_migrations (sequence INTEGER PRIMARY KEY AUTOINCREMENT, transition_key TEXT NOT NULL UNIQUE, migration_key TEXT NOT NULL, target TEXT NOT NULL, target_identity TEXT NOT NULL, database_identity TEXT NOT NULL, source_identity TEXT NOT NULL, schema_identity TEXT NOT NULL, tool_identity TEXT NOT NULL, operation TEXT NOT NULL, status TEXT NOT NULL, from_version INTEGER NOT NULL, to_version INTEGER NOT NULL, step_count INTEGER NOT NULL, step_ids TEXT NOT NULL, checksum TEXT NOT NULL, lock_mode TEXT NOT NULL, risk TEXT NOT NULL, started_unix_ms INTEGER NOT NULL, finished_unix_ms INTEGER NOT NULL, error TEXT)"
+MIGRATION_LEDGER_SCHEMA :: "CREATE TABLE IF NOT EXISTS __jet_migrations (sequence INTEGER PRIMARY KEY AUTOINCREMENT, transition_key TEXT NOT NULL UNIQUE, migration_key TEXT NOT NULL, target TEXT NOT NULL, target_identity TEXT NOT NULL, database_identity TEXT NOT NULL, source_identity TEXT NOT NULL, schema_identity TEXT NOT NULL, tool_identity TEXT NOT NULL, operation TEXT NOT NULL, status TEXT NOT NULL, from_version INTEGER NOT NULL, to_version INTEGER NOT NULL, step_count INTEGER NOT NULL, step_ids TEXT NOT NULL, checksum TEXT NOT NULL, lock_mode TEXT NOT NULL, risk TEXT NOT NULL, started_unix_ms INTEGER NOT NULL, finished_unix_ms INTEGER NOT NULL, error TEXT)"
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:1941
 fn db_migration_ensure_schema<B: JetDBBackend>(backend: &B) -> () DBError! {
     _ :: backend.execute(&(MIGRATION_LEDGER_SCHEMA.to_string(), []), true)?
