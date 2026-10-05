@@ -2364,16 +2364,15 @@ fn jet_codegen_comptime_types(session: JetCodegenComptimeSession) -> [MIRTypeDef
     types
 }
 
-// The temporary interpreter lowering of comptime items: their checked
-// function closure, returned as program rows, then one lowered item function
-// per request, pushed onto `items` in request order (a returned list moves to
-// the caller; a struct field moved out of a result would be copied). A type
-// row names only the methods lowered with this closure: the owner index
-// consults the closure method set (jet_codegen_function_type_generic_names)
-// and type rows drop methods outside the closure's function index
-// (jet_codegen_type_method_ids), so the staged modules are never rewritten
-// per item.
-pub fn lower_comptime_closure(session: &JetCodegenComptimeSession, requests: [SemaComptimeItemRequest], functions: [TFunc], items: &[JetCodegenLoweredFunction]) -> JetCodegenFunctions {
+// The temporary interpreter lowering of a comptime program's checked function
+// closure, returned as program rows; the session's builder keeps the
+// closure's function index, so lower_comptime_item then lowers each item
+// function of the program against it. A type row names only the methods
+// lowered with this closure: the owner index consults the closure method set
+// (jet_codegen_function_type_generic_names) and type rows drop methods
+// outside the closure's function index (jet_codegen_type_method_ids), so the
+// staged modules are never rewritten per program.
+pub fn lower_comptime_closure(session: &JetCodegenComptimeSession, functions: [TFunc]) -> JetCodegenFunctions {
     closure_methods := [String:Bool]{}
     loop function in functions -> closure_methods[jet_codegen_qualified_function_key(function.module_identity, function.key)] = true
     session.builder.owners.closure_methods = ^closure_methods
@@ -2381,12 +2380,14 @@ pub fn lower_comptime_closure(session: &JetCodegenComptimeSession, requests: [Se
     rows := jet_codegen_lower_each_function(&session.builder, functions, None)
     constants := session.constants
     types := jet_codegen_comptime_types(session)
-    lowered := jet_codegen_functions_from_rows(rows, functions, session.builder.function_index, session.builder.modules, session.trait_names, ^types, ^constants)
-    loop request in requests {
-        item_function := jet_codegen_comptime_item_function(request, session.builder.modules)
-        &items.push(jet_codegen_lower_function(&session.builder, item_function, [TStmt]{}, Val(request.expression), None))
-    }
-    lowered
+    jet_codegen_functions_from_rows(rows, functions, session.builder.function_index, session.builder.modules, session.trait_names, ^types, ^constants)
+}
+
+// The item function of one comptime `request`, lowered against the closure
+// the last lower_comptime_closure set up on `session`.
+pub fn lower_comptime_item(session: &JetCodegenComptimeSession, request: SemaComptimeItemRequest) -> JetCodegenLoweredFunction {
+    item_function := jet_codegen_comptime_item_function(request, session.builder.modules)
+    jet_codegen_lower_function(&session.builder, item_function, [TStmt]{}, Val(request.expression), None)
 }
 
 // Positions of `keys` in stable ascending (key, tie) order; an empty `keys`
