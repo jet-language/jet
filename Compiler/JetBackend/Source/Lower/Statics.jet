@@ -1,27 +1,24 @@
 // Module constants are frozen once; Global borrows their data and clones only
 // when checked MIR ownership requires an owner. Literal Constant stays separate.
 //
-// A String inside a frozen tree is a runtime string handle, whose layout
-// belongs to the runtime the program links (the Rust runtime pack or the
-// freestanding image runtime), so it cannot be frozen at build time: its
-// slot stays zero and a fixup (LowerStaticFixup) fills it with
-// jet_rt_string_from_static before the program's entry runs (Entry.jet). A
-// String-typed constant is a one-word cell filled the same way; a read loads
-// the handle from it.
+// Runtime-owned words inside a frozen tree (String and spilled exact Int)
+// cannot be frozen at build time. Their slots stay zero until the entry
+// runs the recorded constructor on static text. The resulting owners live
+// for the process; an ownership-bearing Global read clones them.
 use jet_foundation.[
     MIRConstant, MIRInstruction, MIRProgram, MIRType,
     mir_type_display_name,
 ]
 use core.math as math
 
-// `text`: a String whose handle a fixup makes from that data at startup.
-struct LowerStaticValue { pub word: Int, pub data: LIRDataID?, pub text: LIRDataID? }
+// `text`: constructor input for a runtime-owned word filled at startup.
+struct LowerStaticValue { pub word: Int, pub data: LIRDataID?, pub text: LIRDataID?, pub constructor: String }
 
-// Slot `offset` of data `object` holds the String made from data `text`.
-struct LowerStaticFixup { pub object: LIRDataID, pub offset: Int, pub text: LIRDataID }
+// Slot `offset` of data `object` receives the constructor's result.
+struct LowerStaticFixup { pub object: LIRDataID, pub offset: Int, pub text: LIRDataID, pub constructor: String }
 
 fn lower_static_word(value: Int) -> LowerStaticValue Never! {
-    LowerStaticValue{word: value, data: None, text: None}
+    LowerStaticValue{word: value, data: None, text: None, constructor: ""}
 }
 
 fn lower_static_object(m: &LowerModule, bytes: Int) -> LIRDataID Never! {
@@ -34,14 +31,18 @@ fn lower_static_object(m: &LowerModule, bytes: Int) -> LIRDataID Never! {
 }
 
 fn lower_static_pointer(id: LIRDataID) -> LowerStaticValue Never! {
-    LowerStaticValue{word: 0, data: Val(id), text: None}
+    LowerStaticValue{word: 0, data: Val(id), text: None, constructor: ""}
 }
 
-// Writes the low `size` bytes of a word (or a pointer relocation, or records
-// a String fixup) at offset.
+fn lower_static_runtime(m: &LowerModule, value: String, constructor: String) -> LowerStaticValue Never! {
+    LowerStaticValue{word: 0, data: None, text: Val(lower_data(&m, value)), constructor: constructor}
+}
+
+// Writes the low `size` bytes of a word, a pointer relocation, or a runtime
+// constructor fixup at offset.
 fn lower_static_store_sized(m: &LowerModule, object: LIRDataID, offset: Int, value: LowerStaticValue, size: Int) Never! {
     if value.text == .Val(text) {
-        &m.static_fixups.push(LowerStaticFixup{object: object, offset: offset, text: text})
+        &m.static_fixups.push(LowerStaticFixup{object: object, offset: offset, text: text, constructor: value.constructor})
     } else if value.data == .Val(target) {
         &m.data[object.value].relocs.push(LIRDataReloc{offset: offset, target: target, addend: 0})
     } else {
@@ -140,8 +141,7 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
         .Unit -> return Val(lower_static_word(0))
         .Int(value, _, _) -> {
             if lower_is_exact_int(ty) && !lower_int_inline(value) {
-                lower_fail(&m, &f, "BigInt constant {value} is not lowered at O0 yet")
-                return None
+                return Val(lower_static_runtime(&m, "{value}", "jet_rt_int_from_static"))
             }
             return Val(lower_static_word(value))
         }
@@ -154,7 +154,7 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
             }
             return Val(lower_static_word(math.to_bits(value)))
         }
-        .String(value) -> return Val(LowerStaticValue{word: 0, data: None, text: Val(lower_data(&m, value))})
+        .String(value) -> return Val(lower_static_runtime(&m, value, "jet_rt_string_from_static"))
         .Struct(_, _) -> {
             id :: lower_static_object(&m, lower_size(p, ty).size)
             lower_static_fill(p, &m, &f, id, 0, ty, constant)
@@ -243,7 +243,13 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
             if f.failed -> return None
             return Val(lower_static_pointer(id))
         }
-        .BigInt(_) -> lower_fail(&m, &f, "BigInt constants are not lowered at O0 yet")
+        .BigInt(decimal) -> {
+            if !lower_is_exact_int(ty) {
+                lower_fail(&m, &f, "BigInt constant of a non-Int type is not lowered at O0 yet")
+                return None
+            }
+            return Val(lower_static_runtime(&m, decimal, "jet_rt_int_from_static"))
+        }
         .Bytes(_) -> lower_fail(&m, &f, "Bytes constants are not lowered at O0 yet")
         .Map(_) -> lower_fail(&m, &f, "Map constants are not lowered at O0 yet")
     }
@@ -274,9 +280,9 @@ fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     if value.data == .Val(data) {
         owned := false
         if instruction.result == .Val(result) -> owned = lower_value_owned(c, result)
-        source :: if owned -> lower_pointer(&f) else -> dst
-        if repr == .Handle(_, _) {
-            // A String constant's data is its cell: the handle a fixup stored.
+        source :: if owned -> (if repr == .Word -> lower_word(&f) else -> lower_pointer(&f)) else -> dst
+        if repr == .Handle(_, _) || (repr == .Word && lower_is_exact_int(definition.ty)) {
+            // Runtime-owned constants point at the cell filled by their fixup.
             cell :: lower_pointer(&f)
             lower_emit(&f, LIRInst.DataAddress{dst: cell, data: data})
             lower_emit(&f, LIRInst.Load{dst: source, base: cell, offset: 0})
@@ -285,6 +291,7 @@ fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         }
         if owned {
             if repr == {
+                .Word -> lower_call_runtime(&m, &f, "jet_rt_int_clone", [LIRValueID]{source}, Val(dst))
                 .Handle(_, clone) -> lower_call_runtime(&m, &f, clone, [LIRValueID]{source}, Val(dst))
                 .Boxed(ty) -> lower_call_clone_glue(&m, &f, ty, source, dst)
                 .Inline(aggregate) -> {
@@ -299,17 +306,17 @@ fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     }
 }
 
-// Fills every String slot of the frozen statics (LowerStaticFixup); the entry
-// function (Entry.jet) runs this before the program's entry. The handles live
-// as long as the process, like the frozen data holding them.
+// Fills every runtime-owned slot of the frozen statics before entry. The
+// handles live as long as the process, like the frozen data holding them.
 fn lower_static_fixups(m: &LowerModule, f: &LowerFunction) Never! {
     fixups :: ~m.static_fixups
     loop fixup in fixups {
         text :: lower_pointer(&f)
         lower_emit(&f, LIRInst.DataAddress{dst: text, data: fixup.text})
         length :: lower_const(&f, m.data[fixup.text.value].bytes.len())
-        handle :: lower_pointer(&f)
-        lower_call_runtime(&m, &f, "jet_rt_string_from_static", [LIRValueID]{text, length}, Val(handle))
+        layout :: if fixup.constructor == "jet_rt_int_from_static" -> lir_layout_word() else -> lir_layout_pointer()
+        handle :: lower_new_value(&f, layout, None, None)
+        lower_call_runtime(&m, &f, fixup.constructor, [LIRValueID]{text, length}, Val(handle))
         object :: lower_pointer(&f)
         lower_emit(&f, LIRInst.DataAddress{dst: object, data: fixup.object})
         lower_emit(&f, LIRInst.Store{base: object, offset: fixup.offset, value: handle})

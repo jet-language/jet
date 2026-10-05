@@ -275,108 +275,131 @@ fn lower_list_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     true
 }
 
-// MIRRust.rs:29480 `jet_view_new(_range)` / `jet_view_mut_new(_range)`
-// (Core.rs:2496-2543): the receiver's elements from `start` to `end`, `end`
-// exclusive when the Range says so (two bare bounds are inclusive), checked
-// like jet_checked_view_window, whose stop names the enclosing function's
-// line (MIRRust.rs function_stack_context).
-fn lower_view_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, receiver_ty: MIRType, receiver_place: MIRPlaceID?, args: [MIRValueID]) Never! {
-    elem :: lower_list_element(receiver_ty) ?? return lower_fail(&m, &f, "a view of a non-List is not lowered at O0 yet")
-    ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "a view without a checked type is not lowered at O0 yet")
-    if lower_view_element(ty) == None -> return lower_fail(&m, &f, "a view of type {mir_type_display_name(ty)} is not lowered at O0 yet")
+// Range fields are read using the checked declaration's layout. Bare bounds
+// differ by kernel: List/View are inclusive, jet_string_slice is exclusive.
+struct LowerSliceBounds { pub start: LIRValueID, pub end: LIRValueID, pub exclusive: LIRValueID }
+
+fn lower_slice_bounds(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, args: [MIRValueID], bare_exclusive: Bool) -> LowerSliceBounds? {
     bounds := [LIRValueID]{}
     bound_types := [MIRType]{}
     exclusive := LIRValueID{value: -1}
     if args.len() == 2 {
         loop arg in args {
-            bound_ty :: lower_value_type(c, arg) ?? return lower_fail(&m, &f, "a view bound without a checked type is not lowered at O0 yet")
-            bound :: lower_use(&m, &f, arg) ?? return
+            bound_ty :: lower_value_type(c, arg) ?? {
+                lower_fail(&m, &f, "a slice bound without a checked type is not lowered at O0 yet")
+                return None
+            }
+            bound :: lower_use(&m, &f, arg) ?? return None
             &bounds.push(bound)
             &bound_types.push(bound_ty)
         }
-        exclusive = lower_const_flag(&f, 0)
+        exclusive = lower_const_flag(&f, if bare_exclusive -> 1 else -> 0)
     } else if args.len() == 1 {
-        range_ty :: lower_value_type(c, args[0]) ?? return lower_fail(&m, &f, "a view range without a checked type is not lowered at O0 yet")
-        range :: lower_use(&m, &f, args[0]) ?? return
+        range_ty :: lower_value_type(c, args[0]) ?? {
+            lower_fail(&m, &f, "a slice range without a checked type is not lowered at O0 yet")
+            return None
+        }
+        range :: lower_use(&m, &f, args[0]) ?? return None
         members :: lower_inline_members(p, range_ty)
-        names :: [String]{"start", "end", "exclusive"}
-        loop name in names {
+        loop name in [String]{"start", "end", "exclusive"} {
             found := -1
             loop (index, member) in members { if member.name == name -> found = index }
-            if found < 0 -> return lower_fail(&m, &f, "a view range of type {mir_type_display_name(range_ty)} is not lowered at O0 yet")
+            if found < 0 {
+                lower_fail(&m, &f, "a slice range of type {mir_type_display_name(range_ty)} has no {name} field")
+                return None
+            }
             member :: members[found]
-            value :: lower_read_at(p, &f, range, member.offset, member.ty) ?? return lower_fail(&m, &f, "a view range field without a layout is not lowered at O0 yet")
-            if name == "exclusive" {
-                exclusive = value
-            } else {
+            value :: lower_read_at(p, &f, range, member.offset, member.ty) ?? {
+                lower_fail(&m, &f, "a slice range field without a layout is not lowered at O0 yet")
+                return None
+            }
+            if name == "exclusive" -> exclusive = value
+            else {
                 &bounds.push(value)
                 &bound_types.push(member.ty)
             }
         }
     } else {
-        return lower_fail(&m, &f, "this view_new arity is not lowered at O0 yet")
+        lower_fail(&m, &f, "this slice bound arity is not lowered at O0 yet")
+        return None
     }
-    if lower_value_layout(f, exclusive) != lir_layout_bool() -> return lower_fail(&m, &f, "a non-Bool view range end flag is not lowered at O0 yet")
+    if lower_value_layout(f, exclusive) != lir_layout_bool() {
+        lower_fail(&m, &f, "a non-Bool slice end flag is not lowered at O0 yet")
+        return None
+    }
     natives := [LIRValueID]{}
     loop (index, bound) in bounds {
-        if lower_value_layout(f, bound) != lir_layout_word() -> return lower_fail(&m, &f, "a non-word view bound is not lowered at O0 yet")
+        if lower_value_layout(f, bound) != lir_layout_word() {
+            lower_fail(&m, &f, "a non-word slice bound is not lowered at O0 yet")
+            return None
+        }
         if lower_is_exact_int(bound_types[index]) {
             native :: lower_word(&f)
             lower_convert_exact(&m, &f, native, bound, "jet_int_owned_to_i64", false)
             &natives.push(native)
-        } else {
-            &natives.push(bound)
-        }
+        } else -> &natives.push(bound)
     }
-    start :: natives[0]
-    end :: natives[1]
-    list := LIRValueID{value: -1}
-    if receiver_place != None {
-        list = lower_receiver_header(p, c, &m, &f, receiver_place, "View") ?? return
-    } else {
-        list = lower_use(&m, &f, receiver) ?? return
-    }
+    Val(LowerSliceBounds{start: natives[0], end: natives[1], exclusive: exclusive})
+}
+
+// Only the shared runtime checks bounds and chooses the exclusive stop.
+// The backend marshals a window header; owned slices clone its elements.
+fn lower_slice_window(p: MIRProgram, m: &LowerModule, f: &LowerFunction, list: LIRValueID, elem: MIRType, bounds: LowerSliceBounds, site: MIRPanicLoc, view: Bool, dst: LIRValueID) Never! {
     length :: lower_list_word(&f, list, 0)
-    zero :: lower_const(&f, 0)
-    one :: lower_const(&f, 1)
-    widen :: lower_numeric_choose(&f, exclusive, zero, one)
+    args := [LIRValueID]{bounds.start, bounds.end, bounds.exclusive, length}
+    loop arg in lower_location(p, &m, &f, site) -> &args.push(arg)
     stop_at :: lower_word(&f)
-    lower_emit(&f, LIRInst.Binary{dst: stop_at, op: LIRBinaryOp.Add, left: end, right: widen})
-    // RangeBounds.rs jet_range_bounds: start < 0, end < 0, start > end, an
-    // inclusive end overflowing, or an end past the receiver.
-    failed := lower_flag(&f)
-    lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Lt, left: start, right: zero})
-    failed = lower_view_failed_when(&f, failed, LIRCondition.Lt, end, zero)
-    failed = lower_view_failed_when(&f, failed, LIRCondition.Gt, start, end)
-    failed = lower_view_failed_when(&f, failed, LIRCondition.Lt, stop_at, end)
-    failed = lower_view_failed_when(&f, failed, LIRCondition.Gt, stop_at, length)
-    stop :: lower_new_block(&f)
-    valid :: lower_new_block(&f)
-    lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(valid, [LIRValueID]{})})
-    lower_start(&f, stop, [LIRValueID]{})
-    stop_args := [LIRValueID]{start, end, exclusive, length}
-    site :: MIRPanicLoc{file: c.mir.source_file, line: lower_source_line(p, &m, c.mir.source_file, c.mir.span.start), column: 0}
-    loop arg in lower_location(p, &m, &f, site) -> &stop_args.push(arg)
-    lower_noreturn_call(&m, &f, "jet_rt_view_window_stop", stop_args)
-    lower_start(&f, valid, [LIRValueID]{})
-    dst :: lower_result(p, c, &m, &f, instruction) ?? return
-    lower_storage_into(p, &f, dst, ty)
+    lower_call_runtime(&m, &f, if view -> "jet_rt_view_end" else -> "jet_rt_slice_end", args, Val(stop_at))
     count :: lower_word(&f)
-    lower_emit(&f, LIRInst.Binary{dst: count, op: LIRBinaryOp.Sub, left: stop_at, right: start})
+    lower_emit(&f, LIRInst.Binary{dst: count, op: LIRBinaryOp.Sub, left: stop_at, right: bounds.start})
+    zero :: lower_const(&f, 0)
     lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: count})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: zero})
     data :: lower_list_data(&f, list)
-    first :: lower_list_address(&f, data, start, lower_list_stride(p, elem))
+    first :: lower_list_address(&f, data, bounds.start, lower_list_stride(p, elem))
     lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: first})
 }
 
-// `failed`, or else whether `left condition right` holds.
-fn lower_view_failed_when(f: &LowerFunction, failed: LIRValueID, condition: LIRCondition, left: LIRValueID, right: LIRValueID) -> LIRValueID Never! {
-    check :: lower_flag(&f)
-    lower_emit(&f, LIRInst.Compare{dst: check, condition: condition, left: left, right: right})
-    either :: lower_flag(&f)
-    lower_logic(&f, either, false, failed, check)
-    either
+fn lower_view_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, receiver_ty: MIRType, receiver_place: MIRPlaceID?, args: [MIRValueID]) Never! {
+    elem :: lower_list_element(receiver_ty) ?? return lower_fail(&m, &f, "a view of a non-List is not lowered at O0 yet")
+    ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "a view without a checked type is not lowered at O0 yet")
+    if lower_view_element(ty) == None -> return lower_fail(&m, &f, "a view of type {mir_type_display_name(ty)} is not lowered at O0 yet")
+    bounds :: lower_slice_bounds(p, c, &m, &f, args, false) ?? return
+    list :: if receiver_place != None -> lower_receiver_header(p, c, &m, &f, receiver_place, "View") ?? return
+        else -> lower_use(&m, &f, receiver) ?? return
+    site :: MIRPanicLoc{file: c.mir.source_file, line: lower_source_line(p, &m, c.mir.source_file, c.mir.span.start), column: 0}
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_storage_into(p, &f, dst, ty)
+    lower_slice_window(p, &m, &f, list, elem, bounds, site, true, dst)
+}
+
+fn lower_slice(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, base: MIRValueID, start: MIRValueID, end: MIRValueID, range: MIRValueID?, site: MIRPanicLoc) Never! {
+    symbol :: lower_runtime_symbol(row)
+    if symbol != "jet_slice_vec" && symbol != "jet_slice_vec_range" && symbol != "jet_slice_range" && symbol != "jet_string_slice"
+        && symbol != "jet_view_new" && symbol != "jet_view_new_range" && symbol != "jet_view_mut_new" && symbol != "jet_view_mut_new_range" {
+        return lower_fail(&m, &f, "Slice runtime kernel {symbol} is not lowered at O0 yet")
+    }
+    args :: if range == .Val(value) -> [MIRValueID]{value} else -> [MIRValueID]{start, end}
+    bounds :: lower_slice_bounds(p, c, &m, &f, args, symbol == "jet_string_slice") ?? return
+    base_ty :: lower_value_type(c, base) ?? return lower_fail(&m, &f, "Slice without a checked base type is not lowered at O0 yet")
+    ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "Slice without a checked result type is not lowered at O0 yet")
+    source :: lower_use(&m, &f, base) ?? return
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    if lower_string_type(base_ty) {
+        call_args := [LIRValueID]{source, bounds.start, bounds.end, bounds.exclusive}
+        loop arg in lower_location(p, &m, &f, site) -> &call_args.push(arg)
+        return lower_call_runtime(&m, &f, "jet_rt_string_slice_range", call_args, Val(dst))
+    }
+    elem :: lower_list_element(base_ty) ?? return lower_fail(&m, &f, "Slice of {mir_type_display_name(base_ty)} is not lowered at O0 yet")
+    if lower_list_element(ty) == None -> return lower_fail(&m, &f, "Slice result {mir_type_display_name(ty)} is not lowered at O0 yet")
+    lower_storage_into(p, &f, dst, ty)
+    if lower_view_element(ty) != None {
+        return lower_slice_window(p, &m, &f, source, elem, bounds, site, true, dst)
+    }
+    window :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: window, size: 24, align: 8})
+    lower_slice_window(p, &m, &f, source, elem, bounds, site, false, window)
+    lower_inline_clone(p, &m, &f, window, dst, ty)
 }
 
 // Moves one element's value (an inline aggregate's bytes) from `from` to `to`.
