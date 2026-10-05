@@ -412,7 +412,7 @@ impl JetDevtoolsMetricStore {
         rows := [JetDevtoolsMetricTableRow]{}
         loop series in self.retained_series {
             if instrument == .Val(name) {
-                if name != series.instrument.name -> continue
+                if name != series.instrument.name -> next
             }
             loop point in series.points() -> &rows.push(point.table_row())
         }
@@ -903,7 +903,7 @@ fn linked_logs_for_span(span: JetDevtoolsTraceSpan, logs: JetDevtoolsLogRing) ->
     first :: logs.retained_records[0].index // #4500
     last :: logs.retained_records[logs.len() - 1].index // #4500
     loop log_index in span.linked_log_indexes {
-        if log_index < first || log_index > last -> continue
+        if log_index < first || log_index > last -> next
         offset :: Int.from_u64(log_index - first) // bounded by retained count
         record :: logs.retained_records[offset] // #4500 retaining loan
         &links.push(JetDevtoolsTraceLogLink{span_index: span.index, log_index: record.index, trace_id: span.identity.trace_id, span_id: span.identity.span_id, span_source_id: span.source_id(), log_source_id: record.source_id(), timestamp_ns: record.timestamp_ns, level: record.level, body: record.body})

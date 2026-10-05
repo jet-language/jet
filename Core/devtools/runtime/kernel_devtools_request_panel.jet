@@ -697,7 +697,7 @@ impl JetDevtoolsRequestPanelState {
         events := [d.JetDevtoolsEvent]{}
         loop i in 0..<self.order.len() {
             id :: self.order[i] // #4500: retaining Queue element loan.
-            if !self.rows.has_key(id) -> continue
+            if !self.rows.has_key(id) -> next
             if self.rows[id].request == .Val(fact) -> &events.push(fact.to_protocol_event(~source) ?? return Err(err))
             if self.rows[id].response == .Val(fact) -> &events.push(fact.to_protocol_event(~source) ?? return Err(err))
             loop fact in self.rows[id].access_events -> &events.push(fact.to_protocol_event(~source) ?? return Err(err))
