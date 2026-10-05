@@ -221,7 +221,7 @@ pub fn jet_db_validate_explain_sql(sql: &SQL) -> () DBError! {
         return Err(DBError{message: "database EXPLAIN accepts one comment-free SELECT"})
     }
     tokens :: db_sql_tokens(text)
-    if tokens.first().map(fn(token) { token.2.as_str() }) != Val("select") {
+    if tokens.first().map(fn(token) { token.2.as_str() }) != "select" {
         return Err(DBError{message: "database EXPLAIN accepts read-only SELECT statements only"})
     }
     Ok(())
@@ -305,7 +305,7 @@ fn db_sql_contains_comment(sql: &String) -> Bool {
             }
             next
         }
-        if bytes.get(i..<i + 2) == Val(b"--") || bytes.get(i..<i + 2) == Val(b"/*") || bytes.get(i..<i + 2) == Val(b"*/") { return true }
+        if bytes.get(i..<i + 2) == b"--" || bytes.get(i..<i + 2) == b"/*" || bytes.get(i..<i + 2) == b"*/" { return true }
         i += 1
     }
     false
@@ -339,7 +339,7 @@ pub fn jet_db_write_set(steps: &[SQL]) -> String {
                     if kind == "create" || kind == "drop" {
                         loop {
                             word :: tokens.get(index).map(fn(token) { token.2.as_str() })
-                            if word != Val("if") && word != Val("not") && word != Val("exists") { break }
+                            if word != "if" && word != "not" && word != "exists" { break }
                             index = index.checked_add(1)?
                         }
                     }
@@ -532,7 +532,7 @@ fn jet_db_apply_policy_inner(sql: &SQL, table: &String, compiled: JetRowPolicyEx
         return Err(DBError{message: "row policy supports SELECT, INSERT, UPDATE, and DELETE only"})
     }
     expected_table :: policy_table.to_ascii_lowercase()
-    if db_sql_target_table(&tokens, kind).as_deref() != Val(expected_table.as_str()) {
+    if db_sql_target_table(&tokens, kind).as_deref() != expected_table.as_str() {
         return Err(DBError{message: "policy scope targets table `{policy_table}`"})
     }
     if !db_sql_simple_target(sql_text, &tokens, kind) {
