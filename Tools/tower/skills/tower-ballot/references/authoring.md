@@ -14,26 +14,33 @@ Before recommending an option, attack each of its losses:
 5. Repeat until losses are empty or negligible with a mitigation for each. If removing a loss is physically impossible, flag it in the summary and show how to minimize it.
 
 The required result is fixed. The order and tools used to reach it are not.
-A recommendation with an unattacked loss is still a draft. Record material
-changes in the card log so the next reader sees the reasoning.
+A recommendation with an unattacked loss is still a draft. Keep at most two
+negligible, concretely mitigated losses; if more remain, redesign or narrow the
+choice. Explain costs shared by every option once as shared work. Keep decision
+rationale and design changes in the ballot's `detail`, not a substitute card log.
 
-## Ground comparisons when useful
+## Research before drafting
 
-For a user-facing syntax, workflow, or API choice, consult current external
-practice when it can change the owner's choice. Start with a primary
-specification or official documentation. Add a reproducible public adoption or
-reception signal when one exists.
+Before drafting an unresolved owner choice, study how proven ecosystems and
+systems solve the same problem. Start with primary specifications and official
+documentation. Seek data where it exists: adoption, measured friction,
+migration pain, and failure post-mortems.
 
 State what each number measures. Downloads and stars measure a tool, not one
 feature. Code-search counts measure indexed matches, not users. Record query,
 date, exclusions, and known limits. Never present a repository census as market
-evidence.
+evidence or invent data that is unavailable.
 
-Name the strongest praised design, why it is praised, and its recorded
-complaints. Keep the useful mechanism and repair observed faults instead of
-copying accidental syntax. Put URLs and measured signals in `comparisons`.
-Skip this research for a local choice already fixed by ratified law when no
-comparison can affect the decision.
+Record proven right ways and wrong ways, sources, and what went wrong in
+`detail`; use `technical` for implementation facts. Combine the best approaches
+into the no-compromise recommendation: design away avoidable costs instead of
+offering a known-bad trade-off. The short surface must explain why it wins,
+which known mistakes it avoids, and why the genuine alternatives are worse,
+without showing the evidence machinery.
+
+A choice settled by ratified law or an implementation detail is not a ballot:
+record "settled by D-XXX" or "implementation choice" in its proper work context.
+Do not research or sell a new owner choice where none exists.
 
 ## Full-profile review handoff
 

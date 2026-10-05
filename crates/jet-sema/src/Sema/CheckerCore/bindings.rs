@@ -1797,10 +1797,14 @@ impl<'a> Checker<'a> {
         };
         self.borrow_ctx = saved_borrow_ctx;
         let arena_alloc_source = arena_alloc_source.or_else(|| self.arena_alloc_source(&b.init));
+        // D-MEM-COPYSEM1=A (`infer_checked`'s field-read rule): a borrowed
+        // window is not a value to duplicate. `rec.view_field` bound here IS
+        // the view; an `Expr::Copy` would materialize an owned value under a
+        // binding typed as the view and erase its owner relation (#4392).
         if implicit_field_read
-            && it
-                .as_ref()
-                .is_some_and(|ty| self.is_cloneable_type(ty))
+            && it.as_ref().is_some_and(|ty| {
+                self.is_cloneable_type(ty) && !crate::Sema::CheckerCore::is_core_view_generic(ty)
+            })
         {
             let span = b.init.span();
             let inner = std::mem::replace(&mut b.init, Expr::Absent(span));

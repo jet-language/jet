@@ -49,6 +49,9 @@ patterns, and selects a subset with `..`. Its
 [golden](features/expected/basics/tuple_destructure_names.out) makes the
 member-to-binding mapping visible.
 
+[`view_return_lifetimes.jet`](features/memory/view_return_lifetimes.jet) shows
+borrowed returns from named owners and direct operations on the returned view.
+The caller keeps the owner alive; binding the returned view first is optional.
 ## Auxiliary golden stream suffix
 
 The feature runner discovers `.jet` files and project directories containing a

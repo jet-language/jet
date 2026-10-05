@@ -4,6 +4,24 @@ This is the sole detailed cadence for the orchestration, Tower, and verify
 skills. `AGENTS.md` remains the policy authority. The board is the work ledger;
 chat, worker receipts, and local notes do not replace it.
 
+## Diagnose, then batch fix
+
+Before repairing a set of failures, diagnose the requested corpus once and
+classify all visible blockers. Rank root causes by the items each blocks and
+cumulative coverage (Pareto). Fix the highest-coverage set together, then run
+one proof per batch. Do not loop one error at a time unless the owner orders
+it. Keep the findings in Tower; this does not authorize unrelated broad proof.
+
+## One integration line
+
+Branch parallel work from one integration line and return it promptly after
+focused proof. One named integrator lands branches or patches; do not keep
+long-lived side branches.
+
+`master` advances only when a goal or milestone is accomplished and its proof
+gate passes. Use the commit-bound sweep and fresh review below; individual
+patches do not substitute for milestone evidence.
+
 ## Card loop
 
 Repeat this sequence for each requested card or bounded slice:

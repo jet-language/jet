@@ -1149,6 +1149,29 @@ impl<'a> Checker<'a> {
         Some(result_ty)
     }
 
+    /// Binary and compound arithmetic share the same missing-hook diagnostic.
+    pub(in crate::Sema) fn report_missing_operator_hook(
+        &mut self,
+        op: BinOp,
+        type_name: &str,
+        span: Span,
+    ) {
+        let trait_name = match op {
+            BinOp::Add => crate::Syntax::TRAIT_ADD,
+            BinOp::Sub => crate::Syntax::TRAIT_SUB,
+            BinOp::Mul => crate::Syntax::TRAIT_MUL,
+            BinOp::Div => crate::Syntax::TRAIT_DIV,
+            _ => unreachable!(),
+        };
+        self.diags.push(Diagnostic::error(
+            "E0360",
+            format!("no {} operator is defined for `{}`", operator_label(op), type_name),
+            format!("user arithmetic dispatches only through one `impl {}.{}` hook", type_name, trait_name),
+            format!("implement `{type_name}.{trait_name}`, or call a named method"),
+            Some(span),
+        ));
+    }
+
     pub(crate) fn infer_binary(
         &mut self,
         op: BinOp,
@@ -2460,30 +2483,7 @@ impl<'a> Checker<'a> {
                 } else if let Type::Named(type_name) = &lt {
                     let (import_ns, leaf) = Self::split_type_name(type_name);
                     if self.struct_owner_module(leaf, import_ns).is_some() {
-                        let trait_name = match op {
-                            BinOp::Add => crate::Syntax::TRAIT_ADD,
-                            BinOp::Sub => crate::Syntax::TRAIT_SUB,
-                            BinOp::Mul => crate::Syntax::TRAIT_MUL,
-                            BinOp::Div => crate::Syntax::TRAIT_DIV,
-                            _ => unreachable!(),
-                        };
-                        self.diags.push(Diagnostic::error(
-                            "E0360",
-                            format!(
-                                "no {} operator is defined for `{}`",
-                                operator_label(op),
-                                type_name
-                            ),
-                            format!(
-                                concat!(
-                                    "user arithmetic dispatches only through one ",
-                                    "`impl {}.{}` hook"
-                                ),
-                                type_name, trait_name
-                            ),
-                            format!("implement `{type_name}.{trait_name}`, or call a named method"),
-                            Some(span),
-                        ));
+                        self.report_missing_operator_hook(op, type_name, span);
                         None
                     } else {
                         self.op_mismatch(op, &lt, &rt, span);

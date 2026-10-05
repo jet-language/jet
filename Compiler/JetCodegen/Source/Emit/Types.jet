@@ -36,7 +36,9 @@ use jet_foundation.[
     MIRTypeKind,
     MIRVariant,
     MIRVariantPayload,
+    MIRViewProvenanceEntry,
     MIRVisibility,
+    Span,
     mir_measure_expression,
     mir_measure_literal_value,
     mir_trait_id,
@@ -63,6 +65,248 @@ fn jet_rust_emit_callable_param_type(ctx: &JetRustEmitContext, ty: MIRType, acce
 
 fn jet_rust_emit_callable_return(ctx: &JetRustEmitContext, function: MIRFunction) -> String Never! {
     jet_rust_emit_type(&ctx, function.return_type)
+}
+
+// MIRRust type_contains_view: `ty` carries a `View`/`ViewMut` whose Rust
+// spelling borrows, directly or through a declared type in `carriers`.
+fn jet_rust_emit_type_contains_view(ty: MIRType, carriers: [String:Bool]) -> Bool Never! {
+    if ty.kind == {
+        .Apply(name, args) -> {
+            // D-PIN1=A: `Pin<T>` joins the borrowed-window family (`&mut T`).
+            if (name.name == "View" || name.name == "ViewMut" || name.name == "Pin") && args.len() == 1 -> return true
+            if carriers.get(name.name) != None -> return true
+            loop arg in args {
+                if jet_rust_emit_type_contains_view(arg, carriers) -> return true
+            }
+            return false
+        }
+        .List(inner) | .Shared(inner) | .Option(inner) -> return jet_rust_emit_type_contains_view(inner, carriers)
+        .Map(key, value) -> return jet_rust_emit_type_contains_view(key, carriers) || jet_rust_emit_type_contains_view(value, carriers)
+        .Result(ok, err) -> return jet_rust_emit_type_contains_view(ok, carriers) || jet_rust_emit_type_contains_view(err, carriers)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if jet_rust_emit_type_contains_view(field.ty, carriers) -> return true
+            }
+            return false
+        }
+        .FixedList(elem, _) -> return jet_rust_emit_type_contains_view(elem, carriers)
+        .Tagged(_, inner) -> return jet_rust_emit_type_contains_view(inner, carriers)
+        .InlineRange(base, _, _) -> return jet_rust_emit_type_contains_view(base, carriers)
+        .Quantity(base, _) -> return jet_rust_emit_type_contains_view(base, carriers)
+        .Union(members) -> {
+            loop member in members {
+                if jet_rust_emit_type_contains_view(member, carriers) -> return true
+            }
+            return false
+        }
+        else -> return false
+    }
+}
+
+// MIRRust type_carries_view: `ty` holds a view, directly or through a
+// declared type whose Rust declaration takes the `'__jet_view` parameter.
+fn jet_rust_emit_type_carries_view(ctx: JetRustEmitContext, ty: MIRType) -> Bool Never! {
+    jet_rust_emit_type_contains_view(ty, ctx.view_carriers)
+}
+
+// MIRRust collect_view_carriers (D-MEM-VIEWRET1, #4392): the names and keys of
+// every Jet-declared type whose stored data holds a view, so its declaration
+// takes the `'__jet_view` lifetime parameter and every use names one. A type
+// holding such a type holds one too; the set grows to its fixed point. Rows
+// the runtime or Prelude spell keep their own Rust type.
+fn jet_rust_emit_collect_view_carriers(ctx: &JetRustEmitContext) -> [String:Bool] Never! {
+    carriers := [String:Bool]{}
+    grew := true
+    loop grew {
+        grew = false
+        loop definition in ctx.program.types {
+            if carriers.get(definition.key) != None -> next
+            if jet_rust_emit_runtime_declares_type(&ctx, definition) || jet_rust_emit_is_canonical_core_native_type(definition.key) -> next
+            carries := false
+            if definition.kind == {
+                .Struct(fields, _) -> {
+                    loop field in fields {
+                        if !field.computed && jet_rust_emit_type_contains_view(field.ty, carriers) -> carries = true
+                    }
+                }
+                .Enum(variants, _) -> {
+                    loop variant in variants {
+                        if variant.payload == {
+                            .Unit -> {}
+                            .Single(value) -> {
+                                if jet_rust_emit_type_contains_view(value, carriers) -> carries = true
+                            }
+                            .Named(fields) -> {
+                                loop field in fields {
+                                    if jet_rust_emit_type_contains_view(field.ty, carriers) -> carries = true
+                                }
+                            }
+                        }
+                    }
+                }
+                .Distinct(base, _) -> carries = jet_rust_emit_type_contains_view(base, carriers)
+                .Alias(target) -> carries = jet_rust_emit_type_contains_view(target, carriers)
+                .UnitFamily(_) -> {}
+            }
+            if carries {
+                carriers[definition.key] = true
+                carriers[definition.name] = true
+                grew = true
+            }
+        }
+    }
+    carriers
+}
+
+// MIRRust type_def_generics: `<'__jet_view, …>` for a declaration whose type
+// generics render as `generics`, when the declared row holds a view.
+fn jet_rust_emit_type_def_generics(ctx: JetRustEmitContext, definition: MIRTypeDef, generics: String) -> String Never! {
+    if ctx.view_carriers.get(definition.key) == None -> return ~generics
+    jet_rust_emit_signature_generics([String]{JET_RUST_EMIT_VIEW_LIFETIME}, generics)
+}
+
+// MIRRust type_def_impl_args: the `<'_, …>` arguments an impl header names for
+// a declared row whose type arguments render as `args` (`""` or `<…>`).
+fn jet_rust_emit_type_def_impl_args(ctx: JetRustEmitContext, definition: MIRTypeDef, args: String) -> String Never! {
+    if ctx.view_carriers.get(definition.key) == None -> return ~args
+    jet_rust_emit_signature_generics([String]{"'_"}, args)
+}
+
+// D-MEM-VIEWRET1 (#4392), MIRRust ViewReturnLifetime: the lifetime a callable
+// signature names for the views it returns. `owners` index the rendered
+// parameter types that carry `'__jet_view`; `receiver` tags a Rust `self`.
+pub enum JetRustEmitViewLifetime {
+    Elided
+    Static
+    Named(receiver: Bool, owners: [Int])
+}
+
+JET_RUST_EMIT_VIEW_LIFETIME :: "'__jet_view"
+
+fn jet_rust_emit_int_list_has(values: [Int], value: Int) -> Bool Never! {
+    loop item in values {
+        if item == value -> return true
+    }
+    false
+}
+
+// A non-empty returned-view contract, or none.
+fn jet_rust_emit_view_contract(provenance: [MIRViewProvenanceEntry]?) -> [MIRViewProvenanceEntry]? {
+    entries :: provenance ?? return None
+    if entries.len() == 0 -> return None
+    Val(entries)
+}
+
+// MIRRust signature_view_provenance: a trait method implementation states its
+// trait's contract, which every implementation and dynamic dispatch share.
+fn jet_rust_emit_signature_view_provenance(ctx: JetRustEmitContext, function: MIRFunction) -> [MIRViewProvenanceEntry]? {
+    if function.form == {
+        .TraitMethod(_, trait_ref, _, _) -> {
+            leaf :: jet_rust_emit_function_leaf(function.name)
+            loop definition in jet_rust_emit_trait_rows(ctx, trait_ref.id) {
+                if definition.id != trait_ref.id -> next
+                loop method in definition.methods {
+                    if method.name != leaf -> next
+                    if jet_rust_emit_view_contract(method.return_view_provenance) == .Val(entries) -> return Val(entries)
+                }
+            }
+        }
+        else -> {}
+    }
+    function.return_view_provenance
+}
+
+// MIRRust view_return_lifetime. Sema proved every returned view's owners
+// (receiver, parameter positions, statics); the Rust signature states the
+// same relation so rustc never has to guess it (I2/I3). `types` are the
+// rendered non-`self` parameter types; `receiver_index` is the slot of a
+// receiver rendered as an ordinary parameter (-1 when none or when
+// `self_receiver` is a Rust `self`); `declared_indexes` maps each declared
+// parameter position to its slot.
+fn jet_rust_emit_view_return_lifetime(ctx: &JetRustEmitContext, return_type: MIRType, provenance: [MIRViewProvenanceEntry]?, self_receiver: MIRAccess?, receiver_index: Int, declared_indexes: [Int], types: [String], span: Span) -> JetRustEmitViewLifetime Never! {
+    if !jet_rust_emit_type_carries_view(ctx, return_type) -> return JetRustEmitViewLifetime.Elided
+    entries :: provenance ?? [MIRViewProvenanceEntry]{}
+    receiver_source := false
+    statics := false
+    owners := [Int]{}
+    loop entry in entries {
+        loop path in entry.provenance.sources {
+            if path.source == {
+                .Receiver -> {
+                    receiver_source = true
+                    if self_receiver == None && receiver_index >= 0 && !jet_rust_emit_int_list_has(owners, receiver_index) -> &owners.push(receiver_index)
+                }
+                .Parameter(index) -> {
+                    if index < 0 || index >= declared_indexes.len() {
+                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR returned view names an undeclared parameter", "returned-view provenance must name a declared parameter position", Val(span))
+                        return JetRustEmitViewLifetime.Elided
+                    }
+                    if !jet_rust_emit_int_list_has(owners, declared_indexes[index]) -> &owners.push(declared_indexes[index])
+                }
+                .Static(_, _) -> statics = true
+            }
+        }
+    }
+    self_source :: receiver_source && self_receiver != None
+    if !self_source && owners.len() == 0 {
+        if statics -> return JetRustEmitViewLifetime.Static
+        return JetRustEmitViewLifetime.Elided
+    }
+    // Rust elision names a borrowed `self` for every elided output lifetime;
+    // without one, exactly one input lifetime must exist and belong to the
+    // owner. Anything else is spelled out.
+    borrowed_self := false
+    if self_receiver == .Val(access) -> borrowed_self = access == MIRAccess.Read || access == MIRAccess.Write
+    if borrowed_self {
+        if owners.len() == 0 && !statics -> return JetRustEmitViewLifetime.Elided
+    } else if !self_source && !statics && owners.len() == 1 {
+        positions := 0
+        loop ty in types {
+            loop byte in ty.bytes() {
+                code :: Int.from_u8(byte)
+                if code == 38 || code == 39 -> positions += 1
+            }
+        }
+        if positions == 1 && types[owners[0]].starts_with("&") -> return JetRustEmitViewLifetime.Elided
+    }
+    JetRustEmitViewLifetime.Named{receiver: self_source && borrowed_self, owners: owners}
+}
+
+// `ty` rendered with every `View`/`ViewMut` naming `lifetime`.
+fn jet_rust_emit_type_with_view_lifetime(ctx: &JetRustEmitContext, ty: MIRType, lifetime: String) -> String Never! {
+    previous :: ~ctx.view_lifetime
+    ctx.view_lifetime = lifetime
+    rendered :: jet_rust_emit_type(&ctx, ty)
+    ctx.view_lifetime = previous
+    rendered
+}
+
+// MIRRust view_owner_parameter_type: a view owner's own shared or exclusive
+// borrow names `'__jet_view` (`rendered` already names it on every view the
+// owner carries); an exclusive borrow of a view carrier keeps its outer
+// lifetime free, since `&mut` is invariant.
+fn jet_rust_emit_view_owner_borrow(rendered: String, carries_view: Bool) -> String Never! {
+    if rendered.starts_with("&mut ") {
+        if carries_view -> return ~rendered
+        return "&{JET_RUST_EMIT_VIEW_LIFETIME} mut {rendered.slice(5, rendered.len())}"
+    }
+    if rendered.starts_with("&'") -> return ~rendered
+    if rendered.starts_with("&") -> return "&{JET_RUST_EMIT_VIEW_LIFETIME} {rendered.slice(1, rendered.len())}"
+    ~rendered
+}
+
+// A borrowed Rust `self` receiver naming `'__jet_view`.
+fn jet_rust_emit_view_owner_self(receiver: String) -> String Never! {
+    if receiver.starts_with("&") -> return "&{JET_RUST_EMIT_VIEW_LIFETIME} {receiver.slice(1, receiver.len())}"
+    ~receiver
+}
+
+// `<lifetimes…, generics…>` for a signature whose type generics render as
+// `generics` (`""` or `<…>`).
+fn jet_rust_emit_signature_generics(lifetimes: [String], generics: String) -> String Never! {
+    if lifetimes.len() == 0 -> return ~generics
+    if generics.starts_with("<") -> return "<{lifetimes.join(", ")}, {generics.slice(1, generics.len())}"
+    "<{lifetimes.join(", ")}>"
 }
 
 fn jet_rust_emit_is_columnar_type(ctx: &JetRustEmitContext, source: MIRType) -> Bool Never! {
@@ -614,17 +858,23 @@ fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef, args:
         }
         return "*mut {jet_rust_emit_type(&ctx, args[0])}"
     }
+    // MIRRust view_lifetime: a signature naming its returned views' lifetime
+    // spells it on every view carrier it renders.
     if name.name == "View" && args.len() == 1 {
+        lifetime :: if ctx.view_lifetime == "" -> "" else -> "{ctx.view_lifetime} "
         inner := args[0]
         if inner.kind == {
             .Apply(inner_name, inner_args) -> {
-                if inner_args.len() == 0 && inner_name.name == "str" -> return "&str"
+                if inner_args.len() == 0 && inner_name.name == "str" -> return "&{lifetime}str"
             }
             else -> {}
         }
-        return "&[{jet_rust_emit_type(&ctx, inner)}]"
+        return "&{lifetime}[{jet_rust_emit_type(&ctx, inner)}]"
     }
-    if name.name == "ViewMut" && args.len() == 1 -> return "&mut [{jet_rust_emit_type(&ctx, args[0])}]"
+    if name.name == "ViewMut" && args.len() == 1 {
+        lifetime :: if ctx.view_lifetime == "" -> "" else -> "{ctx.view_lifetime} "
+        return "&{lifetime}mut [{jet_rust_emit_type(&ctx, args[0])}]"
+    }
     if name.name == "Set" && args.len() == 1 -> return "std::collections::HashSet<{jet_rust_emit_type(&ctx, args[0])}>"
     if name.name == "Rank" && args.len() == 1 -> return "std::collections::BTreeSet<{jet_rust_emit_type(&ctx, args[0])}>"
     if name.name == "PriorityQueue" && args.len() == 1 -> return "std::collections::BinaryHeap<{jet_rust_emit_type(&ctx, args[0])}>"
@@ -647,9 +897,12 @@ fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef, args:
             }
         }
     }
-    if args.len() == 0 -> return head
     rendered := [String]{}
+    // MIRRust rust_apply_type (D-MEM-VIEWRET1, #4392): a declared type holding
+    // a view takes its lifetime first: the signature's view lifetime, else `'_`.
+    if ctx.view_carriers.get(name.name) != None -> &rendered.push(if ctx.view_lifetime == "" -> "'_" else -> ctx.view_lifetime)
     loop arg in args -> &rendered.push(jet_rust_emit_type(&ctx, arg))
+    if rendered.len() == 0 -> return head
     "{head}<{rendered.join(", ")}>"
 }
 
@@ -1519,7 +1772,13 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
     }
     visibility_name :: jet_rust_emit_visibility(visibility)
     name :: jet_rust_emit_type_name(&ctx, definition.id)
-    generics :: jet_rust_emit_generic_params(&ctx, definition.generic_params)
+    // MIRRust emit_type_def (D-MEM-VIEWRET1, #4392): a row holding a view
+    // declares the lifetime its stored views (and nested view-carrying rows)
+    // name.
+    type_generics :: jet_rust_emit_generic_params(&ctx, definition.generic_params)
+    generics :: jet_rust_emit_type_def_generics(ctx, definition, type_generics)
+    outer_view_lifetime :: ~ctx.view_lifetime
+    ctx.view_lifetime = if ctx.view_carriers.get(definition.key) != None -> JET_RUST_EMIT_VIEW_LIFETIME else -> ""
     if definition.kind == {
         .Struct(fields, _) -> {
             &lines.push("{visibility_name}struct {name}{generics} {{")
@@ -1581,6 +1840,7 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
             &lines.push("")
         }
     }
+    ctx.view_lifetime = outer_view_lifetime
     debug_derived := false
     loop trait_id in definition.derives {
         loop row in jet_rust_emit_trait_rows(ctx, trait_id) { if row.id == trait_id && row.name == "Debug" -> debug_derived = true }
