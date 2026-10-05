@@ -415,7 +415,7 @@ pub struct JetGameOverlayState {
         if self.command_slots.len() == JET_GAME_OVERLAY_MAX_COMMANDS {
             self.command_slots[self.command_head] = ^row
             self.command_head = (self.command_head + 1) % JET_GAME_OVERLAY_MAX_COMMANDS
-        } else -> &self.command_slots.push(^row)
+        } else { &self.command_slots.push(^row) }
         Ok(id)
     }
     pub fn record_output(&self, row: ^JetGameOverlayOutputRow) -> U64 JetGameOverlayError! {
@@ -433,7 +433,7 @@ pub struct JetGameOverlayState {
         if self.history_slots.len() == JET_GAME_OVERLAY_MAX_HISTORY {
             self.history_slots[self.history_head] = ^owned
             self.history_head = (self.history_head + 1) % JET_GAME_OVERLAY_MAX_HISTORY
-        } else -> &self.history_slots.push(^owned)
+        } else { &self.history_slots.push(^owned) }
         Ok(id)
     }
     pub fn output(&self, timestamp_ns: U64, category: JetGameOverlayOutputCategory, message: ^String) -> U64 JetGameOverlayError! {
@@ -453,7 +453,7 @@ pub struct JetGameOverlayState {
         if self.transition_slots.len() == JET_GAME_OVERLAY_MAX_TRANSITIONS {
             self.transition_slots[self.transition_head] = ~fact
             self.transition_head = (self.transition_head + 1) % JET_GAME_OVERLAY_MAX_TRANSITIONS
-        } else -> &self.transition_slots.push(~fact)
+        } else { &self.transition_slots.push(~fact) }
         fact
     }
     pub fn render_json(self) -> String Never! {
