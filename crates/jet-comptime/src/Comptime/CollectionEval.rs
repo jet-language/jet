@@ -366,6 +366,25 @@ pub(crate) mod collection_semantics {
             let unbounded = std::sync::Mutex::new(JetMemo::<i64, i64>::with_bound(None));
             assert_eq!(jet_memo_stats(&unbounded).bound, "none");
         }
+
+        #[test]
+        fn collection_native_int_abi_is_shared_by_cache_and_bitset() {
+            let mut cache = JetCache::<i64, i64>::new(JetInt::from_i64(2));
+            assert_eq!(cache.put(1, 11), None);
+            assert_eq!(cache.capacity(), 2);
+
+            let mut bits = JetBitSet::new();
+            assert!(jet_bitset_add(&mut bits, JetInt::from_i64(7)));
+            assert!(jet_bit_set_has(&bits, JetInt::from_i64(7)));
+            jet_bitset_remove(&mut bits, JetInt::from_i64(7));
+            assert!(!jet_bit_set_has(&bits, JetInt::from_i64(7)));
+        }
+
+        #[test]
+        #[should_panic(expected = "E3010")]
+        fn collection_native_int_overflow_uses_the_shared_runtime_stop() {
+            jet_collection_native_int(&past_word(1));
+        }
     }
 
     /// Sequence kernels the lowering reaches with either carrier: an eager

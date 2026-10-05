@@ -1,4 +1,13 @@
 // ── D-ITERTOOLS1=A: expanded collection/runtime handles ─────────────────────
+#[inline(always)]
+fn jet_collection_native_int(value: &jet_foundation::Numeric::JetInt) -> i64 {
+    jet_foundation::NumericConversion::jet_int_owned_to_i64(value).unwrap_or_else(|error| {
+        jet_panic_rich_code(
+            "E3010", "<core.collections>", 0, "", "", 0, 0, error, "",
+        )
+    })
+}
+
 impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
     fn add_new(&mut self, key: K, value: V) -> bool {
         if self.bound == Some(0) || self.entries.iter().any(|(stored, _)| stored == &key) {
@@ -41,8 +50,7 @@ struct JetCache<K, V> {
 
 impl<K: Eq + Clone, V: Clone> JetCache<K, V> {
     fn new(capacity: jet_foundation::Numeric::JetInt) -> Self {
-        let capacity = jet_std::jet_int_owned_to_i64(&capacity)
-            .unwrap_or_else(|error| jet_arithmetic_stop("<core.collections>", 0, &error));
+        let capacity = jet_collection_native_int(&capacity);
         Self {
             lru: JetLru::new(Some(capacity.max(0) as usize)),
         }
@@ -703,8 +711,7 @@ fn jet_bit_set_is_empty(bits: &JetBitSet) -> bool {
 }
 #[inline(always)]
 fn jet_bit_set_has(bits: &JetBitSet, bit: jet_foundation::Numeric::JetInt) -> bool {
-    let bit = jet_std::jet_int_owned_to_i64(&bit)
-        .unwrap_or_else(|error| jet_arithmetic_stop("<core.collections>", 0, &error));
+    let bit = jet_collection_native_int(&bit);
     bits.contains(&bit)
 }
 #[inline(always)]
@@ -718,15 +725,13 @@ fn jet_bit_set_count(bits: &JetBitSet) -> i64 {
 
 #[inline(always)]
 fn jet_bitset_add(bits: &mut JetBitSet, bit: jet_foundation::Numeric::JetInt) -> bool {
-    let bit = jet_std::jet_int_owned_to_i64(&bit)
-        .unwrap_or_else(|error| jet_arithmetic_stop("<core.collections>", 0, &error));
+    let bit = jet_collection_native_int(&bit);
     bits.add(bit)
 }
 
 #[inline(always)]
 fn jet_bitset_remove(bits: &mut JetBitSet, bit: jet_foundation::Numeric::JetInt) {
-    let bit = jet_std::jet_int_owned_to_i64(&bit)
-        .unwrap_or_else(|error| jet_arithmetic_stop("<core.collections>", 0, &error));
+    let bit = jet_collection_native_int(&bit);
     bits.remove(&bit);
 }
 #[inline(always)]

@@ -84,6 +84,11 @@ its stored fields uses it. Such parameters are carried by a zero-sized
 is not a source field or a serialized/displayed value. Native/runtime-owned
 records retain their existing layouts rather than receiving emitter fields.
 
+Shared collection kernels narrow owned exact `Int` arguments through the same
+Foundation numeric ABI check on every host. A native-width overflow uses the
+registry-backed `E3010` stop; an include host supplies only the stop transport,
+not another conversion rule or runtime dependency.
+
 ## Core keepers
 
 Engines must handle literals (`IntLit`, `FloatLit`, `BoolLit`, `CharLit`, and

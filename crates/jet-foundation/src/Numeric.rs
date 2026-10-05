@@ -3257,7 +3257,8 @@ impl JetInt {
         if self.is_inline() {
             return Some(self.0 as i64);
         }
-        self.to_big().try_i64()
+        // SAFETY: this borrowed owner keeps the immutable numeric node alive.
+        unsafe { (*jet_int_pointer(self.0)).value.try_i64() }
     }
 
 
