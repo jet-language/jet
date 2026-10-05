@@ -510,6 +510,8 @@ for (const c of until >= 3 ? open() : []) {
   const run = spawnSync(program, [], { input: c.stdin ?? "", encoding: "utf8", timeout: 20000, cwd, maxBuffer: 1 << 26 });
   const expected = readFileSync(c.expectedOut, "utf8");
   writeFileSync(join(dirs.run, `${c.slug}.stdout`), run.stdout ?? "");
+  writeFileSync(join(dirs.run, `${c.slug}.stderr`), run.stderr ?? "");
+  writeFileSync(join(dirs.run, `${c.slug}.status.json`), JSON.stringify({ status: run.status, signal: run.signal, error: run.error ? { code: run.error.code, message: run.error.message } : null }) + "\n");
   if (run.stdout === expected && run.status === 0) c.verdict = "pass";
   else {
     c.verdict = "wrong";

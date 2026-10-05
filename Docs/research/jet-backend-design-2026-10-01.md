@@ -1045,6 +1045,8 @@ compares stdout with the golden; each verdict names its leg (`static` or
 `hosted`). `--stage` and `--until` bound the stages that run.
 `<outdir>/summary.txt` counts pass, wrong, unsupported and harness verdicts and
 ranks the blockers by how many goldens each one stops.
+Each executed native case retains stdout, stderr and process status/signal/error
+receipts so all wrong-output, stop and crash causes can be diagnosed as one batch.
 Set `JET_MIR_EMIT=1` to regenerate checked MIR with the current reference
 compiler's `emit --rust` seam without compiling or executing its Rust output.
 The native executable still runs against the golden; the dump receipt is
