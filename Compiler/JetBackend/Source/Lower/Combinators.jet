@@ -92,6 +92,7 @@ fn lower_call_closure_box(p: MIRProgram, m: &LowerModule, f: &LowerFunction, clo
 
 fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, args: [MIRCallArg], call: MIRPreludeCallID) Never! {
     row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "ClosureMethod names missing Prelude call {call.value}")
+    if lower_lazy_closure_method(p, c, &m, &f, instruction, receiver, args, row) -> return
     unsupported :: "semantic operation ClosureMethod {row.module_name}.{row.member} is not lowered at O0 yet"
     symbol :: lower_runtime_symbol(row)
     receiver_ty :: lower_value_type(c, receiver) ?? return lower_fail(&m, &f, unsupported)

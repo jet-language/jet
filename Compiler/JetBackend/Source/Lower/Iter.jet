@@ -40,6 +40,7 @@ fn lower_iter_route(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: MIR
 // MIRRust.rs:23860 moves a value source; Collections.rs:1666 snapshots a borrowed
 // Vec by cloning it. Both cursors consequently own an independent element walk.
 fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, collection: MIRValueID, step: MIRValueID?, by_value: Bool, source_kind: MIRLoopSourceKind) Never! {
+    if lower_lazy_cursor_init(p, c, &m, &f, instruction, call, collection, step, by_value, source_kind) -> return
     if source_kind != .Plain -> return lower_fail(&m, &f, "this iterator source kind is not lowered at O0 yet")
     if !lower_iter_route(p, &m, &f, call, "jet_loop_iter_init", 5) -> return
     ty :: lower_value_type(c, collection) ?? return lower_fail(&m, &f, "iterator collection without a checked type is not lowered at O0 yet")
@@ -116,7 +117,7 @@ fn lower_iter_operation(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
         lower_alias_absent(&f, instruction)
         return
     }
-    more :: lower_iter_more(&f, handle)
+    more :: lower_lazy_cursor_more(&m, &f, handle)
     if operation == "has_next" {
         dst :: lower_result(p, c, &m, &f, instruction) ?? return
         lower_emit(&f, LIRInst.Move{dst: dst, src: more})
@@ -127,17 +128,7 @@ fn lower_iter_operation(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     lower_emit(&f, LIRInst.Compare{dst: invalid, condition: LIRCondition.Eq, left: more, right: no})
     lower_iter_check(&m, &f, invalid, "iterator loop value requested after exhaustion")
     result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "iterator value without a checked type is not lowered at O0 yet")
-    if lower_repr(p, result_ty) == .Absent {
-        lower_alias_absent(&f, instruction)
-    } else {
-        dst :: lower_result(p, c, &m, &f, instruction) ?? return
-        list :: lower_pointer(&f)
-        lower_emit(&f, LIRInst.Load{dst: list, base: handle, offset: 0})
-        data :: lower_list_data(&f, list)
-        at :: lower_list_word(&f, handle, 8)
-        address :: lower_list_address(&f, data, at, lower_list_stride(p, result_ty))
-        lower_read_into(p, &f, dst, address, 0, result_ty)
-    }
+    lower_lazy_cursor_value(p, c, &m, &f, instruction, handle, result_ty)
     lower_store_word(&f, handle, 32, 1)
     // Borrowed results remain owned by the snapshot until Advance/Drop. Owned
     // results move out; their slots are excluded, never dropped as fake nulls.
@@ -169,6 +160,7 @@ fn lower_iter_drop_range(p: MIRProgram, m: &LowerModule, f: &LowerFunction, list
 // LoopCursor.rs:116 takes the current owner; :133-149 drops skipped elements.
 // Destruction drops only current/remaining owners, including on early exit.
 fn lower_helper_iter_typed(p: MIRProgram, m: &LowerModule, glue: LowerGlue, advance: Bool) -> LIRFunction Never! {
+    if lower_lazy_element(glue.ty) != None -> return lower_lazy_cursor_helper(p, &m, glue, advance)
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
     cursor :: ~f.open_params[0]
     elem :: lower_sequence_element(glue.ty) ?? {

@@ -177,7 +177,8 @@ fn lower_record_render(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MI
 fn lower_record_store_from_slot(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, runtime: String, slot: LIRValueID, base: LIRValueID, offset: Int) Never! {
     handle :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_{runtime}"}, None)
     lower_emit(&f, LIRInst.Load{dst: handle, base: slot, offset: 0})
-    lower_call_helper(&m, &f, "record.in", ty, [LIRValueID]{handle, lower_address(&f, base, offset)}, None)
+    target :: lower_address(&f, base, offset)
+    lower_call_helper(&m, &f, "record.in", ty, [LIRValueID]{handle, target}, None)
     lower_emit(&f, LIRInst.Drop{value: handle})
 }
 
@@ -210,15 +211,15 @@ fn lower_helper_record_in(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
     box :: lower_pointer(&f)
     lower_alloc(&m, &f, box, lower_enum_box_size(p, definition))
     lower_emit(&f, LIRInst.Store{base: target, offset: 0, value: box})
-    tag :: lower_word(&f)
-    lower_call_runtime(&m, &f, "jet_rt_record_tag_{runtime}", [LIRValueID]{handle}, Val(tag))
-    lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: tag})
+    variant_index :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_record_tag_{runtime}", [LIRValueID]{handle}, Val(variant_index))
+    lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: variant_index})
     done :: lower_new_block(&f)
     loop (index, variant) in variants {
         if variant.payload == .Unit -> next
         expected :: lower_const(&f, lower_discriminant(index))
         selected :: lower_flag(&f)
-        lower_emit(&f, LIRInst.Compare{dst: selected, condition: LIRCondition.Eq, left: tag, right: expected})
+        lower_emit(&f, LIRInst.Compare{dst: selected, condition: LIRCondition.Eq, left: variant_index, right: expected})
         body :: lower_new_block(&f)
         next_block :: lower_new_block(&f)
         lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(next_block, [LIRValueID]{})})
@@ -259,10 +260,10 @@ fn lower_record_load_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ha
         lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 8, align: 8})
         zero :: lower_const(&f, 0)
         lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: zero})
-        tag :: lower_word(&f)
-        lower_call_runtime(&m, &f, getter, [LIRValueID]{handle, slot}, Val(tag))
+        presence :: lower_word(&f)
+        lower_call_runtime(&m, &f, getter, [LIRValueID]{handle, slot}, Val(presence))
         present :: lower_flag(&f)
-        lower_emit(&f, LIRInst.Compare{dst: present, condition: LIRCondition.Ne, left: tag, right: zero})
+        lower_emit(&f, LIRInst.Compare{dst: present, condition: LIRCondition.Ne, left: presence, right: zero})
         some_block :: lower_new_block(&f)
         none_block :: lower_new_block(&f)
         merge :: lower_new_block(&f)
@@ -291,7 +292,8 @@ fn lower_record_load_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ha
     if lower_record_handle(p, ty) == .Val(runtime) {
         nested :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_{runtime}"}, None)
         lower_call_runtime(&m, &f, getter, [LIRValueID]{handle}, Val(nested))
-        lower_call_helper(&m, &f, "record.in", ty, [LIRValueID]{nested, lower_address(&f, base, offset)}, None)
+        target :: lower_address(&f, base, offset)
+        lower_call_helper(&m, &f, "record.in", ty, [LIRValueID]{nested, target}, None)
         lower_emit(&f, LIRInst.Drop{value: nested})
         return
     }
@@ -329,13 +331,13 @@ fn lower_helper_record_out(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> L
         return lir_builder_finish(f.builder)
     }
     variants :: if definition.kind == .Enum(rows, _) -> rows else -> panic("a record is a struct or an enum")
-    tag :: lower_word(&f)
-    lower_emit(&f, LIRInst.Load{dst: tag, base: value, offset: 0})
+    variant_index :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: variant_index, base: value, offset: 0})
     done :: lower_new_block(&f)
     loop (index, variant) in variants {
         expected :: lower_const(&f, lower_discriminant(index))
         selected :: lower_flag(&f)
-        lower_emit(&f, LIRInst.Compare{dst: selected, condition: LIRCondition.Eq, left: tag, right: expected})
+        lower_emit(&f, LIRInst.Compare{dst: selected, condition: LIRCondition.Eq, left: variant_index, right: expected})
         body :: lower_new_block(&f)
         next_block :: lower_new_block(&f)
         lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(next_block, [LIRValueID]{})})

@@ -83,7 +83,7 @@ fn lower_entry_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
 // Ends the open block: reports `error` (of type `ty`, borrowed) and exits 1.
 // The general `Err` becomes the runtime's own error (Records.jet record.out).
 fn lower_entry_error_exit(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, error: LIRValueID?) Never! {
-    if lower_record_handle(p, ty) == .Val("JetErr") {
+    if (lower_record_handle(p, ty) ?? "") == "JetErr" {
         operand :: error ?? {
             lower_fail(&m, &f, "an entry Err without storage is not lowered at O0 yet")
             return lower_seal(&f, LIRTerminator.Unreachable)

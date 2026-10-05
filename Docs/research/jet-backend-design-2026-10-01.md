@@ -372,6 +372,21 @@ dropped after the call; a returned handle is dropped after conversion. Records
 render through their runtime type's own Display, Show and Debug, as generated
 Rust does, and a failing entry's `Err` reaches `jet_rt_entry_error_exit_err` the
 same way.
+
+Lazy collection routes use the existing `Collections.rs` and `LoopCursor.rs`
+kernels through `CAbiIter.rs`; lowering does not recreate their iteration or
+failure policy. A copied descriptor tree carries stride, clone/drop and checked
+trait callbacks plus recursive element/error descriptors. Slots up to three words
+are stored inline; a borrowed cursor projection retains the buffered owner until
+advance, while the native cursor's taken flag prevents returning it twice.
+Callbacks follow MIR parameter access: Read lends a slot, Move transfers an owned
+input or clones a borrowed input, and the returned consume mask disarms only moved
+owners. Write uses a genuinely mutable owned local; a borrowed kernel input may
+not be made mutable by casting its shared reference. That unsupported adaptation
+is reported as a native lowering failure, not silently changed to Read.
+`Tests/prepare-call-runtime.mjs --allparts` refreshes the current C ABI, generated
+routes and iterator adapters together for full-pack proofs; its default mode
+retains an emitted seed's paired route set.
 Linking: the runtime rlib plus a staticlib wrapper crate
 (`extern crate jet_runtime;`, `--crate-type staticlib`) gives
 `libjet_runtime_c.a`; link the object with it and `-lpthread -ldl -lm`.
