@@ -229,6 +229,26 @@ fn lower_list_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         lower_view_new(p, c, &m, &f, instruction, receiver, ty, receiver_place, args)
         return true
     }
+    if row.member == "get" && symbol == "jet_list_get_opt" {
+        if args.len() != 1 {
+            lower_fail(&m, &f, "List.get without one index is not lowered at O0 yet")
+            return true
+        }
+        list :: lower_use(&m, &f, receiver) ?? return true
+        index_ty :: lower_value_type(c, args[0]) ?? {
+            lower_fail(&m, &f, "List.get without a checked index type is not lowered at O0 yet")
+            return true
+        }
+        index :: lower_use(&m, &f, args[0]) ?? return true
+        native := index
+        if lower_is_exact_int(index_ty) {
+            native = lower_word(&f)
+            lower_convert_exact(&m, &f, native, index, "jet_int_owned_to_i64", false)
+        }
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+        lower_call_helper(&m, &f, "list.get", ty, [LIRValueID]{list, native}, Val(dst))
+        return true
+    }
     length_route :: row.member == "len" && symbol == "jet_list_len"
     empty_route :: row.member == "is_empty" && symbol == "jet_list_is_empty"
     push_route :: row.member == "list_push" && symbol == "jet_list_push"
@@ -644,6 +664,49 @@ fn lower_helper_list_pop(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     data :: lower_list_data(&f, list)
     address :: lower_list_address(&f, data, last, stride)
     lower_list_move(p, &f, result, address, elem)
+    lower_seal(&f, LIRTerminator.Return{value: Val(result)})
+    lir_builder_finish(f.builder)
+}
+
+// jet_list_get_opt: a borrowed read returns an owned copy of the selected
+// element, or None for a negative/past-end native index. The Option owns
+// only its cloned payload, never the List's header or buffer.
+fn lower_helper_list_get(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    elem :: lower_list_element(glue.ty) ?? panic("list.get helper has no List type")
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_word()}, Val(lir_layout_pointer()))
+    list :: ~f.open_params[0]
+    index :: ~f.open_params[1]
+    length :: lower_list_word(&f, list, 0)
+    zero :: lower_const(&f, 0)
+    negative :: lower_flag(&f)
+    past :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: negative, condition: LIRCondition.Lt, left: index, right: zero})
+    lower_emit(&f, LIRInst.Compare{dst: past, condition: LIRCondition.Ge, left: index, right: length})
+    invalid :: lower_flag(&f)
+    lower_logic(&f, invalid, false, negative, past)
+    absent :: lower_new_block(&f)
+    present :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: invalid, then_target: lower_target(absent, [LIRValueID]{}), else_target: lower_target(present, [LIRValueID]{})})
+    lower_start(&f, absent, [LIRValueID]{})
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    lower_seal(&f, LIRTerminator.Return{value: Val(null)})
+    lower_start(&f, present, [LIRValueID]{})
+    result :: lower_pointer(&f)
+    lower_alloc(&m, &f, result, lower_option_box_size(p, elem))
+    if lower_repr(p, elem) != .Absent {
+        data :: lower_list_data(&f, list)
+        address :: lower_list_address(&f, data, index, lower_list_stride(p, elem))
+        if lower_is_inline(p, elem) {
+            lower_inline_clone(p, &m, &f, address, result, elem)
+        } else {
+            value :: lower_read_at(p, &f, address, 0, elem) ?? return lir_builder_finish(f.builder)
+            layout :: lower_repr_layout(lower_repr(p, elem)) ?? return lir_builder_finish(f.builder)
+            owned :: lower_new_value(&f, layout, None, elem.identity)
+            lower_clone_into(p, &m, &f, value, owned, elem)
+            lower_write_at(p, &f, result, 0, owned, elem)
+        }
+    }
     lower_seal(&f, LIRTerminator.Return{value: Val(result)})
     lir_builder_finish(f.builder)
 }
