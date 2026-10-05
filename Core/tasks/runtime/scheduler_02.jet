@@ -84,9 +84,9 @@ impl IOPoller {
                 streams :: self.streams.lock().unwrap()
                 out := []
                 for interest in interests.iter() {
-                    stream :: streams.get(&interest.stream_id) ?? continue
+                    stream :: streams.get(&interest.stream_id) ?? next
                     fd :: stream.lock().unwrap().as_raw_fd()
-                    if fd_slots.contains_key(&fd) { continue }
+                    if fd_slots.contains_key(&fd) { next }
                     events := U32{0}
                     if interest.readable { events |= EPOLLIN }
                     if interest.writable { events |= EPOLLOUT }
@@ -157,9 +157,9 @@ impl IOPoller {
                 streams :: self.streams.lock().unwrap()
                 out := []
                 for interest in interests.iter() {
-                    stream :: streams.get(&interest.stream_id) ?? continue
+                    stream :: streams.get(&interest.stream_id) ?? next
                     fd :: stream.lock().unwrap().as_raw_fd()
-                    if fd_slots.contains_key(&fd) { continue }
+                    if fd_slots.contains_key(&fd) { next }
                     if interest.readable { out.push((fd, EVFILT_READ, interest.slot.clone())) }
                     if interest.writable { out.push((fd, EVFILT_WRITE, interest.slot.clone())) }
                 }
@@ -268,11 +268,11 @@ impl IOPoller {
                     if self.interests.lock().unwrap().iter().find(fn(interest) { interest.stream_id == id }).map(fn(interest) { interest.slot.clone() }) == .Val(slot) { slot.wake() }
                     self.interests.lock().unwrap().retain(fn(interest) { interest.stream_id != id })
                     _ :: self.streams.lock().unwrap().remove(&id)
-                    continue
+                    next
                 }
                 operations := []
-                for read in [true, false] {
-                    if (read && not readable) || (not read && not writable) { continue }
+                loop read in [true, false] {
+                    if (read && not readable) || (not read && not writable) { next }
                     raw :: Box.into_raw(Box.new(Overlapped{internal: 0, internal_high: 0, offset: 0, offset_high: 0, event: 0}))
                     _ :: METRIC_IO_ALLOCATED.fetch_add(1, Ordering.Relaxed)
                     buffer := WsaBuf{len: 0, buf: ptr.null_mut()}
@@ -295,7 +295,7 @@ impl IOPoller {
                 }
             }
             retiring :: self.retire_requested.lock().unwrap().iter().copied().collect()
-            for id in retiring {
+            loop id in retiring {
                 if active.get_mut(&id) == .Val(entry) {
                     if not entry.cancel_requested {
                         entry.cancel_requested = true
@@ -323,7 +323,7 @@ impl IOPoller {
                     _ :: METRIC_IO_FAILURES.fetch_add(1, Ordering.Relaxed)
                     *self.backend_state.lock().unwrap() = .Failed("internal scheduler IOCP completion port failed")
                     for interest in self.interests.lock().unwrap().drain(..) { interest.slot.wake() }
-                    for entry in active.values_mut() {
+                    loop entry in active.values_mut() {
                         if not entry.cancel_requested {
                             entry.cancel_requested = true
                             for pending in &entry.operations {
@@ -342,7 +342,7 @@ impl IOPoller {
                         drain_key := USize{0}
                         drain_operation := ptr.null_mut<Overlapped>()
                         _ :: GetQueuedCompletionStatus(port, &drain_bytes, &drain_key, &drain_operation, 50)
-                        if drain_operation.is_null() { continue }
+                        if drain_operation.is_null() { next }
                         drop(Box.from_raw(drain_operation))
                         _ :: METRIC_IO_RETIRED.fetch_add(1, Ordering.Relaxed)
                         owner :: active.iter().find_map(fn((id, entry)) { if entry.operations.contains(&drain_operation) { Val(*id) } else { None } })
@@ -373,13 +373,13 @@ impl IOPoller {
                     return
                 }
                 if key != 0 { _ :: METRIC_IO_STALE.fetch_add(1, Ordering.Relaxed) }
-                continue
+                next
             }
             if ok == 0 && GetLastError() != 995 { _ :: METRIC_IO_FAILURES.fetch_add(1, Ordering.Relaxed) }
             drop(Box.from_raw(operation))
             _ :: METRIC_IO_RETIRED.fetch_add(1, Ordering.Relaxed)
             id :: key.saturating_sub(1)
-            entry := active.get_mut(&id) ?? continue
+            entry := active.get_mut(&id) ?? next
             entry.operations.retain(fn(candidate) { *candidate != operation })
             slot :: {
                 interests := self.interests.lock().unwrap()
@@ -410,7 +410,7 @@ impl IOPoller {
                 streams :: self.streams.lock().unwrap()
                 slots := []
                 for interest in interests.iter() {
-                    stream :: streams.get(&interest.stream_id) ?? continue
+                    stream :: streams.get(&interest.stream_id) ?? next
                     s := stream.lock().unwrap()
                     _ :: s.set_nonblocking(true)
                     buf := Array<U8,1>.filled(0)
@@ -478,7 +478,7 @@ impl JetSchedulerRawIoHandle {
     pub fn close(self: &Self) -> {
         if self.closed.swap(true, Ordering.AcqRel) { return }
         registrations :: self.registrations.lock().unwrap().drain().filter_map(fn((_, registration)) { registration.upgrade() }).collect()
-        for registration in registrations { registration.close() }
+        loop registration in registrations { registration.close() }
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2487
@@ -567,7 +567,7 @@ impl JetRawIoPoller {
                 interests :: self.interests.lock().unwrap()
                 if interests.is_empty() {
                     _guard :: self.notify.wait(interests).unwrap()
-                    continue
+                    next
                 }
                 descriptors :: interests.iter().map(fn(interest) {
                     PollFd{fd: interest.registration.handle.fd,
@@ -577,7 +577,7 @@ impl JetRawIoPoller {
                 (^descriptors, ^ids)
             }
             ready :: poll(descriptors.as_mut_ptr(), descriptors.len(), 50)
-            if ready <= 0 { continue }
+            if ready <= 0 { next }
             // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2627
             const POLLERR: I16 = 0x0008
             // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2628
@@ -811,7 +811,7 @@ impl<T> Drop for JetSchedulerChannel<T> {
             jet_observe_channel_update(self.inner.observe_id, &st)
             ^waiters
         }
-        for slot in send_waiters { slot.wake() }
+        loop slot in send_waiters { slot.wake() }
     }
 }
 impl<T: Send> JetSchedulerChannel<T> {
@@ -960,7 +960,7 @@ impl<T> Drop for JetSchedulerSender<T> {
             jet_observe_channel_update(self.inner.observe_id, &st)
             ^waiters
         }
-        for slot in recv_waiters { slot.wake() }
+        loop slot in recv_waiters { slot.wake() }
     }
 }
 impl<T: Send> JetSchedulerSender<T> {
@@ -1152,7 +1152,7 @@ struct SelectRegistration<T> { recvs: [Arc<ChannelInner<T>>], master: Arc<ParkSl
 impl<T> SelectRegistration<T> {
     // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3466
     fn new(recvs: &[Arc<ChannelInner<T>>], master: Arc<ParkSlot>, cancel_control: Arc<JetTaskControl>?) -> Self {
-        for channel in recvs { channel.register_select_waiter(master.clone()) }
+        loop channel in recvs { channel.register_select_waiter(master.clone()) }
         if cancel_control.as_ref() == .Val(control) { control.register_cancel_waiter(&master) }
         Self{recvs: recvs.to_vec(), master: ^master, cancel_control: ^cancel_control}
     }

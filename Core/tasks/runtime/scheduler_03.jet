@@ -131,7 +131,7 @@ impl Scheduler {
         // GATE #4565: kernel primitive
         #Unsafe("steal oldest permitted work while each victim queue is mutex-owned") {
             loop (index, worker) in self.workers.iter().enumerate() {
-                if index == thief -> continue
+                if index == thief -> next
                 queue := worker.queue.lock().unwrap()
                 job :: if allow_blocking { queue.pop_front() }
                     else { queue.iter().position(fn(job) { not job.blocking }).map(fn(index) { queue.remove(index).unwrap() }) }
@@ -156,7 +156,7 @@ impl Scheduler {
                     (job.run)()
                     _ :: self.live.fetch_sub(1, Ordering.Relaxed)
                     self.notify.notify_one()
-                    continue
+                    next
                 }
                 if self.shutdown.load(Ordering.Relaxed) -> break
                 guard :: self.global.lock().unwrap()
@@ -215,7 +215,7 @@ impl Scheduler {
                     (job.run)()
                     _ :: self.live.fetch_sub(1, Ordering.Relaxed)
                     self.notify.notify_one()
-                    continue
+                    next
                 }
                 guard :: self.global.lock().unwrap()
                 _ :: self.notify.wait_timeout(^guard, Duration.from_millis(2)).unwrap()

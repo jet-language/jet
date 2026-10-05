@@ -219,7 +219,7 @@ impl<T> JetTaskGroupRuntime<T> {
             children :: #Unsafe("move queue out under lock; joining must never hold the child queue lock") { take(&*self.children.lock().unwrap()) }
             if children.is_empty() { break }
             if cancel_children { for child in &children { cancel(child) } }
-            for child in children {
+            loop child in children {
                 // D-CONC-FAIL1=A: child outcomes belong to explicit joins, not lexical cleanup.
                 // GATE #4565: kernel primitive
                 #Unsafe("contain child join panic at lexical cleanup boundary without losing remaining child joins") {

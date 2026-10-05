@@ -246,7 +246,7 @@ impl<K: Clone + PartialEq + Send, T: Send> JetWindowedStream<K, T> {
                 _ :: &self.source.take()
                 &self.ready.extend(&self.state.finish())
                 self.finished = true
-                continue
+                next
             }
             (key, event) :: next.unwrap()
             _ :: &self.state.ingest(^key, ^event)
