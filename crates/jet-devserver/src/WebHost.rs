@@ -6057,7 +6057,7 @@ fn current_revision_for_request(canvas_file: &str, request: &str) -> String {
                 (name == "source_id")
                     .then_some(value)
                     .and_then(|value| match value {
-                        Dyn::Text(source_id) | Dyn::TypedText(source_id) => {
+                        Dyn::Text(source_id) => {
                             Some(source_id)
                         }
                         _ => None,
@@ -6084,7 +6084,7 @@ fn source_id_from_payload(payload: &str) -> String {
                     (name == "source_id")
                         .then_some(value)
                         .and_then(|value| match value {
-                            Dyn::Text(source_id) | Dyn::TypedText(source_id) => {
+                            Dyn::Text(source_id) => {
                                 Some(source_id.clone())
                             }
                             _ => None,

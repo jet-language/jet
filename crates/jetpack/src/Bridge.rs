@@ -834,7 +834,7 @@ fn add_catalog_json(path: &Path, names: &mut BTreeSet<String>) {
 
 fn add_catalog_value(value: &Dyn, names: &mut BTreeSet<String>) {
     match value {
-        Dyn::Text(name) | Dyn::TypedText(name) if is_catalog_name(name) => {
+        Dyn::Text(name) if is_catalog_name(name) => {
             names.insert(name.clone());
         }
         Dyn::Array(values) => {

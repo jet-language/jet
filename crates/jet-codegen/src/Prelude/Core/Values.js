@@ -631,6 +631,15 @@ function jet_codec_tree_payload(tree) {
   return tree && Array.isArray(tree.values) ? tree.values[0] : undefined;
 }
 
+// #4602: decoding is strict. A Text leaf parses into a scalar only while a
+// text-native source (environment, CSV cells, route parameters) decodes.
+let jet_text_cells_depth = 0;
+
+function jet_decode_text_cells(decode) {
+  jet_text_cells_depth += 1;
+  try { return decode(); } finally { jet_text_cells_depth -= 1; }
+}
+
 function jet_dyn_kind(tree) {
   switch (tree?.tag) {
     case "Null": return "null";
@@ -638,8 +647,7 @@ function jet_dyn_kind(tree) {
     case "Int": return "Int";
     case "Float": return "Float";
     case "Number": return "number";
-    case "TypedText":
-    case "Text": return "text";
+    case "Text": return "Text";
     case "Bytes": return "Bytes";
     case "Array": return "a list";
     case "Object": return "an object";
@@ -675,7 +683,6 @@ function jet_dyn_render(tree) {
       catch (_) { return String(jet_codec_tree_payload(tree)); }
     case "Float": return jet_float_display(jet_codec_tree_payload(tree));
     case "Number": return String(jet_codec_tree_payload(tree));
-    case "TypedText":
     case "Text": return JSON.stringify(String(jet_codec_tree_payload(tree)));
     case "Bytes": {
       const bytes = jet_codec_tree_payload(tree);
@@ -779,7 +786,7 @@ function jet_dyn_int(tree) {
 }
 
 function jet_dyn_text(tree) {
-  if (tree?.tag === "Text" || tree?.tag === "TypedText") {
+  if (tree?.tag === "Text") {
     return { tag: "Ok", values: [String(jet_codec_tree_payload(tree))] };
   }
   return {
@@ -818,7 +825,6 @@ function jet_dyn_float(tree) {
 function jet_dyn_to_text(tree) {
   switch (tree?.tag) {
     case "Text":
-    case "TypedText":
     case "Number":
       return jet_option_some(String(jet_codec_tree_payload(tree)));
     case "Int":
@@ -846,7 +852,6 @@ function jet_dyn_equal_unordered(left, right) {
       return !Number.isNaN(l) && !Number.isNaN(r) && l === r;
     }
     case "Number":
-    case "TypedText":
     case "Text":
       return jet_codec_tree_payload(left) === jet_codec_tree_payload(right);
     case "Bytes": {
@@ -878,18 +883,12 @@ function jet_dyn_equal_unordered(left, right) {
 }
 
 function jet_codec_typed_string(tree) {
-  if (tree?.tag === "Text" || tree?.tag === "TypedText") {
+  if (tree?.tag === "Text") {
     return jet_codec_decode_ok(String(jet_codec_tree_payload(tree)));
   }
   if (tree?.tag === "Number") {
     return jet_codec_decode_error("", `expected Text, found number ${String(jet_codec_tree_payload(tree))}`);
   }
-  if (tree?.tag === "Int") {
-    try { return jet_codec_decode_ok(BigInt(jet_codec_tree_payload(tree)).toString()); }
-    catch (_) { return jet_codec_decode_error("", "expected Text, found Int"); }
-  }
-  if (tree?.tag === "Float") return jet_codec_decode_ok(jet_float_display(jet_codec_tree_payload(tree)));
-  if (tree?.tag === "Bool") return jet_codec_decode_ok(jet_codec_tree_payload(tree) ? "true" : "false");
   return jet_codec_decode_error("", `expected Text, found ${jet_dyn_kind(tree)}`);
 }
 
@@ -913,16 +912,9 @@ function jet_codec_typed_int(tree) {
       ? jet_codec_decode_error("", `expected Int, found number ${raw}`)
       : jet_codec_decode_ok(value);
   }
-  if (tree?.tag === "TypedText") {
-    const raw = String(jet_codec_tree_payload(tree));
-    const value = /^[+-]?\d+$/.test(raw.trim()) ? BigInt(raw.trim()) : null;
-    return value == null
-      ? jet_codec_decode_error("", `expected Int, found text ${JSON.stringify(raw)}`)
-      : jet_codec_decode_ok(value);
-  }
   if (tree?.tag === "Text") {
-    const raw = String(jet_codec_tree_payload(tree)).trim();
-    const value = /^[+-]?\d+$/.test(raw) ? BigInt(raw) : null;
+    const raw = String(jet_codec_tree_payload(tree));
+    const value = jet_text_cells_depth > 0 && /^[+-]?\d+$/.test(raw.trim()) ? BigInt(raw.trim()) : null;
     return value == null
       ? jet_codec_decode_error("", `expected Int, found text ${JSON.stringify(raw)}`)
       : jet_codec_decode_ok(value);
@@ -943,15 +935,19 @@ function jet_codec_typed_float(tree) {
       ? jet_codec_decode_ok(value)
       : jet_codec_decode_error("", "expected Float, found out-of-range Int");
   }
-  if (tree?.tag === "Number" || tree?.tag === "Text") {
-    const raw = String(jet_codec_tree_payload(tree)).trim();
+  if (tree?.tag === "Number") {
+    const raw = String(jet_codec_tree_payload(tree));
     const value = Number(raw);
     return Number.isFinite(value)
       ? jet_codec_decode_ok(value)
-      : jet_codec_decode_error("", `expected Float, found text ${JSON.stringify(raw)}`);
+      : jet_codec_decode_error("", `expected Float, found out-of-range number ${raw}`);
   }
-  if (tree?.tag === "TypedText") {
-    return jet_codec_decode_error("", `expected Float, found text ${JSON.stringify(jet_codec_tree_payload(tree))}`);
+  if (tree?.tag === "Text") {
+    const raw = String(jet_codec_tree_payload(tree));
+    const value = jet_text_cells_depth > 0 && raw.trim() !== "" ? Number(raw.trim()) : NaN;
+    return Number.isFinite(value)
+      ? jet_codec_decode_ok(value)
+      : jet_codec_decode_error("", `expected Float, found text ${JSON.stringify(raw)}`);
   }
   return jet_codec_decode_error("", `expected Float, found ${jet_dyn_kind(tree)}`);
 }
@@ -959,13 +955,10 @@ function jet_codec_typed_float(tree) {
 function jet_codec_typed_bool(tree) {
   if (tree?.tag === "Bool") return jet_codec_decode_ok(Boolean(jet_codec_tree_payload(tree)));
   if (tree?.tag === "Text") {
-    const raw = String(jet_codec_tree_payload(tree)).trim();
-    if (raw === "true") return jet_codec_decode_ok(true);
-    if (raw === "false") return jet_codec_decode_ok(false);
+    const raw = String(jet_codec_tree_payload(tree));
+    if (jet_text_cells_depth > 0 && raw.trim() === "true") return jet_codec_decode_ok(true);
+    if (jet_text_cells_depth > 0 && raw.trim() === "false") return jet_codec_decode_ok(false);
     return jet_codec_decode_error("", `expected Bool, found text ${JSON.stringify(raw)}`);
-  }
-  if (tree?.tag === "TypedText") {
-    return jet_codec_decode_error("", `expected Bool, found text ${JSON.stringify(jet_codec_tree_payload(tree))}`);
   }
   return jet_codec_decode_error("", `expected Bool, found ${jet_dyn_kind(tree)}`);
 }
@@ -1005,9 +998,6 @@ function jet_codec_typed_float32(tree) {
 }
 
 function jet_codec_typed_decimal(tree) {
-  if (tree?.tag === "TypedText") {
-    return jet_codec_decode_error("", `expected Decimal, found text ${JSON.stringify(jet_codec_tree_payload(tree))}`);
-  }
   if (tree?.tag === "Number" || tree?.tag === "Text") {
     const raw = String(jet_codec_tree_payload(tree));
     const trimmed = raw.trim();

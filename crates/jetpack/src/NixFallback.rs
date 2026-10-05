@@ -148,7 +148,7 @@ fn write_canonical(value: &Dyn, output: &mut String) -> Result<(), String> {
         Dyn::Float(value) if value.is_finite() => output.push_str(&value.to_string()),
         Dyn::Float(_) => return Err("fallback document contains a non-finite number".into()),
         Dyn::Number(value) => output.push_str(value),
-        Dyn::TypedText(value) | Dyn::Text(value) => output.push_str(&JSON::quote(value)),
+        Dyn::Text(value) => output.push_str(&JSON::quote(value)),
         Dyn::Bytes(values) => output.push_str(&JSON::quote(&Dyn::bytes_text(values))),
         Dyn::DateTime(value) => output.push_str(&JSON::quote(&value.to_rfc3339())),
         Dyn::Array(values) => {

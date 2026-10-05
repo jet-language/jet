@@ -323,9 +323,7 @@ pub(crate) mod runtime {
             jet_std::Dyn::Null => Ok(crate::jet_xml_pull::Value::Null),
             jet_std::Dyn::Bool(value) => Ok(crate::jet_xml_pull::Value::Bool(*value)),
             jet_std::Dyn::Int(value) => Ok(crate::jet_xml_pull::Value::Int(*value)),
-            jet_std::Dyn::Number(_) | jet_std::Dyn::TypedText(_) => {
-                Err("internal JSON carrier escaped typed decode".to_string())
-            }
+            jet_std::Dyn::Number(text) => Ok(crate::jet_xml_pull::Value::Text(text.clone())),
             jet_std::Dyn::Text(value) => Ok(crate::jet_xml_pull::Value::Text(value.clone())),
             jet_std::Dyn::Array(values) => Ok(crate::jet_xml_pull::Value::Array(
                 values

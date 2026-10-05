@@ -220,6 +220,12 @@ mod web_kernel {
             ) -> Result<Dyn, jet_foundation::EncodingJson::Error> {
                 jet_foundation::EncodingJson::parse_json_exact_numbers(text, true)
             }
+
+            /// The one text-cell decode scope (#4602), shared with the
+            /// comptime Prelude mirror so route parameters decode alike.
+            pub fn jet_decode_text_cells<R>(decode: impl FnOnce() -> R) -> R {
+                crate::Comptime::SyncLite::decode_text_cells(decode)
+            }
         }
 
         include!(concat!(env!("OUT_DIR"), "/web_kernel_native_scheduler.rs"));
@@ -1459,7 +1465,7 @@ fn ct_to_json_string(value: &CtValue) -> String {
             web_kernel::Dyn::Int(value) => value.to_string(),
             web_kernel::Dyn::Float(value) => format!("{value:?}"),
             web_kernel::Dyn::Number(value) => value.clone(),
-            web_kernel::Dyn::TypedText(value) | web_kernel::Dyn::Text(value) => {
+            web_kernel::Dyn::Text(value) => {
                 format!("{value:?}")
             }
             web_kernel::Dyn::Bytes(values) => format!("{:?}", web_kernel::Dyn::bytes_text(values)),

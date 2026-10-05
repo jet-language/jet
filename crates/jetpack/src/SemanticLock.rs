@@ -2008,7 +2008,7 @@ fn canonical_json(value: &Dyn) -> String {
             }
         }
         Dyn::Number(value) => value.clone(),
-        Dyn::Text(value) | Dyn::TypedText(value) => crate::JSON::quote(value),
+        Dyn::Text(value) => crate::JSON::quote(value),
         Dyn::Bytes(values) => crate::JSON::quote(&Dyn::bytes_text(values)),
         Dyn::DateTime(value) => crate::JSON::quote(&value.to_rfc3339()),
         Dyn::Array(values) => format!(
@@ -2594,10 +2594,10 @@ fn lock_node_name(
         start_node: &str,
     ) -> Result<Option<String>, FlakeGraphError> {
         match value {
-            Dyn::Text(value) | Dyn::TypedText(value) if !value.is_empty() => {
+            Dyn::Text(value) if !value.is_empty() => {
                 Ok(Some(value.clone()))
             }
-            Dyn::Text(_) | Dyn::TypedText(_) => Err(FlakeGraphError::Io(
+            Dyn::Text(_) => Err(FlakeGraphError::Io(
                 "flake.lock node reference is empty".to_string(),
             )),
             Dyn::Array(values) => {

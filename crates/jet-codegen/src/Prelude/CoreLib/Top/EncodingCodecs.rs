@@ -96,9 +96,7 @@ fn jet_xml_from_dyn(value: &jet_std::Dyn) -> Result<crate::jet_xml_pull::Value, 
         jet_std::Dyn::Null => Ok(crate::jet_xml_pull::Value::Null),
         jet_std::Dyn::Bool(value) => Ok(crate::jet_xml_pull::Value::Bool(*value)),
         jet_std::Dyn::Int(value) => Ok(crate::jet_xml_pull::Value::Int(*value)),
-        jet_std::Dyn::Number(_) | jet_std::Dyn::TypedText(_) => {
-            Err("internal JSON carrier escaped typed decode".to_string())
-        }
+        jet_std::Dyn::Number(text) => Ok(crate::jet_xml_pull::Value::Text(text.clone())),
         jet_std::Dyn::Text(value) => Ok(crate::jet_xml_pull::Value::Text(value.clone())),
         jet_std::Dyn::Array(values) => Ok(crate::jet_xml_pull::Value::Array(
             values
@@ -388,14 +386,23 @@ fn jet_cbor_value_at(
         jet_std::Dyn::Bool(value) => Ok(crate::jet_cbor_kernel::Value::Bool(*value)),
         jet_std::Dyn::Int(value) => Ok(crate::jet_cbor_kernel::Value::Int(*value)),
         jet_std::Dyn::Float(value) => Ok(crate::jet_cbor_kernel::Value::Float(*value)),
-        jet_std::Dyn::Number(text) => Err(jet_cbor_value_error(
-            path,
-            format!("JSON number carrier {text:?} is not a CBOR value"),
-        )),
-        jet_std::Dyn::TypedText(text) => Err(jet_cbor_value_error(
-            path,
-            format!("typed text carrier {text:?} is not a CBOR value"),
-        )),
+        // #4602: a number lexeme crosses as the CBOR number it spells: an
+        // integer in range as major 0/1, anything else as a finite float64.
+        jet_std::Dyn::Number(text) => {
+            if let Ok(value) = text.parse::<i64>() {
+                Ok(crate::jet_cbor_kernel::Value::Int(value))
+            } else {
+                match text.parse::<f64>() {
+                    Ok(value) if value.is_finite() => {
+                        Ok(crate::jet_cbor_kernel::Value::Float(value))
+                    }
+                    _ => Err(jet_cbor_value_error(
+                        path,
+                        format!("number {text} is outside the CBOR Int and float64 range"),
+                    )),
+                }
+            }
+        }
         jet_std::Dyn::Text(value) => Ok(crate::jet_cbor_kernel::Value::Text(value.clone())),
         jet_std::Dyn::Bytes(value) => Ok(crate::jet_cbor_kernel::Value::Bytes(value.clone())),
         jet_std::Dyn::DateTime(value) => Ok(crate::jet_cbor_kernel::Value::DateTime(*value)),

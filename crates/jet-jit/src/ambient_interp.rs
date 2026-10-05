@@ -302,7 +302,7 @@ fn http_field<'a>(object: &'a [(String, HttpTree)], name: &str) -> Option<&'a Ht
 
 fn http_text<'a>(object: &'a [(String, HttpTree)], name: &str) -> Option<&'a str> {
     match http_field(object, name)? {
-        HttpTree::Text(value) | HttpTree::TypedText(value) => Some(value),
+        HttpTree::Text(value) => Some(value),
         _ => None,
     }
 }
@@ -363,7 +363,7 @@ fn http_tree_runtime(value: &HttpTree) -> MirRuntimeValue {
                 f32: false,
             }))
             .unwrap_or_else(|_| MirRuntimeValue::String(value.clone())),
-        HttpTree::TypedText(value) | HttpTree::Text(value) => {
+        HttpTree::Text(value) => {
             MirRuntimeValue::String(value.clone())
         }
         HttpTree::Bytes(value) => MirRuntimeValue::Bytes(value.clone()),

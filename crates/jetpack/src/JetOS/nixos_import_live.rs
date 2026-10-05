@@ -498,7 +498,7 @@ fn plan_from_live_facts(
             // re-declaring them collides with the module that owns them.
             if matches!(
                 value,
-                Dyn::Text(s) | Dyn::TypedText(s) if s.contains("/nix/store/")
+                Dyn::Text(s) if s.contains("/nix/store/")
             ) {
                 continue;
             }
@@ -507,7 +507,7 @@ fn plan_from_live_facts(
                 Dyn::Float(n) => render_live_number(*n),
                 Dyn::Number(n) => n.clone(),
                 Dyn::Bool(b) => b.to_string(),
-                Dyn::Text(s) | Dyn::TypedText(s) => import_render_string(s),
+                Dyn::Text(s) => import_render_string(s),
                 other => {
                     omissions.push(format!(
                         "boot.kernel.sysctl.{key} has a shape jetos cannot encode yet: {other:?}"

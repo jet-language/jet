@@ -5728,7 +5728,6 @@ fn dyn_value(tree: crate::enc_stream::runtime::jet_std::Dyn) -> MirRuntimeValue 
             vec![MirRuntimeValue::Float { value, f32: false }],
         ),
         Dyn::Number(value) => ("Number", vec![MirRuntimeValue::String(value)]),
-        Dyn::TypedText(value) => ("TypedText", vec![MirRuntimeValue::String(value)]),
         Dyn::Text(value) => ("Text", vec![MirRuntimeValue::String(value)]),
         Dyn::Bytes(value) => ("Bytes", vec![MirRuntimeValue::Bytes(value)]),
         Dyn::DateTime(_) => unreachable!("JSON and XML parsers never produce native temporal nodes"),
@@ -5955,14 +5954,6 @@ fn dyn_from_value(
             }
             _ => Err(MirNativeCursorError::internal(
                 "Dyn.Number carrier has the wrong payload",
-            )),
-        },
-        "TypedText" => match arg(0)? {
-            MirRuntimeValue::String(value) if args.len() == 1 => {
-                Ok(Dyn::TypedText(value.clone()))
-            }
-            _ => Err(MirNativeCursorError::internal(
-                "Dyn.TypedText carrier has the wrong payload",
             )),
         },
         "Text" => match arg(0)? {

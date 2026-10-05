@@ -983,7 +983,7 @@ fn stringify(v: &Dyn) -> String {
         Dyn::Int(n) => n.to_string(),
         Dyn::Float(n) => format!("{n}"),
         Dyn::Number(text) => text.clone(),
-        Dyn::TypedText(text) | Dyn::Text(text) => JSON::quote(text),
+        Dyn::Text(text) => JSON::quote(text),
         Dyn::Bytes(values) => JSON::quote(&Dyn::bytes_text(values)),
         Dyn::DateTime(value) => JSON::quote(&value.to_rfc3339()),
         Dyn::Array(items) => {

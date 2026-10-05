@@ -2560,7 +2560,7 @@ fn unix_time_ms() -> u64 {
 
 fn json_string(value: &Dyn) -> Option<&str> {
     match value {
-        Dyn::Text(value) | Dyn::TypedText(value) => Some(value),
+        Dyn::Text(value) => Some(value),
         _ => None,
     }
 }
@@ -2634,7 +2634,7 @@ pub(crate) fn render_json(value: &Dyn) -> String {
         Dyn::Int(value) => value.to_string(),
         Dyn::Float(value) => value.to_string(),
         Dyn::Number(value) => value.clone(),
-        Dyn::TypedText(value) | Dyn::Text(value) => json_value(value),
+        Dyn::Text(value) => json_value(value),
         Dyn::Bytes(values) => json_value(&Dyn::bytes_text(values)),
         Dyn::DateTime(value) => json_value(&value.to_rfc3339()),
         Dyn::Array(values) => format!(
@@ -2698,7 +2698,7 @@ fn json_string_any(text: &str, key: &str) -> Option<String> {
     fn find(value: &Dyn, key: &str) -> Option<String> {
         match value {
             Dyn::Object(object) => {
-                if let Some(Dyn::Text(value) | Dyn::TypedText(value)) =
+                if let Some(Dyn::Text(value)) =
                     object.iter().find_map(|(name, value)| (name == key).then_some(value))
                 {
                     return Some(value.clone());
@@ -2719,7 +2719,7 @@ fn find_debugger_snapshot(text: &str) -> Option<DebuggerSnapshot> {
     fn find(value: &Dyn) -> Option<DebuggerSnapshot> {
         match value {
             Dyn::Object(object) => {
-                if let Some(Dyn::Text(session_id) | Dyn::TypedText(session_id)) =
+                if let Some(Dyn::Text(session_id)) =
                     object.iter().find_map(|(name, value)| (name == "id").then_some(value))
                 {
                     if session_id.starts_with("canvas-debug-") {
@@ -2728,7 +2728,7 @@ fn find_debugger_snapshot(text: &str) -> Option<DebuggerSnapshot> {
                                 .iter()
                                 .find_map(|(name, value)| (name == key).then_some(value))
                                 .and_then(|value| match value {
-                                    Dyn::Text(value) | Dyn::TypedText(value) => {
+                                    Dyn::Text(value) => {
                                         Some(value.clone())
                                     }
                                     _ => None,

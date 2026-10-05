@@ -13567,9 +13567,12 @@ mod service_adapter {
             crate::Encoding::json_rt::Dyn::Bool(value) => CborValue::Bool(*value),
             crate::Encoding::json_rt::Dyn::Int(value) => CborValue::Int(*value),
             crate::Encoding::json_rt::Dyn::Float(value) => CborValue::Float(*value),
-            crate::Encoding::json_rt::Dyn::Number(value)
-            | crate::Encoding::json_rt::Dyn::TypedText(value)
-            | crate::Encoding::json_rt::Dyn::Text(value) => CborValue::Text(value.clone()),
+            // #4602: a number lexeme crosses as the number it spells.
+            crate::Encoding::json_rt::Dyn::Number(value) => value
+                .parse::<i64>()
+                .map(CborValue::Int)
+                .unwrap_or_else(|_| CborValue::Float(value.parse::<f64>().unwrap_or(f64::NAN))),
+            crate::Encoding::json_rt::Dyn::Text(value) => CborValue::Text(value.clone()),
             crate::Encoding::json_rt::Dyn::Bytes(value) => CborValue::Bytes(value.clone()),
             crate::Encoding::json_rt::Dyn::DateTime(value) => CborValue::DateTime(*value),
             crate::Encoding::json_rt::Dyn::Array(values) => {

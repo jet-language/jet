@@ -1808,7 +1808,7 @@ fn typed_enum_shape_matches(
     if variant.fields.is_empty() {
         return match tree {
             json_rt::Dyn::Null => true,
-            json_rt::Dyn::Text(name) | json_rt::Dyn::TypedText(name) => {
+            json_rt::Dyn::Text(name) => {
                 name == &variant.name || name == &variant.wire_name
             }
             _ => false,
@@ -1825,7 +1825,6 @@ fn typed_enum_shape_matches(
             return matches!(
                 tree,
                 json_rt::Dyn::Text(_)
-                    | json_rt::Dyn::TypedText(_)
                     | json_rt::Dyn::Int(_)
                     | json_rt::Dyn::Number(_)
                     | json_rt::Dyn::Float(_)
@@ -1838,7 +1837,6 @@ fn typed_enum_shape_matches(
                 json_rt::Dyn::Int(_)
                     | json_rt::Dyn::Number(_)
                     | json_rt::Dyn::Text(_)
-                    | json_rt::Dyn::TypedText(_)
             ),
             runtime_host::RuntimeValueKind::Float => matches!(
                 tree,
@@ -1854,7 +1852,6 @@ fn typed_enum_shape_matches(
             | runtime_host::RuntimeValueKind::String => matches!(
                 tree,
                 json_rt::Dyn::Text(_)
-                    | json_rt::Dyn::TypedText(_)
                     | json_rt::Dyn::Int(_)
                     | json_rt::Dyn::Float(_)
                     | json_rt::Dyn::Bool(_)
@@ -1871,10 +1868,7 @@ fn typed_enum_shape_matches(
             runtime_host::RuntimeValueKind::Named | runtime_host::RuntimeValueKind::Handle => {
                 (matches!(child.name.as_str(), "Path" | "JetPath")
                     || matches!(child.canonical.as_str(), "Path" | "JetPath"))
-                    && matches!(
-                        tree,
-                        json_rt::Dyn::Text(_) | json_rt::Dyn::TypedText(_)
-                    )
+                    && matches!(tree, json_rt::Dyn::Text(_))
             }
             _ => false,
         };
@@ -1894,7 +1888,7 @@ fn typed_decode_enum(
     descriptor: &runtime_host::RuntimeTypeDescriptor,
 ) -> Result<JetVal, Vec<json_rt::FieldError>> {
     let (variant, payload) = match tree {
-        json_rt::Dyn::Text(name) | json_rt::Dyn::TypedText(name) => {
+        json_rt::Dyn::Text(name) => {
             let variant = if descriptor.serde_untagged {
                 descriptor
                     .variants
@@ -1942,8 +1936,7 @@ fn typed_decode_enum(
                     .iter()
                     .find(|(name, _)| name == tag_name)
                     .and_then(|(_, value)| match value {
-                        json_rt::Dyn::Text(name)
-                        | json_rt::Dyn::TypedText(name) => Some(name),
+                        json_rt::Dyn::Text(name) => Some(name),
                         _ => None,
                     });
                 if let Some(name) = tagged {
@@ -2858,9 +2851,7 @@ fn dyn_to_xml_value(
         json_rt::Dyn::Null => Ok(Value::Null),
         json_rt::Dyn::Bool(b) => Ok(Value::Bool(*b)),
         json_rt::Dyn::Int(n) => Ok(Value::Int(*n)),
-        json_rt::Dyn::Number(_) | json_rt::Dyn::TypedText(_) => {
-            Err("internal JSON carrier escaped typed decode".to_string())
-        }
+        json_rt::Dyn::Number(text) => Ok(Value::Text(text.clone())),
         json_rt::Dyn::Text(s) => Ok(Value::Text(s.clone())),
         json_rt::Dyn::Array(xs) => Ok(Value::Array(
             xs.iter()
@@ -3313,9 +3304,7 @@ fn cbor_dyn_to_value(value: &json_rt::Dyn) -> Value {
         json_rt::Dyn::Bool(value) => Value::Bool(*value),
         json_rt::Dyn::Int(value) => Value::Int(*value),
         json_rt::Dyn::Float(value) => Value::Float(*value),
-        json_rt::Dyn::Number(_) | json_rt::Dyn::TypedText(_) => {
-            unreachable!("internal JSON carrier escaped typed decode")
-        }
+        json_rt::Dyn::Number(value) => Value::Text(value.clone()),
         json_rt::Dyn::Text(value) => Value::Text(value.clone()),
         json_rt::Dyn::Bytes(value) => Value::Bytes(value.clone()),
         json_rt::Dyn::DateTime(value) => Value::DateTime(*value),
@@ -4233,8 +4222,7 @@ fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
         return result_err_decode("", "invalid Dyn");
     };
     match (kind, tree) {
-        (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, json_rt::Dyn::Text(text))
-        | (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, json_rt::Dyn::TypedText(text)) => {
+        (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, json_rt::Dyn::Text(text)) => {
             match codec_rt::jet_codec_date_decode(&text) {
                 Ok((year, month, day)) => result_ok(crate::Time::push(TimeValue::Date(
                     crate::Time::time_rt::JetDate::new(year, month, day),
@@ -4242,8 +4230,7 @@ fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
                 Err(error) => result_err_decode("", &format!("expected Date: {error}")),
             }
         }
-        (CODEC_KIND_LOCAL_TIME, json_rt::Dyn::Text(text))
-        | (CODEC_KIND_LOCAL_TIME, json_rt::Dyn::TypedText(text)) => {
+        (CODEC_KIND_LOCAL_TIME, json_rt::Dyn::Text(text)) => {
             match codec_rt::jet_codec_local_time_decode(&text) {
                 Ok((hour, minute, second)) => result_ok(crate::Time::push(TimeValue::LocalTime(
                     crate::Time::time_rt::JetLocalTime::new(hour, minute, second),
@@ -4251,8 +4238,7 @@ fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
                 Err(error) => result_err_decode("", &format!("expected LocalTime: {error}")),
             }
         }
-        (CODEC_KIND_DATETIME, json_rt::Dyn::Text(text))
-        | (CODEC_KIND_DATETIME, json_rt::Dyn::TypedText(text)) => {
+        (CODEC_KIND_DATETIME, json_rt::Dyn::Text(text)) => {
             match codec_rt::jet_codec_datetime_decode(&text) {
                 Ok((secs, nanos, leap_second)) => result_ok(crate::Time::push(TimeValue::DateTime(
                     crate::Time::time_rt::JetDateTime::from_timestamp_ns_with_leap(
@@ -4265,8 +4251,7 @@ fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
         (CODEC_KIND_DURATION, json_rt::Dyn::Int(ns)) => {
             result_ok(codec_rt::jet_codec_duration_decode(ns) as u64)
         }
-        (CODEC_KIND_DURATION, json_rt::Dyn::Number(text))
-        | (CODEC_KIND_DURATION, json_rt::Dyn::Text(text)) => {
+        (CODEC_KIND_DURATION, json_rt::Dyn::Number(text)) => {
             let decoded =
                 jet_foundation::JSONNumber::json_exact_integer_text(&text).and_then(|value| {
                     value
@@ -4278,7 +4263,15 @@ fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
                 Err(error) => result_err_decode("", &error),
             }
         }
-        (CODEC_KIND_DURATION, json_rt::Dyn::TypedText(text)) => {
+        (CODEC_KIND_DURATION, json_rt::Dyn::Text(text)) if json_rt::jet_text_cells_active() => {
+            match jet_foundation::JSONNumber::json_exact_integer_text(text.trim()).and_then(|value| {
+                value.parse::<i64>().map_err(|_| "Duration is outside the I64 range".to_string())
+            }) {
+                Ok(ns) => result_ok(codec_rt::jet_codec_duration_decode(ns) as u64),
+                Err(error) => result_err_decode("", &error),
+            }
+        }
+        (CODEC_KIND_DURATION, json_rt::Dyn::Text(text)) => {
             result_err_decode("", &format!("expected Duration, found text {:?}", text))
         }
         (CODEC_KIND_DECIMAL, json_rt::Dyn::Number(text)) => {
@@ -4286,9 +4279,6 @@ fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
                 Ok(decimal) => result_ok(crate::Numeric::push_decimal(decimal) as u64),
                 Err(error) => result_err_decode("", &format!("expected Decimal: {error}")),
             }
-        }
-        (CODEC_KIND_DECIMAL, json_rt::Dyn::TypedText(text)) => {
-            result_err_decode("", &format!("expected Decimal, found text {:?}", text))
         }
         (CODEC_KIND_DECIMAL, json_rt::Dyn::Text(text)) => {
             match codec_rt::jet_codec_decimal_decode_text(&text) {

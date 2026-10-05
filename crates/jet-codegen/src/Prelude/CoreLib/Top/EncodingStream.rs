@@ -1843,7 +1843,7 @@ fn jet_json_fold_from_event(
                         heap,
                         &mut root,
                         &mut frames,
-                        jet_std::Dyn::TypedText(value),
+                        jet_std::Dyn::Text(value),
                     )
                 }
             }
@@ -2116,17 +2116,7 @@ fn jet_jsonl_tree_size(
             error.path = path.to_string();
             return Err(error);
         }
-        jet_std::Dyn::Number(_) | jet_std::Dyn::TypedText(_) => {
-            let mut error = jet_encoding_error(
-                jet_std::EncodingErrorKind::State,
-                0,
-                1,
-                1,
-                "internal JSON carrier escaped typed decode",
-            );
-            error.path = path.to_string();
-            return Err(error);
-        }
+        jet_std::Dyn::Number(text) => text.len(),
         jet_std::Dyn::Text(text) => text.len(),
         jet_std::Dyn::Bytes(bytes) => bytes.len().div_ceil(3) * 4,
         jet_std::Dyn::DateTime(value) => value.to_rfc3339().len(),
@@ -2188,15 +2178,7 @@ fn jet_jsonl_wire_size(
         jet_std::Dyn::Int(value) => Ok(value.to_string().len()),
         jet_std::Dyn::Float(value) => Ok(value.to_string().len()),
         jet_std::Dyn::Text(value) => checked_sum(&[writer.quoted_len(value)?, 2]),
-        jet_std::Dyn::Number(_) | jet_std::Dyn::TypedText(_) => Err(
-            jet_encoding_error(
-                jet_std::EncodingErrorKind::State,
-                writer.total,
-                1,
-                writer.total + 1,
-                "internal JSON carrier escaped typed decode",
-            ),
-        ),
+        jet_std::Dyn::Number(text) => Ok(text.len()),
         jet_std::Dyn::Bytes(bytes) => checked_sum(&[bytes.len().div_ceil(3) * 4, 2]),
         jet_std::Dyn::DateTime(value) => checked_sum(&[writer.quoted_len(&value.to_rfc3339())?, 2]),
         jet_std::Dyn::Array(items) => {
@@ -2231,15 +2213,7 @@ fn jet_jsonl_write_tree(
         jet_std::Dyn::Bool(value) => writer.write_event(jet_std::DataEvent::Bool(*value)),
         jet_std::Dyn::Int(value) => writer.write_event(jet_std::DataEvent::Int(*value)),
         jet_std::Dyn::Float(value) => writer.write_event(jet_std::DataEvent::Float(*value)),
-        jet_std::Dyn::Number(_) | jet_std::Dyn::TypedText(_) => Err(
-            jet_encoding_error(
-                jet_std::EncodingErrorKind::State,
-                writer.total,
-                1,
-                writer.total + 1,
-                "internal JSON carrier escaped typed decode",
-            ),
-        ),
+        jet_std::Dyn::Number(text) => writer.write_event(jet_std::DataEvent::Number(text.clone())),
         jet_std::Dyn::Text(value) => writer.write_event(jet_std::DataEvent::Text(value.clone())),
         jet_std::Dyn::Bytes(value) => writer.write_event(jet_std::DataEvent::Text(jet_std::Dyn::bytes_text(value))),
         jet_std::Dyn::DateTime(value) => writer.write_event(jet_std::DataEvent::Text(value.to_rfc3339())),
@@ -4211,15 +4185,16 @@ fn jet_enc_json_canonical_tree(
             }
             Ok(jet_json_jcs_number(*f).into_bytes())
         }
-        jet_std::Dyn::Number(_) | jet_std::Dyn::TypedText(_) => Err(
-            jet_encoding_error(
-                jet_std::EncodingErrorKind::State,
+        jet_std::Dyn::Number(text) => match text.parse::<f64>() {
+            Ok(value) if value.is_finite() => Ok(jet_json_jcs_number(value).into_bytes()),
+            _ => Err(jet_encoding_error(
+                jet_std::EncodingErrorKind::Unsupported,
                 0,
                 1,
                 1,
-                "internal JSON carrier escaped typed decode",
-            ),
-        ),
+                "JCS cannot encode a number outside binary64",
+            )),
+        },
         jet_std::Dyn::Text(s) => Ok(jet_json_canonical_quote_text(s)),
         jet_std::Dyn::Bytes(value) => Ok(jet_json_canonical_quote_text(&jet_std::Dyn::bytes_text(value))),
         jet_std::Dyn::DateTime(value) => Ok(jet_json_canonical_quote_text(&value.to_rfc3339())),

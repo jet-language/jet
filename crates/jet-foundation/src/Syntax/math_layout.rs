@@ -338,7 +338,9 @@ pub fn is_data_type_name(name: &str) -> bool {
     matches!(name, "Dyn" | "JSON" | "TOML" | "YAML" | "CSV")
 }
 
-/// The closed public cases of `Dyn` (D-ENC-DYN1).
+/// The constructible variants of the dynamic `Dyn` value (D-ENC-DYN1=A+,
+/// #4602). `Number` (an exact parsed lexeme) is matchable but only parsers
+/// build it.
 pub fn is_data_variant(variant: &str) -> bool {
     matches!(
         variant,

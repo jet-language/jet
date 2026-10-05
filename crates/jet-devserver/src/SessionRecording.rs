@@ -1051,7 +1051,7 @@ fn canonical_json(value: &Dyn) -> String {
         Dyn::Int(value) => value.to_string(),
         Dyn::Float(value) => value.to_string(),
         Dyn::Number(value) => value.clone(),
-        Dyn::TypedText(value) | Dyn::Text(value) => quoted(value),
+        Dyn::Text(value) => quoted(value),
         Dyn::Bytes(values) => quoted(&Dyn::bytes_text(values)),
         Dyn::DateTime(value) => quoted(&value.to_rfc3339()),
         Dyn::Array(values) => format!(

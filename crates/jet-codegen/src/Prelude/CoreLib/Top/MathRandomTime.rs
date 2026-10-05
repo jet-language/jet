@@ -1689,9 +1689,7 @@ fn jet_std_json_render_canonical(d: &jet_std::Dyn) -> String {
             jet_std::Dyn::Bool(b) => b.to_string(),
             jet_std::Dyn::Int(n) => jet_std::jet_int_to_string(*n),
             jet_std::Dyn::Float(f) => format!("{:?}", f),
-            jet_std::Dyn::Number(_) | jet_std::Dyn::TypedText(_) => {
-                unreachable!("internal JSON carrier escaped typed decode")
-            }
+            jet_std::Dyn::Number(text) => text.clone(),
             jet_std::Dyn::Text(s) => jet_quote_json_local(s),
             jet_std::Dyn::Bytes(bs) => jet_quote_json_local(&jet_std::Dyn::bytes_text(bs)),
             jet_std::Dyn::DateTime(value) => jet_quote_json_local(&value.to_rfc3339()),

@@ -168,7 +168,7 @@ mod tests {
             text,
         );
         assert!(<JetInt as __jet_Decode>::jet_decode(&Dyn::Number("1.5".to_string())).is_err());
-        assert!(<JetInt as __jet_Decode>::jet_decode(&Dyn::TypedText("12".to_string())).is_err());
+        assert!(<JetInt as __jet_Decode>::jet_decode(&Dyn::Text("12".to_string())).is_err());
     }
 }
 

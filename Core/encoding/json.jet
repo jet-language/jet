@@ -1,11 +1,12 @@
 
 // core.encoding.json — RFC 8259 JSON as Dyn.
 //
-// `parse` is the strict codec: objects keep insertion order, whole numbers
-// become `Dyn.Int` (exact `Int`, not binary64), fractions become
-// `Dyn.Float`, and `NaN` / `Infinity` are syntax errors. `decode` is the
-// same tree with the historical lenient name; typed `decode<T>` stays a
-// compiler lowering over this tree and is not reimplemented here.
+// `parse` is the strict codec: objects keep insertion order, every number
+// becomes `Dyn.Number` holding its exact lexeme (`1.50` stays `1.50`,
+// `1e400` and integers wider than `Int` are kept exactly; a typed read
+// range-checks them), and `NaN` / `Infinity` are syntax errors (#4602).
+// `decode` is the same parse; typed `decode<T>` stays a compiler lowering over
+// this tree and is not reimplemented here.
 //
 // `to_string` is compact. `to_string_pretty` uses two-space indent. Neither
 // emits a trailing newline, sorts keys, or is a hashing contract: insertion
@@ -450,9 +451,7 @@ impl Parser {
                 }
             }
         }
-        fractional := false
         if (self.peek() ?? (U8{0})) == (U8{46}) {
-            fractional = true
             _ :: &self.bump()
             digit :: self.peek() ?? return Err(self.err("decimal point must be followed by a digit"))
             dn :: digit
@@ -467,11 +466,9 @@ impl Parser {
                 }
             }
         }
-        exp := false
         ebyte :: self.peek() ?? (U8{0})
         en :: ebyte
         if en == 101 || en == 69 {
-            exp = true
             _ :: &self.bump()
             sign :: self.peek() ?? (U8{0})
             sn :: sign
@@ -490,13 +487,7 @@ impl Parser {
             }
         }
         token :: String.from_bytes(self.bytes[start..self.index - 1]) ?? return Err(self.err("invalid number token"))
-        if fractional || exp {
-            f :: Float.parse(token) ?? return Err(self.err("number does not fit in Float"))
-            if !math.is_finite(f) -> return Err(self.err("non-finite JSON numbers are not allowed"))
-            return Ok(Dyn.Float(f))
-        }
-        n :: Int.parse(token) ?? return Err(self.err("number does not fit in Int"))
-        Ok(Dyn.Int(n))
+        Ok(Dyn.Number(token))
     }
 
     fn parse_array(&self) -> Dyn EncodingError! {
@@ -634,6 +625,8 @@ fn append_events(value: Dyn) -> [DataEvent] Never! {
         .Bool(v) -> &out.push(DataEvent.Bool(v))
         .Int(n) -> &out.push(DataEvent.Int(n))
         .Float(n) -> &out.push(DataEvent.Float(n))
+        .Number(s) -> &out.push(DataEvent.Number(s))
+        .Bytes(b) -> &out.push(DataEvent.Bytes(b))
         .Text(s) -> &out.push(DataEvent.Text(s))
         .Bytes(bytes) -> &out.push(DataEvent.Bytes(bytes))
         .DateTime(z) -> &out.push(DataEvent.DateTime(z))
@@ -731,6 +724,14 @@ fn write_canonical(out: &[U8], value: Dyn, path: &[String], depth: Int) -> Bool 
             }
             write_ascii(&out, jcs_number(n))
         }
+        .Number(s) -> {
+            f :: Float.parse(s) ?? return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS cannot encode number {s}"))
+            if !math.is_finite(f) {
+                return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS requires a number within IEEE 754 binary64; {s} is out of range"))
+            }
+            write_ascii(&out, jcs_number(f))
+        }
+        .Bytes(_) -> return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JSON cannot encode Bytes; encode bytes as Text explicitly"))
         .Text(s) -> write_json_string(&out, s)
         .Bytes(_) -> write_json_string(&out, value.to_text() ?? "")
         .DateTime(_) -> write_json_string(&out, value.to_text() ?? "")
@@ -945,6 +946,8 @@ fn write_json(out: &[U8], value: Dyn, pretty: Bool, indent: Int) Never! {
             else -> write_ascii(&out, "false")
         }
         .Int(n) -> write_ascii(&out, "{n}")
+        .Number(s) -> write_ascii(&out, s)
+        .Bytes(b) -> write_json_bytes(&out, b)
         .Float(n) -> write_json_float(&out, n)
         .Text(s) -> write_json_string(&out, s)
         .Bytes(_) -> write_json_string(&out, value.to_text() ?? "")
@@ -998,6 +1001,15 @@ fn write_json(out: &[U8], value: Dyn, pretty: Bool, indent: Int) Never! {
 }
 fn write_json_float(out: &[U8], n: Float) Never! {
     if math.is_finite(n) -> write_ascii(&out, "{n}") else -> write_ascii(&out, "null")
+}
+// Bytes render as their byte values, `[1,255]`, the same text every tier writes.
+fn write_json_bytes(out: &[U8], bytes: [U8]) Never! {
+    &out.push(U8{91})
+    loop i in 0..<bytes.len() {
+        if i > 0 -> &out.push(U8{44})
+        write_ascii(&out, "{Int.from_u8(bytes[i])}")
+    }
+    &out.push(U8{93})
 }
 
 fn write_ascii(out: &[U8], text: String) Never! {
@@ -1353,6 +1365,7 @@ fn json_equal(left: Dyn, right: Dyn) -> Bool Never! {
             if right == {
                 .Int(b) -> return a == b
                 .Float(b) -> return Float{a} == b
+                .Number(b) -> return Float{a} == (Float.parse(b) ?? return false)
                 else -> return false
             }
         }
@@ -1360,6 +1373,21 @@ fn json_equal(left: Dyn, right: Dyn) -> Bool Never! {
             if right == {
                 .Float(b) -> return a == b
                 .Int(b) -> return a == Float{b}
+                .Number(b) -> return a == (Float.parse(b) ?? return false)
+                else -> return false
+            }
+        }
+        .Number(a) -> {
+            if right == {
+                .Number(b) -> return a == b || (Float.parse(a) ?? return false) == (Float.parse(b) ?? return false)
+                .Int(b) -> return (Float.parse(a) ?? return false) == Float{b}
+                .Float(b) -> return (Float.parse(a) ?? return false) == b
+                else -> return false
+            }
+        }
+        .Bytes(a) -> {
+            if right == {
+                .Bytes(b) -> return a == b
                 else -> return false
             }
         }

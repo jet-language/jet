@@ -307,15 +307,55 @@ fn parse_scalar(text: String) -> Dyn EncodingError! {
         "false" -> return Ok(Dyn.Bool(false))
         else -> { _ := 0 }
     }
+    // #4602: a number keeps its exact JSON-number lexeme as `Number`.
     if Int.parse(clean) == {
-        .Ok(n) -> return Ok(Dyn.Int(n))
+        .Ok(n) -> return Ok(Dyn.Number("{n}"))
         else -> { _ := 0 }
     }
     if Float.parse(clean) == {
-        .Ok(n) -> return Ok(Dyn.Float(n))
+        .Ok(n) -> return Ok(number_tree(clean, n))
         else -> { _ := 0 }
     }
     Ok(Dyn.Text(unquote(clean)))
+}
+
+// A float keeps its own spelling when it is a JSON number token (`+`
+// dropped), else its shortest decimal spelling; `.inf` and `.nan` have no
+// lexeme and stay `Float`. Rust twin: jet-foundation JSONNumber.rs.
+fn number_tree(clean: String, value: Float) -> Dyn Never! {
+    raw :: clean.bytes()
+    unsigned :: if raw.len() > 0 && raw[0] == (U8{43}) -> String.from_bytes(raw[1..<raw.len()]) ?? clean else -> clean
+    if is_json_number_token(unsigned) -> return Dyn.Number(unsigned)
+    shown :: "{value}"
+    if is_json_number_token(shown) -> return Dyn.Number(shown)
+    Dyn.Float(value)
+}
+
+fn is_json_number_token(text: String) -> Bool Never! {
+    b :: text.bytes()
+    i := 0
+    if i < b.len() && b[i] == (U8{45}) -> i += 1
+    if i >= b.len() -> return false
+    if b[i] == (U8{48}) {
+        i += 1
+    } else {
+        if b[i] < (U8{49}) || b[i] > (U8{57}) -> return false
+        loop i < b.len() && b[i] >= (U8{48}) && b[i] <= (U8{57}) -> i += 1
+    }
+    if i < b.len() && b[i] == (U8{46}) {
+        i += 1
+        fraction :: i
+        loop i < b.len() && b[i] >= (U8{48}) && b[i] <= (U8{57}) -> i += 1
+        if i == fraction -> return false
+    }
+    if i < b.len() && (b[i] == (U8{101}) || b[i] == (U8{69})) {
+        i += 1
+        if i < b.len() && (b[i] == (U8{43}) || b[i] == (U8{45})) -> i += 1
+        exponent :: i
+        loop i < b.len() && b[i] >= (U8{48}) && b[i] <= (U8{57}) -> i += 1
+        if i == exponent -> return false
+    }
+    i == b.len()
 }
 
 fn render_yaml(value: Dyn, indent: Int) -> String {
@@ -327,6 +367,15 @@ fn render_yaml(value: Dyn, indent: Int) -> String {
         }
         .Int(n) -> return "{n}"
         .Float(n) -> return "{n}"
+        .Number(s) -> return s
+        .Bytes(b) -> {
+            out := "["
+            loop i in 0..<b.len() {
+                if i > 0 -> out = "{out}, "
+                out = "{out}{Int.from_u8(b[i])}"
+            }
+            return "{out}]"
+        }
         .Text(s) -> return yaml_scalar(s)
         .Bytes(_) -> return "!!binary {value.to_text() ?? ""}"
         .DateTime(_) -> return value.to_text() ?? ""

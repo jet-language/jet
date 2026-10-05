@@ -1212,7 +1212,7 @@ fn json_value_to_canonical(value: Dyn) -> CanonicalJson {
         Dyn::Int(value) => CanonicalJson::Integer(value.to_string()),
         Dyn::Float(value) => CanonicalJson::String(value.to_string()),
         Dyn::Number(value) => CanonicalJson::String(value),
-        Dyn::TypedText(value) | Dyn::Text(value) => CanonicalJson::String(value),
+        Dyn::Text(value) => CanonicalJson::String(value),
         Dyn::Bytes(values) => CanonicalJson::String(Dyn::bytes_text(&values)),
         Dyn::DateTime(value) => CanonicalJson::String(value.to_rfc3339()),
         Dyn::Array(values) => {

@@ -58,7 +58,7 @@ impl ProviderFactValue {
             Dyn::Int(value) => Ok(Self::Number(value.to_string())),
             Dyn::Float(value) => Ok(Self::Number(value.to_string())),
             Dyn::Number(value) => Ok(Self::Number(value.clone())),
-            Dyn::Text(value) | Dyn::TypedText(value) => Ok(Self::Text(value.clone())),
+            Dyn::Text(value) => Ok(Self::Text(value.clone())),
             Dyn::Bytes(values) => Ok(Self::Text(Dyn::bytes_text(values))),
             Dyn::DateTime(value) => Ok(Self::Text(value.to_rfc3339())),
             Dyn::Array(values) => values

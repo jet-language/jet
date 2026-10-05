@@ -292,6 +292,18 @@ fn write_cbor(out: &[U8], value: Dyn, canonical: Bool) Never! {
         }
         .Int(n) -> { write_cbor_int(&out, n) }
         .Float(n) -> { write_cbor_float(&out, n) }
+        .Number(s) -> {
+            // A lexeme is a JSON number token, so it is an integer or a float64.
+            if Int.parse(s) == .Ok(n) {
+                write_cbor_int(&out, n)
+            } else {
+                write_cbor_float(&out, Float.parse(s) ?? 0.0)
+            }
+        }
+        .Bytes(b) -> {
+            write_cbor_head(&out, 2, b.len())
+            loop x in b { cbor_push(&out, x) }
+        }
         .Text(s) -> {
             raw :: s.bytes()
             write_cbor_head(&out, 3, raw.len())

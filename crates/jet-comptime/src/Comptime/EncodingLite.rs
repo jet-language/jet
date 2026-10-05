@@ -1116,7 +1116,7 @@ fn yaml_scalar_payload(value: &CtValue) -> Option<usize> {
         return integer.limbs.len().checked_mul(std::mem::size_of::<u32>());
     }
     Some(
-        ["Text", "Number", "TypedText"]
+        ["Text", "Number"]
             .iter()
             .find_map(|variant| match json_payload(value, variant) {
                 Some(CtValue::Str(text)) => Some(text.len()),
@@ -1157,7 +1157,7 @@ fn yaml_clone(value: &CtValue, budget: &mut YamlBudget) -> Result<CtValue, ()> {
 }
 
 fn value_is_yaml_scalar(value: &CtValue) -> bool {
-    ["Bool", "Int", "Float", "Number", "TypedText", "Text"]
+    ["Bool", "Int", "Float", "Number", "Text"]
         .iter()
         .any(|variant| json_payload(value, variant).is_some())
 }
@@ -2764,7 +2764,28 @@ fn cbor_kernel_value(value: &CtValue) -> Result<jet_foundation::CborKernel::Valu
                 }
                 _ => Err("Dyn.Float has an invalid payload".to_string()),
             },
-            "Text" | "TypedText" => match args.first().map(|(_, value)| value) {
+            "Number" => match args.first().map(|(_, value)| value) {
+                // #4602: a number lexeme crosses as the CBOR number it spells.
+                Some(CtValue::Str(text)) => match text.parse::<i64>() {
+                    Ok(value) => Ok(jet_foundation::CborKernel::Value::Int(value)),
+                    Err(_) => match text.parse::<f64>() {
+                        Ok(value) if value.is_finite() => {
+                            Ok(jet_foundation::CborKernel::Value::Float(value))
+                        }
+                        _ => Err(format!(
+                            "number {text} is outside the CBOR Int and float64 range"
+                        )),
+                    },
+                },
+                _ => Err("Dyn.Number has an invalid payload".to_string()),
+            },
+            "Bytes" => match args.first().map(|(_, value)| value) {
+                Some(CtValue::Bytes(value)) => {
+                    Ok(jet_foundation::CborKernel::Value::Bytes(value.clone()))
+                }
+                _ => Err("Dyn.Bytes has an invalid payload".to_string()),
+            },
+            "Text" => match args.first().map(|(_, value)| value) {
                 Some(CtValue::Str(value)) => {
                     Ok(jet_foundation::CborKernel::Value::Text(value.clone()))
                 }
@@ -2795,9 +2816,13 @@ fn cbor_kernel_tree(value: jet_foundation::CborKernel::Value) -> Result<CtValue,
         jet_foundation::CborKernel::Value::Text(value) => {
             json_variant("Text", Some(CtValue::Str(value)))
         }
-        jet_foundation::CborKernel::Value::Bytes(value) => CtValue::Bytes(value),
-        jet_foundation::CborKernel::Value::DateTime(_) => return Err(CborFailure::new(
-            "Unsupported", 0, "$", "CBOR DateTime requires the AOT time payload boundary")),
+        jet_foundation::CborKernel::Value::Bytes(value) => {
+            json_variant("Bytes", Some(CtValue::Bytes(value)))
+        }
+        jet_foundation::CborKernel::Value::DateTime(value) => json_variant(
+            "DateTime",
+            Some(super::CorePureParity::dyn_datetime_value(value)),
+        ),
         jet_foundation::CborKernel::Value::Array(values) => {
             json_array(values.into_iter().map(cbor_kernel_tree).collect::<Result<_, _>>()?)
         }

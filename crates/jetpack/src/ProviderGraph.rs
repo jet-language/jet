@@ -5265,7 +5265,7 @@ fn json_array_strings(
         Some(Dyn::Array(values)) => values
             .iter()
             .filter_map(|value| match value {
-                Dyn::Text(value) | Dyn::TypedText(value) => Some(value.clone()),
+                Dyn::Text(value) => Some(value.clone()),
                 Dyn::Object(value) => object_field(value, "name")
                     .and_then(|value| value.as_str().ok())
                     .map(str::to_string),
@@ -5356,7 +5356,7 @@ fn json_value_text(value: &Dyn) -> String {
         Dyn::Int(value) => value.to_string(),
         Dyn::Float(value) => value.to_string(),
         Dyn::Number(value) => value.clone(),
-        Dyn::Text(value) | Dyn::TypedText(value) => value.clone(),
+        Dyn::Text(value) => value.clone(),
         Dyn::DateTime(value) => value.to_rfc3339(),
         Dyn::Bytes(_) | Dyn::Array(_) | Dyn::Object(_) => json_value_json(value),
     }
@@ -5369,7 +5369,7 @@ fn json_value_json(value: &Dyn) -> String {
         Dyn::Int(value) => value.to_string(),
         Dyn::Float(value) => value.to_string(),
         Dyn::Number(value) => value.clone(),
-        Dyn::Text(value) | Dyn::TypedText(value) => JSON::quote(value),
+        Dyn::Text(value) => JSON::quote(value),
         Dyn::Bytes(values) => JSON::quote(&Dyn::bytes_text(values)),
         Dyn::DateTime(value) => JSON::quote(&value.to_rfc3339()),
         Dyn::Array(values) => format!(

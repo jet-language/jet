@@ -1413,7 +1413,6 @@ fn ensure_depth(value: &Dyn, depth: usize, maximum: usize) -> Result<(), CodecEr
         | Dyn::Int(_)
         | Dyn::Float(_)
         | Dyn::Number(_)
-        | Dyn::TypedText(_)
         | Dyn::Text(_)
         | Dyn::Bytes(_) | Dyn::DateTime(_) => {}
     }
@@ -1570,7 +1569,7 @@ fn stringify_into(
             }
             append_fragment(output, value, maximum)
         }
-        Dyn::TypedText(value) | Dyn::Text(value) => {
+        Dyn::Text(value) => {
             append_json_string(output, value, maximum)
         }
         Dyn::Bytes(values) => append_json_string(output, &Dyn::bytes_text(values), maximum),

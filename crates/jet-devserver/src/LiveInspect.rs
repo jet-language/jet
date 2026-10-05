@@ -189,7 +189,7 @@ fn canonical_json_value(value: &Dyn) -> Result<String, String> {
         Dyn::Float(value) if value.is_finite() => Ok(value.to_string()),
         Dyn::Float(_) => Err("decision ledger contains a non-finite number".to_string()),
         Dyn::Number(value) => Ok(value.clone()),
-        Dyn::TypedText(value) | Dyn::Text(value) => {
+        Dyn::Text(value) => {
             Ok(jet_foundation::JSON::quote(value))
         }
         Dyn::Bytes(values) => Ok(jet_foundation::JSON::quote(&Dyn::bytes_text(values))),
