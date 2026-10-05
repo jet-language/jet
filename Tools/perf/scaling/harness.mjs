@@ -391,7 +391,8 @@ export async function run(config) {
       const judged = judge(series);
       series.metrics = judged.metrics;
       series.failures = judged.failures;
-      if (!series.baseline.ok) series.failures.push({ kind: 'compile', phase: series.baseline.timeout_phase, text: `baseline: ${series.baseline.problems.join('; ')}` });
+      if (!series.baseline.ok) series.failures.push({ kind: series.baseline.timeout_phase ? 'timeout' : 'compile',
+        phase: series.baseline.timeout_phase ?? series.baseline.open_phases?.at(-1) ?? null, text: `baseline: ${series.baseline.problems.join('; ')}` });
       const ok = series.points.filter(point => point.ok);
       if (config.mode !== 'counters' && ok.length) {
         const checked = checkFloors(ok[ok.length - 1], limits);
@@ -401,11 +402,11 @@ export async function run(config) {
       if (series.truncated) {
         const failed = series.points.find(point => !point.ok);
         series.failures.push({ kind: failed?.timeout_phase ? 'timeout' : series.truncated.startsWith('stopped') ? 'truncated' : 'compile',
-          phase: failed?.timeout_phase ?? null, text: series.truncated });
+          phase: failed?.timeout_phase ?? failed?.open_phases?.at(-1) ?? null, text: series.truncated });
       }
       if (config.mode === 'counters') {
         for (const failed of series.points.filter(point => !point.ok)) {
-          series.failures.push({ kind: failed.timeout_phase ? 'timeout' : 'compile', phase: failed.timeout_phase,
+          series.failures.push({ kind: failed.timeout_phase ? 'timeout' : 'compile', phase: failed.timeout_phase ?? failed.open_phases?.at(-1) ?? null,
             text: `N=${failed.n}: ${failed.problems.join('; ')}` });
         }
       }

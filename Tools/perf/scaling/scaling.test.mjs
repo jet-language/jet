@@ -62,6 +62,27 @@ test('resume preserves completed rungs, including timeouts, without retrying the
   }
 });
 
+test('resumed counter failures retain the last open phase without claiming a timeout', async () => {
+  const scratch = path.join(os.homedir(), '.cache/jet-dev/scratch');
+  fs.mkdirSync(scratch, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(scratch, 'scaling-crash-phase-'));
+  try {
+    const config = options(['--compiler', 'fixture=command:exit 99', '--shape', 'modules', '--layout', 'single',
+      '--mode', 'counters', '--jobs', '2', '--ladder', 'modules=2,4', '--work-dir', dir]);
+    const failed = n => ({ n, x: n, ok: false, problems: ['compiler exited 139'], open_phases: ['compile', 'sema.check'], timeout_phase: null, metrics: {} });
+    const receipt = resumeReceipt(config, floors());
+    receipt.series.push({ shape: 'modules', compiler: 'fixture', layout: 'single', mode: 'counters',
+      baseline: failed(1), points: [failed(2), failed(4)], truncated: null });
+    fs.writeFileSync(config.receipt, JSON.stringify(receipt));
+    const resumed = await run(config);
+    assert.equal(resumed.series[0].failures.length, 3);
+    assert.ok(resumed.series[0].failures.every(failure => failure.kind === 'compile' && failure.phase === 'sema.check'));
+    assert.equal(resumed.passed, false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('reports merge receipts and retain timeout phase attribution', () => {
   const receipt = compiler => ({ startedAt: 'start', finishedAt: 'end', compilers: [{ label: compiler, path: '/compiler' }], failures: ['timeout'],
     series: [{ shape: 'modules', layout: 'files', compiler, points: [], done: true, truncated: 'timed out',

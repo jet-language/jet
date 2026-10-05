@@ -22,7 +22,8 @@ the single `run-gate.mjs` command above is the landing counter proof: it covers
 every stress and domain shape, both layouts, and all rungs, with bounded
 parallel compiles. Counter mode gates deterministic work counters and compile
 outcomes, not contended time/RSS or lines/s floors. A timed-out rung fails with
-its open phase and is not retried. Timing mode remains serial and gates wall/RSS
+its open phase and is not retried. Other compile failures retain the last observed
+open phase when available, without being classified as timeouts. Timing mode remains serial and gates wall/RSS
 growth and floors; only its measurements feed 1M-line projections.
 Every baseline, rung and profile compile is atomically checkpointed. Repeat
 the identical command to resume without retrying completed rungs (including
