@@ -458,15 +458,18 @@ fn jet_eval_function_result(failure: MIRFailureCarrier, data: TComptimeValue) ->
     ~data
 }
 fn jet_eval_result(machine: ^JetEvalMachine, value: JetEvalRuntimeValue?, complete: Bool) -> JetEvalResult Never! {
-    stdout := machine.stdout
-    stderr := machine.stderr
-    output_context := machine.config.output_context
-    steps := machine.steps
-    soft_stop := machine.soft_stop
-    exit_code := machine.exit_code
-    error := machine.failure
-    internal_problem := machine.internal_problem
-    session := JetEvalRuntimeSession{machine: machine, retired: false}
+    jet_eval_session_result(JetEvalRuntimeSession{machine: machine, retired: false}, value, complete)
+}
+
+fn jet_eval_session_result(session: ^JetEvalRuntimeSession, value: JetEvalRuntimeValue?, complete: Bool) -> JetEvalResult Never! {
+    stdout := session.machine.stdout
+    stderr := session.machine.stderr
+    output_context := session.machine.config.output_context
+    steps := session.machine.steps
+    soft_stop := session.machine.soft_stop
+    exit_code := session.machine.exit_code
+    error := session.machine.failure
+    internal_problem := session.machine.internal_problem
     JetEvalResult{complete: complete, value: value, session: Val(session), stdout: stdout, stderr: stderr, output_context: output_context, steps: steps, soft_stop: soft_stop, exit_code: exit_code, error: error, internal_problem: internal_problem}
 }
 // Discharge one owned alias per registry reference inside `value`. Terminal
@@ -615,9 +618,21 @@ fn jet_eval_retire_machine(machine: &JetEvalMachine, span: Span) -> Bool {
 }
 
 pub fn jet_eval_retire_result(result: &JetEvalResult, span: Span) -> Bool {
+    ok :: jet_eval_retire_in_place(&result, span) ?? return false
+    result.session = None
+    ok
+}
+
+// Retires `result`'s session where it stands: drains callbacks, drops the
+// value, cleans up the frames, and records the final outcome on `result`. The
+// retired session stays on `result` until jet_eval_retire_result drops it, or
+// its owner moves it out to evaluate the next function on the same program
+// (jet_eval_session_function). None when draining callbacks failed; the
+// session then stays live.
+pub fn jet_eval_retire_in_place(result: &JetEvalResult, span: Span) -> Bool? {
     ok := true
     if &result.session == {
-        None -> return true
+        None -> return Val(true)
         .Val(session) -> {
             if !session.retired {
                 if !jet_eval_drain_callbacks(&session.machine, span) {
@@ -626,7 +641,7 @@ pub fn jet_eval_retire_result(result: &JetEvalResult, span: Span) -> Bool {
                     result.stdout = session.machine.stdout
                     result.stderr = session.machine.stderr
                     result.output_context = session.machine.config.output_context
-                    return false
+                    return None
                 }
                 value := result.value
                 if value != None {
@@ -643,9 +658,8 @@ pub fn jet_eval_retire_result(result: &JetEvalResult, span: Span) -> Bool {
             }
         }
     }
-    result.session = None
     result.value = None
-    ok
+    Val(ok)
 }
 
 // Move the produced value out of a result before the session retires. The
@@ -667,7 +681,7 @@ pub fn jet_eval_result_take_value(result: &JetEvalResult, span: Span) -> JetEval
 
 pub fn jet_eval_comptime_value(result: &JetEvalResult, span: Span) -> TComptimeValue? {
     if result.internal_problem != None {
-        jet_eval_retire_result(&result, span)
+        _ := jet_eval_retire_in_place(&result, span)
         return None
     }
     value :: result.value ?? return None
@@ -683,53 +697,74 @@ pub fn jet_eval_comptime_value(result: &JetEvalResult, span: Span) -> TComptimeV
         }
     }
     data :: data_result ?? {
-        jet_eval_retire_result(&result, span)
+        _ := jet_eval_retire_in_place(&result, span)
         return None
     }
-    if !jet_eval_retire_result(&result, span) -> return None
+    if !(jet_eval_retire_in_place(&result, span) ?? false) -> return None
     Val(data)
 }
 
 
 pub fn jet_eval_function(program: ^MIRProgram, function_id: MIRFunctionID, args: [TComptimeValue], config: ^JetEvalConfig) -> JetEvalResult {
     machine := jet_eval_machine(^program, ^config)
+    value := jet_eval_function_in(&machine, function_id, args)
+    complete :: value != None
+    jet_eval_result(^machine, value, complete)
+}
+
+// jet_eval_function on the program of `session`, a session an earlier result
+// retired in place (jet_eval_retire_in_place): it starts over with `config`
+// (jet_eval_reset_session), so the result is the one a new machine over the
+// same program would give, without rebuilding the program or its row index.
+// Only the program and its rows carry over, so a session whose callbacks
+// failed to drain is reused exactly as a fresh machine would be.
+pub fn jet_eval_session_function(session: ^JetEvalRuntimeSession, function_id: MIRFunctionID, args: [TComptimeValue], config: ^JetEvalConfig) -> JetEvalResult {
+    reused := ^session
+    jet_eval_reset_session(&reused.machine, ^config)
+    reused.retired = false
+    value := jet_eval_function_in(&reused.machine, function_id, args)
+    complete :: value != None
+    jet_eval_session_result(^reused, value, complete)
+}
+
+// The value of one evaluation of `function_id` on `machine`; None when it
+// did not complete (the machine records why).
+fn jet_eval_function_in(machine: &JetEvalMachine, function_id: MIRFunctionID, args: [TComptimeValue]) -> JetEvalRuntimeValue? {
     function :: jet_eval_find_function(machine, function_id) ?? {
         jet_eval_compiler_fail(&machine, jet_eval_empty_span(), "requested MIR function is unavailable")
-        return jet_eval_result(^machine, None, false)
+        return None
     }
     if !function.target_applicability.interpreter {
         jet_eval_unsupported(&machine, function.span, "evaluating a function disabled for the interpreter target")
-        return jet_eval_result(^machine, None, false)
+        return None
     }
     runtime_args := [JetEvalRuntimeValue]{}
     loop arg in args -> &runtime_args.push(JetEvalRuntimeValue.Data{value: arg})
     value :: jet_eval_invoke(&machine, function_id, runtime_args, [JetEvalRuntimeValue]{}, function.span) ?? {
-        if machine.soft_stop && !jet_eval_has_failure(machine) -> return jet_eval_result(^machine, Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}), true)
+        if machine.soft_stop && !jet_eval_has_failure(machine) -> return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
         if !jet_eval_has_failure(machine) -> jet_eval_compiler_fail(&machine, function.span, "MIR evaluation of `{function.key}` returned no value without a diagnostic")
-        return jet_eval_result(^machine, None, false)
+        return None
     }
     if jet_eval_has_failure(machine) {
         jet_eval_drop_value(&machine, value, function.span)
-        return jet_eval_result(^machine, None, false)
+        return None
     }
     if machine.soft_stop {
         jet_eval_drop_value(&machine, value, function.span)
-        return jet_eval_result(^machine, Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}), true)
+        return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
     }
-    if machine.config.runtime_execution {
-        return jet_eval_result(^machine, Val(value), true)
-    }
+    if machine.config.runtime_execution -> return Val(value)
     data :: jet_eval_data(value, &machine, function.span) ?? {
         if !jet_eval_has_failure(machine) -> jet_eval_compiler_fail(&machine, function.span, "the value of `{function.key}` is not compile-time data")
         jet_eval_drop_value(&machine, value, function.span)
-        return jet_eval_result(^machine, None, false)
+        return None
     }
     if !jet_eval_drop_value(&machine, value, function.span) {
         if !jet_eval_has_failure(machine) -> jet_eval_compiler_fail(&machine, function.span, "the value of `{function.key}` did not retire cleanly")
-        return jet_eval_result(^machine, None, false)
+        return None
     }
     result_data := jet_eval_function_result(function.failure, data)
-    jet_eval_result(^machine, Val(JetEvalRuntimeValue.Data{value: result_data}), true)
+    Val(JetEvalRuntimeValue.Data{value: result_data})
 }
 
 // Run each of `function_ids` with no arguments as one pure evaluation on ONE
