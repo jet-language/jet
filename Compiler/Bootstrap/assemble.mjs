@@ -24,7 +24,6 @@ const packageSource = [
 const sourceRoots = [
   "Compiler/JetLexer/Source",
   "Compiler/JetFoundation/Source",
-  "Compiler/JetBackend/Source",
   "Compiler/JetOptimizer/Source",
   "Compiler/JetParser/Source/Parser",
   "Compiler/JetSema/Source",

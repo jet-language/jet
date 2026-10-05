@@ -3,12 +3,11 @@
 // argv without the program name and exits with the returned status.
 use core.files as cli_files
 use core.process as cli_process
-use core.sys as cli_sys
 use core.term as cli_term
 use jet_backend.[
-    lir_lower_entry,
-    x64_link_executable,
-    x64_relocatable_object,
+    LIRFunctionID,
+    lir_lower_program,
+    x64_static_executable,
 ]
 use jet_driver.[
     JetDriverAuthorizedSourceSnapshot,
@@ -49,7 +48,7 @@ fn jet_cli_errors(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
 // on the file that owns it, and report the outcome the Rust host prints.
 fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color, false, threads)
+    compiled :: jet_cli_compile_file(file, color, threads)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
         .Compiled(result, snapshot) -> {
@@ -94,47 +93,18 @@ fn jet_cli_build_failed(what: String, why: String, fix: String, color: Bool) -> 
     JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", what, why, fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 
-// The prelinked runtime dev builds link against (#3954, #4549): the runtime
-// archive set (the runtime rlib, the Rust standard library rlibs, musl's
-// libc.a, libgcc_eh.a and libgcc.a) linked once by `x64_link_runtime_pack`
-// when the toolchain is packaged (Tools/packaging/prebuild-runtime.sh) and
-// shipped beside `jet` as jet-runtime/<runtime key>/jet_runtime.pack.o, in the
-// directory of the runtime rlib it was linked from (NativeRuntimeCache's
-// prebuilt layout). It is self-contained: a dev build needs no rustc, libc or
-// system linker.
-JET_CLI_RUNTIME_PACK_FILE :: "jet_runtime.pack.o"
-// Written by packaging: the runtime key of the pack dev builds link.
-JET_CLI_RUNTIME_KEY_FILE :: "native.key"
-
-// jet-runtime/ beside the `jet` executable.
-fn jet_cli_runtime_dir() -[Env]> String Never! {
-    parts := cli_sys.executable().split("/").to_list()
-    _ := &parts.pop()
-    "{parts.join("/")}/jet-runtime"
-}
-
-// The one answer to "which runtime does a dev build link": the key packaging
-// recorded in jet-runtime/native.key (the release-profile rlib's runtime cache
-// key, which needs rustc and the runtime's Rust text to compute, so the native
-// path reads it instead). None when the file is missing, unreadable, or does
-// not hold one directory name.
-fn jet_cli_runtime_key(runtime_dir: String) -[FS]> String? Never! {
-    text :: cli_files.read("{runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}") ?? return None
-    key :: text.trim()
-    if key.len() == 0 || key == "." || key == ".." || key.split("/").to_list().len() != 1 -> return None
-    Val(key)
-}
-
-// Dev builds: the Jet-native backend lowers the optimized MIR to LIR, writes
-// a relocatable object, and the in-process linker binds it to the runtime
-// pack into a static x86-64 executable (D-EXEC1: the one compiled runtime).
-// A program it cannot lower yet is refused with the backend's first
-// finding, never built another way.
-fn jet_cli_build_native(file: String, result: JetDriverCompileResult, binary: String, color: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
-    unpruned :: result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
+// Dev builds: the Jet-native backend lowers the optimized MIR to LIR and
+// writes a static x86-64 executable (D-EXEC1). A program it cannot lower yet
+// is refused with the backend's first finding, never built another way.
+fn jet_cli_build_native(file: String, result: JetDriverCompileResult, binary: String, color: Bool) -[FS]> JetDriverVerbOutput Never! {
+    program :: result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
     entry_id :: result.entry_function ?? return jet_cli_build_failed("`{file}` has no `fn run` to build", "an executable starts at the program's `fn run`", "add `fn run()` to the file, or check it with `jet check {file}`", color)
-    // Only functions the entry reaches are lowered, generic ones per instance.
-    lowered :: lir_lower_entry(unpruned, entry_id)
+    entry := -1
+    loop (index, function) in program.functions {
+        if function.id == entry_id -> entry = index
+    }
+    if entry < 0 -> return jet_cli_ice("the MIR program of `{file}` lost its entry function")
+    lowered :: lir_lower_program(program)
     if lowered.issues.len() > 0 {
         issue :: lowered.issues[0]
         return JetDriverVerbOutput{
@@ -143,21 +113,14 @@ fn jet_cli_build_native(file: String, result: JetDriverCompileResult, binary: St
             exit_code: JET_DRIVER_EXIT_USER_ERROR,
         }
     }
-    entry :: lowered.entry ?? return jet_cli_ice("the MIR program of `{file}` lost its entry function")
-    object :: x64_relocatable_object(lowered.lir, entry)
-    if object.errors.len() > 0 {
+    image :: x64_static_executable(lowered.lir, LIRFunctionID{value: entry})
+    if image.errors.len() > 0 {
         return JetDriverVerbOutput{
             stdout: "",
-            stderr: jet_cli_report("E2104", "the Jet backend can't build `{file}` yet: {object.errors[0]}", jet_cli_why("E2104"), "build it with `jet build --release {file}` (rustc) until the Jet backend lowers this program", color),
+            stderr: jet_cli_report("E2104", "the Jet backend can't build `{file}` yet: {image.errors[0]}", jet_cli_why("E2104"), "build it with `jet build --release {file}` (rustc) until the Jet backend lowers this program", color),
             exit_code: JET_DRIVER_EXIT_USER_ERROR,
         }
     }
-    runtime_dir :: jet_cli_runtime_dir()
-    key :: jet_cli_runtime_key(runtime_dir) ?? return jet_cli_build_failed("couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}", jet_cli_why("E2105"), "package the runtime beside jet with `Tools/packaging/prebuild-runtime.sh <jet>`, which writes the key and the runtime pack", color)
-    pack_path :: "{runtime_dir}/{key}/{JET_CLI_RUNTIME_PACK_FILE}"
-    pack :: cli_files.read_bytes(pack_path) ?? return jet_cli_build_failed("couldn't read the Jet runtime {pack_path}: {err}", jet_cli_why("E2105"), "package the runtime beside jet with `Tools/packaging/prebuild-runtime.sh <jet>`, which writes the runtime pack", color)
-    image :: x64_link_executable([String]{"{binary}.o", pack_path}, ^[[U8]]{object.bytes, pack})
-    if image.errors.len() > 0 -> return jet_cli_ice("linking `{file}` with the Jet runtime failed: {image.errors[0]}")
     cli_files.write_bytes(binary, image.bytes) ?? return jet_cli_build_failed("couldn't write {binary}: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color)
     cli_files.set_mode(binary, 0o755) ?? return jet_cli_build_failed("couldn't make {binary} executable: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color)
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
@@ -192,7 +155,7 @@ fn jet_cli_build_release(file: String, result: JetDriverCompileResult, root: Str
 // `jet build <file>`: compile through the Jet compiler, report its problems
 // the way the Rust host does, then write `.jet/build/<stem>` in the source
 // root through the backend the profile selects.
-fn jet_cli_build_result(file: String, source: String, color: Bool, release: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[FS, Env, Exec, Time.Wait]> JetDriverVerbOutput Never! {
+fn jet_cli_build_result(file: String, source: String, color: Bool, release: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
     errors :: jet_cli_errors(jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files))
     if errors.len() > 0 {
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
@@ -210,7 +173,7 @@ fn jet_cli_build_result(file: String, source: String, color: Bool, release: Bool
 
 fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Bool, threads: Int?) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color, release, threads)
+    compiled :: jet_cli_compile_file(file, color, threads)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
         .Compiled(result, snapshot) -> output = jet_cli_build_result(file, source, color, release, result, snapshot)

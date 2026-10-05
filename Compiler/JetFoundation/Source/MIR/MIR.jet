@@ -722,8 +722,7 @@ pub fn mir_type_canonical_key(ty: MIRType) -> String Never! {
 fn mir_function_signature_canonical_key(signature: MIRFunctionSignature) -> String Never! {
     params := [String]{}
     loop param in signature.params -> &params.push(mir_type_canonical_key(param))
-    // WORKAROUND #4581: revert when the JIT Option.map payload bug is fixed
-    result :: if signature.ret == .Val(value) -> mir_type_canonical_key(value) else -> "Unit"
+    result :: signature.ret.map(value -> mir_type_canonical_key(value)) ?? "Unit"
     contract := [String]{}
     contract_rows :: signature.param_contract ?? [MIRCallContractRow]{}
     loop row in contract_rows -> &contract.push("{row.label}:{param_zone_name(row.zone)}")
@@ -757,8 +756,7 @@ fn mir_function_signature_canonical_key(signature: MIRFunctionSignature) -> Stri
 fn mir_send_function_canonical_key(params: [MIRType], ret: MIRType?, conventions: [MIRAccess]) -> String Never! {
     names := [String]{}
     loop param in params -> &names.push(mir_type_canonical_key(param))
-    // WORKAROUND #4581: revert when the JIT Option.map payload bug is fixed
-    result :: if ret == .Val(value) -> mir_type_canonical_key(value) else -> "Unit"
+    result :: ret.map(value -> mir_type_canonical_key(value)) ?? "Unit"
     access := [String]{}
     loop item in conventions -> &access.push(mir_access_code(item))
     "SendFn({names.join(",")})->{result};conventions={access.join("")}"
@@ -813,8 +811,7 @@ pub fn mir_type_display_name(ty: MIRType) -> String Never! {
         .SendFn(params, ret, _) -> {
             names := [String]{}
             loop param in params -> &names.push(mir_type_display_name(param))
-            // WORKAROUND #4581: revert when the JIT Option.map payload bug is fixed
-            result :: if ret == .Val(value) -> mir_type_display_name(value) else -> "Unit"
+            result :: ret.map(value -> mir_type_display_name(value)) ?? "Unit"
             "SendFn({names.join(", ")}) -> {result}"
         }
         .Apply(name, args) -> {

@@ -2,10 +2,9 @@
 // generator level reads (D-EXEC1). It sits below Jet MIR. Every value carries
 // its machine layout (size, alignment, ABI class), its drop action, and a link
 // back to the checked Jet type; moves and drops are explicit instructions; calls
-// name a signature ID and a function in the same module, a symbol in the
-// compiled runtime or a code pointer value. Blocks take parameters instead
-// of phi nodes, and the entry block's parameters are the function's
-// parameters.
+// name a signature ID and either a function in the same module or a symbol in
+// the compiled runtime. Blocks take parameters instead of phi nodes, and the
+// entry block's parameters are the function's parameters.
 use jet_foundation.[MIRTypeID]
 
 pub struct LIRValueID { pub value: Int }
@@ -40,23 +39,19 @@ pub struct LIRValue {
     pub jet_type: MIRTypeID?
 }
 
-// Word Div/Rem truncate signed operands and Shr is arithmetic; UDiv/URem
-// divide unsigned operands and UShr is logical. Lowering checks zero divisors
-// and signed MIN/-1 before division. UAdd/USub/UMul have the same result bits
-// as Add/Sub/Mul but use unsigned range tests in Overflows.
-// Float Add/Sub/Mul/Div are IEEE double arithmetic; Xor acts on their bits.
-pub enum LIRBinaryOp { Add Sub Mul Div Rem And Or Xor Shl Shr UAdd USub UMul UDiv URem UShr }
+// Word arithmetic is signed: `Div` and `Rem` truncate (the lowering checks the
+// divisor, zero and -1 against the minimum, before them) and `Shr` is
+// arithmetic. On Float values `Add Sub Mul Div` are IEEE double arithmetic and
+// `Xor` acts on the bits (negation flips the sign bit).
+pub enum LIRBinaryOp { Add Sub Mul Div Rem And Or Xor Shl Shr }
 
-// Lt/Le/Gt/Ge are signed integer or ordered IEEE comparisons (NaN is false
-// except Ne). ULt/ULe/UGt/UGe compare unsigned integers only.
-pub enum LIRCondition { Eq Ne Lt Le Gt Ge ULt ULe UGt UGe }
+// Signed integer comparisons; on Float operands, ordered IEEE comparisons
+// (every comparison with NaN is false, except `Ne`).
+pub enum LIRCondition { Eq Ne Lt Le Gt Ge }
 
-// `Value` calls through a code pointer (a Pointer value, from
-// FunctionAddress or loaded from a closure box).
 pub enum LIRCallee {
     Function(id: LIRFunctionID)
     Runtime(symbol: String)
-    Value(value: LIRValueID)
 }
 
 pub enum LIRInst {
@@ -70,25 +65,17 @@ pub enum LIRInst {
     Call(dst: LIRValueID?, signature: LIRSignatureID, callee: LIRCallee, args: [LIRValueID])
     // Runs the value's drop glue; the value is dead afterwards.
     Drop(value: LIRValueID)
-    // Bool: whether Add/Sub/Mul overflow signed, or UAdd/USub/UMul unsigned.
+    // Bool: whether signed `left op right` (Add, Sub or Mul) overflows a word.
     Overflows(dst: LIRValueID, op: LIRBinaryOp, left: LIRValueID, right: LIRValueID)
     // Reads `dst`'s layout from `base + offset`; `base` is a Pointer.
     Load(dst: LIRValueID, base: LIRValueID, offset: Int)
-    // Byte-addressed pointer arithmetic; offset is an Integer word.
-    PointerAdd(dst: LIRValueID, base: LIRValueID, offset: LIRValueID)
     // Writes `value` to `base + offset`; `base` is a Pointer.
     Store(base: LIRValueID, offset: Int, value: LIRValueID)
     // The address of a module data object.
     DataAddress(dst: LIRValueID, data: LIRDataID)
-    // The code address of a module function.
-    FunctionAddress(dst: LIRValueID, function: LIRFunctionID)
     // Numeric conversion between the layouts of `src` and `dst`: a signed
     // Integer word to Float, or a Float to an Integer word (truncating).
     Convert(dst: LIRValueID, src: LIRValueID)
-    // The address of `size` bytes of storage aligned to `align` (1, 2, 4, 8
-    // or 16) in the function's frame, live until the function returns. Each
-    // StackSlot instruction names storage of its own.
-    StackSlot(dst: LIRValueID, size: Int, align: Int)
 }
 
 pub struct LIRJumpTarget { pub block: LIRBlockID, pub args: [LIRValueID] }
@@ -126,18 +113,11 @@ pub struct LIRFunction {
     pub blocks: [LIRBlock]
 }
 
-// Read-only module objects, including immutable aggregate constant trees.
-pub struct LIRDataReloc {
-    pub offset: Int
-    pub target: LIRDataID
-    pub addend: Int
-}
-
+// Read-only bytes the module's code addresses (string literals, file names).
 pub struct LIRData {
     pub id: LIRDataID
     pub bytes: [U8]
     pub align: Int
-    pub relocs: [LIRDataReloc]
 }
 
 // `signatures[i].id.value == i`, `functions[i].id.value == i` and
@@ -175,12 +155,9 @@ pub fn lir_inst_def(inst: LIRInst) -> LIRValueID? {
         .Drop(_) -> None
         .Overflows(dst, _, _, _) -> Val(dst)
         .Load(dst, _, _) -> Val(dst)
-        .PointerAdd(dst, _, _) -> Val(dst)
         .Store(_, _, _) -> None
         .DataAddress(dst, _) -> Val(dst)
-        .FunctionAddress(dst, _) -> Val(dst)
         .Convert(dst, _) -> Val(dst)
-        .StackSlot(dst, _, _) -> Val(dst)
     }
 }
 
@@ -191,23 +168,13 @@ pub fn lir_inst_uses(inst: LIRInst) -> [LIRValueID] Never! {
         .Compare(_, _, left, right) -> [LIRValueID]{left, right}
         .Move(_, src) -> [LIRValueID]{src}
         .Copy(_, src) -> [LIRValueID]{src}
-        .Call(_, _, callee, args) -> {
-            if callee == .Value(target) {
-                uses := [LIRValueID]{target}
-                loop arg in args -> &uses.push(arg)
-                return uses
-            }
-            args
-        }
+        .Call(_, _, _, args) -> args
         .Drop(value) -> [LIRValueID]{value}
         .Overflows(_, _, left, right) -> [LIRValueID]{left, right}
         .Load(_, base, _) -> [LIRValueID]{base}
-        .PointerAdd(_, base, offset) -> [LIRValueID]{base, offset}
         .Store(base, _, value) -> [LIRValueID]{base, value}
         .DataAddress(_, _) -> [LIRValueID]{}
-        .FunctionAddress(_, _) -> [LIRValueID]{}
         .Convert(_, src) -> [LIRValueID]{src}
-        .StackSlot(_, _, _) -> [LIRValueID]{}
     }
 }
 

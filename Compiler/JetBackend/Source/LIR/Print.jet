@@ -13,10 +13,7 @@
 
 pub fn lir_print_module(program: LIRModule) -> String Never! {
     lines := [String]{}
-    loop data in program.data {
-        &lines.push("data d{data.id.value} = {lir_print_bytes(data.bytes)} ({data.bytes.len()} bytes, align {data.align})")
-        loop reloc in data.relocs -> &lines.push("  reloc +{reloc.offset} = d{reloc.target.value}+{reloc.addend}")
-    }
+    loop data in program.data -> &lines.push("data d{data.id.value} = {lir_print_bytes(data.bytes)} ({data.bytes.len()} bytes)")
     loop signature in program.signatures -> &lines.push("sig s{signature.id.value} = {lir_print_signature(signature)}")
     loop function in program.functions {
         &lines.push("fn f{function.id.value} {function.name}: s{function.signature.value}")
@@ -77,12 +74,6 @@ fn lir_print_binary(op: LIRBinaryOp) -> String Never! {
         .Xor -> "xor"
         .Shl -> "shl"
         .Shr -> "shr"
-        .UAdd -> "uadd"
-        .USub -> "usub"
-        .UMul -> "umul"
-        .UDiv -> "udiv"
-        .URem -> "urem"
-        .UShr -> "ushr"
     }
 }
 
@@ -94,10 +85,6 @@ fn lir_print_condition(condition: LIRCondition) -> String Never! {
         .Le -> "le"
         .Gt -> "gt"
         .Ge -> "ge"
-        .ULt -> "ult"
-        .ULe -> "ule"
-        .UGt -> "ugt"
-        .UGe -> "uge"
     }
 }
 
@@ -112,7 +99,6 @@ fn lir_print_inst(function: LIRFunction, inst: LIRInst) -> String Never! {
             target :: if callee == {
                 .Function(id) -> "f{id.value}"
                 .Runtime(symbol) -> "rt {symbol}"
-                .Value(target) -> "*v{target.value}"
             }
             call :: "call {target}({lir_print_values(args)}): s{signature.value}"
             if dst == .Val(result) -> "{lir_print_def(function, result)} = {call}" else -> call
@@ -120,12 +106,9 @@ fn lir_print_inst(function: LIRFunction, inst: LIRInst) -> String Never! {
         .Drop(value) -> "drop v{value.value}"
         .Overflows(dst, op, left, right) -> "{lir_print_def(function, dst)} = overflows {lir_print_binary(op)} v{left.value}, v{right.value}"
         .Load(dst, base, offset) -> "{lir_print_def(function, dst)} = load v{base.value}+{offset}"
-        .PointerAdd(dst, base, offset) -> "{lir_print_def(function, dst)} = ptradd v{base.value}, v{offset.value}"
         .Store(base, offset, value) -> "store v{base.value}+{offset}, v{value.value}"
         .DataAddress(dst, data) -> "{lir_print_def(function, dst)} = data d{data.value}"
-        .FunctionAddress(dst, target) -> "{lir_print_def(function, dst)} = fnaddr f{target.value}"
         .Convert(dst, src) -> "{lir_print_def(function, dst)} = convert v{src.value}"
-        .StackSlot(dst, size, align) -> "{lir_print_def(function, dst)} = stack {size} align {align}"
     }
 }
 

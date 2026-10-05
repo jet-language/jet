@@ -21,8 +21,6 @@ pub struct X64Runtime {
 pub struct X64LoadedImage {
     pub base: Int
     pub size: Int
-    // Only [base, base + code_size) is executable. Data is never executable.
-    pub code_size: Int
     pub entry: Int
     pub imports: [String]
     pub slots: [Int]
@@ -30,7 +28,7 @@ pub struct X64LoadedImage {
 }
 
 fn x64_loaded_failure(errors: [String]) -> X64LoadedImage Never! {
-    X64LoadedImage{base: 0, size: 0, code_size: 0, entry: 0, imports: [String]{}, slots: [Int]{}, errors: errors}
+    X64LoadedImage{base: 0, size: 0, entry: 0, imports: [String]{}, slots: [Int]{}, errors: errors}
 }
 
 // Open the compiled runtime's shared library at `path`.
@@ -40,60 +38,25 @@ pub fn x64_runtime_open(path: String) -> X64Runtime {
     X64Runtime{library: library, errors: [String]{}}
 }
 
-// Resolve symbols already exported by this process (RTLD_DEFAULT). The host
-// must retain the resident runtime for the lifetime of every loaded image.
-pub fn x64_runtime_current() -> X64Runtime Never! {
-    X64Runtime{library: 0, errors: [String]{}}
-}
-
 // Map, copy and bind `image`, then make it read+execute.
 pub fn x64_load_image(image: X64MemoryImage, runtime: X64Runtime) -> X64LoadedImage {
     if image.errors.len() > 0 -> return x64_loaded_failure(image.errors)
     if runtime.errors.len() > 0 -> return x64_loaded_failure(runtime.errors)
     size :: image.text.len()
     if size == 0 -> return x64_loaded_failure([String]{"the image is empty"})
-    if image.data_offset <= 0 || image.data_offset > size -> return x64_loaded_failure([String]{"data boundary {image.data_offset} is outside the image"})
-    if image.data_offset < size && image.data_offset % OS_PAGE_SIZE != 0 -> return x64_loaded_failure([String]{"data boundary {image.data_offset} is not page-aligned"})
-    if image.entry < 0 || image.entry >= image.data_offset -> return x64_loaded_failure([String]{"entry offset {image.entry} is outside the code"})
+    if image.entry < 0 || image.entry >= size -> return x64_loaded_failure([String]{"entry offset {image.entry} is outside the image"})
     if image.slots.len() != image.imports.len() -> return x64_loaded_failure([String]{"the image has {image.imports.len()} imports but {image.slots.len()} slots"})
     addresses := [Int]{}
     loop (index, symbol) in image.imports {
         at :: image.slots[index]
-        if at < 0 || at > image.data_offset - 8 || at % 8 != 0 -> return x64_loaded_failure([String]{"slot {at} of {symbol} is not an aligned word inside the code"})
+        if at < 0 || at + 8 > size || at % 8 != 0 -> return x64_loaded_failure([String]{"slot {at} of {symbol} is not an aligned word inside the image"})
         address :: os_library_symbol(runtime.library, symbol)
         if address == 0 -> return x64_loaded_failure([String]{"unresolved runtime symbol {symbol}"})
         &addresses.push(address)
     }
-    loop reloc in image.relocs {
-        if reloc.at < image.data_offset || reloc.at % 8 != 0 || reloc.at > size - 8 -> return x64_loaded_failure([String]{"data relocation {reloc.at} is not an aligned word inside the data"})
-        if reloc.target < 0 || reloc.target >= size -> return x64_loaded_failure([String]{"data relocation target {reloc.target} is outside the image"})
-    }
 
-    if image.align < 16 || (image.align & (image.align - 1)) != 0 -> return x64_loaded_failure([String]{"image origin alignment {image.align} is not a power of two at least 16"})
-    // Over-map by the origin alignment, then trim whole pages on both sides,
-    // so the kept mapping starts at an address aligned for the image's data.
-    mapping_size :: os_page_round(size)
-    origin_align :: if image.align > OS_PAGE_SIZE -> image.align else -> OS_PAGE_SIZE
-    reserved_size :: mapping_size + origin_align - OS_PAGE_SIZE
-    mapping :: os_map(reserved_size, OS_PROT_READ + OS_PROT_WRITE)
-    if os_failed(mapping) -> return x64_loaded_failure([String]{"mmap of {reserved_size} bytes failed (errno {-mapping})"})
-    prefix :: (origin_align - mapping % origin_align) % origin_align
-    base :: mapping + prefix
-    suffix :: reserved_size - prefix - mapping_size
-    if prefix > 0 {
-        released :: os_unmap(mapping, prefix)
-        if os_failed(released) {
-            _ := os_unmap(mapping, reserved_size)
-            return x64_loaded_failure([String]{"munmap alignment prefix failed (errno {-released})"})
-        }
-    }
-    if suffix > 0 {
-        released :: os_unmap(base + mapping_size, suffix)
-        if os_failed(released) {
-            _ := os_unmap(base, reserved_size - prefix)
-            return x64_loaded_failure([String]{"munmap alignment suffix failed (errno {-released})"})
-        }
-    }
+    base :: os_map(size, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(base) -> return x64_loaded_failure([String]{"mmap of {size} bytes failed (errno {-base})"})
     os_copy_in(base, image.text)
     slots := [Int]{}
     loop (index, at) in image.slots {
@@ -102,25 +65,18 @@ pub fn x64_load_image(image: X64MemoryImage, runtime: X64Runtime) -> X64LoadedIm
         }
         &slots.push(base + at)
     }
-    loop reloc in image.relocs {
-        #Unsafe("the relocation is an aligned word inside the writable mapping, checked above") {
-            os_store_word(base + reloc.at, base + reloc.target)
-        }
-    }
-    code_size :: os_page_round(image.data_offset)
-    protected :: os_protect(base, code_size, OS_PROT_READ + OS_PROT_EXEC)
+    protected :: os_protect(base, size, OS_PROT_READ + OS_PROT_EXEC)
     if os_failed(protected) {
         _ := os_unmap(base, size)
         return x64_loaded_failure([String]{"mprotect to read+execute failed (errno {-protected})"})
     }
-    X64LoadedImage{base: base, size: mapping_size, code_size: code_size, entry: base + image.entry, imports: image.imports, slots: slots, errors: [String]{}}
+    X64LoadedImage{base: base, size: os_page_round(size), entry: base + image.entry, imports: image.imports, slots: slots, errors: [String]{}}
 }
 
 // Run the loaded entry through `jet_rt_main`, which sets up the runtime,
 // calls the entry and returns the exit status. A runtime stop ends the
 // process from inside the runtime instead.
 pub fn x64_run_image(loaded: X64LoadedImage, runtime: X64Runtime) -> Int {
-    if loaded.errors.len() > 0 || runtime.errors.len() > 0 || loaded.entry == 0 -> return -1
     main :: os_library_symbol(runtime.library, "jet_rt_main")
     if main == 0 -> return -1
     status := 0
@@ -140,10 +96,7 @@ pub fn x64_run_image(loaded: X64LoadedImage, runtime: X64Runtime) -> Int {
 // it would fault; the per-function slot table of the tier design lives on its
 // own pages for that reason.
 pub fn x64_rebind_slot(loaded: X64LoadedImage, slot: Int, address: Int) -> Bool {
-    if loaded.errors.len() > 0 || address == 0 -> return false
-    found := false
-    loop candidate in loaded.slots { if candidate == slot -> found = true }
-    if !found -> return false
+    if slot < loaded.base || slot + 8 > loaded.base + loaded.size || slot % 8 != 0 -> return false
     page :: slot - (slot - loaded.base) % OS_PAGE_SIZE
     if os_failed(os_protect(page, OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)) -> return false
     #Unsafe("the slot is an aligned word inside the mapping, now writable") {
@@ -154,6 +107,5 @@ pub fn x64_rebind_slot(loaded: X64LoadedImage, slot: Int, address: Int) -> Bool 
 
 // Release the mapping. No frame may still return into it.
 pub fn x64_unload_image(loaded: X64LoadedImage) -> Bool {
-    if loaded.errors.len() > 0 || loaded.base == 0 || loaded.size <= 0 -> return false
     !os_failed(os_unmap(loaded.base, loaded.size))
 }

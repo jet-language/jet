@@ -120,20 +120,6 @@ where
         .into_value()
 }
 
-// A native borrowed loop binding lends the buffered item until advance. Keep
-// its failure/exhaustion meaning in the same cursor kernel as the owned pull.
-pub(crate) fn jet_loop_iter_typed_value_ref<T, E, I>(
-    cursor: &JetLoopIterCursor<Result<T, E>, I>,
-) -> Result<&T, E>
-where
-    E: Clone + From<&'static str>,
-    I: Iterator<Item = Result<T, E>>,
-{
-    cursor.current.as_ref()
-        .ok_or_else(<Result<T, E> as JetLoopItem>::exhausted_error)?
-        .as_ref().map_err(Clone::clone)
-}
-
 pub(crate) fn jet_loop_iter_typed_advance<T, I>(
     cursor: &mut JetLoopIterCursor<T, I>,
 ) -> Result<(), T::Error>
