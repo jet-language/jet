@@ -325,7 +325,7 @@ impl JetTableBatchState {
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2404
     pub fn with_limits(capacity: Usize, max_batch_rows: U128?, max_rows: U128?) -> Self JetTableBatchError! {
         if capacity == 0 { return Err(JetTableBatchError.ZeroCapacity) }
-        if max_batch_rows == Val(0) { return Err(JetTableBatchError.ZeroBatchRows) }
+        if max_batch_rows == 0 { return Err(JetTableBatchError.ZeroBatchRows) }
         Ok(Self{capacity: capacity, max_batch_rows: max_batch_rows, max_rows: max_rows, queue: VecDeque.with_capacity(capacity),
             next_sequence: 0, accepted_rows: 0, emitted_rows: 0, dropped_rows: 0, backpressure_events: 0,
             truncated: false, cancelled: None, closed: false})
