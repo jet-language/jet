@@ -520,7 +520,7 @@ impl JetWebServerFunction {
         auth_subject :: request.headers.first("authorization").filter(fn(value) { !value.trim().is_empty() }).map(fn(_) { "authorization" })
             .or_else(fn() { request.headers.first("cookie").filter(fn(value) { !value.trim().is_empty() }).map(fn(_) { "cookie" }) })
         capabilities: [String:Bool] := [:]
-        if Val(value) :: request.headers.first("x-jet-capability") {
+        if request.headers.first("x-jet-capability") == .Val(value) {
             loop capability in value.split(',') {
                 capability := capability.trim() // #4303
                 if !capability.is_empty() -> capabilities.insert(capability.to_string(), true)
@@ -543,7 +543,7 @@ impl JetWebServerFunction {
                     (None, None) -> true
                 }
                 if !same_origin -> return Err(.Csrf("the request origin is not same-origin"))
-                if Val(expected) :: token {
+                if token == .Val(expected) {
                     if context.csrf_token.as_ref() != Some(expected) -> return Err(.Csrf("the request CSRF token is invalid"))
                 }
                 Ok(())
@@ -564,7 +564,7 @@ impl JetWebServerFunction {
             return Ok(body.to_string())
         }
         if content_type.to_ascii_lowercase().starts_with("application/x-www-form-urlencoded") {
-            if Val(binding) :: self.form_binding.as_ref() {
+            if self.form_binding.as_ref() == .Val(binding) {
                 normalized :: jet_web_server_fn_form_json_typed(body, binding)?
                 if self.spec.input_type == "String" || self.spec.input_type.ends_with("::String") -> return Ok(jet_web_server_fn_json_string(&normalized))
                 return Ok(normalized)
@@ -576,7 +576,7 @@ impl JetWebServerFunction {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:887
     fn authorize(self: &Self, context: &JetWebServerFnRequestContext) -> () JetWebServerFnError! {
         if self.spec.capability.is_some() && context.auth_subject.is_none() -> return Err(.Unauthorized)
-        if Val(required) :: &self.spec.capability {
+        if (&self.spec.capability) == .Val(required) {
             if !context.capabilities.contains_key(required) -> return Err(.Forbidden("the request lacks the required capability"))
         }
         Ok(())
@@ -591,7 +591,7 @@ impl JetWebServerFunction {
         self.check_csrf(&request.context)?
         self.authorize(&request.context)?
         body :: self.normalize_input(&request.content_type, &request.body)?
-        if Val(validator) :: &self.validator -> validator(&body).map_err(fn(message) { JetWebServerFnError.InvalidInput(jet_web_server_fn_clean(&message, 512)) })?
+        if (&self.validator) == .Val(validator) -> validator(&body).map_err(fn(message) { JetWebServerFnError.InvalidInput(jet_web_server_fn_clean(&message, 512)) })?
         middleware := [String].with_capacity(self.middleware.len())
         loop entry in &self.middleware {
             request.context.check_live()?
@@ -599,23 +599,23 @@ impl JetWebServerFunction {
             middleware.push(entry.name.clone())
         }
         if self.spec.idempotency_declared {
-            if Val(key) :: request.context.idempotency_key.as_ref() {
+            if request.context.idempotency_key.as_ref() == .Val(key) {
                 // GATE #4565: kernel primitive
                 cached :: #Unsafe("read completed idempotent result under cache mutex") { self.idempotency_results.lock().ok().and_then(fn(results) { results.get(key).cloned() }) }
-                if Val(output) :: cached -> return Ok((output, middleware))
+                if cached == .Val(output) -> return Ok((output, middleware))
             }
         }
         request.context.check_live()?
         output :: (self.handler)(&request.context, &body)?
         if output.len() > JET_WEB_SERVER_FN_MAX_BODY || parse_json_typed_datatree(output.clone()).is_err() -> return Err(.InvalidOutput)
         if self.spec.idempotency_declared {
-            if Val(key) :: request.context.idempotency_key.as_ref() {
+            if request.context.idempotency_key.as_ref() == .Val(key) {
                 // GATE #4565: kernel primitive
                 #Unsafe("evict lexicographically first entry at capacity, then cache completed result") {
                     if Ok(results) :: self.idempotency_results.lock() {
                         if results.len() >= 1024 {
                             first :: results.keys().min().cloned()
-                            if Val(first) :: first -> results.remove(&first)
+                            if first == .Val(first) -> results.remove(&first)
                         }
                         results.insert(key.to_string(), output.clone())
                     }
@@ -675,9 +675,9 @@ impl JetWebServerFunction {
             None, None, [:], self.spec.csrf.token().map(fn(value) { value.to_string() }), idempotency_key.clone(), self.spec.timeout_ms)?
         context.origin = self.spec.csrf.expected_origin().map(fn(value) { value.to_string() }).or_else(fn() { Val("same-origin") })
         request := JetWebServerFnRequest.json(self.spec.method.clone(), self.spec.endpoint.clone(), ^body, ^context)
-        if Val(key) :: idempotency_key -> request.headers.insert("idempotency-key", ^key)
-        if Val(origin) :: self.spec.csrf.expected_origin() -> request.headers.insert("origin", origin.to_string())
-        if Val(token) :: self.spec.csrf.token() -> request.headers.insert("x-csrf-token", token.to_string())
+        if idempotency_key == .Val(key) -> request.headers.insert("idempotency-key", ^key)
+        if self.spec.csrf.expected_origin() == .Val(origin) -> request.headers.insert("origin", origin.to_string())
+        if self.spec.csrf.token() == .Val(token) -> request.headers.insert("x-csrf-token", token.to_string())
         Ok(request)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:1115
@@ -891,7 +891,7 @@ fn jet_web_server_fn_form_json_typed(body: &String, binding: &String) -> String 
         (field_type, optional) :: &schema_fields[&name]
         values :: match posted.get(&name) {
             .Val(values) -> values
-            None if *optional -> continue
+            None if *optional -> next
             None -> return Err(.InvalidInput("form input is missing required field `{name}`"))
         }
         if values.len() != 1 -> return Err(.InvalidInput("form input field `{name}` was posted more than once"))

@@ -512,7 +512,7 @@ module jet_devserver_unix_output {
     // GATE #4565: kernel primitive
     #Unsafe("allocate a private journal with exclusive mkdirat and remove it if secure open fails")
     fn create_publication_journal(parent: File) -> (String, File) Error! {
-        for _ in 0..<100 {
+        loop _ in 0..<100 {
             value :: ".jet-devserver-publication-{process.id()}-{JET_DEVSERVER_STAGING_COUNTER.fetch_add(U64{1}, Ordering.Relaxed)}"
             cname :: name(OsStr.new(value))?
             if mkdirat(parent.as_raw_fd(), cname.as_ptr(), U32{0o700}) == 0 {
@@ -584,7 +584,7 @@ module jet_devserver_unix_output {
         current := ^current
         components :: relative.components().collect::<[_]>()
         if components.is_empty() -> return Err(Error.new(ErrorKind.InvalidInput, "empty relative path"))
-        for component in components[0..<components.len() - 1] {
+        loop component in components[0..<components.len() - 1] {
             value :: match component {
                 .Normal(value) -> value
                 _ -> return Err(Error.new(ErrorKind.InvalidInput, "devserver path is not relative"))
@@ -611,7 +611,7 @@ module jet_devserver_unix_output {
     pub fn publish_build(root: JetDevServerOutputRoot, staging: JetDevServerStaging, html: [U8]?) -> () Error! {
         build :: open_dir_at(staging.directory, OsStr.new("build"))?
         if html == .Val(bytes) -> replace_file_at(build, OsStr.new("index.html"), bytes)?
-        for value in JET_DEVSERVER_OUTPUT_FILES {
+        loop value in JET_DEVSERVER_OUTPUT_FILES {
             source :: open_file_at(build, OsStr.new(value), false)?
             _ :: check_regular(source)?
             _ :: check_existing(root.directory, OsStr.new(value))?
@@ -620,13 +620,13 @@ module jet_devserver_unix_output {
         backed_up := []
         published := []
         result :: (fn() -> () Error! {
-            for value in JET_DEVSERVER_OUTPUT_FILES {
+            loop value in JET_DEVSERVER_OUTPUT_FILES {
                 if check_existing(root.directory, OsStr.new(value))? {
                     rename_at(root.directory, OsStr.new(value), journal, OsStr.new(value))?
                     backed_up.push(value)
                 }
             }
-            for value in JET_DEVSERVER_OUTPUT_FILES {
+            loop value in JET_DEVSERVER_OUTPUT_FILES {
                 source :: open_file_at(build, OsStr.new(value), false)?
                 source_id :: check_regular(source)?
                 rename_at(build, OsStr.new(value), root.directory, OsStr.new(value))?
@@ -684,11 +684,11 @@ fn jet_devserver_read_inside(root: OSPath, relative: String) -> [U8] Error! {
 #Unsafe("accept real sockets, limit connection threads and release their shared slot on return")
 fn jet_devserver_serve_forever(listener: ^TcpListener, version: ^Arc<AtomicU64>, output_root: ^Arc<JetDevServerOutputRoot>) -> {
     active_connections :: Arc.new(AtomicUsize.new(USize{0}))
-    for stream in listener.incoming() {
+    loop stream in listener.incoming() {
         if stream == .Ok(stream) {
             if !jet_devserver_try_acquire(active_connections) {
                 drop(^stream)
-                continue
+                next
             }
             version :: Arc.clone(version)
             output_root :: Arc.clone(output_root)
@@ -1066,7 +1066,7 @@ module jet_devserver_windows_output {
             return Err(Error.new(ErrorKind.PermissionDenied, "devserver path contains a Windows device namespace"))
         }
         current := OSPath.new()
-        for component in path.components() {
+        loop component in path.components() {
             match component {
                 .Prefix(_) | Component.RootDir -> current.push(component.as_os_str())
                 Component.CurDir -> {}

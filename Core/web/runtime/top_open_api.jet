@@ -62,14 +62,14 @@ impl JetOpenApiSchema {
             .Array(item) | .Nullable(item) -> item.validate_definition(path, errors)
             Self.Object{properties, additional_properties: _} -> {
                 names := BTreeSet.new()
-                for property in properties {
+                loop property in properties {
                     if !names.insert(property.name.clone()) { errors.push(JetOpenApiValidationError.new(path.to_string(), "duplicate schema property `{property.name}`")) }
                     property.schema.validate_definition("{path}.{property.name}", errors)
                 }
             }
             .OneOf(items) -> {
                 if items.is_empty() { errors.push(JetOpenApiValidationError.new(path.to_string(), "oneOf needs at least one schema")) }
-                for item in items { item.validate_definition(path, errors) }
+                loop item in items { item.validate_definition(path, errors) }
             }
             Self.Any | Self.Null | Self.Boolean | Self.Integer | Self.Number | Self.String -> {}
         }
@@ -87,7 +87,7 @@ impl JetOpenApiSchema {
             Self.Object{properties, additional_properties} -> {
                 rendered :: properties.iter().map(fn(property) {
                     out := "{jet_openapi_json_string(&property.name)}:{property.schema.render_json()}"
-                    if Val(default) :: &property.default {
+                    if (&property.default) == .Val(default) {
                         _ :: out.pop()
                         out.push_str(",\"default\":{render_datatree_json(default, false, 0)}")
                         out.push('}')
@@ -130,11 +130,11 @@ impl JetOpenApiSchema {
                 for (name, value) in values {
                     if !seen.insert(name.clone()) {
                         errors.push(JetOpenApiValidationError.new("{path}.{name}", "duplicate object field"))
-                        continue
+                        next
                     }
                     property :: properties.iter().find(fn(property) { property.name == name }) ?? {
                         if !additional_properties { errors.push(JetOpenApiValidationError.new("{path}.{name}", "unknown object field")) }
-                        continue
+                        next
                     }
                     errors.extend(property.schema.validate_tree(value, "{path}.{name}"))
                 }
@@ -145,7 +145,7 @@ impl JetOpenApiSchema {
             }
             .OneOf(items) -> {
                 alternatives := [JetOpenApiValidationError]{}
-                for item in items {
+                loop item in items {
                     errors :: item.validate_tree(value, path)
                     if errors.is_empty() { return [] }
                     alternatives.extend(^errors)
@@ -162,9 +162,9 @@ fn jet_openapi_canonicalize_schema(schema: &JetOpenApiSchema) -> () {
         .Array(item) | .Nullable(item) -> jet_openapi_canonicalize_schema(item)
         JetOpenApiSchema.Object{properties, additional_properties: _} -> {
             properties.sort_by(fn(left, right) { left.name.cmp(&right.name) })
-            for property in properties { jet_openapi_canonicalize_schema(&property.schema) }
+            loop property in properties { jet_openapi_canonicalize_schema(&property.schema) }
         }
-        .OneOf(items) -> for item in items { jet_openapi_canonicalize_schema(item) }
+        .OneOf(items) -> loop item in items { jet_openapi_canonicalize_schema(item) }
         JetOpenApiSchema.Any | JetOpenApiSchema.Null | JetOpenApiSchema.Boolean | JetOpenApiSchema.Integer | JetOpenApiSchema.Number | JetOpenApiSchema.String -> {}
     }
 }
@@ -241,7 +241,7 @@ pub struct JetOpenApiRouteFact {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/OpenAPI.rs:529
 fn jet_openapi_operation_id_for_path(method: JetOpenApiHttpMethod, path: &String) -> String {
     hash := 14695981039346656037u64
-    for byte in b"jet-openapi-operation-v1:" {
+    loop byte in b"jet-openapi-operation-v1:" {
         hash ^= U64{*byte}
         hash = hash.wrapping_mul(1099511628211)
     }
@@ -267,8 +267,8 @@ fn jet_openapi_canonicalize_route(route: &JetOpenApiRouteFact) -> () {
     for requirement in &route.security { requirement.scopes.sort() }
     route.security.sort_by(fn(left, right) { left.scheme.cmp(&right.scheme).then_with(fn() { left.scopes.cmp(&right.scopes) }) })
     for parameter in &route.parameters { jet_openapi_canonicalize_schema(&parameter.schema) }
-    if Val(body) :: &route.request_body { jet_openapi_canonicalize_schema(&body.schema) }
-    for response in &route.responses { if Val(schema) :: &response.schema { jet_openapi_canonicalize_schema(schema) } }
+    if (&route.request_body) == .Val(body) { jet_openapi_canonicalize_schema(&body.schema) }
+    for response in &route.responses { if (&response.schema) == .Val(schema) { jet_openapi_canonicalize_schema(schema) } }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/OpenAPI.rs:596
 #Derive(Clone, Debug, PartialEq)
@@ -326,10 +326,10 @@ impl JetOpenApiDocument {
                 if parameter.name.is_empty() { schema_errors.push(JetOpenApiValidationError.new("parameter", "parameter name must not be empty")) }
                 if parameter.location == JetOpenApiParameterLocation.Path && !parameter.required { schema_errors.push(JetOpenApiValidationError.new(parameter.name.clone(), "path parameters are always required")) }
             }
-            for path_name in path_names {
+            loop path_name in path_names {
                 if !declared_path_names.contains(&path_name) { schema_errors.push(JetOpenApiValidationError.new(path_name.to_string(), "route template parameter has no parameter fact")) }
             }
-            if Val(body) :: &route.request_body {
+            if (&route.request_body) == .Val(body) {
                 body.schema.validate_definition("requestBody", &schema_errors)
                 if body.content_type.is_empty() { schema_errors.push(JetOpenApiValidationError.new("requestBody", "request body content type must not be empty")) }
             }
@@ -337,7 +337,7 @@ impl JetOpenApiDocument {
             for response in &route.responses {
                 if response.status < 100 || response.status > 599 { errors.push("response status {response.status} is out of range") }
                 if !response_statuses.insert(response.status) { errors.push("route `{key}` declares response status {response.status} more than once") }
-                if Val(schema) :: &response.schema { schema.validate_definition("response", &schema_errors) }
+                if (&response.schema) == .Val(schema) { schema.validate_definition("response", &schema_errors) }
             }
             if route.responses.is_empty() { errors.push("route `{key}` must declare a response") }
             for requirement in &route.security {
@@ -422,13 +422,13 @@ impl JetOpenApiValidator {
                 JetOpenApiParameterLocation.Cookie -> request.cookies.get(&parameter.name)
             }
             value :: value ?? {
-                if parameter.default.is_some() { continue }
+                if parameter.default.is_some() { next }
                 if parameter.required || parameter.location == JetOpenApiParameterLocation.Path { errors.push(JetOpenApiValidationError.new("{parameter.location.as_str()}.{parameter.name}", "required parameter is missing")) }
-                continue
+                next
             }
             if Err(reason) :: jet_openapi_validate_parameter_value(&parameter.schema, value) { errors.push(JetOpenApiValidationError.new("{parameter.location.as_str()}.{parameter.name}", ^reason)) }
         }
-        if Val(body) :: &route.request_body {
+        if (&route.request_body) == .Val(body) {
             match request.body.as_ref() {
                 Val(value) -> errors.extend(body.schema.validate_tree(value, "body"))
                 None if body.required -> errors.push(JetOpenApiValidationError.new("body", "required request body is missing"))
@@ -477,14 +477,14 @@ fn jet_openapi_match_path(route: &JetOpenApiRouteFact, actual: &String) -> [Stri
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/OpenAPI.rs:1097
 fn jet_openapi_route_json(route: &JetOpenApiRouteFact) -> String {
     out := "{{\"operationId\":{jet_openapi_json_string(&route.operation_id)}"
-    if Val(summary) :: &route.summary { out.push_str(",\"summary\":{jet_openapi_json_string(summary)}") }
+    if (&route.summary) == .Val(summary) { out.push_str(",\"summary\":{jet_openapi_json_string(summary)}") }
     parameters :: &route.parameters
     if !parameters.is_empty() {
         out.push_str(",\"parameters\":[")
         out.push_str(&parameters.iter().map(jet_openapi_parameter_json).collect::<[String]>().join(","))
         out.push(']')
     }
-    if Val(body) :: &route.request_body {
+    if (&route.request_body) == .Val(body) {
         out.push_str(",\"requestBody\":{\"required\":")
         out.push_str(if body.required { "true" } else { "false" })
         out.push_str(",\"content\":{")
@@ -521,17 +521,17 @@ fn jet_openapi_route_json(route: &JetOpenApiRouteFact) -> String {
 fn jet_openapi_parameter_json(parameter: &JetOpenApiParameter) -> String {
     required :: parameter.required || parameter.location == JetOpenApiParameterLocation.Path
     out := "{{\"name\":{jet_openapi_json_string(&parameter.name)},\"in\":{jet_openapi_json_string(parameter.location.as_str())},\"required\":{required},\"schema\":{parameter.schema.render_json()}"
-    if Val(default) :: &parameter.default { out.push_str(",\"default\":{render_datatree_json(default, false, 0)}") }
+    if (&parameter.default) == .Val(default) { out.push_str(",\"default\":{render_datatree_json(default, false, 0)}") }
     out.push('}')
     ^out
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/OpenAPI.rs:1190
 fn jet_openapi_security_scheme_json(scheme: &JetOpenApiSecurityScheme) -> String {
     out := "{{\"type\":{jet_openapi_json_string(&scheme.kind)}"
-    if Val(location) :: &scheme.location { out.push_str(",\"in\":{jet_openapi_json_string(location)}") }
-    if Val(name) :: &scheme.parameter_name { out.push_str(",\"name\":{jet_openapi_json_string(name)}") }
-    if Val(value) :: &scheme.scheme { out.push_str(",\"scheme\":{jet_openapi_json_string(value)}") }
-    if Val(value) :: &scheme.bearer_format { out.push_str(",\"bearerFormat\":{jet_openapi_json_string(value)}") }
+    if (&scheme.location) == .Val(location) { out.push_str(",\"in\":{jet_openapi_json_string(location)}") }
+    if (&scheme.parameter_name) == .Val(name) { out.push_str(",\"name\":{jet_openapi_json_string(name)}") }
+    if (&scheme.scheme) == .Val(value) { out.push_str(",\"scheme\":{jet_openapi_json_string(value)}") }
+    if (&scheme.bearer_format) == .Val(value) { out.push_str(",\"bearerFormat\":{jet_openapi_json_string(value)}") }
     out.push('}')
     ^out
 }
@@ -539,7 +539,7 @@ fn jet_openapi_security_scheme_json(scheme: &JetOpenApiSecurityScheme) -> String
 fn jet_openapi_json_string(value: &String) -> String {
     out := String.with_capacity(value.len() + 2)
     out.push('"')
-    for character in value.chars() {
+    loop character in value.chars() {
         match character {
             '"' -> out.push_str("\\\"")
             '\\' -> out.push_str("\\\\")
@@ -601,7 +601,7 @@ fn jet_openapi_contract_integer(object: &[(String, DataTree)], name: &String) ->
 fn jet_openapi_contract_schema(value: &DataTree) -> JetOpenApiSchema Err! {
     object :: jet_openapi_contract_object(value)?
     kind :: jet_openapi_contract_field(object, "type").ok() ?? {
-        if Val(any_of) :: jet_openapi_contract_field(object, "anyOf").ok() {
+        if jet_openapi_contract_field(object, "anyOf").ok() == .Val(any_of) {
             items :: match any_of { .Array(items) -> items, _ -> return Err("OpenAPI schema `anyOf` must be an array") }
             is_object :: if items.len() == 2 { match &items[1] { .Object(_) -> true, _ -> false } } else { false }
             if is_object {
@@ -609,7 +609,7 @@ fn jet_openapi_contract_schema(value: &DataTree) -> JetOpenApiSchema Err! {
                 if null_schema == JetOpenApiSchema.Null { return Ok(JetOpenApiSchema.Nullable(Box.new(jet_openapi_contract_schema(&items[0])?))) }
             }
         }
-        if Val(one_of) :: jet_openapi_contract_field(object, "oneOf").ok() {
+        if jet_openapi_contract_field(object, "oneOf").ok() == .Val(one_of) {
             items :: match one_of { .Array(items) -> items, _ -> return Err("OpenAPI schema `oneOf` must be an array") }
             return Ok(JetOpenApiSchema.OneOf(items.iter().map(jet_openapi_contract_schema).collect::<[JetOpenApiSchema] Err!>()?))
         }

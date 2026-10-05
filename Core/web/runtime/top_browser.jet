@@ -146,7 +146,7 @@ fn jet_browser_trace_push(state: &JetBrowserState, entry: String) -> {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:256
 fn jet_browser_fact_hash(value: &String) -> String {
     hash := U64{0xcbf2_9ce4_8422_2325}
-    for byte in value.as_bytes() {
+    loop byte in value.as_bytes() {
         hash ^= U64.from(*byte)
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3)
     }
@@ -292,7 +292,7 @@ fn jet_browser_command_with_timeout(browser: &JetBrowser, method: &String, param
     jet_ws_send_text(&state.conn, &text).map_err(jet_browser_ws_error)?
     loop {
         response :: jet_browser_recv_json(&state, deadline)?
-        if jet_browser_capture_event(&state, &response)? { continue }
+        if jet_browser_capture_event(&state, &response)? { next }
         if jet_browser_id(&response) != id { return Err(JetBrowserError.new("protocol")) }
         response_type :: jet_browser_string(&response, "type")?
         if response_type == "error" || jet_browser_get(&response, "error").is_some() {
@@ -334,20 +334,20 @@ fn jet_browser_parse_locked(raw: &String, engine: &String) -> JetBrowserLocked J
     current := None
     in_browser := false
     found := None
-    for line in raw.lines() {
+    loop line in raw.lines() {
         line := line.trim() // #4303
-        if line.is_empty() || line.starts_with('#') { continue }
+        if line.is_empty() || line.starts_with('#') { next }
         if line.starts_with('[') {
             if in_browser {
                 if current.take() == .Val(entry) { if entry.engine == engine { found = Val(^entry) } }
             }
             in_browser = line == "[[browser]]"
             if in_browser { current = Val(JetBrowserLocked{engine: "", version: "", binary: "", protocol: "", size: 0, output_hash: ""}) }
-            continue
+            next
         }
-        if not in_browser { continue }
+        if not in_browser { next }
         entry := current.as_mut() ?? continue
-        (key, val) :: line.split_once('=') ?? continue
+        (key, val) :: line.split_once('=') ?? next
         key := key.trim() // #4303
         val := val.trim().trim_matches('"') // #4303
         match key {
@@ -708,7 +708,7 @@ fn jet_browser_page_storage_clear(page: &JetBrowserPage, kind: &String) -> Unit 
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1497
 fn jet_browser_css_attr_equals(attr: &String, value: &String) -> String {
     escaped := String.with_capacity(value.len())
-    for ch in value.chars() {
+    loop ch in value.chars() {
         match ch { '\\' | '"' -> {
             escaped.push('\\')
             escaped.push(ch)
@@ -790,7 +790,7 @@ fn jet_browser_collect_frame_ids(node: &DataTree, out: &[String]) -> Unit JetBro
     match jet_browser_get(node, "children") {
         None -> Ok(())
         Val(.Array(children)) -> {
-            for child in children { jet_browser_collect_frame_ids(child, out)? }
+            loop child in children { jet_browser_collect_frame_ids(child, out)? }
             Ok(())
         }
         Val(_) -> Err(JetBrowserError.new("protocol"))
@@ -802,7 +802,7 @@ fn jet_browser_page_frames(page: &JetBrowserPage) -> [JetBrowserFrame] JetBrowse
     result :: jet_browser_command(&page.state.browser, "browsingContext.getTree", jet_browser_object([("root", jet_browser_text(&page.state.id))]))?
     contexts :: match jet_browser_get(&result, "contexts") { Val(.Array(contexts)) -> contexts, _ -> return Err(JetBrowserError.new("protocol")) }
     ids := []
-    for node in contexts { jet_browser_collect_frame_ids(node, &ids)? }
+    loop node in contexts { jet_browser_collect_frame_ids(node, &ids)? }
     Ok(ids.into_iter().map(fn(id) { jet_browser_frame_from_page(page, ^id) }).collect())
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1719

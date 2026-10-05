@@ -27,7 +27,7 @@ fn jet_web_router_bound_data(value: String,fallback: &String) -> String { if val
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:24
 fn jet_web_router_identity(pattern: &String) -> String {
     hash: U64 := 0xcbf29ce484222325
-    for byte in pattern.as_bytes() {
+    loop byte in pattern.as_bytes() {
         hash ^= U64.from(*byte)
         hash = hash.wrapping_mul(0x100000001b3)
     }
@@ -144,8 +144,8 @@ fn jet_web_router_parse_search(query: &String,codec: WebRouterSearchCodec) -> [S
 fn jet_web_router_parse_json_search(query: &String) -> [String:String] Err! {
     if query.is_empty() { return Ok([:]) }
     encoded: String? := None
-    for pair in query.split('&') {
-        if pair.is_empty() { continue }
+    loop pair in query.split('&') {
+        if pair.is_empty() { next }
         (raw_key,raw_value) := pair.split_once('=').unwrap_or((pair,"")) // #4303
         key :: jet_web_router_decode(raw_key,true)?
         if key != "search" { return Err("JSON search codec accepts only the `search` query parameter, got `{key}`") }
@@ -180,8 +180,8 @@ fn jet_web_router_json_value_text(value: &DataTree) -> String Err! {
 fn jet_web_router_parse_query(query: &String) -> [String:String] Err! {
     values: [String:String] := [:]
     if query.is_empty() { return Ok(^values) }
-    for pair in query.split('&') {
-        if pair.is_empty() { continue }
+    loop pair in query.split('&') {
+        if pair.is_empty() { next }
         (raw_key,raw_value) := pair.split_once('=').unwrap_or((pair,"")) // #4303
         key :: jet_web_router_decode(raw_key,true)?
         if !jet_http_route_name(&key) { return Err("search parameter `{key}` has an invalid name") }
@@ -229,9 +229,9 @@ fn jet_web_router_json_value_for_field(field: &JetWebRouterField,raw: &String) -
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:370
 fn jet_web_router_typed_values(fields: &[JetWebRouterField],values: &[String:String]) -> [String:String] Err! {
     typed: [String:String] := [:]
-    for field in fields {
+    loop field in fields {
         value :: jet_web_router_parse_value(field,values.get(&field.name))?
-        if Val(value) :: value { typed.insert(field.name.clone(),^value) }
+        if value == .Val(value) { typed.insert(field.name.clone(),^value) }
     }
     Ok(^typed)
 }
@@ -252,21 +252,21 @@ fn jet_web_router_validate_fields(pattern: &JetHTTPRoutePattern,params: &[JetWeb
         match segment { .Param(name) | .CatchAll(name) -> { path_names.insert(name.clone(),true) }, JetHTTPRouteSegment.Static(_) -> {} }
     }
     declared: [String:Bool] := [:]
-    for field in params {
+    loop field in params {
         if !jet_http_route_name(&field.name) { return Err("route parameter `{field.name}` has an invalid name") }
         if !path_names.contains_key(&field.name) { return Err("route parameter `{field.name}` is not present in the route pattern") }
         if field.required && field.default.is_some() { return Err("required route parameter `{field.name}` cannot have a default") }
-        if Val(default) :: field.default.as_ref() { _ :: jet_web_router_parse_value(field,Val(default))? }
+        if field.default.as_ref() == .Val(default) { _ :: jet_web_router_parse_value(field,Val(default))? }
         if declared.insert(field.name.clone(),true).is_some() { return Err("route parameter `{field.name}` is declared more than once") }
     }
     names :: path_names.keys().cloned().collect::<[String]>().sorted()
     for name in &names {
         if !declared.contains_key(name) { return Err("route pattern parameter `{name}` has no typed declaration") }
     }
-    for field in search {
+    loop field in search {
         if !jet_http_route_name(&field.name) { return Err("search parameter `{field.name}` has an invalid name") }
         if field.required && field.default.is_some() { return Err("required search parameter `{field.name}` cannot have a default") }
-        if Val(default) :: field.default.as_ref() { _ :: jet_web_router_parse_value(field,Val(default))? }
+        if field.default.as_ref() == .Val(default) { _ :: jet_web_router_parse_value(field,Val(default))? }
         if declared.insert(field.name.clone(),true).is_some() { return Err("parameter `{field.name}` is declared more than once") }
     }
     Ok(())
@@ -294,7 +294,7 @@ impl JetWebRouteBoundaries {
         pending :: pending_boundary_id.map(JetWebBoundaryId.new).transpose().map_err(fn(error) { error.to_string() })?
         error :: error_boundary_id.map(JetWebBoundaryId.new).transpose().map_err(fn(error) { error.to_string() })?
         if (pending.is_some() || error.is_some() || hydration_trigger.is_some()) && identity.is_none() { return Err("web route boundary IDs and hydration require an island identity") }
-        if Val(identity) :: identity.as_ref() { identity.validate().map_err(fn(error) { error.to_string() })? }
+        if identity.as_ref() == .Val(identity) { identity.validate().map_err(fn(error) { error.to_string() })? }
         Ok(Self{pending,error,identity,hydration_trigger})
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:536
@@ -448,7 +448,7 @@ impl JetWebRouter {
             generation :: state.cache_generation
             if state.cache.len() >= JET_WEB_ROUTER_MAX_PRELOADED && !state.cache.contains_key(&key) {
                 oldest :: state.cache.keys().min().cloned()
-                if Val(oldest) :: oldest -> state.cache.remove(&oldest)
+                if oldest == .Val(oldest) -> state.cache.remove(&oldest)
             }
             state.cache.insert(key, JetWebRouterCacheState{identity, status, data, dependencies, generation})
             Ok(())
@@ -506,12 +506,12 @@ impl JetWebRouter {
             state :: self.inner.lock().map_err(fn(_) { "router is unavailable" })?
             if state.routes.len() >= JET_WEB_ROUTER_MAX_ROUTES -> return Err("router route table is full")
             if state.routes.iter().any(fn(route) { route.pattern_text == pattern }) -> return Err("duplicate route `{pattern}`")
-            if Val(identity) :: boundaries.identity.as_ref() {
-                if Val(boundary_id) :: boundaries.pending.as_ref() {
+            if boundaries.identity.as_ref() == .Val(identity) {
+                if boundaries.pending.as_ref() == .Val(boundary_id) {
                     jet_web_stream_register(boundary_id.as_str().to_string(), identity.clone()).map_err(fn(error) { error.to_string() })?
                 }
                 if boundaries.error.as_ref() != boundaries.pending.as_ref() {
-                    if Val(boundary_id) :: boundaries.error.as_ref() {
+                    if boundaries.error.as_ref() == .Val(boundary_id) {
                         jet_web_stream_register(boundary_id.as_str().to_string(), identity.clone()).map_err(fn(error) { error.to_string() })?
                     }
                 }
@@ -539,7 +539,7 @@ impl JetWebRouter {
             state :: self.inner.lock().map_err(fn(_) { "router is unavailable" })?
             selected: (USize, JetWebRoute, JetWebNavigation)? := None
             loop (index, route) in state.routes.iter().enumerate() {
-                raw_params :: match jet_web_router_match(&route.pattern, path)? { .Val(raw_params) -> raw_params, None -> continue }
+                raw_params :: match jet_web_router_match(&route.pattern, path)? { .Val(raw_params) -> raw_params, None -> next }
                 raw_search :: jet_web_router_parse_search(query, route.search_codec)?
                 params :: jet_web_router_typed_values(&route.params, &raw_params)?
                 jet_web_router_validate_search(&route.search, &raw_search)?

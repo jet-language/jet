@@ -82,7 +82,7 @@ impl JetWebFormTyped {
         self.set_lifecycle(JetWebFormLifecycleStatus.Pending,"","")
         state :: self.form.state()
         values: [String:String] := [:]
-        for field in self.input.fields() {
+        loop field in self.input.fields() {
             value :: state.fields.get(&field.name).map(fn(field) { field.value.clone() }).unwrap_or_default()
             values.insert(^field.name,^value)
         }
@@ -140,7 +140,7 @@ impl JetWebFormTyped {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2011
     pub fn post(self: &Self,body: String) -> String Err! {
         decoded :: self.input.decode_post(&body)?
-        for field in self.input.fields() { if Val(value) :: decoded.values.get(&field.name) { self.form.set(field.name.clone(),value.clone())? } }
+        loop field in self.input.fields() { if decoded.values.get(&field.name) == .Val(value) { self.form.set(field.name.clone(),value.clone())? } }
         self.submit()
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2021
@@ -185,17 +185,17 @@ impl JetWebFormTyped {
         html.push_str(if busy { "true" } else { "false" })
         html.push_str("\">")
         open_group: String? := None
-        for spec in self.input.fields() {
+        loop spec in self.input.fields() {
             if spec.group != open_group {
                 if open_group.is_some() { html.push_str("</fieldset>") }
-                if Val(group) :: spec.group.as_ref() {
+                if spec.group.as_ref() == .Val(group) {
                     html.push_str("<fieldset><legend>")
                     html.push_str(&jet_web_form_escape(group))
                     html.push_str("</legend>")
                 }
                 open_group = spec.group.clone()
             }
-            field :: match state.fields.get(&spec.name) { .Val(field) -> field, None -> { continue } }
+            field :: match state.fields.get(&spec.name) { .Val(field) -> field, None -> { next } }
             id :: jet_web_form_field_id(&self.input.type_name,&spec.wire_name)
             error_id :: "{id}-error"
             invalid :: !field.errors.is_empty()
@@ -268,7 +268,7 @@ impl JetWebFormTyped {
     fn apply_action_errors(self: &Self) -> {
         // GATE #4565: kernel primitive
         error :: #Unsafe("consume normalized server error slot under shared mutex before reactive publication") { self.action_errors.lock().ok().and_then(fn(slot) { slot.take() }) }
-        if Val(error) :: error { self.form.set_server_errors(^error.field_errors,^error.form_errors) }
+        if error == .Val(error) { self.form.set_server_errors(^error.field_errors,^error.form_errors) }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2211
     fn set_lifecycle(self: &Self,status: JetWebFormLifecycleStatus,result: String,error: String) -> {
@@ -316,7 +316,7 @@ impl JetWebFormTypedValidation {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2297
     pub fn cancel(self: &Self) -> {
-        if Val(validation) :: &self.validation { validation.cancel() }
+        if (&self.validation) == .Val(validation) { validation.cancel() }
         self.form.cancel()
     }
 }
@@ -341,7 +341,7 @@ impl JetWebFormTypedSubmission {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2332
     pub fn cancel(self: &Self) -> {
         // GATE #4565: kernel primitive
-        #Unsafe("request cancellation of retained submission task without detaching it") { if Val(join) :: &self.join { join.cancel() } }
+        #Unsafe("request cancellation of retained submission task without detaching it") { if (&self.join) == .Val(join) { join.cancel() } }
         self.form.cancel()
     }
 }
@@ -356,10 +356,10 @@ fn jet_web_form_validate_text(value: &String,kind: &String) -> () Err! {
 fn jet_web_form_human_label(name: &String) -> String {
     label := String.new()
     for (index,word) in name.split(['_','-']).enumerate() {
-        if word.is_empty() { continue }
+        if word.is_empty() { next }
         if index > 0 { label.push(' ') }
         chars := word.chars()
-        if Val(first) :: chars.next() {
+        if chars.next() == .Val(first) {
             label.extend(first.to_uppercase())
             label.extend(chars)
         }

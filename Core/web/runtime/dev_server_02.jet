@@ -93,7 +93,7 @@ fn create_publication_journal(root_path: &OSPath, root_final: String, root: &Fil
     -> (OSPath, String, File, String) io.Error! {
     // GATE #4565: kernel primitive
     #Unsafe("journal creation retries collisions only and retains a checked directory handle beneath the root") {
-        for _ in 0..<100 {
+        loop _ in 0..<100 {
             value :: ".jet-devserver-publication-{process_id()}-{JET_DEVSERVER_STAGING_COUNTER.fetch_add(1, Ordering.Relaxed)}"
             path :: root_path.join(value)
             match create_dir(&path) {
@@ -107,7 +107,7 @@ fn create_publication_journal(root_path: &OSPath, root_final: String, root: &Fil
                         }
                     }
                 }
-                Err(error) if error.kind() == .AlreadyExists -> continue
+                Err(error) if error.kind() == .AlreadyExists -> next
                 Err(error) -> return Err(^error)
             }
         }
@@ -116,7 +116,7 @@ fn create_publication_journal(root_path: &OSPath, root_final: String, root: &Fil
 }
 // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1950
 fn clear_publication_journal(path: &OSPath, final_path: String, directory: &File, names: &[String]) -> {
-    for value in names {
+    loop value in names {
         if open_file_in_parent(path, final_path, OsStr.new(value), true, directory) == .Ok((file, _)) {
             _ :: delete_handle(&file)
         }
@@ -294,7 +294,7 @@ fn publish_build(root: &JetDevServerOutputRoot, staging: &JetDevServerStaging, h
     if html == .Val(bytes) {
         replace_file_in_parent(&build_path, build_final, &build, OsStr.new("index.html"), bytes)?
     }
-    for value in JET_DEVSERVER_OUTPUT_FILES {
+    loop value in JET_DEVSERVER_OUTPUT_FILES {
         _ :: open_file_in_parent(&build_path, build_final, OsStr.new(value), false, &build)?
         match open_file_in_parent(&root_path, root_final, OsStr.new(value), false, &root.directory) {
             Ok(_) -> {}
@@ -306,7 +306,7 @@ fn publish_build(root: &JetDevServerOutputRoot, staging: &JetDevServerStaging, h
     backed_up := [String]{}
     published := [String]{}
     result :: (fn() -> () io.Error! {
-        for value in JET_DEVSERVER_OUTPUT_FILES {
+        loop value in JET_DEVSERVER_OUTPUT_FILES {
             match open_file_in_parent(&root_path, root_final, OsStr.new(value), true, &root.directory) {
                 Ok((old, _)) -> {
                     rename_into(&old, &journal, OsStr.new(value))?
@@ -316,7 +316,7 @@ fn publish_build(root: &JetDevServerOutputRoot, staging: &JetDevServerStaging, h
                 Err(error) -> return Err(^error)
             }
         }
-        for value in JET_DEVSERVER_OUTPUT_FILES {
+        loop value in JET_DEVSERVER_OUTPUT_FILES {
             (source, source_id) :: open_file_in_parent(&build_path, build_final, OsStr.new(value), true, &build)?
             rename_into(&source, &root.directory, OsStr.new(value))?
             published.push(value)
@@ -342,7 +342,7 @@ fn cleanup(root: &JetDevServerOutputRoot, staging: &JetDevServerStaging) -> () i
     root_final :: normalize(final_path(&root.directory)?)
     staging_final :: normalize(final_path(&staging.directory)?)
     if open_dir_in_parent(&staging.path, staging_final, OsStr.new("build"), true, &staging.directory) == .Ok((build, build_final)) {
-        for value in JET_DEVSERVER_STAGING_FILES {
+        loop value in JET_DEVSERVER_STAGING_FILES {
             if open_file_in_parent(&staging.path.join("build"), build_final, OsStr.new(value), true, &build) == .Ok((file, _)) {
                 _ :: delete_handle(&file)
             }
@@ -540,7 +540,7 @@ fn jet_devserver_write_response_parts<W: Write>(stream: &W, status: String, cont
     }
     header :: "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {body_len}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
     stream.write_all(header.as_bytes())?
-    for part in parts { stream.write_all(part)? }
+    loop part in parts { stream.write_all(part)? }
     stream.flush()
 }
 // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:2763

@@ -205,7 +205,7 @@ impl JetWebFormValidation {
     pub fn cancel(self: &Self) -> {
         // GATE #4565: kernel primitive
         #Unsafe("request cancellation on retained validation task") {
-            if Val(join) :: &self.join -> join.cancel()
+            if (&self.join) == .Val(join) -> join.cancel()
         }
     }
 }
@@ -366,7 +366,7 @@ impl JetWebForm {
                 loop name in names {
                     field :: &snapshot.fields[&name]
                     field_errors := errors.remove(&field.name).unwrap_or_default()
-                    if Val(validators) :: rules.async_validators.get(&field.name) {
+                    if rules.async_validators.get(&field.name) == .Val(validators) {
                         loop validator in validators {
                             if Err(error) :: validator(field.value.clone()) -> field_errors.push(jet_web_form_bound_error(^error))
                         }
@@ -486,14 +486,14 @@ impl JetWebForm {
         #Unsafe("snapshot callback rules and schedule generation-checked single-field validation") {
             rules :: self.rules.lock().map_err(fn(_) { "form rules are unavailable" })?.clone()
             errors := jet_web_form_validate_value(&value, value_type, required)
-            if Val(validators) :: rules.validators.get(&name) {
+            if rules.validators.get(&name) == .Val(validators) {
                 loop validator in validators {
                     if Err(error) :: validator(value.clone()) -> errors.push(jet_web_form_bound_error(^error))
                 }
             }
             self.apply_one_errors(&name, errors.clone(), false)
             if run_async {
-                if Val(validators) :: rules.async_validators.get(&name) {
+                if rules.async_validators.get(&name) == .Val(validators) {
                     validators :: validators.clone()
                     form :: self.clone()
                     name_for_worker :: name.clone()
@@ -537,7 +537,7 @@ impl JetWebForm {
         names.sort()
         loop name in names {
             errors :: field_errors.remove(&name).unwrap()
-            if Val(field) :: state.fields.get_mut(&name) {
+            if state.fields.get_mut(&name) == .Val(field) {
                 field.errors = errors.into_iter().map(jet_web_form_bound_error).collect()
                 field.touched = true
                 summary.extend(field.errors.iter().cloned())
@@ -558,7 +558,7 @@ impl JetWebForm {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:830
     fn apply_one_errors(self: &Self, name: &String, errors: [String], validating: Bool) -> {
         state := self.state.get()
-        if Val(field) :: state.fields.get_mut(name) {
+        if state.fields.get_mut(name) == .Val(field) {
             field.errors = ^errors
             field.validating = validating
         }
@@ -658,7 +658,7 @@ fn jet_web_form_validate_value(value: &String, value_type: WebFormValueType, req
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:972
 fn jet_web_form_validate_field(field: &WebFormFieldState, validators: (&[JetWebFormValidator])?) -> [String] {
     errors := jet_web_form_validate_value(&field.value, field.value_type, field.required)
-    if Val(validators) :: validators {
+    if validators == .Val(validators) {
         loop validator in validators {
             if Err(error) :: validator(field.value.clone()) -> errors.push(jet_web_form_bound_error(^error))
         }
@@ -846,7 +846,7 @@ impl JetWebFormFieldSpec {
         if raw.len() > JET_WEB_FORM_MAX_VALUE -> return Err("form field `{self.name}` exceeds {JET_WEB_FORM_MAX_VALUE} bytes")
         if self.required && raw.trim().is_empty() -> return Err("value is required")
         if raw.trim().is_empty() -> return Ok("")
-        parsed :: if Val(parser) :: &self.parser { parser(raw) } else {
+        parsed :: if (&self.parser) == .Val(parser) { parser(raw) } else {
             match self.value_type {
                 .String -> Ok(raw.to_string())
                 .Int -> raw.parse<I64>().map(fn(value) { value.to_string() }).map_err(fn(_) { "expected Int" })
@@ -1001,8 +1001,8 @@ impl JetWebFormInput {
             if !jet_web_form_valid_name(&field.name) || names.insert(field.name.clone(), true).is_some() -> return Err("duplicate or invalid form field `{field.name}`")
             if !jet_web_form_valid_name(&field.wire_name) || wire_names.insert(field.wire_name.clone(), true).is_some() -> return Err("duplicate or invalid form wire name `{field.wire_name}`")
             jet_web_form_validate_text(&field.label, "form field label")?
-            if Val(group) :: &field.group -> jet_web_form_validate_text(group, "form field group")?
-            if Val(default) :: &field.default {
+            if (&field.group) == .Val(group) -> jet_web_form_validate_text(group, "form field group")?
+            if (&field.default) == .Val(default) {
                 _ :: field.parse(default).map_err(fn(error) { "default for form field `{field.name}`: {error}" })?
             }
         }
@@ -1115,8 +1115,8 @@ impl JetWebFormTyped {
         loop field in input.fields() {
             name :: field.name.clone()
             form.field(name.clone(), field.value_type, field.required)?
-            if Val(default) :: field.default.clone() -> form.set(name.clone(), ^default)?
-            if Val(parser) :: field.parser.clone() {
+            if field.default.clone() == .Val(default) -> form.set(name.clone(), ^default)?
+            if field.parser.clone() == .Val(parser) {
                 parser_name :: name.clone()
                 form.set_validator(^name, fn(value) {
                     parser(&value).map(fn(_) { () }).map_err(fn(error) { "field `{parser_name}`: {error}" })
@@ -1135,7 +1135,7 @@ impl JetWebFormTyped {
                 async_timings: Arc.new(Mutex.new([:] ))}
         }
         jet_web_form_register_panel_fact(&typed)
-        if Val(handler) :: handler -> typed.install_action(handler)
+        if handler == .Val(handler) -> typed.install_action(handler)
         Ok(typed)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1742

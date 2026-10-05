@@ -74,7 +74,7 @@ fn jet_web_query_queue_path() -> OSPath? {
 fn jet_web_query_hex(value: String) -> String {
     HEX :: "0123456789abcdef".as_bytes()
     encoded := String.with_capacity(value.len().saturating_mul(2))
-    for byte in value.as_bytes() {
+    loop byte in value.as_bytes() {
         encoded.push(HEX[(byte >> 4) as Int] as Char)
         encoded.push(HEX[(byte & 0x0f) as Int] as Char)
     }
@@ -188,7 +188,7 @@ fn jet_web_query_valid_key(key: String) -> Bool {
 fn jet_web_query_targets(targets: [String]) -> [String] Err! {
     if targets.len() > JET_WEB_QUERY_MAX_INVALIDATIONS -> return Err("query invalidation list exceeds {JET_WEB_QUERY_MAX_INVALIDATIONS} entries")
     normalized: [String] := [String].with_capacity(targets.len())
-    for target in targets {
+    loop target in targets {
         target := target.trim() // #4303
         if target.is_empty() || target.len() > JET_WEB_QUERY_MAX_INVALIDATION_TARGET || target.chars().any(fn(c) { c.is_control() }) {
             return Err("query invalidation target is invalid")
@@ -593,7 +593,7 @@ impl JetWebQuery {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebQuery.rs:995
     fn invalidate_targets(self: &Self, targets: &[String]) -> {
-        for target in targets {
+        loop target in targets {
             if target.strip_prefix("key:") == .Val(key) -> _ :: jet_app_invalidate_key(key.to_string())
             else -> _ :: jet_app_invalidate(target.clone())
         }
@@ -777,7 +777,7 @@ impl JetWebQuery {
         if !self.is_online() -> return Err("query replay paused while offline")
         entries :: jet_web_query_queued(&self.key)?
         sent: Int := 0
-        for entry in entries {
+        loop entry in entries {
             if send(entry.payload.clone()) == .Err(error) {
                 error :: jet_web_query_bound_error(error)
                 mutation := self.mutation.get()

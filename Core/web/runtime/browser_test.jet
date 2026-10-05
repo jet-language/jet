@@ -56,7 +56,7 @@ fn jet_browser_test_config_value(root: String, key: String) -> String? {
     contents :: #Unsafe("read browser-tests.conf from the selected project root") {
         fs.read_to_string(OSPath.from_text(root).join("browser-tests.conf")).ok()
     }?
-    for raw in contents.lines() {
+    loop raw in contents.lines() {
         line := raw.trim() // #4303
         if line.split_once('=') == .Val((name, value)) {
             if name.trim().eq_ignore_ascii_case(key) {
@@ -169,16 +169,16 @@ fn jet_browser_test_env_bool(name: String, default: Bool) -> Bool {
 // Rust: crates/jet-codegen/src/Prelude/BrowserTest.rs:213
 fn jet_browser_test_engines(raw: String) -> [String] JetBrowserError! {
     requested: [String] := []
-    for part in raw.split(fn(ch) { ch == ',' || ch.is_ascii_whitespace() }) {
+    loop part in raw.split(fn(ch) { ch == ',' || ch.is_ascii_whitespace() }) {
         text := part.trim() // #4303
         value :: text.to_ascii_lowercase()
-        if value.is_empty() -> continue
+        if value.is_empty() -> next
         if value != "chromium" && value != "firefox" && value != "webkit" -> return Err(JetBrowserError.new("unknown engine"))
         if !requested.contains(value) -> requested.push(^value)
     }
     if requested.is_empty() || requested.len() > JET_BROWSER_TEST_MAX_ENGINES -> return Err(JetBrowserError.new("unknown engine"))
     engines: [String] := []
-    for value in ["chromium", "firefox", "webkit"] {
+    loop value in ["chromium", "firefox", "webkit"] {
         if requested.contains(value) -> engines.push(value.to_string())
     }
     Ok(^engines)
@@ -188,7 +188,7 @@ fn jet_browser_test_split_command(raw: String) -> [String] {
     command: [String] := []
     value := String.new()
     quote: Char? := .None
-    for ch in raw.chars() {
+    loop ch in raw.chars() {
         if quote == .Val(delimiter) {
             if ch == delimiter -> quote = .None
             else -> value.push(ch)
@@ -207,7 +207,7 @@ fn jet_browser_test_split_command(raw: String) -> [String] {
 // Rust: crates/jet-codegen/src/Prelude/BrowserTest.rs:262
 pub fn jet_browser_test_selected(config: &JetBrowserTestConfig, name: &String) -> Bool {
     if config.filter.trim().is_empty() -> return true
-    for pattern in config.filter.split(fn(ch) { ch == ',' || ch.is_ascii_whitespace() }) {
+    loop pattern in config.filter.split(fn(ch) { ch == ',' || ch.is_ascii_whitespace() }) {
         if !pattern.is_empty() && jet_browser_test_glob_match(pattern, name) -> return true
     }
     false
@@ -338,7 +338,7 @@ fn jet_browser_test_begin(config: &JetBrowserTestConfig, test: &String, engine: 
         }
     }
     // Older profiles can reject optional events; their native queue is authoritative.
-    for event in ["log.entryAdded", "network.beforeRequestSent", "network.responseStarted",
+    loop event in ["log.entryAdded", "network.beforeRequestSent", "network.responseStarted",
         "network.fetchError", "browsingContext.consoleMessage"] {
         _ :: jet_browser_subscribe(&browser, event.to_string())
     }
@@ -389,7 +389,7 @@ fn jet_browser_test_drain_events(browser: &JetBrowser) -> [JetBrowserTestEventFa
 // Rust: crates/jet-codegen/src/Prelude/BrowserTest.rs:562
 fn jet_browser_test_safe_component(value: String, fallback: String) -> String {
     safe := String.new()
-    for ch in value.chars() {
+    loop ch in value.chars() {
         safe.push(if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.' -> ch else -> '_')
     }
     if safe.is_empty() || safe == "." || safe == ".." -> fallback.to_string() else -> ^safe
@@ -605,7 +605,7 @@ fn jet_browser_test_text(report: &JetBrowserTestReport) -> String {
     for case in &report.cases {
         if !case.selected {
             out.push_str(format("SKIP {}\n", case.name))
-            continue
+            next
         }
         for attempt in &case.attempts {
             out.push_str(format("{} {} [{}] attempt={} duration={}ms\n",
@@ -696,7 +696,7 @@ pub fn jet_browser_test_watch_changed(path: &String, last_modified_ms: I64) -> B
 // Rust: crates/jet-codegen/src/Prelude/BrowserTest.rs:1175
 fn jet_browser_test_escape_source(value: String) -> String {
     escaped := String.with_capacity(value.len())
-    for ch in value.chars() {
+    loop ch in value.chars() {
         if ch == {
             '\\' -> escaped.push_str("\\\\")
             '"' -> escaped.push_str("\\\"")
@@ -833,8 +833,8 @@ fn jet_browser_test_base64_decode(value: String) -> [U8] JetBrowserError! {
     output := [U8].with_capacity(value.len() * 3 / 4)
     quartet: [U8] := [0, 0, 0, 0]
     count := 0
-    for byte in value.bytes() {
-        if byte.is_ascii_whitespace() -> continue
+    loop byte in value.bytes() {
+        if byte.is_ascii_whitespace() -> next
         if byte == 61 -> quartet[count] = 64
         else if byte >= 65 && byte <= 90 -> quartet[count] = byte - 65
         else if byte >= 97 && byte <= 122 -> quartet[count] = byte - 97 + 26
@@ -843,7 +843,7 @@ fn jet_browser_test_base64_decode(value: String) -> [U8] JetBrowserError! {
         else if byte == 47 -> quartet[count] = 63
         else -> return Err(JetBrowserError.new("protocol"))
         count += 1
-        if count != 4 -> continue
+        if count != 4 -> next
         output.push((quartet[0] << 2) | (quartet[1] >> 4))
         if quartet[2] != 64 -> output.push((quartet[1] << 4) | (quartet[2] >> 2))
         if quartet[3] != 64 -> output.push((quartet[2] << 6) | quartet[3])

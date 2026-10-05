@@ -938,7 +938,7 @@ impl JetApp {
         state :: self.lock()
         rows := [String]{}
         loop (name, function, kind, _) in state.actions {
-            if function.is_none() -> continue
+            if function.is_none() -> next
             endpoint :: "/actions/{name}"
             middleware :: APP_SERVER_FUNCTION_MIDDLEWARE.iter().map(kind -> jet_app_json_string(kind.as_str()))
                 .collect<[String]>().join(",")
