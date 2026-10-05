@@ -1,192 +1,179 @@
-// PORT-PENDING 2164 crates-jet-rt-src-gc-portable: crates/jet-rt/src/__gc_portable.rs:1-188
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Portable GC adapter.  This file is emitted only with the checked no-OS
-//RS // Prelude.  It uses alloc/core only: a target-sized spin lock, a one-time
-//RS // cell, and a target-sized identity counter.  Collection itself remains in
-//RS // __gc_core.rs and is never replaced by a no-op path.
-//RS 
-//RS extern crate alloc;
-//RS 
-//RS use core::cell::UnsafeCell;
-//RS use core::mem::MaybeUninit;
-//RS use core::ops::{Deref, DerefMut};
-//RS use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-//RS use super::{Fault, GcPanic, ObjectId, PromotionSite};
-//RS 
-//RS pub(crate) struct GcMutex<T> {
-//RS     locked: AtomicBool,
-//RS     value: UnsafeCell<T>,
-//RS }
-//RS 
-//RS unsafe impl<T: Send> Send for GcMutex<T> {}
-//RS unsafe impl<T: Send> Sync for GcMutex<T> {}
-//RS 
-//RS pub(crate) struct GcMutexGuard<'a, T> {
-//RS     mutex: &'a GcMutex<T>,
-//RS }
-//RS 
-//RS impl<T> Deref for GcMutexGuard<'_, T> {
-//RS     type Target = T;
-//RS 
-//RS     fn deref(&self) -> &Self::Target {
-//RS         // The guard owns the lock until Drop, so this shared reference cannot
-//RS         // race with a mutable access through another guard.
-//RS         unsafe { &*self.mutex.value.get() }
-//RS     }
-//RS }
-//RS 
-//RS impl<T> DerefMut for GcMutexGuard<'_, T> {
-//RS     fn deref_mut(&mut self) -> &mut Self::Target {
-//RS         // The guard is the sole owner of the lock while this mutable borrow is
-//RS         // alive.
-//RS         unsafe { &mut *self.mutex.value.get() }
-//RS     }
-//RS }
-//RS 
-//RS impl<T> Drop for GcMutexGuard<'_, T> {
-//RS     fn drop(&mut self) {
-//RS         self.mutex.locked.store(false, Ordering::Release);
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) struct GcPoisonError<T>(T);
-//RS 
-//RS impl<T> GcPoisonError<T> {
-//RS     pub(crate) fn into_inner(self) -> T {
-//RS         self.0
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) enum GcTryLockError<T> {
-//RS     WouldBlock,
-//RS     Poisoned(T),
-//RS }
-//RS 
-//RS impl<T> GcMutex<T> {
-//RS     pub(crate) const fn new(value: T) -> Self {
-//RS         Self {
-//RS             locked: AtomicBool::new(false),
-//RS             value: UnsafeCell::new(value),
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn into_inner(self) -> Result<T, GcPoisonError<T>> {
-//RS         Ok(self.value.into_inner())
-//RS     }
-//RS 
-//RS     #[inline]
-//RS     fn acquire(&self) {
-//RS         while self
-//RS             .locked
-//RS             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-//RS             .is_err()
-//RS         {
-//RS             core::hint::spin_loop();
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn lock(&self) -> Result<GcMutexGuard<'_, T>, GcPoisonError<GcMutexGuard<'_, T>>> {
-//RS         self.acquire();
-//RS         Ok(GcMutexGuard { mutex: self })
-//RS     }
-//RS 
-//RS     pub(crate) fn try_lock(&self) -> Result<GcMutexGuard<'_, T>, GcTryLockError<GcMutexGuard<'_, T>>> {
-//RS         if self
-//RS             .locked
-//RS             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-//RS             .is_ok()
-//RS         {
-//RS             Ok(GcMutexGuard { mutex: self })
-//RS         } else {
-//RS             Err(GcTryLockError::WouldBlock)
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn get_mut(
-//RS         &mut self,
-//RS     ) -> Result<&mut T, GcPoisonError<&mut T>> {
-//RS         // An exclusive borrow of the mutex proves no guard can be active.
-//RS         Ok(self.value.get_mut())
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) struct GcOnce<T> {
-//RS     state: AtomicU8,
-//RS     value: UnsafeCell<MaybeUninit<T>>,
-//RS }
-//RS 
-//RS unsafe impl<T: Send + Sync> Sync for GcOnce<T> {}
-//RS unsafe impl<T: Send> Send for GcOnce<T> {}
-//RS 
-//RS impl<T> GcOnce<T> {
-//RS     pub(crate) const fn new() -> Self {
-//RS         Self {
-//RS             state: AtomicU8::new(0),
-//RS             value: UnsafeCell::new(MaybeUninit::uninit()),
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn get_or_init(&'static self, init: impl FnOnce() -> T) -> &'static T {
-//RS         if self.state.load(Ordering::Acquire) != 2
-//RS             && self
-//RS                 .state
-//RS                 .compare_exchange(0, 1, Ordering::Acquire, Ordering::Relaxed)
-//RS                 .is_ok()
-//RS         {
-//RS             // A no-OS panic policy aborts, so an initializer cannot return
-//RS             // while the cell is in the initializing state.
-//RS             unsafe { (*self.value.get()).write(init()) };
-//RS             self.state.store(2, Ordering::Release);
-//RS         } else {
-//RS             while self.state.load(Ordering::Acquire) != 2 {
-//RS                 core::hint::spin_loop();
-//RS             }
-//RS         }
-//RS         unsafe { (*self.value.get()).assume_init_ref() }
-//RS     }
-//RS }
-//RS 
-//RS static NEXT_OBJECT_ID: GcMutex<u64> = GcMutex::new(1);
-//RS 
-//RS pub(crate) fn gc_next_object_id() -> Result<u64, Fault> {
-//RS     let mut next = NEXT_OBJECT_ID.lock().map_err(|_| Fault::HeapPoisoned)?;
-//RS     let id = *next;
-//RS     *next = next.checked_add(1).ok_or(Fault::IdExhausted)?;
-//RS     Ok(id)
-//RS }
-//RS 
-//RS pub(crate) fn gc_catch_unwind<F, R>(f: F) -> Result<R, GcPanic>
-//RS where
-//RS     F: FnOnce() -> R,
-//RS {
-//RS     Ok(f())
-//RS }
-//RS 
-//RS pub(crate) fn gc_resume_unwind(_payload: GcPanic) -> ! {
-//RS     crate::jet_target_exit(101)
-//RS }
-//RS 
-//RS pub(crate) fn gc_initialize_trace() -> Result<(), Fault> {
-//RS     // Trace is intentionally inactive without a hosted filesystem/env/time
-//RS     // adapter.  It does not alter allocation or collection behavior.
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub(crate) fn gc_runtime_or_exit(fault: Fault) -> ! {
-//RS     crate::jet_target_failure_render(1, |out| super::gc_write_failure(out, &fault))
-//RS }
-//RS 
-//RS pub(crate) fn gc_record_memory_ledger(_site: PromotionSite) {
-//RS     // The portable closure has no configured hosted memory-ledger provider.
-//RS }
-//RS 
-//RS pub(crate) fn gc_trace_promotion(_id: ObjectId, _site: PromotionSite) -> Result<(), Fault> {
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub(crate) fn gc_trace_collection(_reclaimed: &[ObjectId]) -> Result<(), Fault> {
-//RS     Ok(())
-//RS }
-//RS 
-// END-PORT-PENDING 2164 crates/jet-rt/src/__gc_portable.rs:1-188
+use core.cell.UnsafeCell
+use core.mem.MaybeUninit
+use core.ops.[Deref, DerefMut, Drop]
+use core.sync.atomic.[AtomicBool, AtomicU8, Ordering]
+use core.hint.spin_loop
+use core.mem.runtime.gc_core.[GCFault, GCObjectID, GCPromotionSite]
+use jet_rt.[GcPanic, jet_target_exit, jet_target_failure_render]
+use core.mem.runtime.gc_host_policy.gc_write_failure
+// GATE #4494: UnsafeCell/MaybeUninit, target atomics, guard loans, Send/Sync
+// attestations and terminal target-exit/render leaves use native Core names.
+// This no-OS adapter keeps real collection in the canonical gc_core owner.
+// #4483: AtomicBool/AtomicU8 and spin_loop are selected-target primitives,
+// never hosted Mutex/Once substitutions. #4499 and #4409 are not used here.
 
+// Rust: crates/jet-rt/src/__gc_portable.rs:14
+pub module gc_portable<T> {
+    // Rust: crates/jet-rt/src/__gc_portable.rs:14
+    pub struct GcMutex {
+        locked: AtomicBool
+        value: UnsafeCell<T>
+    }
+    // Rust: crates/jet-rt/src/__gc_portable.rs:19
+    // GATE #4494: native Send attestation requires exactly T: Send.
+    impl GcMutex.Send where T: Send {}
+    // Rust: crates/jet-rt/src/__gc_portable.rs:20
+    // GATE #4494: native Sync attestation requires exactly T: Send.
+    impl GcMutex.Sync where T: Send {}
+
+    // Rust: crates/jet-rt/src/__gc_portable.rs:22
+    pub struct GcMutexGuard {
+        mutex: View<GcMutex>
+    }
+    // Rust: crates/jet-rt/src/__gc_portable.rs:26
+    impl GcMutexGuard.Deref {
+        // Rust: crates/jet-rt/src/__gc_portable.rs:27
+        type Target = T
+        // Rust: crates/jet-rt/src/__gc_portable.rs:29
+        fn deref(self) -> View<T> {
+            // The guard holds the lock through Drop, excluding another mutable guard.
+            #Unsafe("guard owns the acquired lock while lending its shared value") {
+                self.mutex.value.get().as_ref()
+            }
+        }
+    }
+    // Rust: crates/jet-rt/src/__gc_portable.rs:36
+    impl GcMutexGuard.DerefMut {
+        // Rust: crates/jet-rt/src/__gc_portable.rs:37
+        fn deref_mut(&self) -> ViewMut<T> {
+            #Unsafe("this exclusive guard is the sole lock owner during its mutable loan") {
+                self.mutex.value.get().as_mut()
+            }
+        }
+    }
+    // Rust: crates/jet-rt/src/__gc_portable.rs:44
+    impl GcMutexGuard.Drop {
+        // Rust: crates/jet-rt/src/__gc_portable.rs:45
+        fn drop(&self) -> {
+            self.mutex.locked.store(false, Ordering.Release)
+        }
+    }
+    // Rust: crates/jet-rt/src/__gc_portable.rs:50
+    #Error
+    pub struct GcPoisonError { value: T }
+    // Rust: crates/jet-rt/src/__gc_portable.rs:52
+    impl GcPoisonError {
+        // Rust: crates/jet-rt/src/__gc_portable.rs:53
+        pub fn into_inner(^self) -> T { ^self.value }
+    }
+    // Rust: crates/jet-rt/src/__gc_portable.rs:58
+    #Error
+    pub enum GcTryLockError {
+        WouldBlock
+        Poisoned(T)
+    }
+    // Rust: crates/jet-rt/src/__gc_portable.rs:63
+    impl GcMutex {
+        // Rust: crates/jet-rt/src/__gc_portable.rs:64
+        pub fn new(value: ^T) -> GcMutex {
+            GcMutex{locked: AtomicBool.new(false), value: UnsafeCell.new(^value)}
+        }
+        // Rust: crates/jet-rt/src/__gc_portable.rs:71
+        pub fn into_inner(^self) -> T GcPoisonError! {
+            Ok(self.value.into_inner())
+        }
+        // Rust: crates/jet-rt/src/__gc_portable.rs:76
+        fn acquire(self) -> {
+            loop self.locked.compare_exchange(false, true, Ordering.Acquire, Ordering.Relaxed).is_err() {
+                spin_loop()
+            }
+        }
+        // Rust: crates/jet-rt/src/__gc_portable.rs:86
+        pub fn lock(self) -> GcMutexGuard gc_portable<GcMutexGuard>.GcPoisonError! {
+            self.acquire()
+            Ok(GcMutexGuard{mutex: self})
+        }
+        // Rust: crates/jet-rt/src/__gc_portable.rs:91
+        pub fn try_lock(self) -> GcMutexGuard gc_portable<GcMutexGuard>.GcTryLockError! {
+            if self.locked.compare_exchange(false, true, Ordering.Acquire, Ordering.Relaxed).is_ok() {
+                Ok(GcMutexGuard{mutex: self})
+            } else {
+                Err(gc_portable<GcMutexGuard>.GcTryLockError.WouldBlock)
+            }
+        }
+        // Rust: crates/jet-rt/src/__gc_portable.rs:103
+        pub fn get_mut(&self) -> ViewMut<T> gc_portable<ViewMut<T>>.GcPoisonError! {
+            // Exclusive mutex access proves that no guard can be active.
+            Ok(self.value.get_mut())
+        }
+    }
+    // Rust: crates/jet-rt/src/__gc_portable.rs:111
+    pub struct GcOnce {
+        state: AtomicU8
+        value: UnsafeCell<MaybeUninit<T>>
+    }
+    // Rust: crates/jet-rt/src/__gc_portable.rs:116
+    // GATE #4494: Sync requires T: Send + Sync; publication uses release/acquire.
+    impl GcOnce.Sync where T: Send + Sync {}
+    // Rust: crates/jet-rt/src/__gc_portable.rs:117
+    // GATE #4494: Send requires T: Send.
+    impl GcOnce.Send where T: Send {}
+    // Rust: crates/jet-rt/src/__gc_portable.rs:119
+    impl GcOnce {
+        // Rust: crates/jet-rt/src/__gc_portable.rs:120
+        pub fn new() -> GcOnce {
+            GcOnce{state: AtomicU8.new(0), value: UnsafeCell.new(MaybeUninit<T>.uninit())}
+        }
+        // Rust: crates/jet-rt/src/__gc_portable.rs:127
+        // GATE #4494: self and its returned loan have static extent, and init is
+        // consuming FnOnce. The no-OS panic policy aborts during initialization.
+        pub fn get_or_init(self, init: ^FnOnce<T>) -> View<T> {
+            if self.state.load(Ordering.Acquire) != 2 && self.state.compare_exchange(0, 1, Ordering.Acquire, Ordering.Relaxed).is_ok() {
+                #Unsafe("the successful initializing CAS grants sole access to the uninitialized cell") {
+                    self.value.get().as_mut().write(init())
+                }
+                self.state.store(2, Ordering.Release)
+            } else {
+                loop self.state.load(Ordering.Acquire) != 2 { spin_loop() }
+            }
+            #Unsafe("acquire observed release publication of the single initialized static value") {
+                self.value.get().as_ref().assume_init_ref()
+            }
+        }
+    }
+}
+// Rust: crates/jet-rt/src/__gc_portable.rs:147
+NEXT_OBJECT_ID :: gc_portable<U64>.GcMutex.new(1)
+// Rust: crates/jet-rt/src/__gc_portable.rs:149
+pub fn gc_next_object_id() -> U64 GCFault! {
+    next := NEXT_OBJECT_ID.lock().map_err(_ -> GCFault.HeapPoisoned)?
+    id :: next.deref()
+    next.deref_mut() = id.checked_add(1) ?? return Err(GCFault.IDExhausted)
+    Ok(id)
+}
+// Rust: crates/jet-rt/src/__gc_portable.rs:156
+pub fn gc_catch_unwind<R>(f: ^FnOnce<R>) -> R GcPanic! {
+    // Portable panic policy aborts; successful completion returns the real value.
+    Ok(f())
+}
+// Rust: crates/jet-rt/src/__gc_portable.rs:163
+pub fn gc_resume_unwind(_payload: ^GcPanic) -> Never {
+    jet_target_exit(101)
+}
+// Rust: crates/jet-rt/src/__gc_portable.rs:167
+pub fn gc_initialize_trace() -> GCFault! {
+    // No hosted filesystem/env/time adapter. Allocation and collection are unchanged.
+    Ok()
+}
+// Rust: crates/jet-rt/src/__gc_portable.rs:173
+pub fn gc_runtime_or_exit(fault: GCFault) -> Never {
+    jet_target_failure_render(1, out -> gc_write_failure(out, fault))
+}
+// Rust: crates/jet-rt/src/__gc_portable.rs:177
+pub fn gc_record_memory_ledger(_site: GCPromotionSite) -> {
+    // The no-OS closure has no configured hosted memory-ledger provider.
+}
+// Rust: crates/jet-rt/src/__gc_portable.rs:181
+pub fn gc_trace_promotion(_id: GCObjectID, _site: GCPromotionSite) -> GCFault! { Ok() }
+// Rust: crates/jet-rt/src/__gc_portable.rs:185
+pub fn gc_trace_collection(_reclaimed: [GCObjectID]) -> GCFault! { Ok() }

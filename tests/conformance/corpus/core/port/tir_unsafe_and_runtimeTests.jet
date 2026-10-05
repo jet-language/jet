@@ -1,23 +1,28 @@
-use core.fs
-use core.env
-use core.process
+use std.fs as fs
+use std.env as env
+use std.process as process
 use jet.[compile, compile_with_path, render_diagnostics]
 use jet_foundation.Registry
-use common.unsafe_keyword_columns
-use tir_support.[assert_tiers_agree, assert_tiers_agree_with_application_policy, build_and_run, build_and_run_full, have_rustc, write_test_package, TIR_TEST_PACKAGE, strip_vetted_prelude_modules, jit_run, interpreter_run]
-use tir_unsafe_and_runtime.FROM_ADDR_SOURCE
+use tests.common.unsafe_keyword_columns
+use tests.tir_support as tir_support
+use tests.tir_support.[assert_tiers_agree, assert_tiers_agree_with_application_policy, build_and_run, build_and_run_full, have_rustc, write_test_package, TIR_TEST_PACKAGE, strip_vetted_prelude_modules, run_default_multi]
+use tests.conformance.corpus.core.port.tir_unsafe_and_runtime.[FROM_ADDR_SOURCE, assert_task_tier_parity, assert_named_task_tier_parity, SOURCE, PARTIAL_EXIT_SOURCE, WHOLE_VALUE_SOURCE, MUTATING_BORROW_SOURCE]
+use tests.common.Scratch
+use std.process.Command
+use tests.common as common
+use jet.[Loader, Sema, Diagnostics]
 
 // Rust: tests/tir_unsafe_and_runtime.rs:35
 #Test("unsafe_fn_block_and_ptr_ops") {
     if !have_rustc() { return }
-    src :: """
+    src :: ``
 use core.mem
 #Unsafe("reads through a raw pointer; addr must be a live, valid Int")
 fn read_reg(addr: Int) -> Int {
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }
-fn run() {
+fn run() -> {
 cell :: 1337
     addr :: mem.address_of(cell)
     #Unsafe("addr is the address of `cell`, a live Int on this stack frame") {
@@ -28,7 +33,7 @@ cell :: 1337
         print(again)
     }
 }
-"""
+``
     (code, stdout) :: build_and_run("tir_unsafe_lowlevel", src)
     assert_eq(code, 0)
     assert_eq(stdout, "1337\n1337\n")
@@ -38,21 +43,21 @@ cell :: 1337
 #Test("mem_address_of_never_folds_plain_or_parenthesized") {
     if !have_rustc() { return }
     for (name, addr_init) in [("tir_addr_of_plain", "mem.address_of(cell)"), ("tir_addr_of_paren", "(mem.address_of(cell))")] {
-        src :: """
+        src :: ``
 use core.mem
 #Unsafe("reads through a raw pointer; addr must be a live, valid Int")
 fn read_reg(addr: Int) -> Int {
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }
-fn run() {
+fn run() -> {
     cell :: 1337
     addr :: ADDRESS_INITIALIZER
     #Unsafe("addr is the address of `cell`, a live Int on this stack frame") {
         print(read_reg(addr))
     }
 }
-""".replace("ADDRESS_INITIALIZER", addr_init)
+``.replace("ADDRESS_INITIALIZER", addr_init)
         (code, stdout) :: build_and_run(name, src)
         assert_eq(code, 0, "case {name}")
         assert_eq(stdout, "1337\n", "case {name}")
@@ -61,28 +66,28 @@ fn run() {
 
 // Rust: tests/tir_unsafe_and_runtime.rs:114
 #Test("mem_address_of_known_binding_is_a_compile_error_not_a_silent_bake") {
-    src :: """
+    src :: ``
 use core.mem
-fn run() {
+fn run() -> {
     cell_value :: prep { 1337 }
     address :: prep { mem.address_of(cell_value) }
     print(address)
 }
-"""
+``
     diags :: compile(src).expect_err("@ mem.address_of must not silently fold")
     assert(diags.iter().any(d -> d.code == "E0956"), "expected E0956 (can't run at compile time), got: {diags}")
 }
 
 // Rust: tests/tir_unsafe_and_runtime.rs:135
 #Test("unsafe_tier_emit_is_byte_exact") {
-    src :: """
+    src :: ``
 use core.mem
 #Unsafe("reads through a raw pointer; addr must be valid")
 fn read_reg(addr: Int) -> Int {
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }
-fn run() {
+fn run() -> {
 cell :: 1337
     addr :: mem.address_of(cell)
     #Unsafe("safe: cell is live") {
@@ -90,7 +95,7 @@ cell :: 1337
         print("{seen}")
     }
 }
-"""
+``
     // GATE #4494: native temporary directory and process identity.
     dir :: env.temp_dir().join("jet_tir_unsafe_{process.id()}")
     fs.create_dir_all(dir).unwrap()
@@ -98,36 +103,36 @@ cell :: 1337
     fs.write(jet_path, src).unwrap()
     shown :: jet_path.to_string_lossy().into_owned()
     out :: compile_with_path(src, shown).unwrap_or_else(diags -> panic("front end rejected:\n{render_diagnostics(shown, src, diags)}"))
-    assert(out.rust.contains("pub unsafe fn __jet_read_reg(__jet_addr: i64) -> JetOutcome<i64, JetErr> {"), "unsafe fn signature not byte-exact (D-FAIL-CARRIER1=A):\n{out.rust}")
+    assert(out.rust.contains(`pub unsafe fn __jet_read_reg(__jet_addr: i64) -> JetOutcome<i64, JetErr> {`), "unsafe fn signature not byte-exact (D-FAIL-CARRIER1=A):\n{out.rust}")
     assert(out.rust.contains("let __jet_p: *mut i64 = ((__jet_addr) as usize as *mut i64);"), "PtrFromAddr not byte-exact:\n{out.rust}")
     assert(out.rust.contains("return Ok(jet_mem::jet_sentry_volatile_read((__jet_p), \"valid_ptr\"));"), "volatile_read sentry wrapper missing (D-FAIL-CARRIER1=A):\n{out.rust}")
     assert(out.rust.contains("let __jet_addr: i64 = jet_mem::jet_sentry_stack_address_of((&(__jet_cell) as *const _));"), "address_of sentry wrapper missing:\n{out.rust}")
     assert(out.rust.contains("let _jet_sentry_frame = jet_mem::jet_sentry_frame();"), "stack address function lacks the shared lifetime hook:\n{out.rust}")
-    assert(out.rust.contains("    unsafe {\n"), "unsafe block not emitted:\n{out.rust}")
+    assert(out.rust.contains("    unsafe {{\n"), "unsafe block not emitted:\n{out.rust}")
     assert(out.rust.contains("jet_mem::jet_sentry_scope(true"), "unsafe block must carry its sentry gate:\n{out.rust}")
     assert(out.rust.contains("safe: cell is live"), "unsafe gate reason must reach the sentry Prelude:\n{out.rust}")
     user :: strip_vetted_prelude_modules(out.rust)
     for line in user.lines() {
         for col in unsafe_keyword_columns(line) {
             after := line[col + "unsafe".len()..].trim_start() // #4303
-            assert(after.starts_with("{") || after.starts_with("fn "), "I1: ungated `unsafe` in generated code: {line.trim()}")
+            assert(after.starts_with(`{`) || after.starts_with("fn "), "I1: ungated `unsafe` in generated code: {line.trim()}")
         }
     }
 }
 
 // Rust: tests/tir_unsafe_and_runtime.rs:236
 #Test("ffi_capability_edge_uses_shared_sentry_prelude") {
-    src :: """
+    src :: ``
 extern rust "std" {
     fn borrow(s: &String) -> String = "std::mem::take"
 }
-fn run() {
+fn run() -> {
     value := "hi"
     #Unsafe("the foreign call may write through the borrowed value") {
         print(borrow(&value))
     }
 }
-"""
+``
     // GATE #4494
     dir :: env.temp_dir().join("jet_tir_ffi_sentry_{process.id()}")
     fs.create_dir_all(dir).unwrap()
@@ -143,16 +148,16 @@ fn run() {
 
 // Rust: tests/tir_unsafe_and_runtime.rs:279
 #Test("volatile_write_emit_is_byte_exact") {
-    src :: """
+    src :: ``
 use core.mem
 #Unsafe("UART TX register is mapped by the target machine")
-fn write_reg(value: Int) {
+fn write_reg(value: Int) -> {
     p :: mem.Ptr<Int>.from_addr(0x40000100)
     mem.volatile_write(p, value)
 }
-fn run() {
+fn run() -> {
 }
-"""
+``
     // GATE #4494
     dir :: env.temp_dir().join("jet_tir_volatile_write_{process.id()}")
     fs.create_dir_all(dir).unwrap()
@@ -181,7 +186,7 @@ fn run() {
         assert(!row.fix.is_empty(), "{code} is missing Fix text")
     }
     emitted :: tir_support.compile("unsafe_sentries_shared_kernel", fs.read_to_string(root.join("Examples/features/memory/unsafe_sentries_source_off.jet")).unwrap())
-    assert(emitted.contains("mod jet_sentry {"))
+    assert(emitted.contains(`mod jet_sentry {`))
     trimmed := kernel.trim() // #4303
     assert(emitted.contains(trimmed), "AOT must embed the exact Foundation sentry kernel")
 }
@@ -189,65 +194,71 @@ fn run() {
 // Rust: tests/tir_unsafe_and_runtime.rs:364
 #Test("sentry_source_policy_off_is_tier_parity") {
     source :: fs.read_to_string(OSPath.from(env.CARGO_MANIFEST_DIR).join("Examples/features/memory/unsafe_sentries_source_off.jet")).unwrap().replace("use core.mem", "use core.mem as _mem")
-    (jit_code, jit_out, jit_err) :: jit_run("unsafe_sentries_source_off", source)
-    assert_eq(jit_code, 0, "default JIT failed:\n{jit_err}")
-    assert_eq(jit_out, "41\n", "default JIT output drifted:\n{jit_err}")
-    (interpreter_code, interpreter_out, interpreter_err) :: interpreter_run("unsafe_sentries_source_off", source)
-    assert_eq(interpreter_code, jit_code, "forced interpreter/default JIT exit codes disagree:\n{interpreter_err}")
-    assert_eq(interpreter_out, jit_out, "forced interpreter/default JIT stdout disagrees:\n{interpreter_err}")
-    assert_eq(interpreter_err, jit_err, "forced interpreter/default JIT stderr disagrees")
+    fixture :: Scratch.new("unsafe_sentries_source_off")
+    write_test_package(fixture.path, TIR_TEST_PACKAGE)
+    entry :: fixture.join("unsafe_sentries_source_off.jet")
+    fs.write(entry, source).unwrap()
+    shown :: entry.to_string_lossy().into_owned()
+    bundle := Loader.load_entry(shown).unwrap()
+    errors :: Sema.check_bundle(&bundle, Sema.CompileMode.Run).into_iter().filter(d -> d.severity == Diagnostics.Severity.Error).collect()
+    assert(errors.is_empty(), "{errors}")
+    for tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+        result :: common.execute_bundle(&bundle, tier).expect("policy-off source must execute")
+        assert_eq((result.exit_code, result.stdout, result.stderr), (0, "41\n", ""))
+    }
     if have_rustc() {
         (aot_code, aot_out, aot_err) :: build_and_run_full("jet_tir_sentry", "unsafe_sentries_source_off", source)
-        assert_eq(aot_code, jit_code, "AOT/default JIT exit codes disagree:\n{aot_err}")
-        assert_eq(aot_out, jit_out, "AOT/default JIT stdout disagrees:\n{aot_err}")
-        assert_eq(aot_err, jit_err, "AOT/default JIT stderr disagrees")
+        assert_eq((aot_code, aot_out, aot_err), (0, "41\n", ""))
     }
 }
 
 // Rust: tests/tir_unsafe_and_runtime.rs:402
 #Test("from_addr_sentry_is_tier_parity") {
-    (jit_code, jit_out, jit_err) :: jit_run("core_mem_from_addr", FROM_ADDR_SOURCE)
-    assert_eq(jit_code, 0, "default JIT failed:\n{jit_err}")
-    assert_eq(jit_out, "7\n", "default JIT output drifted:\n{jit_err}")
-    (interpreter_code, interpreter_out, interpreter_err) :: interpreter_run("core_mem_from_addr", FROM_ADDR_SOURCE)
-    assert_eq(interpreter_code, jit_code, "forced interpreter/default JIT exit codes disagree:\n{interpreter_err}")
-    assert_eq(interpreter_out, jit_out, "forced interpreter/default JIT stdout disagrees:\n{interpreter_err}")
-    assert_eq(interpreter_err, jit_err, "forced interpreter/default JIT stderr disagrees")
+    fixture :: Scratch.new("core_mem_from_addr")
+    write_test_package(fixture.path, TIR_TEST_PACKAGE)
+    entry :: fixture.join("core_mem_from_addr.jet")
+    fs.write(entry, FROM_ADDR_SOURCE).unwrap()
+    shown :: entry.to_string_lossy().into_owned()
+    bundle := Loader.load_entry(shown).unwrap()
+    errors :: Sema.check_bundle(&bundle, Sema.CompileMode.Run).into_iter().filter(d -> d.severity == Diagnostics.Severity.Error).collect()
+    assert(errors.is_empty(), "{errors}")
+    for tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+        result :: common.execute_bundle(&bundle, tier).expect("from_addr source must execute")
+        assert_eq((result.exit_code, result.stdout, result.stderr), (0, "7\n", ""))
+    }
     if have_rustc() {
         (aot_code, aot_out, aot_err) :: build_and_run_full("jet_tir_from_addr", "core_mem_from_addr", FROM_ADDR_SOURCE)
-        assert_eq(aot_code, jit_code, "AOT/default JIT exit codes disagree:\n{aot_err}")
-        assert_eq(aot_out, jit_out, "AOT/default JIT stdout disagrees:\n{aot_err}")
-        assert_eq(aot_err, jit_err, "AOT/default JIT stderr disagrees")
+        assert_eq((aot_code, aot_out, aot_err), (0, "7\n", ""))
     }
 }
 
 // Rust: tests/tir_unsafe_and_runtime.rs:439
 #Test("sentry_faults_are_tier_parity") {
-    misaligned_source :: """
+    misaligned_source :: ``
 use core.mem
-fn run() {
+fn run() -> {
     cell :: (x: 1, y: 2)
     #Unsafe("the tuple storage is live but this raw Int is misaligned") {
         pointer :: mem.Ptr<Int>.from_addr(mem.address_of(cell) + 1)
         print(pointer.*)
     }
 }
-"""
-    expired_stack_source :: """
+``
+    expired_stack_source :: ``
 use core.mem
 fn leak() -> Int {
     cell :: 1337
     return mem.address_of(cell)
 }
-fn run() {
+fn run() -> {
     addr :: leak()
     #Unsafe("the returned address outlives its owning Jet frame") {
         pointer :: mem.Ptr<Int>.from_addr(addr)
         print(pointer.*)
     }
 }
-"""
-    expired_recursive_source :: """
+``
+    expired_recursive_source :: ``
 use core.mem
 fn leak(depth: Int) -> Int {
     cell :: depth
@@ -256,14 +267,14 @@ fn leak(depth: Int) -> Int {
     }
     return leak(depth - 1)
 }
-fn run() {
+fn run() -> {
     addr :: leak(2)
     #Unsafe("the recursive address outlives its owning Jet frame") {
         pointer :: mem.Ptr<Int>.from_addr(addr)
         print(pointer.*)
     }
 }
-"""
+``
     root :: OSPath.from(env.CARGO_MANIFEST_DIR)
     cases :: [
         ("unsafe_sentries_provenance", fs.read_to_string(root.join("Examples/features/memory/unsafe_sentries_provenance.jet")).unwrap(), "R0801", "The pointer is outside the allocation provenance"),
@@ -274,7 +285,19 @@ fn run() {
     ]
     aot_available :: have_rustc()
     for (name, src, code, detail) in cases {
-        tiers := [("default JIT", jit_run(name, src)), ("forced interpreter", interpreter_run(name, src))]
+        fixture :: Scratch.new(name)
+        write_test_package(fixture.path, TIR_TEST_PACKAGE)
+        entry :: fixture.join("{name}.jet")
+        fs.write(entry, src).unwrap()
+        shown :: entry.to_string_lossy().into_owned()
+        bundle := Loader.load_entry(shown).unwrap()
+        errors :: Sema.check_bundle(&bundle, Sema.CompileMode.Run).into_iter().filter(d -> d.severity == Diagnostics.Severity.Error).collect()
+        assert(errors.is_empty(), "{errors}")
+        tiers := []
+        for tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+            result :: common.execute_bundle(&bundle, tier).expect("sentry fault fixture must execute")
+            tiers.push((tier.to_string(), (result.exit_code, result.stdout, result.stderr)))
+        }
         if aot_available { tiers.push(("AOT", build_and_run_full("jet_tir_sentry", name, src))) }
         for (tier, (exit_code, stdout, stderr)) in tiers {
             assert_eq(exit_code, 70, "{tier} changed {code} exit status: {stderr}")
@@ -284,4 +307,940 @@ fn run() {
             }
         }
     }
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:555
+#Test("generic_struct_fns") {
+    if !have_rustc() { return }
+    src :: ``
+struct Pair<T> {
+    first: T
+    second: T
+}
+fn make_pair<T>(a: T, b: T) -> Pair<T> {
+    return Pair<T>{first: ~a, second: ~b}
+}
+struct Stack<T> {
+    items: [T]
+}
+fn empty_stack<T>() -> Stack<T> {
+    return Stack<T>{items: []}
+}
+fn push<T>(s: Stack<T>, item: T) -> Stack<T> {
+    dup := ~s
+    dup.items.push(item)
+    return dup
+}
+fn run() -> {
+p :: Pair<Int>{ make_pair(1, 2) }
+    print(p.first)
+    st := Stack<Int>{ empty_stack() }
+    st = push(st, 42)
+    print(st.items[0])
+}
+``
+    (code, stdout) :: build_and_run("tir_generic_struct", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1\n42\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:595
+#Test("foreign_struct_construction") {
+    if !have_rustc() { return }
+    // GATE #4494
+    dir :: env.temp_dir().join("jet_tir_foreign_{process.id()}")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("note.jet"), "pub struct Note {{\n    pub title: String\n    pub pages: Int\n}}\n").unwrap()
+    main_src :: ``
+use "note"
+fn make() -> Note {
+    return note.Note{ title: "hello", pages: 3 }
+}
+fn run() -> {
+    n := make()
+    print(n.title)
+    print(n.pages)
+}
+``
+    main_path :: dir.join("main.jet")
+    fs.write(main_path, main_src).unwrap()
+    shown :: main_path.to_string_lossy().into_owned()
+    out :: compile_with_path(main_src, shown).unwrap_or_else(diags -> panic("front end rejected:\n{render_diagnostics(shown, main_src, diags)}"))
+    assert(out.rust.contains(`__jet_note::__jet_Note { __jet_title: "hello".to_string(), __jet_pages: 3i64 }`), "foreign struct construction not byte-exact:\n{out.rust}")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:639
+#Test("stopwatch_elapsed_millis") {
+    if !have_rustc() { return }
+    src :: ``
+use core.time
+fn run() -> {
+    sw := time.start()
+    n := 0
+    loop i in 0..100 {
+        n = n + i
+    }
+    ms := sw.elapsed_millis()
+    print(ms >= 0)
+    print(n)
+}
+``
+    (code, stdout) :: build_and_run("tir_stopwatch", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "true\n5050\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:665
+#Test("arena_alloc_reset_close") {
+    if !have_rustc() { return }
+    src :: ``
+use core.mem
+fn run() -> {
+    arena :: mem.Arena.new()
+    x :: arena.alloc(42)
+    print(x)
+    arena.reset()
+    y :: arena.alloc(99)
+    print(y)
+    sized :: mem.Arena.new(capacity: 4096)
+    s :: sized.alloc(7)
+    print(s)
+    pool :: mem.Pool.new(slots: 8)
+    p :: pool.alloc(3)
+    print(p)
+    close(^arena)
+}
+``
+    (code, stdout) :: build_and_run("tir_arena", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "42\n99\n7\n3\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:695
+#Test("arena_region_block") {
+    if !have_rustc() { return }
+    src :: ``
+use core.mem
+fn run() -> {
+    #Region(scratch) {
+        a :: mem.Arena.new()
+        b :: mem.Bump.new()
+        x :: a.alloc(1)
+        y :: b.alloc(2)
+        print(x)
+        print(y)
+    }
+    print(99)
+}
+``
+    (code, stdout) :: build_and_run("tir_region", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1\n2\n99\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:721
+#Test("smart_context_block") {
+    if !have_rustc() { return }
+    src :: ``
+use core.mem
+fn run() -> {
+    arena :: mem.Arena.new()
+    #Context(allocator: arena) {
+        x :: arena.alloc(10)
+        print(x)
+    }
+    y :: arena.alloc(20)
+    print(y)
+    close(^arena)
+}
+``
+    (code, stdout) :: build_and_run("tir_context", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "10\n20\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:752
+#Test("polymorphic_core_specials") {
+    if !have_rustc() { return }
+    src :: ``
+use core.math as math
+use core.math.random as random
+use core.term as io
+fn calc() -> Int {
+    a :: math.abs((-5))
+    b :: math.min(3, 7)
+    c :: math.max(3, 7)
+    d :: math.clamp(15, 0, 10)
+    io.eprint("trace: {a} {b} {c} {d}")
+    xs := [1, 2, 3]
+    random.shuffle(&xs)
+    p :: random.pick(xs)
+    return ((((a + b) + c) + d) + (p ?? 0))
+}
+fn run() -> {
+    print(calc())
+}
+``
+    (code, _stdout) :: build_and_run("tir_poly_specials", src)
+    assert_eq(code, 0)
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:789
+#Test("http_request_response_accessors") {
+    if !have_rustc() { return }
+    src :: ``
+use core.http as http
+use core.http.server as server
+fn handle(req: HTTPRequest) -> HTTPResponse {
+    m :: req.method()
+    p :: req.path()
+    h :: req.header("host")
+    q :: req.param("id")
+    body :: "m={m} p={p}"
+    return server.response(200, body)
+}
+fn describe(resp: HTTPResponse) -> String {
+    s :: resp.status()
+    b :: resp.body().text(1048576) ?? "invalid body"
+    return "{s}: {b}"
+}
+fn run() -> {
+    req :: http.parse("GET /x HTTP/1.1\nHost: localhost")
+    resp :: handle(req)
+    print(describe(resp))
+}
+``
+    (code, stdout) :: build_and_run("tir_http_accessors", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "200: m=GET p=/x\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:827
+#Test("task_spawn_join") {
+    if !have_rustc() { return }
+    src :: ``
+fn sum_range(first: Int, last: Int) -> Int {
+    total := 0
+    loop n in first..last {
+        total = (total + n)
+    }
+    return total
+}
+fn run() -> {
+    a :: task sum_range(1, 25)
+    b :: task sum_range(26, 50)
+    print((a.join() ?? 0) + (b.join() ?? 0))
+}
+``
+    (code, stdout) :: build_and_run("tir_task_spawn_join", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1275\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:1003
+#Test("task_all") {
+    if !have_rustc() { return }
+    src :: ``
+fn work(value: Int, turns: Int) -> Int {
+    total := value
+    loop _ in 1..turns {
+        total += 1
+        total -= 1
+    }
+    return total
+}
+fn run() -> {
+    results :: (task.all {
+        work(10, 10000),
+        work(20, 1),
+        work(30, 100)
+    }) ?? panic("task.all failed")
+    print(results[0], results[1], results[2])
+}
+``
+    assert_task_tier_parity("tir_task_all", src, "10\n20\n30\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:1031
+#Test("named_task_all_maps_reverse_completion_by_field_name") {
+    if !have_rustc() { return }
+    src :: ``
+fn slow() -> String {
+    turns := 0
+    loop _ in 0..<50000 {
+        turns += 1
+    }
+    return "slow"
+}
+fn fast() -> Int {
+    return 7
+}
+fn run() -> {
+    values :: (task.all {
+        z: slow(),
+        a: fast()
+    }) ?? panic("named task.all failed")
+    print(values.z, values.a)
+}
+``
+    assert_named_task_tier_parity("tir_named_task_all_order", src, "slow\n7\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:1060
+#Test("task_failure_rail") {
+    if !have_rustc() { return }
+    src :: ``
+use core.time as time
+
+fn boom() -> Int {
+    panic("boom")
+    return 0
+}
+fn deadline() -> Int {
+    #Context(deadline: 0) {
+        time.sleep(1ms)
+    }
+    return 0
+}
+fn panic_rail() -> {
+    task.group workers {
+        failed :: task boom()
+        if failed.join() == {
+            .Err(error) -> {
+                if error == {
+                    .Panicked(reason) -> { print("panic:{reason}") }
+                    .DeadlineBlown -> { print("deadline") }
+                    .Cancelled -> { print("cancelled") }
+                }
+            }
+            .Ok(_) -> { print("wrong panic variant") }
+        }
+    }
+}
+fn all_rail() -> {
+    task.group workers {
+        if (task.all { boom(), 2 }) == {
+            .Err(error) -> {
+                if error == {
+                    .Panicked(reason) -> { print("panic:{reason}") }
+                    .DeadlineBlown -> { print("deadline") }
+                    .Cancelled -> { print("cancelled") }
+                }
+            }
+            .Ok(_) -> { print("wrong all variant") }
+        }
+    }
+}
+fn deadline_rail() -> {
+    task.group workers {
+        expired :: task deadline()
+        if expired.join() == {
+            .Err(error) -> {
+                if error == {
+                    .Panicked(reason) -> { print("panic:{reason}") }
+                    .DeadlineBlown -> { print("deadline") }
+                    .Cancelled -> { print("cancelled") }
+                }
+            }
+            .Ok(_) -> { print("wrong deadline variant") }
+        }
+    }
+}
+fn cancel_rail() -> {
+    task.group workers {
+        cancelled :: task {
+            time.sleep(1000ms)
+        }
+        cancelled.cancel()
+        if cancelled.join() == {
+            .Err(error) -> {
+                if error == {
+                    .Panicked(reason) -> { print("panic:{reason}") }
+                    .DeadlineBlown -> { print("deadline") }
+                    .Cancelled -> { print("cancelled") }
+                }
+            }
+            .Ok(_) -> { print("wrong cancel variant") }
+        }
+    }
+}
+fn run() -> {
+    panic_rail()
+    all_rail()
+    deadline_rail()
+    cancel_rail()
+}
+``
+    assert_tiers_agree_with_application_policy("tir_task_failure_rail", src,
+        "panic:boom (spawn site 0): boom\npanic:boom (spawn site 1): boom\ndeadline\ncancelled\n",
+        "name: \"tir_support\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] }} }}\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:1155
+#Test("task_all_allows_nested_task_in_every_tier") {
+    if !have_rustc() { return }
+    src :: ``
+fn nested(value: Int) -> Int {
+    inner :: task value + 1
+    return inner.join() ?? 0
+}
+fn run() -> {
+    outer :: task nested(40)
+    print(outer.join() ?? 0)
+}
+``
+    assert_task_tier_parity("tir_task_all_nested", src, "41\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:1173
+#Test("task_join_parent_deadline_is_e3003_in_every_tier") {
+    if !have_rustc() { return }
+    src :: ``
+fn run() -> {
+    #Context(deadline: 0) {
+        handle :: task 10
+        handle.join() ?? 0
+    }
+    print("unreachable")
+}
+``
+    (code, stdout, stderr) :: build_and_run_full("jet_tir_test", "tir_task_join_deadline", src)
+    assert_eq(code, 70, stderr)
+    assert_eq(stdout, "", stderr)
+    assert(stderr.contains("Error [E3003]: Deadline exceeded while waiting in task join") && stderr.contains("More: jet-lang.dev/e/E3003"), stderr)
+    fixture :: Scratch.new("jet_task_join_deadline_parity")
+    write_test_package(fixture.path, TIR_TEST_PACKAGE)
+    entry :: fixture.join("main.jet")
+    fs.write(entry, src).unwrap()
+    bundle := Loader.load_entry(entry.to_string_lossy().into_owned()).expect("deadline bundle should load")
+    errors :: Sema.check_bundle(&bundle, Sema.CompileMode.Run).into_iter().filter(d -> d.severity == Diagnostics.Severity.Error).collect()
+    assert(errors.is_empty(), "deadline program must type-check: {errors}")
+    for tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+        result :: common.execute_bundle(&bundle, tier).expect("deadline fixture must execute")
+        assert_ne(result.exit_code, 0, "{tier} ignored the expired deadline")
+        assert_eq(result.stdout, "", "{tier} continued after the expired deadline")
+        assert(result.stderr.contains("E3003"), "{tier}: {result.stderr}")
+    }
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:1260
+#Test("task_all_consumes_branches_once") {
+    valid :: ``
+fn first() -> Int {
+    return 10
+}
+fn second() -> Int {
+    return 20
+}
+fn run() -> {
+    results :: (task.all { first(), second() }) ?? panic("task.all failed")
+    print(results.len())
+}
+``
+    compiled :: compile(valid).expect("task.all should consume its branches")
+    assert(compiled.lints.iter().all(lint -> lint.code != "L1101"), "task.all branches must not trigger L1101: {compiled.lints}")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:1282
+#Test("task_combinator_parent_deadline_is_e3003_in_every_tier") {
+    if !have_rustc() { return }
+    src :: ``
+use core.time as time
+
+fn slow(value: Int) -> Int {
+    time.sleep(1ms)
+    return value
+}
+
+fn run() -> {
+    #Context(deadline: 0) {
+        task.group workers {
+            if (task.all { slow(1), slow(2) }) == {
+                .Ok(results) -> {
+                    print(results[0], results[1])
+                }
+                .Err(error) -> {
+                    panic("unexpected child task failure")
+                }
+            }
+        }
+    }
+    print("unreachable")
+}
+``
+    (code, stdout, stderr) :: build_and_run_full("jet_tir_test", "tir_task_all_deadline", src)
+    assert_eq(code, 70, stderr)
+    assert_eq(stdout, "", stderr)
+    assert(stderr.contains("Error [E3003]: Deadline exceeded while waiting in task selection") && stderr.contains("More: jet-lang.dev/e/E3003"), stderr)
+    fixture :: Scratch.new("jet_task_all_deadline_parity")
+    write_test_package(fixture.path, TIR_TEST_PACKAGE)
+    entry :: fixture.join("main.jet")
+    fs.write(entry, src).unwrap()
+    bundle := Loader.load_entry(entry.to_string_lossy().into_owned()).expect("combinator bundle should load")
+    errors :: Sema.check_bundle(&bundle, Sema.CompileMode.Run).into_iter().filter(d -> d.severity == Diagnostics.Severity.Error).collect()
+    assert(errors.is_empty(), "combinator program must type-check: {errors}")
+    for tier in [common.ExecutionTier.O0, common.ExecutionTier.O1, common.ExecutionTier.O2, common.ExecutionTier.Web] {
+        result :: common.execute_bundle(&bundle, tier).expect("combinator deadline fixture must execute")
+        assert_ne(result.exit_code, 0, "{tier} ignored the expired deadline")
+        assert_eq(result.stdout, "", "{tier} continued after the expired deadline")
+        assert(result.stderr.contains("E3003"), "{tier}: {result.stderr}")
+    }
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:1385
+#Test("task_detach") {
+    if !have_rustc() { return }
+    src :: ``
+fn run() -> {
+    handle :: task 42
+    handle.detach()
+    print("launched")
+}
+``
+    (code, stdout) :: build_and_run("tir_task_detach", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "launched\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:1406
+#Test("channel_send_receive") {
+    if !have_rustc() { return }
+    src :: ``
+fn run() -> {
+(s1, ch) :: channel<Int>()
+    s2 :: ~s1
+    t1 :: task {
+        s1.send(30)
+    }
+    t2 :: task {
+        s2.send(12)
+    }
+    t1.join() ?? panic("task failed")
+    t2.join() ?? panic("task failed")
+    s1.close()
+    s2.close()
+    results := [Int]{}
+    loop value in ch -> &results.push(value)
+    &results.sort()
+    loop x in results {
+        print(x)
+    }
+}
+``
+    (code, stdout) :: build_and_run("tir_channel", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "12\n30\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:1438
+#Test("select_receives_from_real_channel") {
+    if !have_rustc() { return }
+    src :: ``
+fn run() -> {
+    (sender, receiver) :: channel<Int>()
+    worker :: task {
+        sender.send(42)
+    }
+    if {
+        value, receiver -> { print(value) }
+    }
+    worker.join() ?? panic("task failed")
+}
+``
+    (code, stdout) :: build_and_run("tir_select", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "42\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:1463
+#Test("method_call_collection_iteration") {
+    if !have_rustc() { return }
+    src :: ``
+fn count_chars(s: String) -> Int {
+    n := 0
+    loop c in s.chars() {
+        n+= 1
+    }
+    return n
+}
+fn join_words(s: String) -> String {
+    out := ""
+    loop w in s.split(",") {
+        out = "{out}[{w}]"
+    }
+    return out
+}
+fn run() -> {
+    print(count_chars("hello"))
+    print(join_words("a,b,c"))
+}
+``
+    (code, stdout) :: build_and_run("tir_method_iter", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "5\n[a][b][c]\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:1496
+#Test("optional_binding_if_condition") {
+    if !have_rustc() { return }
+    src :: ``
+fn describe(x: Int?) -> String {
+    if x == Val(n) {
+        return "got {n}"
+    }
+    if x == None {
+        return "nothing"
+    }
+    return "?"
+}
+fn first_even(xs: [Int]) -> Int {
+    out := [Int]{}
+    i := 0
+    loop i < xs.len() {
+        if xs.get(i) == Val(v) {
+            out.push(v)
+        }
+        i+= 1
+    }
+    return out.len()
+}
+fn run() -> {
+    print(describe(Val(7)))
+    print(describe(None))
+    print(first_even([1, 2, 3]))
+}
+``
+    (code, stdout) :: build_and_run("tir_opt_if", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "got 7\nnothing\n3\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:1534
+#Test("optional_flow_narrowing_after_none_check") {
+    if !have_rustc() { return }
+    src :: ``
+fn from_ne(x: Int?) -> Int {
+    if x != None {
+        return x + 1
+    }
+    return 0
+}
+fn from_else(x: Int?) -> Int {
+    if x == None {
+        return 0
+    } else {
+        return x + 2
+    }
+}
+fn and_tail(x: Int?) -> Int {
+    if x != None && x > 0 {
+        return x
+    }
+    return -1
+}
+fn still_binds(x: Int?) -> Int {
+    if x == Val(n) {
+        return n * 10
+    }
+    return -2
+}
+fn text_ne(x: String?) -> String {
+    if x != None {
+        return x
+    }
+    return "?"
+}
+fn run() -> {
+    print(from_ne(Val(3)))
+    print(from_ne(None))
+    print(from_else(Val(5)))
+    print(from_else(None))
+    print(and_tail(Val(7)))
+    print(and_tail(Val(0)))
+    print(and_tail(None))
+    print(still_binds(Val(4)))
+    print(text_ne(Val("hi")))
+    print(text_ne(None))
+}
+``
+    (code, stdout) :: build_and_run("tir_opt_flow", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "4\n0\n7\n0\n7\n-1\n-1\n40\nhi\n?\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:1591
+#Test("optional_flow_narrowing_rejects_unstable_subjects") {
+    mutable :: compile(``
+fn run() -> {
+    x := Val(1)
+    if x != None {
+        print(x + 1)
+    }
+}
+``)
+    assert(mutable.is_err(), "mutable Optional must not narrow after != None")
+    field :: compile(``
+struct Box {
+    n: Int?
+}
+fn run() -> {
+    b :: Box{ n: Val(1) }
+    if b.n != None {
+        print(b.n + 1)
+    }
+}
+``)
+    assert(field.is_err(), "field Optional must not narrow after != None")
+    call :: compile(``
+fn get() -> Int? { return Val(1) }
+fn run() -> {
+    if get() != None {
+        print(get() + 1)
+    }
+}
+``)
+    assert(call.is_err(), "call Optional must not narrow after != None")
+    after_branch :: compile(``
+fn run() -> {
+    x :: Val(1)
+    if x != None {
+        print(x)
+    }
+    print(x + 1)
+}
+``)
+    assert(after_branch.is_err(), "Optional narrowing must end at the branch boundary")
+    through_or :: compile(``
+fn run() -> {
+    x :: Val(1)
+    if x != None || true {
+        print(x + 1)
+    }
+}
+``)
+    assert(through_or.is_err(), "Optional narrowing must not travel through ||")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:1671
+#Test("card_2840_owned_task_join_helper_tier_parity") {
+    src :: ``
+fn boom() -> Int {
+    panic("x")
+    return 0
+}
+fn joined(handle: ^Task<Int>) -> Int { handle.join() ?? 91 }
+fn run() -> {
+    task.group g {
+        handle :: task boom()
+        print(joined(^handle))
+    }
+}
+``
+    assert_tiers_agree("tir_card_2840_owned_task_join_helper", src, "91\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:1692
+#Test("card_2831_process_limit_error_display_tier_parity") {
+    src :: ``
+use core.process as process
+fn run() -> {
+    result :: process.cmd(["printf", "abcdef"]).stdout(.Capture).output_limit(3).run() ?? {
+        print(err)
+        return
+    }
+    print(result.output)
+}
+``
+    assert_tiers_agree("tir_card_2831_process_limit_error_display", src, "process resource limit exceeded: output\n")
+}
+
+// Rust: tests/tir_unsafe_and_runtime.rs:1712
+#Test("spawned_diverging_callee_keeps_later_bindings_in_scope") {
+    if !have_rustc() { return }
+    src :: ``
+fn value(n: Int) -> Int { n }
+fn boom() -> Int {
+    panic("boom")
+    return 0
+}
+fn run() -> {
+    task.group joined {
+        seven :: task boom()
+        eight :: task value(8)
+        print(seven.join() ?? 99)
+        print(eight.join() ?? 0)
+    }
+}
+``
+    assert_tiers_agree("tir_spawned_diverging_callee_scope", src, "99\n8\n")
+}
+
+// Rust: tests/uninit_fixed.rs:70
+#Test("fixed_uninit_index_fill_runs_through_aot") {
+    if have_rustc() {
+        (code, stdout) :: build_and_run("uninit_fixed_aot", SOURCE)
+        assert_eq(code, 0)
+        assert_eq(stdout, "65 66 67 68\n")
+    }
+}
+
+// Rust: tests/uninit_fixed.rs:79
+#Test("fixed_uninit_index_fill_runs_through_default_tier") {
+    (code, stdout, stderr) :: run_default_multi("uninit_fixed_default", "main.jet", [("main.jet", SOURCE)])
+    assert_eq(code, 0, stderr)
+    assert_eq(stdout, "65 66 67 68\n")
+}
+
+// Rust: tests/uninit_fixed.rs:87
+#Test("fixed_uninit_index_fill_is_resident_jit_safe") {
+    // Retired Cranelift safety-plan probes become compilation and execution parity.
+    assert_tiers_agree("jet_uninit_fixed_jit", SOURCE, "65 66 67 68\n")
+}
+
+// Rust: tests/uninit_fixed.rs:110
+#Test("partial_uninit_fixed_backing_exits_through_resident_jit") {
+    // No retired host-supported gate: partial storage exit is a product invariant.
+    (code, stdout, stderr) :: run_default_multi("jet_uninit_fixed_partial_exit_jit", "main.jet", [("main.jet", PARTIAL_EXIT_SOURCE)])
+    assert_eq(code, 0, "default tier stderr: {stderr}")
+    assert(stderr.is_empty(), "default tier stderr: {stderr}")
+    assert_eq(stdout, "7\n")
+}
+
+// Rust: tests/uninit_fixed.rs:165
+#Test("partial_uninit_fixed_backing_exit_agrees_across_tiers") {
+    assert_tiers_agree("uninit_fixed_partial_exit", PARTIAL_EXIT_SOURCE, "7\n")
+}
+
+// Rust: tests/uninit_fixed.rs:174
+#Test("initialized_fixed_storage_is_an_ordinary_fixed_list_value") {
+    if have_rustc() {
+        (code, stdout) :: build_and_run("uninit_fixed_whole_value", WHOLE_VALUE_SOURCE)
+        assert_eq(code, 0)
+        assert_eq(stdout, "7\n")
+    }
+    (code, stdout, stderr) :: run_default_multi("uninit_fixed_whole_value", "main.jet", [("main.jet", WHOLE_VALUE_SOURCE)])
+    assert_eq(code, 0, stderr)
+    assert_eq(stdout, "7\n")
+}
+
+// Rust: tests/uninit_fixed.rs:191
+#Test("initialized_fixed_storage_mutating_borrow_writes_back") {
+    if have_rustc() {
+        (code, stdout) :: build_and_run("uninit_fixed_mutating_borrow", MUTATING_BORROW_SOURCE)
+        assert_eq(code, 0)
+        assert_eq(stdout, "8\n8\n")
+    }
+    (code, stdout, stderr) :: run_default_multi("uninit_fixed_mutating_borrow", "main.jet", [("main.jet", MUTATING_BORROW_SOURCE)])
+    assert_eq(code, 0, stderr)
+    assert_eq(stdout, "8\n8\n")
+}
+
+// Rust: tests/uninit_fixed.rs:208
+#Test("scalar_uninit_storage_runs_through_aot") {
+    source :: `use core.mem
+fn run() -> {
+    flag := Bool{ uninit }
+    flag = true
+    print(flag)
+}
+`
+    if have_rustc() {
+        (code, stdout) :: build_and_run("uninit_scalar_safe", source)
+        assert_eq(code, 0)
+        assert_eq(stdout, "true\n")
+    }
+}
+
+// Rust: tests/uninit_fixed.rs:219
+#Test("fixed_uninit_web_artifact_is_accepted_by_rustc") {
+    source :: `use core.mem
+fn run() -> {
+    bytes := [U8#2]{ uninit }
+    bytes[0] = 1
+    bytes[1] = 2
+}
+`
+    // GATE #4494: native files and rustc subprocess are a real peer comparator.
+    fixture :: Scratch.new("jet_uninit_fixed_web_fixture")
+    entry :: fixture.join("web_uninit_fixed.jet")
+    write_test_package(fixture.path, TIR_TEST_PACKAGE)
+    fs.write(entry, source).unwrap()
+    shown :: entry.to_string_lossy().into_owned()
+    web :: jet.compile_web_with_path(source, shown).expect("fixed uninit should compile for the web target").web.expect("web output")
+    if have_rustc() {
+        rust_scratch :: Scratch.new("jet_uninit_fixed_web_rustc")
+        root :: rust_scratch.path
+        rust_source :: root.join("app_wasm.rs")
+        fs.write(rust_source, web.wasm_rust).unwrap()
+        output :: Command.new("rustc").args(["--edition", "2021", "--crate-type", "lib", rust_source.to_str().unwrap(), "-o", root.join("app_wasm.rlib").to_str().unwrap()]).output().unwrap()
+        assert(output.status.success(), "rustc rejected generated web Rust:\n{String.from_utf8_lossy(output.stderr)}")
+    }
+}
+
+// Rust: tests/uninit_fixed.rs:256
+#Test("fixed_uninit_requires_every_slot_before_read") {
+    diagnostics :: compile(`use core.mem
+fn run() -> {
+    bytes := [U8#2]{ uninit }
+    bytes[0] = 1
+    print(bytes[0])
+}
+`).expect_err("a partially initialized fixed list must not be readable")
+    assert(diagnostics.iter().any(diagnostic -> diagnostic.code == "E0420"), "{diagnostics}")
+}
+
+// Rust: tests/uninit_fixed.rs:270
+#Test("write_argument_does_not_claim_an_uninit_buffer_was_filled") {
+    diagnostics :: compile(`use core.mem
+fn noop(bytes: &[U8#2]) -> {}
+fn run() -> {
+    bytes := [U8#2]{ uninit }
+    noop(&bytes)
+    print(bytes[0])
+}
+`).expect_err("a no-op write callee cannot prove definite initialization")
+    assert(diagnostics.iter().any(diagnostic -> diagnostic.code == "E0420"), "{diagnostics}")
+}
+
+// Rust: tests/uninit_fixed.rs:287
+#Test("every_path_initialising_a_slot_makes_it_written") {
+    out :: compile(`use core.mem
+fn decide(flag: Bool) -> {
+    bytes := [U8#2]{ uninit }
+    if {
+        flag -> {
+            bytes[0] = 1
+            bytes[1] = 2
+        }
+        else -> {
+            bytes[0] = 3
+            bytes[1] = 4
+        }
+    }
+    print(bytes[0])
+}
+fn run() -> { decide(true) }
+`)
+    assert(out.is_ok(), "both paths write every slot: {out.err()}")
+}
+
+// Rust: tests/uninit_fixed.rs:298
+#Test("a_slot_written_on_one_path_only_stays_unwritten") {
+    diagnostics :: compile(`use core.mem
+fn decide(flag: Bool) -> {
+    bytes := [U8#2]{ uninit }
+    if {
+        flag -> {
+            bytes[0] = 1
+            bytes[1] = 2
+        }
+        else -> {
+            bytes[0] = 3
+        }
+    }
+    print(bytes[1])
+}
+fn run() -> { decide(true) }
+`).expect_err("one path leaves a slot unwritten")
+    assert(diagnostics.iter().any(diagnostic -> diagnostic.code == "E0420"), "{diagnostics}")
 }

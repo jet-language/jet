@@ -419,3 +419,484 @@ fn run() -> {
     assert_eq(code, 0, "block lambda generated Rust must compile")
     assert_eq(stdout, "41\nseen 7\n")
 }
+// Rust: tests/tir_core_and_closures.rs:757
+#Test("numeric_width_conversions") {
+    if !have_rustc() { return }
+    src :: `fn widen(red: U8) -> I64 { return I64.from_u8(red) }
+fn narrow(channel: I32) -> U8 { return U8.from_i32(channel) ?? 255 }
+fn to_real(x: Int) -> Float { return Float.from_int(x) }
+fn truncate(x: Float) -> U8 { return U8.from_float(x) ?? 255 }
+fn narrow_float(x: Float) -> F32 Err! { return F32.from_float(x) }
+fn run() -> {
+    print(widen(255))
+    print(narrow(100))
+    print(narrow(100000))
+    print(to_real(3))
+    print(truncate(42.9))
+    print(truncate(300.0))
+    print(narrow_float(2.0) ?? F32.from_int(0))
+    print(narrow_float(1e100) ?? F32.from_int(-1))
+}
+`
+    (code, stdout) :: build_and_run("tir_numeric_conv", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "255\n100\n255\n3.0\n42\n255\n2.0\n-1.0\n")
+}
+// Rust: tests/tir_core_and_closures.rs:798
+#Test("numeric_predicates_and_bits") {
+    if !have_rustc() { return }
+    src :: `fn bits(flags: U8) -> Int { return flags.count_ones() }
+fn finite(f: Float) -> Bool { return f.is_finite() }
+fn show(n: I32) -> String { return n.to_string() }
+fn run() -> {
+    print(bits(13))
+    print(finite(1.5))
+    print(show(42))
+}
+`
+    (code, stdout) :: build_and_run("tir_numeric_pred", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "3\ntrue\n42\n")
+}
+// Rust: tests/tir_core_and_closures.rs:829
+#Test("trait_impl_method_bodies") {
+    if !have_rustc() { return }
+    src :: `trait Shape {
+    fn area(self) -> Float
+    fn name(self) -> String
+}
+struct Circle {
+    radius: Float
+    impl Shape {
+        fn area(self) -> Float { return ((3.0 * self.radius) * self.radius) }
+        fn name(self) -> String { return "circle" }
+    }
+}
+struct Square { side: Float }
+impl Square.Shape {
+    fn area(self) -> Float { return (self.side * self.side) }
+    fn name(self) -> String { return "square" }
+}
+fn describe(s: Shape) -> String { return "{s.name()}: {s.area()}" }
+fn run() -> {
+    shapes :: [Shape]{ Circle{radius: 2.0}, Square{side: 3.0} }
+    shapes.each((s) -> { print(describe(s)) })
+}
+`
+    (code, stdout) :: build_and_run("tir_trait_methods", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "circle: 12.0\nsquare: 9.0\n")
+}
+// Rust: tests/tir_core_and_closures.rs:876
+#Test("trait_object_call_keeps_non_scalar_arg_and_return_type") {
+    if !have_rustc() { return }
+    src :: `trait Measure { fn measure(self, text: String) -> Int }
+struct Counter {
+    bonus: Int
+    impl Measure {
+        fn measure(self, text: String) -> Int { return text.len() + self.bonus }
+    }
+}
+fn apply_measure(counter: Measure, text: String) -> Int { return inspect(counter) + counter.measure(text) }
+fn inspect<T>(value: T) -> Int { return 1 }
+fn run() -> {
+    counters :: [Measure]{ Counter{bonus: 2} }
+    counters.each((counter) -> {
+        text :: "read"
+        print(apply_measure(counter, text))
+        print(text)
+    })
+}
+`
+    (code, stdout) :: build_and_run("tir_trait_object_non_scalar_arg", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "7\nread\n")
+}
+// Rust: tests/tir_core_and_closures.rs:918
+#Test("explicit_else_block_with_inner_if_not_flattened") {
+    if !have_rustc() { return }
+    src :: `fn pick(a: Int, b: Int) -> Int {
+    if a > b {
+        return a
+    } else {
+        if b > 0 { return b }
+    }
+    return 0
+}
+fn run() -> {
+    print(pick(5, 3))
+    print(pick(2, 7))
+    print(pick(0, 0))
+}
+`
+    (code, stdout) :: build_and_run("tir_else_block_if", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "5\n7\n0\n")
+}
+// Rust: tests/tir_core_and_closures.rs:951
+#Test("fn_typed_values") {
+    if !have_rustc() { return }
+    src :: `fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int { return f(f(x)) }
+fn double(x: Int) -> Int { return (x * 2) }
+fn run() -> {
+    print(apply_twice(double, 3))
+    print(apply_twice((n: Int) -> (n + 1), 5))
+    g :: double
+    print(apply_twice(g, 4))
+}
+`
+    (code, stdout) :: build_and_run("tir_fn_values", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "12\n7\n16\n")
+}
+// Rust: tests/tir_core_and_closures.rs:980
+#Test("fn_value_call_through_local") {
+    if !have_rustc() { return }
+    src :: `fn calc(f: fn(Int) -> Int) -> Int { return f(10) }
+fn inc(x: Int) -> Int { return (x + 1) }
+fn run() -> {
+    print(calc(inc))
+    print(calc((y: Int) -> (y * y)))
+}
+`
+    (code, stdout) :: build_and_run("tir_fn_value_local", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "11\n100\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1006
+#Test("scope_guard_closure_core_call") {
+    if !have_rustc() { return }
+    src :: `use core.mem.scope as scope
+fn work() -> {
+    _g :: scope.guard(() -> { print("cleanup") })
+    print("working")
+}
+fn run() -> { work() }
+`
+    (code, stdout) :: build_and_run("tir_scope_guard", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "working\ncleanup\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1030
+#Test("tasks_spawn_closure_core_call") {
+    if !have_rustc() { return }
+    src :: `fn compute() -> Int { return 21 }
+fn launch() -> Int {
+    t :: task compute()
+    return t.join() ?? 0
+}
+fn run() -> { print(launch()) }
+`
+    (code, stdout) :: build_and_run("tir_tasks_spawn", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "21\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1058
+#Test("handle_methods_file_writer") {
+    if !have_rustc() { return }
+    tmp :: std.env.temp_dir().join("jet_tir_handle_{std.process.id()}.txt")
+    path :: tmp.to_string_lossy().replace("\\", "\\\\")
+    src :: "use core.files as files\nuse core.files as fs\nfn write_file(path: String, text: String) -> Int {\n    w := files.create(~path) ?? return 0\n    _r :: w.write_line(text)\n    _f :: w.flush()\n    return 1\n}\nfn run() -> {\n    done :: write_file(\"{path}\", \"hello handle\")\n    print(done)\n    contents :: fs.read(\"{path}\") ?? \"<none>\"\n    print(contents)\n}\n"
+    (code, stdout) :: build_and_run("tir_handle_writer", src)
+    _ :: fs.remove_file(tmp)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1\nhello handle\n\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1093
+#Test("card_2837_captured_closure_call_tier_parity") {
+    src :: `fn run() -> {
+    count := 0
+    next :: () -> {
+        count += 1
+        count
+    }
+    print(next())
+    print(count)
+}
+`
+    assert_tiers_agree("tir_card_2837_captured_closure_call", src, "1\n1\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1109
+#Test("card_2837_escaping_closure_keeps_capture_copy") {
+    src :: `fn run() -> {
+    count := 1
+    get :: () Int -> count
+    items :: [get]
+    count = 7
+    print(items[0].call())
+    print(count)
+}
+`
+    assert_tiers_agree("tir_card_2837_escaping_closure_copy", src, "1\n7\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1124
+#Test("closure_capture_reads_current_storage_and_reuses_owned_copy") {
+    src :: `fn run() -> {
+    first := 41
+    first_read :: () Int -> first
+    first_items :: [first_read]
+    print(first_items[0].call())
+    print(first_items[0].call())
+    current := 1
+    print(current)
+    current = 7
+    current_read :: () Int -> current
+    current_items :: [current_read]
+    print(current_items[0].call())
+    print(current)
+}
+`
+    assert_tiers_agree("tir_closure_capture_current_storage", src, "41\n41\n1\n7\n7\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1152
+#Test("card_2845_returned_mutating_closure_tier_parity") {
+    src :: `fn make() -[..E]> fn() -[..E]> Int {
+    count := 0
+    return () -> {
+        count += 1
+        count
+    }
+}
+fn run() -> {
+    f :: make()
+    print(f.call())
+    print(f.call())
+}
+`
+    assert_tiers_agree("tir_card_2845_returned_mutating_closure", src, "1\n2\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1173
+#Test("card_2845_stored_mutating_closure_tier_parity") {
+    src :: `fn run() -> {
+    count := 0
+    step :: () Int -> {
+        count += 1
+        count
+    }
+    items :: [step]
+    print(items[0].call())
+    print(count)
+}
+`
+    assert_tiers_agree("tir_card_2845_stored_mutating_closure", src, "1\n0\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1192
+#Test("nested_unannotated_lambda_returns_int") {
+    src :: `fn run() -> {
+    x := 2
+    outer :: (y: Int) -> {
+        inner :: (z: Int) -> x + y + z
+        inner(4)
+    }
+    print(outer(3))
+}
+`
+    assert_tiers_agree("tir_nested_unannotated_lambda_returns_int", src, "9\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1208
+#Test("card_2842_function_value_call_tier_parity") {
+    src :: `fn run() -> {
+    double :: (x: Int) Int -> x * 2
+    result :: double.call(21)
+    print(result)
+}
+`
+    assert_tiers_agree("tir_card_2842_function_value_call", src, "42\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1221
+#Test("card_2836_json_datetime_field_tier_parity") {
+    src :: `use core.encoding.json as json
+#Codable
+struct Event { at: DateTime }
+fn run() -> {
+    raw :: "{{\"at\":\"2024-03-15T12:30:45Z\"}}"
+    event :: json.decode<Event>(raw) ?? return
+    print(event.at.to_unix_ms())
+}
+`
+    assert_tiers_agree("tir_card_2836_json_datetime_field", src, "1710505845000\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1244
+#Test("card_2818_typed_empty_list_keeps_element_type_tier_parity") {
+    src :: `fn empty_bytes() -> [U8] { return [U8]{} }
+fn empty_floats() -> [Float] { return [Float]{} }
+fn empty_names() -> [String] { return [String]{} }
+fn count_bytes(xs: [U8]) -> Int { return xs.len() }
+fn count_floats(xs: [Float]) -> Int { return xs.len() }
+fn count_names(xs: [String]) -> Int { return xs.len() }
+fn run() -> {
+    bytes :: [U8]{}
+    floats :: [Float]{}
+    names :: [String]{}
+    print(bytes == [U8]{})
+    print(floats == [Float]{})
+    print(names == [String]{})
+    print([U8]{} != bytes)
+    print([Float]{} == floats)
+    print([String]{} == names)
+    print(count_bytes([U8]{}) + count_floats([Float]{}) + count_names([String]{}))
+    print(empty_bytes() == bytes)
+    print(empty_floats() == floats)
+    print(empty_names() == names)
+    picked :: if bytes.len() == 0 -> { [U8]{} } else -> { [U8]{7} }
+    print(picked == bytes)
+    scaled :: if floats.len() > 0 -> { [Float]{1.5} } else -> { [Float]{} }
+    print(scaled == floats)
+    table :: [String: [Float]]{ "a": [Float]{} }
+    print(table["a"] == floats)
+    pair :: (left: [U8]{}, right: [String]{})
+    print(pair.left == bytes)
+    print(pair.right == names)
+    fresh :: () [U8] -> { [U8]{} }
+    print(fresh() == bytes)
+}
+`
+    assert_tiers_agree("tir_card_2818_typed_empty_list_element_type", src, "true\ntrue\ntrue\nfalse\ntrue\ntrue\n0\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1299
+#Test("typed_float_heads_preserve_folded_and_runtime_values") {
+    src :: `fn values(seed: Int) -> [Float] { return [Float{seed}, Float{seed % 7}] }
+fn total(values: [Float]) -> Float {
+    sum := Float{0}
+    loop value in values -> sum += value
+    return sum
+}
+fn run() -> {
+    print(total(values(42)))
+    loop seed in 1..<3 -> print(total(values(seed)))
+}
+`
+    assert_tiers_agree("typed_float_heads_preserve_folded_and_runtime_values", src, "42.0\n2.0\n4.0\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1324
+#Test("card_2875_typed_byte_list_index_literal_tier_parity") {
+    src :: `fn copy_first_two(values: [U8]) -> [U8] { return [U8]{ values[0], values[1], 127 } }
+fn run() -> {
+    input :: [U8]{18, 52}
+    output :: copy_first_two(input)
+    print(output[0])
+    print(output[1])
+    print(output[2])
+}
+`
+    assert_tiers_agree("tir_card_2875_typed_byte_list_index_literal", src, "18\n52\n127\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1347
+#Test("card_2877_if_arm_tail_copies_noncopy_local") {
+    src :: `fn run() -> {
+    bytes :: [U8]{1}
+    picked :: if bytes.len() == 0 -> { [U8]{9} } else -> { bytes }
+    print(picked == bytes)
+}
+`
+    assert_tiers_agree("tir_card_2877_if_arm_tail_copy", src, "true\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1361
+#Test("card_2877_if_arm_tail_preserves_explicit_take") {
+    src :: `fn consume(value: ^[U8]) -> [U8] { return value }
+fn run() -> {
+    bytes := [U8]{1}
+    picked :: if bytes.len() == 0 -> { [U8]{9} } else -> { consume(^bytes) }
+    print(picked == [U8]{1})
+}
+`
+    assert_tiers_agree("tir_card_2877_if_arm_explicit_take", src, "true\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1376
+#Test("card_2877_if_arm_tail_preserves_view_destination") {
+    src :: `fn use_view(view: View<Int>) -> { print(view[0]) }
+fn run() -> {
+    values := [7, 8]
+    left :: values[0..0]
+    right :: values[1..1]
+    use_view(if true -> { left } else -> { right })
+}
+`
+    assert_tiers_agree("tir_card_2877_if_arm_view_destination", src, "7\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1392
+#Test("card_2877_if_arm_explicit_copy_requires_tilde") {
+    src :: `#Policy(copies: .Explicit)
+fn run() -> {
+    bytes :: [U8]{1}
+    picked :: if bytes.len() == 0 -> { [U8]{9} } else -> { bytes }
+    print(picked == bytes)
+}
+`
+    diagnostics :: compile(src).expect_err("explicit-copy arm must be rejected")
+    diagnostic :: diagnostics.iter().find(d -> { d.code == "E0120" }).expect("explicit-copy arm must report E0120")
+    edit :: diagnostic.edit.expect("E0120 must carry the canonical copy edit")
+    assert_eq(edit.new_text, "~")
+    assert_eq(src[edit.span.start..edit.span.end], "")
+}
+// Rust: tests/tir_core_and_closures.rs:1415
+#Test("readonly_optional_list_alias_preserves_sequence") {
+    src :: `fn none() -> Float? { None }
+fn run() -> {
+    values :: [Val(Float{4.0}), none(), Val(Float{8.0}), none()]
+    print(values.len())
+    alias :: values
+    print(alias.len())
+    print(values.len())
+}
+`
+    assert_tiers_agree("readonly_optional_list_alias", src, "4\n4\n4\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1430
+#Test("projected_float_list_updates_reach_nested_places") {
+    src :: `struct Row { values: [Float] }
+fn run() -> {
+    rows := [Row{values: [Float{1}, Float{2}]}]
+    rows[0].values[1] = Float{7}
+    print(rows[0].values[0])
+    print(rows[0].values[1])
+    nested := [[Float{3}]]
+    nested[0][0] = Float{9}
+    print(nested[0][0])
+}
+`
+    assert_tiers_agree("projected_float_list_updates", src, "1.0\n7.0\n9.0\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1447
+#Test("command_entry_ignores_associated_run_method") {
+    src :: `struct Worker { fn run() -> Int { 99 } }
+fn run() -> { print(Worker.run()) }
+`
+    assert_tiers_agree("command_entry_associated_run", src, "99\n")
+}
+// Rust: tests/tir_core_and_closures.rs:1462
+#Test("card_2860_fallible_carrier_projection_tier_parity") {
+    handled_map :: `fn run() -> {
+    values :: ["1", "2"].map(line -> { Int.parse(line) ?? panic("bad") })
+    print(values)
+}
+`
+    assert_tiers_agree("tir_card_2860_handled_map", handled_map, "[1, 2]\n")
+    fallible_map :: `fn parse(n: Int) -> Int Err! {
+    if n == 0 { return Err("bad") }
+    return n
+}
+fn run() -> {
+    values :: [1, 0].map((n: Int) -> parse(n)) ?? {
+        print(err.message)
+        []
+    }
+    print(values)
+}
+`
+    assert_tiers_agree("tir_card_2860_fallible_map", fallible_map, "bad\n[]\n")
+    default_helper_map :: `fn parse_default(n: Int) -> Int { n }
+fn run() -> {
+    values :: [1, 2].map((n: Int) -> parse_default(n))
+    print(values)
+}
+`
+    assert_tiers_agree("tir_card_2860_default_helper_map", default_helper_map, "[1, 2]\n")
+    explicit_ok_arms :: `fn choose(first: Bool) -> Int Err! { if first -> Ok(1) else -> Ok(2) }
+fn run() -> {
+    print(choose(true) ?? 0)
+    print(choose(false) ?? 0)
+}
+`
+    assert_tiers_agree("tir_card_2860_explicit_ok_arms", explicit_ok_arms, "1\n2\n")
+}

@@ -14,12 +14,12 @@ use jet
 RESTART_SEQ :: AtomicU64.new(0)
 
 // Rust: tests/services_runtime.rs:68
-AUTHORITY_SOURCE :: """
+AUTHORITY_SOURCE :: `
 use core.service as services
 use core.testing as testing
 use core.time as time
 
-fn orders_worker() {}
+fn orders_worker() -> {}
 
 fn receipt_id(receipt: ^Delivery) -> Delivery {
     return receipt
@@ -38,7 +38,7 @@ fn receipt_kind(receipt: ^Delivery) -> String {
     return "unknown"
 }
 
-fn run() {
+fn run() -> {
     temp := testing.temp_dir("service-authority")
     store :: Path.from(temp).join("authority.log").to_string()
     retention :: Duration.seconds(86400) ?? panic("retention")
@@ -86,15 +86,15 @@ fn run() {
     replay :: recovered.send(endpoint, "order", key: "order-1") ?? panic("replay")
     print("replay:{receipt_kind(^replay)}")
 }
-"""
+`
 
 // Rust: tests/services_runtime.rs:183
-DURABLE_AUDIT_SOURCE :: """
+DURABLE_AUDIT_SOURCE :: `
 use core.service as service
 use core.testing as testing
 use core.time as time
 
-fn worker() {}
+fn worker() -> {}
 
 fn state_name(delivery: ^Delivery) -> String {
     state :: delivery.status() ?? panic("status")
@@ -109,7 +109,7 @@ fn state_name(delivery: ^Delivery) -> String {
     return "unknown"
 }
 
-fn run() {
+fn run() -> {
     temp := testing.temp_dir("durable-audit")
     store :: Path.from(temp).join("authority.log").to_string()
     retention :: Duration.seconds(86400) ?? panic("retention")
@@ -137,18 +137,18 @@ fn run() {
     time.sleep(Duration.milliseconds(5) ?? panic("sleep"))
     print("expired:{state_name(^expiring)}")
 }
-"""
+`
 
 // Rust: tests/services_runtime.rs:233
 DURABLE_AUDIT_OUTPUT :: "audit:true:1\ncancel:cancelled\ndead:dead\nexpired:dead\n"
 
 // Rust: tests/services_runtime.rs:261
-RESTART_SOURCE :: """
+RESTART_SOURCE :: `
 use core.sys as env
 use core.service as services
 use core.time as time
 
-fn orders_worker() {}
+fn orders_worker() -> {}
 
 fn receipt_id(receipt: ^Delivery) -> Delivery {
     return receipt
@@ -167,7 +167,7 @@ fn receipt_kind(receipt: ^Delivery) -> String {
     return "unknown"
 }
 
-fn run() {
+fn run() -> {
     store :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
     phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
     retention :: Duration.seconds(86400) ?? panic("retention")
@@ -192,17 +192,17 @@ fn run() {
         runtime.commit(retry) ?? panic("commit")
     }
 }
-"""
+`
 
 // Rust: tests/services_runtime.rs:312
-CANCELLED_RESTART_SOURCE :: """
+CANCELLED_RESTART_SOURCE :: `
 use core.sys as env
 use core.service as services
 use core.time as time
 
-fn worker() {}
+fn worker() -> {}
 
-fn run() {
+fn run() -> {
     store :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
     phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
     retention :: Duration.seconds(86400) ?? panic("retention")
@@ -224,7 +224,7 @@ fn run() {
         print("receipt:{tree.upgrade_receipt() ?? panic("receipt")}")
     }
 }
-"""
+`
 
 // Rust: tests/services_runtime.rs:343
 fn compile_restart_binary(source: String) -> (OSPath, OSPath) {
@@ -277,13 +277,13 @@ fn run_restart_default_process(dir: &OSPath, store: &OSPath, phase: String, id: 
 
 // Tests Rust19,143,156,170,236,428,520 live in services_runtimeTests.jet.
 // Rust: tests/services_runtime.rs:536
-ROLLOUT_RESTART_SOURCE :: """
+ROLLOUT_RESTART_SOURCE :: `
 use core.sys as env
 use core.service as services
 
-fn rollout_worker() {}
+fn rollout_worker() -> {}
 
-fn run() {
+fn run() -> {
     store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
     phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
     tree := services.tree("rollout-restart")
@@ -310,19 +310,19 @@ fn run() {
     }
     tree.stop() ?? panic("stop")
 }
-"""
+`
 
 // Rust: tests/services_runtime.rs:571
 ROLLOUT_RESTART_OUTPUT :: "generation:2\ncurrent:Endpoint(rollout-restart/api@g2)\nreceipt:ServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\nstale:rejected\nafter:after\n"
 
 // Rust: tests/services_runtime.rs:639
-STATE_RESTART_SOURCE :: """
+STATE_RESTART_SOURCE :: `
 use core.sys as env
 use core.service as services
 
-fn state_worker() {}
+fn state_worker() -> {}
 
-fn run() {
+fn run() -> {
     store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
     phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
     adapter :: env.get("JET_SERVICE_AUTH_ID") ?? panic("adapter")
@@ -365,7 +365,7 @@ fn run() {
         }
     }
 }
-"""
+`
 
 // Rust: tests/services_runtime.rs:767
 fn restart_status(bin: &OSPath, store: &OSPath, phase: String, id: String) -> ExitStatus {
@@ -375,13 +375,13 @@ fn restart_status(bin: &OSPath, store: &OSPath, phase: String, id: String) -> Ex
 
 // Tests Rust575,612,693 live in services_runtimeTests.jet.
 // Rust: tests/services_runtime.rs:777
-WORKFLOW_RESTART_SOURCE :: """
+WORKFLOW_RESTART_SOURCE :: `
 use core.sys as env
 use core.service as services
 
-fn workflow_worker() {}
+fn workflow_worker() -> {}
 
-fn run() {
+fn run() -> {
     store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
     phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
     tree := services.tree("workflows")
@@ -414,19 +414,19 @@ fn run() {
         }
     }
 }
-"""
+`
 
 // Rust: tests/services_runtime.rs:818
 WORKFLOW_RESTART_HISTORY :: "history:start@v1|step:charge|step:ship:express\nreplay:1\nversion:rejected\n"
 
 // Rust: tests/services_runtime.rs:821
-WORKFLOW_REPLAY_SOURCE :: """
+WORKFLOW_REPLAY_SOURCE :: `
 use core.sys as env
 use core.service as services
 
-fn replay_worker() {}
+fn replay_worker() -> {}
 
-fn run() {
+fn run() -> {
     store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
     phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
     tree := services.tree("workflow-replay")
@@ -461,19 +461,19 @@ fn run() {
         print("replayed:{tree.workflow_history(run_id) ?? panic("history")}")
     }
 }
-"""
+`
 
 // Rust: tests/services_runtime.rs:864
 WORKFLOW_REPLAY_HISTORY :: "start@v1|step:charge|step:ship|activity:charge:charge-1@1/2|activity-retry:charge-1@2/2:Panicked(timeout)|activity-done:charge-1|activity-result:Finished\n"
 
 // Rust: tests/services_runtime.rs:992
-WORKFLOW_OUTCOME_SOURCE :: """
+WORKFLOW_OUTCOME_SOURCE :: `
 use core.sys as env
 use core.service as services
 
-fn outcome_worker() {}
+fn outcome_worker() -> {}
 
-fn run() {
+fn run() -> {
     store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
     phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
     tree := services.tree("workflow-outcome")
@@ -504,19 +504,19 @@ fn run() {
         print("history:{tree.workflow_history(1) ?? panic("history")}")
     }
 }
-"""
+`
 
 // Rust: tests/services_runtime.rs:1031
 WORKFLOW_OUTCOME_HISTORY :: "start@v1|activity:charge:charge-1@1/2|activity-retry:charge-1@2/2:Panicked(timeout)|activity-done:charge-1|activity-result:Finished\n"
 
 // Rust: tests/services_runtime.rs:1034
-WORKFLOW_WAIT_SOURCE :: """
+WORKFLOW_WAIT_SOURCE :: `
 use core.service as service
 use core.testing as testing
 
-fn worker() {}
+fn worker() -> {}
 
-fn run() {
+fn run() -> {
     temp := testing.temp_dir("service-workflow-wait")
     path :: Path.from(temp).join("workflow.log").to_string()
     tree := service.tree("checkout")
@@ -538,20 +538,20 @@ fn run() {
     replay.all([replay_activity]) ?? panic("replay all")
     print("replay:{tree.workflow_history(replay) ?? panic("replay history")}")
 }
-"""
+`
 
 // Rust: tests/services_runtime.rs:1064
 WORKFLOW_WAIT_HISTORY :: "start@v1|sleep:0|activity:charge:charge-1|all:charge-1\n"
 
 // Tests Rust869,952 live in services_runtimeTests.jet.
 // Rust: tests/services_runtime.rs:1138
-WORKFLOW_SLEEP_CANCEL_SOURCE :: """
+WORKFLOW_SLEEP_CANCEL_SOURCE :: `
 use core.service as service
 use core.testing as testing
 
-fn worker() {}
+fn worker() -> {}
 
-fn sleeping_workflow(store_path: String, ready: Sender<Int>) {
+fn sleeping_workflow(store_path: String, ready: Sender<Int>) -> {
     tree := service.tree("checkout")
     store :: service.state_store(store_path) ?? panic("state store")
     tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
@@ -562,7 +562,7 @@ fn sleeping_workflow(store_path: String, ready: Sender<Int>) {
     workflow.sleep(Duration.seconds(10) ?? panic("duration")) ?? panic("sleep completed")
 }
 
-fn run() {
+fn run() -> {
     temp :: testing.temp_dir("workflow-sleep-cancel")
     store_path :: Path.from(temp).join("workflow.log").to_string()
     (ready, started) :: channel<Int>()
@@ -582,16 +582,16 @@ fn run() {
     tree.start() ?? panic("restart")
     print("history:{tree.workflow_history(1) ?? panic("history")}")
 }
-"""
+`
 
 // Rust: tests/services_runtime.rs:1251
-SOURCE :: """
+SOURCE :: `
 use core.service as services
 use core.testing as testing
 
-fn failure_worker() {}
+fn failure_worker() -> {}
 
-fn run() {
+fn run() -> {
     tree := services.tree("delivery")
     tree.set_delivery(services.delivery_durable()) ?? panic("delivery")
     temp := testing.temp_dir("service-failure")
@@ -633,15 +633,15 @@ fn run() {
         .Err(_) -> { print("drained_receive:rejected") }
     }
 }
-"""
+`
 
 // Rust: tests/services_runtime.rs:1328
-DRAIN_HANDOFF_SOURCE :: """
+DRAIN_HANDOFF_SOURCE :: `
 use core.service as service
 
-fn worker() {}
+fn worker() -> {}
 
-fn run() {
+fn run() -> {
     tree := service.tree("drain-handoff")
     endpoint :: tree.worker("api", worker, capacity: 2) ?? panic("worker")
     tree.start() ?? panic("start")
@@ -666,1047 +666,597 @@ fn run() {
     print("after:{tree.receive(current) ?? panic("after receive")}")
     tree.stop() ?? panic("stop")
 }
-"""
+`
 
 // Rust: tests/services_runtime.rs:1360
 DRAIN_HANDOFF_OUTPUT :: "late:rejected\ndrained:queued\nhandoff:2:Endpoint(drain-handoff/api@g2)\nafter:after\n"
 
 // Tests Rust1069,1104,1180,1221,1302,1315,1364,1374,1385 live in services_runtimeTests.jet.
-// PORT-PENDING 1153 tests-services-runtime: tests/services_runtime.rs:1392-2426
-//RS const DRAIN_DURABLE_SOURCE: &str = r#"
-//RS use core.service as service
-//RS use core.testing as testing
-//RS use core.time as time
-//RS 
-//RS fn worker() {}
-//RS 
-//RS fn receipt_id(receipt: ^Delivery) -> Delivery {
-//RS     return receipt
-//RS }
-//RS 
-//RS fn run() {
-//RS     temp := testing.temp_dir("drain-durable")
-//RS     store :: Path.from(temp).join("authority.log").to_string()
-//RS     retention :: Duration.seconds(86400) ?? panic("retention")
-//RS     runtime := service.runtime(store, retention: retention)
-//RS     tree := service.tree("drain-durable")
-//RS     endpoint :: tree.worker("api", worker, capacity: 2) ?? panic("worker")
-//RS     tree.start() ?? panic("start")
-//RS     tree.send(endpoint, "before") ?? panic("before")
-//RS     tree.drain_worker(endpoint) ?? panic("drain")
-//RS     receipt :: runtime.send(endpoint, "after", key: "after") ?? panic("send")
-//RS     id :: receipt_id(receipt)
-//RS     print("accepted")
-//RS     print("first:{tree.receive(endpoint) ?? panic("first")}")
-//RS     print("second:{tree.receive(endpoint) ?? panic("second")}")
-//RS     runtime.commit(id) ?? panic("commit")
-//RS     print("generation:{tree.handoff_generation() ?? panic("handoff")}")
-//RS }
-//RS "#;
-//RS 
-//RS const DRAIN_DURABLE_OUTPUT: &str = "accepted\nfirst:before\nsecond:after\ngeneration:2\n";
-//RS 
-//RS #[test]
-//RS fn service_drain_consumes_in_flight_durable_receipts_before_handoff_aot() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (code, stdout) = build_and_run("services_drain_durable", DRAIN_DURABLE_SOURCE);
-//RS     assert_eq!(code, 0);
-//RS     assert_eq!(stdout, DRAIN_DURABLE_OUTPUT);
-//RS }
-//RS 
-//RS #[test]
-//RS fn service_drain_consumes_in_flight_durable_receipts_before_handoff_default_run() {
-//RS     let (code, stdout, stderr) = run_default_multi(
-//RS         "services_drain_durable_jit",
-//RS         "main.jet",
-//RS         &[("main.jet", DRAIN_DURABLE_SOURCE)],
-//RS     );
-//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
-//RS     assert_eq!(stdout, DRAIN_DURABLE_OUTPUT);
-//RS }
-//RS 
-//RS const RUNTIME_HANDOFF_PENDING_SOURCE: &str = r#"
-//RS use core.service as service
-//RS use core.testing as testing
-//RS use core.time as time
-//RS 
-//RS fn worker() {}
-//RS 
-//RS fn receipt_id(receipt: ^Delivery) -> Delivery {
-//RS     return receipt
-//RS }
-//RS 
-//RS fn receipt_kind(receipt: ^Delivery) -> String {
-//RS     state :: receipt.status() ?? panic("status")
-//RS     if state == {
-//RS         .Pending -> { return "pending" }
-//RS         .Accepted -> { return "accepted" }
-//RS         .Delivering -> { return "delivering" }
-//RS         .Delivered -> { return "delivered" }
-//RS         .DeadLettered -> { return "dead" }
-//RS         .Cancelled -> { return "cancelled" }
-//RS     }
-//RS     return "unknown"
-//RS }
-//RS 
-//RS fn run() {
-//RS     temp := testing.temp_dir("runtime-handoff-pending")
-//RS     store :: Path.from(temp).join("authority.log").to_string()
-//RS     retention :: Duration.seconds(86400) ?? panic("retention")
-//RS     runtime := service.runtime(store, retention: retention)
-//RS     tree := service.tree("runtime-handoff-pending")
-//RS     endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
-//RS     tree.start() ?? panic("start")
-//RS 
-//RS     receipt :: runtime.send(endpoint, "pending", key: "pending") ?? panic("send")
-//RS     id :: receipt_id(~receipt)
-//RS     print("sent:{receipt_kind(^receipt)}")
-//RS     print("handoff:{tree.handoff_generation() ?? panic("handoff")}")
-//RS     print("receipt:{tree.upgrade_receipt() ?? panic("receipt")}")
-//RS     print("received:{tree.receive(endpoint) ?? panic("receive")}")
-//RS     runtime.commit(id) ?? panic("commit")
-//RS     print("next:{tree.handoff_generation() ?? panic("next handoff")}")
-//RS     tree.stop() ?? panic("stop")
-//RS }
-//RS "#;
-//RS 
-//RS const RUNTIME_HANDOFF_PENDING_OUTPUT: &str =
-//RS     "sent:accepted\nhandoff:2\nreceipt:ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=api)\nreceived:pending\nnext:3\n";
-//RS 
-//RS #[test]
-//RS fn runtime_receipt_pins_pending_shard_across_handoff_aot() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (code, stdout) = build_and_run(
-//RS         "services_runtime_handoff_pending",
-//RS         RUNTIME_HANDOFF_PENDING_SOURCE,
-//RS     );
-//RS     assert_eq!(code, 0);
-//RS     assert_eq!(stdout, RUNTIME_HANDOFF_PENDING_OUTPUT);
-//RS }
-//RS 
-//RS #[test]
-//RS fn runtime_receipt_pins_pending_shard_across_handoff_default_run() {
-//RS     let (code, stdout, stderr) = run_default_multi(
-//RS         "services_runtime_handoff_pending_jit",
-//RS         "main.jet",
-//RS         &[("main.jet", RUNTIME_HANDOFF_PENDING_SOURCE)],
-//RS     );
-//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
-//RS     assert_eq!(stdout, RUNTIME_HANDOFF_PENDING_OUTPUT);
-//RS }
-//RS 
-//RS #[test]
-//RS fn runtime_receipt_pins_pending_shard_across_handoff_interpreter() {
-//RS     let (code, stdout, stderr) = interpreter_run(
-//RS         "services_runtime_handoff_pending_interpreter",
-//RS         RUNTIME_HANDOFF_PENDING_SOURCE,
-//RS     );
-//RS     assert_eq!(code, 0, "interpreter run failed: {stderr}");
-//RS     assert_eq!(stdout, RUNTIME_HANDOFF_PENDING_OUTPUT);
-//RS }
-//RS 
-//RS const DRAIN_EMPTY_DURABLE_SOURCE: &str = r#"
-//RS use core.service as service
-//RS use core.testing as testing
-//RS use core.time as time
-//RS 
-//RS fn worker() {}
-//RS 
-//RS fn receipt_id(receipt: ^Delivery) -> Delivery {
-//RS     return receipt
-//RS }
-//RS 
-//RS fn run() {
-//RS     temp := testing.temp_dir("drain-empty-durable")
-//RS     store :: Path.from(temp).join("authority.log").to_string()
-//RS     retention :: Duration.seconds(86400) ?? panic("retention")
-//RS     runtime := service.runtime(store, retention: retention)
-//RS     tree := service.tree("drain-empty-durable")
-//RS     endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
-//RS     tree.start() ?? panic("start")
-//RS     tree.drain_worker(endpoint) ?? panic("drain")
-//RS     receipt :: runtime.send(endpoint, "after", key: "after") ?? panic("send")
-//RS     id :: receipt_id(receipt)
-//RS     print("accepted")
-//RS     print("received:{tree.receive(endpoint) ?? panic("receive")}")
-//RS     runtime.commit(id) ?? panic("commit")
-//RS     print("committed")
-//RS     tree.stop() ?? panic("stop")
-//RS }
-//RS "#;
-//RS 
-//RS const DRAIN_EMPTY_DURABLE_OUTPUT: &str = "accepted\nreceived:after\ncommitted\n";
-//RS 
-//RS #[test]
-//RS fn service_empty_drain_preserves_durable_receipts_aot() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (code, stdout) = build_and_run("services_drain_empty_durable", DRAIN_EMPTY_DURABLE_SOURCE);
-//RS     assert_eq!(code, 0);
-//RS     assert_eq!(stdout, DRAIN_EMPTY_DURABLE_OUTPUT);
-//RS }
-//RS 
-//RS #[test]
-//RS fn service_empty_drain_preserves_durable_receipts_default_run() {
-//RS     let (code, stdout, stderr) = run_default_multi(
-//RS         "services_drain_empty_durable_jit",
-//RS         "main.jet",
-//RS         &[("main.jet", DRAIN_EMPTY_DURABLE_SOURCE)],
-//RS     );
-//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
-//RS     assert_eq!(stdout, DRAIN_EMPTY_DURABLE_OUTPUT);
-//RS }
-//RS 
-//RS const DURABLE_RETRY_SOURCE: &str = r#"
-//RS use core.service as service
-//RS use core.testing as testing
-//RS use core.time as time
-//RS 
-//RS fn worker() {}
-//RS 
-//RS fn receipt_id(receipt: ^Delivery) -> Delivery {
-//RS     return receipt
-//RS }
-//RS 
-//RS fn run() {
-//RS     temp := testing.temp_dir("durable-retry")
-//RS     state_path :: Path.from(temp).join("state.log").to_string()
-//RS     delivery_path :: Path.from(temp).join("state.log.delivery").to_string()
-//RS     retention :: Duration.seconds(86400) ?? panic("retention")
-//RS     runtime := service.runtime(delivery_path, retention: retention)
-//RS     tree := service.tree("durable-retry")
-//RS     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
-//RS     state :: service.state_store(state_path) ?? panic("state")
-//RS     tree.set_state_event_log(state, "events", 1, "reversible") ?? panic("state adapter")
-//RS     endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
-//RS     tree.start() ?? panic("start")
-//RS 
-//RS     receipt :: tree.send_durable(endpoint, "once", key: "once") ?? panic("send")
-//RS     id :: receipt_id(receipt)
-//RS     print("first:{tree.receive(endpoint) ?? panic("first")}")
-//RS     duplicate :: tree.receive(endpoint)
-//RS     if duplicate == {
-//RS         .Ok(_) -> { print("duplicate:accepted") }
-//RS         .Err(_) -> { print("duplicate:rejected") }
-//RS     }
-//RS     retry :: runtime.retry(id) ?? panic("retry")
-//RS     print("retry:{tree.receive(endpoint) ?? panic("retry receive")}")
-//RS     runtime.commit(retry) ?? panic("commit")
-//RS     tree.stop() ?? panic("stop")
-//RS }
-//RS "#;
-//RS 
-//RS const DURABLE_RETRY_OUTPUT: &str = "first:once\nduplicate:rejected\nretry:once\n";
-//RS 
-//RS #[test]
-//RS fn durable_retry_is_the_only_explicit_redelivery_aot() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (code, stdout) = build_and_run("services_durable_retry", DURABLE_RETRY_SOURCE);
-//RS     assert_eq!(code, 0);
-//RS     assert_eq!(stdout, DURABLE_RETRY_OUTPUT);
-//RS }
-//RS 
-//RS #[test]
-//RS fn durable_retry_is_the_only_explicit_redelivery_default_run() {
-//RS     let (code, stdout, stderr) = run_default_multi(
-//RS         "services_durable_retry_jit",
-//RS         "main.jet",
-//RS         &[("main.jet", DURABLE_RETRY_SOURCE)],
-//RS     );
-//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
-//RS     assert_eq!(stdout, DURABLE_RETRY_OUTPUT);
-//RS }
-//RS 
-//RS #[test]
-//RS fn durable_retry_is_the_only_explicit_redelivery_interpreter() {
-//RS     let (code, stdout, stderr) =
-//RS         interpreter_run("services_durable_retry_interpreter", DURABLE_RETRY_SOURCE);
-//RS     assert_eq!(code, 0, "interpreter run failed: {stderr}");
-//RS     assert_eq!(stdout, DURABLE_RETRY_OUTPUT);
-//RS }
-//RS 
-//RS const TREE_DRAIN_REJECT_SOURCE: &str = r#"
-//RS use core.service as service
-//RS use core.testing as testing
-//RS 
-//RS fn worker() {}
-//RS 
-//RS fn run() {
-//RS     temp := testing.temp_dir("tree-drain-reject")
-//RS     store :: Path.from(temp).join("authority.log").to_string()
-//RS     tree := service.tree("tree-drain-reject")
-//RS     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
-//RS     state :: service.state_store(store) ?? panic("state")
-//RS     tree.set_state_event_log(state, "events", 1, "reversible") ?? panic("state adapter")
-//RS     endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
-//RS     tree.start() ?? panic("start")
-//RS     tree.directory_register("api", endpoint) ?? panic("directory")
-//RS     tree.drain_worker(endpoint) ?? panic("drain")
-//RS     rejected :: tree.send_durable(endpoint, "after", key: "after")
-//RS     if rejected == {
-//RS         .Ok(_) -> { print("direct:accepted") }
-//RS         .Err(_) -> { print("direct:rejected") }
-//RS     }
-//RS     print("handoff:{tree.handoff_generation() ?? panic("handoff")}")
-//RS     current :: tree.directory_resolve("api") ?? panic("resolve")
-//RS     pending :: tree.receive(current)
-//RS     if pending == {
-//RS         .Ok(_) -> { print("pending:accepted") }
-//RS         .Err(_) -> { print("pending:rejected") }
-//RS     }
-//RS     tree.stop() ?? panic("stop")
-//RS }
-//RS "#;
-//RS 
-//RS const TREE_DRAIN_REJECT_OUTPUT: &str = "direct:rejected\nhandoff:2\npending:rejected\n";
-//RS 
-//RS #[test]
-//RS fn tree_durable_send_during_drain_is_rejected_before_admission_aot() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (code, stdout) = build_and_run("services_tree_drain_reject", TREE_DRAIN_REJECT_SOURCE);
-//RS     assert_eq!(code, 0);
-//RS     assert_eq!(stdout, TREE_DRAIN_REJECT_OUTPUT);
-//RS }
-//RS 
-//RS #[test]
-//RS fn tree_durable_send_during_drain_is_rejected_before_admission_default_run() {
-//RS     let (code, stdout, stderr) = run_default_multi(
-//RS         "services_tree_drain_reject_jit",
-//RS         "main.jet",
-//RS         &[("main.jet", TREE_DRAIN_REJECT_SOURCE)],
-//RS     );
-//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
-//RS     assert_eq!(stdout, TREE_DRAIN_REJECT_OUTPUT);
-//RS }
-//RS 
-//RS #[test]
-//RS fn tree_durable_send_during_drain_is_rejected_before_admission_interpreter() {
-//RS     let (code, stdout, stderr) = interpreter_run(
-//RS         "services_tree_drain_reject_interpreter",
-//RS         TREE_DRAIN_REJECT_SOURCE,
-//RS     );
-//RS     assert_eq!(code, 0, "interpreter run failed: {stderr}");
-//RS     assert_eq!(stdout, TREE_DRAIN_REJECT_OUTPUT);
-//RS }
-//RS 
-//RS const ROLLOUT_ROLLBACK_SOURCE: &str = r#"
-//RS use core.service as service
-//RS use core.testing as testing
-//RS 
-//RS fn worker() {}
-//RS 
-//RS fn run() {
-//RS     temp := testing.temp_dir("rollout-rollback")
-//RS     path :: Path.from(temp).join("events.log").to_string()
-//RS     tree := service.tree("rollback")
-//RS     store :: service.state_store(path) ?? panic("store")
-//RS     tree.set_state_event_log(store, "events", 1, "reversible") ?? panic("state")
-//RS     endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
-//RS     tree.start() ?? panic("start")
-//RS     tree.append_event("before") ?? panic("before")
-//RS     tree.drain_worker(endpoint) ?? panic("drain")
-//RS     tree.handoff_generation() ?? panic("handoff")
-//RS     receipt :: tree.upgrade_receipt() ?? panic("receipt")
-//RS     print("receipt:{receipt}")
-//RS     tree.append_event("after") ?? panic("after")
-//RS     rolled :: tree.rollback_generation()
-//RS     if rolled == {
-//RS         .Ok(generation) -> { print("rolled:{generation}:{tree.replay_events()}") }
-//RS         .Err(_) -> { print("rolled:refused") }
-//RS     }
-//RS     tree.stop() ?? panic("stop")
-//RS }
-//RS "#;
-//RS 
-//RS const ROLLOUT_ROLLBACK_OUTPUT: &str =
-//RS     "receipt:ServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\nrolled:1:before\n";
-//RS 
-//RS #[test]
-//RS fn service_rollout_rollback_restores_pre_handoff_state_aot() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (code, stdout) = build_and_run("services_rollout_rollback", ROLLOUT_ROLLBACK_SOURCE);
-//RS     assert_eq!(code, 0);
-//RS     assert_eq!(stdout, ROLLOUT_ROLLBACK_OUTPUT);
-//RS }
-//RS 
-//RS #[test]
-//RS fn service_rollout_rollback_restores_pre_handoff_state_default_run() {
-//RS     let (code, stdout, stderr) = run_default_multi(
-//RS         "services_rollout_rollback_jit",
-//RS         "main.jet",
-//RS         &[("main.jet", ROLLOUT_ROLLBACK_SOURCE)],
-//RS     );
-//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
-//RS     assert_eq!(stdout, ROLLOUT_ROLLBACK_OUTPUT);
-//RS }
-//RS 
-//RS const ROLLOUT_PINNED_ROLLBACK_SOURCE: &str = r#"
-//RS use core.service as service
-//RS 
-//RS fn worker() {}
-//RS 
-//RS fn run() {
-//RS     tree := service.tree("pinned-rollback")
-//RS     endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
-//RS     tree.start() ?? panic("start")
-//RS     tree.send(endpoint, "queued") ?? panic("send")
-//RS     tree.drain_worker(endpoint) ?? panic("drain")
-//RS     generation :: tree.handoff_generation() ?? panic("handoff")
-//RS     print("handoff:{generation}")
-//RS     print("rolled:{tree.rollback_generation() ?? panic("rollback")}")
-//RS     print("message:{tree.receive(endpoint) ?? panic("receive")}")
-//RS     tree.stop() ?? panic("stop")
-//RS }
-//RS "#;
-//RS 
-//RS const ROLLOUT_PINNED_ROLLBACK_OUTPUT: &str = "handoff:2\nrolled:1\nmessage:queued\n";
-//RS 
-//RS #[test]
-//RS fn service_rollout_rollback_restores_pinned_shard_aot() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (code, stdout) = build_and_run(
-//RS         "services_rollout_pinned_rollback",
-//RS         ROLLOUT_PINNED_ROLLBACK_SOURCE,
-//RS     );
-//RS     assert_eq!(code, 0);
-//RS     assert_eq!(stdout, ROLLOUT_PINNED_ROLLBACK_OUTPUT);
-//RS }
-//RS 
-//RS #[test]
-//RS fn service_rollout_rollback_restores_pinned_shard_default_run() {
-//RS     let (code, stdout, stderr) = run_default_multi(
-//RS         "services_rollout_pinned_rollback_jit",
-//RS         "main.jet",
-//RS         &[("main.jet", ROLLOUT_PINNED_ROLLBACK_SOURCE)],
-//RS     );
-//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
-//RS     assert_eq!(stdout, ROLLOUT_PINNED_ROLLBACK_OUTPUT);
-//RS }
-//RS 
-//RS const STATE_AND_LIFECYCLE_SOURCE: &str = r#"
-//RS use core.service as services
-//RS use core.testing as testing
-//RS 
-//RS fn lifecycle_worker() {}
-//RS 
-//RS fn run() {
-//RS     temp := testing.temp_dir("service-state")
-//RS     snapshot := services.tree("snapshot")
-//RS     snapshot_store :: Path.from(temp).join("snapshot.state").to_string()
-//RS     snapshot_authority :: services.state_store(snapshot_store) ?? panic("snapshot store")
-//RS     snapshot.set_state_snapshot(snapshot_authority, "snapshot", 1, "reversible") ?? panic("snapshot state")
-//RS     snapshot_worker :: snapshot.worker("worker", lifecycle_worker, capacity: 2) ?? panic("snapshot worker")
-//RS     snapshot.start() ?? panic("snapshot start")
-//RS     snapshot.commit_snapshot("state-v1") ?? panic("snapshot commit")
-//RS     restored :: snapshot.restore_snapshot() ?? panic("snapshot restore")
-//RS     print("snapshot:{restored}")
-//RS     snapshot.stop() ?? panic("snapshot stop")
-//RS 
-//RS     events := services.tree("events")
-//RS     event_store :: Path.from(temp).join("events.state").to_string()
-//RS     event_authority :: services.state_store(event_store) ?? panic("event store")
-//RS     events.set_state_event_log(event_authority, "events", 1, "reversible") ?? panic("event state")
-//RS     event_worker :: events.worker("worker", lifecycle_worker, capacity: 2) ?? panic("event worker")
-//RS     events.start() ?? panic("event start")
-//RS     events.append_event("first") ?? panic("event one")
-//RS     events.append_event("second") ?? panic("event two")
-//RS     print("events:{events.replay_events()}")
-//RS     print("event_count:{events.event_count()}")
-//RS     events.stop() ?? panic("event stop")
-//RS 
-//RS     workflow := services.tree("workflow")
-//RS     workflow_store_path :: Path.from(temp).join("workflow.state").to_string()
-//RS     workflow_store :: services.state_store(workflow_store_path) ?? panic("workflow store")
-//RS     workflow.set_state_event_log(workflow_store, "workflow-events", 1, "reversible") ?? panic("workflow state")
-//RS     workflow_worker :: workflow.worker("worker", lifecycle_worker, capacity: 2) ?? panic("workflow worker")
-//RS     workflow.start() ?? panic("workflow start")
-//RS     run_id :: workflow.workflow_start("checkout", 1) ?? panic("workflow id")
-//RS     same_run :: workflow.workflow_start("checkout", 1) ?? panic("workflow duplicate")
-//RS     workflow.workflow_step(run_id, "charge") ?? panic("workflow step")
-//RS     history :: workflow.workflow_history(run_id) ?? panic("workflow history")
-//RS     print("workflow:{run_id}:{same_run}:{history}")
-//RS     versioned :: workflow.workflow_start("checkout", 2)
-//RS     if versioned == {
-//RS         .Ok(_) -> { print("workflow_version:accepted") }
-//RS         .Err(_) -> { print("workflow_version:rejected") }
-//RS     }
-//RS     workflow.stop() ?? panic("workflow stop")
-//RS 
-//RS     cluster := services.tree("cluster")
-//RS     endpoint :: cluster.worker("api", lifecycle_worker, capacity: 2) ?? panic("cluster worker")
-//RS     cluster.start() ?? panic("cluster start")
-//RS     cluster.directory_register("api", endpoint) ?? panic("directory register")
-//RS     cluster.drain_worker(endpoint) ?? panic("cluster drain")
-//RS     handed :: cluster.handoff_generation() ?? panic("handoff")
-//RS     receipt :: cluster.upgrade_receipt() ?? panic("upgrade receipt")
-//RS     current :: cluster.directory_resolve("api") ?? panic("directory resolve")
-//RS     print("generation:{handed}:{cluster.directory_generation()}:{current.show()}:{receipt}")
-//RS     stale :: cluster.send(endpoint, "late")
-//RS     if stale == {
-//RS         .Ok(_) -> { print("stale:accepted") }
-//RS         .Err(_) -> { print("stale:rejected") }
-//RS     }
-//RS     rolled :: cluster.rollback_generation() ?? panic("rollback")
-//RS     print("rollback:{rolled}:{cluster.directory_generation()}")
-//RS     cluster.chaos_fail() ?? panic("chaos")
-//RS     print(&cluster.observe())
-//RS     cluster.stop() ?? panic("cluster stop")
-//RS }
-//RS "#;
-//RS 
-//RS #[test]
-//RS fn services_state_workflow_identity_and_upgrade_are_real_aot_paths() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (code, stdout) = build_and_run("services_state_lifecycle", STATE_AND_LIFECYCLE_SOURCE);
-//RS     assert_eq!(code, 0);
-//RS     assert_eq!(
-//RS         stdout,
-//RS         "snapshot:state-v1\nevents:first|second\nevent_count:2\nworkflow:1:1:start@v1|step:charge\nworkflow_version:rejected\ngeneration:2:2:Endpoint(cluster/api@g2):ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=)\nstale:rejected\nrollback:1:1\nObserve(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=1, draining=0, partitions=0, rollback=false, workflows=0,statuses={running:0,paused:0,cancel_requested:0},outcomes={pending:0,finished:0,panicked:0,cancelled:0,deadline_blown:0})\n"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn services_state_workflow_identity_and_upgrade_match_default_run() {
-//RS     let (code, stdout, stderr) = run_default_multi(
-//RS         "services_state_lifecycle_jit",
-//RS         "main.jet",
-//RS         &[("main.jet", STATE_AND_LIFECYCLE_SOURCE)],
-//RS     );
-//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
-//RS     assert_eq!(
-//RS         stdout,
-//RS         "snapshot:state-v1\nevents:first|second\nevent_count:2\nworkflow:1:1:start@v1|step:charge\nworkflow_version:rejected\ngeneration:2:2:Endpoint(cluster/api@g2):ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=)\nstale:rejected\nrollback:1:1\nObserve(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=1, draining=0, partitions=0, rollback=false, workflows=0,statuses={running:0,paused:0,cancel_requested:0},outcomes={pending:0,finished:0,panicked:0,cancelled:0,deadline_blown:0})\n"
-//RS     );
-//RS }
-//RS 
-//RS /// Durable delivery and an event log share one service tree but must not share
-//RS /// one file. The delivery log and the state store use different framing, and
-//RS /// the state store is read back with the adapter its header declares, so a
-//RS /// durable send used to leave records the typed read could not parse: a later
-//RS /// `append_event` failed on any tree that had accepted a `send_durable`.
-//RS ///
-//RS /// No existing check combined the two surfaces on one tree, so the collision
-//RS /// only showed up in an example.
-//RS const DURABLE_PLUS_EVENT_LOG_SOURCE: &str = r#"
-//RS use core.service as services
-//RS use core.testing as testing
-//RS 
-//RS fn durable_worker() {}
-//RS 
-//RS fn run() {
-//RS     tree := services.tree("app")
-//RS     tree.set_delivery(services.delivery_durable()) ?? panic("delivery")
-//RS     temp := testing.temp_dir("services-delivery-eventlog")
-//RS     store_path :: Path.from(temp).join("state.log").to_string()
-//RS     store :: services.state_store(store_path) ?? panic("state store")
-//RS     tree.set_state_event_log(store, "app-events", 1, "reversible") ?? panic("state")
-//RS     worker :: tree.worker("a", durable_worker, capacity: 4) ?? panic("worker")
-//RS     tree.start() ?? panic("start")
-//RS 
-//RS     first :: tree.send_durable(worker, "ping", key: "k1") ?? panic("durable send")
-//RS     first.status() ?? panic("first status")
-//RS     tree.append_event("after-durable-send") ?? panic("append after durable send")
-//RS     second :: tree.send_durable(worker, "pong", key: "k2") ?? panic("second durable send")
-//RS     second.status() ?? panic("second status")
-//RS     tree.append_event("after-second-send") ?? panic("append after second send")
-//RS 
-//RS     print("events:{tree.event_count()}")
-//RS }
-//RS "#;
-//RS 
-//RS #[test]
-//RS fn durable_delivery_does_not_corrupt_the_event_log_aot() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (code, stdout) = build_and_run("services_durable_eventlog", DURABLE_PLUS_EVENT_LOG_SOURCE);
-//RS     assert_eq!(code, 0, "durable send beside an event log must not fail");
-//RS     assert_eq!(stdout, "events:2\n");
-//RS }
-//RS 
-//RS #[test]
-//RS fn durable_delivery_does_not_corrupt_the_event_log_default_run() {
-//RS     let (code, stdout, stderr) = run_default_multi(
-//RS         "services_durable_eventlog_jit",
-//RS         "main.jet",
-//RS         &[("main.jet", DURABLE_PLUS_EVENT_LOG_SOURCE)],
-//RS     );
-//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
-//RS     assert_eq!(stdout, "events:2\n");
-//RS }
-//RS 
-//RS /// #1149: the snapshot and event-log adapters must survive a reopen and refuse
-//RS /// a store they cannot trust. The state store is framed with a magic line, an
-//RS /// adapter line and a schema line, so garbage in the file has to surface as a
-//RS /// typed error rather than a panic or a silently empty restore.
-//RS const STATE_ADAPTER_SOURCE: &str = r#"
-//RS use core.files as files
-//RS use core.service as services
-//RS use core.testing as testing
-//RS 
-//RS fn adapter_worker() {}
-//RS 
-//RS fn run() {
-//RS     temp := testing.temp_dir("services-state-adapters")
-//RS 
-//RS     snapshot_path :: Path.from(temp).join("snapshot.log").to_string()
-//RS     snap_tree := services.tree("snap")
-//RS     snap_store :: services.state_store(snapshot_path) ?? panic("snapshot store")
-//RS     snap_tree.set_state_snapshot(snap_store, "app-state", 1, "reversible") ?? panic("snapshot adapter")
-//RS     _snap_worker :: snap_tree.worker("a", adapter_worker, capacity: 2) ?? panic("snapshot worker")
-//RS     snap_tree.start() ?? panic("snapshot start")
-//RS     snap_tree.commit_snapshot("state-v1") ?? panic("commit")
-//RS     print("restored:{snap_tree.restore_snapshot() ?? panic("restore")}")
-//RS 
-//RS     event_path :: Path.from(temp).join("events.log").to_string()
-//RS     log_tree := services.tree("log")
-//RS     log_store :: services.state_store(event_path) ?? panic("event store")
-//RS     log_tree.set_state_event_log(log_store, "app-events", 1, "reversible") ?? panic("event adapter")
-//RS     _log_worker :: log_tree.worker("a", adapter_worker, capacity: 2) ?? panic("event worker")
-//RS     log_tree.start() ?? panic("event start")
-//RS     log_tree.append_event("first") ?? panic("first event")
-//RS     log_tree.append_event("second") ?? panic("second event")
-//RS     print("replay:{log_tree.replay_events()}")
-//RS 
-//RS     // A store the runtime cannot trust must fail closed, not restore nothing.
-//RS     files.write(snapshot_path, "not a service state store") ?? panic("corrupt write")
-//RS     corrupted :: snap_tree.restore_snapshot()
-//RS     if corrupted == {
-//RS         .Ok(_) -> { print("corrupt:accepted") }
-//RS         .Err(_) -> { print("corrupt:rejected") }
-//RS     }
-//RS }
-//RS "#;
-//RS 
-//RS #[test]
-//RS fn state_adapters_reopen_and_reject_corrupt_stores_aot() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (code, stdout) = build_and_run("services_state_adapters", STATE_ADAPTER_SOURCE);
-//RS     assert_eq!(code, 0);
-//RS     assert_eq!(
-//RS         stdout,
-//RS         "restored:state-v1\nreplay:first|second\ncorrupt:rejected\n"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn state_adapters_reopen_and_reject_corrupt_stores_default_run() {
-//RS     let (code, stdout, stderr) = run_default_multi(
-//RS         "services_state_adapters_jit",
-//RS         "main.jet",
-//RS         &[("main.jet", STATE_ADAPTER_SOURCE)],
-//RS     );
-//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
-//RS     assert_eq!(
-//RS         stdout,
-//RS         "restored:state-v1\nreplay:first|second\ncorrupt:rejected\n"
-//RS     );
-//RS }
-//RS 
-//RS /// The rollback path only does real work when the tree has a state adapter.
-//RS /// With no adapter, `prepare_rollback` returns early and `restore_rollback`
-//RS /// never touches the store, so a rollback test on a bare tree proves nothing
-//RS /// about the durable body. This sets an adapter first, so the upgrade really
-//RS /// copies the store aside and the rollback reads it back.
-//RS const ROLLBACK_WITH_STATE_SOURCE: &str = r#"
-//RS use core.sys as env
-//RS use core.service as services
-//RS 
-//RS fn rollback_worker() {}
-//RS 
-//RS fn run() {
-//RS     store_path :: env.get("JET_SERVICE_ROLLBACK_STORE") ?? panic("store")
-//RS     policy :: env.get("JET_SERVICE_ROLLBACK_POLICY") ?? panic("policy")
-//RS     tree := services.tree("cluster")
-//RS     store :: services.state_store(store_path) ?? panic("state store")
-//RS     tree.set_state_event_log(store, "cluster-events", 1, policy) ?? panic("state")
-//RS     endpoint :: tree.worker("api", rollback_worker, capacity: 1) ?? panic("worker")
-//RS     tree.start() ?? panic("start")
-//RS     tree.append_event("before-upgrade") ?? panic("append")
-//RS     tree.directory_register("api", endpoint) ?? panic("register")
-//RS     tree.drain_worker(endpoint) ?? panic("drain")
-//RS     tree.handoff_generation() ?? panic("handoff")
-//RS     receipt :: tree.upgrade_receipt() ?? panic("receipt")
-//RS     print("receipt:{receipt}")
-//RS     tree.append_event("after-upgrade") ?? panic("append after")
-//RS     rolled :: tree.rollback_generation()
-//RS     if rolled == {
-//RS         .Ok(generation) -> {
-//RS             events :: tree.replay_events()
-//RS             print("rolled:{generation}:{events}")
-//RS         }
-//RS         .Err(_) -> { print("rolled:refused") }
-//RS     }
-//RS     tree.stop() ?? panic("stop")
-//RS }
-//RS "#;
-//RS 
-//RS fn run_rollback_process(bin: &Path, store: &Path, policy: &str) -> (bool, String, String) {
-//RS     let output = Command::new(bin)
-//RS         .env("JET_SERVICE_ROLLBACK_STORE", store)
-//RS         .env("JET_SERVICE_ROLLBACK_POLICY", policy)
-//RS         .output()
-//RS         .unwrap();
-//RS     (
-//RS         output.status.success(),
-//RS         String::from_utf8_lossy(&output.stdout).into_owned(),
-//RS         String::from_utf8_lossy(&output.stderr).into_owned(),
-//RS     )
-//RS }
-//RS 
-//RS /// A reversible migration copies the store aside on upgrade, so rolling back
-//RS /// restores the events as they stood before it.
-//RS #[test]
-//RS fn a_reversible_migration_rolls_the_state_store_back() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (dir, bin) = compile_restart_binary(ROLLBACK_WITH_STATE_SOURCE);
-//RS     let store = dir.join("cluster.log");
-//RS     let (ok, stdout, stderr) = run_rollback_process(&bin, &store, "reversible");
-//RS     assert!(ok, "reversible rollback run failed: {stderr}");
-//RS     assert!(
-//RS         stdout.contains("rollback_available=true"),
-//RS         "a reversible migration must offer a rollback: {stdout}"
-//RS     );
-//RS     assert!(
-//RS         stdout.contains("rolled:1:before-upgrade"),
-//RS         "rolling back must restore the store as it stood before the upgrade: {stdout}"
-//RS     );
-//RS     assert!(
-//RS         !stdout.contains("after-upgrade"),
-//RS         "the event written after the upgrade must not survive the rollback: {stdout}"
-//RS     );
-//RS }
-//RS 
-//RS /// A forward-only migration refuses to roll back, and says so through the
-//RS /// receipt rather than by silently doing nothing.
-//RS #[test]
-//RS fn a_forward_only_migration_refuses_to_roll_back() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (dir, bin) = compile_restart_binary(ROLLBACK_WITH_STATE_SOURCE);
-//RS     let store = dir.join("cluster.log");
-//RS     let (ok, stdout, stderr) = run_rollback_process(&bin, &store, "forward_only");
-//RS     assert!(ok, "forward-only run failed: {stderr}");
-//RS     assert!(
-//RS         stdout.contains("migration=forward_only"),
-//RS         "the receipt must name the policy the adapter was opened under: {stdout}"
-//RS     );
-//RS     assert!(
-//RS         stdout.contains("rollback_available=false"),
-//RS         "a forward-only migration must not offer a rollback: {stdout}"
-//RS     );
-//RS }
-//RS 
-//RS const PARTITION_RECONCILE_SOURCE: &str =
-//RS     include_str!("../Examples/features/tooling/service_partition_reconcile.jet");
-//RS 
-//RS #[test]
-//RS fn grouped_durable_partition_reconciles_after_handoff() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (code, stdout) = build_and_run("services_partition_reconcile", PARTITION_RECONCILE_SOURCE);
-//RS     assert_eq!(code, 0);
-//RS     assert_eq!(
-//RS         stdout,
-//RS         "foreign:rejected\ndrained:ok\nexpired:rejected\npartition_route:rejected\npartitioned:ok\nhandoff:2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=api)\nreconciled:g2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\nrejoined:rejoined\n"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn grouped_durable_partition_reconciles_under_default_run() {
-//RS     let (code, stdout, stderr) = run_default_multi(
-//RS         "services_partition_reconcile_jit",
-//RS         "main.jet",
-//RS         &[("main.jet", PARTITION_RECONCILE_SOURCE)],
-//RS     );
-//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
-//RS     assert_eq!(
-//RS         stdout,
-//RS         "foreign:rejected\ndrained:ok\nexpired:rejected\npartition_route:rejected\npartitioned:ok\nhandoff:2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=api)\nreconciled:g2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\nrejoined:rejoined\n"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn grouped_durable_partition_reconciles_in_interpreter() {
-//RS     let (code, stdout, stderr) = interpreter_run(
-//RS         "services_partition_reconcile_interpreter",
-//RS         PARTITION_RECONCILE_SOURCE,
-//RS     );
-//RS     assert_eq!(
-//RS         code, 0,
-//RS         "interpreter service partition run failed: {stderr}"
-//RS     );
-//RS     assert_eq!(
-//RS         stdout,
-//RS         "foreign:rejected\ndrained:ok\nexpired:rejected\npartition_route:rejected\npartitioned:ok\nhandoff:2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=api)\nreconciled:g2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\nrejoined:rejoined\n"
-//RS     );
-//RS }
-//RS 
-//RS /// An unknown migration policy is a named error, not a silent default. The
-//RS /// policy decides whether a rollback is possible at all, so guessing it is
-//RS /// worse than refusing.
-//RS #[test]
-//RS fn an_unknown_migration_policy_is_refused() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (dir, bin) = compile_restart_binary(ROLLBACK_WITH_STATE_SOURCE);
-//RS     let store = dir.join("cluster.log");
-//RS     let (ok, stdout, stderr) = run_rollback_process(&bin, &store, "whenever");
-//RS     assert!(
-//RS         !ok,
-//RS         "an unknown migration policy must stop the program: {stdout}{stderr}"
-//RS     );
-//RS }
-//RS 
-//RS const DURABLE_LIFECYCLE_MATRIX_SOURCE: &str = r#"
-//RS use core.service as service
-//RS use core.testing as testing
-//RS use core.time as time
-//RS 
-//RS fn worker() -[]> {}
-//RS 
-//RS fn state_name(delivery: ^Delivery) -> String {
-//RS     state :: delivery.status() ?? panic("status")
-//RS     if state == {
-//RS         .Pending -> { return "Pending" }
-//RS         .Accepted -> { return "Accepted" }
-//RS         .Delivering -> { return "Delivering" }
-//RS         .Delivered -> { return "Delivered" }
-//RS         .DeadLettered -> { return "DeadLettered" }
-//RS         .Cancelled -> { return "Cancelled" }
-//RS     }
-//RS     return "unknown"
-//RS }
-//RS 
-//RS fn run() {
-//RS     temp := testing.temp_dir("durable-lifecycle-matrix")
-//RS     delivery_path :: Path.from(temp).join("delivery.log").to_string()
-//RS     state_path :: Path.from(temp).join("state.log").to_string()
-//RS     retention :: Duration.seconds(60) ?? panic("retention")
-//RS     runtime := service.runtime(delivery_path, retention: retention)
-//RS 
-//RS     tree := service.tree("lifecycle-matrix")
-//RS     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
-//RS     state :: service.state_store(state_path) ?? panic("state store")
-//RS     tree.set_state_event_log(state, "lifecycle-events", 1, "reversible") ?? panic("state")
-//RS     endpoint :: tree.worker("api", worker, capacity: 2) ?? panic("worker")
-//RS     tree.start() ?? panic("start")
-//RS 
-//RS     accepted :: runtime.send(endpoint, "accepted", key: "same") ?? panic("accept")
-//RS     accepted_state :: state_name(~accepted)
-//RS     print("accept:{accepted_state}")
-//RS     duplicate :: runtime.send(endpoint, "accepted", key: "same") ?? panic("duplicate")
-//RS     duplicate_id :: (~duplicate).show()
-//RS     accepted_id :: (~accepted).show()
-//RS     duplicate_state :: state_name(~duplicate)
-//RS     print("duplicate:{duplicate_id == accepted_id}:{duplicate_state}")
-//RS     conflict :: runtime.send(endpoint, "different", key: "same")
-//RS     if conflict == {
-//RS         .Ok(delivery) -> {
-//RS             delivery.cancel() ?? panic("unexpected conflict")
-//RS             print("conflict:accepted")
-//RS         }
-//RS         .Err(_) -> { print("conflict:Policy") }
-//RS     }
-//RS     delivered :: tree.receive(endpoint) ?? panic("deliver")
-//RS     print("delivered:{delivered}")
-//RS     runtime.commit(accepted) ?? panic("commit")
-//RS     retained :: runtime.retain(duplicate) ?? panic("retain")
-//RS     retained_receipt :: (~retained).receipt() ?? panic("retained receipt")
-//RS     retained_text :: "{retained_receipt}"
-//RS     retained_events :: (~retained).events() ?? panic("retained events")
-//RS     retention_kept := retained_text.contains("retention_until=-1") == false
-//RS     retained_state :: state_name(^retained)
-//RS     print("retention:{retention_kept}:{retained_events.len()}:{retained_state}")
-//RS 
-//RS     retry_source :: runtime.send(endpoint, "retry", key: "retry") ?? panic("retry source")
-//RS     retry_first :: tree.receive(endpoint) ?? panic("retry first")
-//RS     print("retry_first:{retry_first}")
-//RS     retry :: runtime.retry(retry_source) ?? panic("retry")
-//RS     retry_receipt :: (~retry).receipt() ?? panic("retry receipt")
-//RS     retry_text :: "{retry_receipt}"
-//RS     retry_events :: (~retry).events() ?? panic("retry events")
-//RS     retried := retry_text.contains("attempts=1")
-//RS     retry_state :: state_name(~retry)
-//RS     print("retry_state:{retry_state}:{retried}:{retry_events.len()}")
-//RS     retry_second :: tree.receive(endpoint) ?? panic("retry second")
-//RS     print("retry_second:{retry_second}")
-//RS     retry_copy :: ~retry
-//RS     runtime.commit(retry) ?? panic("retry commit")
-//RS     retry_done :: state_name(^retry_copy)
-//RS     print("retry_done:{retry_done}")
-//RS 
-//RS     cancelled_handle :: runtime.send(endpoint, "cancel", key: "cancel") ?? panic("cancel source")
-//RS     cancelled :: cancelled_handle.cancel() ?? panic("cancel")
-//RS     cancel_state :: state_name(^cancelled)
-//RS     print("cancel:{cancel_state}")
-//RS 
-//RS     dead_handle :: runtime.send(endpoint, "dead", key: "dead") ?? panic("dead source")
-//RS     dead :: runtime.dead_letter(dead_handle) ?? panic("dead letter")
-//RS     dead_state :: state_name(^dead)
-//RS     print("dead:{dead_state}")
-//RS 
-//RS     short_runtime := service.runtime(delivery_path, retention: Duration.milliseconds(1) ?? panic("short retention"))
-//RS     expiring :: short_runtime.send(endpoint, "expire", key: "expire") ?? panic("expire source")
-//RS     time.sleep(Duration.milliseconds(10) ?? panic("sleep"))
-//RS     expiry_events :: (~expiring).events() ?? panic("expiry events")
-//RS     expiry_state :: state_name(^expiring)
-//RS     print("expiry:{expiry_state}:{expiry_events.len()}")
-//RS 
-//RS     partition_source :: runtime.send(endpoint, "partition", key: "partition") ?? panic("partition source")
-//RS     tree.partition_worker(endpoint) ?? panic("partition")
-//RS     partition_retry :: runtime.retry(partition_source)
-//RS     if partition_retry == {
-//RS         .Ok(delivery) -> {
-//RS             delivery.cancel() ?? panic("unexpected partition retry")
-//RS             print("partition:accepted")
-//RS         }
-//RS         .Err(_) -> { print("partition:Partitioned") }
-//RS     }
-//RS     tree.reconcile_worker(endpoint) ?? panic("reconcile")
-//RS     recovered :: runtime.send(endpoint, "partition", key: "partition") ?? panic("partition recovery")
-//RS     recovered_state :: state_name(~recovered)
-//RS     print("partition_recovery:{recovered_state}")
-//RS     partition_delivery :: tree.receive(endpoint) ?? panic("partition delivery")
-//RS     print("partition_delivery:{partition_delivery}")
-//RS     recovered_copy :: ~recovered
-//RS     runtime.commit(recovered) ?? panic("partition commit")
-//RS     recovered_events :: (~recovered_copy).events() ?? panic("recovered events")
-//RS     recovered_state_done :: state_name(^recovered_copy)
-//RS     print("partition_done:{recovered_state_done}:{recovered_events.len()}")
-//RS 
-//RS     foreign := service.tree("foreign")
-//RS     foreign_endpoint :: foreign.worker("api", worker, capacity: 1) ?? panic("foreign worker")
-//RS     foreign.start() ?? panic("foreign start")
-//RS     revoked :: tree.send_durable(foreign_endpoint, "revoked", key: "revoked")
-//RS     if revoked == {
-//RS         .Ok(delivery) -> {
-//RS             delivery.cancel() ?? panic("unexpected revoked delivery")
-//RS             print("revoked:accepted")
-//RS         }
-//RS         .Err(_) -> { print("revoked:Revoked") }
-//RS     }
-//RS     foreign.stop() ?? panic("foreign stop")
-//RS     tree.stop() ?? panic("stop")
-//RS }
-//RS "#;
-//RS 
-//RS #[test]
-//RS fn durable_lifecycle_matrix_covers_all_delivery_scenarios_on_all_tiers() {
-//RS     tir_support::assert_tiers_agree(
-//RS         "durable_lifecycle_matrix",
-//RS         DURABLE_LIFECYCLE_MATRIX_SOURCE,
-//RS         "accept:Accepted\nduplicate:true:Accepted\nconflict:Policy\ndelivered:accepted\nretention:true:3:Delivered\nretry_first:retry\nretry_state:Accepted:true:3\nretry_second:retry\nretry_done:Delivered\ncancel:Cancelled\ndead:DeadLettered\nexpiry:DeadLettered:2\npartition:Partitioned\npartition_recovery:Accepted\npartition_delivery:partition\npartition_done:Delivered:3\nrevoked:Revoked\n",
-//RS     );
-//RS }
-//RS 
-//RS const DURABLE_CRASH_REPLAY_SOURCE: &str = r#"
-//RS use core.service as service
-//RS use core.sys as env
-//RS 
-//RS fn worker() -[]> {}
-//RS 
-//RS fn state_name(delivery: ^Delivery) -> String {
-//RS     state :: delivery.status() ?? panic("status")
-//RS     if state == {
-//RS         .Pending -> { return "Pending" }
-//RS         .Accepted -> { return "Accepted" }
-//RS         .Delivering -> { return "Delivering" }
-//RS         .Delivered -> { return "Delivered" }
-//RS         .DeadLettered -> { return "DeadLettered" }
-//RS         .Cancelled -> { return "Cancelled" }
-//RS     }
-//RS     return "unknown"
-//RS }
-//RS 
-//RS fn run() {
-//RS     store :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
-//RS     phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
-//RS     retention :: Duration.seconds(60) ?? panic("retention")
-//RS     runtime := service.runtime(store, retention: retention)
-//RS     tree := service.tree("durable-crash")
-//RS     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
-//RS     endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
-//RS     tree.start() ?? panic("start")
-//RS 
-//RS     if phase == "accept" {
-//RS         accepted :: runtime.send(endpoint, "crash", key: "crash") ?? panic("accept")
-//RS         id :: accepted.show()
-//RS         print("accepted:{id}")
-//RS     } else if phase == "deliver" {
-//RS         delivery :: runtime.send(endpoint, "crash", key: "crash") ?? panic("deliver lookup")
-//RS         id :: (~delivery).show()
-//RS         state :: state_name(^delivery)
-//RS         print("before:{id}:{state}")
-//RS         received :: tree.receive(endpoint) ?? panic("receive")
-//RS         print("received:{received}")
-//RS         print("crash_window:open")
-//RS     } else {
-//RS         recovered :: runtime.send(endpoint, "crash", key: "crash") ?? panic("recover lookup")
-//RS         recovered_id :: (~recovered).show()
-//RS         recovered_state :: state_name(~recovered)
-//RS         print("recovered:{recovered_id}:{recovered_state}")
-//RS         retry :: runtime.retry(recovered) ?? panic("recover retry")
-//RS         retry_id :: (~retry).show()
-//RS         retry_state :: state_name(~retry)
-//RS         retry_copy :: ~retry
-//RS         print("retry:{retry_id}:{retry_state}")
-//RS         received :: tree.receive(endpoint) ?? panic("replay receive")
-//RS         print("received:{received}")
-//RS         runtime.commit(retry) ?? panic("replay commit")
-//RS         history :: (~retry_copy).events() ?? panic("replay history")
-//RS         replayed_state :: state_name(^retry_copy)
-//RS         print("replayed:{replayed_state}:{history.len()}")
-//RS         print("same_identity:{recovered_id == retry_id}")
-//RS     }
-//RS }
-//RS "#;
-//RS 
-//RS #[test]
-//RS fn durable_lifecycle_crash_window_recovers_and_replays_one_identity() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (dir, bin) = compile_restart_binary(DURABLE_CRASH_REPLAY_SOURCE);
-//RS     let store = dir.join("crash.log");
-//RS     let accepted = run_restart_process(&bin, &store, "accept", None);
-//RS     assert!(accepted.starts_with("accepted:Delivery(svc-"), "{accepted}");
-//RS     let delivered = run_restart_default_process(&dir, &store, "deliver", None);
-//RS     assert!(delivered.starts_with("before:Delivery(svc-"), "{delivered}");
-//RS     assert!(delivered.contains(":Accepted\nreceived:crash\ncrash_window:open\n"));
-//RS     let recovered = run_restart_process(&bin, &store, "recover", None);
-//RS     assert_eq!(
-//RS         recovered.lines().last(),
-//RS         Some("same_identity:true"),
-//RS         "recovery changed the durable identity: {recovered}"
-//RS     );
-//RS     assert!(
-//RS         recovered.contains("recovered:Delivery(svc-")
-//RS             && recovered.contains(":Delivering\nretry:Accepted\nreceived:crash\nreplayed:Delivered:5\n"),
-//RS         "crash-window replay did not rebuild the signed history: {recovered}"
-//RS     );
-//RS }
-// END-PORT-PENDING 1153 tests/services_runtime.rs:1-2426
+// Rust: tests/services_runtime.rs:1392
+DRAIN_DURABLE_SOURCE :: `
+use core.service as service
+use core.testing as testing
+use core.time as time
+fn worker() -> {}
+fn receipt_id(receipt: ^Delivery) -> Delivery {
+    return receipt
+}
+fn run() -> {
+    temp := testing.temp_dir("drain-durable")
+    store :: Path.from(temp).join("authority.log").to_string()
+    retention :: Duration.seconds(86400) ?? panic("retention")
+    runtime := service.runtime(store, retention: retention)
+    tree := service.tree("drain-durable")
+    endpoint :: tree.worker("api", worker, capacity: 2) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.send(endpoint, "before") ?? panic("before")
+    tree.drain_worker(endpoint) ?? panic("drain")
+    receipt :: runtime.send(endpoint, "after", key: "after") ?? panic("send")
+    id :: receipt_id(receipt)
+    print("accepted")
+    print("first:{tree.receive(endpoint) ?? panic("first")}")
+    print("second:{tree.receive(endpoint) ?? panic("second")}")
+    runtime.commit(id) ?? panic("commit")
+    print("generation:{tree.handoff_generation() ?? panic("handoff")}")
+}
+`
+// Rust: tests/services_runtime.rs:1423
+DRAIN_DURABLE_OUTPUT :: "accepted\nfirst:before\nsecond:after\ngeneration:2\n"
 
+// Rust: tests/services_runtime.rs:1446
+RUNTIME_HANDOFF_PENDING_SOURCE :: `
+use core.service as service
+use core.testing as testing
+use core.time as time
+fn worker() -> {}
+fn receipt_id(receipt: ^Delivery) -> Delivery {
+    return receipt
+}
+fn receipt_kind(receipt: ^Delivery) -> String {
+    state :: receipt.status() ?? panic("status")
+    if state == {
+        .Pending -> { return "pending" }
+        .Accepted -> { return "accepted" }
+        .Delivering -> { return "delivering" }
+        .Delivered -> { return "delivered" }
+        .DeadLettered -> { return "dead" }
+        .Cancelled -> { return "cancelled" }
+    }
+    return "unknown"
+}
+fn run() -> {
+    temp := testing.temp_dir("runtime-handoff-pending")
+    store :: Path.from(temp).join("authority.log").to_string()
+    retention :: Duration.seconds(86400) ?? panic("retention")
+    runtime := service.runtime(store, retention: retention)
+    tree := service.tree("runtime-handoff-pending")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    receipt :: runtime.send(endpoint, "pending", key: "pending") ?? panic("send")
+    id :: receipt_id(~receipt)
+    print("sent:{receipt_kind(^receipt)}")
+    print("handoff:{tree.handoff_generation() ?? panic("handoff")}")
+    print("receipt:{tree.upgrade_receipt() ?? panic("receipt")}")
+    print("received:{tree.receive(endpoint) ?? panic("receive")}")
+    runtime.commit(id) ?? panic("commit")
+    print("next:{tree.handoff_generation() ?? panic("next handoff")}")
+    tree.stop() ?? panic("stop")
+}
+`
+// Rust: tests/services_runtime.rs:1491
+RUNTIME_HANDOFF_PENDING_OUTPUT :: "sent:accepted\nhandoff:2\nreceipt:ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=api)\nreceived:pending\nnext:3\n"
+
+// Rust: tests/services_runtime.rs:1528
+DRAIN_EMPTY_DURABLE_SOURCE :: `
+use core.service as service
+use core.testing as testing
+use core.time as time
+fn worker() -> {}
+fn receipt_id(receipt: ^Delivery) -> Delivery {
+    return receipt
+}
+fn run() -> {
+    temp := testing.temp_dir("drain-empty-durable")
+    store :: Path.from(temp).join("authority.log").to_string()
+    retention :: Duration.seconds(86400) ?? panic("retention")
+    runtime := service.runtime(store, retention: retention)
+    tree := service.tree("drain-empty-durable")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.drain_worker(endpoint) ?? panic("drain")
+    receipt :: runtime.send(endpoint, "after", key: "after") ?? panic("send")
+    id :: receipt_id(receipt)
+    print("accepted")
+    print("received:{tree.receive(endpoint) ?? panic("receive")}")
+    runtime.commit(id) ?? panic("commit")
+    print("committed")
+    tree.stop() ?? panic("stop")
+}
+`
+// Rust: tests/services_runtime.rs:1558
+DRAIN_EMPTY_DURABLE_OUTPUT :: "accepted\nreceived:after\ncommitted\n"
+
+// Rust: tests/services_runtime.rs:1581
+DURABLE_RETRY_SOURCE :: `
+use core.service as service
+use core.testing as testing
+use core.time as time
+fn worker() -> {}
+fn receipt_id(receipt: ^Delivery) -> Delivery {
+    return receipt
+}
+fn run() -> {
+    temp := testing.temp_dir("durable-retry")
+    state_path :: Path.from(temp).join("state.log").to_string()
+    delivery_path :: Path.from(temp).join("state.log.delivery").to_string()
+    retention :: Duration.seconds(86400) ?? panic("retention")
+    runtime := service.runtime(delivery_path, retention: retention)
+    tree := service.tree("durable-retry")
+    tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    state :: service.state_store(state_path) ?? panic("state")
+    tree.set_state_event_log(state, "events", 1, "reversible") ?? panic("state adapter")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    receipt :: tree.send_durable(endpoint, "once", key: "once") ?? panic("send")
+    id :: receipt_id(receipt)
+    print("first:{tree.receive(endpoint) ?? panic("first")}")
+    duplicate :: tree.receive(endpoint)
+    if duplicate == {
+        .Ok(_) -> { print("duplicate:accepted") }
+        .Err(_) -> { print("duplicate:rejected") }
+    }
+    retry :: runtime.retry(id) ?? panic("retry")
+    print("retry:{tree.receive(endpoint) ?? panic("retry receive")}")
+    runtime.commit(retry) ?? panic("commit")
+    tree.stop() ?? panic("stop")
+}
+`
+// Rust: tests/services_runtime.rs:1620
+DURABLE_RETRY_OUTPUT :: "first:once\nduplicate:rejected\nretry:once\n"
+
+// Rust: tests/services_runtime.rs:1651
+TREE_DRAIN_REJECT_SOURCE :: `
+use core.service as service
+use core.testing as testing
+fn worker() -> {}
+fn run() -> {
+    temp := testing.temp_dir("tree-drain-reject")
+    store :: Path.from(temp).join("authority.log").to_string()
+    tree := service.tree("tree-drain-reject")
+    tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    state :: service.state_store(store) ?? panic("state")
+    tree.set_state_event_log(state, "events", 1, "reversible") ?? panic("state adapter")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.directory_register("api", endpoint) ?? panic("directory")
+    tree.drain_worker(endpoint) ?? panic("drain")
+    rejected :: tree.send_durable(endpoint, "after", key: "after")
+    if rejected == {
+        .Ok(_) -> { print("direct:accepted") }
+        .Err(_) -> { print("direct:rejected") }
+    }
+    print("handoff:{tree.handoff_generation() ?? panic("handoff")}")
+    current :: tree.directory_resolve("api") ?? panic("resolve")
+    pending :: tree.receive(current)
+    if pending == {
+        .Ok(_) -> { print("pending:accepted") }
+        .Err(_) -> { print("pending:rejected") }
+    }
+    tree.stop() ?? panic("stop")
+}
+`
+// Rust: tests/services_runtime.rs:1684
+TREE_DRAIN_REJECT_OUTPUT :: "direct:rejected\nhandoff:2\npending:rejected\n"
+
+// Tests Rust1426-1708 live in services_runtimeTests.jet.
+// Rust: tests/services_runtime.rs:1717
+ROLLOUT_ROLLBACK_SOURCE :: `
+use core.service as service
+use core.testing as testing
+fn worker() -> {}
+fn run() -> {
+    temp := testing.temp_dir("rollout-rollback")
+    path :: Path.from(temp).join("events.log").to_string()
+    tree := service.tree("rollback")
+    store :: service.state_store(path) ?? panic("store")
+    tree.set_state_event_log(store, "events", 1, "reversible") ?? panic("state")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.append_event("before") ?? panic("before")
+    tree.drain_worker(endpoint) ?? panic("drain")
+    tree.handoff_generation() ?? panic("handoff")
+    receipt :: tree.upgrade_receipt() ?? panic("receipt")
+    print("receipt:{receipt}")
+    tree.append_event("after") ?? panic("after")
+    rolled :: tree.rollback_generation()
+    if rolled == {
+        .Ok(generation) -> { print("rolled:{generation}:{tree.replay_events()}") }
+        .Err(_) -> { print("rolled:refused") }
+    }
+    tree.stop() ?? panic("stop")
+}
+`
+// Rust: tests/services_runtime.rs:1746
+ROLLOUT_ROLLBACK_OUTPUT :: "receipt:ServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\nrolled:1:before\n"
+
+// Rust: tests/services_runtime.rs:1770
+ROLLOUT_PINNED_ROLLBACK_SOURCE :: `
+use core.service as service
+fn worker() -> {}
+fn run() -> {
+    tree := service.tree("pinned-rollback")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.send(endpoint, "queued") ?? panic("send")
+    tree.drain_worker(endpoint) ?? panic("drain")
+    generation :: tree.handoff_generation() ?? panic("handoff")
+    print("handoff:{generation}")
+    print("rolled:{tree.rollback_generation() ?? panic("rollback")}")
+    print("message:{tree.receive(endpoint) ?? panic("receive")}")
+    tree.stop() ?? panic("stop")
+}
+`
+// Rust: tests/services_runtime.rs:1789
+ROLLOUT_PINNED_ROLLBACK_OUTPUT :: "handoff:2\nrolled:1\nmessage:queued\n"
+
+// Rust: tests/services_runtime.rs:1815
+STATE_AND_LIFECYCLE_SOURCE :: `
+use core.service as services
+use core.testing as testing
+fn lifecycle_worker() -> {}
+fn run() -> {
+    temp := testing.temp_dir("service-state")
+    snapshot := services.tree("snapshot")
+    snapshot_store :: Path.from(temp).join("snapshot.state").to_string()
+    snapshot_authority :: services.state_store(snapshot_store) ?? panic("snapshot store")
+    snapshot.set_state_snapshot(snapshot_authority, "snapshot", 1, "reversible") ?? panic("snapshot state")
+    snapshot_worker :: snapshot.worker("worker", lifecycle_worker, capacity: 2) ?? panic("snapshot worker")
+    snapshot.start() ?? panic("snapshot start")
+    snapshot.commit_snapshot("state-v1") ?? panic("snapshot commit")
+    restored :: snapshot.restore_snapshot() ?? panic("snapshot restore")
+    print("snapshot:{restored}")
+    snapshot.stop() ?? panic("snapshot stop")
+
+    events := services.tree("events")
+    event_store :: Path.from(temp).join("events.state").to_string()
+    event_authority :: services.state_store(event_store) ?? panic("event store")
+    events.set_state_event_log(event_authority, "events", 1, "reversible") ?? panic("event state")
+    event_worker :: events.worker("worker", lifecycle_worker, capacity: 2) ?? panic("event worker")
+    events.start() ?? panic("event start")
+    events.append_event("first") ?? panic("event one")
+    events.append_event("second") ?? panic("event two")
+    print("events:{events.replay_events()}")
+    print("event_count:{events.event_count()}")
+    events.stop() ?? panic("event stop")
+
+    workflow := services.tree("workflow")
+    workflow_store_path :: Path.from(temp).join("workflow.state").to_string()
+    workflow_store :: services.state_store(workflow_store_path) ?? panic("workflow store")
+    workflow.set_state_event_log(workflow_store, "workflow-events", 1, "reversible") ?? panic("workflow state")
+    workflow_worker :: workflow.worker("worker", lifecycle_worker, capacity: 2) ?? panic("workflow worker")
+    workflow.start() ?? panic("workflow start")
+    run_id :: workflow.workflow_start("checkout", 1) ?? panic("workflow id")
+    same_run :: workflow.workflow_start("checkout", 1) ?? panic("workflow duplicate")
+    workflow.workflow_step(run_id, "charge") ?? panic("workflow step")
+    history :: workflow.workflow_history(run_id) ?? panic("workflow history")
+    print("workflow:{run_id}:{same_run}:{history}")
+    versioned :: workflow.workflow_start("checkout", 2)
+    if versioned == {
+        .Ok(_) -> { print("workflow_version:accepted") }
+        .Err(_) -> { print("workflow_version:rejected") }
+    }
+    workflow.stop() ?? panic("workflow stop")
+
+    cluster := services.tree("cluster")
+    endpoint :: cluster.worker("api", lifecycle_worker, capacity: 2) ?? panic("cluster worker")
+    cluster.start() ?? panic("cluster start")
+    cluster.directory_register("api", endpoint) ?? panic("directory register")
+    cluster.drain_worker(endpoint) ?? panic("cluster drain")
+    handed :: cluster.handoff_generation() ?? panic("handoff")
+    receipt :: cluster.upgrade_receipt() ?? panic("upgrade receipt")
+    current :: cluster.directory_resolve("api") ?? panic("directory resolve")
+    print("generation:{handed}:{cluster.directory_generation()}:{current.show()}:{receipt}")
+    stale :: cluster.send(endpoint, "late")
+    if stale == {
+        .Ok(_) -> { print("stale:accepted") }
+        .Err(_) -> { print("stale:rejected") }
+    }
+    rolled :: cluster.rollback_generation() ?? panic("rollback")
+    print("rollback:{rolled}:{cluster.directory_generation()}")
+    cluster.chaos_fail() ?? panic("chaos")
+    print(&cluster.observe())
+    cluster.stop() ?? panic("cluster stop")
+}
+`
+
+// Rust: tests/services_runtime.rs:1913-1921
+// Durable delivery and event-state framing must remain in separate files on one tree.
+DURABLE_PLUS_EVENT_LOG_SOURCE :: `
+use core.service as services
+use core.testing as testing
+fn durable_worker() -> {}
+fn run() -> {
+    tree := services.tree("app")
+    tree.set_delivery(services.delivery_durable()) ?? panic("delivery")
+    temp := testing.temp_dir("services-delivery-eventlog")
+    store_path :: Path.from(temp).join("state.log").to_string()
+    store :: services.state_store(store_path) ?? panic("state store")
+    tree.set_state_event_log(store, "app-events", 1, "reversible") ?? panic("state")
+    worker :: tree.worker("a", durable_worker, capacity: 4) ?? panic("worker")
+    tree.start() ?? panic("start")
+    first :: tree.send_durable(worker, "ping", key: "k1") ?? panic("durable send")
+    first.status() ?? panic("first status")
+    tree.append_event("after-durable-send") ?? panic("append after durable send")
+    second :: tree.send_durable(worker, "pong", key: "k2") ?? panic("second durable send")
+    second.status() ?? panic("second status")
+    tree.append_event("after-second-send") ?? panic("append after second send")
+    print("events:{tree.event_count()}")
+}
+`
+
+// Rust: tests/services_runtime.rs:1969-1973
+// Magic/adapter/schema framing must produce typed refusal of untrusted stores.
+STATE_ADAPTER_SOURCE :: `
+use core.files as files
+use core.service as services
+use core.testing as testing
+fn adapter_worker() -> {}
+fn run() -> {
+    temp := testing.temp_dir("services-state-adapters")
+    snapshot_path :: Path.from(temp).join("snapshot.log").to_string()
+    snap_tree := services.tree("snap")
+    snap_store :: services.state_store(snapshot_path) ?? panic("snapshot store")
+    snap_tree.set_state_snapshot(snap_store, "app-state", 1, "reversible") ?? panic("snapshot adapter")
+    _snap_worker :: snap_tree.worker("a", adapter_worker, capacity: 2) ?? panic("snapshot worker")
+    snap_tree.start() ?? panic("snapshot start")
+    snap_tree.commit_snapshot("state-v1") ?? panic("commit")
+    print("restored:{snap_tree.restore_snapshot() ?? panic("restore")}")
+
+    event_path :: Path.from(temp).join("events.log").to_string()
+    log_tree := services.tree("log")
+    log_store :: services.state_store(event_path) ?? panic("event store")
+    log_tree.set_state_event_log(log_store, "app-events", 1, "reversible") ?? panic("event adapter")
+    _log_worker :: log_tree.worker("a", adapter_worker, capacity: 2) ?? panic("event worker")
+    log_tree.start() ?? panic("event start")
+    log_tree.append_event("first") ?? panic("first event")
+    log_tree.append_event("second") ?? panic("second event")
+    print("replay:{log_tree.replay_events()}")
+    files.write(snapshot_path, "not a service state store") ?? panic("corrupt write")
+    corrupted :: snap_tree.restore_snapshot()
+    if corrupted == {
+        .Ok(_) -> { print("corrupt:accepted") }
+        .Err(_) -> { print("corrupt:rejected") }
+    }
+}
+`
+
+// Tests Rust1750-2026 live in services_runtimeTests.jet.
+// Rust: tests/services_runtime.rs:2039-2044
+// A state adapter forces upgrade to copy the store and rollback to read that copy.
+ROLLBACK_WITH_STATE_SOURCE :: `
+use core.sys as env
+use core.service as services
+fn rollback_worker() -> {}
+fn run() -> {
+    store_path :: env.get("JET_SERVICE_ROLLBACK_STORE") ?? panic("store")
+    policy :: env.get("JET_SERVICE_ROLLBACK_POLICY") ?? panic("policy")
+    tree := services.tree("cluster")
+    store :: services.state_store(store_path) ?? panic("state store")
+    tree.set_state_event_log(store, "cluster-events", 1, policy) ?? panic("state")
+    endpoint :: tree.worker("api", rollback_worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.append_event("before-upgrade") ?? panic("append")
+    tree.directory_register("api", endpoint) ?? panic("register")
+    tree.drain_worker(endpoint) ?? panic("drain")
+    tree.handoff_generation() ?? panic("handoff")
+    receipt :: tree.upgrade_receipt() ?? panic("receipt")
+    print("receipt:{receipt}")
+    tree.append_event("after-upgrade") ?? panic("append after")
+    rolled :: tree.rollback_generation()
+    if rolled == {
+        .Ok(generation) -> {
+            events :: tree.replay_events()
+            print("rolled:{generation}:{events}")
+        }
+        .Err(_) -> { print("rolled:refused") }
+    }
+    tree.stop() ?? panic("stop")
+}
+`
+
+// Rust: tests/services_runtime.rs:2077
+fn run_rollback_process(bin: &OSPath, store: &OSPath, policy: String) -> (Bool, String, String) {
+    output :: Command.new(bin).env("JET_SERVICE_ROLLBACK_STORE", store)
+        .env("JET_SERVICE_ROLLBACK_POLICY", policy).output().unwrap()
+    (output.status.success(), String.from_utf8_lossy(output.stdout).into_owned(), String.from_utf8_lossy(output.stderr).into_owned())
+}
+
+// Rust: tests/services_runtime.rs:2136
+PARTITION_RECONCILE_SOURCE :: include_str("../Examples/features/tooling/service_partition_reconcile.jet")
+
+// Rust: tests/services_runtime.rs:2199
+DURABLE_LIFECYCLE_MATRIX_SOURCE :: `
+use core.service as service
+use core.testing as testing
+use core.time as time
+fn worker() -[]> {}
+fn state_name(delivery: ^Delivery) -> String {
+    state :: delivery.status() ?? panic("status")
+    if state == {
+        .Pending -> { return "Pending" }
+        .Accepted -> { return "Accepted" }
+        .Delivering -> { return "Delivering" }
+        .Delivered -> { return "Delivered" }
+        .DeadLettered -> { return "DeadLettered" }
+        .Cancelled -> { return "Cancelled" }
+    }
+    return "unknown"
+}
+fn run() -> {
+    temp := testing.temp_dir("durable-lifecycle-matrix")
+    delivery_path :: Path.from(temp).join("delivery.log").to_string()
+    state_path :: Path.from(temp).join("state.log").to_string()
+    retention :: Duration.seconds(60) ?? panic("retention")
+    runtime := service.runtime(delivery_path, retention: retention)
+    tree := service.tree("lifecycle-matrix")
+    tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    state :: service.state_store(state_path) ?? panic("state store")
+    tree.set_state_event_log(state, "lifecycle-events", 1, "reversible") ?? panic("state")
+    endpoint :: tree.worker("api", worker, capacity: 2) ?? panic("worker")
+    tree.start() ?? panic("start")
+    accepted :: runtime.send(endpoint, "accepted", key: "same") ?? panic("accept")
+    accepted_state :: state_name(~accepted)
+    print("accept:{accepted_state}")
+    duplicate :: runtime.send(endpoint, "accepted", key: "same") ?? panic("duplicate")
+    duplicate_id :: (~duplicate).show()
+    accepted_id :: (~accepted).show()
+    duplicate_state :: state_name(~duplicate)
+    print("duplicate:{duplicate_id == accepted_id}:{duplicate_state}")
+    conflict :: runtime.send(endpoint, "different", key: "same")
+    if conflict == {
+        .Ok(delivery) -> {
+            delivery.cancel() ?? panic("unexpected conflict")
+            print("conflict:accepted")
+        }
+        .Err(_) -> { print("conflict:Policy") }
+    }
+    delivered :: tree.receive(endpoint) ?? panic("deliver")
+    print("delivered:{delivered}")
+    runtime.commit(accepted) ?? panic("commit")
+    retained :: runtime.retain(duplicate) ?? panic("retain")
+    retained_receipt :: (~retained).receipt() ?? panic("retained receipt")
+    retained_text :: "{retained_receipt}"
+    retained_events :: (~retained).events() ?? panic("retained events")
+    retention_kept := retained_text.contains("retention_until=-1") == false
+    retained_state :: state_name(^retained)
+    print("retention:{retention_kept}:{retained_events.len()}:{retained_state}")
+
+    retry_source :: runtime.send(endpoint, "retry", key: "retry") ?? panic("retry source")
+    retry_first :: tree.receive(endpoint) ?? panic("retry first")
+    print("retry_first:{retry_first}")
+    retry :: runtime.retry(retry_source) ?? panic("retry")
+    retry_receipt :: (~retry).receipt() ?? panic("retry receipt")
+    retry_text :: "{retry_receipt}"
+    retry_events :: (~retry).events() ?? panic("retry events")
+    retried := retry_text.contains("attempts=1")
+    retry_state :: state_name(~retry)
+    print("retry_state:{retry_state}:{retried}:{retry_events.len()}")
+    retry_second :: tree.receive(endpoint) ?? panic("retry second")
+    print("retry_second:{retry_second}")
+    retry_copy :: ~retry
+    runtime.commit(retry) ?? panic("retry commit")
+    retry_done :: state_name(^retry_copy)
+    print("retry_done:{retry_done}")
+
+    cancelled_handle :: runtime.send(endpoint, "cancel", key: "cancel") ?? panic("cancel source")
+    cancelled :: cancelled_handle.cancel() ?? panic("cancel")
+    cancel_state :: state_name(^cancelled)
+    print("cancel:{cancel_state}")
+    dead_handle :: runtime.send(endpoint, "dead", key: "dead") ?? panic("dead source")
+    dead :: runtime.dead_letter(dead_handle) ?? panic("dead letter")
+    dead_state :: state_name(^dead)
+    print("dead:{dead_state}")
+    short_runtime := service.runtime(delivery_path, retention: Duration.milliseconds(1) ?? panic("short retention"))
+    expiring :: short_runtime.send(endpoint, "expire", key: "expire") ?? panic("expire source")
+    time.sleep(Duration.milliseconds(10) ?? panic("sleep"))
+    expiry_events :: (~expiring).events() ?? panic("expiry events")
+    expiry_state :: state_name(^expiring)
+    print("expiry:{expiry_state}:{expiry_events.len()}")
+
+    partition_source :: runtime.send(endpoint, "partition", key: "partition") ?? panic("partition source")
+    tree.partition_worker(endpoint) ?? panic("partition")
+    partition_retry :: runtime.retry(partition_source)
+    if partition_retry == {
+        .Ok(delivery) -> {
+            delivery.cancel() ?? panic("unexpected partition retry")
+            print("partition:accepted")
+        }
+        .Err(_) -> { print("partition:Partitioned") }
+    }
+    tree.reconcile_worker(endpoint) ?? panic("reconcile")
+    recovered :: runtime.send(endpoint, "partition", key: "partition") ?? panic("partition recovery")
+    recovered_state :: state_name(~recovered)
+    print("partition_recovery:{recovered_state}")
+    partition_delivery :: tree.receive(endpoint) ?? panic("partition delivery")
+    print("partition_delivery:{partition_delivery}")
+    recovered_copy :: ~recovered
+    runtime.commit(recovered) ?? panic("partition commit")
+    recovered_events :: (~recovered_copy).events() ?? panic("recovered events")
+    recovered_state_done :: state_name(^recovered_copy)
+    print("partition_done:{recovered_state_done}:{recovered_events.len()}")
+
+    foreign := service.tree("foreign")
+    foreign_endpoint :: foreign.worker("api", worker, capacity: 1) ?? panic("foreign worker")
+    foreign.start() ?? panic("foreign start")
+    revoked :: tree.send_durable(foreign_endpoint, "revoked", key: "revoked")
+    if revoked == {
+        .Ok(delivery) -> {
+            delivery.cancel() ?? panic("unexpected revoked delivery")
+            print("revoked:accepted")
+        }
+        .Err(_) -> { print("revoked:Revoked") }
+    }
+    foreign.stop() ?? panic("foreign stop")
+    tree.stop() ?? panic("stop")
+}
+`
+
+// Rust: tests/services_runtime.rs:2341
+DURABLE_CRASH_REPLAY_SOURCE :: `
+use core.service as service
+use core.sys as env
+fn worker() -[]> {}
+fn state_name(delivery: ^Delivery) -> String {
+    state :: delivery.status() ?? panic("status")
+    if state == {
+        .Pending -> { return "Pending" }
+        .Accepted -> { return "Accepted" }
+        .Delivering -> { return "Delivering" }
+        .Delivered -> { return "Delivered" }
+        .DeadLettered -> { return "DeadLettered" }
+        .Cancelled -> { return "Cancelled" }
+    }
+    return "unknown"
+}
+fn run() -> {
+    store :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    retention :: Duration.seconds(60) ?? panic("retention")
+    runtime := service.runtime(store, retention: retention)
+    tree := service.tree("durable-crash")
+    tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    if phase == "accept" {
+        accepted :: runtime.send(endpoint, "crash", key: "crash") ?? panic("accept")
+        id :: accepted.show()
+        print("accepted:{id}")
+    } else if phase == "deliver" {
+        delivery :: runtime.send(endpoint, "crash", key: "crash") ?? panic("deliver lookup")
+        id :: (~delivery).show()
+        state :: state_name(^delivery)
+        print("before:{id}:{state}")
+        received :: tree.receive(endpoint) ?? panic("receive")
+        print("received:{received}")
+        print("crash_window:open")
+    } else {
+        recovered :: runtime.send(endpoint, "crash", key: "crash") ?? panic("recover lookup")
+        recovered_id :: (~recovered).show()
+        recovered_state :: state_name(~recovered)
+        print("recovered:{recovered_id}:{recovered_state}")
+        retry :: runtime.retry(recovered) ?? panic("recover retry")
+        retry_id :: (~retry).show()
+        retry_state :: state_name(~retry)
+        retry_copy :: ~retry
+        print("retry:{retry_id}:{retry_state}")
+        received :: tree.receive(endpoint) ?? panic("replay receive")
+        print("received:{received}")
+        runtime.commit(retry) ?? panic("replay commit")
+        history :: (~retry_copy).events() ?? panic("replay history")
+        replayed_state :: state_name(^retry_copy)
+        print("replayed:{replayed_state}:{history.len()}")
+        print("same_identity:{recovered_id == retry_id}")
+    }
+}
+`
+// Tests Rust2093-2426 live in services_runtimeTests.jet.

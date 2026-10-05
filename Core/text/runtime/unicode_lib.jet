@@ -1,13 +1,7 @@
-// PORT-PENDING 2179 crates-jet-unicode-src-lib: crates/jet-unicode/src/lib.rs:1-9
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! The one compiled copy of Jet's generated Unicode tables.
-//RS //!
-//RS //! The AOT prelude embeds the same file as text; every in-binary host
-//RS //! (jet-foundation, the comptime evaluator, the JIT hosts) reads these
-//RS //! statics instead of compiling its own copy. The file never changes between
-//RS //! Unicode releases, so this leaf crate stays cached across rebuilds.
-//RS 
-//RS include!("../../jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs");
-//RS 
-// END-PORT-PENDING 2179 crates/jet-unicode/src/lib.rs:1-9
+// The one retained copy of Jet's generated Unicode tables.
+// Foundation, comptime and native hosts read the canonical immutable assets;
+// no host-local table copy or generated-Rust include is compiled here.
+// Rust: crates/jet-unicode/src/lib.rs:8
+use core.text.runtime.top_unicode_tables.[UNICODE_VERSION]
+use core.text.runtime.assets.*
 

@@ -228,7 +228,7 @@ use std.env as env
     root :: tests.common.unique_tmp("jet_service_workflow_wait_effects")
     fs.create_dir_all(&root).unwrap()
     entry :: root.join("main.jet")
-    fs.write(&entry, """
+    fs.write(&entry, `
 fn time_wait(workflow: ServiceWorkflow, duration: Duration) -[Time]> {
     workflow.sleep(duration) ?? return
 }
@@ -236,8 +236,8 @@ fn activity_wait(workflow: ServiceWorkflow) -[IO]> {
     workflow.activity("charge", "charge-1") ?? return
     workflow.all(["charge-1"]) ?? return
 }
-fn run() {}
-""").unwrap()
+fn run() -> {}
+`).unwrap()
     (diagnostics, _, facts) :: jet.Driver.check_file_with_effect_facts(entry.to_str().unwrap(), None, false)
     assert(!diagnostics.iter().any(diagnostic -> diagnostic.severity == jet.Diagnostics.Severity.Error),
         "typed workflow effects should satisfy their declared rows: {diagnostics}")
@@ -328,4 +328,230 @@ fn run() {}
     (code, stdout, stderr) :: interpreter_run("services_drain_handoff_interpreter", DRAIN_HANDOFF_SOURCE)
     assert_eq(code, 0, "interpreter run failed: {stderr}")
     assert_eq(stdout, DRAIN_HANDOFF_OUTPUT)
+}
+
+// Rust: tests/services_runtime.rs:1426
+#Test("service_drain_consumes_in_flight_durable_receipts_before_handoff_aot") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("services_drain_durable", DRAIN_DURABLE_SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, DRAIN_DURABLE_OUTPUT)
+}
+// Rust: tests/services_runtime.rs:1436
+#Test("service_drain_consumes_in_flight_durable_receipts_before_handoff_default_run") {
+    (code, stdout, stderr) :: run_default_multi("services_drain_durable_jit", "main.jet", [("main.jet", DRAIN_DURABLE_SOURCE)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, DRAIN_DURABLE_OUTPUT)
+}
+
+// Rust: tests/services_runtime.rs:1495
+#Test("runtime_receipt_pins_pending_shard_across_handoff_aot") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("services_runtime_handoff_pending", RUNTIME_HANDOFF_PENDING_SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, RUNTIME_HANDOFF_PENDING_OUTPUT)
+}
+// Rust: tests/services_runtime.rs:1508
+#Test("runtime_receipt_pins_pending_shard_across_handoff_default_run") {
+    (code, stdout, stderr) :: run_default_multi("services_runtime_handoff_pending_jit", "main.jet", [("main.jet", RUNTIME_HANDOFF_PENDING_SOURCE)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, RUNTIME_HANDOFF_PENDING_OUTPUT)
+}
+// Rust: tests/services_runtime.rs:1519
+#Test("runtime_receipt_pins_pending_shard_across_handoff_interpreter") {
+    (code, stdout, stderr) :: interpreter_run("services_runtime_handoff_pending_interpreter", RUNTIME_HANDOFF_PENDING_SOURCE)
+    assert_eq(code, 0, "interpreter run failed: {stderr}")
+    assert_eq(stdout, RUNTIME_HANDOFF_PENDING_OUTPUT)
+}
+
+// Rust: tests/services_runtime.rs:1561
+#Test("service_empty_drain_preserves_durable_receipts_aot") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("services_drain_empty_durable", DRAIN_EMPTY_DURABLE_SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, DRAIN_EMPTY_DURABLE_OUTPUT)
+}
+// Rust: tests/services_runtime.rs:1571
+#Test("service_empty_drain_preserves_durable_receipts_default_run") {
+    (code, stdout, stderr) :: run_default_multi("services_drain_empty_durable_jit", "main.jet", [("main.jet", DRAIN_EMPTY_DURABLE_SOURCE)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, DRAIN_EMPTY_DURABLE_OUTPUT)
+}
+
+// Rust: tests/services_runtime.rs:1623
+#Test("durable_retry_is_the_only_explicit_redelivery_aot") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("services_durable_retry", DURABLE_RETRY_SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, DURABLE_RETRY_OUTPUT)
+}
+// Rust: tests/services_runtime.rs:1633
+#Test("durable_retry_is_the_only_explicit_redelivery_default_run") {
+    (code, stdout, stderr) :: run_default_multi("services_durable_retry_jit", "main.jet", [("main.jet", DURABLE_RETRY_SOURCE)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, DURABLE_RETRY_OUTPUT)
+}
+// Rust: tests/services_runtime.rs:1644
+#Test("durable_retry_is_the_only_explicit_redelivery_interpreter") {
+    (code, stdout, stderr) :: interpreter_run("services_durable_retry_interpreter", DURABLE_RETRY_SOURCE)
+    assert_eq(code, 0, "interpreter run failed: {stderr}")
+    assert_eq(stdout, DURABLE_RETRY_OUTPUT)
+}
+
+// Rust: tests/services_runtime.rs:1687
+#Test("tree_durable_send_during_drain_is_rejected_before_admission_aot") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("services_tree_drain_reject", TREE_DRAIN_REJECT_SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, TREE_DRAIN_REJECT_OUTPUT)
+}
+// Rust: tests/services_runtime.rs:1697
+#Test("tree_durable_send_during_drain_is_rejected_before_admission_default_run") {
+    (code, stdout, stderr) :: run_default_multi("services_tree_drain_reject_jit", "main.jet", [("main.jet", TREE_DRAIN_REJECT_SOURCE)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, TREE_DRAIN_REJECT_OUTPUT)
+}
+// Rust: tests/services_runtime.rs:1708
+#Test("tree_durable_send_during_drain_is_rejected_before_admission_interpreter") {
+    (code, stdout, stderr) :: interpreter_run("services_tree_drain_reject_interpreter", TREE_DRAIN_REJECT_SOURCE)
+    assert_eq(code, 0, "interpreter run failed: {stderr}")
+    assert_eq(stdout, TREE_DRAIN_REJECT_OUTPUT)
+}
+
+// Rust: tests/services_runtime.rs:1750
+#Test("service_rollout_rollback_restores_pre_handoff_state_aot") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("services_rollout_rollback", ROLLOUT_ROLLBACK_SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, ROLLOUT_ROLLBACK_OUTPUT)
+}
+// Rust: tests/services_runtime.rs:1760
+#Test("service_rollout_rollback_restores_pre_handoff_state_default_run") {
+    (code, stdout, stderr) :: run_default_multi("services_rollout_rollback_jit", "main.jet", [("main.jet", ROLLOUT_ROLLBACK_SOURCE)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, ROLLOUT_ROLLBACK_OUTPUT)
+}
+// Rust: tests/services_runtime.rs:1792
+#Test("service_rollout_rollback_restores_pinned_shard_aot") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("services_rollout_pinned_rollback", ROLLOUT_PINNED_ROLLBACK_SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, ROLLOUT_PINNED_ROLLBACK_OUTPUT)
+}
+// Rust: tests/services_runtime.rs:1805
+#Test("service_rollout_rollback_restores_pinned_shard_default_run") {
+    (code, stdout, stderr) :: run_default_multi("services_rollout_pinned_rollback_jit", "main.jet", [("main.jet", ROLLOUT_PINNED_ROLLBACK_SOURCE)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, ROLLOUT_PINNED_ROLLBACK_OUTPUT)
+}
+// Rust: tests/services_runtime.rs:1887
+#Test("services_state_workflow_identity_and_upgrade_are_real_aot_paths") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("services_state_lifecycle", STATE_AND_LIFECYCLE_SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, "snapshot:state-v1\nevents:first|second\nevent_count:2\nworkflow:1:1:start@v1|step:charge\nworkflow_version:rejected\ngeneration:2:2:Endpoint(cluster/api@g2):ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=)\nstale:rejected\nrollback:1:1\nObserve(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=1, draining=0, partitions=0, rollback=false, workflows=0,statuses={{running:0,paused:0,cancel_requested:0}},outcomes={{pending:0,finished:0,panicked:0,cancelled:0,deadline_blown:0}})\n")
+}
+// Rust: tests/services_runtime.rs:1900
+#Test("services_state_workflow_identity_and_upgrade_match_default_run") {
+    (code, stdout, stderr) :: run_default_multi("services_state_lifecycle_jit", "main.jet", [("main.jet", STATE_AND_LIFECYCLE_SOURCE)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, "snapshot:state-v1\nevents:first|second\nevent_count:2\nworkflow:1:1:start@v1|step:charge\nworkflow_version:rejected\ngeneration:2:2:Endpoint(cluster/api@g2):ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=)\nstale:rejected\nrollback:1:1\nObserve(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=1, draining=0, partitions=0, rollback=false, workflows=0,statuses={{running:0,paused:0,cancel_requested:0}},outcomes={{pending:0,finished:0,panicked:0,cancelled:0,deadline_blown:0}})\n")
+}
+// Rust: tests/services_runtime.rs:1949
+#Test("durable_delivery_does_not_corrupt_the_event_log_aot") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("services_durable_eventlog", DURABLE_PLUS_EVENT_LOG_SOURCE)
+    assert_eq(code, 0, "durable send beside an event log must not fail")
+    assert_eq(stdout, "events:2\n")
+}
+// Rust: tests/services_runtime.rs:1959
+#Test("durable_delivery_does_not_corrupt_the_event_log_default_run") {
+    (code, stdout, stderr) :: run_default_multi("services_durable_eventlog_jit", "main.jet", [("main.jet", DURABLE_PLUS_EVENT_LOG_SOURCE)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, "events:2\n")
+}
+// Rust: tests/services_runtime.rs:2013
+#Test("state_adapters_reopen_and_reject_corrupt_stores_aot") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("services_state_adapters", STATE_ADAPTER_SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, "restored:state-v1\nreplay:first|second\ncorrupt:rejected\n")
+}
+// Rust: tests/services_runtime.rs:2026
+#Test("state_adapters_reopen_and_reject_corrupt_stores_default_run") {
+    (code, stdout, stderr) :: run_default_multi("services_state_adapters_jit", "main.jet", [("main.jet", STATE_ADAPTER_SOURCE)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, "restored:state-v1\nreplay:first|second\ncorrupt:rejected\n")
+}
+
+// Rust: tests/services_runtime.rs:2090-2093
+// A reversible upgrade restores the real copied-aside durable store.
+#Test("a_reversible_migration_rolls_the_state_store_back") {
+    if !have_rustc() { return }
+    (dir, bin) :: compile_restart_binary(ROLLBACK_WITH_STATE_SOURCE)
+    store :: dir.join("cluster.log")
+    (ok, stdout, stderr) :: run_rollback_process(&bin, &store, "reversible")
+    assert(ok, "reversible rollback run failed: {stderr}")
+    assert(stdout.contains("rollback_available=true"), "a reversible migration must offer a rollback: {stdout}")
+    assert(stdout.contains("rolled:1:before-upgrade"), "rolling back must restore the store as it stood before the upgrade: {stdout}")
+    assert(!stdout.contains("after-upgrade"), "the event written after the upgrade must not survive the rollback: {stdout}")
+}
+// Rust: tests/services_runtime.rs:2115-2118
+// Forward-only refusal must be explicit in the receipt, never a silent no-op.
+#Test("a_forward_only_migration_refuses_to_roll_back") {
+    if !have_rustc() { return }
+    (dir, bin) :: compile_restart_binary(ROLLBACK_WITH_STATE_SOURCE)
+    store :: dir.join("cluster.log")
+    (ok, stdout, stderr) :: run_rollback_process(&bin, &store, "forward_only")
+    assert(ok, "forward-only run failed: {stderr}")
+    assert(stdout.contains("migration=forward_only"), "the receipt must name the policy the adapter was opened under: {stdout}")
+    assert(stdout.contains("rollback_available=false"), "a forward-only migration must not offer a rollback: {stdout}")
+}
+// Rust: tests/services_runtime.rs:2140
+#Test("grouped_durable_partition_reconciles_after_handoff") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("services_partition_reconcile", PARTITION_RECONCILE_SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, "foreign:rejected\ndrained:ok\nexpired:rejected\npartition_route:rejected\npartitioned:ok\nhandoff:2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=api)\nreconciled:g2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\nrejoined:rejoined\n")
+}
+// Rust: tests/services_runtime.rs:2153
+#Test("grouped_durable_partition_reconciles_under_default_run") {
+    (code, stdout, stderr) :: run_default_multi("services_partition_reconcile_jit", "main.jet", [("main.jet", PARTITION_RECONCILE_SOURCE)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, "foreign:rejected\ndrained:ok\nexpired:rejected\npartition_route:rejected\npartitioned:ok\nhandoff:2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=api)\nreconciled:g2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\nrejoined:rejoined\n")
+}
+// Rust: tests/services_runtime.rs:2167
+#Test("grouped_durable_partition_reconciles_in_interpreter") {
+    (code, stdout, stderr) :: interpreter_run("services_partition_reconcile_interpreter", PARTITION_RECONCILE_SOURCE)
+    assert_eq(code, 0, "interpreter service partition run failed: {stderr}")
+    assert_eq(stdout, "foreign:rejected\ndrained:ok\nexpired:rejected\npartition_route:rejected\npartitioned:ok\nhandoff:2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=api)\nreconciled:g2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\nrejoined:rejoined\n")
+}
+// Rust: tests/services_runtime.rs:2182-2186
+// Unknown migration policy must refuse, not silently guess a rollback policy.
+#Test("an_unknown_migration_policy_is_refused") {
+    if !have_rustc() { return }
+    (dir, bin) :: compile_restart_binary(ROLLBACK_WITH_STATE_SOURCE)
+    store :: dir.join("cluster.log")
+    (ok, stdout, stderr) :: run_rollback_process(&bin, &store, "whenever")
+    assert(!ok, "an unknown migration policy must stop the program: {stdout}{stderr}")
+}
+// Rust: tests/services_runtime.rs:2333
+#Test("durable_lifecycle_matrix_covers_all_delivery_scenarios_on_all_tiers") {
+    tests.tir_support.assert_tiers_agree("durable_lifecycle_matrix", DURABLE_LIFECYCLE_MATRIX_SOURCE,
+        "accept:Accepted\nduplicate:true:Accepted\nconflict:Policy\ndelivered:accepted\nretention:true:3:Delivered\nretry_first:retry\nretry_state:Accepted:true:3\nretry_second:retry\nretry_done:Delivered\ncancel:Cancelled\ndead:DeadLettered\nexpiry:DeadLettered:2\npartition:Partitioned\npartition_recovery:Accepted\npartition_delivery:partition\npartition_done:Delivered:3\nrevoked:Revoked\n")
+}
+// Rust: tests/services_runtime.rs:2404
+#Test("durable_lifecycle_crash_window_recovers_and_replays_one_identity") {
+    if !have_rustc() { return }
+    (dir, bin) :: compile_restart_binary(DURABLE_CRASH_REPLAY_SOURCE)
+    store :: dir.join("crash.log")
+    accepted :: run_restart_process(&bin, &store, "accept", None)
+    assert(accepted.starts_with("accepted:Delivery(svc-"), accepted)
+    delivered :: run_restart_default_process(&dir, &store, "deliver", None)
+    assert(delivered.starts_with("before:Delivery(svc-"), delivered)
+    assert(delivered.contains(":Accepted\nreceived:crash\ncrash_window:open\n"))
+    recovered :: run_restart_process(&bin, &store, "recover", None)
+    assert_eq(recovered.lines().last(), Some("same_identity:true"), "recovery changed the durable identity: {recovered}")
+    assert(recovered.contains("recovered:Delivery(svc-") && recovered.contains(":Delivering\nretry:Accepted\nreceived:crash\nreplayed:Delivered:5\n"),
+        "crash-window replay did not rebuild the signed history: {recovered}")
 }
