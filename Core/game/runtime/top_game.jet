@@ -34,8 +34,8 @@ struct GameState {
 impl GameState {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:23
     fn new(scene_name: String) -> GameState {
-        root :: JetGameAssetRootIdentity.new("game", ".").expect("the built-in game asset root is valid")
-        asset_roots :: JetGameAssetRootSet.new([^root]).expect("the built-in game asset root is unique")
+        root :: JetGameAssetRootIdentity.new("game", ".") ?? panic("the built-in game asset root is valid")
+        asset_roots :: JetGameAssetRootSet.new([^root]) ?? panic("the built-in game asset root is unique")
         dev_session :: if JET_GAME_DEBUG_DATA_ENABLED {
             fallback_source :: if scene_name.is_empty() { "game" } else { scene_name }
             session :: jet_game_identity_from_env("JET_DEVTOOLS_RELAY_SESSION_ID", "game:{scene_name}")
@@ -43,11 +43,10 @@ impl GameState {
             build :: jet_game_identity_from_env("JET_DEVTOOLS_RELAY_BUILD_ID", "runtime")
             revision :: jet_game_identity_from_env("JET_DEVTOOLS_RELAY_REVISION", "runtime")
             identity :: GameDevRunIdentity.new(^session, ^source, ^build, ^revision)
-            dev_session := GameDevSession.new_with_policy(^identity, 0, GameDevPolicy.new(JET_GAME_DEBUG_DATA_ENABLED))
-                .expect("the built-in game dev session is valid")
+            dev_session := GameDevSession.new_with_policy(^identity, 0, GameDevPolicy.new(JET_GAME_DEBUG_DATA_ENABLED)) ?? panic("the built-in game dev session is valid")
             jet_game_install_devtools_callback()
-            dev_session.register_gameplay_debugger(0, "dev").expect("the built-in gameplay debugger extension is valid")
-            dev_session.configure_asset_roots(asset_roots.clone()).expect("the built-in game asset roots are valid")
+            dev_session.register_gameplay_debugger(0, "dev") ?? panic("the built-in gameplay debugger extension is valid")
+            dev_session.configure_asset_roots(asset_roots.clone()) ?? panic("the built-in game asset roots are valid")
             Val(^dev_session)
         } else { None }
         GameState{assets: [], bindings: [], components: [], asset_bytes: 0, asset_roots: ^asset_roots,
@@ -259,7 +258,7 @@ fn jet_game_execute_frame_callback(callback: &GameFrameCallback, frame: GameFram
     if (&callback.schedule) == .Val(schedule) {
         // GATE #4565: kernel primitive
         #Unsafe("check reuse readiness under the native completion mutex after callback execution") {
-            completion :: callback.completion.as_ref().expect("checked game frame schedule has no completion state")
+            completion :: (callback.completion.as_ref() ?? panic("checked game frame schedule has no completion state"))
                 .lock().unwrap_or_else(PoisonError.into_inner)
             completion.assert_reuse_ready(schedule).unwrap_or_else(fn(error) { panic("checked game frame reuse before completion: {error}") })
         }
@@ -388,7 +387,7 @@ fn jet_game_run(scene: &GameScene, replay: &GameReplay?, backend: &GameBackend?,
         measure_frames: I64 :: 600
         total_frames :: warmup_frames + measure_frames
         frame_plan := if measuring {
-            JetGameFrameBudget.with_frame_count(total_frames).expect("the measured game frame plan must be positive")
+            JetGameFrameBudget.with_frame_count(total_frames) ?? panic("the measured game frame plan must be positive")
         } else { backend.frame_budget.clone() }
         out := [String]{}
         if !measuring {
@@ -412,14 +411,13 @@ fn jet_game_run(scene: &GameScene, replay: &GameReplay?, backend: &GameBackend?,
         }
         if JET_GAME_DEBUG_DATA_ENABLED {
             state := scene.assets.state.borrow_mut()
-            dev_session :: state.dev_session.as_mut().expect("development game session must exist when debug data is enabled")
+            dev_session :: state.dev_session.as_mut() ?? panic("development game session must exist when debug data is enabled")
             identity :: dev_session.profiler.identity().clone()
             dev_session.set_trace_context(JetGameTraceContext.new(^identity.session, scene.name.clone(), "runtime",
-                "{backend.renderer}/{backend.audio}/{backend.editor}", 1, 1, "default"))
-                .expect("the game trace context must satisfy the profiler identity")
-            dev_session.dispatch_pending_devtools_controls(0).expect("game devtools command ingress must be valid")
+                "{backend.renderer}/{backend.audio}/{backend.editor}", 1, 1, "default")) ?? panic("the game trace context must satisfy the profiler identity")
+            dev_session.dispatch_pending_devtools_controls(0) ?? panic("game devtools command ingress must be valid")
             if dev_session.phase == GameDevPhase.Editing {
-                dev_session.dispatch_control(0, GameDevControl.Play).expect("the game devtools session must enter Play")
+                dev_session.dispatch_control(0, GameDevControl.Play) ?? panic("the game devtools session must enter Play")
             }
         }
         // Preserve the reference frame_idx independently of the issued plan index.
@@ -431,8 +429,8 @@ fn jet_game_run(scene: &GameScene, replay: &GameReplay?, backend: &GameBackend?,
             loop {
                 admitted :: if JET_GAME_DEBUG_DATA_ENABLED {
                     state := scene.assets.state.borrow_mut()
-                    dev_session :: state.dev_session.as_mut().expect("development game session must exist when debug data is enabled")
-                    dev_session.dispatch_pending_devtools_controls(frame_idx as U64).expect("game devtools command ingress must be valid")
+                    dev_session :: state.dev_session.as_mut() ?? panic("development game session must exist when debug data is enabled")
+                    dev_session.dispatch_pending_devtools_controls(frame_idx as U64) ?? panic("game devtools command ingress must be valid")
                     dev_session.begin_simulation_frame()
                 } else { true }
                 if admitted -> break
@@ -473,40 +471,36 @@ fn jet_game_run(scene: &GameScene, replay: &GameReplay?, backend: &GameBackend?,
                 frame_identity :: JetGameFrameIdentity.new(&scene.name, frame_idx as U64, ^identity.build, ^identity.revision, ^identity.source)
                 sample :: JetGameFrameSample.new(^frame_identity, frame_idx as U64, elapsed_ns, None)
                 state := scene.assets.state.borrow_mut()
-                dev_session :: state.dev_session.as_mut().expect("development game session must exist when debug data is enabled")
+                dev_session :: state.dev_session.as_mut() ?? panic("development game session must exist when debug data is enabled")
                 if dev_session.profiler.profiler().state() == JetGameFrameProfilerState.Running {
-                    dev_session.record_and_publish(sample.into()).expect("the game frame producer must satisfy the profiler identity")
+                    dev_session.record_and_publish(sample.into()) ?? panic("the game frame producer must satisfy the profiler identity")
                     sample_time_ns :: frame_idx as U64
                     event_time_ms :: frame_idx as U64
                     dev_session.publish_overlay_metric(event_time_ms,
-                        JetGameOverlayMetricValue.new(JetGameOverlayMetric.FrameTime, elapsed_ns.min(I64.MAX as U64) as I64, sample_time_ns))
-                        .expect("the game frame metric must publish")
+                        JetGameOverlayMetricValue.new(JetGameOverlayMetric.FrameTime, elapsed_ns.min(I64.MAX as U64) as I64, sample_time_ns)) ?? panic("the game frame metric must publish")
                     dev_session.publish_overlay_metric(event_time_ms,
-                        JetGameOverlayMetricValue.new(JetGameOverlayMetric.DrawCalls, callbacks_count.min(I64.MAX as U64) as I64, sample_time_ns))
-                        .expect("the draw-call metric must publish")
+                        JetGameOverlayMetricValue.new(JetGameOverlayMetric.DrawCalls, callbacks_count.min(I64.MAX as U64) as I64, sample_time_ns)) ?? panic("the draw-call metric must publish")
                     if asset_bytes != 0 {
                         dev_session.publish_overlay_metric(event_time_ms,
-                            JetGameOverlayMetricValue.new(JetGameOverlayMetric.SceneAssetBytes, asset_bytes.min(I64.MAX as U64) as I64, sample_time_ns))
-                            .expect("the scene asset metric must publish")
+                            JetGameOverlayMetricValue.new(JetGameOverlayMetric.SceneAssetBytes, asset_bytes.min(I64.MAX as U64) as I64, sample_time_ns)) ?? panic("the scene asset metric must publish")
                     }
                     if rss != 0 {
                         dev_session.publish_overlay_metric(event_time_ms,
-                            JetGameOverlayMetricValue.new(JetGameOverlayMetric.MemoryHighWater, rss.min(I64.MAX as U64) as I64, sample_time_ns))
-                            .expect("the memory metric must publish")
+                            JetGameOverlayMetricValue.new(JetGameOverlayMetric.MemoryHighWater, rss.min(I64.MAX as U64) as I64, sample_time_ns)) ?? panic("the memory metric must publish")
                     }
                 }
             }
             if JET_GAME_DEBUG_DATA_ENABLED {
                 state := scene.assets.state.borrow_mut()
                 state.dev_session.as_mut().expect("development game session must exist when debug data is enabled")
-                    .finish_simulation_frame(frame_idx as U64, frame_idx as U64).expect("the game frame must satisfy the devtools phase")
+                    .finish_simulation_frame(frame_idx as U64, frame_idx as U64) ?? panic("the game frame must satisfy the devtools phase")
             }
             frame_plan.present()
         }
         if JET_GAME_DEBUG_DATA_ENABLED {
             state := scene.assets.state.borrow_mut()
             state.dev_session.as_mut().expect("development game session must exist when debug data is enabled")
-                .stop(frame_idx as U64, "game run completed").expect("the game run must publish its stopped lifecycle")
+                .stop(frame_idx as U64, "game run completed") ?? panic("the game run must publish its stopped lifecycle")
         }
         if !measuring && frames.is_some() -> out.push("transcript_hash:{transcript.finish()}")
         out.join("\n")
