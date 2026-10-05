@@ -652,7 +652,7 @@ impl JetWebStreamingBoundary {
         &self.check_timestamp(completed_at_ns) ?? return Err(err)
         if identity != self.identity_value -> return &self.reject(.HydrationIdentityMismatch(~self.identity_value, ^identity), completed_at_ns)
         if !self.is_ready() -> return &self.reject(.InvalidLifecycle(self.state_value, "hydration_complete"), completed_at_ns)
-        if self.hydration_identity != Val(identity) -> return &self.reject(.InvalidLifecycle(self.state_value, "hydration_complete_without_start"), completed_at_ns)
+        if self.hydration_identity != identity -> return &self.reject(.InvalidLifecycle(self.state_value, "hydration_complete_without_start"), completed_at_ns)
         timing := self.hydration_value ?? return &self.reject(.InvalidLifecycle(self.state_value, "hydration_complete_without_start"), completed_at_ns)
         &timing.complete(completed_at_ns) ?? return &self.reject(err, completed_at_ns)
         self.hydration_value = Val(timing)
