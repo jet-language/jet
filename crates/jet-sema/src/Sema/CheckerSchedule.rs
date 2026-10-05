@@ -17,7 +17,6 @@
 //! a `#Job`/`#Every` function generates as an ordinary fn.
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Syntax;
 use crate::AST::{
     EveryArg, EverySchedule, EveryScheduleError, Func, Item, JobScope, LoadedModule,
     ProgramBundle,

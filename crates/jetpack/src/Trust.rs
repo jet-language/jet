@@ -678,7 +678,7 @@ fn component_prefix_matches(prefix: &str, subject: &str) -> bool {
 /// Persist a hash grant (the interactive prompt's "yes"). Returns `true` when
 /// the grant is new and `false` when the store already contains it.
 pub fn grant_hash(store: &Path, project_dir: &Path, hash: &str) -> Result<bool, Vec<crate::Diagnostics::Diagnostic>> {
-    jet_driver::Loader::check_project_gate(project_dir, crate::Policy::PolicyKey::TrustGrant, &format!("hash:{hash} -> {}", store.display()))?;
+    jet_driver::Loader::check_project_gate(project_dir, jet_foundation::Policy::PolicyKey::TrustGrant, &format!("hash:{hash} -> {}", store.display()))?;
     let line = format!("{HASH_PREFIX}{hash}");
     if read_lines(store).iter().any(|l| *l == line) {
         return Ok(false);
@@ -689,7 +689,7 @@ pub fn grant_hash(store: &Path, project_dir: &Path, hash: &str) -> Result<bool, 
 
 /// `jetpack config trust add <pattern>`. Returns `false` if already present.
 pub fn add_pattern(store: &Path, project_dir: &Path, pattern: &str) -> Result<bool, Vec<crate::Diagnostics::Diagnostic>> {
-    jet_driver::Loader::check_project_gate(project_dir, crate::Policy::PolicyKey::TrustGrant, &format!("pattern:{pattern} -> {}", store.display()))?;
+    jet_driver::Loader::check_project_gate(project_dir, jet_foundation::Policy::PolicyKey::TrustGrant, &format!("pattern:{pattern} -> {}", store.display()))?;
     let line = format!("{PATTERN_PREFIX}{pattern}");
     if read_lines(store).iter().any(|l| *l == line) {
         return Ok(false);
@@ -701,7 +701,7 @@ pub fn add_pattern(store: &Path, project_dir: &Path, pattern: &str) -> Result<bo
 /// `jet trust grant <selector> [--scope user|repo]`. Returns `false` if the
 /// exact grant already exists.
 pub fn add_grant(store: &Path, project_dir: &Path, grant: &TrustGrant) -> Result<bool, Vec<crate::Diagnostics::Diagnostic>> {
-    jet_driver::Loader::check_project_gate(project_dir, crate::Policy::PolicyKey::TrustGrant, &format!("{} -> {}", grant.key(), store.display()))?;
+    jet_driver::Loader::check_project_gate(project_dir, jet_foundation::Policy::PolicyKey::TrustGrant, &format!("{} -> {}", grant.key(), store.display()))?;
     let line = grant.line();
     if read_lines(store).iter().any(|l| *l == line) {
         return Ok(false);
@@ -946,7 +946,7 @@ pub fn gate_build_identity(
     bypass: bool,
 ) -> Result<(), i32> {
     if bypass {
-        jet_driver::Loader::check_project_gate(project_dir, crate::Policy::PolicyKey::SessionFlag, "--trust")
+        jet_driver::Loader::check_project_gate(project_dir, jet_foundation::Policy::PolicyKey::SessionFlag, "--trust")
             .map_err(|diagnostics| report_gate_failure(theme, diagnostics))?;
     }
     let ci = std::env::var_os("CI").is_some();
@@ -1037,7 +1037,7 @@ fn gate_with_hash(
     lifecycle_hooks: bool,
 ) -> Result<(), i32> {
     if bypass {
-        jet_driver::Loader::check_project_gate(project_dir, crate::Policy::PolicyKey::SessionFlag, "--trust")
+        jet_driver::Loader::check_project_gate(project_dir, jet_foundation::Policy::PolicyKey::SessionFlag, "--trust")
             .map_err(|diagnostics| report_gate_failure(theme, diagnostics))?;
     }
     if !typed && !is_trust_sensitive_ext(refs, !secrets.is_empty()) && !lifecycle_hooks {
@@ -1172,7 +1172,7 @@ pub fn gate_flake(
     bypass: bool,
 ) -> Result<(), i32> {
     if bypass {
-        jet_driver::Loader::check_project_gate(project_dir, crate::Policy::PolicyKey::SessionFlag, "--trust")
+        jet_driver::Loader::check_project_gate(project_dir, jet_foundation::Policy::PolicyKey::SessionFlag, "--trust")
             .map_err(|diagnostics| report_gate_failure(theme, diagnostics))?;
     }
     let content = std::fs::read_to_string(flake_path).unwrap_or_default();
