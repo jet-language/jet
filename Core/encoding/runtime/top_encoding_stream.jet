@@ -522,7 +522,7 @@ impl JSONReader {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:772
     fn read_hex4(self: &JSONReader) -> U16 EncodingError! {
         value := U16{0}
-        for _ in 0..<4 {
+        loop _ in 0..<4 {
             byte :: self.take()? ?? return Err(jet_encoding_error(.Truncated, self.offset, self.line, self.column, "incomplete Unicode escape"))
             digit :: match byte {
                 48..57 -> byte - 48,
@@ -595,7 +595,7 @@ impl JSONReader {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:856
     fn read_literal(self: &JSONReader, tail: View<U8>, event: DataEvent) -> DataEvent EncodingError! {
-        for byte in tail { self.expect_byte(byte, "JSON literal")? }
+        loop byte in tail { self.expect_byte(byte, "JSON literal")? }
         Ok(^event)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:863
@@ -884,7 +884,7 @@ impl JSONWriter {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:1120
     fn quoted_len(self, text: String) -> USize EncodingError! {
         len := USize{0}
-        for ch in text.chars() {
+        loop ch in text.chars() {
             add :: match ch {
                 '"' | '\\' | '\n' | '\r' | '\t' | '\u{08}' | '\u{0c}' -> 2,
                 c if c <= '\u{1f}' -> 6,
@@ -899,7 +899,7 @@ impl JSONWriter {
     fn write_quoted(self: &JSONWriter, text: String) -> EncodingError! {
         _ :: self.quoted_len(text)?
         self.write_bytes("\"".as_bytes())?
-        for ch in text.chars() {
+        loop ch in text.chars() {
             match ch {
                 '"' -> self.write_bytes("\\\"".as_bytes())?,
                 '\\' -> self.write_bytes("\\\\".as_bytes())?,
@@ -1013,7 +1013,7 @@ impl JSONWriter {
         out.push(34)
         // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:1267
         HEX :: "0123456789abcdef".as_bytes()
-        for ch in text.chars() {
+        loop ch in text.chars() {
             match ch {
                 '"' -> out.extend_from_slice("\\\"".as_bytes()),
                 '\\' -> out.extend_from_slice("\\\\".as_bytes()),

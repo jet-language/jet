@@ -38,7 +38,7 @@ fn jet_std_base32_decode(text: &String) -> [U8] Err! {
 fn jet_std_base32hex_decode(text: &String) -> [U8] Err! {
     STANDARD :: b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
     canonical := String.with_capacity(text.len())
-    for ch in text.chars() {
+    loop ch in text.chars() {
         mapped :: match ch {
             '0'..'9' -> STANDARD[Int{U8{ch} - U8{'0'}}]
             'A'..'V' -> STANDARD[Int{U8{ch} - U8{'A'} + U8{10}}]
@@ -77,7 +77,7 @@ fn jet_xml_from_data_tree(value: &jet_std.DataTree) -> jet_xml_pull.Value Err! {
         .Text(value) -> jet_xml_pull.Value.Text(value.clone())
         .Array(values) -> {
             output := []
-            for value in values { output.push(jet_xml_from_data_tree(value)?) }
+            loop value in values { output.push(jet_xml_from_data_tree(value)?) }
             jet_xml_pull.Value.Array(^output)
         }
         .Object(entries) -> {
@@ -371,7 +371,7 @@ fn jet_uuid_sha1(data: &[U8]) -> [U8; 20] {
         for i in 0..16 {
             w[i] = U32.from_be_bytes([chunk[i * 4], chunk[i * 4 + 1], chunk[i * 4 + 2], chunk[i * 4 + 3]])
         }
-        for i in 16..<80 { w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1) }
+        loop i in 16..<80 { w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1) }
         a := h[0]
         b := h[1]
         c := h[2]
