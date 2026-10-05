@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 6104e0a523d3589c895333e32888d975ffca6343dae4cb24bbc9861d677840ad
+// Source SHA-256: 7e587af59d3159b5eab2df421b39544e025bff571a6e8300c269799f3abbd7f3
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -301,7 +301,7 @@ const CORE_MODULE_31_TYPES: &[(&str, CoreLeafKind)] = &[("Address", CoreLeafKind
 const CORE_MODULE_31_DEPENDENCIES: &[&str] = &["core.crypto", "core.crypto.expert", "core.encoding.base64", "core.encoding.hex", "core.net", "core.sys", "core.text"];
 
 const CORE_MODULE_32_MEMBERS: &[&str] = &["DataEvent", "Dyn", "EncodingCause", "EncodingError", "EncodingErrorKind", "EncodingFormat", "EncodingLimits", "Reader", "hex_nibble", "hex_value", "bytes_to_hex", "hex_to_bytes", "wrap32", "HexError"];
-const CORE_MODULE_32_TYPES: &[(&str, CoreLeafKind)] = &[("Dyn", CoreLeafKind::Enum(&["Null", "Bool", "Int", "Float", "Text", "Bytes", "DateTime", "Array", "Object"])), ("EncodingLimits", CoreLeafKind::Plain), ("EncodingError", CoreLeafKind::Plain), ("EncodingCause", CoreLeafKind::Plain), ("EncodingFormat", CoreLeafKind::Enum(&["JSON", "JSONL", "CSV", "TOML", "YAML", "XML", "CBOR"])), ("EncodingErrorKind", CoreLeafKind::Enum(&["Syntax", "Truncated", "Unsupported", "Limit", "IO", "State"])), ("DataEvent", CoreLeafKind::Enum(&["Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "DateTime", "ArrayStart", "ArrayEnd", "ObjectStart", "Key", "ObjectEnd"])), ("Reader", CoreLeafKind::Plain), ("HexError", CoreLeafKind::Plain)];
+const CORE_MODULE_32_TYPES: &[(&str, CoreLeafKind)] = &[("Dyn", CoreLeafKind::Enum(&["Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "DateTime", "Array", "Object"])), ("EncodingLimits", CoreLeafKind::Plain), ("EncodingError", CoreLeafKind::Plain), ("EncodingCause", CoreLeafKind::Plain), ("EncodingFormat", CoreLeafKind::Enum(&["JSON", "JSONL", "CSV", "TOML", "YAML", "XML", "CBOR"])), ("EncodingErrorKind", CoreLeafKind::Enum(&["Syntax", "Truncated", "Unsupported", "Limit", "IO", "State"])), ("DataEvent", CoreLeafKind::Enum(&["Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "DateTime", "ArrayStart", "ArrayEnd", "ObjectStart", "Key", "ObjectEnd"])), ("Reader", CoreLeafKind::Plain), ("HexError", CoreLeafKind::Plain)];
 const CORE_MODULE_32_DEPENDENCIES: &[&str] = &["core"];
 
 const CORE_MODULE_33_MEMBERS: &[&str] = &["decode", "encode", "is_base32", "b32encode", "b32decode", "b32hexencode", "b32hexdecode", "Base32Error"];
