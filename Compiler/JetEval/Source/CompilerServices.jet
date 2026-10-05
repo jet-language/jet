@@ -124,7 +124,10 @@ use jet_lexer.[
     TOKEN_UNIFIED_ARROW,
     TOKEN_UNIT_NUMBER,
     Token,
+    TokenTables,
     lex,
+    token_tables,
+    token_text,
 ]
 use jet_parser.[
     parse_lexed,
@@ -387,11 +390,11 @@ pub fn jet_eval_compiler_services_source_map(source: String) -> JetCompilerServi
     JetCompilerServicesSourceMapFacts{value: value}
 }
 
-fn jet_eval_compiler_services_token_value(token: Token) -> TComptimeValue? {
+fn jet_eval_compiler_services_token_value(tables: TokenTables, token: Token) -> TComptimeValue? {
     kind :: jet_eval_compiler_services_token_kind(token.kind) ?? return None
     TComptimeValue.Struct{type_name: "CompilerToken", fields: [TComptimeField]{
         TComptimeField{name: "kind", value: jet_eval_compiler_services_string(kind)},
-        TComptimeField{name: "text", value: jet_eval_compiler_services_string(token.payload.text)},
+        TComptimeField{name: "text", value: jet_eval_compiler_services_string(token_text(tables, token))},
         TComptimeField{name: "span", value: jet_eval_compiler_services_span(token.span)},
     }}
 }
@@ -399,7 +402,7 @@ fn jet_eval_compiler_services_token_value(token: Token) -> TComptimeValue? {
 fn jet_eval_compiler_services_lex_value(source: String, lexed: Lexed) -> TComptimeValue? {
     tokens := [TComptimeValue]{}
     loop token in lexed.tokens {
-        value :: jet_eval_compiler_services_token_value(token) ?? return None
+        value :: jet_eval_compiler_services_token_value(lexed.tables, token) ?? return None
         &tokens.push(value)
     }
     TComptimeValue.Struct{type_name: "CompilerLexed", fields: [TComptimeField]{
@@ -413,7 +416,7 @@ fn jet_eval_compiler_services_lex_value(source: String, lexed: Lexed) -> TCompti
 pub fn jet_eval_compiler_services_lex(input: JetCompilerServicesSourceInput) -> JetCompilerServicesLexFacts? {
     preparation :: input.preparation ?? return None
     compiler_source := ""
-    lexed := Lexed{tokens: [Token]{}, diagnostics: [Diagnostic]{}}
+    lexed := Lexed{tokens: [Token]{}, tables: token_tables(), diagnostics: [Diagnostic]{}}
     if preparation == {
         .Masked(source) -> {
             compiler_source = source
@@ -586,7 +589,7 @@ pub fn jet_eval_compiler_services_parse(input: JetCompilerServicesSourceInput) -
         lex_facts.lexed.diagnostics.len() > 0 -> {
             ParseResult{program: ast_program(), diagnostics: lex_facts.lexed.diagnostics}
         }
-        else -> parse_lexed(lex_facts.lexed)
+        else -> parse_lexed(~lex_facts.lexed)
     }
     value := jet_eval_compiler_services_syntax_value(input.source, parsed)
     Val(JetCompilerServicesParseFacts{source: input.source, compiler_source: lex_facts.compiler_source, lexed: lex_facts.lexed, parsed: parsed, value: value})
