@@ -161,12 +161,12 @@ fn db_read_metadata_field(bytes: &[U8], pos: &Usize) -> String DBError! {
     if *pos == len_start || bytes.get(*pos) != Val(&b':') {
         return Err(DBError{message: "database metadata has no field delimiter"})
     }
-    length :: std.str.from_utf8(&bytes[len_start..*pos]).ok()
+    length :: std.str.from_utf8(&bytes[len_start..<*pos]).ok()
         .and_then(fn(value) { value.parse<Usize>().ok() })
         .ok_or_else(fn() { DBError{message: "database metadata field length is invalid"} })?
     *pos += 1
     end :: (*pos).checked_add(length).ok_or_else(fn() { DBError{message: "database metadata field length overflow"} })?
-    value :: bytes.get(*pos..end).ok_or_else(fn() { DBError{message: "database metadata field is truncated"} })?
+    value :: bytes.get(*pos..<end).ok_or_else(fn() { DBError{message: "database metadata field is truncated"} })?
     *pos = end
     String.from_utf8(value.to_vec()).map_err(fn(error) { DBError{message: "database metadata field is not UTF-8"} })
 }
@@ -194,7 +194,7 @@ impl JetDbQueryMetadata {
         if source_end < source_start { return Err(DBError{message: "database metadata source span is inverted"}) }
         if table_count > DB_MAX_METADATA_TABLES { return Err(DBError{message: "database metadata table count exceeds the limit"}) }
         table_facts := [].with_capacity(table_count)
-        for i in 0..table_count {
+        for i in 0..<table_count {
             table_id :: db_read_metadata_field(bytes, &pos)?
             read :: match db_read_metadata_field(bytes, &pos)?.as_str() {
                 "1" -> true, "0" -> false, _ -> return Err(DBError{message: "database metadata read flag is invalid"}),
@@ -279,7 +279,7 @@ fn db_sql_tokens(sql: &String) -> [(Usize, Usize, String)] {
                 if i >= bytes.len() || !(bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') { break }
                 i += 1
             }
-            tokens.push((start, i, sql[start..i].to_ascii_lowercase()))
+            tokens.push((start, i, sql[start..<i].to_ascii_lowercase()))
         } else { i += 1 }
     }
     tokens
@@ -305,7 +305,7 @@ fn db_sql_contains_comment(sql: &String) -> Bool {
             }
             continue
         }
-        if bytes.get(i..i + 2) == Val(b"--") || bytes.get(i..i + 2) == Val(b"/*") || bytes.get(i..i + 2) == Val(b"*/") { return true }
+        if bytes.get(i..<i + 2) == Val(b"--") || bytes.get(i..<i + 2) == Val(b"/*") || bytes.get(i..<i + 2) == Val(b"*/") { return true }
         i += 1
     }
     false
@@ -369,7 +369,7 @@ fn db_sql_simple_target(sql: &String, tokens: &[(Usize, Usize, String)], kind: &
                 word :: token.2.as_str()
                 word == "where" || word == "order" || word == "group" || word == "limit" || word == "offset" || word == "returning"
             }).map(fn(token) { token.0 }).unwrap_or(sql.len())
-            remainder := sql[target_end..clause].trim() // #4303
+            remainder := sql[target_end..<clause].trim() // #4303
             remainder.is_empty()
         },
         "update" -> {
@@ -377,7 +377,7 @@ fn db_sql_simple_target(sql: &String, tokens: &[(Usize, Usize, String)], kind: &
                 Val(pair) -> pair, None -> return false,
             }
             _ :: set.0
-            remainder := sql[target_end..set.1.0].trim() // #4303
+            remainder := sql[target_end..<set.1.0].trim() // #4303
             remainder.is_empty()
         },
         "insert" -> count("values") == 1 && count("select") == 0,
@@ -394,8 +394,8 @@ fn db_sql_insert_columns_and_values(sql: &String, tokens: &[(Usize, Usize, Strin
     value_token_end :: tokens.get(values_index)?.1
     value_start :: sql[value_token_end..].find('(')?.checked_add(value_token_end)?
     value_end :: sql[value_start..].find(')')?.checked_add(value_start)?
-    columns :: sql[column_start + 1..column_end].split(',').map(fn(value) { value.trim() }).collect()
-    values :: sql[value_start + 1..value_end].split(',').map(fn(value) { value.trim() }).collect()
+    columns :: sql[column_start + 1..<column_end].split(',').map(fn(value) { value.trim() }).collect()
+    values :: sql[value_start + 1..<value_end].split(',').map(fn(value) { value.trim() }).collect()
     if columns.is_empty() || columns.len() != values.len() || columns.iter().any(fn(column) {
         column.is_empty() || !column.chars().all(fn(ch) { ch.is_ascii_alphanumeric() || ch == '_' })
     }) || values.iter().any(fn(value) { value != "?" }) { return None }
@@ -459,7 +459,7 @@ fn db_sql_update_mutates_owner(tokens: &[(Usize, Usize, String)]) -> Bool {
         word :: pair.1.2.as_str()
         word == "where" || word == "order" || word == "group" || word == "limit" || word == "offset" || word == "returning"
     }).map(fn(pair) { pair.0 }).unwrap_or(tokens.len())
-    tokens[set_index + 1..end_index].iter().any(fn(token) { token.2 == "owner" })
+    tokens[set_index + 1..<end_index].iter().any(fn(token) { token.2 == "owner" })
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:740
 fn db_sql_is_migration_metadata(sql: &String) -> Bool {
@@ -553,7 +553,7 @@ fn jet_db_apply_policy_inner(sql: &SQL, table: &String, compiled: JetRowPolicyEx
     where_token :: tokens.iter().find(fn(token) { token.2 == "where" }).map(fn(token) { (token.0, token.1) })
     insertion :: where_token.and_then(fn(pair) { db_sql_clause_start(&tokens, pair.1) })
         .or_else(fn() { db_sql_clause_start(&tokens, 0) }).unwrap_or_else(fn() { sql_text.len() })
-    user_index :: db_sql_placeholder_count(&sql_text[..insertion])
+    user_index :: db_sql_placeholder_count(&sql_text[0..<insertion])
     if user_index > params.len() { return Err(DBError{message: "policy-scoped SQL bind count does not match its placeholders"}) }
     scoped_params := params.clone()
     scoped_params.insert(user_index, DBValue.Text(user.to_string()))
@@ -564,7 +564,7 @@ fn jet_db_apply_policy_inner(sql: &SQL, table: &String, compiled: JetRowPolicyEx
         " {suffix_text}"
     }
     scoped_sql :: if Val((where_start, where_end)) :: where_token {
-        condition := sql_text[where_end..insertion].trim() // #4303
+        condition := sql_text[where_end..<insertion].trim() // #4303
         if condition.is_empty() { return Err(DBError{message: "policy-scoped SQL has an empty WHERE clause"}) }
         "{sql_text[..where_start]}WHERE ({condition}) AND owner = ?{suffix}"
     } else {
@@ -622,12 +622,12 @@ fn db_read_tagged(bytes: &[U8], pos: &Usize) -> (Char, String) Err! {
         *pos += 1
     }
     if *pos == len_start || bytes.get(*pos) != Val(&b':') { return Err("database wire has no value length delimiter") }
-    length :: std.str.from_utf8(&bytes[len_start..*pos])
+    length :: std.str.from_utf8(&bytes[len_start..<*pos])
         .map_err(fn(error) { "database wire length is not UTF-8".to_string() })?
         .parse<Usize>().map_err(fn(error) { "database wire value length overflows usize".to_string() })?
     *pos += 1
     end :: (*pos).checked_add(length).ok_or_else(fn() { "database wire value length overflows the input".to_string() })?
-    payload :: std.str.from_utf8(bytes.get(*pos..end).ok_or_else(fn() { "database wire value is truncated".to_string() })?)
+    payload :: std.str.from_utf8(bytes.get(*pos..<end).ok_or_else(fn() { "database wire value is truncated".to_string() })?)
         .map_err(fn(error) { "database wire value is not UTF-8".to_string() })?.to_string()
     *pos = end
     Ok((tag, ^payload))
@@ -646,18 +646,18 @@ fn db_decode_plan(payload: &String) -> [JetDbQueryPlanFact] DBError! {
     colon :: match bytes.iter().position(fn(byte) { *byte == b':' }) {
         Val(value) -> value, None -> return Err(DBError{message: "database runtime plan is missing its row-count delimiter"}),
     }
-    count :: std.str.from_utf8(&bytes[..colon]).ok().and_then(fn(value) { value.parse<Usize>().ok() })
+    count :: std.str.from_utf8(&bytes[0..<colon]).ok().and_then(fn(value) { value.parse<Usize>().ok() })
         .ok_or_else(fn() { DBError{message: "database runtime plan row count is invalid"} })?
     if count > DB_MAX_PLAN_ROWS { return Err(DBError{message: "database runtime plan row count exceeds the limit"}) }
     pos := colon + 1
     plan := [JetDbQueryPlanFact].with_capacity(count)
-    for _ in 0..count {
+    for _ in 0..<count {
         ordinal := None
         parent := None
         operation := None
         relation := None
         index := None
-        for _ in 0..5 {
+        for _ in 0..<5 {
             (tag, value) :: db_read_tagged(bytes, &pos).map_err(fn(message) { DBError{message: ^message} })?
             match tag {
                 'I' if ordinal.is_none() -> { ordinal = Val(db_runtime_number(&value, "plan ordinal")?) },
@@ -800,21 +800,21 @@ pub fn jet_db_decode_query_result(wire: &String) -> [JetDBRow] DBError! {
     }
     bytes :: body.as_bytes()
     colon :: bytes.iter().position(fn(byte) { *byte == b':' }).ok_or_else(fn() { DBError{message: "database result is missing its row-count delimiter"} })?
-    row_count :: std.str.from_utf8(&bytes[..colon]).map_err(fn(error) { DBError{message: "database row count is not UTF-8"} })?
+    row_count :: std.str.from_utf8(&bytes[0..<colon]).map_err(fn(error) { DBError{message: "database row count is not UTF-8"} })?
         .parse<Usize>().map_err(fn(error) { DBError{message: "database row count is invalid"} })?
     if row_count > DB_MAX_ROWS { return Err(DBError{message: "database row count exceeds the wire limit"}) }
     pos := colon + 1
     rows := [JetDBRow].with_capacity(row_count)
-    for _ in 0..row_count {
+    for _ in 0..<row_count {
         row_start :: pos
         col_colon :: bytes.get(pos..).and_then(fn(rest) { rest.iter().position(fn(byte) { *byte == b':' }) })
             .ok_or_else(fn() { DBError{message: "database row is missing its column-count delimiter"} })?
-        col_count :: std.str.from_utf8(&bytes[pos..pos + col_colon]).map_err(fn(error) { DBError{message: "database column count is not UTF-8"} })?
+        col_count :: std.str.from_utf8(&bytes[pos..<pos + col_colon]).map_err(fn(error) { DBError{message: "database column count is not UTF-8"} })?
             .parse<Usize>().map_err(fn(error) { DBError{message: "database column count is invalid"} })?
         if col_count > DB_MAX_COLUMNS { return Err(DBError{message: "database column count exceeds the wire limit"}) }
         pos += col_colon + 1
         row := JetDBRow.new()
-        for _ in 0..col_count {
+        for _ in 0..<col_count {
             (tag, name) :: db_read_tagged(bytes, &pos).map_err(fn(message) { DBError{message: ^message} })?
             if tag != 'C' { return Err(DBError{message: "database row column has an invalid tag"}) }
             (vtag, vpayload) :: db_read_tagged(bytes, &pos).map_err(fn(message) { DBError{message: ^message} })?
