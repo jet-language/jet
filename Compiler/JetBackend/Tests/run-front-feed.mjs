@@ -141,6 +141,7 @@ if (options.bootstrap) {
     // rest of the selected census. Both feeds always use the identical pack.
     for (const c of cases) {
       for (const suffix of ['.rust.exe', '.jet.exe', '.jet.mird', '.rust.issues', '.jet.issues', '.jet.front-issues']) rmSync(c.prefix + suffix, { force: true });
+      writeFileSync(`${c.prefix}.rust.want-lir`, '');
       writeFileSync(join(probeDir, 'front-cases.txt'), `${c.file}\t${c.prefix}\n`);
       const probe = spawnSync(resolve(options.probe), [], { cwd: probeDir, env: { ...process.env, JET_TOOLCHAIN_ROOT: repo, JET_COMPILER_IDENTITY: compilerIdentity }, timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), encoding: 'utf8', maxBuffer: 1 << 27 });
       writeFileSync(`${c.prefix}.probe.log`, `${probe.stdout ?? ''}${probe.stderr ?? ''}`);
