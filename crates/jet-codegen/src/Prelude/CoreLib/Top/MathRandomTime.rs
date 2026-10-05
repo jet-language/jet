@@ -1799,15 +1799,6 @@ fn jet_std_jsonl_first(
     Ok(None)
 }
 
-// D-JSON1-decode + D-JSON3: lenient JSON decode with coercion surfacing. The
-// walk, the coercion message and the audit-line shape are ONE policy in
-// `CoreLib/JetStd/JSONDyn.rs`, shared with the resident JIT host that
-// used to carry a byte-equivalent copy (I8/I9). AOT supplies only the sink it
-// owns: the process's own stderr.
-fn jet_std_json_decode_lenient(text: &String) -> Result<jet_std::Dyn, jet_std::EncodingError> {
-    jet_std::jet_std_json_decode_lenient(text, &mut |line| eprintln!("{}", line))
-}
-
 fn jet_string_bytes(s: &String) -> Vec<u8> {
     s.as_bytes().to_vec()
 }

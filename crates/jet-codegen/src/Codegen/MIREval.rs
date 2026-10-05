@@ -21272,7 +21272,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     )
                 })?;
                 let mut callback_fault = None;
-                let decoded = mir_csv_prelude::jet_enc_csv_decode_rows(
+                // CSV cells are text-native: rows decode inside the text-cell scope.
+                let decoded = crate::Comptime::decode_text_cells(|| mir_csv_prelude::jet_enc_csv_decode_rows(
                     rows.into_iter().map(|row| row.fields),
                     |tree| {
                         if callback_fault.is_some() {
@@ -21325,7 +21326,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         args: vec![(None, MirEvalValue::String(text))],
                     },
                     |fields| Self::dyn_object(fields),
-                );
+                ));
                 if let Some(error) = callback_fault {
                     return Err(error);
                 }

@@ -593,6 +593,13 @@ pub fn parse_ordered_json_for_tir(text: &str) -> CtValue {
     }
 }
 
+/// The interpreter's text-cell decode scope (#4602): a text-native source
+/// (CSV cells, environment, route parameters) decodes inside it, so only
+/// there a `Text` leaf parses into a scalar.
+pub fn decode_text_cells<R>(decode: impl FnOnce() -> R) -> R {
+    SyncLite::decode_text_cells(decode)
+}
+
 /// TIR typed TOML decode parses with the codec's own parser; a failure is the
 /// canonical `EncodingError` (frame it with [`codec_parse_error_for_tir`]).
 pub fn toml_parse_for_tir(text: &str) -> Result<CtValue, CtValue> {

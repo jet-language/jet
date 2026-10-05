@@ -2268,7 +2268,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.time", "clock", "jet_std_clock_new", true, &[false]),
     CoreCallRecord::new( "core.encoding.json", "parse", "jet_std_json_parse", true, &[true], ),
     CoreCallRecord::new( "core.encoding.json", "loads", "jet_std_json_parse", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.json", "decode", "jet_std_json_decode_lenient", true, &[true], ) .without_direct_aot() .without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new( "core.encoding.json", "decode", "jet_std_json_parse", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.encoding.json", "to_string", "jet_std_json_render", true, &[true], ) .with_jit_symbol("jet_jit_json_to_string"),
     CoreCallRecord::new( "core.encoding.json", "dumps", "jet_std_json_render", true, &[true], ) .with_jit_symbol("jet_jit_json_to_string"),
     CoreCallRecord::new( "core.encoding.json", "to_string_pretty", "jet_std_json_render_pretty", true, &[true], ) .with_jit_symbol("jet_jit_json_to_string_pretty"),

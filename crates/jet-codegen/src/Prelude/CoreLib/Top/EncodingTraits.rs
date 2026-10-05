@@ -722,7 +722,8 @@ fn jet_enc_csv_decode<T: __jet_Decode>(text: &String) -> Result<Vec<T>, Vec<jet_
         .map_err(jet_std::FieldError::one)?;
     jet_std::jet_enc_csv_decode_rows(
         rows,
-        |tree| T::jet_decode(&tree),
+        // CSV cells are text-native: each row decodes inside the text-cell scope.
+        |tree| jet_std::jet_decode_text_cells(|| T::jet_decode(&tree)),
         |row, error| jet_std::FieldError::under_errors(row, error),
         jet_std::Dyn::Text,
         jet_std::Dyn::Object,

@@ -3481,7 +3481,8 @@ fn jet_jit_enc_csv_decode(text: i64, callback: i64, element_kind: i64) -> i64 {
         Err(error) => return result_err_fields(json_rt::FieldError::one(error)),
     };
     let mut callback_fault = false;
-    let decoded = json_rt::jet_enc_csv_decode_rows(
+    // CSV cells are text-native: each row decodes inside the text-cell scope.
+    let decoded = json_rt::jet_decode_text_cells(|| json_rt::jet_enc_csv_decode_rows(
         rows.into_iter().map(|row| row.fields),
         |tree| {
             if callback_fault {
@@ -3525,7 +3526,7 @@ fn jet_jit_enc_csv_decode(text: i64, callback: i64, element_kind: i64) -> i64 {
         |row, error| json_rt::FieldError::under_errors(row, error),
         json_rt::Dyn::Text,
         json_rt::Dyn::Object,
-    );
+    ));
     if callback_fault {
         return 0;
     }
