@@ -129,14 +129,14 @@ fn os_store_word(address: Int, value: Int) {
 }
 
 #[Unsafe("reads one word at an address the caller owns and has mapped readable"), FFI(asm)]
-fn os_load_word(address: Int) -> Int -> {
+fn os_load_word(address: Int) -> Int {
     """
     mov rax, qword ptr [{address}] ; -> return
     """
 }
 
 #[Unsafe("reads one byte at an address the caller owns and has mapped readable"), FFI(asm)]
-fn os_load_byte(address: Int) -> Int -> {
+fn os_load_byte(address: Int) -> Int {
     """
     movzx rax, byte ptr [{address}] ; -> return
     """
@@ -182,7 +182,7 @@ fn os_call_address(address: Int, argument: Int) -> Int {
 }
 
 #[Unsafe("calls machine code; the caller vouches for the code and its two-word System V signature"), FFI(asm)]
-fn os_call_address_two(address: Int, first: Int, second: Int) -> Int -> {
+fn os_call_address_two(address: Int, first: Int, second: Int) -> Int {
     """
     push {address}
     push {first}
