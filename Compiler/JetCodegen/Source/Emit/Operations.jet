@@ -80,6 +80,7 @@ use jet_foundation.[
     mir_symbol_name,
     mir_type_id,
     mir_type_canonical_key,
+    mir_type_display_name,
     mir_type_is_float,
     mir_type_is_integer,
     mir_type_is_unit,
@@ -5234,7 +5235,8 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
             return "unreachable!(\"unsupported MIR semantic operation\")"
         }
         .Todo(call, todo_location, expected_type) -> {
-            emitted :: jet_rust_emit_route_call(&ctx, call, [String]{})
+            expected_name :: if expected_type == .Val(ty) -> mir_type_display_name(ty) else -> "(unknown)"
+            emitted :: jet_rust_emit_route_call(&ctx, call, [String]{jet_rust_emit_source_path(&ctx, todo_location.file), "{todo_location.line}u32", jet_rust_emit_quote(expected_name)})
             expected :: if expected_type == .Val(ty) -> jet_rust_emit_type(&ctx, ty) else -> "()"
             return "{{ let _: {expected} = {emitted}; unreachable!(\"MIR Todo at {todo_location.file.value}:{todo_location.line}:{todo_location.column}\") }}"
         }

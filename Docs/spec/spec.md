@@ -849,6 +849,10 @@ report and exits 1. E3002 records the trail of `?(text)` frames, while E3003
 reports an expired wait or I/O deadline. See [diagnostics.md](diagnostics.md)
 for the complete report shape and fixes. (S36)
 
+`#Todo` reports E3011 with its source file, source line, and the checked Jet
+type expected at that expression. Native adapters pass those facts to the
+shared stop renderer; backend carrier names are not source type names.
+
 ### Cleanup at a process stop
 
 An explicit stop runs active cleanup before the process ends. `defer close(...)`

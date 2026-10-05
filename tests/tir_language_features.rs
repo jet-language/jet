@@ -225,6 +225,12 @@ fn run() {
     print(double(21))
 }
 ";
+    let compiled = jet::compile(src).expect("typed Todo lowers its contextual arguments");
+    assert!(
+        compiled.rust.contains("5u32, \"Int\")"),
+        "Todo must carry its source line and checked Jet type: {}",
+        compiled.rust
+    );
     let (code, stdout) = build_and_run("tir_todo", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "42\n");

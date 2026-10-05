@@ -19902,7 +19902,15 @@ impl<'a> RustEmitter<'a> {
             }
             MirOperation::AttachTag { value, .. } => self.value_move(*value),
             MirOperation::Todo { call, location, expected_type } => {
-                let emitted = self.prelude_call_args_exact(*call, &[]);
+                let expected_name = expected_type
+                    .as_ref()
+                    .map(MirType::name)
+                    .unwrap_or_else(|| "(unknown)".to_string());
+                let emitted = self.prelude_call_args_exact(*call, &[
+                    format!("{:?}", self.source_file_path(location.file)),
+                    format!("{}u32", location.line),
+                    format!("{expected_name:?}"),
+                ]);
                 let expected = expected_type
                     .as_ref()
                     .map(|ty| self.rust_type(ty))
