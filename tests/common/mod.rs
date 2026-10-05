@@ -43,18 +43,40 @@ fn prepare_test_fixture_root(path: &Path) {
     }
 }
 
-/// One self-hosting parity unit: the `Compiler/` sources `include` selects,
+/// #4555: one self-hosting parity unit is a `Compiler/` package plus every
+/// package its `package.jet` `deps` name, transitively: their `Source/` files
 /// concatenated in `Compiler/Bootstrap/sources.list` order, each preceded by a
-/// `// [label: path]` marker line.
-pub fn compiler_parity_source(label: &str, include: impl Fn(&str) -> bool) -> String {
+/// `// [label: path]` marker line. A hand-picked file slice drifted each time
+/// an input gained a dependency; the package graph is the closure the package
+/// itself builds with.
+pub fn compiler_package_parity_source(label: &str, package: &str) -> String {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut packages = vec![package.to_string()];
+    let mut index = 0;
+    while index < packages.len() {
+        let manifest = fs::read_to_string(root.join(&packages[index]).join("package.jet"))
+            .unwrap_or_else(|error| panic!("read `{}/package.jet`: {error}", packages[index]));
+        for row in manifest.lines() {
+            // A dependency row reads `jet_lexer: ../JetLexer,`.
+            if let Some((_, directory)) = row.trim().trim_end_matches(',').split_once(": ../") {
+                let dependency = format!("Compiler/{directory}");
+                if !packages.contains(&dependency) {
+                    packages.push(dependency);
+                }
+            }
+        }
+        index += 1;
+    }
     let manifest = fs::read_to_string(root.join("Compiler/Bootstrap/sources.list"))
         .expect("Compiler/Bootstrap/sources.list");
     let mut core_imports = std::collections::HashSet::new();
     let mut source = String::new();
     for row in manifest.lines() {
         let path = row.trim();
-        if path.is_empty() || path.starts_with('#') || !include(path) {
+        let member = packages.iter().any(|package| {
+            path.strip_prefix(package.as_str()).is_some_and(|rest| rest.starts_with("/Source/"))
+        });
+        if !member {
             continue;
         }
         let text = fs::read_to_string(root.join(path))

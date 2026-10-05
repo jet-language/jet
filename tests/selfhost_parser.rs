@@ -326,37 +326,8 @@ fn expected_tier_stdout() -> String {
     output
 }
 
-/// #4555: the parity source is the jet_parser package plus every package its
-/// `package.jet` `deps` name, transitively, in `sources.list` order. A
-/// hand-picked file slice drifted each time a parser input gained a
-/// dependency; the package graph is the closure the parser itself builds with.
-fn parser_packages(root: &Path) -> Vec<String> {
-    let mut packages = vec![String::from("Compiler/JetParser")];
-    let mut index = 0;
-    while index < packages.len() {
-        let manifest = fs::read_to_string(root.join(&packages[index]).join("package.jet"))
-            .expect("parser package manifest");
-        for row in manifest.lines() {
-            // A dependency row reads `jet_lexer: ../JetLexer,`.
-            if let Some((_, directory)) = row.trim().trim_end_matches(',').split_once(": ../") {
-                let package = format!("Compiler/{directory}");
-                if !packages.contains(&package) {
-                    packages.push(package);
-                }
-            }
-        }
-        index += 1;
-    }
-    packages
-}
-
-fn parser_source(root: &Path) -> String {
-    let packages = parser_packages(root);
-    let mut source = common::compiler_parity_source("selfhost parser parity source", |path| {
-        packages.iter().any(|package| {
-            path.strip_prefix(package.as_str()).is_some_and(|rest| rest.starts_with("/Source/"))
-        })
-    });
+fn parser_source() -> String {
+    let mut source = common::compiler_package_parity_source("selfhost parser parity source", "Compiler/JetParser");
     source.push_str(PROBE_SOURCE);
     source.push_str(&tier_run_source());
     source
@@ -387,7 +358,7 @@ fn bootstrap() -> Arc<Pass> {
         let scratch = common::Scratch::new("selfhost_parser_bootstrap");
         tir_support::write_test_package(&scratch.path, tir_support::TIR_TEST_PACKAGE);
         let path = scratch.path.join("parser.jet");
-        let source = parser_source(Path::new(env!("CARGO_MANIFEST_DIR")));
+        let source = parser_source();
         fs::write(&path, &source).unwrap();
         let mut bundle = jet::Loader::load_entry(path.to_str().unwrap())
             .expect("Rust reference bootstraps the Jet parser source");
