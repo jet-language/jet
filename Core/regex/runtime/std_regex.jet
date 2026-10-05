@@ -629,7 +629,7 @@ impl RegexParser {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:911
     fn parse_alt(self: &Self, terminator: Char?) -> RegexNode Err! {
         arms := [self.parse_seq(terminator)?]
-        loop self.peek() == Val('|') {
+        loop self.peek() == '|' {
             self.pos += 1
             arms.push(self.parse_seq(terminator)?)
         }
@@ -669,7 +669,7 @@ impl RegexParser {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:961
     fn parse_group(self: &Self) -> RegexAtom Err! {
-        if self.peek() == Val('?') {
+        if self.peek() == '?' {
             self.pos += 1
             return match self.bump() {
                 Val(':') -> Ok(.Group(0, Box.new(self.parse_alt(Val(')'))?)))
@@ -694,7 +694,7 @@ impl RegexParser {
     fn parse_group_name(self: &Self) -> String Err! {
         start :: self.pos
         loop self.peek().is_some_and(fn(ch) { ch != '>' }) -> self.pos += 1
-        if self.bump() != Val('>') -> return Err("invalid regex: missing `>` in named group")
+        if self.bump() != '>' -> return Err("invalid regex: missing `>` in named group")
         name: String :: self.chars.slice(start, self.pos - 1).iter().collect()
         if name.is_empty() || !name.chars().all(fn(ch) { ch == '_' || ch.is_ascii_alphanumeric() }) {
             return Err("invalid regex: named group needs an identifier")
@@ -719,11 +719,11 @@ impl RegexParser {
             Val('{') -> {
                 self.pos += 1
                 min :: self.parse_number()?
-                max :: if self.peek() == Val(',') {
+                max :: if self.peek() == ',' {
                     self.pos += 1
-                    if self.peek() == Val('}') { None } else { Val(self.parse_number()?) }
+                    if self.peek() == '}' { None } else { Val(self.parse_number()?) }
                 } else { Val(min) }
-                if self.bump() != Val('}') -> return Err("invalid regex: missing `}}` in quantifier")
+                if self.bump() != '}' -> return Err("invalid regex: missing `}}` in quantifier")
                 if max.is_some_and(fn(m) { m < min }) -> return Err("invalid regex: quantifier max is below min")
                 Ok(.Range{min: min, max: max})
             }
@@ -732,7 +732,7 @@ impl RegexParser {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1044
     fn parse_class(self: &Self) -> RegexClass Err! {
-        negated :: if self.peek() == Val('^') {
+        negated :: if self.peek() == '^' {
             self.pos += 1
             true
         } else { false }
@@ -748,7 +748,7 @@ impl RegexParser {
                 self.pos += 1
                 RegexClassItem.Char(']')
             } else { self.parse_class_item()? }
-            if self.peek() == Val('-') && self.peek_n(1) != Val(']') {
+            if self.peek() == '-' && self.peek_n(1) != ']' {
                 self.pos += 1
                 second :: self.parse_class_char()?
                 match first {
@@ -761,7 +761,7 @@ impl RegexParser {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1080
     fn parse_class_item(self: &Self) -> RegexClassItem Err! {
-        if self.peek() == Val('\\') {
+        if self.peek() == '\\' {
             self.pos += 1
             return match self.bump() {
                 Val('d') -> Ok(.Digit)
@@ -801,10 +801,10 @@ impl RegexParser {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1149
     fn parse_unicode_class(self: &Self, _negated: Bool) -> RegexClassItem Err! {
-        if self.bump() != Val('{') -> return Err("invalid regex: Unicode class needs `{{...}}`")
+        if self.bump() != '{' -> return Err("invalid regex: Unicode class needs `{{...}}`")
         start :: self.pos
         loop self.peek().is_some_and(fn(ch) { ch != '}' }) -> self.pos += 1
-        if self.bump() != Val('}') -> return Err("invalid regex: missing `}}` in Unicode class")
+        if self.bump() != '}' -> return Err("invalid regex: missing `}}` in Unicode class")
         name: String :: self.chars.slice(start, self.pos - 1).iter().collect()
         match name {
             "L" | "Letter" -> Ok(.UnicodeLetter)
