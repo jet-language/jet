@@ -735,14 +735,14 @@ fn jet_codegen_impl_method_matches(function: TFunc, definition: TImplDef, trait_
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_impl_rows. Only a
 // lowered function (`lowered_ids`) is an executable impl method.
-fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], fields_by_name: [String:MIRFieldID], lowered_ids: [String:Bool]) -> MIRImplDef? {
+fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], trait_names: JetCodegenTraitNames, fields_by_name: [String:MIRFieldID], lowered_ids: [String:Bool]) -> MIRImplDef? {
     trait_name := if definition.trait_ref == {
         Val(name) -> Val(name)
         None -> definition.trait_name
     }
     trait_ref := if trait_name == {
         None -> None
-        Val(name) -> Val(jet_codegen_lower_declared_or_builtin_trait_ref(modules, name, definition.module_identity))
+        Val(name) -> Val(jet_codegen_lower_declared_or_builtin_trait_ref(trait_names, name, definition.module_identity))
     }
     method_ids := [MIRFunctionID]{}
     seen_methods := [U64:Bool]{}
@@ -2272,6 +2272,10 @@ pub struct JetCodegenComptimeSession {
     // Qualified method key (jet_codegen_qualified_function_key) -> the
     // positions in `type_slots` of the rows that list that method.
     method_slots: [String:[Int]]
+    // The staged modules' trait spellings (jet_codegen_trait_names): staged
+    // values add only constants, so every item's impl rows resolve their
+    // trait names against this one index.
+    trait_names: JetCodegenTraitNames
 }
 
 pub struct JetCodegenComptimeLowering {
@@ -2303,11 +2307,12 @@ pub fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_fi
             method_slots[qualified] = positions
         }
     }
+    trait_names := jet_codegen_trait_names(modules)
     // Every lowering replaces this first function (jet_codegen_begin_function).
     first := jet_codegen_comptime_item_tfunc("", "", "", "", Span{start: 0, end: 0}, Type.Named{name: "Unit"})
     builder := jet_codegen_new_builder(first, ^function_index, ^modules, ^field_symbols, source_files, ^source_index)
     builder.owners.closure_only = true
-    JetCodegenComptimeSession{builder: ^builder, constants: ^constants, type_slots: ^type_slots, method_slots: ^method_slots}
+    JetCodegenComptimeSession{builder: ^builder, constants: ^constants, type_slots: ^type_slots, method_slots: ^method_slots, trait_names: ^trait_names}
 }
 
 // Joins the checked rows of staged constants that landed after the session
@@ -2378,7 +2383,7 @@ pub fn lower_comptime_closure(session: &JetCodegenComptimeSession, request: Sema
     rows := jet_codegen_lower_each_function(&session.builder, functions, None)
     constants := session.constants
     types := jet_codegen_comptime_types(session)
-    lowered := jet_codegen_functions_from_rows(rows, functions, session.builder.function_index, session.builder.modules, ^types, ^constants)
+    lowered := jet_codegen_functions_from_rows(rows, functions, session.builder.function_index, session.builder.modules, session.trait_names, ^types, ^constants)
     item_function := jet_codegen_comptime_item_function(request, session.builder.modules)
     item := jet_codegen_lower_function(&session.builder, item_function, [TStmt]{}, Val(request.expression), None)
     JetCodegenComptimeLowering{functions: lowered, item: item}
@@ -3163,7 +3168,7 @@ pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], s
         constants := jet_codegen_lower_constant_rows(modules)
         empty_index := jet_codegen_function_index([TFunc]{})
         types := jet_codegen_declared_type_rows(empty_index, modules)
-        return jet_codegen_functions_from_rows([JetCodegenLoweredFunction]{}, functions, empty_index, modules, ^types, ^constants)
+        return jet_codegen_functions_from_rows([JetCodegenLoweredFunction]{}, functions, empty_index, modules, jet_codegen_trait_names(modules), ^types, ^constants)
     }
     rows := [TFunc]{}
     jet_codegen_move_function_rows(&rows, &functions)
@@ -3177,7 +3182,7 @@ pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], s
     lowered_rows := jet_codegen_lower_indexed_functions(&builder, trace_sink)
     constants := jet_codegen_lower_constant_rows(builder.modules)
     types := jet_codegen_declared_type_rows(builder.function_index, builder.modules)
-    lowered := jet_codegen_functions_from_rows(lowered_rows, builder.function_index.rows, builder.function_index, builder.modules, ^types, ^constants)
+    lowered := jet_codegen_functions_from_rows(lowered_rows, builder.function_index.rows, builder.function_index, builder.modules, jet_codegen_trait_names(builder.modules), ^types, ^constants)
     jet_codegen_move_function_rows(&functions, &builder.function_index.rows)
     jet_codegen_move_module_rows(&modules, &builder.modules)
     lowered
@@ -3320,7 +3325,7 @@ fn jet_codegen_declared_type_rows(function_index: JetCodegenFunctionIndex, modul
 // with `declared_types` (jet_codegen_declared_type_rows of `modules`, or a
 // comptime closure's jet_codegen_comptime_types) and `constants`
 // (jet_codegen_lower_constant_rows of `modules`).
-fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], functions: [TFunc], function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], declared_types: ^[MIRTypeDef], constants: ^[MIRConstantDef]) -> JetCodegenFunctions {
+fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], functions: [TFunc], function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], trait_names: JetCodegenTraitNames, declared_types: ^[MIRTypeDef], constants: ^[MIRConstantDef]) -> JetCodegenFunctions {
     lowered_functions := [MIRFunction]{}
     prelude_calls := [MIRPreludeCall]{}
     core_calls := [MIRCoreCall]{}
@@ -3425,7 +3430,7 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
     impl_index_by_key := [String:Int]{}
     loop semantic_module in modules {
         loop definition in semantic_module.declarations.impls {
-            lowered :: jet_codegen_lower_impl_definition(definition, function_index, modules, fields_by_name, top_ids) ?? next
+            lowered :: jet_codegen_lower_impl_definition(definition, function_index, modules, trait_names, fields_by_name, top_ids) ?? next
             if impl_index_by_key.get(lowered.key) == .Val(index) {
                 loop method in lowered.methods {
                     method_key := jet_codegen_qualified_function_key(lowered.key, "{method.value}")

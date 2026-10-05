@@ -82,30 +82,69 @@ fn jet_codegen_nominal_type_key(module_identity: String, nominal: SemaRegistrati
     jet_codegen_qualified_type_key(module_identity, nominal.symbol.name)
 }
 
-fn jet_codegen_resolve_trait_ref(modules: [SemaGraphModuleResult], name: String, preferred_module_identity: String) -> MIRTraitRef? {
-    preferred := MIRTraitRef?{None}
-    other := MIRTraitRef?{None}
-    ambiguous_other := false
+// A declared trait as a checked name can resolve to it: its module and its
+// canonical key.
+struct JetCodegenTraitCandidate {
+    pub module_identity: String
+    pub canonical: String
+}
+
+// Every declared trait under each spelling that names it
+// (jet_codegen_trait_spellings), candidates in module and declaration order:
+// resolving a checked trait name is one lookup instead of a scan that formats
+// every module's trait spellings. Built once per program lowering.
+struct JetCodegenTraitNames {
+    pub candidates: [String:[JetCodegenTraitCandidate]]
+}
+
+// The distinct spellings that name a trait declared as `definition_name` with
+// key `definition_key` in a module: its key, its name, its canonical key, and
+// its name qualified by the module's name and by the module's identity.
+fn jet_codegen_trait_spellings(module_name: String, module_identity: String, definition_key: String, definition_name: String, canonical: String) -> [String] Never! {
+    spellings := [String]{}
+    loop spelling in [String]{definition_key, definition_name, canonical, "{module_name}::{definition_name}", "{module_identity}::{definition_name}"} {
+        if !spellings.contains(spelling) -> &spellings.push(spelling)
+    }
+    spellings
+}
+
+fn jet_codegen_trait_names(modules: [SemaGraphModuleResult]) -> JetCodegenTraitNames Never! {
+    candidates := [String:[JetCodegenTraitCandidate]]{}
     loop semantic_module in modules {
         loop definition in semantic_module.declarations.traits {
             canonical :: jet_codegen_canonical_target_type(semantic_module.module_identity, definition.key)
-            canonical_module_name :: "{semantic_module.module_name}::{definition.name}"
-            canonical_module_identity :: "{semantic_module.module_identity}::{definition.name}"
-            if name != definition.key && name != definition.name && name != canonical && name != canonical_module_name && name != canonical_module_identity -> next
-            candidate :: mir_trait_ref(canonical)
-            if {
-                semantic_module.module_identity == preferred_module_identity -> {
-                    if preferred != None && (preferred ?? candidate).id != candidate.id -> return None
-                    preferred = Val(candidate)
-                }
-                else -> {
-                    if {
-                        other != None && (other ?? candidate).id != candidate.id -> {
-                            ambiguous_other = true
-                        }
-                        else -> {
-                            other = Val(candidate)
-                        }
+            candidate :: JetCodegenTraitCandidate{module_identity: semantic_module.module_identity, canonical: canonical}
+            loop spelling in jet_codegen_trait_spellings(semantic_module.module_name, semantic_module.module_identity, definition.key, definition.name, canonical) {
+                rows := candidates.get(spelling) ?? [JetCodegenTraitCandidate]{}
+                &rows.push(candidate)
+                candidates[spelling] = rows
+            }
+        }
+    }
+    JetCodegenTraitNames{candidates: candidates}
+}
+
+// The trait a checked name resolves to among the traits it names, in module
+// order: the one in the preferred module, else the one elsewhere; `None` when
+// none matches or the match is ambiguous.
+fn jet_codegen_choose_trait_ref(candidates: [JetCodegenTraitCandidate], preferred_module_identity: String) -> MIRTraitRef? {
+    preferred := MIRTraitRef?{None}
+    other := MIRTraitRef?{None}
+    ambiguous_other := false
+    loop row in candidates {
+        candidate :: mir_trait_ref(row.canonical)
+        if {
+            row.module_identity == preferred_module_identity -> {
+                if preferred != None && (preferred ?? candidate).id != candidate.id -> return None
+                preferred = Val(candidate)
+            }
+            else -> {
+                if {
+                    other != None && (other ?? candidate).id != candidate.id -> {
+                        ambiguous_other = true
+                    }
+                    else -> {
+                        other = Val(candidate)
                     }
                 }
             }
@@ -114,6 +153,23 @@ fn jet_codegen_resolve_trait_ref(modules: [SemaGraphModuleResult], name: String,
     if preferred != None -> return preferred
     if ambiguous_other -> return None
     other
+}
+
+fn jet_codegen_resolve_trait_name(names: JetCodegenTraitNames, name: String, preferred_module_identity: String) -> MIRTraitRef? {
+    candidates :: names.candidates.get(name) ?? return None
+    jet_codegen_choose_trait_ref(candidates, preferred_module_identity)
+}
+
+fn jet_codegen_resolve_trait_ref(modules: [SemaGraphModuleResult], name: String, preferred_module_identity: String) -> MIRTraitRef? {
+    candidates := [JetCodegenTraitCandidate]{}
+    loop semantic_module in modules {
+        loop definition in semantic_module.declarations.traits {
+            canonical :: jet_codegen_canonical_target_type(semantic_module.module_identity, definition.key)
+            if !jet_codegen_trait_spellings(semantic_module.module_name, semantic_module.module_identity, definition.key, definition.name, canonical).contains(name) -> next
+            &candidates.push(JetCodegenTraitCandidate{module_identity: semantic_module.module_identity, canonical: canonical})
+        }
+    }
+    jet_codegen_choose_trait_ref(candidates, preferred_module_identity)
 }
 
 // The traits a Rust derive provides natively.
@@ -168,9 +224,9 @@ fn jet_codegen_is_checked_text_trait_id(id: MIRTraitID) -> Bool Never! {
     id == mir_trait_id("CheckedText")
 }
 
-fn jet_codegen_lower_declared_or_builtin_trait_ref(modules: [SemaGraphModuleResult], name: String, module_identity: String) -> MIRTraitRef Never! {
-    if jet_codegen_resolve_trait_ref(modules, name, module_identity) == .Val(resolved) -> return resolved
-    if jet_codegen_trait_name_has_declaration(modules, name) -> panic("checked trait name is ambiguous")
+fn jet_codegen_lower_declared_or_builtin_trait_ref(names: JetCodegenTraitNames, name: String, module_identity: String) -> MIRTraitRef Never! {
+    if jet_codegen_resolve_trait_name(names, name, module_identity) == .Val(resolved) -> return resolved
+    if names.candidates.get(name) != None -> panic("checked trait name is ambiguous")
     if jet_codegen_is_native_rust_derive_name(name) || jet_codegen_is_compiler_owned_trait_name(name) || name == "CheckedText" -> return mir_trait_ref(name)
     panic("checked trait name has no declared or registered builtin identity")
 }
@@ -179,9 +235,7 @@ fn jet_codegen_trait_name_has_declaration(modules: [SemaGraphModuleResult], name
     loop semantic_module in modules {
         loop definition in semantic_module.declarations.traits {
             canonical :: jet_codegen_canonical_target_type(semantic_module.module_identity, definition.key)
-            canonical_module_name :: "{semantic_module.module_name}::{definition.name}"
-            canonical_module_identity :: "{semantic_module.module_identity}::{definition.name}"
-            if name == definition.key || name == definition.name || name == canonical || name == canonical_module_name || name == canonical_module_identity -> return true
+            if jet_codegen_trait_spellings(semantic_module.module_name, semantic_module.module_identity, definition.key, definition.name, canonical).contains(name) -> return true
         }
     }
     false
