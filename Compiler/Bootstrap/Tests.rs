@@ -2373,6 +2373,51 @@ fn write_small_program(project: &Path) -> PathBuf {
     entry
 }
 
+#[test]
+fn native_loose_root_accepts_sources_without_a_manifest() {
+    let project = bootstrap_session_root();
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("main.jet"), "use other\nfn run() { other.answer() }\n").unwrap();
+    fs::write(project.join("other.jet"), "pub fn answer() -> Int => 42\n").unwrap();
+    let lease = crate::compiler_bootstrap_host::open_authorized_sources(&project, Path::new("main.jet"))
+        .unwrap_or_else(|error| panic!("loose source authorization failed: {error:?}"));
+    let snapshot = lease.snapshot();
+    assert_eq!(snapshot.roots.len(), 1);
+    assert_eq!(snapshot.entry_root_identity, snapshot.roots[0].identity);
+    assert!(snapshot.entry_path.ends_with("/main.jet"));
+    let files = &snapshot.roots[0].files;
+    assert!(files.iter().any(|file| file.relative_path == "main.jet"));
+    assert!(files.iter().any(|file| file.relative_path == "other.jet"));
+    assert!(!files.iter().any(|file| file.relative_path == "package.jet"));
+    lease.revalidate().expect("revalidate loose source handles");
+    drop(lease);
+    fs::remove_dir_all(project).unwrap();
+}
+
+#[test]
+fn native_loose_root_does_not_hide_a_retired_manifest() {
+    let project = bootstrap_session_root();
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("main.jet"), "fn run() {}\n").unwrap();
+    fs::write(project.join(crate::Syntax::PAYLOAD_FILE), "package { name: \"retired\", version: \"0.0.1\" }\n").unwrap();
+    assert!(matches!(
+        crate::compiler_bootstrap_host::open_authorized_sources(&project, Path::new("main.jet")),
+        Err(crate::Authority::AuthorityError::RetiredManifest(_))
+    ));
+    fs::remove_dir_all(project).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn native_loose_root_does_not_hide_a_manifest_symlink() {
+    let project = bootstrap_session_root();
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("main.jet"), "fn run() {}\n").unwrap();
+    std::os::unix::fs::symlink("missing.jet", project.join("package.jet")).unwrap();
+    assert!(crate::compiler_bootstrap_host::open_authorized_sources(&project, Path::new("main.jet")).is_err());
+    fs::remove_dir_all(project).unwrap();
+}
+
 fn write_source_fixture_project(project: &Path, manifest: &str, source: &str) -> PathBuf {
     fs::create_dir_all(project).unwrap_or_else(|error| {
         panic!("cannot create source fixture project `{}`: {error}", project.display())

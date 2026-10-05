@@ -5,7 +5,7 @@ fn inventory_total() -> Int {
     picked :: first_or(items, Item{weight: 0})
     slot :: Slot<Item>{value: picked}
     copied :: pool_copy(Pool<Item>{items: items})
-    shape :: Shape{weight: slot.get().weight}
+    shape :: Shape{mass: slot.get().weight}
     matched :: count_where(items, (item: Item) -> item.weight > 2)
     shape.weight() + matched + pool_len(copied) + stage_weight(Stage.Ready(4))
 }
