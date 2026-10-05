@@ -879,7 +879,7 @@ fn jet_compute_view_strides(shape: &[I64], offset: USize) -> [I64] JetComputeErr
 fn jet_compute_view_storage_end(tensor: &JetTensor, strides: &[I64], offset: USize) -> USize JetComputeError! {
     relative_end := USize{0}
     loop (dim, stride) in tensor.shape.iter().zip(strides.iter()) {
-        if *dim == 0 -> continue
+        if *dim == 0 -> next
         dim :: USize.try_from(*dim).map_err(fn(_) { JetComputeError.InvalidShape("Tensor shape axis is too large") })?
         stride :: USize.try_from(*stride).map_err(fn(_) { JetComputeError.InvalidShape("Tensor view strides must be non-negative and representable") })?
         extent :: dim.checked_sub(1).and_then(fn(last) { last.checked_mul(stride) })

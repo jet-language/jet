@@ -23,7 +23,7 @@ fn jet_compute_jvp(state: JetComputeVjpState, input_tangents: ^[JetTensor]) -> J
         if index < tangents.len() -> tangents[index] = Val(jet_compute_remove_trace_level(tangent, state.tape))
     }
     for (index, node) in nodes.iter().enumerate().skip(inputs.len()) {
-        rule :: match node.rule.as_ref() { Val(rule) -> rule, None -> continue }
+        rule :: match node.rule.as_ref() { Val(rule) -> rule, None -> next }
         node_tangents := [JetTensor].with_capacity(node.parents.len())
         for (parent, value) in node.parents.iter().zip(node.values.iter()) {
             node_tangents.push(parent.and_then(parent -> tangents.get(parent).and_then(value -> value.as_ref()).cloned()).unwrap_or(jet_compute_zero_like(value)?))
@@ -118,7 +118,7 @@ fn jet_compute_validate_profile_value(profile: String, value: F64, context: Stri
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9267
 fn jet_compute_validate_serialized_profile_values(profile: String, values: [F64]) -> () JetComputeError! {
     if profile == CPU_ORACLE_F32_PROFILE {
-        for value in values {
+        loop value in values {
             narrowed :: jet_compute_f32_value(value, "serialized Tensor value")?
             if F64.from(narrowed) != value {
                 return Err(JetComputeError.Serialization("serialized Tensor value is not canonical for its F32 profile"))
@@ -130,7 +130,7 @@ fn jet_compute_validate_serialized_profile_values(profile: String, values: [F64]
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9284
 fn jet_compute_wire_checksum(body: String) -> String Never! {
     hash := U64{0xcbf29ce484222325}
-    for byte in body.as_bytes() {
+    loop byte in body.as_bytes() {
         hash = hash ~| U64{byte}
         hash = hash.wrapping_mul(U64{0x100000001b3})
     }
@@ -709,8 +709,8 @@ fn jet_compute_to_sparse(tensor: &JetTensor) -> JetSparseCsr JetComputeError! {
     row_ptr := [I64{0}]
     col_idx := [I64].new()
     values := [F64].new()
-    for r in 0..<rows {
-        for c in 0..<cols {
+    loop r in 0..<rows {
+        loop c in 0..<cols {
             v :: jet_compute_get_raw(tensor, &[r, c])?
             if v != F64{0.0} {
                 col_idx.push(c)
@@ -731,12 +731,12 @@ fn jet_compute_sparse_mv(sparse: &JetSparseCsr, vector: &JetTensor) -> JetTensor
     if jet_compute_is_accelerator(vector.device) -> return Err(JetComputeError.Unsupported("accelerator backend does not support sparse_mv; transfer the vector to CPU explicitly"))
     if vector.shape.len() != 1 || vector.shape[0] != sparse.cols -> return Err(JetComputeError.RankMismatch("sparse_mv expects a length-{sparse.cols} vector"))
     out := jet_compute_zeros(&[sparse.rows])?
-    for r in 0..<sparse.rows {
+    loop r in 0..<sparse.rows {
         row :: USize.try_from(r).map_err(_ -> JetComputeError.InvalidShape("sparse row index is too large"))?
         start :: USize.try_from(sparse.row_ptr[row]).map_err(_ -> JetComputeError.InvalidShape("sparse row pointer is invalid"))?
         end :: USize.try_from(sparse.row_ptr[row + 1]).map_err(_ -> JetComputeError.InvalidShape("sparse row pointer is invalid"))?
         acc := F64{0.0}
-        for k in start..<end {
+        loop k in start..<end {
             c :: sparse.col_idx[k]
             acc += sparse.values[k] * jet_compute_get_raw(vector, &[c])?
             if !acc.is_finite() -> return Err(JetComputeError.Arithmetic("sparse matrix-vector multiplication produced a non-finite value"))
@@ -830,7 +830,7 @@ fn jet_compute_f32_dot_avx2(a: View<F32>, b: View<F32>) -> F32 {
     lanes := [F32; 8].filled(F32{0.0})
     _mm256_storeu_ps(lanes.as_mut_ptr(), acc)
     sum := F32{0.0}
-    for lane in lanes { sum += lane }
+    loop lane in lanes { sum += lane }
     loop index < a.len() {
         sum += a[index] * b[index]
         index += 1
@@ -855,7 +855,7 @@ fn jet_compute_f32_dot_avx2_x86(a: View<F32>, b: View<F32>) -> F32 {
     lanes := [F32; 8].filled(F32{0.0})
     _mm256_storeu_ps(lanes.as_mut_ptr(), acc)
     sum := F32{0.0}
-    for lane in lanes { sum += lane }
+    loop lane in lanes { sum += lane }
     loop index < a.len() {
         sum += a[index] * b[index]
         index += 1
@@ -879,7 +879,7 @@ fn jet_compute_f32_dot_sse2(a: View<F32>, b: View<F32>) -> F32 {
     lanes := [F32; 4].filled(F32{0.0})
     _mm_storeu_ps(lanes.as_mut_ptr(), acc)
     sum := F32{0.0}
-    for lane in lanes { sum += lane }
+    loop lane in lanes { sum += lane }
     loop index < a.len() {
         sum += a[index] * b[index]
         index += 1
@@ -903,7 +903,7 @@ fn jet_compute_f32_dot_sse2_x86(a: View<F32>, b: View<F32>) -> F32 {
     lanes := [F32; 4].filled(F32{0.0})
     _mm_storeu_ps(lanes.as_mut_ptr(), acc)
     sum := F32{0.0}
-    for lane in lanes { sum += lane }
+    loop lane in lanes { sum += lane }
     loop index < a.len() {
         sum += a[index] * b[index]
         index += 1
@@ -985,8 +985,8 @@ fn jet_compute_matmul_f32_tile(a: &JetTensor, b: &JetTensor) -> JetTensor JetCom
     b_values :: jet_compute_tensor_values(b).into_iter().map(value -> jet_compute_f32_value(value, "f32 tile input")).collect<[F32] JetComputeError!>()?
     packed_b_len :: cols.checked_mul(inner).ok_or_else(fn() { JetComputeError.InvalidShape("f32 tile packed-B storage length overflow") })?
     packed_b := [F32].filled(packed_b_len, F32{0.0})
-    for row in 0..<inner {
-        for column in 0..<cols { packed_b[column * inner + row] = b_values[row * cols + column] }
+    loop row in 0..<inner {
+        loop column in 0..<cols { packed_b[column * inner + row] = b_values[row * cols + column] }
     }
     output_len :: rows.checked_mul(cols).ok_or_else(fn() { JetComputeError.InvalidShape("f32 tile output storage length overflow") })?
     backend :: jet_compute_simd_backend()
@@ -996,9 +996,9 @@ fn jet_compute_matmul_f32_tile(a: &JetTensor, b: &JetTensor) -> JetTensor JetCom
         row_end :: row_tile.saturating_add(TILE).min(rows)
         for column_tile in (0..<cols).step_by(TILE) {
             column_end :: column_tile.saturating_add(TILE).min(cols)
-            for row in row_tile..<row_end {
+            loop row in row_tile..<row_end {
                 left :: a_values.slice(row * inner, (row + 1) * inner)
-                for column in column_tile..<column_end {
+                loop column in column_tile..<column_end {
                     right :: packed_b.slice(column * inner, (column + 1) * inner)
                     value :: jet_compute_f32_dot(backend, left, right)?
                     output[row * cols + column] = F64.from(value)

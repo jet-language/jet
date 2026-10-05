@@ -815,7 +815,7 @@ impl Context {
             #Unsafe("query queue family count for this enumerated physical device") {
                 (api.get_queue_family_properties)(physical, &family_count, ptr.null_mut())
             }
-            if family_count == 0 -> continue
+            if family_count == 0 -> next
             families := [QueueFamilyProperties].repeat(QueueFamilyProperties {
                 queue_flags: 0, queue_count: 0, timestamp_valid_bits: 0,
                 min_image_transfer_granularity: [0, 0, 0],
@@ -826,7 +826,7 @@ impl Context {
             family :: families.iter().enumerate().find(fn((_, family)) {
                 family.queue_count != 0 and family.queue_flags & VK_QUEUE_COMPUTE_BIT != 0
             })
-            (family_index, _) :: family ?? continue
+            (family_index, _) :: family ?? next
             memory := MemoryProperties {
                 memory_type_count: 0,
                 memory_types: Array<MemoryType, 32>.repeat(MemoryType { property_flags: 0, heap_index: 0 }),
@@ -1095,7 +1095,7 @@ fn run(op: U32, inputs: [&[F32]], output_len: USize, params: Params) -> Result<[
     context :: Context.new(^api)?
     dummy :: [F32{0.0}]
     input_buffers := [Buffer].with_capacity(5)
-    for index in 0..<5 {
+    loop index in 0..<5 {
         values :: inputs.get(index).copied().unwrap_or(&dummy)
         input_buffers.push(Buffer.f32(&context, values, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)?)
     }

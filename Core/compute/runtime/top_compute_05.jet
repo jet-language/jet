@@ -110,10 +110,10 @@ fn jet_compute_contiguous_broadcast_layout(tensor: &JetTensor, output_shape: &[I
     if strides != source_strides { return Ok(None) }
     rank_delta :: output_shape.len() - tensor.shape.len()
     effective_strides := [I64].with_capacity(output_shape.len())
-    for axis in 0..<output_shape.len() {
+    loop axis in 0..<output_shape.len() {
         if axis < rank_delta {
             effective_strides.push(0)
-            continue
+            next
         }
         source_axis :: axis - rank_delta
         effective_strides.push(if tensor.shape[source_axis] == 1 { 0 } else { source_strides[source_axis] })
@@ -126,10 +126,10 @@ fn jet_compute_broadcast_strided_layout(tensor: &JetTensor, output_shape: &[I64]
     (source_strides, offset) :: jet_compute_view_metadata(tensor)?
     rank_delta :: output_shape.len() - tensor.shape.len()
     effective_strides := [I64].with_capacity(output_shape.len())
-    for axis in 0..<output_shape.len() {
+    loop axis in 0..<output_shape.len() {
         if axis < rank_delta {
             effective_strides.push(0)
-            continue
+            next
         }
         source_axis :: axis - rank_delta
         effective_strides.push(if tensor.shape[source_axis] == 1 { 0 } else { source_strides[source_axis] })
@@ -148,10 +148,10 @@ fn jet_compute_binary_strided(op: String, a: &JetTensor, b: &JetTensor, shape: &
     left_column_stride :: USize.try_from(*left_strides.last().ok_or_else(fn() { JetComputeError.InvalidShape("Tensor shape must have at least one axis") })?).map_err(fn(_) { JetComputeError.InvalidShape("Tensor view strides must be non-negative and representable") })?
     right_column_stride :: USize.try_from(*right_strides.last().ok_or_else(fn() { JetComputeError.InvalidShape("Tensor shape must have at least one axis") })?).map_err(fn(_) { JetComputeError.InvalidShape("Tensor view strides must be non-negative and representable") })?
     data := [F64].with_capacity(n)
-    for row in 0..<row_count {
+    loop row in 0..<row_count {
         left_index := jet_compute_contiguous_row_offset(row, shape, &left_strides, left_offset)?
         right_index := jet_compute_contiguous_row_offset(row, shape, &right_strides, right_offset)?
-        for _ in 0..<row_width {
+        loop _ in 0..<row_width {
             x :: a.data[left_index]
             y :: b.data[right_index]
             data.push(jet_compute_binary_element(op, x, y, f32_profile)?)
@@ -209,10 +209,10 @@ fn jet_compute_binary_contiguous(op: String, a: &JetTensor, b: &JetTensor, shape
     left_column_stride :: USize.try_from(*left_strides.last().ok_or_else(fn() { JetComputeError.InvalidShape("Tensor shape must have at least one axis") })?).map_err(fn(_) { JetComputeError.InvalidShape("Tensor view strides must be non-negative and representable") })?
     right_column_stride :: USize.try_from(*right_strides.last().ok_or_else(fn() { JetComputeError.InvalidShape("Tensor shape must have at least one axis") })?).map_err(fn(_) { JetComputeError.InvalidShape("Tensor view strides must be non-negative and representable") })?
     data := [F64].with_capacity(n)
-    for row in 0..<row_count {
+    loop row in 0..<row_count {
         left_index := jet_compute_contiguous_row_offset(row, shape, &left_strides, left_offset)?
         right_index := jet_compute_contiguous_row_offset(row, shape, &right_strides, right_offset)?
-        for _ in 0..<row_width {
+        loop _ in 0..<row_width {
             x :: a.data[left_index]
             y :: b.data[right_index]
             data.push(jet_compute_binary_element(op, x, y, f32_profile)?)
@@ -262,7 +262,7 @@ fn jet_compute_binary(op: String, a: &JetTensor, b: &JetTensor) -> JetTensor Jet
 fn jet_compute_eye(n: I64) -> JetTensor JetComputeError! {
     if n < 0 { return Err(JetComputeError.InvalidShape("eye size must be non-negative")) }
     out := jet_compute_tensor_from_shape([n, n], 0.0, JetComputeDevice.Cpu)?
-    for i in 0..<n { jet_compute_set(&out, &[i, i], 1.0)? }
+    loop i in 0..<n { jet_compute_set(&out, &[i, i], 1.0)? }
     Ok(^out)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:7696
@@ -277,21 +277,21 @@ fn jet_compute_det(tensor: &JetTensor) -> F64 JetComputeError! {
     if matrix_len != values.len() { return Err(JetComputeError.InvalidShape("det matrix storage is inconsistent")) }
     a := values.to_vec()
     det := 1.0
-    for i in 0..<n {
+    loop i in 0..<n {
         pivot := i
-        for r in i..<n { if a[r * n + i].abs() > a[pivot * n + i].abs() { pivot = r } }
+        loop r in i..<n { if a[r * n + i].abs() > a[pivot * n + i].abs() { pivot = r } }
         if a[pivot * n + i].abs() < 1e-15 { return Ok(0.0) }
         if pivot != i {
-            for c in 0..<n { a.swap(i * n + c, pivot * n + c) }
+            loop c in 0..<n { a.swap(i * n + c, pivot * n + c) }
             det = -det
         }
         piv :: a[i * n + i]
         det *= piv
         if !det.is_finite() { return Err(JetComputeError.Arithmetic("det overflowed to a non-finite value")) }
-        for r in (i + 1)..<n {
+        loop r in (i + 1)..<n {
             factor :: a[r * n + i] / piv
             if !factor.is_finite() { return Err(JetComputeError.Arithmetic("det elimination produced a non-finite factor")) }
-            for c in i..<n {
+            loop c in i..<n {
                 a[r * n + c] -= factor * a[i * n + c]
                 if !a[r * n + c].is_finite() { return Err(JetComputeError.Arithmetic("det elimination produced a non-finite value")) }
             }
@@ -310,33 +310,33 @@ fn jet_compute_inv(tensor: &JetTensor) -> JetTensor JetComputeError! {
     matrix_len :: n.checked_mul(width).ok_or_else(fn() { JetComputeError.InvalidShape("inv matrix storage length overflow") })?
     if matrix_len > MAX_TENSOR_ELEMENTS { return Err(JetComputeError.InvalidShape("inv workspace exceeds the Core storage limit")) }
     a := [F64{0.0}].repeat(matrix_len)
-    for i in 0..<n {
-        for j in 0..<n {
+    loop i in 0..<n {
+        loop j in 0..<n {
             a[i * width + j] = jet_compute_get_raw(tensor, &[I64{i}, I64{j}])?
             a[i * width + n + j] = if i == j { 1.0 } else { 0.0 }
         }
     }
-    for i in 0..<n {
+    loop i in 0..<n {
         pivot := i
-        for r in i..<n { if a[r * width + i].abs() > a[pivot * width + i].abs() { pivot = r } }
+        loop r in i..<n { if a[r * width + i].abs() > a[pivot * width + i].abs() { pivot = r } }
         if a[pivot * width + i].abs() < 1e-15 { return Err(JetComputeError.InvalidShape("matrix is singular")) }
-        if pivot != i { for c in 0..<width { a.swap(i * width + c, pivot * width + c) } }
+        if pivot != i { loop c in 0..<width { a.swap(i * width + c, pivot * width + c) } }
         piv :: a[i * width + i]
-        for c in 0..<width {
+        loop c in 0..<width {
             a[i * width + c] /= piv
             if !a[i * width + c].is_finite() { return Err(JetComputeError.Arithmetic("inv normalization produced a non-finite value")) }
         }
-        for r in 0..<n {
-            if r == i { continue }
+        loop r in 0..<n {
+            if r == i { next }
             factor :: a[r * width + i]
-            for c in 0..<width {
+            loop c in 0..<width {
                 a[r * width + c] -= factor * a[i * width + c]
                 if !a[r * width + c].is_finite() { return Err(JetComputeError.Arithmetic("inv elimination produced a non-finite value")) }
             }
         }
     }
     out := jet_compute_tensor_from_shape([tensor.shape[0], tensor.shape[1]], 0.0, JetComputeDevice.Cpu)?
-    for i in 0..<n { for j in 0..<n { jet_compute_set(&out, &[I64{i}, I64{j}], a[i * width + n + j])? } }
+    loop i in 0..<n { loop j in 0..<n { jet_compute_set(&out, &[I64{i}, I64{j}], a[i * width + n + j])? } }
     Ok(^out)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:7862
@@ -356,27 +356,27 @@ fn jet_compute_solve(a: &JetTensor, b: &JetTensor) -> JetTensor JetComputeError!
     workspace :: n.checked_mul(width).ok_or_else(fn() { JetComputeError.InvalidShape("solve workspace length overflow") })?
     if workspace > MAX_TENSOR_ELEMENTS { return Err(JetComputeError.InvalidShape("solve workspace exceeds the Core storage limit")) }
     augmented := (0..<n).map(fn(_) { [F64{0.0}].repeat(width) }).collect::<[[F64]]>()
-    for row in 0..<n {
-        for col in 0..<n { augmented[row][col] = jet_compute_get_raw(a, &[I64{row}, I64{col}])? }
-        for col in 0..<rhs_cols {
+    loop row in 0..<n {
+        loop col in 0..<n { augmented[row][col] = jet_compute_get_raw(a, &[I64{row}, I64{col}])? }
+        loop col in 0..<rhs_cols {
             augmented[row][n + col] = if b.shape.len() == 1 { jet_compute_get_raw(b, &[I64{row}])? } else { jet_compute_get_raw(b, &[I64{row}, I64{col}])? }
         }
     }
-    for pivot in 0..<n {
+    loop pivot in 0..<n {
         best := pivot
-        for row in pivot..<n { if augmented[row][pivot].abs() > augmented[best][pivot].abs() { best = row } }
+        loop row in pivot..<n { if augmented[row][pivot].abs() > augmented[best][pivot].abs() { best = row } }
         if augmented[best][pivot].abs() < 1e-15 { return Err(JetComputeError.Arithmetic("solve coefficient matrix is singular")) }
         augmented.swap(pivot, best)
         divisor :: augmented[pivot][pivot]
-        for col in pivot..<width {
+        loop col in pivot..<width {
             augmented[pivot][col] /= divisor
             if !augmented[pivot][col].is_finite() { return Err(JetComputeError.Arithmetic("solve normalization produced a non-finite value")) }
         }
-        for row in 0..<n {
-            if row == pivot { continue }
+        loop row in 0..<n {
+            if row == pivot { next }
             factor :: augmented[row][pivot]
             if !factor.is_finite() { return Err(JetComputeError.Arithmetic("solve elimination produced a non-finite factor")) }
-            for col in pivot..<width {
+            loop col in pivot..<width {
                 augmented[row][col] -= factor * augmented[pivot][col]
                 if !augmented[row][col].is_finite() { return Err(JetComputeError.Arithmetic("solve elimination produced a non-finite value")) }
             }
@@ -384,8 +384,8 @@ fn jet_compute_solve(a: &JetTensor, b: &JetTensor) -> JetTensor JetComputeError!
     }
     output_shape :: if b.shape.len() == 1 { [a.shape[0]] } else { [a.shape[0], b.shape[1]] }
     out := jet_compute_tensor_from_shape(^output_shape, 0.0, JetComputeDevice.Cpu)?
-    for row in 0..<n {
-        for col in 0..<rhs_cols {
+    loop row in 0..<n {
+        loop col in 0..<rhs_cols {
             index :: if b.shape.len() == 1 { [I64{row}] } else { [I64{row}, I64{col}] }
             jet_compute_set(&out, &index, augmented[row][n + col])?
         }
@@ -403,7 +403,7 @@ fn jet_compute_fft_radix2_f64(values: [F64]) -> [F64] JetComputeError! {
         phase :: direction * F64{3.14159265358979323846264338327950288} / F64{n}
         twiddles :: (0..<n / 2).map(fn(index) { (phase * F64{index}).sin_cos() }).collect::<[(F64, F64)]>()
         reversed := USize{0}
-        for index in 1..<n {
+        loop index in 1..<n {
             bit := n >> 1
             while reversed & bit != 0 {
                 reversed ^= bit
@@ -420,7 +420,7 @@ fn jet_compute_fft_radix2_f64(values: [F64]) -> [F64] JetComputeError! {
             half :: stage_length / 2
             twiddle_step :: n / stage_length
             for block_start in (0..<n).step_by(stage_length) {
-                for offset in 0..<half {
+                loop offset in 0..<half {
                     even :: block_start + offset
                     odd :: even + half
                     (sin, cos) :: twiddles[offset * twiddle_step]
@@ -439,7 +439,7 @@ fn jet_compute_fft_radix2_f64(values: [F64]) -> [F64] JetComputeError! {
         }
         if inverse {
             scale :: F64{1.0} / F64{n}
-            for index in 0..<n {
+            loop index in 0..<n {
                 real[index] *= scale
                 imaginary[index] *= scale
             }
@@ -507,7 +507,7 @@ fn jet_compute_fft_radix2_f32(values: [F32]) -> [F64] JetComputeError! {
         phase :: direction * F32{3.14159265358979323846264338327950288} / F32{n}
         twiddles :: (0..<n / 2).map(fn(index) { (phase * F32{index}).sin_cos() }).collect::<[(F32, F32)]>()
         reversed := USize{0}
-        for index in 1..<n {
+        loop index in 1..<n {
             bit := n >> 1
             while reversed & bit != 0 {
                 reversed ^= bit
@@ -524,7 +524,7 @@ fn jet_compute_fft_radix2_f32(values: [F32]) -> [F64] JetComputeError! {
             half :: stage_length / 2
             twiddle_step :: n / stage_length
             for block_start in (0..<n).step_by(stage_length) {
-                for offset in 0..<half {
+                loop offset in 0..<half {
                     even :: block_start + offset
                     odd :: even + half
                     (sin, cos) :: twiddles[offset * twiddle_step]
@@ -543,7 +543,7 @@ fn jet_compute_fft_radix2_f32(values: [F32]) -> [F64] JetComputeError! {
         }
         if inverse {
             scale :: F32{1.0} / F32{n}
-            for index in 0..<n {
+            loop index in 0..<n {
                 real[index] *= scale
                 imaginary[index] *= scale
             }
@@ -777,7 +777,7 @@ fn jet_compute_reduce_to_shape(tensor: &JetTensor, target_shape: &[I64]) -> JetT
                 rem = if dim == 0 { 0 } else { rem / dim }
             }
             target_coords := [I64{0}].repeat(target_shape.len())
-            for axis in 0..<target_shape.len() {
+            loop axis in 0..<target_shape.len() {
                 source_axis :: axis + rank_delta
                 target_coords[axis] = if target_shape[axis] == 1 { 0 } else { output_coords[source_axis] }
             }
@@ -785,7 +785,7 @@ fn jet_compute_reduce_to_shape(tensor: &JetTensor, target_shape: &[I64]) -> JetT
             buckets[target_offset].push(jet_compute_f32_value(*value, "accelerator gradient accumulation")?)
         }
         sums := [F32].with_capacity(output_len)
-        for bucket in buckets {
+        loop bucket in buckets {
             sum :: if bucket.is_empty() { F32{0.0} } else {
                 jet_compute_accelerator_sum(tensor.device, &bucket)?.into_iter().next().ok_or_else(fn() { JetComputeError.Device("{tensor.device.jet_show()} gradient reduction returned no value") })?
             }
@@ -798,7 +798,7 @@ fn jet_compute_reduce_to_shape(tensor: &JetTensor, target_shape: &[I64]) -> JetT
         }
         return jet_compute_record(^out, &[tensor], [tensor.clone()], JetComputeTapeRule.ReduceToShape{source_shape: tensor.shape.clone()})
     }
-    for flat in 0..<values.len() {
+    loop flat in 0..<values.len() {
         rem := I64{flat}
         output_coords := [I64{0}].repeat(tensor.shape.len())
         for axis in (0..<tensor.shape.len()).rev() {
@@ -807,7 +807,7 @@ fn jet_compute_reduce_to_shape(tensor: &JetTensor, target_shape: &[I64]) -> JetT
             rem = if dim == 0 { 0 } else { rem / dim }
         }
         target_coords := [I64{0}].repeat(target_shape.len())
-        for axis in 0..<target_shape.len() {
+        loop axis in 0..<target_shape.len() {
             source_axis :: axis + rank_delta
             target_coords[axis] = if target_shape[axis] == 1 { 0 } else { output_coords[source_axis] }
         }
@@ -973,18 +973,18 @@ fn jet_compute_reverse(state: &JetComputeVjpState, seed: &JetTensor) -> [JetTens
         (tape.nodes.clone(), tape.inputs.clone())
     }
     cotangents := [JetTensor?].filled(nodes.len(), None)
-    if Val(output_node) :: state.output_node {
+    if state.output_node == .Val(output_node) {
         slot :: cotangents.get_mut(output_node).ok_or_else(fn() { JetComputeError.Unsupported("VJP output node is outside its tape") })?
         *slot = Val(jet_compute_untracked(seed))
     }
     // Input leaves retain accumulated cotangents; reverse only operation nodes.
     for index in (inputs.len()..<nodes.len()).rev() {
-        cot :: match cotangents[index].take() { Val(cot) -> ^cot, None -> continue }
+        cot :: match cotangents[index].take() { Val(cot) -> ^cot, None -> next }
         node :: &nodes[index]
-        rule :: match node.rule.as_ref() { Val(rule) -> rule, None -> continue }
+        rule :: match node.rule.as_ref() { Val(rule) -> rule, None -> next }
         gradients :: jet_compute_rule_gradients(rule, &node.values, &node.output, &cot, &state.tape)?
         for (parent, gradient) in node.parents.iter().zip(gradients) {
-            parent :: match parent { Val(parent) -> parent, None -> continue }
+            parent :: match parent { Val(parent) -> parent, None -> next }
             gradient :: jet_compute_remove_trace_level(&gradient, &state.tape)
             slot :: cotangents.get_mut(*parent).ok_or_else(fn() { JetComputeError.Unsupported("VJP parent node is outside its tape") })?
             *slot = Val(match slot.take() {

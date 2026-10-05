@@ -677,10 +677,10 @@ fn jet_compute_matmul(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComp
     }
     f32_profile :: a.last_placement.profile == CPU_ORACLE_F32_PROFILE
     out := jet_compute_tensor_from_shape_like(a, [m, n], 0.0)?
-    for i in 0..<m {
-        for j in 0..<n {
+    loop i in 0..<m {
+        loop j in 0..<n {
             sum := 0.0
-            for t in 0..<k {
+            loop t in 0..<k {
                 av :: jet_compute_get_raw(a, &[i, t])?
                 bv :: jet_compute_get_raw(b, &[t, j])?
                 sum = if f32_profile {
@@ -762,7 +762,7 @@ fn jet_compute_broadcast_shape(a: &[I64], b: &[I64]) -> Result<[I64], JetCompute
     if a.iter().chain(b.iter()).any(fn(dim) { *dim < 0 }) { return Err(JetComputeError.InvalidShape("broadcast shapes cannot contain negative axes")) }
     rank :: a.len().max(b.len())
     out := [I64].repeat(1, rank)
-    for i in 0..<rank {
+    loop i in 0..<rank {
         da :: if i < rank - a.len() { 1 } else { a[i - (rank - a.len())] }
         db :: if i < rank - b.len() { 1 } else { b[i - (rank - b.len())] }
         if da == db { out[i] = da }
@@ -798,7 +798,7 @@ fn jet_compute_materialize_broadcast(tensor: &JetTensor, shape: &[I64]) -> Resul
     data := [F64].with_capacity(n)
     coordinates := [USize].repeat(0, dst_rank)
     source_index := source_offset
-    for _ in 0..<n {
+    loop _ in 0..<n {
         data.push(tensor.data[source_index])
         axis := dst_rank
         while axis > 0 {
@@ -862,7 +862,7 @@ fn jet_compute_sum_axis(tensor: &JetTensor, axis: I64) -> Result<JetTensor, JetC
         remainder := flat
         offset := source_offset
         for source_axis in (0..<tensor.shape.len()).rev() {
-            if source_axis == axis { continue }
+            if source_axis == axis { next }
             dimension :: USize.try_from(tensor.shape[source_axis]).map_err(fn(error) { JetComputeError.InvalidShape("Tensor shape axis is too large") })?
             coordinate :: if dimension == 0 { 0 } else { remainder % dimension }
             remainder = if dimension == 0 { 0 } else { remainder / dimension }
@@ -881,10 +881,10 @@ fn jet_compute_sum_axis(tensor: &JetTensor, axis: I64) -> Result<JetTensor, JetC
                 None -> return Err(JetComputeError.Unsupported("accelerator sum_axis requires exclusive output storage"))
             }
             values := [F32].with_capacity(axis_len)
-            for flat in 0..<out_n {
+            loop flat in 0..<out_n {
                 source_index := source_offset_for(flat)?
                 values.clear()
-                for k in 0..<axis_len {
+                loop k in 0..<axis_len {
                     values.push(jet_compute_f32_value(source_data[source_index], "accelerator sum input")?)
                     if k + 1 < axis_len { source_index = source_index.checked_add(axis_stride).ok_or_else(fn() { JetComputeError.OutOfBounds("tensor index offset overflow") })? }
                 }
@@ -909,10 +909,10 @@ fn jet_compute_sum_axis(tensor: &JetTensor, axis: I64) -> Result<JetTensor, JetC
             Val(data) -> data
             None -> return Err(JetComputeError.Unsupported("sum_axis requires exclusive output storage"))
         }
-        for flat in 0..<out_n {
+        loop flat in 0..<out_n {
             source_index := source_offset_for(flat)?
             sum := 0.0
-            for k in 0..<axis_len {
+            loop k in 0..<axis_len {
                 value :: source_data[source_index]
                 sum = if f32_profile {
                     value :: jet_compute_f32_value(value, "sum_axis input")?
