@@ -435,7 +435,7 @@ impl CBORWriter {
             match self.frames.last_mut().expect("CBOR frame checked") {
                 .Array{items} -> items.push(^bytes)
                 .Object{entries, key} -> {
-                    key :: key.take().expect("CBOR object key checked")
+                    key :: key.take() ?? panic("CBOR object key checked")
                     entries.push((^key, ^bytes))
                 }
             }

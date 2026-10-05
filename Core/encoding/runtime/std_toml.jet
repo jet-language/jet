@@ -546,7 +546,7 @@ impl Parser {
         if self.try_keyword("nan") -> return Ok(Value.Float(F64.NAN))
         tok := String.new()
         if self.peek() == .Val('+' | '-') {
-            sign :: self.bump().unwrap()
+            sign :: self.bump() ?? panic("unwrap failed")
             tok.push(sign)
             if self.try_keyword("inf") -> return Ok(Value.Float(if sign == '-' { F64.NEG_INFINITY } else { F64.INFINITY }))
             if self.try_keyword("nan") -> return Ok(Value.Float(F64.NAN))
@@ -581,7 +581,7 @@ impl Parser {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:768
     fn radix_integer(self: &Parser) -> Value ParseError! {
         _ :: self.bump()
-        prefix :: self.bump().unwrap()
+        prefix :: self.bump() ?? panic("unwrap failed")
         radix :: match prefix { 'x' -> 16, 'o' -> 8, 'b' -> 2, _ -> 16 }
         tok := String.new()
         loop self.peek() == .Val(c) {

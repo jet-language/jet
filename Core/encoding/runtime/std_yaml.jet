@@ -421,7 +421,7 @@ fn fold_lines(lines: View<String>) -> String {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:609
 fn unescape(c: Char) -> Char {
     match c {
-        'n' -> '\n', 't' -> '\t', 'r' -> '\r', '0' -> TEXT_NUL.chars().next().unwrap(),
+        'n' -> '\n', 't' -> '\t', 'r' -> '\r', '0' -> TEXT_NUL.chars().next() ?? panic("unwrap failed"),
         '\\' -> '\\', '"' -> '"', _ -> c,
     }
 }

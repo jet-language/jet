@@ -101,11 +101,11 @@ fn jet_json_big_pow(base: JetBigInt, exponent: USize) -> JetBigInt {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:137
 fn jet_json_decimal_ratio(text: String) -> (JetBigInt, JetBigInt) {
     (mantissa, exponent) :: text.split_once('e').map(fn(pair) {
-        (pair.0, pair.1.parse<I32>().expect("Rust float exponent"))
+        (pair.0, pair.1.parse<I32>() ?? panic("Rust float exponent"))
     }).unwrap_or((text, 0))
     fraction :: mantissa.split_once('.').map_or(0, fn(pair) { pair.1.len() }) as I32
     digits :: mantissa.replace('.', "")
-    numerator := JetBigInt.from_str(&digits).expect("Rust float digits")
+    numerator := JetBigInt.from_str(&digits) ?? panic("Rust float digits")
     denominator := JetBigInt.from_int(1)
     decimal_exponent :: exponent - fraction
     if decimal_exponent >= 0 {
@@ -135,7 +135,7 @@ fn jet_json_decimal_distance(text: String, exact: &(JetBigInt, JetBigInt)) -> Je
     candidate :: jet_json_decimal_ratio(text)
     distance :: candidate.0.mul(&exact.1).sub(&exact.0.mul(&candidate.1))
     rendered :: distance.to_string_rep()
-    JetBigInt.from_str(rendered.strip_prefix('-').unwrap_or(&rendered)).expect("absolute decimal distance")
+    JetBigInt.from_str(rendered.strip_prefix('-').unwrap_or(&rendered)) ?? panic("absolute decimal distance")
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:181
 fn jet_json_positive_big_cmp(left: &JetBigInt, right: &JetBigInt) -> cmp.Ordering {
@@ -153,7 +153,7 @@ fn jet_json_jcs_shortest(value: F64) -> String {
     for replacement in [digit.checked_sub(1), digit.checked_add(1).filter(fn(next) { next < 10 })].into_iter().flatten() {
         candidate := shortest.clone().into_bytes()
         candidate[index] = U8{48} + replacement
-        rendered :: String.from_utf8(^candidate).expect("ASCII digit replacement")
+        rendered :: String.from_utf8(^candidate) ?? panic("ASCII digit replacement")
         if rendered.parse<F64>().is_ok_and(fn(parsed) { parsed.to_bits() == value.to_bits() }) {
             candidates.push((rendered, replacement))
         }
@@ -165,7 +165,7 @@ fn jet_json_jcs_shortest(value: F64) -> String {
         (pair.0, pair.1, distance)
     }).min_by(fn(left, right) {
         jet_json_positive_big_cmp(&left.2, &right.2).then_with(fn() { (left.1 & 1).cmp(&(right.1 & 1)) })
-    }).map(fn(entry) { entry.0 }).expect("at least one shortest float")
+    }).map(fn(entry) { entry.0 }) ?? panic("at least one shortest float")
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:219
 fn jet_json_jcs_number(value: F64) -> String {
@@ -173,7 +173,7 @@ fn jet_json_jcs_number(value: F64) -> String {
     negative :: value.is_sign_negative()
     shortest :: jet_json_jcs_shortest(value.abs())
     (mantissa, exponent) :: shortest.split_once('e').map(fn(pair) {
-        (pair.0, pair.1.parse<I32>().expect("Rust float exponent"))
+        (pair.0, pair.1.parse<I32>() ?? panic("Rust float exponent"))
     }).unwrap_or((&shortest, 0))
     decimal :: mantissa.find('.').unwrap_or(mantissa.len()) as I32
     digits := mantissa.bytes().filter(fn(byte) { byte != U8{46} }).collect<[U8]>()
@@ -787,7 +787,7 @@ impl JSONReader {
                 },
                 Val(.ObjectColonValue) -> {
                     if self.expect_byte(58, "`:` after object key") == .Err(e) -> return self.fail(e)
-                    frame :: self.frames.last_mut().unwrap()
+                    frame :: self.frames.last_mut() ?? panic("unwrap failed")
                     previous :: mem.replace(frame, JetJSONReadFrame.ObjectKeyOrEnd(false))
                     match previous {
                         .ObjectColonValue(key, key_heap) -> frame = .ObjectCommaOrEnd(key, key_heap),
@@ -798,7 +798,7 @@ impl JSONReader {
                 Val(.ObjectCommaOrEnd) -> match self.fill()? {
                     Val(44) -> {
                         _ :: self.take()?
-                        previous :: mem.replace(self.frames.last_mut().unwrap(), JetJSONReadFrame.ObjectKeyOrEnd(false))
+                        previous :: mem.replace(self.frames.last_mut() ?? panic("unwrap failed"), JetJSONReadFrame.ObjectKeyOrEnd(false))
                         match previous { .ObjectCommaOrEnd(_, key_heap) -> self.release_item_heap(key_heap), _ -> unreachable() }
                     },
                     Val(125) -> {
@@ -1190,7 +1190,7 @@ impl JSONWriter {
                         Ok(())
                     },
                     _ -> {
-                        self.canonical_emit(encoded.as_deref().unwrap())?
+                        self.canonical_emit(encoded.as_deref() ?? panic("unwrap failed"))?
                         self.canonical_complete_value()
                     },
                 }
