@@ -65,6 +65,7 @@ use crate::Codegen::TIR::view_copy_owned_type;
 use crate::Codegen::TIR::{TContract, TContractDisposition, TContractKind};
 use crate::Codegen::TIR::{
     THandleOp, call_return_type, call_return_type_with_args, demand_generic_free_function,
+    demand_module_generic_function,
 };
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::is_db_value_type_name;
@@ -6434,7 +6435,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 .import_sigs
                                 .get(&(call.name.clone(), fn_name.clone()))
                                 .cloned();
-                            let args = call
+                            let args: Vec<TCallArg> = call
                                 .args
                                 .iter()
                                 .enumerate()
@@ -6467,13 +6468,28 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     return invariant_violation_expr(call.name_span, error);
                                 }
                             };
+                            // #4609: a generic target names the instance its
+                            // declaring module lowers, by canonical key.
+                            let form = match demand_module_generic_function(
+                                cx,
+                                &(call.name.clone(), fn_name.clone()),
+                                &fn_name,
+                                &args,
+                                &call.type_args,
+                            ) {
+                                Some((owner, instance)) => TModuleCallForm::Qualified {
+                                    rust_mod: owner,
+                                    rust_fn: instance,
+                                },
+                                None => TModuleCallForm::Qualified {
+                                    rust_mod,
+                                    rust_fn: mangle(&fn_name).to_string(),
+                                },
+                            };
                             let lowered = TExpr {
                                 ty: ret,
                                 kind: TExprKind::ModuleCall {
-                                    form: TModuleCallForm::Qualified {
-                                        rust_mod,
-                                        rust_fn: mangle(&fn_name).to_string(),
-                                    },
+                                    form,
                                     target_return,
                                     type_args: call.type_args.clone(),
                                     args,
