@@ -2031,7 +2031,9 @@ pub(crate) fn module_call_signature(
 ) -> Option<Vec<(crate::AST::AccessConvention, Type)>> {
     let sig = cx.import_sigs.get(key)?;
     let Some(generic) = cx.import_generics.get(key) else {
-        return Some(sig.clone());
+        return Some(sig.iter().map(|(conv, ty)| {
+            (*conv, cx.expand_type_aliases(ty).with_effective_fn_returns())
+        }).collect());
     };
     if generic.type_params.len() != type_args.len() {
         return None;
@@ -2042,7 +2044,10 @@ pub(crate) fn module_call_signature(
         .cloned()
         .zip(type_args.iter().map(|ty| canonical_module_type(cx, ty)))
         .collect();
-    Some(sig.iter().map(|(conv, ty)| (*conv, crate::Generics::substitute_type(ty, &subst))).collect())
+    Some(sig.iter().map(|(conv, ty)| {
+        let instantiated = crate::Generics::substitute_type(ty, &subst);
+        (*conv, cx.expand_type_aliases(&instantiated).with_effective_fn_returns())
+    }).collect())
 }
 
 /// #4609: a call into another source module's generic function names the

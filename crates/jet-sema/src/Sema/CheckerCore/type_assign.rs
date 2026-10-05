@@ -458,6 +458,15 @@ impl<'a> Checker<'a> {
                 // D-CORE-USELIST1=A: a grouped Core item import
                 // (`use core.web.forms.[WebFormError]`) names that module's
                 // public source record.
+                if self.core_item_imports.get(n).zip(self.core_imports.get(n))
+                    .is_some_and(|(item, module)| crate::Sema::CheckerCoreLib::core_module_type_item(module, item))
+                {
+                    let resolved = self.resolve_type(Type::Named(n.clone()));
+                    if !matches!(&resolved, Type::Named(name) if name == n) {
+                        self.check_declared_type_rules(&resolved, span);
+                        return;
+                    }
+                }
                 if let Some(leaf) = self.core_item_imports.get(n.as_str()) {
                     if self
                         .struct_owner_module(n, None)

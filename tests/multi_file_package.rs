@@ -16,6 +16,14 @@ const FILES: &[(&str, &str)] = &[
 ];
 
 #[test]
+fn core_builtin_type_members_preserve_their_identity_through_aliases() {
+    tir_support::assert_example_cli_tiers_agree(
+        "modules/core_type_imports",
+        include_str!("../Examples/features/expected/modules/core_type_imports.out"),
+    );
+}
+
+#[test]
 fn package_members_have_all_tier_parity() {
     tir_support::assert_example_cli_tiers_agree("modules/package_members", GOLDEN);
 
