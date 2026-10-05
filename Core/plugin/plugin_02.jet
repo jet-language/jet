@@ -259,7 +259,7 @@ fn plugin_io_error_value(operation: String, resource: String?, error: IoError) -
 }
 // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:488
 fn plugin_require_io_result(import: HostImportFact, results: [ComponentVal]) -> () Err! {
-    if results.len() != 1 or import.result_type_id != Val("result") -> return Err("plugin host import `{import.operation}` must return the declared typed result")
+    if results.len() != 1 or import.result_type_id != "result" -> return Err("plugin host import `{import.operation}` must return the declared typed result")
 }
 // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:501
 fn plugin_set_io_result_error(import: HostImportFact, results: &[ComponentVal], operation: String, resource: String?, error: IoError) -> () Err! {
@@ -384,7 +384,7 @@ fn plugin_host_connect(import: HostImportFact, params: [ComponentVal], results: 
 fn plugin_host_exec(import: HostImportFact, params: [ComponentVal], results: &[ComponentVal]) -> () PluginBoundaryError! {
     user_error :: |message| -> PluginBoundaryError.new(.UserError, message)
     if params.len() != 2 -> return Err(user_error("plugin host import `{import.operation}` expects a Text program and list<Text> arguments"))
-    if results.len() != 1 or import.result_type_id != Val("Text") -> return Err(user_error("plugin host import `{import.operation}` must return one Text result"))
+    if results.len() != 1 or import.result_type_id != "Text" -> return Err(user_error("plugin host import `{import.operation}` must return one Text result"))
     program :: match params.first() { Val(.String(program)) -> program, _ -> return Err(user_error("plugin host import `{import.operation}` requires a Text program")) }
     command := Command.new(program)
     arguments :: match params.get(1) { Val(.List(arguments)) -> arguments, _ -> return Err(user_error("plugin host import `{import.operation}` requires list<Text> arguments")) }
