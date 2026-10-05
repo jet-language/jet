@@ -650,10 +650,11 @@ fn sema_pattern_reused_hole(name: String, hole_span: Span, diagnostics: &[Diagno
     }
 }
 
-// S20: Jet text has only the `\n`, `\t`, `\"`, `\\` escapes, so any other
-// scalar (a carriage return included) stays as the raw source character.
+// S20: Jet text has only the `\n`, `\t`, `\"`, `\\` escapes plus doubled
+// braces, so any other scalar (a carriage return included) stays as the raw
+// source character.
 fn sema_pattern_escape_literal(text: String) -> String Never! {
-    text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t").replace("{", "{{").replace("}", "}}")
+    text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t").replace("{{", "{{{{").replace("}}", "}}}}")
 }
 
 fn sema_pattern_text_comparison(parts: [StrMatchPart]) -> String Never! {

@@ -3714,8 +3714,14 @@ fn sema_stmt_check_scope_member(name: String, args: [Expr], args_span: Span?, bo
                         code = Val(value)
                     }
                     .TupleLit(fields, _, _) -> {
-                        if message != None || fields.len() != 1 -> { valid = false; next }
-                        if fields[0].name != "message" -> { valid = false; next }
+                        if message != None || fields.len() != 1 {
+                            valid = false
+                            next
+                        }
+                        if fields[0].name != "message" {
+                            valid = false
+                            next
+                        }
                         if fields[0].value == {
                             .Str(parts, _) -> {
                                 text := ""
@@ -3734,11 +3740,10 @@ fn sema_stmt_check_scope_member(name: String, args: [Expr], args_span: Span?, bo
                     else -> valid = false
                 }
             }
-            if valid -> kind = Val(TScopeMemberKind.ExpectFail{code: code, message: message})
-            else -> &diagnostics.push(sema_error("E0617", args_span ?? span,
-                "`.expect_fail` takes an optional runtime stop code and `message: \"text\"`",
-                "the code names a registered E30xx stop; the message is a non-empty string literal matched as a case-sensitive substring",
-                "write `.expect_fail {{ … }}`, `.expect_fail(E3010) {{ … }}`, or `.expect_fail(E3001, message: \"reason\") {{ … }}`"))
+            if {
+                valid -> kind = Val(TScopeMemberKind.ExpectFail{code: code, message: message})
+                else -> &diagnostics.push(sema_error("E0617", args_span ?? span, "`.expect_fail` takes an optional runtime stop code and `message: \"text\"`", "the code names a registered E30xx stop; the message is a non-empty string literal matched as a case-sensitive substring", "write `.expect_fail {{ … }}`, `.expect_fail(E3010) {{ … }}`, or `.expect_fail(E3001, message: \"reason\") {{ … }}`"))
+            }
         }
         "timeout" -> {
             if args.len() == 1 {

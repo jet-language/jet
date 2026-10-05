@@ -1620,12 +1620,16 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     if expected_effects == .Val(bound) {
         if lambda.effects == .Val(written) {
             open := false
-            loop entry in bound -> if entry.name.starts_with("..") -> open = true
+            loop entry in bound {
+                if entry.name.starts_with("..") -> open = true
+            }
             exceeds := false
             loop entry in written {
                 if entry.name.starts_with("!") || entry.name.starts_with("..") -> next
                 covered := false
-                loop allowed in bound -> if sema_effect_covers(allowed.name, entry.name) -> covered = true
+                loop allowed in bound {
+                    if sema_effect_covers(allowed.name, entry.name) -> covered = true
+                }
                 if !covered -> exceeds = true
             }
             if !open && exceeds {
