@@ -1,6 +1,7 @@
 // Jet-owned Rust source emission context. The emitter consumes complete MIR and
 // never asks the Rust compiler to rediscover checked policy.
 use jet_foundation.[
+    CompilerThreads,
     MIRAccess,
     MIRCompilerBuiltin,
     MIRCoreCall,
@@ -44,6 +45,10 @@ pub struct JetRustEmitConfig {
     // JET_KEEP_GOING (jet_rust_emit_program_keep_going): every failure is
     // kept with the function being printed and emission runs to the end.
     pub keep_going: Bool{false}
+    // The compiler threads function printing may use (D-JOBS1): more than
+    // one admitted thread prints the functions in consecutive parts, each on
+    // its own copy of the emission context, joined in program order.
+    pub threads: CompilerThreads
 }
 
 pub enum JetRustEmitFailureKind {

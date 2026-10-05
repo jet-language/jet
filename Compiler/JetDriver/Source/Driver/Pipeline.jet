@@ -2674,8 +2674,8 @@ fn jet_driver_keep_going_optimize(kg: &JetDriverKeepGoingLog, program: &MIRProgr
 }
 
 // Every emitter failure is a row naming the function being printed.
-fn jet_driver_keep_going_emit(kg: &JetDriverKeepGoingLog, program: &MIRProgram, trace_sink: CompilerTraceSink?) -> JetRustEmitResult {
-    kept := jet_rust_emit_program_keep_going(program, jet_driver_native_emit_config(), trace_sink)
+fn jet_driver_keep_going_emit(kg: &JetDriverKeepGoingLog, program: &MIRProgram, trace_sink: CompilerTraceSink?, threads: CompilerThreads) -> JetRustEmitResult {
+    kept := jet_rust_emit_program_keep_going(program, jet_driver_native_emit_config(threads), trace_sink)
     loop kept_failure in kept.failures {
         failure :: kept_failure.failure
         item := "-"
@@ -2692,8 +2692,8 @@ fn jet_driver_keep_going_emit(kg: &JetDriverKeepGoingLog, program: &MIRProgram, 
     kept.result
 }
 
-// The native AOT emission of the selected program.
-fn jet_driver_native_emit_config() -> JetRustEmitConfig Never! {
+// The native AOT emission of the selected program on the compiler's threads.
+fn jet_driver_native_emit_config(threads: CompilerThreads) -> JetRustEmitConfig Never! {
     JetRustEmitConfig{
         target: "rust_aot",
         root_prefix: "",
@@ -2704,6 +2704,7 @@ fn jet_driver_native_emit_config() -> JetRustEmitConfig Never! {
         // development devtools policy keeps the local rail on.
         local_rail: true,
         web_bucket: None,
+        threads: threads,
     }
 }
 
@@ -3294,7 +3295,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         jet_driver_keep_going_trap_emission(&kg, &optimized_program)
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
-    emitted := if kg.enabled -> jet_driver_keep_going_emit(&kg, &optimized_program, request.trace_sink) else -> jet_rust_emit_program(optimized_program, jet_driver_native_emit_config(), request.trace_sink)
+    emitted := if kg.enabled -> jet_driver_keep_going_emit(&kg, &optimized_program, request.trace_sink, request.compiler_threads) else -> jet_rust_emit_program(optimized_program, jet_driver_native_emit_config(request.compiler_threads), request.trace_sink)
     if request.trace_sink == .Val(sink) -> sink.end("emit", optimized_program.functions.len())
     emitted_source := String?{None}
     emit_manifest := JetRustEmitManifest?{None}
