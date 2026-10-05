@@ -12,7 +12,7 @@ use jet_foundation.[
     MIRFunction, MIRFunctionForm, MIRFunctionID, MIRFunctionSignature, MIRGenericParam, MIRImplDef,
     MIRHardwareOp, MIRFailureCarrier, MIRGeneratorFacts, MIROperation,
     MIROptimizationDecision, MIRPanicLoc, MIRPreludeTypeArg, MIRProgram,
-    MIRSemanticOp, MIRTerminator, MIRTextHoleKind, MIRTextPatternPart,
+    MIRSemanticOp, MIRStringFormat, MIRTerminator, MIRTextHoleKind, MIRTextPatternPart,
     MIRBinaryPatternPart, MIRTraitRef, MIRType, MIRTypeDef, MIRTypeDefKind,
     MIRTypeKind, MIRUnionCoercion, MIRValueID, MIRVariant, MIRVariantPayload,
     MIRVectorAccess, MIRVectorFact, MIRVectorLayout, MIRVectorRule,
@@ -463,8 +463,8 @@ fn fx_mono_render() -> MIRProgram Never! {
     s :: fx_mono_wrap(&r, strings, word)
     fx_print(&r, i)
     fx_print(&r, s)
-    fx_display_interpolation(&r, i)
-    fx_display_interpolation(&r, s)
+    fx_render_interpolation(&r, i, MIRStringFormat.Display)
+    fx_render_interpolation(&r, s, MIRStringFormat.Display)
     fx_mono_drop(&r, i)
     fx_mono_drop(&r, s)
     fx_block(&r, 0, MIRTerminator.Return{value: None})

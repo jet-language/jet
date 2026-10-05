@@ -60,7 +60,10 @@ fn lower_equal_fail(m: &LowerModule, f: &LowerFunction, ty: MIRType) -> LIRValue
 
 fn lower_equal_handle_symbol(p: MIRProgram, ty: MIRType) -> String? {
     if ty.kind == .Apply(name, args) {
-        if args.len() > 0 || lower_type_def(p, ty) != None -> return None
+        if args.len() > 0 -> return None
+        if !name.name.starts_with("<corelib>/") {
+            if lower_type_def(p, ty) == .Val(_) -> return None
+        }
         runtime :: lower_runtime_handle(name.name) ?? return None
         if runtime.eq -> return Val("jet_rt_handle_eq_{runtime.runtime}")
     }
