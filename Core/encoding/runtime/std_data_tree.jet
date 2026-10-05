@@ -1,9 +1,10 @@
-// Canonical ordered carrier and its runtime extensions; Foundation and codecs
-// share this owner. Main wires this module into core.encoding.
+// Runtime methods of the built-in DataTree and FieldError (owner rulings, card
+// #4602): one carrier, the compiler built-in, with Number (exact text, range
+// checked when read) and Bytes; Object is an ordered map, so duplicate keys
+// never reach it; decoding is strict (Text never coerces to Int/Float/Bool).
 use core.math as math
 use core.prelude.runtime.kernel_field_error.[jet_field_error_kernel_under, jet_field_error_kernel_show]
 use core.prelude.runtime.std_data_tree_kind.[datatree_kind]
-use core.prelude.runtime.std_wire_order.[jet_wire_order_merge]
 use jet_foundation.Shape.[ShapeProjection]
 use jet_foundation.JSONNumber.[json_exact_integer_text]
 use jet_foundation.NumericConversion.[jet_numeric_fixed_from_i128]
@@ -13,12 +14,6 @@ use core.files.[IOContext, IOError, IOOperation]
 use std.io as native_io
 use std.time.[SystemTime, UNIX_EPOCH]
 
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs:11
-#[Equatable, Error]
-pub struct FieldError {
-    pub path: String
-    pub reason: String
-}
 impl FieldError {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs:18
     pub fn one(reason: String) -> [FieldError] Never! {
@@ -85,16 +80,25 @@ pub fn jet_datatree_int_payload(tree: DataTree) -> Int? Never! {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs:121
 pub fn jet_datatree_key_set(t: DataTree) -> [String: Bool] Never! {
     keys := [String: Bool]{}
-    if t == .Object(pairs) {
-        loop pair in pairs -> _ :: &keys.add(pair.key, true)
+    if t == .Object(entries) {
+        loop key in entries.keys() -> _ :: &keys.add(key, true)
     }
     // BTreeSet consumers sort keys once before traversing this set.
     ^keys
 }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs:131
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs:131 (WireOrder.rs).
+// Original keys keep their position (with the known value when known has it);
+// keys only in known follow in known's order.
 pub fn jet_datatree_merge_wire_order(known: DataTree, original: DataTree) -> DataTree Never! {
     if known == .Object(k) {
-        if original == .Object(o) -> return .Object(jet_wire_order_merge(k, o))
+        if original == .Object(o) {
+            out := [String: DataTree]{}
+            loop key in o.keys() -> _ :: &out.add(key, k.get(key) ?? o[key])
+            loop key in k.keys() {
+                if !out.has_key(key) -> _ :: &out.add(key, k[key])
+            }
+            return .Object(out)
+        }
     }
     ~known
 }
@@ -115,16 +119,11 @@ pub fn jet_datatree_project(tree: DataTree, projection: ShapeProjection) -> Data
 }
 fn project_object(value: DataTree, projection: ShapeProjection) -> DataTree [FieldError]! {
     if value == .Object(entries) {
-        projected := [(key: String, value: DataTree)]{}
+        projected := [String: DataTree]{}
         loop field in projection.fields {
-            loop entry in entries {
-                if entry.key == field.decode_name {
-                    &projected.push((key: ~field.name, value: ~entry.value))
-                    break
-                }
-            }
+            if entries.get(field.decode_name) == .Val(found) -> _ :: &projected.add(field.name, found)
         }
-        return Ok(.Object(^projected))
+        return Ok(.Object(projected))
     }
     Err(FieldError.one("shape projection needs object values"))
 }
@@ -136,7 +135,7 @@ pub fn datatree_kind_for(t: DataTree) -> String Never! {
         .Int(_) -> "Int"
         .Float(_) -> "Float"
         .Number(_) -> "Number"
-        .TypedText(_) | .Text(_) -> "Text"
+        .Text(_) -> "Text"
         .Bytes(_) -> "Bytes"
         .Array(_) -> "Array"
         .Object(_) -> "Object"
@@ -165,11 +164,9 @@ pub trait JetDataTreeAccess {
 impl DataTree.JetDataTreeAccess {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs:220
     fn field(self, name: String) -> DataTree [FieldError]! {
-        if self == .Object(pairs) {
-            loop pair in pairs {
-                if pair.key == name -> return Ok(~pair.value)
-            }
-            return Err(FieldError.at(name, "field `{name}` not found"))
+        if self == .Object(entries) {
+            found :: entries.get(name) ?? return Err(FieldError.at(name, "field `{name}` not found"))
+            return Ok(found)
         }
         rendered :: render_datatree_json(self, false, 0)
         Err(FieldError.at(name, "expected object, got {rendered}"))
@@ -203,7 +200,7 @@ impl DataTree.JetDataTreeAccess {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs:290
     fn text(self) -> String [FieldError]! {
         if self == {
-            .Text(s) | .TypedText(s) -> return Ok(~s)
+            .Text(s) -> return Ok(~s)
             else -> return Err(FieldError.one("expected text, got {render_datatree_json(self, false, 0)}"))
         }
     }
@@ -233,7 +230,7 @@ impl DataTree.JetDataTreeAccess {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs:337
     fn to_text(self) -> String? Never! {
         if self == {
-            .Text(text) | .TypedText(text) -> return Val(~text)
+            .Text(text) -> return Val(~text)
             .Int(value) -> return Val(value.to_string())
             .Float(value) -> return Val(jet_debug_float(value))
             .Bool(value) -> return Val(value.to_string())
@@ -249,7 +246,6 @@ impl DataTree.JetDataTreeAccess {
             .Int(a) -> { if other == .Int(b) -> return a == b }
             .Float(a) -> { if other == .Float(b) -> return !math.is_nan(a) && !math.is_nan(b) && a == b }
             .Number(a) -> { if other == .Number(b) -> return a == b }
-            .TypedText(a) -> { if other == .TypedText(b) -> return a == b }
             .Text(a) -> { if other == .Text(b) -> return a == b }
             .Bytes(a) -> { if other == .Bytes(b) -> return a == b }
             .Array(a) -> {
@@ -264,18 +260,9 @@ impl DataTree.JetDataTreeAccess {
             .Object(a) -> {
                 if other == .Object(b) {
                     if a.len() != b.len() -> return false
-                    used := [Bool]{}
-                    loop _ in b -> &used.push(false)
-                    loop entry in a {
-                        matched := Int?{None}
-                        loop i in 0..<b.len() {
-                            if !used[i] && entry.key == b[i].key && entry.value.equal_unordered(b[i].value) {
-                                matched = Val(i)
-                                break
-                            }
-                        }
-                        i :: matched ?? return false
-                        used[i] = true
+                    loop key in a.keys() {
+                        theirs :: b.get(key) ?? return false
+                        if !a[key].equal_unordered(theirs) -> return false
                     }
                     return true
                 }
@@ -325,12 +312,7 @@ pub fn decode_int_with<T>(t: DataTree, from_i64: fn(Int) -> T Err!, parse_exact:
             value :: parse_exact(integer) ?? return Err(FieldError.one("expected Int, found number {text}"))
             return Ok(^value)
         }
-        .TypedText(text) -> return Err(FieldError.one("expected Int, found text {jet_debug_string(text)}"))
-        .Text(text) -> {
-            trimmed := text.trim() // #4303
-            value :: parse_exact(trimmed) ?? return Err(FieldError.one("expected Int, found text {jet_debug_string(text)}"))
-            return Ok(^value)
-        }
+        .Text(text) -> return Err(FieldError.one("expected Int, found text {jet_debug_string(text)}"))
         else -> return Err(FieldError.one("expected Int, found {datatree_kind_for(t)}"))
     }
 }
@@ -350,13 +332,12 @@ pub fn decode_float(t: DataTree) -> Float [FieldError]! {
             if math.is_finite(value) -> return Ok(value)
             return Err(FieldError.one("expected float, got out-of-range Int"))
         }
-        .Number(text) | .Text(text) -> {
-            trimmed := text.trim() // #4303
-            value :: Float.parse(trimmed) ?? return Err(FieldError.one("expected Float, found text {jet_debug_string(text)}"))
+        .Number(text) -> {
+            value :: Float.parse(text) ?? return Err(FieldError.one("expected Float, found number {text}"))
             if math.is_finite(value) -> return Ok(value)
             return Err(FieldError.one("expected Float, found out-of-range Float"))
         }
-        .TypedText(text) -> return Err(FieldError.one("expected Float, found text {jet_debug_string(text)}"))
+        .Text(text) -> return Err(FieldError.one("expected Float, found text {jet_debug_string(text)}"))
         else -> return Err(FieldError.one("expected Float, found {datatree_kind_for(t)}"))
     }
 }
@@ -364,20 +345,14 @@ pub fn decode_float(t: DataTree) -> Float [FieldError]! {
 pub fn decode_bool(t: DataTree) -> Bool [FieldError]! {
     if t == {
         .Bool(value) -> return Ok(value)
-        .TypedText(text) -> return Err(FieldError.one("expected Bool, found text {jet_debug_string(text)}"))
-        .Text(text) -> {
-            trimmed := text.trim() // #4303
-            if trimmed == "true" -> return Ok(true)
-            if trimmed == "false" -> return Ok(false)
-            return Err(FieldError.one("expected Bool, found text {jet_debug_string(text)}"))
-        }
+        .Text(text) -> return Err(FieldError.one("expected Bool, found text {jet_debug_string(text)}"))
         else -> return Err(FieldError.one("expected Bool, found {datatree_kind_for(t)}"))
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs:544
 pub fn decode_string(t: DataTree) -> String [FieldError]! {
     if t == {
-        .Text(text) | .TypedText(text) -> return Ok(~text)
+        .Text(text) -> return Ok(~text)
         .Number(text) -> return Err(FieldError.one("expected Text, found number {text}"))
         .Int(n) -> return Ok(n.to_string())
         .Float(f) -> return Ok(jet_debug_float(f))
@@ -390,11 +365,10 @@ pub fn decode_f32(t: DataTree) -> F32 [FieldError]! {
     value :: if t == {
         .Float(value) -> value
         .Int(value) -> Float.from_int(value)
-        .Number(text) | .Text(text) -> {
-            trimmed := text.trim() // #4303
-            Float.parse(trimmed) ?? return Err(FieldError.one("expected F32, found text {jet_debug_string(text)}"))
+        .Number(text) -> {
+            Float.parse(text) ?? return Err(FieldError.one("expected F32, found number {text}"))
         }
-        .TypedText(text) -> { return Err(FieldError.one("expected F32, found text {jet_debug_string(text)}")) }
+        .Text(text) -> { return Err(FieldError.one("expected F32, found text {jet_debug_string(text)}")) }
         else -> { return Err(FieldError.one("expected F32, found {datatree_kind_for(t)}")) }
     }
     if math.is_finite(value) && value >= -340282346638528859811704183484516925440.0 && value <= 340282346638528859811704183484516925440.0 {
@@ -495,18 +469,18 @@ impl EncodingError {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs:119
 pub fn jet_enc_csv_decode_rows<T, V, E>(rows: [[String]], decode: fn(V) -> T [E]!,
     frame_errors: fn(String, [E]) -> [E] Never!, make_text: fn(String) -> V Never!,
-    make_object: fn([(key: String, value: V)]) -> V Never!) -> [T] [E]! {
+    make_object: fn([String: V]) -> V Never!) -> [T] [E]! {
     if rows.len() == 0 -> return Ok([])
     header :: rows[0]
     values := [T]{}
     errors := [E]{}
     loop index in 1..<rows.len() {
         row :: rows[index]
-        object := [(key: String, value: V)]{}
+        object := [String: V]{}
         loop col in 0..<header.len() {
             cell := ""
             if col < row.len() -> cell = ~row[col]
-            &object.push((key: ~header[col], value: make_text(cell)))
+            _ :: &object.add(header[col], make_text(cell))
         }
         value :: decode(make_object(object)) ?? {
             framed :: frame_errors("row {index}", err)
@@ -545,7 +519,7 @@ pub fn render_datatree_json(t: DataTree, pretty: Bool, depth: Int) -> String Nev
             return jet_debug_float(f)
         }
         .Number(text) -> return ~text
-        .TypedText(text) | .Text(text) -> return shared_json.quote_json(text)
+        .Text(text) -> return shared_json.quote_json(text)
         .Bytes(bs) -> {
             parts := [String]{}
             loop b in bs -> &parts.push(b.to_string())
@@ -569,10 +543,10 @@ pub fn render_datatree_json(t: DataTree, pretty: Bool, depth: Int) -> String Nev
             end :: "  ".repeat(depth)
             parts := [String]{}
             if !pretty {
-                loop entry in entries -> &parts.push("{shared_json.quote_json(entry.key)}:{render_datatree_json(entry.value, false, depth)}")
+                loop key in entries.keys() -> &parts.push("{shared_json.quote_json(key)}:{render_datatree_json(entries[key], false, depth)}")
                 return "{{{parts.join(",")}}}"
             }
-            loop entry in entries -> &parts.push("{pad}{shared_json.quote_json(entry.key)}: {render_datatree_json(entry.value, true, depth + 1)}")
+            loop key in entries.keys() -> &parts.push("{pad}{shared_json.quote_json(key)}: {render_datatree_json(entries[key], true, depth + 1)}")
             return "{{\n{parts.join(",\n")}\n{end}}}"
         }
     }
@@ -606,7 +580,7 @@ pub fn jet_std_json_coerce_line(path: String, from: String, to: String) -> Strin
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONDataTree.rs:155
 pub fn jet_std_json_coerce_walk(value: DataTree, path: String, emit: fn(String)) -> DataTree Never! {
     if value == {
-        .Text(s) | .TypedText(s) -> {
+        .Text(s) -> {
             if s == "true" {
                 emit(jet_std_json_coerce_line(path, "string", "boolean"))
                 return .Bool(true)
@@ -623,12 +597,12 @@ pub fn jet_std_json_coerce_walk(value: DataTree, path: String, emit: fn(String))
             return ~value
         }
         .Object(entries) -> {
-            out := [(key: String, value: DataTree)]{}
-            loop entry in entries {
-                child_path :: if path.is_empty() -> ~entry.key else -> "{path}.{entry.key}"
-                &out.push((key: ~entry.key, value: jet_std_json_coerce_walk(entry.value, child_path, emit)))
+            out := [String: DataTree]{}
+            loop key in entries.keys() {
+                child_path :: if path.is_empty() -> key else -> "{path}.{key}"
+                _ :: &out.add(key, jet_std_json_coerce_walk(entries[key], child_path, emit))
             }
-            return .Object(^out)
+            return .Object(out)
         }
         .Array(items) -> {
             out := [DataTree]{}
@@ -647,21 +621,9 @@ pub fn jet_std_json_decode_lenient(text: String, emit: fn(String)) -> DataTree E
     Ok(jet_std_json_coerce_walk(parsed, "", emit))
 }
 
-// Rust: crates/jet-foundation/src/DataTree.rs:9
-// Ordered entries deliberately retain duplicate keys; lookup selects the first.
-#Equatable
-pub enum DataTree {
-    Null
-    Bool(Bool)
-    Int(Int)
-    Float(Float)
-    Number(String)
-    TypedText(String)
-    Text(String)
-    Bytes([U8])
-    Array([DataTree])
-    Object([(key: String, value: DataTree)])
-}
+// Rust: crates/jet-foundation/src/DataTree.rs:9 — no second carrier: these are
+// methods of the built-in DataTree (Null/Bool/Int/Float/Number/Text/Bytes/Array/
+// Object as an ordered [String: DataTree]).
 impl DataTree {
     // Rust: crates/jet-foundation/src/DataTree.rs:25
     pub fn as_array(self) -> View<DataTree> Err! {
@@ -669,14 +631,14 @@ impl DataTree {
         Err("expected a DataTree array")
     }
     // Rust: crates/jet-foundation/src/DataTree.rs:32
-    pub fn as_object(self) -> View<(key: String, value: DataTree)> Err! {
-        if self == .Object(values) -> return Ok(values[0..<values.len()])
+    pub fn as_object(self) -> [String: DataTree] Err! {
+        if self == .Object(values) -> return Ok(values)
         Err("expected a DataTree object")
     }
     // Rust: crates/jet-foundation/src/DataTree.rs:39
     pub fn as_str(self) -> String Err! {
         if self == {
-            .Text(value) | .TypedText(value) -> return Ok(value)
+            .Text(value) -> return Ok(value)
             else -> return Err("expected a DataTree string")
         }
     }
@@ -687,16 +649,12 @@ impl DataTree {
     }
     // Rust: crates/jet-foundation/src/DataTree.rs:51
     pub fn get_opt(self, key: String) -> DataTree? Never! {
-        if self == .Object(values) {
-            loop pair in values {
-                if pair.key == key -> return Val(pair.value)
-            }
-        }
+        if self == .Object(values) -> return values.get(key)
         None
     }
     // Rust: crates/jet-foundation/src/DataTree.rs:60
-    pub fn object_entries(self) -> View<(key: String, value: DataTree)>? Never! {
-        if self == .Object(values) -> return Val(values[0..<values.len()])
+    pub fn object_entries(self) -> [String: DataTree]? Never! {
+        if self == .Object(values) -> return Val(values)
         None
     }
 }
