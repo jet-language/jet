@@ -441,7 +441,7 @@ fn jet_math_Vec3_dot(v: &Vec3,o: Vec3) -> F64 { v.value[0]*o.value[0] + v.value[
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:386
 fn jet_math_Vec4_dot(v: &Vec4,o: Vec4) -> F64 {
     sum := 0.0
-    for i in 0..<4 { sum += v.value[i]*o.value[i] }
+    loop i in 0..<4 { sum += v.value[i]*o.value[i] }
     sum
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:389
@@ -469,7 +469,7 @@ fn jet_math_Vec4_normalize(v: &Vec4) -> Vec4 {
     l :: jet_math_Vec4_length(v)
     if l == 0.0 { *v } else {
         r := v.value
-        for i in 0..<4 { r[i] /= l }
+        loop i in 0..<4 { r[i] /= l }
         Vec4{value: r}
     }
 }
@@ -511,7 +511,7 @@ prep loop (T,V,N,S,add,sub,mul,matmul,transform,transpose) in [
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:518,527
     fn transpose(m: &T) -> T {
         r := jet_simd_splat_array<F64,S>(0.0)
-        for c in 0..<N { for row in 0..<N { r[c*N+row] = m.value[row*N+c] } }
+        loop c in 0..<N { loop row in 0..<N { r[c*N+row] = m.value[row*N+c] } }
         T{value: r}
     }
 }

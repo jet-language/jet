@@ -71,7 +71,7 @@ fn jet_std_math_ceil_f32(x: F32) -> F32 { x.ceil() }
 JET_RNG :: ThreadLocal<Cell<U64>>.new(fn() { Cell.new(U64{0x4d595df4d0f33173}) })
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:106
 fn jet_rng_next() -> U64 {
-    if Val(value) :: jet_scheduler_world_rng_next() -> return value
+    if jet_scheduler_world_rng_next() == .Val(value) -> return value
     // GATE #4565: kernel primitive
     #Unsafe("mutate only the calling thread's fallback RNG when no isolated test world is active") {
         JET_RNG.with(fn(cell) {
@@ -137,8 +137,8 @@ fn jet_std_random_exponential(lambda: F64) -> F64 {
 fn jet_std_random_choices<T: Clone>(xs: &[T], n: I64) -> [T] {
     out := [T]{}
     if xs.is_empty() -> return out
-    for _ in 0..<n.max(0) {
-        if Val(value) :: jet_std_random_pick(xs) -> out.push(^value)
+    loop _ in 0..<n.max(0) {
+        if jet_std_random_pick(xs) == .Val(value) -> out.push(^value)
     }
     out
 }
@@ -160,7 +160,7 @@ fn jet_std_random_gamma(alpha: F64, beta: F64) -> F64 {
     loop {
         x :: jet_std_random_normal(0.0, 1.0)
         v0 :: 1.0 + c * x
-        if v0 <= 0.0 -> continue
+        if v0 <= 0.0 -> next
         v :: v0 * v0 * v0
         u :: jet_std_random_float_open()
         if u < 1.0 - 0.0331 * x.powi(4) || u.ln() < 0.5 * x * x + d * (1.0 - v + v.ln()) -> return beta * d * v
@@ -195,7 +195,7 @@ fn jet_std_random_pick<T: Clone>(xs: &[T]) -> T? {
 fn jet_std_random_weighted_pick<T: Clone>(xs: &[T], weights: &[F64]) -> T? {
     if xs.is_empty() || xs.len() != weights.len() -> return None
     total := 0.0
-    for w in weights { if w.is_finite() && w > 0.0 -> total += w }
+    loop w in weights { if w.is_finite() && w > 0.0 -> total += w }
     if total <= 0.0 -> return None
     needle := jet_std_random_float_range(0.0, total)
     for (item, weight) in xs.iter().zip(weights.iter()) {
@@ -209,7 +209,7 @@ fn jet_std_random_weighted_pick<T: Clone>(xs: &[T], weights: &[F64]) -> T? {
 fn jet_std_random_sample<T: Clone>(xs: &[T], k: I64) -> [T] {
     want :: (k.max(0) as USize).min(xs.len())
     pool := xs.clone()
-    for i in 0..<want {
+    loop i in 0..<want {
         j :: jet_std_random_int(i as I64, pool.len() as I64 - 1) as USize
         pool.swap(i, j)
     }
@@ -229,7 +229,7 @@ fn jet_std_random_shuffle<T>(xs: &[T]) -> {
 fn jet_std_random_bytes(n: I64) -> [U8] {
     n :: n.max(0) as USize
     out := [U8].with_capacity(n)
-    for _ in 0..<n { out.push(jet_rng_next() as U8) }
+    loop _ in 0..<n { out.push(jet_rng_next() as U8) }
     out
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:332

@@ -275,7 +275,7 @@ impl TraitRegistry {
         seen := HashSet<String>{}
         loop {
             current :: pending.pop() ?? break
-            if !seen.insert(current) -> continue
+            if !seen.insert(current) -> next
             loop (source, target) in self.error_conversions.keys() {
                 if source == current {
                     if target == to_ty -> return true
@@ -297,7 +297,7 @@ impl TraitRegistry {
         ordered.sort()
         loop source in ordered {
             loop target in ordered {
-                if source == target -> continue
+                if source == target -> next
                 visiting := HashSet<String>{}
                 if self.error_conversion_path_count(source, target, &visiting) > U8{1} -> return Val((source, target))
             }
@@ -311,7 +311,7 @@ impl TraitRegistry {
         if !visiting.insert(from_ty) -> return U8{0}
         paths := U8{0}
         loop (source, target) in self.error_conversions.keys() {
-            if source != from_ty -> continue
+            if source != from_ty -> next
             paths = (paths + self.error_conversion_path_count(target, to_ty, &visiting)).min(U8{2})
             if paths == U8{2} -> break
         }
@@ -593,7 +593,7 @@ impl TraitRegistry {
         loop m in methods {
             if m.name != verb {
                 diags.push(e0907(trait_name, m.name, "only `{verb}`", m.name_span))
-                continue
+                next
             }
             saw_verb = true
             has_self :: m.params.first().is_some_and(|p| p.name == Syntax.KW_SELF)

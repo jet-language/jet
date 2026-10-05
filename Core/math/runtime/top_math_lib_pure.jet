@@ -92,7 +92,7 @@ pub fn jet_std_math_exp_m1(value: F64) -> F64 { value.exp_m1() }
 pub fn jet_std_math_fsum(values: [F64]) -> F64 {
     total := 0.0
     compensation := 0.0
-    for value in values {
+    loop value in values {
         corrected :: value - compensation
         next :: total + corrected
         compensation = (next - total) - corrected
@@ -391,7 +391,7 @@ pub fn jet_stats_histogram(values: [F64], bins: I64) -> [I64] {
         return out
     }
     span :: high - low
-    for value in values {
+    loop value in values {
         index := ((value - low) / span * bins as F64) as I64
         index = index.clamp(0, bins - 1)
         out[index as USize] += 1
@@ -593,7 +593,7 @@ pub fn jet_comb_islice(items: [I64], start: I64, stop: I64, step: I64) -> [I64] 
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1026
 pub fn jet_comb_unique(items: [I64]) -> [I64] {
     out: [I64] := []
-    for value in items {
+    loop value in items {
         if !out.contains(&value) -> out.push(value)
     }
     out
@@ -665,7 +665,7 @@ fn jet_comb_combinations_rec(items: &[I64], target: USize, start: USize, current
         out.push(current.clone())
         return
     }
-    for index in start..<items.len() {
+    loop index in start..<items.len() {
         current.push(items[index])
         jet_comb_combinations_rec(items, target, index + 1, current, out)
         _ :: current.pop()
@@ -685,7 +685,7 @@ fn jet_comb_combinations_replacement_rec(items: &[I64], target: USize, start: US
         out.push(current.clone())
         return
     }
-    for index in start..<items.len() {
+    loop index in start..<items.len() {
         current.push(items[index])
         jet_comb_combinations_replacement_rec(items, target, index, current, out)
         _ :: current.pop()
@@ -695,7 +695,7 @@ fn jet_comb_combinations_replacement_rec(items: &[I64], target: USize, start: US
 pub fn jet_comb_product(items: [I64], repeat: I64) -> [[I64]] {
     if repeat <= 0 -> return [[]]
     out: [[I64]] := [[]]
-    for _ in 0..<repeat {
+    loop _ in 0..<repeat {
         next: [[I64]] := []
         for row in &out {
             for value in &items {
@@ -722,7 +722,7 @@ pub fn jet_comb_batched(items: [I64], size: I64) -> [[I64]] {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1207
 pub fn jet_comb_groupby(items: [I64]) -> [[I64]] {
     out: [[I64]] := []
-    for value in items {
+    loop value in items {
         if out.last().is_some_and(fn(group) { group.last() == value }) {
             out.last_mut().expect("last group exists").push(value)
         } else {
@@ -745,9 +745,9 @@ pub fn jet_comb_zip_longest(left: [I64], right: [I64], fill: I64) -> [[I64]] {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1238
 pub fn jet_comb_powerset(items: [I64]) -> [[I64]] {
     out: [[I64]] := [[]]
-    for value in items {
+    loop value in items {
         next := out.clone()
-        for row in out {
+        loop row in out {
             row := ^row
             row.push(value)
             next.push(^row)
