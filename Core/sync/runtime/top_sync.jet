@@ -223,7 +223,7 @@ fn jet_sync_text_merge(a: &JetSyncText, b: &JetSyncText) -> JetSyncText {
     }
     if merged.len() > MAX_SYNC_ATOMS -> return JetSyncText{atoms: [], valid: false}
     keys :: merged.keys().cloned().collect::<[(String, U64)]>().sorted()
-    atoms :: keys.into_iter().map(fn(key) { merged.remove(&key).unwrap() }).collect()
+    atoms :: keys.into_iter().map(fn(key) { merged.remove(&key) ?? panic("unwrap failed") }).collect()
     merged :: JetSyncText{atoms: ^atoms, valid: true}
     // Reject cycle/orphan rather than silently dropping unreachable atoms in show.
     if jet_sync_text_order(&merged).len() != merged.atoms.len() -> return JetSyncText{atoms: [], valid: false}
@@ -298,7 +298,7 @@ fn jet_sync_counter_merge(a: &JetSyncCounter, b: &JetSyncCounter) -> JetSyncCoun
     if merged.len() > MAX_SYNC_REPLICAS -> return JetSyncCounter{counts: [], valid: false}
     keys :: merged.keys().cloned().collect::<[String]>().sorted()
     counts :: keys.into_iter().map(fn(replica) {
-        (positive, negative) :: merged.remove(&replica).unwrap()
+        (positive, negative) :: merged.remove(&replica) ?? panic("unwrap failed")
         (^replica, positive, negative)
     }).collect()
     if jet_sync_counter_total(&counts).is_none() -> return jet_sync_counter_invalid()
@@ -325,11 +325,11 @@ fn jet_sync_map_set_replica(map: JetSyncMap,replica: String,key: String,value: S
     if next_clock.is_none() { return JetSyncMap{entries: [],valid: false} }
     if Val((_,v,clock,writer)) :: map.entries.iter_mut().find(fn((k,_,_,_)) { k == &key }) {
         *v = ^value
-        *clock = next_clock.unwrap()
+        *clock = (next_clock ?? panic("unwrap failed"))
         *writer = ^replica
     } else {
         if map.entries.len() >= MAX_SYNC_ENTRIES { return JetSyncMap{entries: [],valid: false} }
-        map.entries.push((^key,^value,next_clock.unwrap(),^replica))
+        map.entries.push((^key,^value,next_clock ?? panic("unwrap failed"),^replica))
     }
     map.entries.sort_by(fn(left,right) { left.0.cmp(&right.0) })
     ^map
@@ -356,7 +356,7 @@ fn jet_sync_map_merge(a: &JetSyncMap,b: &JetSyncMap) -> JetSyncMap {
     if merged.len() > MAX_SYNC_ENTRIES { return JetSyncMap{entries: [],valid: false} }
     keys :: merged.keys().cloned().collect::<[String]>().sorted()
     entries :: keys.into_iter().map(fn(key) {
-        (value,clock,writer) :: merged.remove(&key).unwrap()
+        (value,clock,writer) :: merged.remove(&key) ?? panic("unwrap failed")
         (^key,^value,clock,^writer)
     }).collect()
     JetSyncMap{entries: ^entries,valid: true}
@@ -390,9 +390,9 @@ fn jet_sync_map_set_generic<K: __jet_Encode,V: __jet_Encode>(map: JetSyncMapGene
     if Val((existing_key,existing_value,clock,writer)) :: map.entries.iter_mut().find(fn((existing_key,_,_,_)) { jet_sync_value_id(existing_key) == key_id }) {
         *existing_key = ^key
         *existing_value = ^value
-        *clock = next_clock.unwrap()
+        *clock = (next_clock ?? panic("unwrap failed"))
         *writer = ^replica
-    } else if map.entries.len() < MAX_SYNC_ENTRIES { map.entries.push((^key,^value,next_clock.unwrap(),^replica)) }
+    } else if map.entries.len() < MAX_SYNC_ENTRIES { map.entries.push((^key,^value,next_clock ?? panic("unwrap failed"),^replica)) }
     else { return JetSyncMapGeneric{entries: [],valid: false} }
     map.entries.sort_by(fn(left,right) {
         left_id :: jet_sync_value_id(&left.0)
@@ -424,7 +424,7 @@ fn jet_sync_map_merge_generic<K: Clone + __jet_Encode,V: Clone + __jet_Encode>(a
     }
     if merged.len() > MAX_SYNC_ENTRIES { return JetSyncMapGeneric{entries: [],valid: false} }
     keys :: merged.keys().cloned().collect::<[String]>().sorted()
-    JetSyncMapGeneric{entries: keys.into_iter().map(fn(key) { merged.remove(&key).unwrap() }).collect(),valid: true}
+    JetSyncMapGeneric{entries: keys.into_iter().map(fn(key) { merged.remove(&key) ?? panic("unwrap failed") }).collect(),valid: true}
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:825
 fn jet_sync_map_show_generic<K: __jet_Encode,V: __jet_Encode>(map: &JetSyncMapGeneric<K,V>) -> String {
