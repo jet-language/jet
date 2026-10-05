@@ -79,7 +79,7 @@ pub struct JetOutputCapabilities {
 }
 // Rust:151. Encoding capability and stream facts supplied by the host.
 pub fn jet_output_capabilities_with_mode(channel: JetOutputChannel, requested_color: JetOutputColorMode, stdin_is_terminal: Bool, stdout_is_terminal: Bool, stderr_is_terminal: Bool, term: String?, no_color: Bool, force_color: Bool, width: Int, height: Int, unicode: Bool) -> JetOutputCapabilities Never! {
-    dumb :: term == Val("dumb")
+    dumb :: term == "dumb"
     human :: channel.is_human()
     terminal :: if channel == { .HumanStderr -> stderr_is_terminal, .HumanStdout -> stdout_is_terminal, _ -> false }
     color :: human && if requested_color == { .Always -> true, .Never -> false, .Auto -> !no_color && (force_color || terminal) }
@@ -245,7 +245,7 @@ pub struct JetOutputProgressTask {
     pub transient: Bool
     pub columns: [JetOutputProgressColumn]
     pub fn new(id: String, description: String, total: Int?) -> JetOutputProgressTask Never! {
-        JetOutputProgressTask{id: jet_output_bound_text(id), description: jet_output_bound_text(description), count: 0, total, elapsed: 0.0, state: if total == Val(0) -> .Complete else -> .Running, transient: false, columns: [JetOutputProgressColumn]{}}
+        JetOutputProgressTask{id: jet_output_bound_text(id), description: jet_output_bound_text(description), count: 0, total, elapsed: 0.0, state: if total == 0 -> .Complete else -> .Running, transient: false, columns: [JetOutputProgressColumn]{}}
     }
     pub fn update(&self, count: Int, elapsed: Float) Never! {
         self.elapsed = if math.is_finite(elapsed) -> if elapsed > 0.0 -> elapsed else -> 0.0 else -> 0.0
