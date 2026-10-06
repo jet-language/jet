@@ -131,15 +131,23 @@ fn jet_cli_build_native(file: String, command: String, result: JetDriverCompileR
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-// Release builds: rustc/LLVM over the emitted Rust program, with the argv
-// Source/CmdCompile.rs gives a native release build whose runtime is compiled
-// inline (`PreparedRuntime::inline`): the release cfg and profile flags
-// (main.rs `ProfileConfig::release`), the crate name pinned to the file stem,
-// and the project path remapped out of debug records.
-fn jet_cli_build_release(file: String, result: JetDriverCompileResult, root: String, build_dir: String, stem: String, binary: String, color: Bool) -[FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
-    rust :: result.emitted_source ?? return jet_cli_ice("the Jet compiler finished `{file}` without emitting Rust")
+// Release builds: rustc/LLVM over the runtime prefix (RuntimePrefix.jet, the
+// text MIRRust `emit_mir_runtime_text` gives the Rust host) followed by the
+// emitted Rust program, with the argv Source/CmdCompile.rs gives a native
+// release build whose runtime is compiled inline (`PreparedRuntime::inline`):
+// the release cfg and profile flags (main.rs `ProfileConfig::release`), the
+// crate name pinned to the file stem, and the project path remapped out of
+// debug records.
+fn jet_cli_build_release(file: String, result: JetDriverCompileResult, root: String, build_dir: String, stem: String, binary: String, color: Bool) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
+    items :: result.emitted_source ?? return jet_cli_ice("the Jet compiler finished `{file}` without emitting Rust")
+    program :: result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
+    prefix := ""
+    if jet_cli_runtime_text(file, program, color) == {
+        .Text(text) -> prefix = text
+        .Failed(failure) -> return failure
+    }
     rust_path :: "{build_dir}/{stem}.rs"
-    cli_files.write(rust_path, rust) ?? return jet_cli_build_failed("couldn't write {rust_path}: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color)
+    cli_files.write(rust_path, "{prefix}{items}") ?? return jet_cli_build_failed("couldn't write {rust_path}: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color)
     argv :: [String]{
         "rustc", "--edition", "2021",
         "--cfg", "jet_release", "--cfg", "jet_release_inspect=\"local\"",
@@ -166,7 +174,7 @@ enum JetCLIBuilt {
 
 // Write `.jet/build/<stem>` in the source root for a compile with no errors,
 // through the backend the profile selects; `command` is the verb asking.
-fn jet_cli_build_binary(file: String, command: String, color: Bool, release: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[FS, Exec, Time.Wait]> JetCLIBuilt Never! {
+fn jet_cli_build_binary(file: String, command: String, color: Bool, release: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetCLIBuilt Never! {
     if result.internal_problem == .Val(problem) -> return JetCLIBuilt.Failed{output: jet_cli_ice(problem)}
     if !result.complete -> return JetCLIBuilt.Failed{output: jet_cli_ice("the Jet compiler stopped before finishing `{file}`")}
     root :: snapshot.roots[0].canonical_path
@@ -181,7 +189,7 @@ fn jet_cli_build_binary(file: String, command: String, color: Bool, release: Boo
 
 // `jet build <file>`: compile through the Jet compiler, report its problems
 // the way the Rust host does, then write the executable.
-fn jet_cli_build_result(file: String, source: String, color: Bool, release: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
+fn jet_cli_build_result(file: String, source: String, color: Bool, release: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
     errors :: jet_cli_errors(jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files))
     if errors.len() > 0 {
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}

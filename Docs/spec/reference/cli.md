@@ -192,8 +192,14 @@ holds current.
 `--profile debug` builds use the Jet-native backend (`lir_lower_program` and a
 static x86-64 executable); a program that backend cannot lower yet is refused
 with E2104. `--release` (or `--profile release`) compiles the emitted Rust with
-rustc and the release profile flags. Other build flags and profiles are
-refused with E2104 until they are ported.
+rustc and the release profile flags. The Rust file starts with the same
+runtime/Core prefix the Rust compiler emits (MIRRust `emit_mir_runtime_text`):
+[`Emit/RuntimePrefix.jet`](../../../Compiler/JetCodegen/Source/Emit/RuntimePrefix.jet)
+assembles it from the Prelude and Foundation `.rs` sources under
+`JET_TOOLCHAIN_ROOT` (which must therefore also hold `crates/`), with the
+artifact's runtime parts, the test-harness gate, and the release devtools
+policy (`local` inspection for `--release`, development for a test harness).
+Other build flags and profiles are refused with E2104 until they are ported.
 
 `jet run <file>` (and the `jet <file>` shorthand) builds the same executable
 with the same profile rules, then runs it on the caller's stdin, stdout, and
