@@ -1907,7 +1907,7 @@ fn jet_driver_assemble_mir(
                 loop edge_row >= 0 {
                     edge :: load.imports[edge_row]
                     edge_row = edge_chains.next[edge_row]
-                    if edge.source_module_identity == loaded_module.module_identity && edge.declaration.span.start == import.declaration.span.start && edge.declaration.span.end == import.declaration.span.end && jet_driver_import_is_module_edge(edge.declaration.kind) && edge.target_package_identity == loaded_module.package_identity && !jet_driver_is_namespace_binding(edge.declaration) {
+                    if edge.source_module_identity == loaded_module.module_identity && edge.declaration.span.start == import.declaration.span.start && edge.declaration.span.end == import.declaration.span.end && jet_driver_import_is_module_edge(edge.declaration.kind) && edge.target_package_identity == loaded_module.package_identity {
                         child_id := mir_module_id(edge.target_module_identity)
                         if child_ids.get(child_id.value) == None {
                             child_ids[child_id.value] = true
@@ -3867,6 +3867,9 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
             source_origin: unit.source_origin,
             program: loaded_module.program,
             foreign_handles: registration_foreign_handles,
+            namespace: loaded_module.namespace,
+            namespace_names: loaded_module.namespace_names,
+            namespace_refs: loaded_module.namespace_refs,
         })
     }
     canonical_effect_module_identity := canonical_effect_module.module_identity
