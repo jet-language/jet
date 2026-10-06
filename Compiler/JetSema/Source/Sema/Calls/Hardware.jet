@@ -100,6 +100,9 @@ fn sema_hardware_place_frame(expression: Expr, scopes: SemaScopeTable) -> Int? {
 }
 
 pub fn sema_hardware_transfer_fact_for_expr(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> SemaHardwareDMATransferFact? {
+    // The place key only selects among the definite transfers; with none
+    // there is nothing to find (the common case: no DMA in scope).
+    if scopes.hardware_definite_transfers.len() == 0 -> return None
     key :: sema_hardware_place_key(expression, scopes, &state) ?? return None
     loop fact in scopes.hardware_definite_transfers {
         if fact.transfer_key == key -> return Val(fact)
@@ -108,6 +111,10 @@ pub fn sema_hardware_transfer_fact_for_expr(expression: Expr, scopes: SemaScopeT
 }
 
 pub fn sema_hardware_note_cpu_use(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    // Every identifier read lands here; the place key only matters against
+    // an open or pending DMA transfer, so without one there is nothing to
+    // resolve.
+    if scopes.hardware_transfers.len() == 0 && scopes.hardware_pending_transfers.len() == 0 -> return true
     key :: sema_hardware_place_key(expression, scopes, &state) ?? return true
     loop transfer in scopes.hardware_transfers {
         if transfer.buffer_key != key -> next

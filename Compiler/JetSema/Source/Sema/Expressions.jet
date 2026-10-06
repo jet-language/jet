@@ -892,6 +892,10 @@ fn sema_expr_optional_lift(value: TExpr, required: Type, offered: Type, environm
 
 fn sema_expr_expected(value: TExpr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
     if expected == None -> return Val(value)
+    // A scalar leaf type resolves to itself and is assignable to itself, with
+    // no lift, zone or coercion, so the same expected leaf keeps the value as
+    // it is (most literals, locals and operators land here).
+    if expected == .Val(required_leaf) && sema_expr_scalar_leaf(required_leaf) && type_identity_equal(required_leaf, value.ty) -> return Val(value)
     required := sema_expr_expected_type(expected, environment, program)
     offered := sema_expr_expected_type(value.ty, environment, program)
     lifted :: sema_expr_optional_lift(value, required, offered, environment, program)
@@ -906,6 +910,14 @@ fn sema_expr_expected(value: TExpr, expected: Type?, environment: SemaScopeEnvir
         return None
     }
     Val(sema_expr_expected_trait_coercion(^value, required, offered, environment, program))
+}
+
+// The scalar leaf types: no name to resolve and nothing nested.
+fn sema_expr_scalar_leaf(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> true
+        else -> false
+    }
 }
 
 // The rejection for a value that can't fill `required`: the callable and
@@ -2855,10 +2867,11 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
         &diagnostics.push(sema_fallback_err_denied(code, span))
         return None
     }
-    unresolved_index := sema_scope_resolve_index(scopes, name)
-    if unresolved_index != None {
-        unresolved :: unresolved_index ?? 0
-        symbol := scopes.bindings[unresolved].symbol
+    // Resolved once: nothing below rebinds a name before the reference fact
+    // reads this binding again (sema_expr_check_ident only reads the table).
+    unresolved_index :: sema_scope_resolve_index(scopes, name)
+    if unresolved_index == .Val(unresolved) {
+        symbol :: scopes.bindings[unresolved].symbol
         if symbol.kind == SymbolKind.Constant && symbol.ty == None {
             &context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "const"})
             return None
@@ -2880,10 +2893,9 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
     }
     value :: sema_expr_check_ident(name, span, expected, environment, program, &scopes, &diagnostics) ?? return None
     expr := Expr.Ident{name: name, span: span}
-    if unresolved_index != None {
-        unresolved :: unresolved_index ?? 0
-        symbol := scopes.bindings[unresolved].symbol
-        if symbol.kind == SymbolKind.Local || symbol.kind == SymbolKind.Parameter {
+    if unresolved_index == .Val(unresolved) {
+        kind :: scopes.bindings[unresolved].symbol.kind
+        if kind == SymbolKind.Local || kind == SymbolKind.Parameter {
             if !sema_ownership_note_reference(&state, name, span, scopes, SemaOwnershipReferenceKind.Read) -> return None
         }
     }
@@ -2891,8 +2903,8 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
     if !use_checked -> return None
     if !sema_hardware_note_cpu_use(expr, scopes, &state, &context, &diagnostics) -> return None
     sema_string_view_check_read(name, span, scopes, state, context, &diagnostics)
-    binding_index :: sema_scope_resolve_index(scopes, name) ?? return Val(value)
-    symbol := scopes.bindings[binding_index].symbol
+    binding_index :: unresolved_index ?? return Val(value)
+    symbol :: scopes.bindings[binding_index].symbol
     reference_kind := "semantic"
     if symbol.kind == {
         .Function -> reference_kind = "function"
@@ -2947,7 +2959,7 @@ fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment:
         &diagnostics.push(sema_unknown_name(name, span))
         return None
     }
-    binding :: ~scopes.bindings[index]
+    binding :: scopes.bindings[index]
     symbol :: binding.symbol
     ty :: symbol.ty ?? return None
     result := TExpr?{None}
