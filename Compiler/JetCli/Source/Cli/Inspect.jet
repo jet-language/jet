@@ -1459,8 +1459,7 @@ struct JetCLIImpactEdge {
 // (CmdInspect.rs `check_result_text`/`check_result_value`) leads the report.
 fn jet_cli_inspect_impact_report(job: JetCLIInspectJob, result: JetDriverCompileResult, diagnostics: Int, elapsed_ms: Int) -> JetDriverVerbOutput {
     symbol :: job.subject ?? ""
-    authority :: jet_cli_application_authority(result, None)
-    index :: jet_cli_build_semindex(result.doc_modules, JetCLISemEffectProjection{required: authority.required, granted: authority.granted, denied: authority.denied, authority: authority.authority})
+    index :: jet_cli_checked_semindex(result)
     definition_module := String?{None}
     parts :: symbol.split("::").to_list()
     if parts.len() > 1 {
