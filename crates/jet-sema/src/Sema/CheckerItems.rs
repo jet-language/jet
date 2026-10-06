@@ -1433,6 +1433,7 @@ impl<'a> Checker<'a> {
             ));
         }
         let mut arg_idx = 0;
+        let named_elsewhere = Self::args_named_elsewhere(args);
         for (i, (param_conv, param_ty)) in sig.params.iter().enumerate() {
             if i == 0 && sig.self_conv.is_some() {
                 continue;
@@ -1491,7 +1492,15 @@ impl<'a> Checker<'a> {
                         ));
                     }
                 }
-                self.check_callable_argument_ownership(method, arg_idx, *param_conv, param_ty, arg);
+                self.check_callable_argument_ownership(
+                    method,
+                    arg_idx,
+                    *param_conv,
+                    param_ty,
+                    arg,
+                    &call_access,
+                    named_elsewhere.get(arg_idx).copied().unwrap_or(false),
+                );
                 arg_idx += 1;
             }
         }
@@ -1658,6 +1667,7 @@ impl<'a> Checker<'a> {
                 }
             });
         }
+        let named_elsewhere = Self::args_named_elsewhere(args);
         for (index, arg) in args.iter_mut().enumerate() {
             let Some(param) = params.get(if variadic && index >= fixed {
                 fixed
@@ -1708,7 +1718,15 @@ impl<'a> Checker<'a> {
                     ));
                 }
             }
-            self.check_callable_argument_ownership(method, index, param.convention, &param_ty, arg);
+            self.check_callable_argument_ownership(
+                method,
+                index,
+                param.convention,
+                &param_ty,
+                arg,
+                &call_access,
+                named_elsewhere.get(index).copied().unwrap_or(false),
+            );
         }
         self.activate_call_reservations(&call_access, span);
         // Trait calls expose the declared success value to source inference;

@@ -319,6 +319,7 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
         }
+        let named_elsewhere = Self::args_named_elsewhere(args);
         for (i, arg) in args.iter_mut().enumerate() {
             if let Some(param_ty) = params.get(i) {
                 let param_convention = metadata
@@ -405,6 +406,8 @@ impl<'a> Checker<'a> {
                     param_convention,
                     param_ty,
                     arg,
+                    &call_access,
+                    named_elsewhere.get(i).copied().unwrap_or(false),
                 );
             } else {
                 self.infer(&mut arg.expr);

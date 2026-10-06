@@ -1,0 +1,40 @@
+// D-COPY-DEFAULT1=A: an unmarked argument to a take (`^T`) parameter moves
+// when the call is the name's last use, exactly as `^name` would. A use that
+// is not the last needs the explicit copy `~name` (E0209 teaches it).
+struct Order {
+    id: Int
+    items: [String]
+}
+
+fn archive(order: ^Order) -> String {
+    "order {order.id} with {order.items.len()} items"
+}
+
+fn total(values: ^[Int]) -> Int {
+    sum := 0
+    loop value in values {
+        sum += value
+    }
+    sum
+}
+
+fn label(name: ^String, suffix: ^String) -> String {
+    "{name}-{suffix}"
+}
+
+fn run() {
+    order :: Order{id: 7, items: ["book", "pen"]}
+    print(archive(order))
+
+    kept :: Order{id: 8, items: ["lamp"]}
+    print(archive(~kept))
+    print("kept still holds {kept.items.len()} item")
+
+    loop round in 0..<3 {
+        values :: [round, round + 1, round + 2]
+        print("round {round} total {total(values)}")
+    }
+
+    name :: "crate"
+    print(label(~name, name))
+}
