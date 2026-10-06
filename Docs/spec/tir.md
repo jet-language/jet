@@ -86,6 +86,10 @@ records retain their existing layouts rather than receiving emitter fields.
 Canonical source-owned regex and web-table records retain their declared field
 layouts and generated local traits. A same-leaf native carrier is not an ABI
 alias for such a record; all type projections use the source-owner decision.
+Checked-text interpolation carries each hole's checked generic encoder arguments
+through compile-time validation and runtime lowering. Its dynamic `from`
+boundary invokes the declared checker once and preserves the original error;
+only a successful outcome wraps the original text in the nominal type.
 
 Shared collection kernels narrow owned exact `Int` arguments through
 Foundation's borrowed `JetInt::to_native_i64` ABI check on every host. The seam

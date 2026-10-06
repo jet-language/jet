@@ -2541,6 +2541,8 @@ impl<'a> Checker<'a> {
                 && method == "safe")
                 || (!distinct_numeric_conversion
                     && self.resolve_method_sig(type_name, method).is_some())
+                || (matches!(method, "from" | "raw" | "encode_hole")
+                    && self.is_checked_text_type_name(type_name))
             {
                 self.record_static_time_effect(type_name, method, span);
                 let ret = self.check_static_method(

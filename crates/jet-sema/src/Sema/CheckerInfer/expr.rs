@@ -1647,6 +1647,46 @@ impl<'a> Checker<'a> {
             return None;
         };
 
+        let mut holes_valid = true;
+        for part in &mut parts {
+            let StrPart::Interp(inner, format) = part else {
+                continue;
+            };
+            let Some(value_ty) = self.infer(inner) else {
+                holes_valid = false;
+                continue;
+            };
+            let value_span = inner.span();
+            let value = std::mem::replace(&mut **inner, Expr::Absent(value_span));
+            **inner = Expr::MethodCall {
+                receiver: Box::new(Expr::Ident(type_name.clone(), span)),
+                method: "encode_hole".to_string(),
+                method_span: value_span,
+                owner_type_args: Vec::new(),
+                type_args: vec![value_ty],
+                args: vec![CallArg {
+                    convention: AccessConvention::Read,
+                    expr: value,
+                    span: value_span,
+                    flags: CallArgFlags::default(),
+                    label: None,
+                    spread: false,
+                }],
+                recv_type: Some(type_name.clone()),
+                resolved_ret: Some(Type::String),
+                operator_rhs: None,
+                checked_widen: false,
+            };
+            if self.infer(inner) != Some(Type::String) {
+                holes_valid = false;
+            }
+            *format = crate::AST::StrFormat::Display;
+        }
+        if !holes_valid {
+            *e = Expr::Str(parts, literal_span);
+            return None;
+        }
+
         let (import_ns, leaf) = Self::split_type_name(&type_name);
         let owner = self
             .struct_owner_module(leaf, import_ns)
@@ -1712,34 +1752,14 @@ impl<'a> Checker<'a> {
         }
 
         let mut body = String::new();
-        let mut holes_valid = true;
+        holes_valid = true;
         for part in &mut parts {
             match part {
                 StrPart::Lit(text) => body.push_str(text),
                 StrPart::Interp(inner, _) => {
-                    let value = (**inner).clone();
-                    let encoded = Expr::MethodCall {
-                        receiver: Box::new(Expr::Ident(type_name.clone(), span)),
-                        method: "encode_hole".to_string(),
-                        method_span: span,
-                        owner_type_args: Vec::new(),
-                        type_args: Vec::new(),
-                        args: vec![CallArg {
-                            convention: AccessConvention::Read,
-                            expr: value.clone(),
-                            span: value.span(),
-                            flags: CallArgFlags::default(),
-                            label: None,
-                            spread: false,
-                        }],
-                        recv_type: Some(type_name.clone()),
-                        resolved_ret: Some(Type::String),
-                        operator_rhs: None,
-                        checked_widen: false,
-                    };
                     match crate::Comptime::evaluate_checked_text_hole(
-                        &type_name,
-                        &value,
+                        leaf,
+                        inner,
                         &funcs,
                         &methods,
                         &structs,
@@ -1754,7 +1774,6 @@ impl<'a> Checker<'a> {
                             holes_valid = false;
                         }
                     }
-                    *part = StrPart::Interp(Box::new(encoded), crate::AST::StrFormat::Display);
                 }
             }
         }
@@ -1763,7 +1782,7 @@ impl<'a> Checker<'a> {
             return None;
         }
         if let Err(diagnostic) = crate::Comptime::evaluate_checked_text_check(
-            &type_name,
+            leaf,
             body,
             &funcs,
             &methods,
@@ -1774,33 +1793,6 @@ impl<'a> Checker<'a> {
             &core_imports,
         ) {
             self.diags.push(diagnostic);
-            *e = Expr::Str(parts, literal_span);
-            return None;
-        }
-
-        drop(funcs);
-        drop(methods);
-        drop(structs);
-        drop(distinct_bases);
-        drop(owned_globals);
-        drop(core_imports);
-        for part in &mut parts {
-            let StrPart::Interp(inner, _) = part else {
-                continue;
-            };
-            let ty = self.infer(inner);
-            if ty != Some(Type::String) {
-                self.diags.push(Diagnostic::error(
-                    "E0112",
-                    "a checked text hole encoder must return String".to_string(),
-                    "every interpolation is passed through the type's pure `encode_hole` method before it reaches the checker".to_string(),
-                    "make `encode_hole` return a String".to_string(),
-                    Some(inner.span()),
-                ));
-                holes_valid = false;
-            }
-        }
-        if !holes_valid {
             *e = Expr::Str(parts, literal_span);
             return None;
         }
