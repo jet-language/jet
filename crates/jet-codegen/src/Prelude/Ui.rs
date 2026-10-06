@@ -2287,21 +2287,6 @@ pub fn jet_ui_bind_tree_clicks(node: &JetUiNode, path: &str) {
     }
 }
 
-pub fn jet_ui_aria_role_button() -> JetUiAriaRole {
-    JetUiAriaRole::Button
-}
-
-pub fn jet_ui_aria_role_text_input() -> JetUiAriaRole {
-    JetUiAriaRole::TextInput
-}
-
-pub fn jet_ui_aria_role_label() -> JetUiAriaRole {
-    JetUiAriaRole::Label
-}
-
-pub fn jet_ui_aria_role_container() -> JetUiAriaRole {
-    JetUiAriaRole::Container
-}
 
 pub fn jet_ui_key_event(code: &str) -> JetInputEvent {
     JetInputEvent::Key {

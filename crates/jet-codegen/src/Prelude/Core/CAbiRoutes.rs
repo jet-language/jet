@@ -15036,29 +15036,6 @@ mod jet_c_abi_routes {
         guard(|| handle(crate::jet_tui_style_text(view(a0), unsafe { &*a1 }.clone(), unsafe { &*a2 }.clone())))
     }
 
-    /// core.ui.aria_role_button
-    #[no_mangle]
-    pub extern "C" fn jet_ui_aria_role_button() -> *mut crate::JetUiAriaRole {
-        guard(|| Box::into_raw(Box::new(crate::jet_ui_aria_role_button())))
-    }
-
-    /// core.ui.aria_role_container
-    #[no_mangle]
-    pub extern "C" fn jet_ui_aria_role_container() -> *mut crate::JetUiAriaRole {
-        guard(|| Box::into_raw(Box::new(crate::jet_ui_aria_role_container())))
-    }
-
-    /// core.ui.aria_role_label
-    #[no_mangle]
-    pub extern "C" fn jet_ui_aria_role_label() -> *mut crate::JetUiAriaRole {
-        guard(|| Box::into_raw(Box::new(crate::jet_ui_aria_role_label())))
-    }
-
-    /// core.ui.aria_role_text_input
-    #[no_mangle]
-    pub extern "C" fn jet_ui_aria_role_text_input() -> *mut crate::JetUiAriaRole {
-        guard(|| Box::into_raw(Box::new(crate::jet_ui_aria_role_text_input())))
-    }
 
     /// core.ui.button
     #[no_mangle]
