@@ -3284,9 +3284,19 @@ fn jet_codegen_lower_core_closure_call(builder: &JetCodegenBuilder, program: Jet
             borrow_mask = [Bool]{false}
         }
         .ReactiveEffect -> {
+            // D-REACTCORE1: the `#Reactive { … }` statement form has no handle
+            // to own its effect, so it roots the observer; `reactive.effect(..)`
+            // returns its lifecycle handle.
             module_name = "core.reactive"
-            member = "effect"
-            symbol = "jet_std::jet_reactive_effect"
+            if {
+                jet_codegen_is_unit_type(expression.ty) -> {
+                    member = "scope"
+                    symbol = "jet_std::jet_reactive_scope"
+                } else -> {
+                    member = "effect"
+                    symbol = "jet_std::jet_reactive_effect"
+                }
+            }
             arity = 1
             borrow_mask = [Bool]{false}
         }

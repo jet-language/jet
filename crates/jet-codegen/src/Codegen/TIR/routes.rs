@@ -8032,7 +8032,13 @@ pub(super) fn core_closure_route(
     result: &Type,
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
-    let _ = result;
+    // D-REACTCORE1: the `#Reactive { … }` statement form has no handle to own
+    // its effect, so it roots the observer (`jet_reactive_scope`); the
+    // `reactive.effect(..)` expression returns its lifecycle handle.
+    let rooted_effect = matches!(
+        result,
+        Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE
+    );
     let (module, member, symbol, arity, borrow_mask) = match &kind {
         MirCoreClosureKind::Spawn if grouped_spawn => (
             "core.tasks",
@@ -8082,6 +8088,13 @@ pub(super) fn core_closure_route(
             "core.reactive",
             "derived",
             "jet_std::JetDerived::new",
+            1,
+            vec![false],
+        ),
+        MirCoreClosureKind::ReactiveEffect if rooted_effect => (
+            "core.reactive",
+            "scope",
+            "jet_std::jet_reactive_scope",
             1,
             vec![false],
         ),

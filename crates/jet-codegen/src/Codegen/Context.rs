@@ -793,6 +793,16 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
     {
         return None;
     }
+    // D-SIGNAL1: core.reactive's `Computed<T>` (canonical derived value) and
+    // `Effect` lifecycle handle use the same runtime carriers as `Signal` /
+    // `Derived`. Matched by owner: `Effect` collides with core.compiler's enum.
+    if name.starts_with("<corelib>/Core/reactive::") {
+        match core_source_type_leaf(name) {
+            n if n == Syntax::TYPE_COMPUTED => return Some("JetDerived"),
+            n if n == Syntax::TYPE_EFFECT => return Some("JetReactiveEffect"),
+            _ => {}
+        }
+    }
     // Core source nominals have a canonical <corelib>/...::Leaf identity;
     // only registered Core owners may use the Prelude's native type rows.
     // Arbitrary qualified user/import names must not match by leaf.
