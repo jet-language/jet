@@ -265,7 +265,7 @@ fn lower_alloc_bytes(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, size: 
 
 fn lower_needs_drop(p: MIRProgram, ty: MIRType) -> Bool Never! {
     if lower_repr(p, ty) == {
-        .Handle(_, _) -> true
+        .ExactInt | .Handle(_, _) -> true
         .Boxed(_) -> true
         .Inline(aggregate) -> {
             // A List or Map always owns its buffer.

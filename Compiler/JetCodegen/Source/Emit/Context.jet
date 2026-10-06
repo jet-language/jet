@@ -313,6 +313,8 @@ pub struct JetRustEmitBodyIndex {
     // MIRRust shared_capture_locals: locals held in one shared cell because a
     // non-Send closure writes them (jet_rust_emit_shared_capture_locals).
     pub shared_locals: [U64:Bool]
+    // These locals name the existing SSA slot, not a second owning cell.
+    pub bound_local_values: [U64:MIRValueID]{[U64:MIRValueID]{}}
     // Every use of each value in body order, one row per user (MIRRust
     // FunctionIndex::uses): `use_slots` maps a value to its row list.
     pub use_slots: [U64:Int]{[U64:Int]{}}

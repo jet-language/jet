@@ -280,8 +280,8 @@ fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     if value.data == .Val(data) {
         owned := false
         if instruction.result == .Val(result) -> owned = lower_value_owned(c, result)
-        source :: if owned -> (if repr == .Word -> lower_word(&f) else -> lower_pointer(&f)) else -> dst
-        if repr == .Handle(_, _) || (repr == .Word && lower_is_exact_int(definition.ty)) {
+        source :: if owned -> (if repr == .ExactInt || repr == .Word -> lower_word(&f) else -> lower_pointer(&f)) else -> dst
+        if repr == .Handle(_, _) || repr == .ExactInt {
             // Runtime-owned constants point at the cell filled by their fixup.
             cell :: lower_pointer(&f)
             lower_emit(&f, LIRInst.DataAddress{dst: cell, data: data})
@@ -291,7 +291,7 @@ fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         }
         if owned {
             if repr == {
-                .Word -> lower_call_runtime(&m, &f, "jet_rt_int_clone", [LIRValueID]{source}, Val(dst))
+                .ExactInt -> lower_call_runtime(&m, &f, "jet_rt_int_clone", [LIRValueID]{source}, Val(dst))
                 .Handle(_, clone) -> lower_call_runtime(&m, &f, clone, [LIRValueID]{source}, Val(dst))
                 .Boxed(ty) -> lower_call_clone_glue(&m, &f, ty, source, dst)
                 .Inline(aggregate) -> {
@@ -320,6 +320,24 @@ fn lower_static_fixups(m: &LowerModule, f: &LowerFunction) Never! {
         object :: lower_pointer(&f)
         lower_emit(&f, LIRInst.DataAddress{dst: object, data: fixup.object})
         lower_emit(&f, LIRInst.Store{base: object, offset: fixup.offset, value: handle})
+    }
+}
+
+// Releases only the canonical owners created by lower_static_fixups, not the
+// frozen storage or borrowed carriers reachable through its pointer relocations.
+fn lower_static_release(m: &LowerModule, f: &LowerFunction) Never! {
+    loop fixup in m.static_fixups {
+        exact_int :: fixup.constructor == "jet_rt_int_from_static"
+        layout :: if exact_int -> lir_layout_word() else -> lir_layout_pointer()
+        handle :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
+        object :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.DataAddress{dst: object, data: fixup.object})
+        lower_emit(&f, LIRInst.Load{dst: handle, base: object, offset: fixup.offset})
+        empty :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
+        lower_emit(&f, LIRInst.Const{dst: empty, value: 0})
+        lower_emit(&f, LIRInst.Store{base: object, offset: fixup.offset, value: empty})
+        symbol :: if exact_int -> "jet_rt_int_drop" else -> "jet_rt_string_drop"
+        lower_call_runtime(&m, &f, symbol, [LIRValueID]{handle}, None)
     }
 }
 

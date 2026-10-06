@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-pub const MIR_SCHEMA_VERSION: u16 = 6;
+pub const MIR_SCHEMA_VERSION: u16 = 7;
 
 macro_rules! mir_id {
     ($name:ident) => {
@@ -158,6 +158,16 @@ impl MirOwnership {
             last_use: false,
             gc_root: false,
         }
+    }
+
+    /// Semantic Copy does not imply that a physical carrier is dropless.
+    pub const fn copy_value() -> Self {
+        Self { drop: MirDropKind::Value, ..Self::copy() }
+    }
+
+    pub const fn is_runtime_owned(&self) -> bool {
+        !matches!(self.drop, MirDropKind::None)
+            && !matches!(self.mode, MirOwnershipMode::ReadBorrow | MirOwnershipMode::WriteBorrow)
     }
     /// Owned semantic values carry the ordinary drop obligation.
     #[allow(non_upper_case_globals)]
@@ -3634,6 +3644,8 @@ pub struct MirLocal {
     pub span: Span,
     pub ty: MirType,
     pub place: MirPlaceId,
+    /// The SSA definition writes this same owning cell, never a second copy.
+    pub ssa_value: Option<MirValueId>,
     pub mutable: bool,
     pub ownership: MirOwnership,
     pub comptime: bool,
@@ -5543,13 +5555,88 @@ impl MirCopyFact {
         }
     }
 
-    /// An implicit copy (materialize or share) of a Copy-ABI value is a
-    /// bitwise read; the user's `~` and view materialization keep their fact.
-    pub fn for_ownership(self, mode: MirOwnershipMode) -> Self {
+    /// Only a NoDrop Copy carrier can strip an implicit physical clone.
+    /// Explicit and view-materializing copies retain their original fact.
+    pub fn for_ownership(self, ownership: &MirOwnership) -> Self {
         match self {
-            Self::Materialize | Self::Share if mode == MirOwnershipMode::Copy => Self::Scalar,
+            Self::Materialize | Self::Share
+                if ownership.mode == MirOwnershipMode::Copy && ownership.drop == MirDropKind::None => Self::Scalar,
             fact => fact,
         }
+    }
+}
+
+#[cfg(test)]
+mod runtime_copy_ownership_tests {
+    use super::{
+        MirCopyFact, MirCoreClosureKind, MirDropKind, MirOperation, MirOwnership,
+        MirOwnershipMode, MirPreludeCallId, MirSemanticOp, MirSiteId,
+        MirTaskGroupKind, MirValueConsumption, MirValueId,
+    };
+
+    #[test]
+    fn semantic_copy_and_physical_ownership_are_independent() {
+        let exact_int = MirOwnership::copy_value();
+        assert_eq!(exact_int.mode, MirOwnershipMode::Copy);
+        assert_eq!(exact_int.drop, MirDropKind::Value);
+        assert!(exact_int.is_runtime_owned());
+        assert!(!MirOwnership::copy().is_runtime_owned());
+        assert!(MirOwnership::Owned.is_runtime_owned());
+        for mode in [MirOwnershipMode::ReadBorrow, MirOwnershipMode::WriteBorrow] {
+            assert!(!MirOwnership { mode, ..exact_int }.is_runtime_owned());
+        }
+    }
+
+    #[test]
+    fn resource_copies_keep_their_physical_clone_fact() {
+        let exact_int = MirOwnership::copy_value();
+        let plain_word = MirOwnership::copy();
+        for fact in [MirCopyFact::Materialize, MirCopyFact::Share] {
+            assert_eq!(fact.for_ownership(&exact_int), fact);
+            assert_eq!(fact.for_ownership(&plain_word), MirCopyFact::Scalar);
+        }
+        assert_eq!(MirCopyFact::Explicit.for_ownership(&plain_word), MirCopyFact::Explicit);
+    }
+
+    #[test]
+    fn handle_consumption_uses_checked_receiver_first_mask() {
+        let receiver = MirValueId(1);
+        let payload = MirValueId(2);
+        let call = MirPreludeCallId(3);
+        let operation = MirOperation::Semantic(MirSemanticOp::HandleMethod {
+            call, receiver, args: vec![payload],
+            frame_schedule: None, frame_schedule_derivation: None,
+        });
+        assert_eq!(operation.consumption_route(), Some(call));
+        assert_eq!(operation.value_consumption(receiver, &[true, false]), MirValueConsumption::No);
+        assert_eq!(operation.value_consumption(payload, &[true, false]),
+            MirValueConsumption::Yes { requires_owner: false });
+        assert_eq!(operation.value_consumption(receiver, &[false, true]),
+            MirValueConsumption::Yes { requires_owner: true });
+        assert_eq!(operation.value_consumption(payload, &[false, true]), MirValueConsumption::No);
+        assert_eq!(operation.value_consumption(payload, &[]), MirValueConsumption::No);
+    }
+
+    #[test]
+    fn task_group_and_spawn_transfer_their_owner_operands_only() {
+        let owner = MirValueId(1);
+        let borrowed_label = MirValueId(2);
+        for kind in [MirTaskGroupKind::All, MirTaskGroupKind::Any, MirTaskGroupKind::Race] {
+            let operation = MirOperation::Semantic(MirSemanticOp::TaskGroup {
+                call: MirPreludeCallId(3), kind, tasks: vec![owner],
+            });
+            assert_eq!(operation.value_consumption(owner, &[]),
+                MirValueConsumption::Yes { requires_owner: true });
+            assert_eq!(operation.value_consumption(borrowed_label, &[]), MirValueConsumption::No);
+        }
+        let operation = MirOperation::Semantic(MirSemanticOp::CoreClosureCall {
+            call: MirPreludeCallId(3), kind: MirCoreClosureKind::Spawn,
+            values: vec![borrowed_label], closure: Some(owner),
+            site: MirSiteId(4), label: String::new(),
+        });
+        assert_eq!(operation.value_consumption(owner, &[]),
+            MirValueConsumption::Yes { requires_owner: true });
+        assert_eq!(operation.value_consumption(borrowed_label, &[]), MirValueConsumption::No);
     }
 }
 
@@ -5721,6 +5808,182 @@ pub enum MirOperation {
     },
     ScopeExit { scope: MirScopeId },
     Drop { value: MirValueId, kind: MirDropKind },
+}
+
+/// Canonical physical-consumption facts shared by verification, last-use
+/// selection and SSA retirement. A prospective `Through` traversal is not
+/// necessarily a physical carrier transfer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirValueConsumption {
+    Yes { requires_owner: bool },
+    Through { transfers: bool },
+    No,
+}
+
+impl MirValueConsumption {
+    pub const fn transfers(self) -> bool {
+        match self {
+            Self::Yes { .. } => true,
+            Self::Through { transfers } => transfers,
+            Self::No => false,
+        }
+    }
+}
+
+pub fn mir_call_arg_consumes(arg: &MirCallArg) -> bool {
+    !(arg.implicit_clone || arg.shared_auto_clone || arg.widen_fixed_to_list)
+        && (arg.access == MirAccess::Move || arg.owned_last_use)
+}
+
+fn mir_call_value_consumption(args: &[MirCallArg], value: MirValueId) -> MirValueConsumption {
+    if args.iter().any(|arg| arg.value == value && mir_call_arg_consumes(arg)) {
+        MirValueConsumption::Yes { requires_owner: true }
+    } else {
+        MirValueConsumption::No
+    }
+}
+
+impl MirOperation {
+    /// The checked route's receiver-first borrow mask is resolved once by the
+    /// caller. No operation or operand collection is copied by this query.
+    pub fn value_consumption(&self, value: MirValueId, borrow_mask: &[bool]) -> MirValueConsumption {
+        use MirValueConsumption::{No, Through, Yes};
+        match self {
+            Self::Move { value: taken } | Self::TraitBox { value: taken, .. } => {
+                if *taken == value { Yes { requires_owner: true } } else { No }
+            }
+            Self::Drop { value: taken, kind } => {
+                if *taken == value && *kind != MirDropKind::None { Yes { requires_owner: true } } else { No }
+            }
+            Self::WritePlace { value: stored, .. } | Self::ReplacePlace { value: stored, .. }
+            | Self::Present { value: stored } | Self::ResultOk { value: stored } | Self::ResultErr { value: stored } => {
+                if *stored == value { Yes { requires_owner: false } } else { No }
+            }
+            Self::BuildList { values, .. } => {
+                if values.contains(&value) { Yes { requires_owner: false } } else { No }
+            }
+            Self::BuildMap { entries } => {
+                if entries.iter().any(|(key, item)| *key == value || *item == value) { Yes { requires_owner: false } } else { No }
+            }
+            Self::Struct { fields, .. } | Self::Tuple { fields, .. }
+            | Self::Semantic(MirSemanticOp::StructLiteral { fields, .. }) => {
+                if fields.iter().any(|(_, field)| *field == value) { Yes { requires_owner: false } } else { No }
+            }
+            Self::Enum { args, .. } => {
+                if args.iter().any(|arg| arg.value == value) { Yes { requires_owner: false } } else { No }
+            }
+            Self::Phi { incoming } => {
+                if incoming.iter().any(|(_, source)| *source == value) { Through { transfers: true } } else { No }
+            }
+            Self::AttachTag { value: carried, .. } => {
+                if *carried == value { Through { transfers: true } } else { No }
+            }
+            Self::Convert { value: carried, conversion, .. } => {
+                if *carried == value && matches!(conversion, MirConversion::Transparent | MirConversion::SendFn) {
+                    Through { transfers: true }
+                } else { No }
+            }
+            Self::Copy { value: source, fact } => {
+                if *source == value && !matches!(fact, MirCopyFact::Explicit | MirCopyFact::ViewMaterialize) {
+                    Through { transfers: false }
+                } else { No }
+            }
+            Self::OptionValue { subject: source } | Self::ResultValue { subject: source, .. }
+            | Self::EnumPayload { subject: source, .. } => {
+                if *source == value { Through { transfers: false } } else { No }
+            }
+            Self::Call { args, .. } | Self::IndirectCall { args, .. } | Self::CoreCall { args, .. }
+            | Self::Semantic(
+                MirSemanticOp::StaticPreludeCall { args, .. } | MirSemanticOp::HardwareCall { args, .. }
+                | MirSemanticOp::ClosureMethod { args, .. } | MirSemanticOp::HostCall { args, .. }
+                | MirSemanticOp::AllocNew { args, .. },
+            ) => mir_call_value_consumption(args, value),
+            Self::LoopIterInit { collection, by_value, .. } => {
+                if *collection == value && *by_value { Yes { requires_owner: false } } else { No }
+            }
+            Self::Closure { captures, .. } => {
+                if captures.iter().any(|capture| matches!(capture, MirCaptureOperand::Value(captured) if *captured == value)) {
+                    Yes { requires_owner: false }
+                } else { No }
+            }
+            Self::Semantic(MirSemanticOp::TaskGroup { tasks, .. }) => {
+                if tasks.contains(&value) { Yes { requires_owner: true } } else { No }
+            }
+            Self::Semantic(MirSemanticOp::CoreClosureCall {
+                kind: MirCoreClosureKind::Spawn, closure, ..
+            }) => {
+                if *closure == Some(value) { Yes { requires_owner: true } } else { No }
+            }
+            Self::Semantic(MirSemanticOp::HandleMethod { receiver, args, .. }) => {
+                if *receiver == value && borrow_mask.first() == Some(&false) {
+                    Yes { requires_owner: true }
+                } else if args.iter().enumerate().any(|(index, arg)| {
+                    *arg == value && borrow_mask.get(index + 1) == Some(&false)
+                }) { Yes { requires_owner: false } } else { No }
+            }
+            Self::Semantic(MirSemanticOp::BuiltinMethod { receiver, args, .. }) => {
+                if *receiver != value && args.iter().enumerate().any(|(index, arg)| {
+                    *arg == value && borrow_mask.get(index + 1) == Some(&false)
+                }) { Yes { requires_owner: false } } else { No }
+            }
+            _ => No,
+        }
+    }
+
+    /// Checked route whose positional mask participates in physical consumption.
+    pub fn consumption_route(&self) -> Option<MirPreludeCallId> {
+        match self {
+            Self::Semantic(MirSemanticOp::BuiltinMethod { call, .. }
+                | MirSemanticOp::HandleMethod { call, .. }) => Some(*call),
+            _ => None,
+        }
+    }
+
+    /// Canonical checked argument access metadata.
+    pub fn call_args(&self) -> &[MirCallArg] {
+        match self {
+            Self::Call { args, .. } | Self::IndirectCall { args, .. } | Self::CoreCall { args, .. }
+            | Self::Semantic(
+                MirSemanticOp::StaticPreludeCall { args, .. } | MirSemanticOp::HardwareCall { args, .. }
+                | MirSemanticOp::ClosureMethod { args, .. } | MirSemanticOp::HostCall { args, .. }
+                | MirSemanticOp::AllocNew { args, .. },
+            ) => args,
+            _ => &[],
+        }
+    }
+
+    /// Places an operation writes, moves, resizes or opens for writing.
+    pub fn mutated_places(&self) -> Vec<MirPlaceId> {
+        let mut places = Vec::new();
+        match self {
+            Self::WritePlace { place, .. } | Self::ReplacePlace { place, .. }
+            | Self::MovePlace { place } | Self::InitializeUninit { place } => places.push(*place),
+            Self::AddressOf { place, access: MirAccess::Write } => places.push(*place),
+            Self::Semantic(MirSemanticOp::BuiltinMethod { receiver_place: Some(place), .. })
+            | Self::Semantic(MirSemanticOp::CursorTakePattern { receiver_place: place, .. })
+            | Self::Semantic(MirSemanticOp::ReaderTakePattern { receiver_place: place, .. }) => places.push(*place),
+            _ => {}
+        }
+        places.extend(self.call_args().iter().filter(|arg|
+            matches!(arg.access, MirAccess::Write | MirAccess::Move)
+        ).filter_map(|arg| arg.place));
+        places
+    }
+}
+
+impl MirTerminator {
+    pub fn value_consumption(&self, value: MirValueId) -> MirValueConsumption {
+        // The destination phi performs a break's physical transfer.
+        if let Self::Break { value: returned, .. } = self {
+            return if *returned == Some(value) { MirValueConsumption::Through { transfers: false } } else { MirValueConsumption::No };
+        }
+        let transferred = match self {
+            Self::Return { value: returned } => *returned == Some(value),
+            Self::Yield { value: yielded, .. } => *yielded == value,
+            _ => false,
+        };
+        if transferred { MirValueConsumption::Yes { requires_owner: false } } else { MirValueConsumption::No }
+    }
 }
 
 impl MirOperation {
@@ -6868,6 +7131,333 @@ pub struct MirFunction {
     pub scopes: Vec<MirScope>,
     pub drops: Vec<MirDropAction>,
     pub foreign_language: Option<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum MirStorageRoot<'a> {
+    Local(MirLocalId),
+    Value(MirValueId),
+    Static(&'a str),
+}
+
+fn mir_place_storage_root(place: &MirPlace) -> MirStorageRoot<'_> {
+    match &place.base {
+        MirPlaceBase::Local(local) => MirStorageRoot::Local(*local),
+        MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value)
+        | MirPlaceBase::Temporary(value) => MirStorageRoot::Value(*value),
+        MirPlaceBase::Static(name) => MirStorageRoot::Static(name),
+    }
+}
+
+fn mir_snapshot_type_may_borrow(ty: &MirType) -> bool {
+    match ty.kind() {
+        MirTypeKind::Int | MirTypeKind::Float | MirTypeKind::Bool | MirTypeKind::String
+        | MirTypeKind::Char | MirTypeKind::IntN { .. } | MirTypeKind::Float32
+        | MirTypeKind::Measure(_) => false,
+        MirTypeKind::Tagged { inner, .. } | MirTypeKind::InlineRange { base: inner, .. }
+        | MirTypeKind::Quantity { base: inner, .. } | MirTypeKind::List(inner)
+        | MirTypeKind::Shared(inner) | MirTypeKind::Option(inner)
+        | MirTypeKind::FixedList { elem: inner, .. } => mir_snapshot_type_may_borrow(inner),
+        MirTypeKind::Map { key, value } => mir_snapshot_type_may_borrow(key) || mir_snapshot_type_may_borrow(value),
+        MirTypeKind::Result { ok, err } => mir_snapshot_type_may_borrow(ok) || mir_snapshot_type_may_borrow(err),
+        MirTypeKind::Tuple(fields) => fields.iter().any(|(_, ty)| mir_snapshot_type_may_borrow(ty)),
+        MirTypeKind::Union(members) => members.iter().any(mir_snapshot_type_may_borrow),
+        // Nominal layouts and callable captures are unavailable to this
+        // function-local proof, so their borrowed dependencies are retained.
+        _ => true,
+    }
+}
+
+fn mir_snapshot_dependence_carrier(operation: &MirOperation, ty: &MirType, ownership: MirOwnership) -> bool {
+    matches!(ownership.mode, MirOwnershipMode::ReadBorrow | MirOwnershipMode::WriteBorrow)
+        || matches!(operation, MirOperation::ReadPlace(_) | MirOperation::MovePlace { .. }
+            | MirOperation::Move { .. } | MirOperation::Phi { .. } | MirOperation::AttachTag { .. }
+            | MirOperation::Closure { .. }
+            | MirOperation::Convert { conversion: MirConversion::Transparent | MirConversion::SendFn, .. })
+        || mir_snapshot_type_may_borrow(ty)
+}
+
+/// Conservative CFG snapshot stability. Dependence includes SSA aliases and
+/// storage holders; uncertain aliases/effects retain the original owned read.
+fn mir_read_snapshot_unstable(
+    function: &MirFunction,
+    candidates: &HashSet<MirValueId>,
+    routes: &HashMap<MirPreludeCallId, &MirPreludeCall>,
+) -> HashSet<MirValueId> {
+    if function.is_unsafe {
+        return candidates.clone();
+    }
+    let values: HashMap<_, _> = function.values.iter().enumerate()
+        .map(|(row, (id, ..))| (*id, row)).collect();
+    let places: HashMap<_, _> = function.places.iter().enumerate()
+        .map(|(row, place)| (place.id, row)).collect();
+    let blocks: HashMap<_, _> = function.blocks.iter().enumerate()
+        .map(|(row, block)| (block.id, row)).collect();
+    let deadlines: HashMap<_, _> = function.scopes.iter()
+        .filter_map(|scope| scope.deadline.map(|value| (scope.id, value))).collect();
+    let roots: Vec<_> = function.places.iter().map(mir_place_storage_root).collect();
+    let mut edges = vec![Vec::new(); function.values.len()];
+    let mut origins = vec![Vec::new(); function.values.len()];
+    let mut owners: HashMap<_, Vec<usize>> = HashMap::new();
+    let mut ssa_owners: HashMap<MirValueId, Vec<usize>> = HashMap::new();
+    let mut stored: HashMap<_, Vec<usize>> = HashMap::new();
+    let mut work = Vec::new();
+    let mut queued = vec![false; function.values.len()];
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            if let MirOperation::WritePlace { place, value }
+                | MirOperation::ReplacePlace { place, value } = &instruction.operation
+            {
+                if let (Some(&position), Some(&source)) = (places.get(place), values.get(value)) {
+                    stored.entry(roots[position]).or_default().push(source);
+                }
+            }
+            let Some(target) = instruction.result.and_then(|result| values.get(&result).copied()) else {
+                continue;
+            };
+            if let MirOperation::ReadPlace(place) = &instruction.operation {
+                if candidates.contains(&function.values[target].0) {
+                    if let Some(&position) = places.get(place) {
+                        owners.entry(roots[position]).or_default().push(target);
+                        if let MirStorageRoot::Value(value) = roots[position] {
+                            ssa_owners.entry(value).or_default().push(target);
+                        }
+                        origins[target].push(target);
+                        queued[target] = true;
+                        work.push(target);
+                    }
+                }
+            }
+            if !mir_snapshot_dependence_carrier(&instruction.operation, &function.values[target].1, function.values[target].3) {
+                continue;
+            }
+            for operand in instruction.operation.value_uses() {
+                if let Some(&source) = values.get(&operand) {
+                    edges[source].push(target);
+                }
+            }
+            for place in operation_places(&instruction.operation) {
+                let Some(&position) = places.get(&place) else { continue };
+                match function.places[position].base {
+                    MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value)
+                    | MirPlaceBase::Temporary(value) => {
+                        if let Some(&source) = values.get(&value) {
+                            edges[source].push(target);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            let Some(target) = instruction.result.and_then(|result| values.get(&result).copied()) else {
+                continue;
+            };
+            if !mir_snapshot_dependence_carrier(&instruction.operation, &function.values[target].1, function.values[target].3) {
+                continue;
+            }
+            for place in operation_places(&instruction.operation) {
+                let Some(&position) = places.get(&place) else { continue };
+                if let Some(sources) = stored.get(&roots[position]) {
+                    for &source in sources {
+                        edges[source].push(target);
+                    }
+                }
+            }
+        }
+    }
+    let mut members: HashSet<_> = work.iter().map(|&row| (row, row)).collect();
+    let mut cursors = vec![0; function.values.len()];
+    let mut head = 0;
+    while head < work.len() {
+        let row = work[head];
+        head += 1;
+        queued[row] = false;
+        while cursors[row] < origins[row].len() {
+            let origin = origins[row][cursors[row]];
+            cursors[row] += 1;
+            for &target in &edges[row] {
+                if members.insert((target, origin)) {
+                    origins[target].push(origin);
+                    if !queued[target] {
+                        queued[target] = true;
+                        work.push(target);
+                    }
+                }
+            }
+        }
+    }
+    let mut incoming = vec![HashSet::<usize>::new(); function.blocks.len()];
+    let mut reached = vec![false; function.blocks.len()];
+    let mut block_queued = vec![false; function.blocks.len()];
+    let mut block_work = Vec::new();
+    let Some(&entry) = blocks.get(&function.entry) else { return candidates.clone() };
+    reached[entry] = true;
+    block_queued[entry] = true;
+    block_work.push(entry);
+    for drop in &function.drops {
+        if let MirDropEdge::Failure(target) | MirDropEdge::Unwind(target) = drop.edge {
+            if let Some(&row) = blocks.get(&target) {
+                if !block_queued[row] {
+                    reached[row] = true;
+                    block_queued[row] = true;
+                    block_work.push(row);
+                }
+            }
+        }
+    }
+    let mut unstable = HashSet::new();
+    head = 0;
+    while head < block_work.len() {
+        let row = block_work[head];
+        head += 1;
+        block_queued[row] = false;
+        let mut dirty = incoming[row].clone();
+        let block = &function.blocks[row];
+        for instruction in &block.instructions {
+            let uses = instruction.operation.value_uses();
+            let mask = instruction.operation.consumption_route()
+                .and_then(|call| routes.get(&call))
+                .map_or(&[][..], |route| route.signature.borrow_mask.as_slice());
+            for &operand in &uses {
+                let Some(&source) = values.get(&operand) else { continue };
+                if function.values[source].3.is_runtime_owned()
+                    && instruction.operation.value_consumption(operand, mask).transfers()
+                {
+                    if let Some(owner_origins) = ssa_owners.get(&operand) {
+                        dirty.extend(owner_origins);
+                    }
+                }
+            }
+            for place in instruction.operation.mutated_places() {
+                let Some(&position) = places.get(&place) else { continue };
+                if let Some(owner_origins) = owners.get(&roots[position]) {
+                    dirty.extend(owner_origins);
+                    if matches!(instruction.operation, MirOperation::AddressOf { access: MirAccess::Write, .. }) {
+                        unstable.extend(owner_origins.iter().map(|&origin| function.values[origin].0));
+                    }
+                }
+                if let Some(sources) = stored.get(&roots[position]) {
+                    for &source in sources {
+                        unstable.extend(origins[source].iter().map(|&origin| function.values[origin].0));
+                    }
+                }
+                match function.places[position].base {
+                    MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value)
+                    | MirPlaceBase::Temporary(value) => {
+                        if let Some(&source) = values.get(&value) {
+                            unstable.extend(origins[source].iter().map(|&origin| function.values[origin].0));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for arg in instruction.operation.call_args() {
+                if matches!(arg.access, MirAccess::Write | MirAccess::Move) {
+                    if let Some(&source) = values.get(&arg.value) {
+                        unstable.extend(origins[source].iter().map(|&origin| function.values[origin].0));
+                    }
+                }
+            }
+            if matches!(&instruction.operation,
+                MirOperation::Call { .. } | MirOperation::IndirectCall { .. } | MirOperation::CoreCall { .. }
+                | MirOperation::Semantic(MirSemanticOp::StaticPreludeCall { .. }
+                    | MirSemanticOp::ClosureMethod { .. } | MirSemanticOp::CoreClosureCall { .. }
+                    | MirSemanticOp::HostCall { .. } | MirSemanticOp::HardwareCall { .. })
+            ) {
+                dirty.extend(candidates.iter().filter_map(|id| values.get(id).copied()));
+            }
+            if matches!(instruction.operation, MirOperation::ReadPlace(_)) {
+                if let Some(result) = instruction.result.filter(|id| candidates.contains(id)) {
+                    if let Some(&origin) = values.get(&result) {
+                        dirty.remove(&origin);
+                    }
+                }
+            }
+            for operand in uses {
+                if let Some(&source) = values.get(&operand) {
+                    unstable.extend(origins[source].iter().filter(|origin| dirty.contains(origin))
+                        .map(|&origin| function.values[origin].0));
+                }
+            }
+            if let MirOperation::ScopeEnter { scope, .. } = instruction.operation {
+                if let Some(&source) = deadlines.get(&scope).and_then(|value| values.get(value)) {
+                    unstable.extend(origins[source].iter().filter(|origin| dirty.contains(origin))
+                        .map(|&origin| function.values[origin].0));
+                }
+            }
+        }
+        for operand in block.terminator.value_uses() {
+            if let Some(&source) = values.get(&operand) {
+                unstable.extend(origins[source].iter().filter(|origin| dirty.contains(origin))
+                    .map(|&origin| function.values[origin].0));
+            }
+        }
+        for target in block.terminator.targets() {
+            let Some(&successor) = blocks.get(&target) else { continue };
+            let old_len = incoming[successor].len();
+            incoming[successor].extend(&dirty);
+            let changed = !reached[successor] || incoming[successor].len() != old_len;
+            reached[successor] = true;
+            if changed && !block_queued[successor] {
+                block_queued[successor] = true;
+                block_work.push(successor);
+            }
+        }
+    }
+    unstable
+}
+
+/// Refine post-last-use place reads once, before every backend. A borrowed read
+/// must not transfer ownership or observe an owner mutation before its last use.
+pub fn mir_refine_function_ownership(function: &mut MirFunction, prelude: &[MirPreludeCall]) -> usize {
+    let candidates: std::collections::HashSet<_> = function.blocks.iter()
+        .flat_map(|block| &block.instructions)
+        .filter(|instruction| matches!(instruction.operation, MirOperation::ReadPlace(_)))
+        .filter_map(|instruction| instruction.result)
+        .collect();
+    if candidates.is_empty() {
+        return 0;
+    }
+    let routes: std::collections::HashMap<_, _> = prelude.iter().map(|call| (call.id, call)).collect();
+    let mut transferred = std::collections::HashSet::new();
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            let mask = instruction.operation.consumption_route()
+                .and_then(|call| routes.get(&call))
+                .map_or(&[][..], |row| row.signature.borrow_mask.as_slice());
+            for value in instruction.operation.value_uses() {
+                if candidates.contains(&value) && instruction.operation.value_consumption(value, mask).transfers() {
+                    transferred.insert(value);
+                }
+            }
+        }
+        for value in block.terminator.value_uses() {
+            if candidates.contains(&value) && block.terminator.value_consumption(value).transfers() {
+                transferred.insert(value);
+            }
+        }
+    }
+    let eligible: HashSet<_> = function.values.iter()
+        .filter(|(id, _, _, ownership)| candidates.contains(id)
+            && !transferred.contains(id) && ownership.is_runtime_owned())
+        .map(|(id, ..)| *id).collect();
+    if eligible.is_empty() {
+        return 0;
+    }
+    let unstable = mir_read_snapshot_unstable(function, &eligible, &routes);
+    let mut changed = 0;
+    for (_, _, _, ownership) in function.values.iter_mut().filter(|(id, _, _, _)|
+        eligible.contains(id) && !unstable.contains(id)
+    ) {
+        if ownership.is_runtime_owned() {
+            *ownership = MirOwnership::from_access(MirAccess::Read);
+            changed += 1;
+        }
+    }
+    changed
 }
 
 impl MirFunction {

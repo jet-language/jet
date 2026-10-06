@@ -247,6 +247,14 @@ fn lower_glue_clone_fields(p: MIRProgram, m: &LowerModule, f: &LowerFunction, so
             }
             next
         }
+        if repr == .ExactInt {
+            value :: lower_word(&f)
+            lower_emit(&f, LIRInst.Load{dst: value, base: source, offset: field.offset})
+            duplicate :: lower_word(&f)
+            lower_call_runtime(&m, &f, "jet_rt_int_clone", [LIRValueID]{value}, Val(duplicate))
+            lower_emit(&f, LIRInst.Store{base: target, offset: field.offset, value: duplicate})
+            next
+        }
         if repr == {
             .Handle(_, _) | .Boxed(_) -> {}
             else -> next

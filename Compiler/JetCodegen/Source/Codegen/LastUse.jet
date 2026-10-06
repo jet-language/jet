@@ -24,6 +24,8 @@
 //
 // One backward liveness pass over the function's blocks decides all of it.
 
+use jet_foundation.[MIRValueConsumption, mir_operation_consumption_route, mir_operation_value_consumption, mir_terminator_value_consumption]
+
 struct JetCodegenLastUseCandidate {
     // An owned local (whole place and drop flag), a field path of the owned
     // local candidate `root`, an enum subject value, or a copy (`value`, a
@@ -59,10 +61,6 @@ struct JetCodegenLastUseGroup {
     pub payloads: [Int]
 }
 
-// How one operation treats one of its operand values: takes it (stores,
-// wraps or passes it owned), carries it onward in its result, or only
-// inspects it.
-enum JetCodegenLastUseConsume { Yes Through No }
 
 fn jet_codegen_last_use_call_places(args: [MIRCallArg], places: &[MIRPlaceID]) Never! {
     loop arg in args {
@@ -173,70 +171,15 @@ fn jet_codegen_last_use_covers(projections: [MIRProjection], path: [MIRFieldID])
     true
 }
 
-fn jet_codegen_last_use_owned_arg(args: [MIRCallArg], value: MIRValueID) -> JetCodegenLastUseConsume Never! {
-    loop arg in args {
-        if arg.value == value && arg.access == MIRAccess.Move -> return JetCodegenLastUseConsume.Yes
-    }
-    JetCodegenLastUseConsume.No
-}
 
-// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_last_use.rs::consumes
-fn jet_codegen_last_use_consumes(builder: JetCodegenBuilder, operation: MIROperation, value: MIRValueID) -> JetCodegenLastUseConsume Never! {
-    if operation == {
-        .WritePlace(_, stored) -> {
-            if stored == value -> return JetCodegenLastUseConsume.Yes
-            JetCodegenLastUseConsume.No
-        }
-        .ReplacePlace(_, stored) -> {
-            if stored == value -> return JetCodegenLastUseConsume.Yes
-            JetCodegenLastUseConsume.No
-        }
-        .Move(_) | .TraitBox(_, _) | .Present(_) | .ResultOk(_) | .ResultErr(_) | .BuildList(_, _) | .BuildMap(_) | .Struct(_, _) | .Tuple(_, _) | .Enum(_, _, _) -> JetCodegenLastUseConsume.Yes
-        .Copy(_, fact) -> {
-            if fact == {
-                .Explicit | .ViewMaterialize -> JetCodegenLastUseConsume.No
-                else -> JetCodegenLastUseConsume.Through
-            }
-        }
-        .Phi(_) | .OptionValue(_) | .ResultValue(_, _) | .EnumPayload(_, _, _, _) -> JetCodegenLastUseConsume.Through
-        .Call(_, args, _) -> jet_codegen_last_use_owned_arg(args, value)
-        .IndirectCall(_, args, _) -> jet_codegen_last_use_owned_arg(args, value)
-        .CoreCall(_, _, args, _, _, _) -> jet_codegen_last_use_owned_arg(args, value)
-        .LoopIterInit(_, _, _, by_value, _) -> {
-            if by_value -> return JetCodegenLastUseConsume.Yes
-            JetCodegenLastUseConsume.No
-        }
-        .Closure(_, captures, _) -> {
-            loop capture in captures {
-                if capture == .Value(captured) {
-                    if captured == value -> return JetCodegenLastUseConsume.Yes
-                }
-            }
-            JetCodegenLastUseConsume.No
-        }
-        .Semantic(semantic) -> {
-            if semantic == {
-                .StructLiteral(_, _, _, _, _) -> JetCodegenLastUseConsume.Yes
-                .StaticPreludeCall(_, args, _, _) -> jet_codegen_last_use_owned_arg(args, value)
-                .HostCall(_, args) -> jet_codegen_last_use_owned_arg(args, value)
-                .ClosureMethod(_, args, _) -> jet_codegen_last_use_owned_arg(args, value)
-                // A builtin method borrows its receiver; an argument is passed
-                // owned exactly when the route's borrow mask (receiver first)
-                // says so.
-                .BuiltinMethod(call, receiver, _, args, _) -> {
-                    if receiver == value -> return JetCodegenLastUseConsume.No
-                    if builder.prelude_call_positions.get(call.value) == None -> return JetCodegenLastUseConsume.No
-                    row :: builder.prelude_call_positions.get(call.value) ?? panic("checked last-use row is missing")
-                    loop (index, arg) in args {
-                        if arg == value && index + 1 < builder.prelude_calls[row].signature.borrow_mask.len() && !builder.prelude_calls[row].signature.borrow_mask[index + 1] -> return JetCodegenLastUseConsume.Yes
-                    }
-                    JetCodegenLastUseConsume.No
-                }
-                else -> JetCodegenLastUseConsume.No
-            }
-        }
-        else -> JetCodegenLastUseConsume.No
+// Resolve checked access metadata once; consumption itself is Foundation's
+// shared MIR classifier, also used by legality, lint and SSA retirement.
+fn jet_codegen_operation_borrow_mask(builder: JetCodegenBuilder, operation: MIROperation) -> [Bool] Never! {
+    if mir_operation_consumption_route(operation) == Val(call) {
+        row :: builder.prelude_call_positions.get(call.value) ?? return [Bool]{}
+        return builder.prelude_calls[row].signature.borrow_mask
     }
+    [Bool]{}
 }
 
 // Whether `value` is consumed: some use takes it, directly or through the
@@ -254,27 +197,14 @@ fn jet_codegen_last_use_consumed(builder: JetCodegenBuilder, users_block: [U64:[
         loop (position, block) in blocks {
             index :: indices[position]
             if index >= builder.blocks[block].instructions.len() {
-                if builder.blocks[block].terminator == {
-                    .Return(returned) -> {
-                        if returned == .Val(returned_value) {
-                            if returned_value == current -> return true
-                        }
-                    }
-                    .Break(_, returned) -> {
-                        if returned == .Val(returned_value) {
-                            if returned_value == current -> return true
-                        }
-                    }
-                    .Yield(yielded, _) -> {
-                        if yielded == current -> return true
-                    }
-                    else -> {}
-                }
+                if mir_terminator_value_consumption(builder.blocks[block].terminator, current) != .No -> return true
                 next
             }
-            if jet_codegen_last_use_consumes(builder, builder.blocks[block].instructions[index].operation, current) == {
-                .Yes -> return true
-                .Through -> {
+            operation :: builder.blocks[block].instructions[index].operation
+            mask :: jet_codegen_operation_borrow_mask(builder, operation)
+            if mir_operation_value_consumption(operation, current, mask) == {
+                .Yes(_) -> return true
+                .Through(_) -> {
                     if builder.blocks[block].instructions[index].result == .Val(carried) -> &pending.push(carried)
                 }
                 .No -> {}

@@ -167,6 +167,7 @@ use jet_foundation.[
     mir_nominal_ref,
     mir_owned_ownership,
     mir_ownership_from_access,
+    mir_refine_function_ownership,
     mir_source_file_id,
     mir_trait_id,
     mir_type_canonical_key,
@@ -1825,6 +1826,7 @@ fn jet_codegen_lower_function(builder: &JetCodegenBuilder, function: TFunc, stat
         drops: [MIRDropAction]{},
         foreign_language: foreign_language,
     }
+    _ := mir_refine_function_ownership(&mir_function, builder.prelude_calls)
     function_rows := [MIRFunction]{mir_function}
     loop nested_index in 0..<builder.nested_functions.len() {
         nested :: builder.nested_functions[nested_index]

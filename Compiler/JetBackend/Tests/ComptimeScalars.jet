@@ -1,9 +1,10 @@
 // Detached compiler values round-trip through native argument/result carriers.
 // With a compiled runtime library argument, String and exact-Int use that same
 // library's constructor/projection exports, including UTF-8 and embedded NUL.
+use core.math as math
 use core.process as process
 use jet_foundation.[MIRTypeKind, TComptimeValue, mir_type_from_kind]
-use jet_backend.[x64_comptime_encode_scalar, x64_comptime_decode_scalar, x64_comptime_scalar_supported, x64_runtime_open]
+use jet_backend.[x64_comptime_encode_scalar, x64_comptime_decode_scalar, x64_comptime_drop_scalar, x64_comptime_scalar_supported, x64_runtime_open]
 
 fn ci_scalar(kind: MIRTypeKind, value: TComptimeValue, layout: LIRLayout, runtime: X64Runtime) {
     ty :: mir_type_from_kind(kind)
@@ -17,19 +18,24 @@ fn ci_scalar(kind: MIRTypeKind, value: TComptimeValue, layout: LIRLayout, runtim
     parameter :: lir_builder_value(&builder, layout, LIRDrop.Trivial, None)
     lir_builder_seal(&builder, block, [LIRValueID]{parameter}, LIRTerminator.Return{value: Val(parameter)})
     program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{layout}, result: Val(layout)}}, functions: [LIRFunction]{lir_builder_finish(builder)}, data: [LIRData]{}}
-    call :: x64_call_image(program, LIRFunctionID{value: 0})
+    call :: x64_call_image(program, LIRFunctionID{value: 0}, None)
     loaded :: x64_load_image(call.image, runtime)
     answer :: x64_call_loaded(loaded, call, [Int]{encoded.word})
     ci_require(answer.errors.len() == 0, "native compiler scalar call")
     decoded :: x64_comptime_decode_scalar(runtime, ty, answer.word)
     loop error in decoded.errors -> print(error)
-    ci_require(decoded.errors.len() == 0 && decoded.value == Val(value), "detached compiler value equality")
-    if kind == MIRTypeKind.String {
-        drop :: os_library_symbol(runtime.library, "jet_rt_string_drop")
-        #Unsafe("the identity returns its single owning String unchanged; decoding has copied it") {
-            _ := os_call_address(drop, answer.word)
-        }
-    }
+    ci_require(decoded.errors.len() == 0, "detach compiler scalar")
+    if value == .Float(expected, bits) {
+        actual :: decoded.value ?? panic("native Float result missing")
+        if actual == .Float(observed, actual_bits) {
+            ci_require(bits == actual_bits && math.to_bits(expected) == math.to_bits(observed), "Float compiler value bit-pattern equality")
+        } else -> panic("native Float result has another compiler value kind")
+    } else -> ci_require(decoded.value == Val(value), "detached compiler value equality")
+    // This fixture's identity transfers its one input owner to its result.
+    // Decode borrows it; release exactly once after detaching the host value.
+    released :: x64_comptime_drop_scalar(runtime, ty, answer.word)
+    loop error in released -> print(error)
+    ci_require(released.len() == 0, "release native compiler scalar")
     ci_require(x64_unload_image(loaded), "unload compiler scalar")
 }
 
@@ -39,6 +45,7 @@ fn ci_comptime_scalars() {
     ci_scalar(MIRTypeKind.IntN{signed: true, bits: 64}, TComptimeValue.Int{value: -9223372036854775808}, lir_layout_word(), runtime)
     ci_scalar(MIRTypeKind.IntN{signed: false, bits: 64}, TComptimeValue.BigInt{decimal: "18446744073709551615"}, lir_layout_word(), runtime)
     ci_scalar(MIRTypeKind.Bool, TComptimeValue.Bool{value: true}, lir_layout_bool(), runtime)
+    ci_scalar(MIRTypeKind.Float, TComptimeValue.Float{value: math.from_bits(9221120237041090561), bits: 64}, lir_layout_float(), runtime)
     ci_scalar(MIRTypeKind.Char, TComptimeValue.Char{value: 128512}, lir_layout_word(), runtime)
     ci_scalar(MIRTypeKind.Float, TComptimeValue.Float{value: -0.0, bits: 64}, lir_layout_float(), runtime)
     ci_require(!x64_comptime_scalar_supported(mir_type_from_kind(MIRTypeKind.Float32)), "Float32 requires native backend coverage")

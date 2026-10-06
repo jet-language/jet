@@ -10,7 +10,7 @@ fn lower_callable_init(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     params :: ~f.open_params
     // The loader gives module data writable, non-executable pages. This flag
     // avoids re-allocating runtime-owned statics on repeated compiler calls.
-    flag_data :: lower_static_object(&m, 8)
+    flag_data :: m.static_live ?? panic("callable initialization has no static-live cell")
     flag_address :: lower_pointer(&f)
     lower_emit(&f, LIRInst.DataAddress{dst: flag_address, data: flag_data})
     initialized :: lower_flag(&f)
@@ -29,5 +29,28 @@ fn lower_callable_init(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     if signature.result == .Val(layout) -> result = Val(lower_new_value(&f, layout, LIRDrop.Trivial, None))
     lower_emit(&f, LIRInst.Call{dst: result, signature: signature_id, callee: LIRCallee.Function{id: LIRFunctionID{value: glue.function}}, args: params})
     lower_seal(&f, LIRTerminator.Return{value: result})
+    lir_builder_finish(f.builder)
+}
+
+// Native results and parameters must be detached/released before this runs.
+// Clearing the shared flag and fixup cells makes a second finalization harmless.
+fn lower_callable_fini(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{}, None)
+    flag_data :: m.static_live ?? panic("callable finalization has no static-live cell")
+    flag_address :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.DataAddress{dst: flag_address, data: flag_data})
+    initialized :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Load{dst: initialized, base: flag_address, offset: 0})
+    release :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: initialized, then_target: lower_target(release, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, release, [LIRValueID]{})
+    empty :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Const{dst: empty, value: 0})
+    lower_emit(&f, LIRInst.Store{base: flag_address, offset: 0, value: empty})
+    lower_static_release(&m, &f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
     lir_builder_finish(f.builder)
 }

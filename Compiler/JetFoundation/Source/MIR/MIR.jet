@@ -2,7 +2,7 @@
 // places, calls, functions and control flow; target adapters consume these facts
 // rather than recreating source-level policy.
 
-pub MIR_SCHEMA_VERSION :: prep { 6 }
+pub MIR_SCHEMA_VERSION :: prep { 7 }
 
 // Every MIR identity is a fixed 64-bit word, as in the Rust reference
 // (`mir_id!` newtypes over `u64`): a stable FNV-1a hash or, in fixtures, a
@@ -146,6 +146,15 @@ pub struct MIROwnership {
 
 pub fn mir_copy_ownership() -> MIROwnership Never! {
     MIROwnership{mode: MIROwnershipMode.Copy, drop: MIRDropKind.NoDrop, moved: false, last_use: false, gc_root: false}
+}
+
+// A copyable immutable value whose physical carrier owns a resource (Int).
+pub fn mir_copy_value_ownership() -> MIROwnership Never! {
+    MIROwnership{mode: MIROwnershipMode.Copy, drop: MIRDropKind.Value, moved: false, last_use: false, gc_root: false}
+}
+
+pub fn mir_runtime_owned_ownership(ownership: MIROwnership) -> Bool Never! {
+    ownership.drop != MIRDropKind.NoDrop && ownership.mode != MIROwnershipMode.ReadBorrow && ownership.mode != MIROwnershipMode.WriteBorrow
 }
 
 pub fn mir_owned_ownership() -> MIROwnership Never! {
@@ -1005,6 +1014,8 @@ pub struct MIRLocal {
     pub span: Span
     pub ty: MIRType
     pub place: MIRPlaceID
+    // The SSA definition writes this same owning cell; never a second copy.
+    pub ssa_value: MIRValueID?
     pub mutable: Bool
     pub ownership: MIROwnership
     pub is_comptime: Bool
@@ -1797,10 +1808,10 @@ pub fn mir_copy_fact_name(fact: MIRCopyFact) -> String Never! {
     }
 }
 
-// An implicit copy (materialize, share) of a Copy-ABI value is a bitwise read;
-// the user's `~` and view materialization keep their fact.
-pub fn mir_copy_fact_for_ownership(fact: MIRCopyFact, mode: MIROwnershipMode) -> MIRCopyFact Never! {
-    if mode == MIROwnershipMode.Copy && (fact == MIRCopyFact.Materialize || fact == MIRCopyFact.Share) -> return MIRCopyFact.Scalar
+// Only a NoDrop Copy-ABI value can strip an implicit physical clone.
+// The user's `~` and view materialization keep their fact.
+pub fn mir_copy_fact_for_ownership(fact: MIRCopyFact, ownership: MIROwnership) -> MIRCopyFact Never! {
+    if ownership.mode == MIROwnershipMode.Copy && ownership.drop == MIRDropKind.NoDrop && (fact == MIRCopyFact.Materialize || fact == MIRCopyFact.Share) -> return MIRCopyFact.Scalar
     ~fact
 }
 
@@ -1868,6 +1879,520 @@ pub enum MIROperation {
     ScopeExit(scope: MIRScopeID)
     Drop(value: MIRValueID, kind: MIRDropKind)
 }
+
+// One physical-consumption mechanism for verification, last-use selection and
+// SSA retirement. Through preserves prospective last-use traversal; its bit
+// distinguishes a carrier transfer from a projection/implicit clone.
+pub enum MIRValueConsumption {
+    Yes(requires_owner: Bool)
+    Through(transfers: Bool)
+    No
+}
+
+pub fn mir_value_consumption_transfers(consumption: MIRValueConsumption) -> Bool Never! {
+    if consumption == {
+        .Yes(_) -> true
+        .Through(transfers) -> transfers
+        .No -> false
+    }
+}
+
+pub fn mir_call_arg_consumes(arg: MIRCallArg) -> Bool Never! {
+    !(arg.implicit_clone || arg.shared_auto_clone || arg.widen_fixed_to_list) && (arg.access == .Move || arg.owned_last_use)
+}
+
+fn mir_call_value_consumption(args: [MIRCallArg], value: MIRValueID) -> MIRValueConsumption Never! {
+    loop arg in args {
+        if arg.value == value && mir_call_arg_consumes(arg) -> return MIRValueConsumption.Yes{requires_owner: true}
+    }
+    MIRValueConsumption.No
+}
+
+// `borrow_mask` is the checked route's receiver-first borrow mask;
+// callers resolve it once per instruction, never invent access from a name.
+// Only these operation shapes use checked positional masks for consumption.
+pub fn mir_operation_consumption_route(operation: MIROperation) -> MIRPreludeCallID? Never! {
+    if operation == .Semantic(semantic) {
+        if semantic == {
+            .BuiltinMethod(call, _, _, _, _) | .HandleMethod(call, _, _, _, _) -> return Val(call)
+            else -> {}
+        }
+    }
+    None
+}
+
+pub fn mir_operation_value_consumption(operation: MIROperation, value: MIRValueID, borrow_mask: [Bool]) -> MIRValueConsumption Never! {
+    if operation == {
+        .Move(taken) | .TraitBox(taken, _) -> if taken == value -> MIRValueConsumption.Yes{requires_owner: true} else -> MIRValueConsumption.No
+        .Drop(taken, kind) -> if taken == value && kind != .NoDrop -> MIRValueConsumption.Yes{requires_owner: true} else -> MIRValueConsumption.No
+        .WritePlace(_, stored) | .ReplacePlace(_, stored) | .Present(stored) | .ResultOk(stored) | .ResultErr(stored) -> if stored == value -> MIRValueConsumption.Yes{requires_owner: false} else -> MIRValueConsumption.No
+        .BuildList(values, _) -> if values.contains(value) -> MIRValueConsumption.Yes{requires_owner: false} else -> MIRValueConsumption.No
+        .BuildMap(entries) -> {
+            loop entry in entries {
+                if entry.key == value || entry.value == value -> return MIRValueConsumption.Yes{requires_owner: false}
+            }
+            MIRValueConsumption.No
+        }
+        .Struct(_, fields) | .Tuple(_, fields) -> {
+            loop field in fields {
+                if field.value == value -> return MIRValueConsumption.Yes{requires_owner: false}
+            }
+            MIRValueConsumption.No
+        }
+        .Enum(_, _, args) -> {
+            loop arg in args {
+                if arg.value == value -> return MIRValueConsumption.Yes{requires_owner: false}
+            }
+            MIRValueConsumption.No
+        }
+        .Phi(rows) -> {
+            loop row in rows {
+                if row.value == value -> return MIRValueConsumption.Through{transfers: true}
+            }
+            MIRValueConsumption.No
+        }
+        .AttachTag(carried, _) -> if carried == value -> MIRValueConsumption.Through{transfers: true} else -> MIRValueConsumption.No
+        .Convert(carried, _, _, conversion) -> {
+            if carried == value && (conversion == .Transparent || conversion == .SendFn) -> return MIRValueConsumption.Through{transfers: true}
+            MIRValueConsumption.No
+        }
+        .Copy(source, fact) -> {
+            if source == value && fact != .Explicit && fact != .ViewMaterialize -> return MIRValueConsumption.Through{transfers: false}
+            MIRValueConsumption.No
+        }
+        .OptionValue(source) | .ResultValue(source, _) | .EnumPayload(source, _, _, _) -> if source == value -> MIRValueConsumption.Through{transfers: false} else -> MIRValueConsumption.No
+        .Call(_, args, _) | .IndirectCall(_, args, _) | .CoreCall(_, _, args, _, _, _) -> mir_call_value_consumption(args, value)
+        .LoopIterInit(_, collection, _, by_value, _) -> if collection == value && by_value -> MIRValueConsumption.Yes{requires_owner: false} else -> MIRValueConsumption.No
+        .Closure(_, captures, _) -> {
+            loop capture in captures {
+                if capture == .Value(captured) {
+                    if captured == value -> return MIRValueConsumption.Yes{requires_owner: false}
+                }
+            }
+            MIRValueConsumption.No
+        }
+        .Semantic(semantic) -> {
+            if semantic == {
+                .StructLiteral(_, fields, _, _, _) -> {
+                    loop field in fields {
+                        if field.value == value -> return MIRValueConsumption.Yes{requires_owner: false}
+                    }
+                    MIRValueConsumption.No
+                }
+                .StaticPreludeCall(_, args, _, _) | .HardwareCall(_, _, _, args) | .ClosureMethod(_, args, _) | .HostCall(_, args) | .AllocNew(_, _, _, args) -> mir_call_value_consumption(args, value)
+                .TaskGroup(_, _, tasks) -> {
+                    loop task in tasks {
+                        if task == value -> return MIRValueConsumption.Yes{requires_owner: true}
+                    }
+                    MIRValueConsumption.No
+                }
+                .CoreClosureCall(_, .Spawn, _, closure, _, _) -> if closure == Val(value) -> MIRValueConsumption.Yes{requires_owner: true} else -> MIRValueConsumption.No
+                .HandleMethod(_, receiver, args, _, _) -> {
+                    if receiver == value && borrow_mask.len() > 0 && !borrow_mask[0] -> return MIRValueConsumption.Yes{requires_owner: true}
+                    loop (index, arg) in args {
+                        if arg == value && index + 1 < borrow_mask.len() && !borrow_mask[index + 1] -> return MIRValueConsumption.Yes{requires_owner: false}
+                    }
+                    MIRValueConsumption.No
+                }
+                .BuiltinMethod(_, receiver, _, args, _) -> {
+                    if receiver == value -> return MIRValueConsumption.No
+                    loop (index, arg) in args {
+                        if arg == value && index + 1 < borrow_mask.len() && !borrow_mask[index + 1] -> return MIRValueConsumption.Yes{requires_owner: false}
+                    }
+                    MIRValueConsumption.No
+                }
+                else -> MIRValueConsumption.No
+            }
+        }
+        else -> MIRValueConsumption.No
+    }
+}
+
+pub fn mir_terminator_value_consumption(terminator: MIRTerminator, value: MIRValueID) -> MIRValueConsumption Never! {
+    if terminator == {
+        .Return(returned) -> if returned == .Val(value) -> MIRValueConsumption.Yes{requires_owner: false} else -> MIRValueConsumption.No
+        // Break's value is transferred by its destination phi, not twice.
+        .Break(_, returned) -> if returned == .Val(value) -> MIRValueConsumption.Through{transfers: false} else -> MIRValueConsumption.No
+        .Yield(yielded, _) -> if yielded == value -> MIRValueConsumption.Yes{requires_owner: false} else -> MIRValueConsumption.No
+        else -> MIRValueConsumption.No
+    }
+}
+
+// Checked access metadata, not a second ownership-consumption convention.
+pub fn mir_operation_call_args(operation: MIROperation) -> [MIRCallArg] Never! {
+    if operation == {
+        .Call(_, args, _) | .IndirectCall(_, args, _) | .CoreCall(_, _, args, _, _, _) -> args
+        .Semantic(semantic) -> if semantic == {
+            .StaticPreludeCall(_, args, _, _) | .HardwareCall(_, _, _, args) | .ClosureMethod(_, args, _) | .HostCall(_, args) | .AllocNew(_, _, _, args) -> args
+            else -> [MIRCallArg]{}
+        }
+        else -> [MIRCallArg]{}
+    }
+}
+
+pub fn mir_operation_mutated_places(operation: MIROperation) -> [MIRPlaceID] Never! {
+    places := [MIRPlaceID]{}
+    if operation == {
+        .WritePlace(place, _) | .ReplacePlace(place, _) | .MovePlace(place) | .InitializeUninit(place) -> &places.push(place)
+        .AddressOf(place, access) -> { if access == .Write -> &places.push(place) }
+        .Semantic(semantic) -> if semantic == {
+            .BuiltinMethod(_, _, receiver_place, _, _) -> { if receiver_place == .Val(place) -> &places.push(place) }
+            .CursorTakePattern(_, place, _) | .ReaderTakePattern(_, place, _) -> &places.push(place)
+            else -> {}
+        }
+        else -> {}
+    }
+    loop arg in mir_operation_call_args(operation) {
+        if arg.place == .Val(place) {
+            if arg.access == .Write || arg.access == .Move -> &places.push(place)
+        }
+    }
+    places
+}
+
+// Parameter, capture and temporary spellings of one SSA value name the same
+// storage. Projections conservatively share their root for snapshot stability.
+pub fn mir_place_storage_root(place: MIRPlace) -> String Never! {
+    if place.base == {
+        .Local(local) -> "l{local.value}"
+        .Parameter(value) | .Capture(value) | .Temporary(value) -> "v{value.value}"
+        .Static(name) -> "s{name}"
+    }
+}
+
+fn mir_snapshot_type_may_borrow(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> false
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) | .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) -> mir_snapshot_type_may_borrow(inner)
+        .Map(key, value) -> mir_snapshot_type_may_borrow(key) || mir_snapshot_type_may_borrow(value)
+        .Result(ok, err) -> mir_snapshot_type_may_borrow(ok) || mir_snapshot_type_may_borrow(err)
+        .Tuple(fields) -> {
+            loop field in fields -> if mir_snapshot_type_may_borrow(field.ty) -> return true
+            false
+        }
+        .Union(members) -> {
+            loop member in members -> if mir_snapshot_type_may_borrow(member) -> return true
+            false
+        }
+        // Nominal layouts and callable captures are unavailable to this
+        // function-local proof, so their borrowed dependencies are retained.
+        else -> true
+    }
+}
+
+fn mir_snapshot_dependence_carrier(operation: MIROperation, value: MIRValueFact) -> Bool Never! {
+    if value.ownership.mode == .ReadBorrow || value.ownership.mode == .WriteBorrow -> return true
+    if operation == {
+        .ReadPlace(_) | .MovePlace(_) | .Move(_) | .Phi(_) | .AttachTag(_, _) | .Closure(_, _, _) -> return true
+        .Convert(_, _, _, conversion) -> if conversion == .Transparent || conversion == .SendFn -> return true
+        else -> {}
+    }
+    mir_snapshot_type_may_borrow(value.ty)
+}
+
+// A Copy read is an owned snapshot until the CFG proves that borrowing its
+// storage cannot observe a later write. Dependence deliberately over-approximates
+// borrowed aliases, including values stored in and re-read from local holders:
+// an uncertain case retains the original snapshot, never rejects valid source.
+fn mir_read_snapshot_unstable(function: MIRFunction, candidates: [U64:Bool], routes: [U64:Int], prelude: [MIRPreludeCall]) -> [U64:Bool] Never! {
+    unstable := [U64:Bool]{}
+    if function.is_unsafe {
+        loop (value, _) in candidates -> _ := &unstable.add(value, true)
+        return unstable
+    }
+    values := [U64:Int]{}
+    places := [U64:Int]{}
+    blocks := [U64:Int]{}
+    place_roots := [String]{}
+    edges := [[Int]]{}
+    origins := [[Int]]{}
+    cursors := [Int]{}
+    queued := [Bool]{}
+    loop (row, value) in function.values {
+        _ := &values.add(value.id.value, row)
+        &edges.push([Int]{})
+        &origins.push([Int]{})
+        &cursors.push(0)
+        &queued.push(false)
+    }
+    loop (row, place) in function.places {
+        _ := &places.add(place.id.value, row)
+        &place_roots.push(mir_place_storage_root(place))
+    }
+    loop (row, block) in function.blocks -> _ := &blocks.add(block.id.value, row)
+    deadlines := [U64:MIRValueID]{}
+    loop scope in function.scopes {
+        if scope.deadline == .Val(value) -> _ := &deadlines.add(scope.id.value, value)
+    }
+    owners := [String:[Int]]{}
+    ssa_owners := [U64:[Int]]{}
+    stored := [String:[Int]]{}
+    work := [Int]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == {
+                .WritePlace(place, value) | .ReplacePlace(place, value) -> {
+                    position :: places.get(place.value) ?? next
+                    source :: values.get(value.value) ?? next
+                    key :: place_roots[position]
+                    rows := stored.get(key) ?? [Int]{}
+                    &rows.push(source)
+                    _ := &stored.add(key, rows)
+                }
+                else -> {}
+            }
+            result :: instruction.result ?? next
+            target :: values.get(result.value) ?? next
+            if instruction.operation == .ReadPlace(place) {
+                position :: places.get(place.value) ?? next
+                key :: place_roots[position]
+                if candidates.get(result.value) != None {
+                    roots := owners.get(key) ?? [Int]{}
+                    &roots.push(target)
+                    _ := &owners.add(key, roots)
+                    if function.places[position].base == {
+                        .Parameter(value) | .Capture(value) | .Temporary(value) -> {
+                            aliases := ssa_owners.get(value.value) ?? [Int]{}
+                            &aliases.push(target)
+                            _ := &ssa_owners.add(value.value, aliases)
+                        }
+                        else -> {}
+                    }
+                    &origins[target].push(target)
+                    queued[target] = true
+                    &work.push(target)
+                }
+            }
+            if !mir_snapshot_dependence_carrier(instruction.operation, function.values[target]) -> next
+            loop operand in mir_operation_value_uses(instruction.operation) {
+                source :: values.get(operand.value) ?? next
+                &edges[source].push(target)
+            }
+            loop place in mir_operation_place_uses(instruction.operation) {
+                position :: places.get(place.value) ?? next
+                if function.places[position].base == {
+                    .Parameter(value) | .Capture(value) | .Temporary(value) -> {
+                        source :: values.get(value.value) ?? next
+                        &edges[source].push(target)
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            result :: instruction.result ?? next
+            target :: values.get(result.value) ?? next
+            if !mir_snapshot_dependence_carrier(instruction.operation, function.values[target]) -> next
+            loop place in mir_operation_place_uses(instruction.operation) {
+                position :: places.get(place.value) ?? next
+                key :: place_roots[position]
+                loop source in stored.get(key) ?? [Int]{} -> &edges[source].push(target)
+            }
+        }
+    }
+    members := [Int:Bool]{}
+    loop row in work -> _ := &members.add(row * function.values.len() + row, true)
+    head := 0
+    loop head < work.len() {
+        row :: work[head]
+        head += 1
+        queued[row] = false
+        loop cursors[row] < origins[row].len() {
+            origin :: origins[row][cursors[row]]
+            cursors[row] += 1
+            loop target in edges[row] {
+                key :: target * function.values.len() + origin
+                if members.get(key) != None -> next
+                _ := &members.add(key, true)
+                &origins[target].push(origin)
+                if !queued[target] {
+                    queued[target] = true
+                    &work.push(target)
+                }
+            }
+        }
+    }
+    // Each block's may-written state is a union over incoming CFG paths.
+    // Re-executing a read in a loop starts a fresh snapshot and kills its bit.
+    incoming := [[Int:Bool]]{}
+    reached := [Bool]{}
+    block_queued := [Bool]{}
+    block_work := [Int]{}
+    loop _ in function.blocks {
+        &incoming.push([Int:Bool]{})
+        &reached.push(false)
+        &block_queued.push(false)
+    }
+    entry :: blocks.get(function.entry.value) ?? return candidates
+    reached[entry] = true
+    block_queued[entry] = true
+    &block_work.push(entry)
+    loop drop in function.drops {
+        target := MIRBlockID?{None}
+        if drop.edge == {
+            .Failure(block) | .Unwind(block) -> target = .Val(block)
+            else -> {}
+        }
+        if target == .Val(block) {
+            row :: blocks.get(block.value) ?? next
+            if !block_queued[row] {
+                reached[row] = true
+                block_queued[row] = true
+                &block_work.push(row)
+            }
+        }
+    }
+    head = 0
+    loop head < block_work.len() {
+        row :: block_work[head]
+        head += 1
+        block_queued[row] = false
+        dirty := incoming[row]
+        block :: function.blocks[row]
+        loop instruction in block.instructions {
+            uses :: mir_operation_value_uses(instruction.operation)
+            route := Int?{None}
+            if mir_operation_consumption_route(instruction.operation) == Val(call) -> route = routes.get(call.value)
+            loop operand in uses {
+                source :: values.get(operand.value) ?? next
+                if !mir_runtime_owned_ownership(function.values[source].ownership) -> next
+                consumption :: if route == .Val(position) -> mir_operation_value_consumption(instruction.operation, operand, prelude[position].signature.borrow_mask) else -> mir_operation_value_consumption(instruction.operation, operand, [Bool]{})
+                if mir_value_consumption_transfers(consumption) {
+                    loop origin in ssa_owners.get(operand.value) ?? [Int]{} -> _ := &dirty.add(origin, true)
+                }
+            }
+            loop place in mir_operation_mutated_places(instruction.operation) {
+                position :: places.get(place.value) ?? next
+                root :: function.places[position]
+                loop origin in owners.get(place_roots[position]) ?? [Int]{} -> _ := &dirty.add(origin, true)
+                if instruction.operation == .AddressOf(_, .Write) {
+                    loop origin in owners.get(place_roots[position]) ?? [Int]{} -> _ := &unstable.add(function.values[origin].id.value, true)
+                }
+                // Writing through the prospective snapshot would also change
+                // the source owner after refinement, even without a later use.
+                loop source in stored.get(place_roots[position]) ?? [Int]{} {
+                    loop origin in origins[source] -> _ := &unstable.add(function.values[origin].id.value, true)
+                }
+                if root.base == {
+                    .Parameter(value) | .Capture(value) | .Temporary(value) -> {
+                        source :: values.get(value.value) ?? next
+                        loop origin in origins[source] -> _ := &unstable.add(function.values[origin].id.value, true)
+                    }
+                    else -> {}
+                }
+            }
+            loop arg in mir_operation_call_args(instruction.operation) {
+                if arg.access != .Write && arg.access != .Move -> next
+                source :: values.get(arg.value.value) ?? next
+                loop origin in origins[source] -> _ := &unstable.add(function.values[origin].id.value, true)
+            }
+            // Unanalysed callees can reach captured or static owners without
+            // naming them in argument-place metadata; retain uncertain snapshots.
+            unknown := false
+            if instruction.operation == {
+                .Call(_, _, _) | .IndirectCall(_, _, _) | .CoreCall(_, _, _, _, _, _) -> unknown = true
+                .Semantic(semantic) -> if semantic == {
+                    .StaticPreludeCall(_, _, _, _) | .ClosureMethod(_, _, _) | .CoreClosureCall(_, _, _, _, _, _) | .HostCall(_, _) | .HardwareCall(_, _, _, _) -> unknown = true
+                    else -> {}
+                }
+                else -> {}
+            }
+            if unknown -> loop (value, _) in candidates {
+                origin :: values.get(value) ?? next
+                _ := &dirty.add(origin, true)
+            }
+            if instruction.operation == .ReadPlace(_) {
+                if instruction.result == .Val(value) && candidates.get(value.value) != None {
+                    origin :: values.get(value.value) ?? next
+                    _ := &dirty.remove(origin)
+                }
+            }
+            loop operand in uses {
+                source :: values.get(operand.value) ?? next
+                loop origin in origins[source] {
+                    if dirty.get(origin) != None -> _ := &unstable.add(function.values[origin].id.value, true)
+                }
+            }
+            if instruction.operation == .ScopeEnter(scope, _) {
+                value :: deadlines.get(scope.value) ?? next
+                source :: values.get(value.value) ?? next
+                loop origin in origins[source] {
+                    if dirty.get(origin) != None -> _ := &unstable.add(function.values[origin].id.value, true)
+                }
+            }
+        }
+        loop operand in mir_terminator_value_uses(block.terminator) {
+            source :: values.get(operand.value) ?? next
+            loop origin in origins[source] {
+                if dirty.get(origin) != None -> _ := &unstable.add(function.values[origin].id.value, true)
+            }
+        }
+        loop target in mir_terminator_targets(block.terminator) {
+            successor :: blocks.get(target.value) ?? next
+            changed := !reached[successor]
+            reached[successor] = true
+            loop (origin, _) in dirty {
+                if incoming[successor].get(origin) == None {
+                    _ := &incoming[successor].add(origin, true)
+                    changed = true
+                }
+            }
+            if changed && !block_queued[successor] {
+                block_queued[successor] = true
+                &block_work.push(successor)
+            }
+        }
+    }
+    unstable
+}
+
+// Post-last-use facts shared by every backend. A borrowed read must neither
+// transfer ownership nor observe an owner mutation before its last dependent use.
+pub fn mir_refine_function_ownership(function: &MIRFunction, prelude: [MIRPreludeCall]) -> Int Never! {
+    candidates := [U64:Bool]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .ReadPlace(_) {
+                if instruction.result == .Val(value) -> _ := &candidates.add(value.value, true)
+            }
+        }
+    }
+    if candidates.len() == 0 -> return 0
+    routes := [U64:Int]{}
+    loop (row, call) in prelude -> _ := &routes.add(call.id.value, row)
+    transferred := [U64:Bool]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            route := Int?{None}
+            if mir_operation_consumption_route(instruction.operation) == Val(call) -> route = routes.get(call.value)
+            loop value in mir_operation_value_uses(instruction.operation) {
+                if candidates.get(value.value) == None -> next
+                consumption :: if route == .Val(row) -> mir_operation_value_consumption(instruction.operation, value, prelude[row].signature.borrow_mask) else -> mir_operation_value_consumption(instruction.operation, value, [Bool]{})
+                if mir_value_consumption_transfers(consumption) -> _ := &transferred.add(value.value, true)
+            }
+        }
+        loop value in mir_terminator_value_uses(block.terminator) {
+            if candidates.get(value.value) != None && mir_value_consumption_transfers(mir_terminator_value_consumption(block.terminator, value)) -> _ := &transferred.add(value.value, true)
+        }
+    }
+    eligible := [U64:Bool]{}
+    loop value in function.values {
+        if candidates.get(value.id.value) != None && transferred.get(value.id.value) == None && mir_runtime_owned_ownership(value.ownership) -> _ := &eligible.add(value.id.value, true)
+    }
+    if eligible.len() == 0 -> return 0
+    unstable :: mir_read_snapshot_unstable(function, eligible, routes, prelude)
+    changed := 0
+    loop row in 0..<function.values.len() {
+        value :: function.values[row]
+        if eligible.get(value.id.value) == None || unstable.get(value.id.value) != None -> next
+        function.values[row].ownership = mir_ownership_from_access(MIRAccess.Read)
+        changed += 1
+    }
+    changed
+}
+
 
 pub struct MIRFieldValue { pub field: MIRFieldID, pub value: MIRValueID }
 
@@ -2492,6 +3017,11 @@ pub fn mir_operation_place_uses(operation: MIROperation) -> [MIRPlaceID] Never! 
         .InitializeUninit(place) -> [MIRPlaceID]{place}
         .RawAddressOf(place) -> [MIRPlaceID]{place}
         .AddressOf(place, _) -> [MIRPlaceID]{place}
+        .Closure(_, captures, _) -> {
+            places := [MIRPlaceID]{}
+            loop capture in captures -> if capture == .Place(place) -> &places.push(place)
+            places
+        }
         .Semantic(semantic) -> mir_semantic_op_place_uses(semantic)
         else -> [MIRPlaceID]{}
     }

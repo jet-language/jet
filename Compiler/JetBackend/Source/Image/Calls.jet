@@ -16,7 +16,7 @@ pub struct X64CallResult {
 
 // The caller owns the carriers and must obey the target's ownership contract.
 // No argument/result value is cloned or dropped by this ABI-only adapter.
-pub fn x64_call_image(program: LIRModule, target: LIRFunctionID) -> X64CallImage Never! {
+pub fn x64_call_image(program: LIRModule, target: LIRFunctionID, finalizer: LIRFunctionID?) -> X64CallImage Never! {
     if target.value < 0 || target.value >= program.functions.len() -> return X64CallImage{image: x64_memory_image_failure([String]{"call target {target.value} is not in the module"}), params: [LIRLayout]{}, result: None}
     signature :: lir_signature(program, program.functions[target.value].signature) ?? return X64CallImage{image: x64_memory_image_failure([String]{"call target has no signature"}), params: [LIRLayout]{}, result: None}
     callable := program
@@ -38,7 +38,7 @@ pub fn x64_call_image(program: LIRModule, target: LIRFunctionID) -> X64CallImage
     if result == .Val(value) -> lir_builder_push(&builder, LIRInst.Store{base: cells, offset: 8 * signature.params.len(), value: value})
     lir_builder_seal(&builder, block, [LIRValueID]{cells}, LIRTerminator.Return{value: None})
     &callable.functions.push(lir_builder_finish(builder))
-    X64CallImage{image: x64_memory_function_image(callable, adapter_id), params: signature.params, result: signature.result}
+    X64CallImage{image: x64_memory_function_image(callable, adapter_id, finalizer), params: signature.params, result: signature.result}
 }
 
 // Loaded must be the image from this exact call descriptor, retained together

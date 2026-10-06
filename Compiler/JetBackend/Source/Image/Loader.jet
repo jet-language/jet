@@ -24,13 +24,14 @@ pub struct X64LoadedImage {
     // Only [base, base + code_size) is executable. Data is never executable.
     pub code_size: Int
     pub entry: Int
+    pub finalizer: Int?
     pub imports: [String]
     pub slots: [Int]
     pub errors: [String]
 }
 
 fn x64_loaded_failure(errors: [String]) -> X64LoadedImage Never! {
-    X64LoadedImage{base: 0, size: 0, code_size: 0, entry: 0, imports: [String]{}, slots: [Int]{}, errors: errors}
+    X64LoadedImage{base: 0, size: 0, code_size: 0, entry: 0, finalizer: None, imports: [String]{}, slots: [Int]{}, errors: errors}
 }
 
 // Open the compiled runtime's shared library at `path`.
@@ -55,6 +56,9 @@ pub fn x64_load_image(image: X64MemoryImage, runtime: X64Runtime) -> X64LoadedIm
     if image.data_offset <= 0 || image.data_offset > size -> return x64_loaded_failure([String]{"data boundary {image.data_offset} is outside the image"})
     if image.data_offset < size && image.data_offset % OS_PAGE_SIZE != 0 -> return x64_loaded_failure([String]{"data boundary {image.data_offset} is not page-aligned"})
     if image.entry < 0 || image.entry >= image.data_offset -> return x64_loaded_failure([String]{"entry offset {image.entry} is outside the code"})
+    if image.finalizer == .Val(at) {
+        if at < 0 || at >= image.data_offset -> return x64_loaded_failure([String]{"finalizer offset {at} is outside the code"})
+    }
     if image.slots.len() != image.imports.len() -> return x64_loaded_failure([String]{"the image has {image.imports.len()} imports but {image.slots.len()} slots"})
     addresses := [Int]{}
     loop (index, symbol) in image.imports {
@@ -113,7 +117,8 @@ pub fn x64_load_image(image: X64MemoryImage, runtime: X64Runtime) -> X64LoadedIm
         _ := os_unmap(base, size)
         return x64_loaded_failure([String]{"mprotect to read+execute failed (errno {-protected})"})
     }
-    X64LoadedImage{base: base, size: mapping_size, code_size: code_size, entry: base + image.entry, imports: image.imports, slots: slots, errors: [String]{}}
+    finalizer :: if image.finalizer == .Val(at) -> Val(base + at) else -> None
+    X64LoadedImage{base: base, size: mapping_size, code_size: code_size, entry: base + image.entry, finalizer: finalizer, imports: image.imports, slots: slots, errors: [String]{}}
 }
 
 // Run the loaded entry through `jet_rt_main`, which sets up the runtime,
@@ -152,8 +157,15 @@ pub fn x64_rebind_slot(loaded: X64LoadedImage, slot: Int, address: Int) -> Bool 
     !os_failed(os_protect(page, OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_EXEC))
 }
 
-// Release the mapping. No frame may still return into it.
+// Release the mapping exactly once. No frame may return into it, and every
+// native input/result owner must already be detached or released.
 pub fn x64_unload_image(loaded: X64LoadedImage) -> Bool {
     if loaded.errors.len() > 0 || loaded.base == 0 || loaded.size <= 0 -> return false
+    if loaded.finalizer == .Val(address) {
+        if address < loaded.base || address >= loaded.base + loaded.code_size -> return false
+        #Unsafe("this loaded image's checked zero-argument Unit finalizer remains executable; no native owners or returning frames survive") {
+            _ := os_call_address(address, 0)
+        }
+    }
     !os_failed(os_unmap(loaded.base, loaded.size))
 }

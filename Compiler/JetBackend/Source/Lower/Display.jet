@@ -157,8 +157,8 @@ fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
         return Val(LowerText{value: text, owned: true})
     }
     symbol :: if repr == {
+        .ExactInt -> "jet_rt_int_to_string"
         .Word -> if {
-            lower_is_exact_int(ty) -> "jet_rt_int_to_string"
             ty.kind == .Char -> "jet_rt_char_to_string"
             lower_is_unsigned_word(ty) -> "jet_rt_u64_to_string"
             else -> "jet_rt_i64_to_string"

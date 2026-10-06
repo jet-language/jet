@@ -150,7 +150,7 @@ IR with these choices, which the Jet lowering keeps or replaces as noted:
 
 | Checked MIR type | LIR carrier | Layout | Drop when owned |
 |---|---|---|---|
-| `Int`, ranges/tags/quantities over Int | exact-Int word | `i64` (Integer 8) | none (big integers are runtime-managed) |
+| `Int`, ranges/tags/quantities over Int | exact-Int word | `i64` (Integer 8) | `jet_rt_int_drop` (inline tag fast path; BigInt releases one reference) |
 | `Char`, `IntN(_, 64)` | word | `i64` | none |
 | `Bool` | flag | `i8` (Integer 1, 0 or 1) | none |
 | `Unit`, `Never` | no LIR value | — | — |
@@ -197,10 +197,58 @@ hidden first parameter pointing at the caller's storage (the callee returns
 nothing). A Write argument of inline type passes its storage, which the
 callee updates in place.
 
-A value's drop action comes from its MIR ownership fact: owned values
-(`drop != NoDrop`, not a read or write borrow) carry the type's drop; borrows,
-copies and every value of a type without drop carry none. MIR `Drop(value)`
-becomes LIR `Drop` when the value carries a drop action and nothing otherwise.
+A value's drop action comes from its MIR physical ownership fact:
+`drop != NoDrop` and neither read nor write borrow. Source-language `Copy`
+does not mean dropless: exact Int remains semantic `Copy`, with `drop = Value`;
+fixed-width integers and Char remain `Copy/NoDrop`. Both compiler halves use
+the same predicate in their ownership verification. Only a `Copy/NoDrop`
+carrier can strip an implicit physical clone fact to a scalar copy.
+MIR `Drop(value)` becomes LIR `Drop` when the value carries a drop action.
+
+Foundation owns the physical-consumption classifier used by MIR Lint, legality
+and last-use selection: `Yes(requires_owner)`, `Through(transfers)` and `No`.
+`Through` preserves prospective last-use traversal without pretending that an
+implicit clone or payload projection consumes its source. Call consumption
+uses checked argument flags and checked receiver-first builtin/handle masks. Storage writes,
+constructors and return/yield transfers use the same classifier. Phi inputs
+transfer on their selected predecessor edge, not together at the destination;
+`Break` is prospective only because its target Phi performs the transfer.
+TaskGroup task operands and Spawn's closure transfer their owners; borrowed
+handle receivers (for example Sender.send's receiver) do not transfer, while
+false-mask payload arguments do. The checked consumption-route query is shared
+by all callers; there is no runtime-symbol-name ownership inference.
+Transparent carrier operations preserve the source's physical ownership fact,
+including a borrow; numeric casts inspect their source, and an exact-Int
+identity numeric cast clones an independent owner. SSA retirement must use
+these facts rather than establishing a backend frame-owner ledger.
+Join-crossing/maybe-live SSA owners must use canonical place storage and the
+existing drop-flag/flagged-cleanup mechanism, before borrowed aliases form.
+Dominating must-live roots retain plain Drop. No second conditional-lifetime
+opcode, backend frame shadow, sweep or worker-only cleanup ledger is allowed.
+
+MIR schema 7 represents that storage association with `MIRLocal.ssa_value`.
+A present value names the existing SSA definition's cell, not a second owner:
+the definition writes the cell, Rust emission omits the separate local
+declaration, and native lowering associates both identities with the same slot.
+Original SSA ownership and projection facts remain unchanged. Legality must
+reject additional cell writers and require canonical live-flag updates on every
+definition and selected consuming edge. Schema-7 observations require a compiler
+that produces the field; old schema-6 dumps must not acquire a guessed `None`.
+
+Post-last-use place-read refinement is also a Foundation fact, not a native
+clone heuristic. A read without a physical-transfer user becomes ReadBorrow
+only when a CFG may-written proof shows its owner remains stable through every
+dependent use. Copy reads otherwise keep their independent owned snapshot:
+replacing a binding cannot change an already-read exact Int. The proof follows
+borrowed carriers and stored holders, treats owner transfers as invalidation,
+and retains owned reads for uncertain callees/unsafe access. MIR Lint's
+view.valid family checks the resulting borrowed reads and their derived uses.
+By-value inline reads, member extraction and copies snapshot canonical extent
+and alignment even when their bytes are dropless; NoDrop does not authorize a
+mutable-storage alias. These dropless snapshots need no resource clone glue.
+Real ReadBorrow/WriteBorrow results keep the parent's storage. Lint's borrowed
+SSA/root associations and held-copy stale state are generation-specific, so a
+fresh source definition cannot refresh an older holder or Phi alias.
 
 Drop glue is one LIR function per box type, `drop.<canonical type key>`,
 taking the box pointer and returning nothing (`LIRDrop.Function`). It drops
@@ -248,7 +296,7 @@ function parameters and jumps to it (LIR forbids jumps to the entry).
 | `Parameter(i)` | the entry block's parameter for MIR parameter i (Unit parameters have none) |
 | `Constant` Int/Bool/Char | `Const`; exact-Int literals outside the inline range use a runtime constructor fixup, including frozen statics |
 | `Constant` String | `DataAddress` of the literal's bytes, `Const` length, call `jet_rt_string_from_static(ptr, len) -> String` |
-| `Copy` | the same value for word, flag and tag carriers; `jet_rt_string_clone` for a String; clone glue for boxes; a fresh `StackSlot` filled by clone glue for an owned inline aggregate (a borrowing copy names the source) |
+| `Copy` | the same value for dropless word, flag and tag carriers; `jet_rt_int_clone` for owned exact Int (packed tag fast path, BigInt retains one reference); `jet_rt_string_clone` for a String; clone glue for boxes; a fresh `StackSlot` filled by clone glue for an owned inline aggregate (a borrowing copy names the source) |
 | `Move`, `AttachTag`, transparent `Convert` | the same value |
 | exact-Int `+ - *` (Prelude route, arity 2) | inline test (`(x ^ (x << 1)) >= 0` on both operands), native op (Mul also checks `Overflows`), inline test of the result, else the route's runtime symbol; joined in a block parameter |
 | exact-Int other ops (division family, pow, shifts, bit ops) | call of the route's runtime symbol with `(left, right)`, plus `(file_ptr, file_len, line)` for routes of arity 4 |
@@ -326,6 +374,7 @@ Symbols the lowering itself names:
 | `jet_rt_free` | `(ptr, size, align)` |
 | `jet_rt_string_from_static` | `(ptr, len) -> String` |
 | `jet_rt_string_clone`, `jet_rt_string_drop` | `(String) -> String`, `(String)` |
+| `jet_rt_int_clone`, `jet_rt_int_drop` | `(exact Int) -> exact Int`, `(exact Int)`; clone borrows, drop consumes one owner |
 | `jet_rt_string_eq` | `(String, String) -> Bool` |
 | `jet_rt_string_builder_new`, `_push_static`, `_push`, `_finish` | `() -> ptr`, `(ptr, ptr, len)`, `(ptr, String)`, `(ptr) -> String` |
 | `jet_rt_int_to_string`, `jet_rt_i64_to_string`, `jet_rt_char_to_string`, `jet_rt_bool_to_string` | `(word) -> String`, Bool takes the flag |
@@ -496,6 +545,18 @@ normalizing them as program entries do. Compiler-value marshaling borrows
 runtime String bytes through `jet_rt_string_data` and
 `jet_rt_string_byte_len`, copies before dropping the native owner, and never
 depends on Rust's private String representation.
+`x64_comptime_drop_scalar` consumes each encoded/returned scalar owner after
+detachment, according to the checked callee contract; decoding itself borrows.
+`lir_lower_callable` returns an optional zero-argument Unit `finalizer` for
+runtime-owned static fixups. Pass it to `x64_call_image(module, entry, finalizer)`.
+Its shared initialization flag prevents repeated allocation; finalization
+clears that flag and every String/BigInt fixup cell while releasing their
+canonical owners. The loader validates the finalizer's code offset before
+mapping. `x64_unload_image` runs it before unmapping, only after every native
+input/result owner and returning frame has gone. Unload is an exactly-once
+operation; this is image-owned static teardown, not a worker sweep of leaked
+frame owners. Ordinary owned SSA temporaries still require canonical MIR
+retirement edges before a persistent compiler worker can be enabled.
 Signed and unsigned 64-bit compiler values preserve their full bit patterns;
 unsigned values above `i64::MAX` detach as decimal `BigInt` compiler values.
 Runtime effects, stop recovery, execution limits and composite ownership are compiler-call
@@ -510,6 +571,13 @@ than interpreting it against the prep caller. Fuel is shared across native
 callback threads; depth and the current source site belong to each native
 stack. Pure runtime kernels charge `work`, not only generated MIR steps.
 Ordinary runtime execution never activates the scope.
+
+Callable lowering emits `enter` once at the real user-function entry, `step`
+for each executed MIR instruction and terminator (including an empty loop's
+backedge), and `leave` on every successful return carrier. `mir_sources`
+preserves diagnostic owner rows across monomorphization. Synthetic helper/glue
+bodies and ordinary `lir_lower_entry` binaries have no generated budget hooks;
+the Core active scope remains the sole runtime policy.
 
 A stop or exhausted budget does not unwind through native frames: the isolated
 worker flushes output, writes `JCT1 status owner start end byte_len` plus its
@@ -799,7 +867,7 @@ surface and would need a ballot first.
 - `x64_rebind_slot(loaded, slot, address) -> Bool` re-points one slot: the
   slot's page goes read+write (not executable), the word is stored, and the
   page returns to read+execute.
-- `x64_unload_image(loaded) -> Bool` unmaps the block.
+- `x64_unload_image(loaded) -> Bool` runs its optional checked finalizer, then unmaps the block; no native owners or returning frames may remain.
 
 `strace -f -e trace=mmap,mprotect,munmap` of `jet run load/load.jet hello`
 shows the image page mapped `PROT_READ|PROT_WRITE`, then

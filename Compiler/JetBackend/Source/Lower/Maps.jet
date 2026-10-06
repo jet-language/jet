@@ -50,6 +50,7 @@ fn lower_map_key_kind(p: MIRProgram, ty: MIRType) -> String Never! {
         }
     }
     if lower_repr(p, ty) == {
+        .ExactInt -> "int"
         .Word | .Flag | .Discriminant -> "word"
         else -> ""
     }
@@ -223,20 +224,6 @@ fn lower_map_index_write(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     false
 }
 
-// The operands a Map builtin method moves into the Map (MIRRust.rs passes
-// jet_map_insert's key and value owned), so owned place reads of them copy.
-fn lower_map_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRValueID] Never! {
-    stored := [MIRValueID]{}
-    if operation == .Semantic(semantic) {
-        if semantic == .BuiltinMethod(call, _, _, args, _) {
-            row :: lower_prelude_row(p, call) ?? return stored
-            if lower_runtime_symbol(row) == "jet_map_insert" {
-                loop arg in args -> &stored.push(arg)
-            }
-        }
-    }
-    stored
-}
 
 // Map builtin methods by runtime route (Collections.rs / Core.rs jet_map_*):
 // len, is_empty, get (an owned copy of the value), has_key, insert (the

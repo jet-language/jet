@@ -30,7 +30,7 @@ fn lower_equal_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
     a :: left ?? return lower_equal_fail(&m, &f, ty)
     b :: right ?? return lower_equal_fail(&m, &f, ty)
     dst :: lower_flag(&f)
-    if lower_is_exact_int(ty) {
+    if repr == .ExactInt {
         lower_exact_compare(&m, &f, dst, LIRCondition.Eq, a, b)
         return Val(dst)
     }

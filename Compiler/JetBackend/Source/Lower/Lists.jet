@@ -171,6 +171,12 @@ fn lower_index_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     if lower_value_owned(c, instruction.result ?? base) {
         if lower_repr(p, elem) == {
+            .ExactInt -> {
+                source :: lower_word(&f)
+                lower_emit(&f, LIRInst.Load{dst: source, base: address, offset: 0})
+                lower_call_runtime(&m, &f, "jet_rt_int_clone", [LIRValueID]{source}, Val(dst))
+                return
+            }
             .Handle(_, clone) -> {
                 if clone == "" -> return lower_fail(&m, &f, "List element clone is not lowered at O0 yet")
                 source :: lower_pointer(&f)

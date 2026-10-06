@@ -1556,6 +1556,24 @@ pub fn inline_asm_register_known(target: &str, register: &str) -> bool {
         .is_some_and(|arch| arch.register_known(register))
 }
 
+#[cfg(test)]
+mod inline_assembly_register_tests {
+    use super::inline_asm_register_known;
+
+    #[test]
+    fn x86_64_sysv_vector_clobbers_are_audited_without_extra_features() {
+        for index in 0..16 {
+            assert!(inline_asm_register_known("x86_64-unknown-linux-gnu", &format!("xmm{index}")));
+        }
+        assert!(inline_asm_register_known("x86_64-unknown-linux-gnu", "%XMM15"));
+        for register in ["xmm16", "xmm31", "xmm00", "ymm0", "zmm0"] {
+            assert!(!inline_asm_register_known("x86_64-unknown-linux-gnu", register));
+        }
+        assert!(!inline_asm_register_known("i686-unknown-linux-gnu", "xmm0"));
+        assert!(!inline_asm_register_known("aarch64-unknown-linux-gnu", "xmm0"));
+    }
+}
+
 fn x86_64_register_known(register: &str) -> bool {
     matches!(
         register,
@@ -1619,6 +1637,22 @@ fn x86_64_register_known(register: &str) -> bool {
             | "r15d"
             | "r15w"
             | "r15b"
+            | "xmm0"
+            | "xmm1"
+            | "xmm2"
+            | "xmm3"
+            | "xmm4"
+            | "xmm5"
+            | "xmm6"
+            | "xmm7"
+            | "xmm8"
+            | "xmm9"
+            | "xmm10"
+            | "xmm11"
+            | "xmm12"
+            | "xmm13"
+            | "xmm14"
+            | "xmm15"
     )
 }
 

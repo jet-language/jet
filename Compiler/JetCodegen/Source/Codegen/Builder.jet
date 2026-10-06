@@ -9,6 +9,7 @@ use jet_foundation.[
     MIRCaptureFacts,
     MIRCaptureParam,
     MIRConstant,
+    MIRConversion,
     MIRCoreCall,
     MIRDropKind,
     MIRFieldID,
@@ -53,6 +54,7 @@ use jet_foundation.[
     TTypeDef,
     Type,
     mir_copy_ownership,
+    mir_copy_value_ownership,
     mir_copy_fact_for_ownership,
     mir_function_id,
     mir_owned_ownership,
@@ -1107,14 +1109,16 @@ fn jet_codegen_emit_mir_type(builder: &JetCodegenBuilder, span: Span, ty: MIRTyp
 fn jet_codegen_scalar_copy_fact(builder: JetCodegenBuilder, operation: MIROperation) -> MIROperation Never! {
     if operation == .Copy(value, fact) {
         at :: builder.value_positions.get(value.value) ?? return ~operation
-        return MIROperation.Copy{value: value, fact: mir_copy_fact_for_ownership(fact, builder.values[at].ownership.mode)}
+        return MIROperation.Copy{value: value, fact: mir_copy_fact_for_ownership(fact, builder.values[at].ownership)}
     }
     ~operation
 }
 
 fn jet_codegen_ownership(ty: Type) -> MIROwnership Never! {
     if ty == {
-        .Int | .Float | .Float32 | .Bool | .Char -> mir_copy_ownership()
+        .Int -> mir_copy_value_ownership()
+        .Float | .Float32 | .Bool | .Char | .IntN(_, _) -> mir_copy_ownership()
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> jet_codegen_ownership(inner)
         .Named(name) -> {
             if name == "Unit" || name == "Never" -> mir_copy_ownership()
             else -> mir_owned_ownership()
@@ -1127,6 +1131,13 @@ fn jet_codegen_operation_ownership(builder: JetCodegenBuilder, ty: Type, operati
         .MovePlace(_) | .Move(_) -> return mir_ownership_from_access(MIRAccess.Move)
         .AddressOf(_, access) -> return mir_ownership_from_access(access)
         .RawAddressOf(_) -> return MIROwnership{mode: MIROwnershipMode.ReadBorrow, drop: MIRDropKind.NoDrop, moved: false, last_use: false, gc_root: false}
+        .AttachTag(value, _) | .Convert(value, _, _, MIRConversion.Transparent) | .Convert(value, _, _, MIRConversion.SendFn) -> {
+            row :: builder.value_positions.get(value.value) ?? panic("checked carrier transfer has no source ownership fact")
+            ownership := builder.values[row].ownership
+            ownership.moved = false
+            ownership.last_use = false
+            return ownership
+        }
         .Phi(incoming) -> return jet_codegen_phi_ownership(builder, incoming)
         else -> return jet_codegen_ownership(ty)
     }
@@ -1202,7 +1213,9 @@ fn jet_codegen_retain_place_access(builder: &JetCodegenBuilder, place: MIRPlaceI
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::register_owned_drop
 fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, place: MIRPlaceID, ty: Type, ownership: MIROwnership, initialized: Bool) Never! {
-    if ownership.drop == MIRDropKind.NoDrop || jet_codegen_ownership(ty).mode == MIROwnershipMode.Copy -> return
+    // Prerequisite tranche: preserve Rust cleanup emission until Copy+Value
+    // retirement and its flag-discipline validation land together.
+    if ownership.drop == MIRDropKind.NoDrop || ownership.mode == MIROwnershipMode.Copy -> return
     identity := "{builder.function.key}|drop-live|{place.value}"
     local_id := MIRLocalID{value: stable_id("mir-local", identity)}
     live_place := MIRPlaceID{value: stable_id("mir-place", "{identity}|place")}
@@ -1220,6 +1233,7 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, place: MIRPlaceID
         span: owner_span,
         ty: live_ty,
         place: live_place,
+        ssa_value: None,
         mutable: true,
         ownership: mir_copy_ownership(),
         is_comptime: false,
@@ -1468,6 +1482,7 @@ fn jet_codegen_exit_value_slot(builder: &JetCodegenBuilder, value: MIRValueID) -
         span: span,
         ty: row.ty,
         place: place,
+        ssa_value: None,
         mutable: true,
         ownership: ownership,
         is_comptime: false,
@@ -1767,6 +1782,7 @@ fn jet_codegen_bind_local_with_base(builder: &JetCodegenBuilder, local: TLocal, 
         span: local.span,
         ty: mir_ty,
         place: place_id,
+        ssa_value: None,
         mutable: mutable,
         ownership: ownership,
         is_comptime: false,
@@ -1805,6 +1821,7 @@ fn jet_codegen_bind_local_alias(builder: &JetCodegenBuilder, local: TLocal, ty: 
         span: local.span,
         ty: lowered_ty,
         place: place,
+        ssa_value: None,
         mutable: mutable,
         ownership: mir_ownership_from_access(access),
         is_comptime: false,

@@ -306,7 +306,7 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MIRFun
         arg.access == MIRAccess.Move -> jet_rust_emit_value_move(ctx, arg.value)
         // MIRRust call_arg: the call-site copy fact sema recorded (implicit
         // or shared clone), copied once.
-        copied -> jet_rust_emit_value_copy(ctx, function, arg.value, mir_copy_fact_for_ownership(if arg.shared_auto_clone -> MIRCopyFact.Share else -> MIRCopyFact.Materialize, jet_rust_emit_value_mode(ctx, function, arg.value)))
+        copied -> jet_rust_emit_value_copy(ctx, function, arg.value, mir_copy_fact_for_ownership(if arg.shared_auto_clone -> MIRCopyFact.Share else -> MIRCopyFact.Materialize, jet_rust_emit_value_ownership(ctx, function, arg.value)))
         else -> jet_rust_emit_value_owned(ctx, function, arg.value)
     }
     if arg.authority_boundary -> value = "jet_authority_to_wire(&({value}))"

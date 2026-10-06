@@ -53,6 +53,12 @@ use jet_foundation.[
     mir_operation_prelude_calls,
     mir_operation_type_uses,
     mir_operation_value_uses,
+    MIRValueConsumption,
+    mir_operation_consumption_route,
+    mir_operation_value_consumption,
+    mir_terminator_value_consumption,
+    mir_value_consumption_transfers,
+    mir_runtime_owned_ownership,
     mir_semantic_op_place_uses,
     mir_semantic_op_prelude_calls,
     mir_semantic_op_type_uses,
@@ -354,10 +360,25 @@ fn mir_pass_validate_function_legality(
         if !mir_pass_type_valid(value.ty) -> return Val("SSA value type has invalid MIR layout")
         if !mir_pass_ownership_valid(value.ownership) -> return Val("SSA value ownership/drop metadata is inconsistent")
     }
+    bound_values := [U64:Bool]{}
+    bound_locals := [U64:MIRValueID]{}
     loop local in function.locals {
         if !mir_pass_type_valid(local.ty) -> return Val("local type has invalid MIR layout")
         if !mir_pass_ownership_valid(local.ownership) -> return Val("local ownership/drop metadata is inconsistent")
         if definitions.places.get(local.place.value) == None -> return Val("local references a missing place")
+        if local.ssa_value == .Val(value) {
+            if bound_values.get(value.value) != None -> return Val("SSA value is associated with more than one local cell")
+            if definitions.values.get(value.value) == None -> return Val("SSA-bound local references a missing definition")
+            metadata :: definitions.metadata.get(value.value) ?? return Val("SSA-bound local references missing value facts")
+            fact :: function.values[metadata]
+            if !mir_runtime_owned_ownership(fact.ownership) -> return Val("SSA-bound local does not name a physical owner")
+            if !mir_type_same_checked_type(local.ty, fact.ty) || local.ownership.mode != fact.ownership.mode || local.ownership.drop != fact.ownership.drop -> return Val("SSA-bound local changes its definition's type or ownership")
+            root :: definitions.places.get(local.place.value) ?? return Val("SSA-bound local has no root place")
+            if function.places[root].base != .Local(local.id) || function.places[root].projections.len() != 0 -> return Val("SSA-bound local does not name its whole local cell")
+            if local.uninit || local.is_comptime || local.arena_view || local.string_view -> return Val("SSA-bound owner uses another storage mechanism")
+            _ := &bound_values.add(value.value, true)
+            _ := &bound_locals.add(local.id.value, value)
+        }
     }
     loop place in function.places {
         place_failure := mir_pass_validate_place(place, function, tables, definitions)
@@ -367,6 +388,33 @@ fn mir_pass_validate_function_legality(
 
     loop block in function.blocks {
         loop instruction in block.instructions {
+            if instruction.result == .Val(value) {
+                if bound_values.get(value.value) != None {
+                    if instruction.operation == {
+                        .Parameter(_, _) | .Capture(_) -> return Val("SSA-bound local duplicates parameter or capture storage")
+                        else -> {}
+                    }
+                    loop place in mir_operation_place_uses(instruction.operation) {
+                        row :: definitions.places.get(place.value) ?? return Val("SSA-bound definition references a missing place")
+                        if function.places[row].base == .Local(local) {
+                            if bound_locals.get(local.value) == (Val(value)) -> return Val("SSA-bound definition reads its own uninitialized cell")
+                        }
+                    }
+                }
+            }
+            written := MIRPlaceID?{None}
+            if instruction.operation == {
+                .WritePlace(place, _) | .ReplacePlace(place, _) | .InitializeUninit(place) -> written = Val(place)
+                else -> {}
+            }
+            if written == .Val(place) {
+                row :: definitions.places.get(place.value) ?? return Val("storage writer references a missing place")
+                if function.places[row].projections.len() == 0 {
+                    if function.places[row].base == .Local(local) {
+                        if bound_locals.get(local.value) != None -> return Val("SSA-bound local has a writer other than its definition")
+                    }
+                }
+            }
             operation_failure := mir_pass_validate_operation_legality(
                 instruction.operation,
                 instruction.span,
@@ -381,7 +429,7 @@ fn mir_pass_validate_function_legality(
     if drop_failure != None -> return drop_failure
     copy_failure := mir_pass_validate_copy_facts(function, definitions)
     if copy_failure != None -> return copy_failure
-    move_failure := mir_pass_validate_moves(function, definitions)
+    move_failure := mir_pass_validate_moves(function, definitions, tables)
     if move_failure != None -> return move_failure
     host_failure := mir_pass_validate_host_callbacks(function, tables)
     if host_failure != None -> return host_failure
@@ -1546,58 +1594,6 @@ fn mir_pass_validate_drops(function: MIRFunction, definitions: MIRPassDefinition
     None
 }
 
-struct MIRPassMoveEvent {
-    pub value: MIRValueID
-    pub block: MIRBlockID
-    pub index: Int
-    pub span: Span
-}
-
-// Rust: crates/jet-foundation/src/MIROptimization.rs::call_arg_consumes (a
-// clone or a FixedList-to-List widening does not consume the argument).
-fn mir_pass_call_arg_consumes(arg: MIRCallArg) -> Bool Never! {
-    if arg.implicit_clone || arg.shared_auto_clone || arg.widen_fixed_to_list -> false else -> arg.access == .Move || arg.owned_last_use
-}
-
-fn mir_pass_consumed_values(operation: MIROperation) -> [MIRValueID] Never! {
-    values := [MIRValueID]{}
-    if operation == {
-        .Move(value) -> &values.push(value)
-        .Drop(value, kind) -> {
-            if kind != .NoDrop -> &values.push(value)
-        }
-        .Closure(_, captures, _) -> {
-            loop capture in captures {
-                if capture == {
-                    .Value(value) -> &values.push(value)
-                    else -> {}
-                }
-            }
-        }
-        .Call(_, args, _)
-        | .IndirectCall(_, args, _)
-        | .CoreCall(_, _, args, _, _, _) -> {
-            loop arg in args { if mir_pass_call_arg_consumes(arg) -> &values.push(arg.value) }
-        }
-        .Semantic(semantic) -> {
-            if semantic == {
-                .StaticPreludeCall(_, args, _, _)
-                | .HardwareCall(_, _, _, args)
-                | .ClosureMethod(_, args, _)
-                | .HostCall(_, args) -> {
-                    loop arg in args { if mir_pass_call_arg_consumes(arg) -> &values.push(arg.value) }
-                }
-                else -> {}
-            }
-        }
-        else -> {}
-    }
-    values
-}
-
-fn mir_pass_event_dominates(event: MIRPassMoveEvent, block: MIRBlockID, index: Int, dominance: MIRPassDominance) -> Bool Never! {
-    mir_pass_precedes(event.block, event.index, block, index, dominance)
-}
 
 // Block storage order is not execution order: one point precedes another
 // when it comes earlier in the same block or its block dominates the other.
@@ -1688,13 +1684,14 @@ fn mir_pass_move_is_live(moved: [MIRPassPlaceEvent], reinitialized: [MIRPassPlac
 fn mir_pass_validate_moves(
     function: MIRFunction,
     definitions: MIRPassDefinitions,
+    tables: MIRPassLegalityTables,
 ) -> String? {
     reachable :: mir_pass_reachable(function)
     reachable_rows := [U64:Bool]{}
     loop id in reachable -> &reachable_rows.add(id.value, true).drop("a block id may repeat")
     dominators :: mir_pass_dominators(function)
-    // A value is consumed at most once (checked below), so one event per value.
-    consumed := [U64:MIRPassMoveEvent]{}
+    consumption_failure :: mir_pass_validate_consumption(function, definitions, tables)
+    if consumption_failure != None -> return consumption_failure
     // Place moves and reinitializing writes, grouped by path root and
     // collected before any check: block storage order is not execution order.
     move_slots := [String:Int]{}
@@ -1738,11 +1735,6 @@ fn mir_pass_validate_moves(
         if reachable_rows.get(block.id.value) != None {
             index := 0
             loop instruction in block.instructions {
-                loop value in mir_operation_value_uses(instruction.operation) {
-                    if consumed.get(value.value) == .Val(event) {
-                        if mir_pass_event_dominates(event, block.id, index, dominators) -> return Val("MIR value is used after it was moved or dropped")
-                    }
-                }
                 loop place_id in mir_pass_operation_place_refs(instruction.operation) {
                     place_option := mir_pass_defined_place(function, definitions, place_id)
                     if place_option == .Val(place) {
@@ -1814,12 +1806,6 @@ fn mir_pass_validate_moves(
                         }
                     }
                     else -> {}
-                }
-                loop value in mir_pass_consumed_values(instruction.operation) {
-                    ownership :: mir_pass_value_ownership(function, definitions, value) ?? return Val("consumed value has no ownership metadata")
-                    if ownership.mode == .Copy || ownership.mode == .ReadBorrow || ownership.mode == .WriteBorrow -> return Val("copy or borrowed value is consumed")
-                    if consumed.get(value.value) != None -> return Val("value is consumed more than once")
-                    &consumed.add(value.value, MIRPassMoveEvent{value: value, block: block.id, index: index, span: instruction.span}).drop("checked absent above")
                 }
                 index += 1
             }
@@ -1939,4 +1925,146 @@ fn mir_pass_operation_mutably_borrows_place(operation: MIROperation, id: MIRPlac
         else -> {}
     }
     false
+}
+
+// Physical SSA ownership is checked independently of place-path moves. A
+// resource can be consumed on disjoint branches, but not used on any path
+// after a transfer. Definitions reset their life on each loop iteration.
+fn mir_pass_consumption_mask(tables: MIRPassLegalityTables, operation: MIROperation) -> [Bool] Never! {
+    if mir_operation_consumption_route(operation) == Val(call) {
+        row :: tables.prelude_positions.get(call.value) ?? return [Bool]{}
+        return tables.prelude_calls[row].signature.borrow_mask
+    }
+    [Bool]{}
+}
+
+fn mir_pass_consume_value(function: MIRFunction, definitions: MIRPassDefinitions, moved: &[U64:Bool], value: MIRValueID, consumption: MIRValueConsumption, check: Bool) -> String? Never! {
+    if !mir_value_consumption_transfers(consumption) -> return None
+    ownership :: mir_pass_value_ownership(function, definitions, value) ?? return Val("consumed value has no ownership metadata")
+    if !mir_runtime_owned_ownership(ownership) {
+        if check && consumption == .Yes(true) -> return Val("dropless or borrowed value is consumed")
+        return None
+    }
+    if check && (moved.get(value.value) ?? false) -> return Val("value is consumed more than once")
+    _ := &moved.add(value.value, true)
+    None
+}
+
+fn mir_pass_consumption_step(function: MIRFunction, definitions: MIRPassDefinitions, tables: MIRPassLegalityTables, block: MIRBasicBlock, moved: &[U64:Bool], check: Bool) -> String? Never! {
+    loop instruction in block.instructions {
+        if instruction.operation == .Phi(_) {
+            if instruction.result == .Val(defined) -> _ := &moved.remove(defined.value)
+            next
+        }
+        uses :: mir_operation_value_uses(instruction.operation)
+        if check {
+            loop value in uses {
+                if moved.get(value.value) ?? false -> return Val("MIR value is used after it was moved or dropped")
+            }
+            if instruction.operation == .ScopeEnter(scope, _) {
+                loop metadata in function.scopes {
+                    if metadata.id == scope && metadata.deadline == .Val(value) {
+                        if moved.get(value.value) ?? false -> return Val("MIR scope deadline uses a moved or dropped value")
+                    }
+                }
+            }
+        }
+        if instruction.result == .Val(defined) -> _ := &moved.remove(defined.value)
+        mask :: mir_pass_consumption_mask(tables, instruction.operation)
+        loop value in uses {
+            consumption :: mir_operation_value_consumption(instruction.operation, value, mask)
+            failure :: mir_pass_consume_value(function, definitions, &moved, value, consumption, check)
+            if failure != None -> return failure
+        }
+    }
+    loop value in mir_terminator_value_uses(block.terminator) {
+        if check && (moved.get(value.value) ?? false) -> return Val("MIR terminator uses a moved or dropped value")
+        consumption :: mir_terminator_value_consumption(block.terminator, value)
+        failure :: mir_pass_consume_value(function, definitions, &moved, value, consumption, check)
+        if failure != None -> return failure
+    }
+    None
+}
+
+fn mir_pass_consumption_edge(function: MIRFunction, definitions: MIRPassDefinitions, from: MIRBlockID, target: MIRBasicBlock, moved: &[U64:Bool], check: Bool) -> String? Never! {
+    loop instruction in target.instructions {
+        if instruction.operation == .Phi(incoming) {
+            loop edge in incoming {
+                if edge.block != from -> next
+                if check && (moved.get(edge.value.value) ?? false) -> return Val("MIR phi takes a moved or dropped value")
+                consumption :: mir_operation_value_consumption(instruction.operation, edge.value, [Bool]{})
+                failure :: mir_pass_consume_value(function, definitions, &moved, edge.value, consumption, check)
+                if failure != None -> return failure
+            }
+        }
+    }
+    None
+}
+
+fn mir_pass_validate_consumption(function: MIRFunction, definitions: MIRPassDefinitions, tables: MIRPassLegalityTables) -> String? Never! {
+    positions := [U64:Int]{}
+    states := [[U64:Bool]]{}
+    reached := [Bool]{}
+    queued := [Bool]{}
+    loop (position, block) in function.blocks {
+        _ := &positions.add(block.id.value, position)
+        &states.push([U64:Bool]{})
+        &reached.push(false)
+        &queued.push(false)
+    }
+    entry :: positions.get(function.entry.value) ?? return Val("consumption entry is missing")
+    work := [Int]{entry}
+    reached[entry] = true
+    queued[entry] = true
+    loop drop in function.drops {
+        if drop.edge == {
+            .Failure(target) | .Unwind(target) -> {
+                root :: positions.get(target.value) ?? return Val("consumption cleanup root is missing")
+                if !reached[root] {
+                    reached[root] = true
+                    queued[root] = true
+                    &work.push(root)
+                }
+            }
+            else -> {}
+        }
+    }
+    head := 0
+    loop head < work.len() {
+        position :: work[head]
+        head += 1
+        queued[position] = false
+        current := ~states[position]
+        _ := mir_pass_consumption_step(function, definitions, tables, function.blocks[position], &current, false)
+        loop target in mir_terminator_targets(function.blocks[position].terminator) {
+            destination :: positions.get(target.value) ?? return Val("consumption target is missing")
+            edge := ~current
+            _ := mir_pass_consumption_edge(function, definitions, function.blocks[position].id, function.blocks[destination], &edge, false)
+            changed := !reached[destination]
+            reached[destination] = true
+            loop (value, present) in edge {
+                if present && !(states[destination].get(value) ?? false) {
+                    _ := &states[destination].add(value, true)
+                    changed = true
+                }
+            }
+            if changed && !queued[destination] {
+                queued[destination] = true
+                &work.push(destination)
+            }
+        }
+    }
+    loop (position, block) in function.blocks {
+        if !reached[position] -> next
+        current := ~states[position]
+        failure :: mir_pass_consumption_step(function, definitions, tables, block, &current, true)
+        if failure != None -> return failure
+        loop target in mir_terminator_targets(block.terminator) {
+            destination :: positions.get(target.value) ?? return Val("consumption target is missing")
+            edge := ~current
+            edge_failure :: mir_pass_consumption_edge(function, definitions, block.id, function.blocks[destination], &edge, true)
+            if edge_failure != None -> return edge_failure
+        }
+    }
+    None
 }

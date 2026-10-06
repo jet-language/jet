@@ -174,7 +174,7 @@ fn mir_pass_inline_plan(
                 ownership.moved = false
                 ownership.last_use = false
                 &adapter_values.push(MIRValueFact{id: cloned, ty: argument_fact.ty, span: argument_fact.span, ownership: ownership})
-                fact :: mir_copy_fact_for_ownership(if argument.shared_auto_clone -> MIRCopyFact.Share else -> MIRCopyFact.Materialize, argument_fact.ownership.mode)
+                fact :: mir_copy_fact_for_ownership(if argument.shared_auto_clone -> MIRCopyFact.Share else -> MIRCopyFact.Materialize, argument_fact.ownership)
                 &adapters.push(MIRInstruction{id: operation_id, span: argument_fact.span, source_line: None, result: Val(cloned), ty: Val(argument_fact.ty), operation: MIROperation.Copy{value: argument.value, fact: fact}})
                 cloned
             }
@@ -266,6 +266,7 @@ fn mir_pass_inline_plan(
             span: local.span,
             ty: mir_pass_inline_type(local.ty, substitutions),
             place: mir_pass_inline_place(maps, local.place),
+            ssa_value: mir_pass_inline_optional_value(maps, local.ssa_value),
             mutable: local.mutable,
             ownership: local.ownership,
             is_comptime: local.is_comptime,

@@ -2170,7 +2170,9 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     lines := [String]{jet_rust_emit_function_signature(&ctx, function)}
     partial_lines :: jet_rust_emit_partial_declarations(&ctx, function)
     loop line in partial_lines -> &lines.push("    {line}")
-    loop local in function.locals -> &lines.push("    {jet_rust_emit_local_declaration(&ctx, local)}")
+    loop local in function.locals {
+        if local.ssa_value == None -> &lines.push("    {jet_rust_emit_local_declaration(&ctx, local)}")
+    }
     values_start :: lines.len()
     loop value in function.values {
         if ctx.ref_bindings.payloads.get(value.id.value) != None || ctx.ref_bindings.collections.get(value.id.value) != None -> next

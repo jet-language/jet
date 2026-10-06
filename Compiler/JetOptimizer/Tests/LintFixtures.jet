@@ -36,6 +36,7 @@ use jet_foundation.[
     MIRPreludeABI,
     MIRPreludeFamily,
     MIRProgram,
+    MIRPhiIncoming,
     MIRProjection,
     MIRScope,
     MIRScopeFact,
@@ -52,11 +53,13 @@ use jet_foundation.[
     MIRVariant,
     MIRVariantPayload,
     mir_copy_ownership,
+    mir_copy_value_ownership,
     mir_field_id,
     mir_function_id,
     mir_nominal_ref,
     mir_owned_ownership,
     mir_ownership_from_access,
+    mir_refine_function_ownership,
     mir_type_from_kind,
     mir_type_id,
     mir_type_with_identity,
@@ -199,6 +202,78 @@ fn lf_use_after_move(planted: Bool) -> MIRProgram Never! {
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     lf_single(b)
 }
+
+// Copy is a semantic property, not permission to leak a BigInt carrier.
+fn lf_copy_value_consumed(twice: Bool) -> MIRProgram Never! {
+    b := fx_builder()
+    integer :: fx_value(&b, fx_int(), mir_copy_value_ownership(), MIROperation.Constant{value: MIRConstant.BigInt{decimal: "4611686018427387904"}})
+    fx_do(&b, MIROperation.Drop{value: integer, kind: MIRDropKind.Value})
+    if twice -> fx_do(&b, MIROperation.Drop{value: integer, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    lf_single(b)
+}
+
+// memory/last_use_moves ownership shape: owned parent snapshot -> owned
+// OptionValue -> selected Phi -> destination; dropping the parent snapshots
+// must not consume the independent destination. Dropping the transferred Phi
+// again is an ownership violation, not a second alias of the stored owner.
+fn lf_owned_payload_phi_place(planted: Bool) -> MIRProgram Never! {
+    b := fx_builder()
+    list_type :: lf_list()
+    option_type :: mir_type_from_kind(MIRTypeKind.Option{inner: list_type})
+    parent :: fx_local(&b, "parent", option_type, mir_owned_ownership())
+    destination :: fx_local(&b, "destination", list_type, mir_owned_ownership())
+    integer :: fx_int_const(&b, 4611686018427387904)
+    list :: fx_owned(&b, list_type, MIROperation.BuildList{values: [MIRValueID]{integer}, trait_coercion: None})
+    option :: fx_owned(&b, option_type, MIROperation.Present{value: list})
+    fx_do(&b, MIROperation.WritePlace{place: parent, value: option})
+    snapshot :: fx_owned(&b, option_type, MIROperation.ReadPlace{place: parent})
+    some :: fx_copy(&b, fx_bool(), MIROperation.OptionIsSome{subject: snapshot})
+    fx_block(&b, 0, MIRTerminator.Branch{condition: some, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+    payload :: fx_owned(&b, list_type, MIROperation.OptionValue{subject: snapshot})
+    fx_block(&b, 1, MIRTerminator.Jump{target: MIRBlockID{value: 3}})
+    empty :: fx_owned(&b, list_type, MIROperation.BuildList{values: [MIRValueID]{}, trait_coercion: None})
+    fx_block(&b, 2, MIRTerminator.Jump{target: MIRBlockID{value: 3}})
+    joined :: fx_owned(&b, list_type, MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: MIRBlockID{value: 1}, value: payload}, MIRPhiIncoming{block: MIRBlockID{value: 2}, value: empty}}})
+    fx_do(&b, MIROperation.WritePlace{place: destination, value: joined})
+    if planted -> fx_do(&b, MIROperation.Drop{value: joined, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: snapshot, kind: MIRDropKind.Value})
+    parent_owner :: fx_value(&b, option_type, mir_ownership_from_access(MIRAccess.Move), MIROperation.MovePlace{place: parent})
+    fx_do(&b, MIROperation.Drop{value: parent_owner, kind: MIRDropKind.Value})
+    held :: fx_value(&b, list_type, mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: destination})
+    lf_borrowed_len(&b, held)
+    final_owner :: fx_value(&b, list_type, mir_ownership_from_access(MIRAccess.Move), MIROperation.MovePlace{place: destination})
+    fx_do(&b, MIROperation.Drop{value: final_owner, kind: MIRDropKind.Value})
+    fx_block(&b, 3, MIRTerminator.Return{value: None})
+    lf_single(b)
+}
+
+// math/fraction fallback ownership shape, without an OptionValue projection.
+fn lf_owned_read_phi_place(planted: Bool) -> MIRProgram Never! {
+    b := fx_builder()
+    list_type :: lf_list()
+    parent :: fx_local(&b, "parent", list_type, mir_owned_ownership())
+    destination :: fx_local(&b, "destination", list_type, mir_owned_ownership())
+    lf_fill(&b, parent)
+    choice :: fx_param(&b, "choice", fx_bool(), mir_copy_ownership())
+    fx_block(&b, 0, MIRTerminator.Branch{condition: choice, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+    snapshot :: fx_owned(&b, list_type, MIROperation.ReadPlace{place: parent})
+    fx_block(&b, 1, MIRTerminator.Jump{target: MIRBlockID{value: 3}})
+    empty :: fx_owned(&b, list_type, MIROperation.BuildList{values: [MIRValueID]{}, trait_coercion: None})
+    fx_block(&b, 2, MIRTerminator.Jump{target: MIRBlockID{value: 3}})
+    joined :: fx_owned(&b, list_type, MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: MIRBlockID{value: 1}, value: snapshot}, MIRPhiIncoming{block: MIRBlockID{value: 2}, value: empty}}})
+    fx_do(&b, MIROperation.WritePlace{place: destination, value: joined})
+    if planted -> fx_do(&b, MIROperation.Drop{value: joined, kind: MIRDropKind.Value})
+    parent_owner :: fx_value(&b, list_type, mir_ownership_from_access(MIRAccess.Move), MIROperation.MovePlace{place: parent})
+    fx_do(&b, MIROperation.Drop{value: parent_owner, kind: MIRDropKind.Value})
+    held :: fx_value(&b, list_type, mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: destination})
+    lf_borrowed_len(&b, held)
+    final_owner :: fx_value(&b, list_type, mir_ownership_from_access(MIRAccess.Move), MIROperation.MovePlace{place: destination})
+    fx_do(&b, MIROperation.Drop{value: final_owner, kind: MIRDropKind.Value})
+    fx_block(&b, 3, MIRTerminator.Return{value: None})
+    lf_single(b)
+}
+
 
 // A second place over the same local storage as `root`.
 fn lf_alias_place(b: &FxBuilder, root: MIRPlaceID) -> MIRPlaceID Never! {
@@ -466,6 +541,231 @@ fn lf_view_owner_changed(planted: Bool) -> MIRProgram Never! {
     lf_single(r)
 }
 
+fn lf_borrowed_len(b: &FxBuilder, value: MIRValueID) Never! {
+    _ := fx_copy(&b, fx_int(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "list_len"), receiver: value, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
+}
+
+fn lf_read_borrow_owner_write(planted: Bool) -> MIRProgram Never! {
+    r := fx_builder()
+    values :: fx_local(&r, "values", lf_list(), mir_owned_ownership())
+    lf_fill(&r, values)
+    borrowed :: fx_value(&r, lf_list(), mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: values})
+    index :: fx_int_const(&r, 0)
+    element :: lf_index_place(&r, values, index, fx_int())
+    replacement :: fx_int_const(&r, 7)
+    if planted -> fx_do(&r, MIROperation.WritePlace{place: element, value: replacement})
+    lf_borrowed_len(&r, borrowed)
+    if !planted -> fx_do(&r, MIROperation.WritePlace{place: element, value: replacement})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    lf_single(r)
+}
+
+fn lf_read_borrow_phi(planted: Bool) -> MIRProgram Never! {
+    r := fx_builder()
+    values :: fx_local(&r, "values", lf_list(), mir_owned_ownership())
+    choice :: fx_param(&r, "choice", fx_bool(), mir_copy_ownership())
+    lf_fill(&r, values)
+    fx_block(&r, 0, MIRTerminator.Branch{condition: choice, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+    first :: fx_value(&r, lf_list(), mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: values})
+    fx_block(&r, 1, MIRTerminator.Jump{target: MIRBlockID{value: 3}})
+    second :: fx_value(&r, lf_list(), mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: values})
+    fx_block(&r, 2, MIRTerminator.Jump{target: MIRBlockID{value: 3}})
+    joined :: fx_value(&r, lf_list(), mir_ownership_from_access(MIRAccess.Read), MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: MIRBlockID{value: 1}, value: first}, MIRPhiIncoming{block: MIRBlockID{value: 2}, value: second}}})
+    if planted -> lf_push(&r, values)
+    lf_borrowed_len(&r, joined)
+    if !planted -> lf_push(&r, values)
+    fx_block(&r, 3, MIRTerminator.Return{value: None})
+    lf_single(r)
+}
+
+fn lf_read_borrow_loop() -> MIRProgram Never! {
+    r := fx_builder()
+    values :: fx_local(&r, "values", lf_list(), mir_owned_ownership())
+    choice :: fx_param(&r, "choice", fx_bool(), mir_copy_ownership())
+    lf_fill(&r, values)
+    fx_block(&r, 0, MIRTerminator.Jump{target: MIRBlockID{value: 1}})
+    borrowed :: fx_value(&r, lf_list(), mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: values})
+    lf_borrowed_len(&r, borrowed)
+    lf_push(&r, values)
+    fx_block(&r, 1, MIRTerminator.Branch{condition: choice, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+    fx_block(&r, 2, MIRTerminator.Return{value: None})
+    lf_single(r)
+}
+
+fn lf_read_borrow_disjoint_index() -> MIRProgram Never! {
+    r := fx_builder()
+    values :: fx_local(&r, "values", lf_list(), mir_owned_ownership())
+    lf_fill(&r, values)
+    zero :: fx_int_const(&r, 0)
+    two :: fx_int_const(&r, 2)
+    first :: lf_index_place(&r, values, zero, fx_int())
+    second :: lf_index_place(&r, values, two, fx_int())
+    borrowed :: fx_value(&r, fx_int(), mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: first})
+    replacement :: fx_int_const(&r, 7)
+    fx_do(&r, MIROperation.WritePlace{place: second, value: replacement})
+    expected :: fx_int_const(&r, 7)
+    _ := fx_copy(&r, fx_bool(), MIROperation.Binary{op: MIRBinaryOp.Eq, dispatch: MIRBinaryDispatch.Primitive, left: borrowed, right: expected, overflow: MIRBinaryOverflow.Unchecked})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    lf_single(r)
+}
+
+fn lf_read_borrow_one_path_write(planted: Bool) -> MIRProgram Never! {
+    r := fx_builder()
+    values :: fx_local(&r, "values", lf_list(), mir_owned_ownership())
+    choice :: fx_param(&r, "choice", fx_bool(), mir_copy_ownership())
+    lf_fill(&r, values)
+    borrowed :: fx_value(&r, lf_list(), mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: values})
+    if !planted -> lf_borrowed_len(&r, borrowed)
+    fx_block(&r, 0, MIRTerminator.Branch{condition: choice, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+    lf_push(&r, values)
+    fx_block(&r, 1, MIRTerminator.Jump{target: MIRBlockID{value: 3}})
+    fx_block(&r, 2, MIRTerminator.Jump{target: MIRBlockID{value: 3}})
+    if planted -> lf_borrowed_len(&r, borrowed)
+    fx_block(&r, 3, MIRTerminator.Return{value: None})
+    lf_single(r)
+}
+
+fn lf_borrowed_view(b: &FxBuilder, source: MIRValueID) -> MIRValueID Never! {
+    fx_value(&b, lf_generic("View", fx_int()), mir_ownership_from_access(MIRAccess.Read), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "list_view"), receiver: source, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
+}
+
+// Refreshing the source SSA value in the loop header cannot refresh an old
+// view still stored in window. Rewriting window itself is the clean case.
+fn lf_view_holder_generation(planted: Bool) -> MIRProgram Never! {
+    r := fx_builder()
+    view_type :: lf_generic("View", fx_int())
+    values :: fx_local(&r, "values", lf_list(), mir_owned_ownership())
+    window :: fx_local(&r, "window", view_type, mir_owned_ownership())
+    ready :: fx_local(&r, "ready", fx_bool(), mir_copy_ownership())
+    choice :: fx_param(&r, "choice", fx_bool(), mir_copy_ownership())
+    lf_fill(&r, values)
+    initial :: fx_copy(&r, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: false}})
+    fx_do(&r, MIROperation.WritePlace{place: ready, value: initial})
+    fx_block(&r, 0, MIRTerminator.Jump{target: MIRBlockID{value: 1}})
+    source :: fx_value(&r, lf_list(), mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: values})
+    has_window :: fx_copy(&r, fx_bool(), MIROperation.ReadPlace{place: ready})
+    fx_block(&r, 1, MIRTerminator.Branch{condition: has_window, then_target: MIRBlockID{value: 2}, else_target: MIRBlockID{value: 3}})
+    if planted -> lf_len(&r, window, view_type)
+    fx_block(&r, 2, MIRTerminator.Jump{target: MIRBlockID{value: 3}})
+    fresh :: lf_borrowed_view(&r, source)
+    fx_do(&r, MIROperation.WritePlace{place: window, value: fresh})
+    if !planted -> lf_len(&r, window, view_type)
+    lf_push(&r, values)
+    now_ready :: fx_copy(&r, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: true}})
+    fx_do(&r, MIROperation.WritePlace{place: ready, value: now_ready})
+    fx_block(&r, 3, MIRTerminator.Branch{condition: choice, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 4}})
+    fx_block(&r, 4, MIRTerminator.Return{value: None})
+    lf_single(r)
+}
+
+// On the backedge, previous carries fresh's preceding generation. Changing
+// its owner and redefining fresh cannot clear previous's independent stale row.
+fn lf_view_phi_generation(planted: Bool) -> MIRProgram Never! {
+    r := fx_builder()
+    view_type :: lf_generic("View", fx_int())
+    incoming :: fx_param(&r, "incoming", view_type, mir_ownership_from_access(MIRAccess.Read))
+    choice :: fx_param(&r, "choice", fx_bool(), mir_copy_ownership())
+    values :: fx_local(&r, "values", lf_list(), mir_owned_ownership())
+    lf_fill(&r, values)
+    fx_block(&r, 0, MIRTerminator.Jump{target: MIRBlockID{value: 1}})
+    previous :: fx_value(&r, view_type, mir_ownership_from_access(MIRAccess.Read), MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: MIRBlockID{value: 0}, value: incoming}}})
+    if planted -> lf_push(&r, values)
+    fx_block(&r, 1, MIRTerminator.Jump{target: MIRBlockID{value: 2}})
+    if !planted {
+        lf_borrowed_len(&r, previous)
+        lf_push(&r, values)
+    }
+    source :: fx_value(&r, lf_list(), mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: values})
+    fresh :: lf_borrowed_view(&r, source)
+    if planted -> lf_borrowed_len(&r, previous)
+    fx_block(&r, 2, MIRTerminator.Branch{condition: choice, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 3}})
+    fx_block(&r, 3, MIRTerminator.Return{value: None})
+    // Complete the cyclic Phi once the backedge's SSA definition exists.
+    loop row in 0..<r.blocks[1].instructions.len() {
+        if r.blocks[1].instructions[row].result != .Val(previous) -> next
+        if r.blocks[1].instructions[row].operation == .Phi(edges) {
+            incoming_edges := edges
+            &incoming_edges.push(MIRPhiIncoming{block: MIRBlockID{value: 2}, value: fresh})
+            r.blocks[1].instructions[row].operation = MIROperation.Phi{incoming: incoming_edges}
+        }
+    }
+    lf_single(r)
+}
+
+fn lf_dropless_scalar_snapshot() -> MIRProgram Never! {
+    r := fx_builder()
+    place :: fx_local(&r, "value", fx_bool(), mir_copy_ownership())
+    before :: fx_copy(&r, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: true}})
+    fx_do(&r, MIROperation.WritePlace{place: place, value: before})
+    snapshot :: fx_copy(&r, fx_bool(), MIROperation.ReadPlace{place: place})
+    after :: fx_copy(&r, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: false}})
+    fx_do(&r, MIROperation.WritePlace{place: place, value: after})
+    _ := fx_copy(&r, fx_bool(), MIROperation.Binary{op: MIRBinaryOp.Eq, dispatch: MIRBinaryDispatch.Primitive, left: snapshot, right: before, overflow: MIRBinaryOverflow.Unchecked})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    lf_single(r)
+}
+// The read itself is Copy+Value: changing its binding must not turn the old
+// value into a borrow that observes the new contents. The CFG case writes on
+// only one predecessor, so intersection-based mutation state would be wrong.
+fn lf_owned_read_snapshot(changed_before_use: Bool, branched: Bool) -> MIRProgram Never! {
+    r := fx_builder()
+    place :: fx_local(&r, "value", fx_int(), mir_copy_value_ownership())
+    before :: fx_value(&r, fx_int(), mir_copy_value_ownership(), MIROperation.Constant{value: MIRConstant.BigInt{decimal: "4611686018427387904"}})
+    fx_do(&r, MIROperation.WritePlace{place: place, value: before})
+    snapshot :: fx_value(&r, fx_int(), mir_copy_value_ownership(), MIROperation.ReadPlace{place: place})
+    after :: fx_value(&r, fx_int(), mir_copy_value_ownership(), MIROperation.Constant{value: MIRConstant.BigInt{decimal: "4611686018427387905"}})
+    if branched {
+        choice :: fx_param(&r, "choice", fx_bool(), mir_copy_ownership())
+        fx_block(&r, 0, MIRTerminator.Branch{condition: choice, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+        fx_do(&r, MIROperation.WritePlace{place: place, value: after})
+        fx_block(&r, 1, MIRTerminator.Jump{target: MIRBlockID{value: 3}})
+        fx_block(&r, 2, MIRTerminator.Jump{target: MIRBlockID{value: 3}})
+        fx_print(&r, snapshot)
+        fx_block(&r, 3, MIRTerminator.Return{value: None})
+    } else {
+        if changed_before_use -> fx_do(&r, MIROperation.WritePlace{place: place, value: after})
+        fx_print(&r, snapshot)
+        if !changed_before_use -> fx_do(&r, MIROperation.WritePlace{place: place, value: after})
+        fx_block(&r, 0, MIRTerminator.Return{value: None})
+    }
+    lf_single(r)
+}
+
+fn lf_owned_read_ssa_parent(changed_before_use: Bool, branched: Bool) -> MIRProgram Never! {
+    r := fx_builder()
+    parent :: fx_value(&r, fx_int(), mir_copy_value_ownership(), MIROperation.Constant{value: MIRConstant.BigInt{decimal: "4611686018427387904"}})
+    place :: MIRPlaceID{value: 500 + r.places.len()}
+    &r.places.push(MIRPlace{id: place, span: fx_span(), ty: fx_int(), base: MIRPlaceBase.Temporary{value: parent}, projections: [MIRProjection]{}, access: MIRAccess.Read, persist_key: None})
+    snapshot :: fx_value(&r, fx_int(), mir_copy_value_ownership(), MIROperation.ReadPlace{place: place})
+    if branched {
+        choice :: fx_param(&r, "choice", fx_bool(), mir_copy_ownership())
+        fx_block(&r, 0, MIRTerminator.Branch{condition: choice, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+        fx_do(&r, MIROperation.Drop{value: parent, kind: MIRDropKind.Value})
+        fx_block(&r, 1, MIRTerminator.Jump{target: MIRBlockID{value: 3}})
+        fx_block(&r, 2, MIRTerminator.Jump{target: MIRBlockID{value: 3}})
+        fx_print(&r, snapshot)
+        fx_block(&r, 3, MIRTerminator.Return{value: None})
+    } else {
+        if changed_before_use -> fx_do(&r, MIROperation.Drop{value: parent, kind: MIRDropKind.Value})
+        fx_print(&r, snapshot)
+        if !changed_before_use -> fx_do(&r, MIROperation.Drop{value: parent, kind: MIRDropKind.Value})
+        fx_block(&r, 0, MIRTerminator.Return{value: None})
+    }
+    lf_single(r)
+}
+
+fn lf_expect_refinement(name: String, input: MIRProgram, expected: Int) -> Bool {
+    program := input
+    changed :: mir_refine_function_ownership(&program.functions[0], program.prelude_calls)
+    if changed != expected {
+        print("FAIL {name}: expected {expected} refined read(s), got {changed}")
+        return false
+    }
+    lf_expect(name, program, None)
+}
+
+
+
 // view.valid (E2305, tests/ui/view_outlives_owner.jet): `return
 // incidents[0..2]` from a local list; the clean program views a parameter.
 fn lf_view_escape(planted: Bool) -> MIRProgram Never! {
@@ -574,6 +874,12 @@ fn run() {
         lf_expect("terminator.typing planted", lf_terminator_typing(true), Val(MIRLintRule.TerminatorTyping)),
         lf_expect("ownership.move clean", lf_use_after_move(false), None),
         lf_expect("ownership.move planted", lf_use_after_move(true), Val(MIRLintRule.OwnershipMove)),
+        lf_expect("ownership.move Copy+Value consumed once", lf_copy_value_consumed(false), None),
+        lf_expect("ownership.move Copy+Value consumed twice", lf_copy_value_consumed(true), Val(MIRLintRule.OwnershipMove)),
+        lf_expect("ownership.move owned payload Phi place clean (last_use_moves)", lf_owned_payload_phi_place(false), None),
+        lf_expect("ownership.move owned payload Phi place double drop", lf_owned_payload_phi_place(true), Val(MIRLintRule.OwnershipMove)),
+        lf_expect("ownership.move owned read Phi place clean (fraction)", lf_owned_read_phi_place(false), None),
+        lf_expect("ownership.move owned read Phi place double drop", lf_owned_read_phi_place(true), Val(MIRLintRule.OwnershipMove)),
         lf_expect("ownership.move dead cleanup edge", lf_guarded_cleanup(false), None),
         lf_expect("ownership.move live cleanup edge", lf_guarded_cleanup(true), Val(MIRLintRule.OwnershipMove)),
         lf_expect("ownership.move one-branch move", lf_one_branch_move(), None),
@@ -594,6 +900,25 @@ fn run() {
         lf_expect("view.valid lent owner moved (E1101 taskgroup_lent_owner_moved)", lf_group_lend(0, -1, 1), Val(MIRLintRule.ViewValid)),
         lf_expect("view.valid owner changed after last use", lf_view_owner_changed(false), None),
         lf_expect("view.valid owner changed (E0212 view_owner_changed)", lf_view_owner_changed(true), Val(MIRLintRule.ViewValid)),
+        lf_expect("view.valid borrowed whole read before index write", lf_read_borrow_owner_write(false), None),
+        lf_expect("view.valid borrowed whole read after index write", lf_read_borrow_owner_write(true), Val(MIRLintRule.ViewValid)),
+        lf_expect("view.valid borrowed Phi before resize", lf_read_borrow_phi(false), None),
+        lf_expect("view.valid borrowed Phi after resize", lf_read_borrow_phi(true), Val(MIRLintRule.ViewValid)),
+        lf_expect("view.valid fresh loop read", lf_read_borrow_loop(), None),
+        lf_expect("view.valid disjoint constant indexes", lf_read_borrow_disjoint_index(), None),
+        lf_expect("view.valid dropless scalar snapshot", lf_dropless_scalar_snapshot(), None),
+        lf_expect("view.valid one-path write before last use clean", lf_read_borrow_one_path_write(false), None),
+        lf_expect("view.valid one-path write before last use planted", lf_read_borrow_one_path_write(true), Val(MIRLintRule.ViewValid)),
+        lf_expect("view.valid holder refresh clean", lf_view_holder_generation(false), None),
+        lf_expect("view.valid source refresh cannot refresh old holder", lf_view_holder_generation(true), Val(MIRLintRule.ViewValid)),
+        lf_expect("view.valid Phi generation refresh clean", lf_view_phi_generation(false), None),
+        lf_expect("view.valid source refresh cannot refresh old Phi", lf_view_phi_generation(true), Val(MIRLintRule.ViewValid)),
+        lf_expect_refinement("physical read used before write becomes borrowed", lf_owned_read_snapshot(false, false), 1),
+        lf_expect_refinement("physical owned snapshot survives binding write", lf_owned_read_snapshot(true, false), 0),
+        lf_expect_refinement("physical owned snapshot survives one-path write", lf_owned_read_snapshot(true, true), 0),
+        lf_expect_refinement("physical read before SSA parent drop becomes borrowed", lf_owned_read_ssa_parent(false, false), 1),
+        lf_expect_refinement("physical snapshot survives SSA parent drop", lf_owned_read_ssa_parent(true, false), 0),
+        lf_expect_refinement("physical snapshot survives one-path SSA parent drop", lf_owned_read_ssa_parent(true, true), 0),
         lf_expect("view.valid return from parameter", lf_view_escape(false), None),
         lf_expect("view.valid return from local (E2305 view_outlives_owner)", lf_view_escape(true), Val(MIRLintRule.ViewValid)),
         lf_expect("send.boundary copied capture", lf_task_capture(false), None),

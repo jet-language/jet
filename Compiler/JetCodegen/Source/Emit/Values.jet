@@ -17,6 +17,7 @@ use jet_foundation.[
     MIRLocalID,
     MIRLoopSourceKind,
     MIROperation,
+    MIROwnership,
     MIRParam,
     MIRPayloadKind,
     MIRPlace,
@@ -114,15 +115,19 @@ fn jet_rust_emit_value_type(ctx: JetRustEmitContext, function: MIRFunction, valu
     panic("Jet Rust emitter reached a MIR value without a checked type row")
 }
 
-fn jet_rust_emit_value_mode(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> MIROwnershipMode Never! {
+fn jet_rust_emit_value_ownership(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> MIROwnership Never! {
     if ctx.body_index.function == (Val(function.id)) {
         row :: ctx.body_index.value_rows.get(value.value) ?? panic("Jet Rust emitter reached a MIR value without a checked ownership row")
-        return function.values[row].ownership.mode
+        return function.values[row].ownership
     }
     loop row in function.values {
-        if row.id == value -> return row.ownership.mode
+        if row.id == value -> return row.ownership
     }
     panic("Jet Rust emitter reached a MIR value without a checked ownership row")
+}
+
+fn jet_rust_emit_value_mode(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> MIROwnershipMode Never! {
+    jet_rust_emit_value_ownership(ctx, function, value).mode
 }
 
 // The lookup rows of one function body (MIRRust FunctionIndex::new), built
@@ -136,6 +141,16 @@ fn jet_rust_emit_body_index(function: MIRFunction) -> JetRustEmitBodyIndex Never
     uses := [[JetRustEmitUse]]{}
     used_places := [U64:Bool]{}
     moves := [MIRPlaceID]{}
+    bound_local_values := [U64:MIRValueID]{}
+    loop local in function.locals {
+        if local.ssa_value == .Val(value) -> bound_local_values[local.id.value] = value
+    }
+    bound_place_values := [U64:MIRValueID]{}
+    loop place in function.places {
+        if place.base == .Local(local) {
+            if bound_local_values.get(local.value) == .Val(value) -> bound_place_values[place.id.value] = value
+        }
+    }
     test_member_blocks := [U64:Int]{}
     test_member_positions := [U64:Int]{}
     ordinal := 0
@@ -153,7 +168,10 @@ fn jet_rust_emit_body_index(function: MIRFunction) -> JetRustEmitBodyIndex Never
                 }
             }
             loop used in mir_operation_value_uses(instruction.operation) -> jet_rust_emit_index_use(&use_slots, &uses, used.value, JetRustEmitUse{block: block_position, instruction: position})
-            loop place in mir_operation_place_uses(instruction.operation) -> _ := &used_places.add(place.value, true)
+            loop place in mir_operation_place_uses(instruction.operation) {
+                _ := &used_places.add(place.value, true)
+                if bound_place_values.get(place.value) == .Val(value) -> jet_rust_emit_index_use(&use_slots, &uses, value.value, JetRustEmitUse{block: block_position, instruction: position})
+            }
             if instruction.operation == {
                 .MovePlace(place) -> &moves.push(place)
                 .AddressOf(place, access) -> {
@@ -211,6 +229,12 @@ fn jet_rust_emit_body_index(function: MIRFunction) -> JetRustEmitBodyIndex Never
         }
     }
     writes :: jet_rust_emit_local_writes(function, place_rows, value_rows)
+    loop local in function.locals {
+        if local.ssa_value == .Val(value) {
+            _ := &slot_read_values.add(value.value, true)
+            if partial_slots.get("T{value.value}") == .Val(slot) -> partial_slots["L{local.id.value}"] = slot
+        }
+    }
     JetRustEmitBodyIndex{
         function: Val(function.id),
         definition_blocks: definition_blocks,
@@ -219,6 +243,7 @@ fn jet_rust_emit_body_index(function: MIRFunction) -> JetRustEmitBodyIndex Never
         block_positions: block_positions,
         branch_bases: branch_bases,
         shared_locals: [U64:Bool]{},
+        bound_local_values: bound_local_values,
         use_slots: use_slots,
         uses: uses,
         place_rows: place_rows,
@@ -533,6 +558,7 @@ fn jet_rust_emit_local_is_allocator_view(function: MIRFunction, local: MIRLocalI
 
 // MIRRust local_storage: a shared-cell local is reached through its cell.
 fn jet_rust_emit_local_storage(ctx: &JetRustEmitContext, local: MIRLocalID) -> String Never! {
+    if ctx.body_index.bound_local_values.get(local.value) == .Val(value) -> return jet_rust_emit_value_slot(value)
     if jet_rust_emit_local_is_shared(&ctx, local) -> return "(*{jet_rust_emit_local_slot(local)}.borrow_mut())"
     jet_rust_emit_local_slot(local)
 }
@@ -2494,9 +2520,13 @@ fn jet_rust_emit_partial_move(ctx: &JetRustEmitContext, function: MIRFunction, p
 fn jet_rust_emit_partial_drop(ctx: &JetRustEmitContext, function: MIRFunction, place: MIRPlaceID) -> String? {
     loop row in function.places {
         if row.id == place && row.projections.len() == 0 && jet_rust_emit_partial_root_has(ctx, function, row.base) {
-            owner :: jet_rust_emit_partial_node_owner(&ctx, function, row.base, [MIRFieldID]{}) ?? MIRTypeID{value: 0}
-            clear :: jet_rust_emit_partial_clear(&ctx, function, row.base, [MIRFieldID]{}, owner)
-            root :: jet_rust_emit_partial_root_slot(row.base)
+            base := row.base
+            if base == .Local(local) {
+                if ctx.body_index.bound_local_values.get(local.value) == .Val(value) -> base = MIRPlaceBase.Temporary{value: value}
+            }
+            owner :: jet_rust_emit_partial_node_owner(&ctx, function, base, [MIRFieldID]{}) ?? MIRTypeID{value: 0}
+            clear :: jet_rust_emit_partial_clear(&ctx, function, base, [MIRFieldID]{}, owner)
+            root :: jet_rust_emit_partial_root_slot(base)
             return Val("{{ drop({root}.take()); {clear} () }}")
         }
     }

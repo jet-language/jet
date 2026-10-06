@@ -182,6 +182,32 @@ fn run() {
     tir_support::assert_tiers_agree("stored_field_read", src, "24\n8\n");
 }
 
+/// Semantic Copy reads remain snapshots of a mutable binding, including an
+/// exact Int whose physical carrier owns a spilled allocation. Physical borrow
+/// refinement must not make the old read observe the one-path replacement.
+#[test]
+fn exact_int_snapshot_survives_binding_write_in_every_tier() {
+    let src = r#"
+fn show(change: Bool) {
+    value := 4611686018427387904
+    snapshot :: value
+    if change -> value = 4611686018427387905
+    print(snapshot)
+    print(value)
+}
+
+fn run() {
+    show(true)
+    show(false)
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "exact_int_binding_snapshot",
+        src,
+        "4611686018427387904\n4611686018427387905\n4611686018427387904\n4611686018427387904\n",
+    );
+}
+
 /// D-CONC-SHARE1=A (card #1561): plain field access on a `Shared<T>` is the
 /// only source spelling. Sema desugars a field read into ONE locked read and a
 /// field write into ONE locked edit, both through the same Prelude seam the

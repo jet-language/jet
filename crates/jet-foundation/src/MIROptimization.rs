@@ -12,6 +12,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use crate::MIR::{
     canonical_identity, canonical_payload, stable_id, MirAccess, MirAccelerationFact,
+    mir_call_arg_consumes, MirValueConsumption,
     MirArtifactPlan, MirBasicBlock, MirBinaryOp,
     MirBlockId, MirBoundsFact, MirCallbackAdapter, MirCallee, MirCallFallibility, MirCliDefault,
     MirDominators,
@@ -1376,6 +1377,8 @@ fn verify_function(
             return Err(MirLegalityError::MissingValueMetadata { function: function.id, value: *value });
         }
     }
+    let mut bound_values = HashSet::new();
+    let mut bound_locals = HashMap::new();
     for local in &function.locals {
         verify_type(&local.ty, local.span, function.id)?;
         verify_ownership(local.ownership, local.span, function.id, MirValueId(local.id.0))?;
@@ -1386,9 +1389,78 @@ fn verify_function(
                 span: local.span,
             });
         }
+        if let Some(value) = local.ssa_value {
+            let invalid = |subject: &str| MirLegalityError::InvalidReference {
+                function: function.id, subject: subject.to_owned(), span: local.span,
+            };
+            if !bound_values.insert(value) {
+                return Err(invalid("SSA value is associated with more than one local cell"));
+            }
+            let Some((_, _, ty, ownership)) = defs.get(&value) else {
+                return Err(invalid("SSA-bound local references a missing definition"));
+            };
+            if !ownership.is_runtime_owned() {
+                return Err(invalid("SSA-bound local does not name a physical owner"));
+            }
+            if !local.ty.same_checked_type(ty) || local.ownership.mode != ownership.mode || local.ownership.drop != ownership.drop {
+                return Err(invalid("SSA-bound local changes its definition's type or ownership"));
+            }
+            let root = place_map[&local.place];
+            if root.base != MirPlaceBase::Local(local.id) || !root.projections.is_empty() {
+                return Err(invalid("SSA-bound local does not name its whole local cell"));
+            }
+            if local.uninit || local.comptime || local.arena_view || local.string_view {
+                return Err(invalid("SSA-bound owner uses another storage mechanism"));
+            }
+            bound_locals.insert(local.id, value);
+        }
     }
     for place in &function.places {
         verify_place(place, function, &local_ids, &defs, field_ids, source_file_ids, prelude_calls)?;
+    }
+    if !bound_locals.is_empty() {
+        for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+            if instruction.result.is_some_and(|value| bound_values.contains(&value)) {
+                if matches!(&instruction.operation, MirOperation::Parameter { .. } | MirOperation::Capture { .. }) {
+                    return Err(MirLegalityError::InvalidReference {
+                        function: function.id,
+                        subject: "SSA-bound local duplicates parameter or capture storage".to_owned(),
+                        span: instruction.span,
+                    });
+                }
+                for place in operation_place_refs(&instruction.operation) {
+                    if let Some(place) = place_map.get(&place) {
+                        if let MirPlaceBase::Local(local) = place.base {
+                            if bound_locals.get(&local).copied() == instruction.result {
+                                return Err(MirLegalityError::InvalidReference {
+                                    function: function.id,
+                                    subject: "SSA-bound definition reads its own uninitialized cell".to_owned(),
+                                    span: instruction.span,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            let place = match &instruction.operation {
+                MirOperation::WritePlace { place, .. } | MirOperation::ReplacePlace { place, .. }
+                | MirOperation::InitializeUninit { place } => place_map.get(place),
+                _ => None,
+            };
+            if let Some(place) = place {
+                if place.projections.is_empty() {
+                    if let MirPlaceBase::Local(local) = place.base {
+                        if bound_locals.contains_key(&local) {
+                            return Err(MirLegalityError::InvalidReference {
+                                function: function.id,
+                                subject: "SSA-bound local has a writer other than its definition".to_owned(),
+                                span: instruction.span,
+                            });
+                        }
+                    }
+                }
+            }
+        }
     }
     let reachable = reachable_blocks(function);
     let predecessors = predecessor_map(function);
@@ -1419,7 +1491,7 @@ fn verify_function(
     verify_host_borrow_callback_uses(function, &prelude_calls)?;
     verify_drops(function, &block_ids, &place_map)?;
     verify_copy_facts(function, &defs)?;
-    verify_moves_and_borrows(function, &defs, &dominators, &reachable, &place_map)?;
+    verify_moves_and_borrows(function, &defs, &dominators, &reachable, &place_map, prelude_calls)?;
     verify_facts(function, &block_ids, &instruction_ids, &defs)?;
     Ok(())
 }
@@ -3784,12 +3856,6 @@ fn place_value_uses(place: &MirPlace) -> Vec<MirValueId> {
     values
 }
 
-fn call_arg_consumes(arg: &crate::MIR::MirCallArg) -> bool {
-    if arg.implicit_clone || arg.shared_auto_clone || arg.widen_fixed_to_list {
-        return false;
-    }
-    arg.access == MirAccess::Move || arg.owned_last_use
-}
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MirPlacePath {
     root: String,
@@ -3853,7 +3919,7 @@ enum MirPlaceUse {
 }
 
 fn call_arg_place_use(arg: &crate::MIR::MirCallArg) -> MirPlaceUse {
-    if call_arg_consumes(arg) {
+    if mir_call_arg_consumes(arg) {
         MirPlaceUse::Move
     } else if arg.access == MirAccess::Write {
         MirPlaceUse::Borrow
@@ -4093,13 +4159,10 @@ fn verify_moves_and_borrows(
     dominators: &MirDominators,
     reachable: &BTreeSet<MirBlockId>,
     place_map: &HashMap<crate::MIR::MirPlaceId, &MirPlace>,
+    prelude_calls: &HashMap<MirPreludeCallId, &MirPreludeCall>,
 ) -> Result<(), MirLegalityError> {
-    let mut consumed: HashMap<MirValueId, (MirBlockId, usize, Span)> = HashMap::new();
     let feasible = reachable_with_boolean_locals(function);
-    let mut scope_deadlines = HashMap::with_capacity(function.scopes.len());
-    for scope in &function.scopes {
-        scope_deadlines.entry(scope.id).or_insert(scope.deadline);
-    }
+    verify_physical_consumption(function, defs, &feasible, prelude_calls)?;
     // Only paths under one root can overlap, so events are grouped by root:
     // each use scans its own root's moves, not every move in the function.
     type PlaceEvents = HashMap<String, Vec<(MirPlacePath, MirBlockId, usize)>>;
@@ -4136,29 +4199,6 @@ fn verify_moves_and_borrows(
             continue;
         }
         for (index, instruction) in block.instructions.iter().enumerate() {
-            let scope_deadline = match &instruction.operation {
-                MirOperation::ScopeEnter { scope, .. } => scope_deadlines.get(scope).copied().flatten(),
-                _ => None,
-            };
-            for value in instruction
-                .operation
-                .value_uses()
-                .into_iter()
-                .chain(scope_deadline)
-            {
-                if let Some((consumed_block, consumed_index, consumed_span)) = consumed.get(&value) {
-                    let dominates = *consumed_block == block.id && *consumed_index < index
-                        || *consumed_block != block.id
-                            && dominators.dominates(*consumed_block, block.id);
-                    if dominates {
-                        return Err(MirLegalityError::InvalidMove {
-                            function: function.id,
-                            value,
-                            span: *consumed_span,
-                        });
-                    }
-                }
-            }
             for (place_id, use_kind) in operation_place_uses(&instruction.operation) {
                 let Some(place) = place_map.get(&place_id).copied() else {
                     continue;
@@ -4229,66 +4269,184 @@ fn verify_moves_and_borrows(
                     });
                 }
             }
-            let mut moved = Vec::new();
-            match &instruction.operation {
-                MirOperation::Move { value } | MirOperation::TraitBox { value, .. } => {
-                    moved.push(*value)
-                }
-                MirOperation::Drop { value, kind } if *kind != crate::MIR::MirDropKind::None => {
-                    moved.push(*value)
-                }
-                MirOperation::Closure { captures, .. } => {
-                    moved.extend(captures.iter().filter_map(|capture| match capture {
-                        crate::MIR::MirCaptureOperand::Value(value) => Some(*value),
-                        crate::MIR::MirCaptureOperand::Place(_) => None,
-                    }));
-                }
-                MirOperation::Call { args, .. }
-                | MirOperation::CoreCall { args, .. }
-                | MirOperation::IndirectCall { args, .. } => {
-                    moved.extend(
-                        args.iter()
-                            .filter(|arg| call_arg_consumes(arg))
-                            .map(|arg| arg.value),
-                    );
-                }
-                MirOperation::Semantic(
-                    MirSemanticOp::StaticPreludeCall { args, .. }
-                    | MirSemanticOp::HardwareCall { args, .. }
-                    | MirSemanticOp::ClosureMethod { args, .. }
-                    | MirSemanticOp::HostCall { args, .. },
-                ) => {
-                    moved.extend(
-                        args.iter()
-                            .filter(|arg| call_arg_consumes(arg))
-                            .map(|arg| arg.value),
-                    );
-                }
-                _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn consumption_borrow_mask<'a>(
+    operation: &MirOperation,
+    prelude: &HashMap<MirPreludeCallId, &'a MirPreludeCall>,
+) -> &'a [bool] {
+    operation.consumption_route()
+        .and_then(|call| prelude.get(&call))
+        .map_or(&[], |row| row.signature.borrow_mask.as_slice())
+}
+
+fn consume_ssa_value(
+    function: &MirFunction,
+    defs: &HashMap<MirValueId, (MirBlockId, usize, MirType, MirOwnership)>,
+    moved: &mut HashSet<MirValueId>,
+    value: MirValueId,
+    consumption: MirValueConsumption,
+    span: Span,
+    check: bool,
+) -> Result<(), MirLegalityError> {
+    if !consumption.transfers() {
+        return Ok(());
+    }
+    let Some((_, _, _, ownership)) = defs.get(&value) else {
+        return Err(MirLegalityError::InvalidReference { function: function.id, subject: format!("consume {value:?}"), span });
+    };
+    if !ownership.is_runtime_owned() {
+        if check && consumption == (MirValueConsumption::Yes { requires_owner: true }) {
+            return Err(MirLegalityError::InvalidMove { function: function.id, value, span });
+        }
+        return Ok(());
+    }
+    if !moved.insert(value) && check {
+        return Err(MirLegalityError::InvalidMove { function: function.id, value, span });
+    }
+    Ok(())
+}
+
+fn consumption_block(
+    function: &MirFunction,
+    defs: &HashMap<MirValueId, (MirBlockId, usize, MirType, MirOwnership)>,
+    prelude: &HashMap<MirPreludeCallId, &MirPreludeCall>,
+    block: &MirBasicBlock,
+    moved: &mut HashSet<MirValueId>,
+    check: bool,
+) -> Result<(), MirLegalityError> {
+    for instruction in &block.instructions {
+        if matches!(instruction.operation, MirOperation::Phi { .. }) {
+            if let Some(defined) = instruction.result {
+                moved.remove(&defined);
             }
-            for value in moved {
-                let Some((_, _, _, ownership)) = defs.get(&value) else {
-                    return Err(MirLegalityError::InvalidReference {
-                        function: function.id,
-                        subject: format!("move {value:?}"),
-                        span: instruction.span,
-                    });
-                };
-                if matches!(
-                    ownership.mode,
-                    MirOwnershipMode::Copy
-                        | MirOwnershipMode::ReadBorrow
-                        | MirOwnershipMode::WriteBorrow
-                ) || consumed.contains_key(&value)
-                {
-                    return Err(MirLegalityError::InvalidMove {
-                        function: function.id,
-                        value,
-                        span: instruction.span,
-                    });
+            continue;
+        }
+        let uses = instruction.operation.value_uses();
+        if check {
+            if let MirOperation::ScopeEnter { scope, .. } = instruction.operation {
+                if let Some(deadline) = function.scopes.iter().find(|row| row.id == scope).and_then(|row| row.deadline) {
+                    if moved.contains(&deadline) {
+                        return Err(MirLegalityError::InvalidMove { function: function.id, value: deadline, span: instruction.span });
+                    }
                 }
-                consumed.insert(value, (block.id, index, instruction.span));
             }
+            for &value in &uses {
+                if moved.contains(&value) {
+                    return Err(MirLegalityError::InvalidMove { function: function.id, value, span: instruction.span });
+                }
+            }
+        }
+        if let Some(defined) = instruction.result {
+            moved.remove(&defined);
+        }
+        let mask = consumption_borrow_mask(&instruction.operation, prelude);
+        for value in uses {
+            consume_ssa_value(function, defs, moved, value, instruction.operation.value_consumption(value, mask), instruction.span, check)?;
+        }
+    }
+    for value in block.terminator.value_uses() {
+        if check && moved.contains(&value) {
+            return Err(MirLegalityError::InvalidMove { function: function.id, value, span: block.span });
+        }
+        consume_ssa_value(function, defs, moved, value, block.terminator.value_consumption(value), block.span, check)?;
+    }
+    Ok(())
+}
+
+fn consumption_phi_edge(
+    function: &MirFunction,
+    defs: &HashMap<MirValueId, (MirBlockId, usize, MirType, MirOwnership)>,
+    from: MirBlockId,
+    target: &MirBasicBlock,
+    moved: &mut HashSet<MirValueId>,
+    check: bool,
+) -> Result<(), MirLegalityError> {
+    for instruction in &target.instructions {
+        if let MirOperation::Phi { incoming } = &instruction.operation {
+            for &(predecessor, value) in incoming {
+                if predecessor != from {
+                    continue;
+                }
+                if check && moved.contains(&value) {
+                    return Err(MirLegalityError::InvalidMove { function: function.id, value, span: instruction.span });
+                }
+                consume_ssa_value(function, defs, moved, value, instruction.operation.value_consumption(value, &[]), instruction.span, check)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn verify_physical_consumption(
+    function: &MirFunction,
+    defs: &HashMap<MirValueId, (MirBlockId, usize, MirType, MirOwnership)>,
+    feasible: &BTreeSet<MirBlockId>,
+    prelude: &HashMap<MirPreludeCallId, &MirPreludeCall>,
+) -> Result<(), MirLegalityError> {
+    let positions: HashMap<_, _> = function.blocks.iter().enumerate().map(|(row, block)| (block.id, row)).collect();
+    let Some(&entry) = positions.get(&function.entry) else {
+        return Err(MirLegalityError::InvalidReference { function: function.id, subject: "physical-consumption entry".to_owned(), span: function.span });
+    };
+    let mut states = vec![HashSet::new(); function.blocks.len()];
+    let mut reached = vec![false; function.blocks.len()];
+    let mut queued = vec![false; function.blocks.len()];
+    let mut work = vec![entry];
+    reached[entry] = true;
+    queued[entry] = true;
+    for drop in &function.drops {
+        if let MirDropEdge::Failure(target) | MirDropEdge::Unwind(target) = drop.edge {
+            if let Some(&root) = positions.get(&target) {
+                if !reached[root] {
+                    reached[root] = true;
+                    queued[root] = true;
+                    work.push(root);
+                }
+            }
+        }
+    }
+    let mut head = 0;
+    while head < work.len() {
+        let row = work[head];
+        head += 1;
+        queued[row] = false;
+        let block = &function.blocks[row];
+        let mut current = states[row].clone();
+        consumption_block(function, defs, prelude, block, &mut current, false)?;
+        for target in block.terminator.targets() {
+            if !feasible.contains(&target) {
+                continue;
+            }
+            let Some(&destination) = positions.get(&target) else { continue };
+            let mut edge = current.clone();
+            consumption_phi_edge(function, defs, block.id, &function.blocks[destination], &mut edge, false)?;
+            let mut changed = !reached[destination];
+            reached[destination] = true;
+            for value in edge {
+                changed |= states[destination].insert(value);
+            }
+            if changed && !queued[destination] {
+                queued[destination] = true;
+                work.push(destination);
+            }
+        }
+    }
+    for (row, block) in function.blocks.iter().enumerate() {
+        if !reached[row] {
+            continue;
+        }
+        let mut current = states[row].clone();
+        consumption_block(function, defs, prelude, block, &mut current, true)?;
+        for target in block.terminator.targets() {
+            if !feasible.contains(&target) {
+                continue;
+            }
+            let Some(&destination) = positions.get(&target) else { continue };
+            let mut edge = current.clone();
+            consumption_phi_edge(function, defs, block.id, &function.blocks[destination], &mut edge, true)?;
         }
     }
     Ok(())
@@ -5374,11 +5532,11 @@ fn inline_call(
                     } else {
                         MirCopyFact::Materialize
                     }
-                    .for_ownership(argument_ownership.mode),
+                    .for_ownership(&argument_ownership),
                 },
             });
             value
-        } else if call_arg_consumes(argument) {
+        } else if mir_call_arg_consumes(argument) {
             let value = MirValueId(inline_fresh_id(
                 &mut used_values,
                 "mir-inline-value",
@@ -5567,6 +5725,7 @@ fn inline_call(
             span: local.span,
             ty: inline_type(&local.ty, &substitutions),
             place: ids.places[&local.place],
+            ssa_value: local.ssa_value.map(|value| inline_value(&ids, value)),
             mutable: local.mutable,
             ownership: local.ownership,
             comptime: local.comptime,
@@ -7895,6 +8054,7 @@ fn normalized_local_place(
         span,
         ty: ty.clone(),
         place,
+        ssa_value: None,
         mutable: true,
         ownership: MirOwnership::copy(),
         comptime: false,
@@ -15374,6 +15534,7 @@ fn encode_local(writer: &mut CanonicalWriter, local: &crate::MIR::MirLocal) {
     writer.span(local.span);
     writer.mir_type(&local.ty);
     writer.u64(local.place.0);
+    writer.option_u64(local.ssa_value.map(|value| value.0));
     writer.debug(&local.ownership);
     writer.bool(local.mutable);
     writer.bool(local.comptime);
@@ -15896,6 +16057,7 @@ mod ownership_guard_tests {
         let locals = places.iter().map(|place| MirLocal {
             id: MirLocalId(place.id.0), name: format!("local{}", place.id.0),
             span: place.span, ty: place.ty.clone(), place: place.id, mutable: true,
+            ssa_value: None,
             ownership: if place.ty.is_bool() { MirOwnership::copy() } else { MirOwnership::Owned },
             comptime: false, uninit: false, arena_view: false, string_view: false, gc_root: false,
         }).collect();
@@ -15945,11 +16107,11 @@ mod ownership_guard_tests {
         let defs = function.blocks.iter().flat_map(|block| {
             block.instructions.iter().enumerate().filter_map(move |(index, instruction)| {
                 let ty = instruction.ty.clone()?;
-                let ownership = if ty.is_bool() { MirOwnership::copy() } else { MirOwnership::Owned };
+                let ownership = if ty.is_bool() { MirOwnership::copy() } else if matches!(ty.kind(), MirTypeKind::Int) { MirOwnership::copy_value() } else { MirOwnership::Owned };
                 Some((instruction.result?, (block.id, index, ty, ownership)))
             })
         }).collect();
-        verify_moves_and_borrows(function, &defs, &dominators, &reachable, &places)
+        verify_moves_and_borrows(function, &defs, &dominators, &reachable, &places, &HashMap::new())
     }
 
     fn rejects_second_move(function: &MirFunction) {
@@ -16014,6 +16176,188 @@ mod ownership_guard_tests {
         function.blocks[3].instructions = write_flag(40, FLAG, true);
         function.blocks[3].terminator = MirTerminator::Jump { target: MirBlockId(1) };
         rejects_second_move(&function);
+    }
+
+    fn copy_owner_function() -> MirFunction {
+        let mut function = cleanup_function(false);
+        function.locals.clear();
+        function.places.clear();
+        function.blocks = vec![block(0, vec![
+            instruction(10, MirOperation::Constant(MirConstant::BigInt("4611686018427387904".into())), Some(MirTypeKind::Int)),
+            instruction(15, MirOperation::Parameter { index: 0, name: "condition".into() }, Some(MirTypeKind::Bool)),
+        ], MirTerminator::Return { value: None })];
+        function
+    }
+
+    fn snapshot_function(changed_before_use: bool, branched: bool) -> MirFunction {
+        let mut function = cleanup_function(false);
+        function.places[0].ty = MirType::from_kind(MirTypeKind::Int);
+        function.locals[0].ty = MirType::from_kind(MirTypeKind::Int);
+        function.locals[0].ownership = MirOwnership::copy_value();
+        let mut entry = vec![
+            instruction(10, MirOperation::Constant(MirConstant::BigInt("4611686018427387904".into())), Some(MirTypeKind::Int)),
+            instruction(11, MirOperation::WritePlace { place: OWNER, value: MirValueId(10) }, None),
+            instruction(12, MirOperation::ReadPlace(OWNER), Some(MirTypeKind::Int)),
+            instruction(13, MirOperation::Constant(MirConstant::BigInt("4611686018427387905".into())), Some(MirTypeKind::Int)),
+            instruction(15, MirOperation::Parameter { index: 0, name: "condition".into() }, Some(MirTypeKind::Bool)),
+        ];
+        let write = instruction(16, MirOperation::WritePlace { place: OWNER, value: MirValueId(13) }, None);
+        let print = instruction(17, MirOperation::Semantic(MirSemanticOp::Print {
+            call: MirPreludeCallId(0), value: MirValueId(12),
+        }), None);
+        if branched {
+            function.blocks = vec![
+                block(0, entry, MirTerminator::Branch {
+                    condition: MirValueId(15), then_target: MirBlockId(1), else_target: MirBlockId(2),
+                }),
+                block(1, vec![write], MirTerminator::Jump { target: MirBlockId(3) }),
+                block(2, Vec::new(), MirTerminator::Jump { target: MirBlockId(3) }),
+                block(3, vec![print], MirTerminator::Return { value: None }),
+            ];
+        } else {
+            if changed_before_use {
+                entry.extend([write, print]);
+            } else {
+                entry.extend([print, write]);
+            }
+            function.blocks = vec![block(0, entry, MirTerminator::Return { value: None })];
+        }
+        function.values = function.blocks.iter().flat_map(|block| &block.instructions)
+            .filter_map(|instruction| {
+                let id = instruction.result?;
+                let ty = instruction.ty.clone()?;
+                let ownership = if ty.is_bool() { MirOwnership::copy() } else { MirOwnership::copy_value() };
+                Some((id, ty, instruction.span, ownership))
+            }).collect();
+        function
+    }
+
+    #[test]
+    fn physical_read_before_binding_write_can_borrow() {
+        let mut function = snapshot_function(false, false);
+        assert_eq!(crate::MIR::mir_refine_function_ownership(&mut function, &[]), 1);
+        let read = function.values.iter().find(|(id, ..)| *id == MirValueId(12)).unwrap();
+        assert_eq!(read.3, MirOwnership::from_access(MirAccess::Read));
+    }
+
+    #[test]
+    fn physical_read_after_binding_write_keeps_its_owned_snapshot() {
+        let mut function = snapshot_function(true, false);
+        assert_eq!(crate::MIR::mir_refine_function_ownership(&mut function, &[]), 0);
+        let read = function.values.iter().find(|(id, ..)| *id == MirValueId(12)).unwrap();
+        assert_eq!(read.3, MirOwnership::copy_value());
+    }
+
+    #[test]
+    fn one_path_binding_write_keeps_the_owned_snapshot_at_the_join() {
+        let mut function = snapshot_function(true, true);
+        assert_eq!(crate::MIR::mir_refine_function_ownership(&mut function, &[]), 0);
+    }
+
+    #[test]
+    fn fresh_snapshot_each_loop_iteration_can_borrow() {
+        let mut function = snapshot_function(false, false);
+        function.blocks[0].terminator = MirTerminator::Branch {
+            condition: MirValueId(15), then_target: MirBlockId(0), else_target: MirBlockId(1),
+        };
+        function.blocks.push(block(1, Vec::new(), MirTerminator::Return { value: None }));
+        assert_eq!(crate::MIR::mir_refine_function_ownership(&mut function, &[]), 1);
+    }
+
+    fn snapshot_ssa_parent(changed_before_use: bool, branched: bool) -> MirFunction {
+        let mut function = snapshot_function(changed_before_use, branched);
+        function.places[0].base = MirPlaceBase::Temporary(MirValueId(10));
+        function.locals.clear();
+        for block in &mut function.blocks {
+            block.instructions.retain(|instruction| instruction.id != MirOpId(11));
+            for instruction in &mut block.instructions {
+                if instruction.id == MirOpId(16) {
+                    instruction.operation = MirOperation::Drop {
+                        value: MirValueId(10), kind: MirDropKind::Value,
+                    };
+                }
+            }
+        }
+        function
+    }
+
+    #[test]
+    fn physical_read_before_ssa_parent_drop_can_borrow() {
+        let mut function = snapshot_ssa_parent(false, false);
+        assert_eq!(crate::MIR::mir_refine_function_ownership(&mut function, &[]), 1);
+    }
+
+    #[test]
+    fn physical_read_after_ssa_parent_drop_keeps_its_snapshot() {
+        let mut function = snapshot_ssa_parent(true, false);
+        assert_eq!(crate::MIR::mir_refine_function_ownership(&mut function, &[]), 0);
+        let read = function.values.iter().find(|(id, ..)| *id == MirValueId(12)).unwrap();
+        assert_eq!(read.3, MirOwnership::copy_value());
+    }
+
+    #[test]
+    fn one_path_ssa_parent_drop_keeps_its_snapshot_at_the_join() {
+        let mut function = snapshot_ssa_parent(true, true);
+        assert_eq!(crate::MIR::mir_refine_function_ownership(&mut function, &[]), 0);
+    }
+
+    fn drop_copy_owner(id: u64) -> MirInstruction {
+        instruction(id, MirOperation::Drop { value: MirValueId(10), kind: MirDropKind::Value }, None)
+    }
+
+    #[test]
+    fn copy_value_consumed_once_is_legal() {
+        let mut function = copy_owner_function();
+        function.blocks[0].instructions.push(drop_copy_owner(20));
+        assert!(verify(&function).is_ok());
+    }
+
+    #[test]
+    fn copy_value_consumed_twice_is_rejected() {
+        let mut function = copy_owner_function();
+        function.blocks[0].instructions.extend([drop_copy_owner(20), drop_copy_owner(21)]);
+        assert!(matches!(verify(&function), Err(MirLegalityError::InvalidMove { value: MirValueId(10), span, .. }) if span == Span::new(21, 22)));
+    }
+
+    #[test]
+    fn disjoint_branch_consumption_is_legal() {
+        let mut function = copy_owner_function();
+        function.blocks[0].terminator = MirTerminator::Branch {
+            condition: MirValueId(15), then_target: MirBlockId(1), else_target: MirBlockId(2),
+        };
+        function.blocks.extend([
+            block(1, vec![drop_copy_owner(20)], MirTerminator::Return { value: None }),
+            block(2, vec![drop_copy_owner(21)], MirTerminator::Return { value: None }),
+        ]);
+        assert!(verify(&function).is_ok());
+    }
+
+    #[test]
+    fn maybe_consumed_value_is_rejected_after_merge() {
+        let mut function = copy_owner_function();
+        function.blocks[0].terminator = MirTerminator::Branch {
+            condition: MirValueId(15), then_target: MirBlockId(1), else_target: MirBlockId(2),
+        };
+        function.blocks.extend([
+            block(1, vec![drop_copy_owner(20)], MirTerminator::Jump { target: MirBlockId(3) }),
+            block(2, Vec::new(), MirTerminator::Jump { target: MirBlockId(3) }),
+            block(3, Vec::new(), MirTerminator::Return { value: Some(MirValueId(10)) }),
+        ]);
+        assert!(matches!(verify(&function), Err(MirLegalityError::InvalidMove { value: MirValueId(10), .. })));
+    }
+
+    #[test]
+    fn phi_consumes_only_the_selected_predecessor() {
+        let mut function = copy_owner_function();
+        function.blocks[0].terminator = MirTerminator::Branch {
+            condition: MirValueId(15), then_target: MirBlockId(1), else_target: MirBlockId(2),
+        };
+        function.blocks.extend([
+            block(1, Vec::new(), MirTerminator::Jump { target: MirBlockId(3) }),
+            block(2, Vec::new(), MirTerminator::Jump { target: MirBlockId(3) }),
+            block(3, vec![instruction(30, MirOperation::Phi { incoming: vec![(MirBlockId(1), MirValueId(10)), (MirBlockId(2), MirValueId(10))] }, Some(MirTypeKind::Int))], MirTerminator::Return { value: Some(MirValueId(30)) }),
+        ]);
+        assert!(verify(&function).is_ok());
     }
 
     fn verify_copies(function: &MirFunction) -> Result<(), MirLegalityError> {
@@ -16188,6 +16532,7 @@ mod ownership_guard_tests {
             span,
             ty: ty.clone(),
             place: MirPlaceId(3),
+            ssa_value: None,
             mutable: true,
             ownership: MirOwnership::Owned,
             comptime: false,

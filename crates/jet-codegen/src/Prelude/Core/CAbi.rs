@@ -489,6 +489,15 @@ mod jet_c_abi {
         guard(|| unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(value) }.into_raw())
     }
 
+    /// Consumes one exact-Int owner; an inline carrier needs no allocation or release.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_int_drop(value: i64) {
+        guard(|| {
+            // SAFETY: the checked MIR drop edge transfers the caller's owner.
+            drop(unsafe { crate::jet_foundation::Numeric::JetInt::from_raw_owned(value) });
+        });
+    }
+
     /// An exact Int constant beyond the inline word range, from its decimal
     /// text (MIR `BigInt` constants; the JetBackend builds them at use).
     #[no_mangle]

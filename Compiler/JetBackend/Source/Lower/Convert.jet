@@ -93,6 +93,9 @@ fn lower_convert_numeric(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     to_float :: destination == .Float
     from_char :: source == .Char
     to_char :: destination == .Char
+    // Numeric casts inspect their input; an exact identity cast still returns
+    // an independent owner, unlike a transparent carrier transfer.
+    if from_exact && to_exact -> return lower_copy(p, c, &m, &f, instruction, value)
     if source != .Other && source == destination -> return lower_forward(c, &m, &f, instruction, value)
     if (from_exact && (to_i64 || to_float || to_char)) || (from_i64 && (to_exact || to_float)) || (from_char && to_exact) {
         operand :: lower_use(&m, &f, value) ?? return

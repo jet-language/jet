@@ -56,6 +56,7 @@ use jet_foundation.[
     MIRVariant,
     MIRVariantPayload,
     mir_symbol_name,
+    mir_runtime_owned_ownership,
     mir_terminator_targets,
     mir_type_canonical_key,
     mir_type_display_name,
@@ -74,14 +75,17 @@ pub struct LIRLowering {
     pub lir: LIRModule
     pub issues: [LIRLoweringIssue]
     pub entry: LIRFunctionID?
+    // Run after every returned/input native owner is released, before unload.
+    pub finalizer: LIRFunctionID?
 }
 
 // How one checked MIR type is carried in LIR.
 enum LowerRepr {
     // Unit and Never: no LIR value.
     Absent
-    // Int, Char and 64-bit fixed integers: one signed word. An Int word is an
-    // inline integer in [-2^62, 2^62) or a tagged big-integer handle.
+    // Exact Int is an inline number or a tagged, reference-counted BigInt.
+    ExactInt
+    // Char and fixed-width integers are dropless machine words.
     Word
     // Float: the IEEE double's bits in one word (LIR Float layout).
     FloatBits
@@ -147,6 +151,7 @@ struct LowerModule {
     pub static_rows: [String:Int]
     // String slots of frozen statics the entry fills first (lower_static_entry).
     pub static_fixups: [LowerStaticFixup]
+    pub static_live: LIRDataID?
     // MIR source file id -> byte offsets of its line starts (Numeric.jet lower_source_line).
     pub line_starts: [U64:[Int]]
     // MIR source file id -> its row in program.source_files.
@@ -155,6 +160,8 @@ struct LowerModule {
     // order), and per row the program.functions row of its original.
     pub mir_rows: [U64:Int]
     pub mir_sources: [Int]
+    // Compiler callables only: user MIR bodies charge Core's active budget.
+    pub comptime_budget: Bool
     pub mir_signatures: [LIRSignatureID]
     // Per LIR function row: the bytes of the inline aggregate it returns
     // through a hidden result pointer (its first parameter), or 0.
@@ -180,13 +187,6 @@ struct LowerContext {
     pub read_slots: [U64:Int]
     // MIR value a parameter or temporary place stands for -> its slot.
     pub defined_slots: [U64:Int]
-    // MIR values written into a place, stored into a new aggregate (List,
-    // Map, struct, tuple, variant, Option/Result box, closure capture, trait
-    // box) or returned: an owned place read that lands there is a copy of its
-    // own (MIRRust.rs place_read clones).
-    pub sunk: [U64:Bool]
-    // MIR value a `Move` defines -> the value it moves.
-    pub moves: [U64:U64]
     pub order: [Int]
     pub lir_blocks: [LIRBlockID]
     pub split_entry: Bool
@@ -239,7 +239,7 @@ pub fn lir_lower_callable(program: MIRProgram, entry: MIRFunctionID) -> LIRLower
 fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -> LIRLowering Never! {
     prepared :: lower_prepare_entry(program, entry)
     if prepared.issues.len() > 0 {
-        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None}
+        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None, finalizer: None}
     }
     m := LowerModule{
         signatures: [LIRSignature]{},
@@ -248,10 +248,12 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
         data_rows: [String:Int]{},
         static_rows: [String:Int]{},
         static_fixups: [LowerStaticFixup]{},
+        static_live: None,
         line_starts: [U64:[Int]]{},
         source_rows: [U64:Int]{},
         mir_rows: [U64:Int]{},
         mir_sources: [Int]{},
+        comptime_budget: !wrap_entry,
         mir_signatures: [LIRSignatureID]{},
         mir_results: [Int]{},
         glue_base: prepared.functions.len(),
@@ -279,10 +281,16 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
     // Program entries normalize failure carriers. Compiler calls retain the
     // checked signature, including any hidden output pointers.
     lowered_entry := LIRFunctionID?{None}
+    finalizer := LIRFunctionID?{None}
     if prepared.entry == .Val(id) {
         if m.mir_rows.get(id.value) == .Val(row) {
             lowered_entry = Val(if wrap_entry -> lower_entry_id(program, &m, row) else -> LIRFunctionID{value: row})
-            if !wrap_entry && m.static_fixups.len() > 0 -> lowered_entry = Val(lower_closure_helper_id(&m, "callable.init", row, lower_row_source(program, m, row)))
+            if !wrap_entry && m.static_fixups.len() > 0 {
+                m.static_live = Val(lower_static_object(&m, 8))
+                source :: lower_row_source(program, m, row)
+                lowered_entry = Val(lower_closure_helper_id(&m, "callable.init", row, source))
+                finalizer = Val(lower_closure_helper_id(&m, "callable.fini", row, source))
+            }
         }
     }
     // Glue and helpers may register more, so the list grows while it is walked.
@@ -303,8 +311,11 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
     if issues.len() == 0 {
         loop issue in lir_lint_module(lowered) -> &issues.push(LIRLoweringIssue{function: issue.function, message: "LIR lint b{issue.block}: {issue.message}"})
     }
-    if issues.len() > 0 -> lowered_entry = None
-    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry}
+    if issues.len() > 0 {
+        lowered_entry = None
+        finalizer = None
+    }
+    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry, finalizer: finalizer}
 }
 
 // ---------------------------------------------------------------------------
@@ -356,7 +367,7 @@ fn lower_enum_is_tag(variants: [MIRVariant]) -> Bool Never! {
 
 fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
     if ty.kind == {
-        .Int -> LowerRepr.Word
+        .Int -> LowerRepr.ExactInt
         .Char -> LowerRepr.Word
         .Bool -> LowerRepr.Flag
         .Float -> LowerRepr.FloatBits
@@ -409,7 +420,7 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
 
 fn lower_repr_layout(repr: LowerRepr) -> LIRLayout? {
     if repr == {
-        .Word -> Val(lir_layout_word())
+        .ExactInt | .Word -> Val(lir_layout_word())
         .Discriminant -> Val(lir_layout_word())
         .Flag -> Val(lir_layout_bool())
         .FloatBits -> Val(lir_layout_float())
@@ -460,15 +471,15 @@ fn lower_unsigned_overflow_op(op: LIRBinaryOp) -> LIRBinaryOp Never! {
     }
 }
 
-// An owned value is released by its drop action; borrows and copies are not.
+// Physical ownership is independent of source-language Copy semantics.
 fn lower_is_owned(ownership: MIROwnership) -> Bool Never! {
-    if ownership.drop == MIRDropKind.NoDrop -> return false
-    ownership.mode != MIROwnershipMode.ReadBorrow && ownership.mode != MIROwnershipMode.WriteBorrow
+    mir_runtime_owned_ownership(ownership)
 }
 
 fn lower_drop(m: &LowerModule, repr: LowerRepr, owned: Bool) -> LIRDrop Never! {
     if !owned -> return LIRDrop.Trivial
     if repr == {
+        .ExactInt -> LIRDrop.Runtime{symbol: "jet_rt_int_drop"}
         .Handle(drop, _) -> LIRDrop.Runtime{symbol: drop}
         .Boxed(ty) -> LIRDrop.Function{id: lower_glue_id(&m, ty)}
         else -> LIRDrop.Trivial
@@ -727,6 +738,20 @@ fn lower_call_runtime(m: &LowerModule, f: &LowerFunction, symbol: String, args: 
     lower_emit(&f, LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Runtime{symbol: symbol}, args: ~args})
 }
 
+// `mir_sources` retains the original program.functions row even for mono clones.
+// Synthetic glue/helpers never use these hooks or become diagnostic owners.
+fn lower_comptime_site(m: &LowerModule, f: &LowerFunction, symbol: String, start: Int, end: Int) Never! {
+    if !m.comptime_budget -> return
+    owner :: lower_const(&f, m.mir_sources[f.builder.id.value])
+    first :: lower_const(&f, start)
+    last :: lower_const(&f, end)
+    lower_call_runtime(&m, &f, symbol, [LIRValueID]{owner, first, last}, None)
+}
+
+fn lower_comptime_leave(m: &LowerModule, f: &LowerFunction) Never! {
+    if m.comptime_budget -> lower_call_runtime(&m, &f, "jet_rt_comptime_leave", [LIRValueID]{}, None)
+}
+
 // A static string's address and byte length, for runtime calls.
 fn lower_static_text(m: &LowerModule, f: &LowerFunction, text: String) -> [LIRValueID] Never! {
     address :: lower_pointer(&f)
@@ -831,7 +856,13 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         if place.base == .Static(_) -> next
         slot := -1
         base_key :: if place.base == {
-            .Local(local) -> "l{local.value}"
+            .Local(local) -> {
+                row :: local_rows.get(local.value) ?? {
+                    lower_fail(&m, &f, "place {place.id.value} names missing local {local.value}")
+                    return None
+                }
+                if function.locals[row].ssa_value == .Val(value) -> "t{value.value}" else -> "l{local.value}"
+            }
             .Parameter(value) -> "p{value.value}"
             .Temporary(value) -> "t{value.value}"
             .Capture(value) -> "c{value.value}"
@@ -851,6 +882,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
                     }
                     ty = function.locals[row].ty
                     ownership = function.locals[row].ownership
+                    if function.locals[row].ssa_value == .Val(value) -> _ := &defined_slots.add(value.value, slots.len())
                     _ := &local_slots.add(local.value, slots.len())
                 }
                 .Parameter(value) | .Temporary(value) | .Capture(value) -> {
@@ -875,6 +907,18 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
             &slots.push(LowerSlot{base: place.base, ty: ty, ownership: ownership, carried: !cell && lower_repr_layout(repr) != None, write_param: write_param, cell: cell})
             if base_key != "" -> _ := &base_slots.add(base_key, slot)
         }
+        if place.base == {
+            .Local(local) -> {
+                _ := &local_slots.add(local.value, slot)
+                row :: local_rows.get(local.value) ?? {
+                    lower_fail(&m, &f, "place {place.id.value} names missing local {local.value}")
+                    return None
+                }
+                if function.locals[row].ssa_value == .Val(value) -> _ := &defined_slots.add(value.value, slot)
+            }
+            .Temporary(value) -> _ := &defined_slots.add(value.value, slot)
+            else -> {}
+        }
         _ := &place_slots.add(place.id.value, slot)
     }
     // A place a closure captures by reference makes its root a cell.
@@ -895,17 +939,8 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         }
     }
     read_slots := [U64:Int]{}
-    sunk := [U64:Bool]{}
-    moves := [U64:U64]{}
     loop block in function.blocks {
-        if block.terminator == .Return(returned) {
-            if returned == .Val(value) -> _ := &sunk.add(value.value, true)
-        }
         loop instruction in block.instructions {
-            if instruction.operation == .WritePlace(_, written) -> _ := &sunk.add(written.value, true)
-            if instruction.operation == .ReplacePlace(_, replaced) -> _ := &sunk.add(replaced.value, true)
-            loop stored in lower_stored_operands(instruction.operation) -> _ := &sunk.add(stored.value, true)
-            loop stored in lower_map_stored_operands(p, instruction.operation) -> _ := &sunk.add(stored.value, true)
             result_value :: instruction.result ?? next
             if instruction.operation == {
                 .ReadPlace(place) | .MovePlace(place) -> {
@@ -915,7 +950,6 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
                         }
                     }
                 }
-                .Move(inner) -> _ := &moves.add(result_value.value, inner.value)
                 else -> {}
             }
         }
@@ -965,8 +999,6 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         local_slots: local_slots,
         read_slots: read_slots,
         defined_slots: defined_slots,
-        sunk: sunk,
-        moves: moves,
         order: order,
         lir_blocks: lir_blocks,
         ranks: ranks,
@@ -1084,6 +1116,7 @@ fn lower_function_body(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         // The function start precedes every MIR block: slots start as placeholders.
         entry_id :: LIRBlockID{value: 0}
         lower_start(&f, entry_id, entry_params)
+        lower_comptime_site(&m, &f, "jet_rt_comptime_enter", c.mir.span.start, c.mir.span.end)
         loop slot in 0..<c.slots.len() -> lower_clear_slot(p, c, &f, slot)
         lower_frame_storage(p, c, &f)
         lower_frame_cells(p, c, &m, &f)
@@ -1177,12 +1210,14 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
     }
     lower_start(&f, c.lir_blocks[position], params)
     if function_entry {
+        lower_comptime_site(&m, &f, "jet_rt_comptime_enter", c.mir.span.start, c.mir.span.end)
         loop slot in 0..<c.slots.len() -> lower_clear_slot(p, c, &f, slot)
         lower_frame_storage(p, c, &f)
         lower_frame_cells(p, c, &m, &f)
     }
     loop instruction in block.instructions {
         if f.failed -> return
+        lower_comptime_site(&m, &f, "jet_rt_comptime_step", instruction.span.start, instruction.span.end)
         if instruction.operation == .Phi(_) -> next
         lower_instruction(p, c, &m, &f, instruction)
         if lower_is_noreturn(instruction.operation) -> return
@@ -1344,6 +1379,8 @@ fn lower_condition(m: &LowerModule, f: &LowerFunction, value: MIRValueID) -> LIR
 }
 
 fn lower_terminator(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, block: MIRBasicBlock) Never! {
+    // An empty/backedge-only block still spends fuel on each executed terminator.
+    lower_comptime_site(&m, &f, "jet_rt_comptime_step", block.span.start, block.span.end)
     if block.terminator == {
         .Jump(target) | .Continue(target) | .Break(target, _) -> {
             edge :: lower_edge(p, c, &m, &f, target) ?? return
@@ -1379,11 +1416,16 @@ fn lower_terminator(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                 returned :: value ?? return lower_fail(&m, &f, "return without a value from a function returning {mir_type_display_name(c.mir.return_type)}")
                 lowered :: lower_use(&m, &f, returned) ?? return
                 lower_write_at(p, &f, storage, 0, lowered, c.mir.return_type)
+                lower_comptime_leave(&m, &f)
                 return lower_seal(&f, LIRTerminator.Return{value: None})
             }
-            if lower_repr_layout(c.result) == None -> return lower_seal(&f, LIRTerminator.Return{value: None})
+            if lower_repr_layout(c.result) == None {
+                lower_comptime_leave(&m, &f)
+                return lower_seal(&f, LIRTerminator.Return{value: None})
+            }
             returned :: value ?? return lower_return_implicit_ok(p, c, &m, &f)
             lowered :: lower_use(&m, &f, returned) ?? return
+            lower_comptime_leave(&m, &f)
             lower_seal(&f, LIRTerminator.Return{value: Val(lowered)})
         }
         .Unreachable(_) -> lower_seal(&f, LIRTerminator.Unreachable)
@@ -1400,6 +1442,7 @@ fn lower_return_implicit_ok(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
             lower_alloc(&m, &f, boxed, lower_box_size(p, c.mir.return_type))
             lower_store_word(&f, boxed, 0, 1)
             lower_store_word(&f, boxed, 8, 0)
+            lower_comptime_leave(&m, &f)
             return lower_seal(&f, LIRTerminator.Return{value: Val(boxed)})
         }
     }
@@ -1618,9 +1661,9 @@ fn lower_copy(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
     }
     repr :: lower_repr(p, ty)
     if repr == {
-        .Handle(_, _) -> {}
-        // A copy that owns nothing borrows the source box or storage.
-        .Boxed(_) | .Inline(_) -> { if !lower_value_owned(c, instruction.result ?? value) -> return lower_alias(c, &f, instruction, source) }
+        .ExactInt | .Handle(_, _) | .Boxed(_) -> { if !lower_value_owned(c, instruction.result ?? value) -> return lower_alias(c, &f, instruction, source) }
+        // Dropless inline by-value copies still snapshot their bytes.
+        .Inline(_) -> { if !lower_read_owns(p, c, instruction, ty) -> return lower_alias(c, &f, instruction, source) }
         else -> return lower_alias(c, &f, instruction, source)
     }
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
@@ -1632,6 +1675,7 @@ fn lower_copy(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
 // for an inline aggregate, the same bits for anything else.
 fn lower_clone_into(p: MIRProgram, m: &LowerModule, f: &LowerFunction, source: LIRValueID, dst: LIRValueID, ty: MIRType) Never! {
     if lower_repr(p, ty) == {
+        .ExactInt -> lower_call_runtime(&m, &f, "jet_rt_int_clone", [LIRValueID]{source}, Val(dst))
         .Handle(_, clone) -> {
             if clone == "" -> return lower_fail(&m, &f, "{mir_type_display_name(ty)} cannot be copied")
             lower_call_runtime(&m, &f, clone, [LIRValueID]{source}, Val(dst))
@@ -1709,6 +1753,10 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         lower_storage_into(p, &f, dst, row.ty)
         lower_copy_bytes(&f, dst, 0, walk.base, walk.offset, lower_size(p, row.ty).size)
     } else if !moving && lower_read_owns(p, c, instruction, row.ty) {
+        if inline && !lower_needs_drop(p, row.ty) {
+            lower_storage_into(p, &f, dst, row.ty)
+            return lower_copy_bytes(&f, dst, 0, walk.base, walk.offset, lower_size(p, row.ty).size)
+        }
         layout :: lower_repr_layout(lower_repr(p, row.ty)) ?? return
         held :: lower_new_value(&f, layout, LIRDrop.Trivial, row.ty.identity)
         lower_read_into(p, &f, held, walk.base, walk.offset, row.ty)
@@ -1719,44 +1767,17 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     if moving -> lower_clear_at(p, &f, walk.base, walk.offset, row.ty)
 }
 
-// A read (not a move) of a place whose owned result is stored into another
-// place or aggregate or returned is a copy of its own, as MIRRust.rs
-// place_read's `.clone()`; otherwise the read borrows the place's value.
+// A by-value inline snapshot needs independent byte storage even when it has
+// no destructor. Genuinely borrowed results alias; scalar resource snapshots
+// additionally retain their independent owner.
 fn lower_read_owns(p: MIRProgram, c: LowerContext, instruction: MIRInstruction, ty: MIRType) -> Bool Never! {
     result :: instruction.result ?? return false
-    if c.sunk.get(result.value) == None -> return false
-    lower_value_owned(c, result) && lower_needs_drop(p, ty)
+    index :: c.fact_index.get(result.value) ?? return false
+    ownership :: c.mir.values[index].ownership
+    if ownership.mode == MIROwnershipMode.ReadBorrow || ownership.mode == MIROwnershipMode.WriteBorrow -> return false
+    lower_is_inline(p, ty) || (lower_is_owned(ownership) && lower_needs_drop(p, ty))
 }
 
-// The operands an operation moves into the aggregate it builds.
-fn lower_stored_operands(operation: MIROperation) -> [MIRValueID] Never! {
-    stored := [MIRValueID]{}
-    if operation == {
-        .BuildList(values, _) -> { loop value in values -> &stored.push(value) }
-        .BuildMap(entries) -> {
-            loop entry in entries {
-                &stored.push(entry.key)
-                &stored.push(entry.value)
-            }
-        }
-        .Struct(_, fields) | .Tuple(_, fields) -> { loop field in fields -> &stored.push(field.value) }
-        .Enum(_, _, args) -> { loop arg in args -> &stored.push(arg.value) }
-        .Present(value) | .ResultOk(value) | .ResultErr(value) | .TraitBox(value, _) -> &stored.push(value)
-        // A record literal moves its field values into the struct like `Struct`.
-        .Semantic(semantic) -> {
-            if semantic == .StructLiteral(_, fields, _, _, _) {
-                loop field in fields -> &stored.push(field.value)
-            }
-        }
-        .Closure(_, captures, _) -> {
-            loop capture in captures {
-                if capture == .Value(value) -> &stored.push(value)
-            }
-        }
-        else -> {}
-    }
-    stored
-}
 
 // A root write rebinds the slot to the written value (an inline aggregate's
 // pointer: back edges copy it into the slot's storage, lower_edge), after
@@ -1903,16 +1924,26 @@ fn lower_load_payload(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     lower_read_member(p, c, &m, &f, instruction, subject, dst, boxed, offset, ty)
 }
 
-// Reads the member of type `ty` at base + offset of the value `owner` (a
-// field, payload or variant payload). An owned member stored into a place or
-// aggregate or returned (lower_read_owns) out of an owner that was not moved
-// out of its place is a copy of its own: the owner (a read place, or the
-// value a `Move` passes on) still owns and drops the original (MIRRust.rs
-// place_read clones the read owner before projecting).
+// An owned projection clones from a borrowed parent. A moved parent transfers
+// its member into independent result storage, then clears the moved-out member
+// so the parent's ordinary retirement drops only what it still owns.
 fn lower_read_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, owner: MIRValueID, dst: LIRValueID, base: LIRValueID, offset: Int, ty: MIRType) Never! {
     moved := false
-    if c.fact_index.get(lower_move_root(c, owner).value) == .Val(index) -> moved = c.mir.values[index].ownership.mode == MIROwnershipMode.Move
-    if !moved && lower_read_owns(p, c, instruction, ty) {
+    if c.fact_index.get(owner.value) == .Val(index) -> moved = c.mir.values[index].ownership.mode == MIROwnershipMode.Move
+    if lower_read_owns(p, c, instruction, ty) {
+        if moved {
+            if lower_is_inline(p, ty) {
+                lower_storage_into(p, &f, dst, ty)
+                lower_copy_bytes(&f, dst, 0, base, offset, lower_size(p, ty).size)
+            } else {
+                lower_read_into(p, &f, dst, base, offset, ty)
+            }
+            return lower_clear_at(p, &f, base, offset, ty)
+        }
+        if lower_is_inline(p, ty) && !lower_needs_drop(p, ty) {
+            lower_storage_into(p, &f, dst, ty)
+            return lower_copy_bytes(&f, dst, 0, base, offset, lower_size(p, ty).size)
+        }
         layout :: lower_repr_layout(lower_repr(p, ty)) ?? return
         held :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
         lower_read_into(p, &f, held, base, offset, ty)
@@ -1921,11 +1952,6 @@ fn lower_read_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     lower_read_into(p, &f, dst, base, offset, ty)
 }
 
-// The value a chain of `Move`s starts from.
-fn lower_move_root(c: LowerContext, value: MIRValueID) -> MIRValueID Never! {
-    inner :: c.moves.get(value.value) ?? return value
-    lower_move_root(c, MIRValueID{value: inner})
-}
 
 fn lower_option_inner(ty: MIRType) -> MIRType? {
     if ty.kind == {
@@ -2255,12 +2281,12 @@ fn lower_display(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
     // its erased scalar representation (MIRRust.rs selected_trait_impl_for_type).
     if lower_type_def(p, ty) == .Val(_) -> return lower_display_boxed(p, c, &m, &f, ty, lowered)
     if lower_repr(p, ty) == {
-        .Word | .Flag | .FloatBits -> {}
+        .ExactInt | .Word | .Flag | .FloatBits -> {}
         else -> return lower_display_boxed(p, c, &m, &f, ty, lowered)
     }
     symbol :: if lower_repr(p, ty) == {
+        .ExactInt -> "jet_rt_int_to_string"
         .Word -> if {
-            lower_is_exact_int(ty) -> "jet_rt_int_to_string"
             ty.kind == .Char -> "jet_rt_char_to_string"
             lower_is_unsigned_word(ty) -> "jet_rt_u64_to_string"
             else -> "jet_rt_i64_to_string"
@@ -2797,6 +2823,7 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "closure.thunk" -> return lower_closure_thunk(&m, glue)
     if glue.helper == "entry" -> return lower_entry_function(p, &m, glue)
     if glue.helper == "callable.init" -> return lower_callable_init(&m, glue)
+    if glue.helper == "callable.fini" -> return lower_callable_fini(&m, glue)
     if glue.helper == "entry.err" -> return lower_entry_err_function(p, &m, glue)
     if glue.helper == "closure.release" -> return lower_closure_release(p, &m, glue)
     if glue.helper == "iter.release" -> return lower_helper_iter_typed(p, &m, glue, false)
