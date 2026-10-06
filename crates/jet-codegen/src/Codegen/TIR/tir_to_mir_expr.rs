@@ -4468,7 +4468,7 @@ pub(super) fn lower_expr(
                 super::THandleOp::GameSceneOnFrame { derivation, .. } => derivation.clone(),
                 _ => None,
             };
-            let (receiver, _) = lower_builtin_receiver(
+            let (mut receiver, _) = lower_builtin_receiver(
                 ctx,
                 recv,
                 matches!(
@@ -4510,8 +4510,14 @@ pub(super) fn lower_expr(
                         | THandleOp::TLSStreamWriteAllDeadline
                         | THandleOp::TLSStreamClose
                         | THandleOp::TLSStreamCloseWrite
+                        | THandleOp::SolverRequire
                 ),
             )?;
+            // `Solver.new(seed)`'s seed is its receiver slot: the kernel
+            // takes the native i64 word, so the exact Int narrows here.
+            if matches!(op, THandleOp::SolverNew) {
+                receiver = lower_builtin_native_int(ctx, receiver, &recv.ty)?;
+            }
             let source_args = args;
             let mut args = lower_handle_method_args(ctx, source_args)?;
             if matches!(
