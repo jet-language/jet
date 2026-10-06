@@ -1252,7 +1252,8 @@ fn jet_rust_emit_prelude_call(ctx: &JetRustEmitContext, function: MIRFunction, i
         ty :: jet_rust_emit_value_type(ctx, function, args[0].value)
         if jet_rust_emit_shows_labeled_tuple(&ctx, ty) {
             method :: if jet_rust_emit_adapter_symbol_is(symbol, ctx.config.root_prefix, "jet_fmt_debug") -> "jet_debug" else -> "jet_display"
-            return jet_rust_emit_structural_text(&ctx, ty, jet_rust_emit_call_arg_with_borrow(&ctx, function, args[0], true), method, 0)
+            reference :: jet_rust_emit_call_arg_with_borrow(&ctx, function, args[0], true)
+            return jet_rust_emit_structural_text(&ctx, ty, reference, method, 0)
         }
     }
     mask = jet_rust_emit_exact_adapter_mask(args, symbol, mask, exact)

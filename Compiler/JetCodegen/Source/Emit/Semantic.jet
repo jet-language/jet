@@ -231,11 +231,9 @@ fn jet_rust_emit_print(ctx: &JetRustEmitContext, function: MIRFunction, call: MI
     // local or parameter is never copied first. A test print takes a String,
     // so it consumes the value at its single use.
     value_type :: jet_rust_emit_value_type(ctx, function, value)
-    rendered :: if {
-        value_type.kind != MIRTypeKind.String -> jet_rust_emit_structural_text(&ctx, value_type, jet_rust_emit_inspected_value_reference(&ctx, function, value), "jet_show", 0)
-        test_print -> jet_rust_emit_value_consume(ctx, function, value)
-        else -> "*{jet_rust_emit_inspected_value_reference(&ctx, function, value)}"
-    }
+    if test_print && value_type.kind == MIRTypeKind.String -> return "jet_test_print({jet_rust_emit_value_consume(ctx, function, value)})"
+    inspected :: jet_rust_emit_inspected_value_reference(&ctx, function, value)
+    rendered :: if value_type.kind != MIRTypeKind.String -> jet_rust_emit_structural_text(&ctx, value_type, inspected, "jet_show", 0) else -> "*{inspected}"
     if test_print -> return "jet_test_print({rendered})"
     "{{ let _ = {jet_rust_emit_prelude_args(&ctx, function, call, [String]{"&({rendered})", "true"})}; }}"
 }
