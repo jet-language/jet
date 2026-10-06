@@ -78,6 +78,15 @@ pub enum JetDriverCompileTarget {
     )
 }
 
+// Rust `CompileMode`: `Program` compiles a package for check, build, or run
+// (its artifact starts at the package entry); `Test` compiles the `jet test`
+// harness: named `#Test` bodies are checked and lowered, E0601 reports a file
+// with none, and the artifact is a TestExecutable whose harness runs them.
+pub enum JetDriverCompileMode {
+    Program
+    Test
+}
+
 // One Core library source module the host embeds, mirroring a Rust
 // `CoreModuleExports::CORE_SOURCE_MODULES` row or a compiler-private part from
 // `CoreSourceParts` (both generated from Prelude/Core.jet). `path` is the
@@ -112,6 +121,7 @@ pub struct JetDriverCompileRequest {
     // automatic, memory-aware admission without it). Every thread count gives
     // the same diagnostics and output bytes.
     pub compiler_threads: CompilerThreads
+    pub mode: JetDriverCompileMode{JetDriverCompileMode.Program}
 }
 
 // The compiler's record store, reached only through the host, which owns

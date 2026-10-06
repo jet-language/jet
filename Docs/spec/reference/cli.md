@@ -171,10 +171,11 @@ For C and C++, the driver-specific options are `--project-root`, `--build-root`,
 `--target`. The exact acceptance and forwarding behavior is documented in
 [CC driver hosts](cc-driver.md).
 
-## Jet-hosted `check`, `build`, and `run`
+## Jet-hosted `check`, `build`, `run`, and `test`
 
 The Jet-hosted CLI ([`Compiler/JetCli`](../../../Compiler/JetCli)) runs
-`jet check <file>`, `jet build <file>`, and `jet run <file>` through the Jet
+`jet check <file>`, `jet build <file>`, `jet run <file>`, and
+`jet test <file>` through the Jet
 compiler (`jet_driver_compile`). It gives the compiler one authorized source
 root: the nearest directory at or above the file that holds `package.jet`, or
 the file's own directory for a loose file, with every `.jet` file under it (dot names,
@@ -201,5 +202,23 @@ arguments are the words after the first standalone `--`, or else the
 positional words after the file. Advisory lints stay hidden unless `--verbose`
 or `-v` comes before `--`; a verbose run reports them before the program
 starts. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
-`--color`, and `--threads` are refused with E2104 until they are ported, and so
-is `jet test`.
+`--color`, and `--threads` are refused with E2104 until they are ported.
+
+`jet test <file> [<filter>]` compiles the file in test mode: each named
+`#Test` body is checked and lowered as a synthetic function (a property
+test's ungeneratable parameter types are E0613, a file with no named test is
+E0601), and the artifact is a TestExecutable whose harness owns `main`. The
+harness is built through rustc as `.jet/build/.test_<stem>.<pid>` (the
+Jet-native backend has no harness entry yet) and run with `JET_TEST_CAPTURE`,
+`JET_TEST_FILTER`, `JET_TEST_SHUFFLE_SEED`, `JET_TEST_SERIAL`,
+`JET_TEST_TRACE_TIERS`, `JET_UPDATE_SNAPSHOTS`, and `JET_PROJECT_ROOT`. Its
+captured output is shown under `--capture=all`, or for a failed run under the
+default `--capture=failed`; the exit is 0 when the harness passed, else 1. It
+honors `--capture`, `--filter`, `--shuffle=<seed>`, `--serial`,
+`--trace-tiers`, `-u`/`--update-snapshots`, `--fresh`, `--show-default`,
+`--release`, `--profile`, `--verbose`, `--quiet`, `--color`, and `--threads`.
+Directory and package targets, doctests, a `fn test` override, a bare
+`--shuffle`, and the other test flags are refused with E2104 until they are
+ported. The test-result cache, the evidence report, and the package claims
+floor are not ported yet: every run compiles fresh, and the outcome is the
+harness exit (the Rust host's outcome for a package without a claims floor).

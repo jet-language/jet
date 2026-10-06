@@ -11,6 +11,7 @@ use jet_backend.[
 ]
 use jet_driver.[
     JetDriverAuthorizedSourceSnapshot,
+    JetDriverCompileMode,
     JetDriverCompileResult,
     JetDriverVerbOutput,
     JET_DRIVER_EXIT_OK,
@@ -50,7 +51,7 @@ fn jet_cli_errors(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
 // on the file that owns it, and report the outcome the Rust host prints.
 fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color, threads)
+    compiled :: jet_cli_compile_file(file, color, threads, JetDriverCompileMode.Program)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
         .Compiled(result, snapshot) -> {
@@ -194,7 +195,7 @@ fn jet_cli_build_result(file: String, source: String, color: Bool, release: Bool
 
 fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Bool, threads: Int?) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color, threads)
+    compiled :: jet_cli_compile_file(file, color, threads, JetDriverCompileMode.Program)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
         .Compiled(result, snapshot) -> output = jet_cli_build_result(file, source, color, release, result, snapshot)
@@ -219,26 +220,29 @@ fn jet_cli_exec(binary: String, program_args: [String], color: Bool) -[Exec, Tim
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
 }
 
+// Under `--verbose`, the advisory lints (not a11y) of a compile with no
+// errors, written to stderr before the built program runs, so they precede
+// its output on the shared streams (D-LINT-VISIBILITY2=A).
+fn jet_cli_write_verbose_lints(file: String, source: String, color: Bool, diagnostics: [Diagnostic]) {
+    lints := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_LINT && !jet_driver_is_a11y_lint(diagnostic.code) -> &lints.push(diagnostic)
+    }
+    report :: jet_driver_report_problems(file, source, lints, color, true)
+    if report.len() > 0 {
+        stderr_handle :: cli_term.stderr()
+        &stderr_handle.write(report).drop("jet stderr")
+    }
+}
+
 // `jet run <file>`: build it as `jet build` does, then run it. Problems with
-// an error stop the run; `run` hides advisory lints unless `--verbose`
-// (D-LINT-VISIBILITY2=A), and a verbose run reports them before the program
-// starts, so they precede its output on the shared streams.
+// an error stop the run; `run` hides advisory lints unless `--verbose`.
 fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, verbose: Bool, program_args: [String], result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
     diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
     if jet_cli_errors(diagnostics).len() > 0 {
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, diagnostics, color, verbose), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
-    if verbose {
-        lints := [Diagnostic]{}
-        loop diagnostic in diagnostics {
-            if diagnostic.severity == DIAGNOSTIC_LINT && !jet_driver_is_a11y_lint(diagnostic.code) -> &lints.push(diagnostic)
-        }
-        report :: jet_driver_report_problems(file, source, lints, color, true)
-        if report.len() > 0 {
-            stderr_handle :: cli_term.stderr()
-            &stderr_handle.write(report).drop("jet stderr")
-        }
-    }
+    if verbose -> jet_cli_write_verbose_lints(file, source, color, diagnostics)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if jet_cli_build_binary(file, "run", color, release, result, snapshot) == {
         .Failed(failure) -> output = ~failure
@@ -249,10 +253,79 @@ fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, 
 
 fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool, verbose: Bool, threads: Int?, program_args: [String]) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color, threads)
+    compiled :: jet_cli_compile_file(file, color, threads, JetDriverCompileMode.Program)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
         .Compiled(result, snapshot) -> output = jet_cli_run_result(file, source, color, release, verbose, program_args, result, snapshot)
+    }
+    output
+}
+
+// `jet test <file>` after the compile (Source/CmdCompile.rs `run_test_target`):
+// errors stop it with exit 1; `--verbose` lints precede the run. The harness
+// builds as `.jet/build/.test_<stem>.<pid>` through the rustc path for either
+// profile (the Jet-native backend has no harness entry) and runs with its
+// output captured; its selections reach it as environment: the project root,
+// snapshot updates, the name filter, the shuffle seed, serial runs, the tier
+// marker, and the capture policy. Its stdout and stderr are shown when
+// `--capture=all`, or on a failed run under the default `failed`; the binary
+// is removed, and the exit is 0 when the harness passed, else 1. The evidence
+// report, the claims floor, and the result cache are not ported yet; without
+// a package claims floor the outcome is the harness exit, as in the Rust host.
+fn jet_cli_test_result(file: String, source: String, color: Bool, verbose: Bool, options: JetCLITestOptions, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
+    diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+    if jet_cli_errors(diagnostics).len() > 0 {
+        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, diagnostics, color, verbose), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    if verbose -> jet_cli_write_verbose_lints(file, source, color, diagnostics)
+    if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+    if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing the tests of `{file}`")
+    root :: snapshot.roots[0].canonical_path
+    build_dir :: "{root}/.jet/build"
+    cli_files.create_dir_all(build_dir) ?? return jet_cli_build_failed("couldn't create the build directory {build_dir}: {err}", jet_cli_why("E2105"), "check that the project directory is writable", color)
+    // Process-private: concurrent `jet test` runs of one file never replace
+    // an executable another is launching.
+    stem :: ".test_{jet_cli_stem(file)}.{cli_process.current_pid()}"
+    binary :: "{build_dir}/{stem}"
+    built :: jet_cli_build_release(file, result, root, build_dir, stem, binary, color)
+    if built.exit_code != JET_DRIVER_EXIT_OK -> return built
+    spec := cli_process.cmd([String]{binary})
+    if options.project_root == .Val(project_root) -> spec = spec.env("JET_PROJECT_ROOT", project_root)
+    if options.update_snapshots -> spec = spec.env("JET_UPDATE_SNAPSHOTS", "1")
+    if options.filter == .Val(filter) -> spec = spec.env("JET_TEST_FILTER", filter)
+    if options.shuffle_seed == .Val(seed) -> spec = spec.env("JET_TEST_SHUFFLE_SEED", seed)
+    if options.serial -> spec = spec.env("JET_TEST_SERIAL", "1")
+    if options.trace_tiers -> spec = spec.env("JET_TEST_TRACE_TIERS", "1")
+    spec = spec.env("JET_TEST_CAPTURE", options.capture)
+    receipt :: spec.run() ?? {
+        cli_files.remove(binary).drop("the run already failed; a leftover harness binary is harmless")
+        return JetDriverVerbOutput{
+            stdout: "",
+            stderr: jet_cli_report("E2105", "couldn't run tests in `{file}`: {err}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color),
+            exit_code: JET_DRIVER_EXIT_USER_ERROR,
+        }
+    }
+    cli_files.remove(binary).drop("the harness is one-shot; a leftover binary is harmless")
+    passed :: receipt.success
+    show :: options.capture == "all" || (!passed && options.capture == "failed")
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: if passed -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR}
+    if show {
+        output.stdout = receipt.output
+        output.stderr = receipt.errors
+    }
+    output
+}
+
+fn jet_cli_compile_test(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions) -> JetDriverVerbOutput {
+    if options.status.len() > 0 {
+        stderr_handle :: cli_term.stderr()
+        &stderr_handle.write(options.status).drop("jet stderr")
+    }
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    compiled :: jet_cli_compile_file(file, color, threads, JetDriverCompileMode.Test)
+    if compiled == {
+        .Refused(refusal) -> output = ~refusal
+        .Compiled(result, snapshot) -> output = jet_cli_test_result(file, source, color, verbose, options, result, snapshot)
     }
     output
 }
@@ -266,6 +339,7 @@ pub fn jet_cli_main(args: [String]) -> Int {
         .Check(file, source, color, quiet, threads) -> output = jet_cli_compile_check(file, source, color, quiet, threads)
         .Build(file, source, color, release, threads) -> output = jet_cli_compile_build(file, source, color, release, threads)
         .Run(file, source, color, release, verbose, threads, program_args) -> output = jet_cli_compile_run(file, source, color, release, verbose, threads, program_args)
+        .Test(file, source, color, verbose, threads, options) -> output = jet_cli_compile_test(file, source, color, verbose, threads, options)
     }
     if output.stdout.len() > 0 {
         out :: cli_term.stdout()

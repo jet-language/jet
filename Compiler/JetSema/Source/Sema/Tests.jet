@@ -5,9 +5,42 @@ use jet_foundation.[
     TFunc,
     TFuncKind,
     TestDef,
+    Type,
     ast_func,
     tir_test_artifact_key,
+    type_name,
 ]
+
+// D-TEST1 (Rust BodyCheck.rs `property_param_generatable`): the parameter
+// types the property-test runner can synthesize inputs for: the scalar value
+// types plus `[T]`, `T?` and fixed lists of a generatable element.
+fn sema_property_param_generatable(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .InlineRange(_, _, _) -> true
+        .List(inner) -> sema_property_param_generatable(inner)
+        .Option(inner) -> sema_property_param_generatable(inner)
+        .FixedList(elem, _) -> sema_property_param_generatable(elem)
+        else -> false
+    }
+}
+
+// E0613 (Rust `property_param_unsupported`): one row per parameter of a
+// parameterized `#Test fn` whose type has no automatic generator, reported
+// before the test body's own diagnostics.
+pub fn sema_property_param_diagnostics(test: TestDef) -> [Diagnostic] Never! {
+    diagnostics := [Diagnostic]{}
+    loop parameter in test.params {
+        if sema_property_param_generatable(parameter.ty) -> next
+        &diagnostics.push(sema_error(
+            "E0613",
+            parameter.ty_span,
+            "a property test can't generate values of type `{type_name(parameter.ty)}`",
+            "a parameterized `#Test fn` is a property test (D-TEST1): Jet generates inputs from each parameter's type, but this type has no built-in generator",
+            "use a generatable type (Int, Float, Bool, String, Char, a sized integer, or a list/optional of those), or write a plain `#Test \"name\" {{ … }}` block and construct the value yourself",
+        ))
+    }
+    diagnostics
+}
 
 pub struct SemaTestFunctionCheckResult {
     pub function: TFunc?
