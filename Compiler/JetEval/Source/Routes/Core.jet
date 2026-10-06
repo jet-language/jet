@@ -62,59 +62,31 @@ fn jet_eval_route_core_math(row: MIRCoreCall, data: [TComptimeValue], args: [Jet
             bits :: jet_eval_route_core_wrapping_bits(data[0], &machine, span) ?? return None
             Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Float{value: math.from_bits(bits), bits: 64}})
         }
-        // Host Float predicates (plain_calls `is_nan`/`is_infinite`/`is_finite`
-        // and the classification rows).
-        "jet_std_math_is_nan" | "jet_std_math_is_infinite" | "jet_std_math_is_finite" | "jet_std_math_is_normal" | "jet_std_math_is_subnormal" | "jet_std_math_is_signed" | "jet_std_math_sign_bit" | "jet_std_math_is_zero" | "jet_std_math_is_integer" -> {
-            number :: jet_eval_route_core_float(data, 0, &machine, span) ?? return None
-            flag :: if symbol == {
-                "jet_std_math_is_nan" -> math.is_nan(number)
-                "jet_std_math_is_infinite" -> math.is_inf(number)
-                "jet_std_math_is_finite" -> math.is_finite(number)
-                "jet_std_math_is_normal" -> math.is_normal(number)
-                "jet_std_math_is_subnormal" -> math.is_subnormal(number)
-                "jet_std_math_is_signed" | "jet_std_math_sign_bit" -> math.is_signed(number)
-                "jet_std_math_is_zero" -> number == 0.0
-                else -> math.is_integer(number)
-            }
-            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: flag}})
-        }
         "jet_std_math_sin" | "jet_std_math_cos" | "jet_std_math_tan" | "jet_std_math_asin" | "jet_std_math_acos" | "jet_std_math_atan" | "jet_std_math_sinh" | "jet_std_math_cosh" | "jet_std_math_tanh" -> jet_eval_route_core_float_result(jet_eval_route_core_unary(symbol, jet_eval_route_core_float(data, 0, &machine, span) ?? return None))
         "jet_std_math_exp" | "jet_std_math_ln" | "jet_std_math_log2" | "jet_std_math_log10" | "jet_std_math_acosh" | "jet_std_math_asinh" | "jet_std_math_atanh" | "jet_std_math_cbrt" | "jet_std_math_exp2" | "jet_std_math_exp_m1" | "jet_std_math_ln_1p" -> jet_eval_route_core_float_result(jet_eval_route_core_unary(symbol, jet_eval_route_core_float(data, 0, &machine, span) ?? return None))
-        "jet_std_math_degrees" | "jet_std_math_radians" | "jet_std_math_floor" | "jet_std_math_ceil" | "jet_std_math_trunc" | "jet_std_math_fract" | "jet_std_math_signum" | "jet_std_math_sqrt" | "jet_std_math_next_up" | "jet_std_math_next_down" | "jet_std_math_cot" | "jet_std_math_inv" -> jet_eval_route_core_float_result(jet_eval_route_core_unary(symbol, jet_eval_route_core_float(data, 0, &machine, span) ?? return None))
-        // plain_calls `is_canonical`, `sin_cos`, `modf`, `fma`, `lerp`.
-        "jet_std_math_is_canonical" -> {
+        "jet_std_math_floor" | "jet_std_math_ceil" | "jet_std_math_trunc" | "jet_std_math_sqrt" -> jet_eval_route_core_float_result(jet_eval_route_core_unary(symbol, jet_eval_route_core_float(data, 0, &machine, span) ?? return None))
+        "jet_std_math_sin_cos" -> {
             number :: jet_eval_route_core_float(data, 0, &machine, span) ?? return None
-            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: math.is_finite(number) || math.is_nan(number)}})
-        }
-        "jet_std_math_sin_cos" | "jet_std_math_modf" -> {
-            number :: jet_eval_route_core_float(data, 0, &machine, span) ?? return None
-            first_name :: if symbol == "jet_std_math_sin_cos" -> "sin" else -> "fract"
-            second_name :: if symbol == "jet_std_math_sin_cos" -> "cos" else -> "whole"
-            first :: if symbol == "jet_std_math_sin_cos" -> math.sin(number) else -> math.fract(number)
-            second :: if symbol == "jet_std_math_sin_cos" -> math.cos(number) else -> math.trunc(number)
-            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Struct{type_name: "({first_name},{second_name})", fields: [TComptimeField]{
-                TComptimeField{name: first_name, value: TComptimeValue.Float{value: first, bits: 64}},
-                TComptimeField{name: second_name, value: TComptimeValue.Float{value: second, bits: 64}},
+            pair :: math.sin_cos(number)
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Struct{type_name: "(sin,cos)", fields: [TComptimeField]{
+                TComptimeField{name: "sin", value: TComptimeValue.Float{value: pair.sin, bits: 64}},
+                TComptimeField{name: "cos", value: TComptimeValue.Float{value: pair.cos, bits: 64}},
             }}})
         }
-        "jet_std_math_fma" | "jet_std_math_lerp" -> {
+        "jet_std_math_fma" -> {
             first :: jet_eval_route_core_float(data, 0, &machine, span) ?? return None
             second :: jet_eval_route_core_float(data, 1, &machine, span) ?? return None
             third :: jet_eval_route_core_float(data, 2, &machine, span) ?? return None
-            jet_eval_route_core_float_result(if symbol == "jet_std_math_fma" -> math.fma(first, second, third) else -> math.lerp(first, second, third))
+            jet_eval_route_core_float_result(math.fma(first, second, third))
         }
-        "jet_std_math_atan2" | "jet_std_math_hypot" | "jet_std_math_copysign" | "jet_std_math_log" | "jet_std_math_pow" | "jet_std_math_fmod" | "jet_std_math_remainder" | "jet_std_math_next_after" -> {
+        "jet_std_math_atan2" | "jet_std_math_hypot" | "jet_std_math_pow" | "jet_std_math_fmod" -> {
             left :: jet_eval_route_core_float(data, 0, &machine, span) ?? return None
             right :: jet_eval_route_core_float(data, 1, &machine, span) ?? return None
             result :: if symbol == {
                 "jet_std_math_atan2" -> math.atan2(left, right)
                 "jet_std_math_hypot" -> math.hypot(left, right)
-                "jet_std_math_copysign" -> math.copysign(left, right)
-                "jet_std_math_log" -> math.log(left, right)
                 "jet_std_math_pow" -> math.pow(left, right)
-                "jet_std_math_fmod" -> math.fmod(left, right)
-                "jet_std_math_remainder" -> math.remainder(left, right)
-                else -> math.next_after(left, right)
+                else -> math.fmod(left, right)
             }
             jet_eval_route_core_float_result(result)
         }
@@ -224,18 +196,10 @@ fn jet_eval_route_core_unary(symbol: String, number: Float) -> Float Never! {
         "jet_std_math_exp2" -> math.exp2(number)
         "jet_std_math_exp_m1" -> math.exp_m1(number)
         "jet_std_math_ln_1p" -> math.ln_1p(number)
-        "jet_std_math_degrees" -> math.degrees(number)
-        "jet_std_math_radians" -> math.radians(number)
         "jet_std_math_floor" -> math.floor(number)
         "jet_std_math_ceil" -> math.ceil(number)
         "jet_std_math_trunc" -> math.trunc(number)
-        "jet_std_math_fract" -> math.fract(number)
-        "jet_std_math_signum" -> math.signum(number)
-        "jet_std_math_sqrt" -> math.sqrt(number)
-        "jet_std_math_next_up" -> math.next_up(number)
-        "jet_std_math_next_down" -> math.next_down(number)
-        "jet_std_math_cot" -> math.cot(number)
-        else -> math.inv(number)
+        else -> math.sqrt(number)
     }
 }
 

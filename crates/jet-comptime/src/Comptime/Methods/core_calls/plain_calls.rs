@@ -312,7 +312,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         ("core.math", "sqrt") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.sqrt())),
         ("core.math", "floor") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.floor())),
         ("core.math", "ceil") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.ceil())),
-        ("core.math", "round") => Ok(CtValue::Int(as_ct_float(one(0)?, span)?.round_i64())),
         ("core.math", "abs") => match one(0)? {
             value if exact_big(&value).is_some() => {
                 let value = exact_big(&value).expect("whole-number abs");
@@ -414,32 +413,12 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         ("core.math", "exp2") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.exp2())),
         ("core.math", "exp_m1") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.exp_m1())),
         ("core.math", "ln_1p") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.ln_1p())),
-        ("core.math", "signum") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.signum())),
         ("core.math", "trunc") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.trunc())),
-        ("core.math", "fract") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.fract())),
-        ("core.math", "degrees") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.to_degrees())),
-        ("core.math", "radians") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.to_radians())),
         ("core.math", "atan2") => {
             let left = as_ct_float(one(0)?, span)?;
             let right = as_ct_float(one(1)?, span)?;
             Ok(CtValue::Float(
                 left.atan2(right)
-                    .ok_or_else(|| unsupported("mixing float widths", span))?,
-            ))
-        }
-        ("core.math", "copysign") => {
-            let left = as_ct_float(one(0)?, span)?;
-            let right = as_ct_float(one(1)?, span)?;
-            Ok(CtValue::Float(
-                left.copysign(right)
-                    .ok_or_else(|| unsupported("mixing float widths", span))?,
-            ))
-        }
-        ("core.math", "log") => {
-            let left = as_ct_float(one(0)?, span)?;
-            let right = as_ct_float(one(1)?, span)?;
-            Ok(CtValue::Float(
-                left.log(right)
                     .ok_or_else(|| unsupported("mixing float widths", span))?,
             ))
         }
@@ -488,17 +467,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 value.is_even()
             } else {
                 value.is_odd()
-            }))
-        }
-        ("core.math", method @ ("leading_ones" | "trailing_ones" | "digits")) => {
-            let value = exact_big(one(0)?)
-                .ok_or_else(|| unsupported("this operation needs a whole number", span))?;
-            Ok(CtValue::Int(if method == "leading_ones" {
-                value.leading_ones()
-            } else if method == "trailing_ones" {
-                value.trailing_ones()
-            } else {
-                value.digits()
             }))
         }
         ("core.math", "binomial") => {
@@ -600,117 +568,12 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 ("rem", exact_int_value(remainder)),
             ]))
         }
-        ("core.math", "is_normal") => Ok(CtValue::Bool(
-            as_ct_float(one(0)?, span)?.as_f64().is_normal(),
-        )),
-        ("core.math", "is_subnormal") => Ok(CtValue::Bool(
-            as_ct_float(one(0)?, span)?.as_f64().is_subnormal(),
-        )),
-        ("core.math", "is_canonical") => {
-            let x = as_ct_float(one(0)?, span)?;
-            Ok(CtValue::Bool(x.is_finite() || x.is_nan()))
-        }
-        ("core.math", "is_signed" | "sign_bit") => Ok(CtValue::Bool(
-            as_ct_float(one(0)?, span)?.as_f64().is_sign_negative(),
-        )),
-        ("core.math", "is_zero") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.as_f64() == 0.0)),
-        ("core.math", "is_integer") => {
-            let x = as_ct_float(one(0)?, span)?;
-            Ok(CtValue::Bool(x.is_finite() && x.as_f64().fract() == 0.0))
-        }
-        ("core.math", "next_up") => Ok(CtValue::Float(CtFloat::f64(
-            as_ct_float(one(0)?, span)?.as_f64().next_up(),
-        ))),
-        ("core.math", "next_down") => Ok(CtValue::Float(CtFloat::f64(
-            as_ct_float(one(0)?, span)?.as_f64().next_down(),
-        ))),
-        ("core.math", "copy") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?)),
-        ("core.math", "cot") => {
-            let x = as_ct_float(one(0)?, span)?.as_f64();
-            Ok(CtValue::Float(CtFloat::f64(1.0 / x.tan())))
-        }
-        ("core.math", "inv") => {
-            let x = as_ct_float(one(0)?, span)?.as_f64();
-            Ok(CtValue::Float(CtFloat::f64(1.0 / x)))
-        }
-        ("core.math", "zero") => Ok(CtValue::Float(CtFloat::f64(0.0))),
-        ("core.math", "radix") => Ok(CtValue::Int(2)),
-        ("core.math", "cmp") => {
-            let a = as_ct_float(one(0)?, span)?.as_f64();
-            let b = as_ct_float(one(1)?, span)?.as_f64();
-            Ok(CtValue::Int(math_lib_pure::jet_std_math_cmp(a, b)))
-        }
-        ("core.math", "next_after") => {
-            let a = as_ct_float(one(0)?, span)?.as_f64();
-            let b = as_ct_float(one(1)?, span)?.as_f64();
-            Ok(CtValue::Float(CtFloat::f64(
-                math_lib_pure::jet_std_math_next_after(a, b),
-            )))
-        }
-        ("core.math", "ldexp" | "scaleb") => {
-            let x = as_ct_float(one(0)?, span)?.as_f64();
-            let exp = match one(1)? {
-                CtValue::Int(v) => *v,
-                _ => return Err(unsupported("ldexp needs a whole-number exponent", span)),
-            };
-            Ok(CtValue::Float(CtFloat::f64(
-                math_lib_pure::jet_std_math_ldexp(x, exp),
-            )))
-        }
-        ("core.math", "ilogb") => {
-            let x = as_ct_float(one(0)?, span)?.as_f64();
-            Ok(match math_lib_pure::jet_std_math_ilogb(x) {
-                Some(e) => CtValue::Present(Box::new(CtValue::Int(e))),
-                None => CtValue::absent(Type::Int),
-            })
-        }
-        ("core.math", "logb") => Ok(CtValue::Float(CtFloat::f64(
-            math_lib_pure::jet_std_math_logb(as_ct_float(one(0)?, span)?.as_f64()),
-        ))),
-        ("core.math", "significand") => Ok(CtValue::Float(CtFloat::f64(
-            math_lib_pure::jet_std_math_significand(as_ct_float(one(0)?, span)?.as_f64()),
-        ))),
-        ("core.math", "ulp") => Ok(CtValue::Float(CtFloat::f64(
-            math_lib_pure::jet_std_math_ulp(as_ct_float(one(0)?, span)?.as_f64()),
-        ))),
-        ("core.math", "erf") => Ok(CtValue::Float(CtFloat::f64(
-            math_lib_pure::jet_std_math_erf(as_ct_float(one(0)?, span)?.as_f64()),
-        ))),
-        ("core.math", "erfc") => Ok(CtValue::Float(CtFloat::f64(
-            math_lib_pure::jet_std_math_erfc(as_ct_float(one(0)?, span)?.as_f64()),
-        ))),
-        ("core.math", "gamma") => Ok(CtValue::Float(CtFloat::f64(
-            math_lib_pure::jet_std_math_gamma(as_ct_float(one(0)?, span)?.as_f64()),
-        ))),
-        ("core.math", "lgamma") => Ok(CtValue::Float(CtFloat::f64(
-            math_lib_pure::jet_std_math_lgamma(as_ct_float(one(0)?, span)?.as_f64()),
-        ))),
         ("core.math", "sin_cos") => {
             let x = as_ct_float(one(0)?, span)?.as_f64();
             let (s, c) = x.sin_cos();
             Ok(named_tuple(&[
                 ("sin", CtValue::Float(CtFloat::f64(s))),
                 ("cos", CtValue::Float(CtFloat::f64(c))),
-            ]))
-        }
-        ("core.math", "modf") => {
-            let x = as_ct_float(one(0)?, span)?;
-            Ok(named_tuple(&[
-                ("fract", CtValue::Float(x.fract())),
-                ("whole", CtValue::Float(x.trunc())),
-            ]))
-        }
-        ("core.math", "frexp") => {
-            let x = as_ct_float(one(0)?, span)?.as_f64();
-            let exp = math_lib_pure::jet_std_math_ilogb(x).unwrap_or(0);
-            let frac = if x == 0.0 || !x.is_finite() {
-                x
-            } else {
-                math_lib_pure::jet_std_math_ldexp(x, -exp)
-            };
-            Ok(named_tuple(&[
-                ("frac", CtValue::Float(CtFloat::f64(frac))),
-                ("exp", CtValue::Int(exp)),
             ]))
         }
         ("core.math", "hypot") => {
@@ -721,18 +584,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                     .ok_or_else(|| unsupported("mixing float widths", span))?,
             ))
         }
-        ("core.math", "lerp") => {
-            let left = as_ct_float(one(0)?, span)?;
-            let right = as_ct_float(one(1)?, span)?;
-            let t = as_ct_float(one(2)?, span)?;
-            Ok(CtValue::Float(
-                left.lerp(right, t)
-                    .ok_or_else(|| unsupported("mixing float widths", span))?,
-            ))
-        }
-        ("core.math", "is_nan") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.is_nan())),
-        ("core.math", "is_inf") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.is_infinite())),
-        ("core.math", "is_finite") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.is_finite())),
         ("core.math", "sign") => Ok(CtValue::Int(as_ct_float(one(0)?, span)?.sign())),
         // --- core.text module implementation surface (card #392: `"core.string"` was a
         // dead key here — no import ever resolves to it, `core.text` is the
