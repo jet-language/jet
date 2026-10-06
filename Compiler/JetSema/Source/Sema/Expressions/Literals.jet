@@ -713,6 +713,16 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
         }
         .Apply(name, args) -> {
             if (name == "View" || name == "ViewMut") && args.len() == 1 {
+                // D-MEMPROVENANCE2 (Rust `infer_index`): `view[a..b]` is a
+                // `Slice` typed `View<T>`, a read reborrow of the view's owner.
+                if checked_index.ty == (Type.Named{name: "Range"}) {
+                    if sema_expression_view_subrange_type(base_ty) == .Val(window) {
+                        zero_start :: sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
+                        zero_end :: sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
+                        subrange :: sema_tir_expr(window, TExprKind.Slice{base: checked_base, start: zero_start, end: zero_end, range: Val(checked_index), location: sema_expression_panic_location(environment, span)}, span)
+                        return sema_expr_expected(subrange, expected, environment, &diagnostics)
+                    }
+                }
                 if !sema_expression_integer_index(checked_index, expr_span(index), &diagnostics) -> return None
                 resolved_kind = IndexKind.List
                 result_ty = Val(args[0])
@@ -748,7 +758,7 @@ fn sema_expression_slice(base: Expr, start: Expr, end: Expr, range: Expr?, span:
                 .List(element) -> result_ty = Val(Type.List{element: element})
                 .FixedList(element, _) -> result_ty = Val(Type.List{element: element})
                 .String -> result_ty = Val(Type.String)
-                else -> {}
+                else -> result_ty = sema_expression_view_subrange_type(checked_base.ty)
             }
         }
         else -> {
@@ -761,7 +771,7 @@ fn sema_expression_slice(base: Expr, start: Expr, end: Expr, range: Expr?, span:
                 .List(element) -> result_ty = Val(Type.List{element: element})
                 .FixedList(element, _) -> result_ty = Val(Type.List{element: element})
                 .String -> result_ty = Val(Type.String)
-                else -> {}
+                else -> result_ty = sema_expression_view_subrange_type(checked_base.ty)
             }
         }
     }
@@ -777,6 +787,19 @@ fn sema_expression_slice(base: Expr, start: Expr, end: Expr, range: Expr?, span:
     zero_end :: sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
     result :: sema_tir_expr(result_ty ?? Type.Named{name: "Unit"}, TExprKind.Slice{base: checked_base, start: checked_start ?? zero_start, end: checked_end ?? zero_end, range: range_value, location: sema_expression_panic_location(environment, scopes, span)}, span)
     sema_expr_expected(result, expected, environment, &diagnostics)
+}
+
+// D-MEMPROVENANCE2 (Rust `view_subrange_type`): a subrange of a declared
+// `View<T>`/`ViewMut<T>` is a `View<T>` read reborrow of the same owner;
+// `&view[a..b]` on a `ViewMut<T>` reopens the write window in the place.
+fn sema_expression_view_subrange_type(ty: Type) -> Type? Never! {
+    if sema_expr_unwrap_tag(ty) == .Apply(name, args) {
+        if (name == "View" || name == "ViewMut") && args.len() == 1 {
+            if args[0] == (Type.Named{name: "str"}) -> return None
+            return Val(Type.Apply{name: "View", args: [Type]{args[0]}})
+        }
+    }
+    None
 }
 
 // D-DISPLAY-SHAPE: a nominal type whose `Display` comes from a derive: a
