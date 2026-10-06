@@ -19,6 +19,7 @@ use jet_foundation.[
     RecordSection,
     Span,
     diagnostic_from_registry,
+    diagnostic_registry_row,
     diagnostic_with_source_path,
     mir_sha256_hex,
     package_key_check_key,
@@ -149,6 +150,10 @@ struct JetDriverSourceUnit {
     relative_path: String
     source_segments: [SemaSourceSegment]
     source_origin: SemaSourceOrigin
+    // D-MOD-CYCLE1=A: a file of a `package.jet` package shares its package's
+    // namespace. Loose files, one-file (inline Package) packages, embedded
+    // Core sources, and synthetic modules have none.
+    in_namespace: Bool
 }
 
 struct JetDriverPackageDependency {
@@ -180,6 +185,9 @@ struct JetDriverPackageInfo {
     authority_needs: [String]
     entry: JetDriverPackageEntry?
     manifest_path: String?
+    // The Package comes from a leading inline `package { … }` block (its
+    // carrier file is `manifest_path`), not from `package.jet`.
+    inline_package: Bool
     dependencies: [JetDriverPackageDependency]
     // D-MOD-CYCLE1=A: the kinds the manifest's `outputs:` declare. A package
     // that declares a Library and no Executable has no `fn run` (E0625).
@@ -351,6 +359,13 @@ fn jet_driver_diagnostic(code: String, span: Span, what: String, why: String, fi
 
 fn jet_driver_diagnostic_without_span(code: String, what: String, why: String, fix: String) -> Diagnostic {
     diagnostic_from_registry(code, None, what, why, fix)
+}
+
+// A diagnostic worded entirely by its registry row (Rust
+// `Diagnostic::from_row` with no holes).
+fn jet_driver_row_diagnostic(code: String, span: Span?) -> Diagnostic {
+    row :: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
+    diagnostic_from_registry(code, span, row.what, row.why, row.fix)
 }
 
 fn jet_driver_diagnostic_with_optional_span(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic {
