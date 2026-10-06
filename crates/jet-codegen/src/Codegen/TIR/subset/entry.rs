@@ -219,7 +219,7 @@ pub(crate) fn tir_covers_trait_method(
     if !serde_generic_owner
         && !is_covered_struct_ty(&owner_ty, cx)
         && !is_covered_enum_ty(&owner_ty, cx)
-        && !cx.distinct_types.contains_key(type_name)
+        && !cx.fact_distinct_types(type_name).is_some()
         && !operator_on_builtin
     {
         refusal::note(refusal::UNCOVERED_OWNER, f.name_span);

@@ -152,6 +152,30 @@
         unsafe { ptr.read() }
     }
 
+    // The Jet-native backend's raw-pointer adapters (Lower/Pointers.jet): the
+    // same sentry kernel facts for a native storage size and alignment.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_sentry_address_of(ptr: *const u8, bytes: usize) -> i64 {
+        crate::jet_c_abi::guard(|| {
+            jet_sentry_register_allocation(ptr.cast_mut(), bytes);
+            ptr as usize as i64
+        })
+    }
+
+    /// Validates a read of `bytes` at the word address `address` and returns
+    /// it as the pointer the native caller loads from.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_sentry_read(address: i64, bytes: usize, align: usize) -> *const u8 {
+        crate::jet_c_abi::guard(|| {
+            if let Some(fault) = sentry_kernel::jet_sentry_check(address as usize, bytes, align, "read", "valid_ptr") {
+                jet_sentry_runtime_stop(fault);
+            }
+            address as usize as *const u8
+        })
+    }
+
     pub fn jet_sentry_volatile_read<T>(ptr: *const T, obligation: &str) -> T {
         jet_sentry_check(ptr, "volatile_read", obligation);
         // SAFETY: the source gate owns the raw operation and the shared kernel

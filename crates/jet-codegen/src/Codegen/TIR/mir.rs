@@ -10665,6 +10665,10 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn ownership_for(&self, ty: &Type) -> MirOwnership {
+        // D-TYPE2-SPELL1: an inline range is knowledge over its base carrier,
+        // not a runtime wrapper, so it carries exactly the base's ownership.
+        // Otherwise `range_fallible() ?? range_literal` joins an Owned payload
+        // with a Copy one at its Phi.
         match ty {
             Type::Int => MirOwnership::copy_value(),
             Type::Tagged { inner, .. } | Type::InlineRange { base: inner, .. } | Type::Quantity { base: inner, .. } => self.ownership_for(inner),

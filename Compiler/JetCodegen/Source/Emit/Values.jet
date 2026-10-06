@@ -1223,7 +1223,7 @@ fn jet_rust_emit_immutable_read_place(ctx: &JetRustEmitContext, function: MIRFun
                     // MIRRust native_host_field_type: a native carrier's field
                     // read widens its host scalar, so it is never borrowed raw.
                     if jet_rust_emit_type_index(ctx, owner) == .Val(definition_index) {
-                        if ctx.program.types[definition_index].id == owner && jet_rust_emit_has_native_type_projection(ctx.program.types[definition_index].key) -> return None
+                        if ctx.program.types[definition_index].id == owner && jet_rust_emit_has_native_type_projection(ctx, ctx.program.types[definition_index].key) -> return None
                     }
                 }
                 .Payload(_, _) -> {}
@@ -2837,7 +2837,7 @@ fn jet_rust_emit_native_place_int_type(ctx: &JetRustEmitContext, function: MIRFu
             loop row in jet_rust_emit_field_rows(ctx, field) {
                 if row.id != field -> next
                 if jet_rust_emit_type_index(ctx, row.owner) == .Val(definition_index) {
-                    if ctx.program.types[definition_index].id == row.owner && jet_rust_emit_has_native_type_projection(ctx.program.types[definition_index].key) {
+                    if ctx.program.types[definition_index].id == row.owner && jet_rust_emit_has_native_type_projection(ctx, ctx.program.types[definition_index].key) {
                         if index == place.projections.len() - 1 -> return Val(row.field.ty)
                         return Val(place.ty)
                     }
@@ -3023,7 +3023,7 @@ fn jet_rust_emit_native_host_field(ctx: &JetRustEmitContext, field: MIRFieldID) 
     loop row in jet_rust_emit_field_rows(ctx, field) {
         if row.id != field -> next
         if jet_rust_emit_type_index(ctx, row.owner) == .Val(definition_index) {
-            if ctx.program.types[definition_index].id == row.owner -> return jet_rust_emit_has_native_type_projection(ctx.program.types[definition_index].key)
+            if ctx.program.types[definition_index].id == row.owner -> return jet_rust_emit_has_native_type_projection(ctx, ctx.program.types[definition_index].key)
         }
         return false
     }

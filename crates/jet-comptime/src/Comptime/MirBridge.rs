@@ -23,6 +23,8 @@ pub struct MirFragmentCoreSourceSignature {
     pub params: Vec<(AccessConvention, Type)>,
     /// Declared return type, if the function returns a value.
     pub return_type: Option<Type>,
+    /// Canonical return of the callable value, including its protocol/carrier.
+    pub value_return_type: Type,
 }
 
 /// Loaded source module whose bodies a comptime fragment lowers on demand,
@@ -40,6 +42,8 @@ pub struct MirFragmentCoreSourceModule {
     /// Every top-level function of the module by name, private helpers
     /// included, so a demanded body can call its same-module helpers.
     pub functions: HashMap<String, Func>,
+    /// Canonical own signatures, frozen once instead of requalified per body.
+    pub function_signatures: HashMap<String, MirFragmentCoreSourceSignature>,
     /// Every top-level constant of the module, so a demanded body reads its
     /// same-module tables (`C_SHA256_K[t]`) as runtime lowering does.
     pub constants: Vec<crate::AST::ConstDef>,
@@ -64,6 +68,12 @@ pub struct MirFragmentCoreSourceModule {
 /// imported owner from erased `CtValue` data.
 #[derive(Clone, Debug, Default)]
 pub struct MirFragmentNominalFacts {
+    /// Shared semantic owner/name index of the real loaded source modules.
+    pub name_ledger: jet_foundation::Names::NameLedger,
+    /// Defining module of the evaluated fragment in that index.
+    pub module_idx: usize,
+    /// Canonical own signatures of the evaluated source module.
+    pub function_signatures: HashMap<String, MirFragmentCoreSourceSignature>,
     /// Source spellings (including import-qualified and selective-import
     /// names) to canonical `package::module::Type` identities.
     pub nominal_identities: HashMap<String, String>,

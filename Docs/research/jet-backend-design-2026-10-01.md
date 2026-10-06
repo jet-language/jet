@@ -464,10 +464,12 @@ remain mapped until every task body and returned value owner has finished.
 Opaque runtime-owned enums do not expose a native discriminant or payload
 layout. Their construction, variant tests and payload projections report a
 native unsupported issue unless an explicit record adapter supplies that layout.
-In particular, `TaskFailure` is a Rust-owned enum and `Closed` can be a
-zero-sized `Box` with dangling address 1; neither may be read at pointer + 0.
-The rejection fixtures cover Closed variant tests/construction and TaskFailure
-payload reads and assert that no zero-offset load was emitted for their body.
+`Closed` is such an enum (a zero-sized `Box` may have dangling address 1), so it
+stays an opaque handle and is never read at pointer + 0; the rejection fixtures
+cover Closed variant tests and construction and assert that no zero-offset load
+is emitted. `TaskFailure` has a record schema (Records.jet, over the canonical
+`jet_task_failure_abi`): task joins and groups rebuild it in its native layout,
+so its payload projection lowers natively, as the projection fixture checks.
 Linking: the runtime rlib plus a staticlib wrapper crate
 (`extern crate jet_runtime;`, `--crate-type staticlib`) gives
 `libjet_runtime_c.a`; link the object with it and `-lpthread -ldl -lm`.
