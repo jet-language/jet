@@ -236,8 +236,11 @@ pub fn zip_names_json(archive: [U8]) -> String ArchiveError! {
 pub fn list(archive: [U8]) -> [String] ArchiveError! { zip_list(archive) }
 
 
+/// An empty buffer opens a writer: the result is the valid empty ZIP that
+/// `zip_write` extends and `zip_close` finishes. Any other buffer must already
+/// be a well-formed ZIP.
 pub fn zip_open(archive: [U8]) -> [U8] ArchiveError! {
-    if archive.len() == 0 -> return Err(ArchiveError.Malformed)
+    if archive.len() == 0 -> return zip_from_files([ZipFile]{})
     _ :: zip_files(archive)
     Ok(archive)
 }

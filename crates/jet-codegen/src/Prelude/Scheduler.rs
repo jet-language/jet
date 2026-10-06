@@ -3256,7 +3256,7 @@ impl<T: Send> JetSchedulerSender<T> {
                     active: true,
                 });
             }
-            jet_scheduler_yield("channel send capacity", &slot, None);
+            jet_scheduler_yield("channel send", &slot, None);
             let mut state = self.inner.state.lock().unwrap();
             state.send_waiters.retain(|waiter| !Arc::ptr_eq(waiter, &slot));
             jet_observe_channel_update(self.inner.observe_id, &state);
