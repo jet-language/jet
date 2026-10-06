@@ -25,14 +25,36 @@ one package of at least N code lines and prints its digest, golden stdout and
 shape as JSON (Tools/perf/throughput measures it).
 `trait-facts-fix.json` records the module allocation evidence and dual-compiler fix spec.
 The Rust ledger indexes declarations, aliases and checked reference sites by
-source module; package sibling iteration borrows the loader's sorted membership
-list. Structural auto-derive publication retains one shared canonical table of
-actual nominal declarations, while derive/codegen selections remain module-local.
+source module. Implicit package names resolve through one loader-owned name→file
+index, not a complete set of synthetic sibling imports. Structural auto-derive
+publication retains one shared canonical table of actual nominal declarations,
+while derive/codegen selections remain module-local.
 Empty marker-rule and non-App entry paths do not construct unused bundle contexts.
 Declaration/alias lookup uses borrowed keys in module-owned maps, and canonical
 module/declaration identities are cached. Structure observations retain source
 order with collision-checked hash buckets; import-edge presence uses a source/span
 index. Body snapshots borrow loader alias roots rather than cloning that set.
+Semantic state facts and readonly codegen program facts are frozen once and
+shared across module contexts. Namespace callable values retain the real defining
+module; constants, nominal shapes, methods, traits and erased unit/alias metadata
+use local-first indexed lookup. Canonical boxing, iteration/indexing hooks and
+trait-method flags are program facts; generated instance nominals retain one
+registry/declaration owner rather than a copy in every consumer. Display spelling
+lookups use an inverse scope index, and alias metadata keeps its declaration
+scope while preserving transparent substitution. Derive helper snapshots are
+shared by provider scope and built only for actual providers; checked comptime
+projections are demanded only when an expansion will use them. Comptime nominal
+projection borrows the declaration ledger: each source module projects its own
+types and written imports without cloning the global canonical identity set or
+rescanning the global nominal map. Source-body comptime scopes query the same
+owner index, freeze own canonical callable signatures, and project only the
+namespace functions their source mentions. Runtime and comptime callable values
+share one foreign/generator/failure-carrier return policy on `Func`. Qualified
+package calls and imported callable values retain their actual defining-module
+binding. Devtools panel validation borrows one package struct index. Compile-time value keys
+(`jet.comptime-value/v2`) use shared ordered
+peer-source commitments, excluding the evaluating file just as before; edits to
+unreachable functions in that file do not invalidate its constant-value reuse.
 Package item-reuse log rows aggregate all member files of the checked package.
 Focused reuse checks count unchanged bodies across that package and require
 warm-store diagnostics to match a fresh-store check byte for byte.

@@ -429,7 +429,7 @@ pub(crate) fn resolve_unknown_index_kind(
         Type::Apply { name, args } if name == "Pool" && args.len() == 1 => Some(IndexKind::Pool),
         ty if ty.is_compute_tensor_family() && is_range => Some(IndexKind::Range),
         Type::Map { .. } => Some(IndexKind::Map),
-        Type::Named(name) if Syntax::is_simd_lane_type(name) && !cx.type_names.contains(name) => {
+        Type::Named(name) if Syntax::is_simd_lane_type(name) && !cx.fact_type_name(name) => {
             Some(IndexKind::Lane(name.clone()))
         }
         Type::Named(name) if cx.index_hooks.contains_key(name) => {
@@ -604,7 +604,7 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
                 }
                 let field_ty = struct_field_type(cx, &recv.ty, field).unwrap_or(Type::Int);
                 let boxed = match &recv.ty {
-                    Type::Named(n) => cx.boxed_edges.contains(&(n.clone(), field.to_string())),
+                    Type::Named(n) => cx.fact_box_edge(&n, &field),
                     _ => false,
                 };
                 TExpr {
@@ -682,7 +682,7 @@ fn fallback_checked_method_return(
         return Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
     }
     if is_root {
-        if let Some(Type::Fn { ret: Some(ret), .. }) = cx.fn_source_types.get(method) {
+        if let Some(Type::Fn { ret: Some(ret), .. }) = cx.fact_fn_source_types(method) {
             return Some(cx.expand_type_aliases(ret));
         }
     }
@@ -1546,14 +1546,14 @@ fn lower_call_pre_contracts(
     cx: &Cx,
     caller_env: &LowerEnv,
 ) -> (Vec<TStmt>, Vec<TContract>) {
-    let Some(param_names) = cx.fn_param_names.get(&call.name) else {
+    let Some(param_names) = cx.fact_fn_param_names(&call.name) else {
         return (Vec::new(), Vec::new());
     };
     lower_pre_contracts_for_args(
         call.name_span,
         args,
         param_names,
-        cx.sigs.get(&call.name).map(Vec::as_slice),
+        cx.fact_sigs(&call.name).map(Vec::as_slice),
         clauses,
         cx,
         caller_env,
@@ -1588,10 +1588,10 @@ fn lower_method_pre_contracts(
                 return lowered;
             };
             let key = format!("{owner}::{method}");
-            let Some((pre, _)) = cx.contract_sigs.get(&key) else {
+            let Some((pre, _)) = cx.fact_contract_sigs(&key) else {
                 return lowered;
             };
-            let Some(param_names) = cx.fn_param_names.get(&key) else {
+            let Some(param_names) = cx.fact_fn_param_names(&key) else {
                 return lowered;
             };
             (key, pre.clone(), param_names.clone())
@@ -1601,10 +1601,10 @@ fn lower_method_pre_contracts(
             ..
         } => {
             let key = format!("{owner}::{method}");
-            let Some((pre, _)) = cx.contract_sigs.get(&key) else {
+            let Some((pre, _)) = cx.fact_contract_sigs(&key) else {
                 return lowered;
             };
-            let Some(param_names) = cx.fn_param_names.get(&key) else {
+            let Some(param_names) = cx.fact_fn_param_names(&key) else {
                 return lowered;
             };
             (key, pre.clone(), param_names.clone())
@@ -1627,9 +1627,7 @@ fn lower_method_pre_contracts(
             let type_name = owner
                 .split_once("::")
                 .map_or(owner.as_str(), |(type_name, _)| type_name);
-            let self_conv = cx
-                .method_self_convs
-                .get(&(type_name.to_string(), method.to_string()))
+            let self_conv = cx.fact_method_self_convs(&(type_name.to_string(), method.to_string()))
                 .copied()
                 .unwrap_or(AccessConvention::Read);
             let self_ty = recv_value.ty.clone();
@@ -1645,9 +1643,7 @@ fn lower_method_pre_contracts(
                 widen_to_union: None,
                 box_as_trait: None,
             };
-            let method_sig = cx
-                .method_sigs
-                .get(&(type_name.to_string(), method.to_string()));
+            let method_sig = cx.fact_method_sigs(&(type_name.to_string(), method.to_string()));
             let mut sig = Vec::with_capacity(method_sig.map_or(0, |sig| sig.len()) + 1);
             sig.push((self_conv, self_ty));
             if let Some(method_sig) = method_sig {
@@ -1674,9 +1670,7 @@ fn lower_method_pre_contracts(
             let type_name = owner
                 .split_once("::")
                 .map_or(owner.as_str(), |(type_name, _)| type_name);
-            let method_sig = cx
-                .method_sigs
-                .get(&(type_name.to_string(), method.to_string()));
+            let method_sig = cx.fact_method_sigs(&(type_name.to_string(), method.to_string()));
             lower_pre_contracts_for_args(
                 *method_span,
                 args,
@@ -2124,7 +2118,7 @@ fn checked_direct_call_sig(
     call: &crate::AST::Call,
     cx: &Cx,
 ) -> Option<Vec<(AccessConvention, Type)>> {
-    let sig = cx.sigs.get(&call.name)?;
+    let sig = cx.fact_sigs(&call.name)?;
     let Some(order) = cx.fn_type_param_order.get(&call.name) else {
         return Some(sig.clone());
     };
@@ -2148,7 +2142,7 @@ fn direct_call_conventions(
     cx: &Cx,
     env: &LowerEnv,
 ) -> Option<Vec<(AccessConvention, Type)>> {
-    if env.locals.contains_key(&call.name) && !cx.consts.contains_key(&call.name) {
+    if env.locals.contains_key(&call.name) && !cx.fact_consts(&call.name).is_some() {
         return match env.ty_of(&call.name) {
             Some(Type::Fn { params, .. }) => Some(
                 params
@@ -2169,16 +2163,15 @@ fn direct_call_conventions(
         .and_then(|scope| scope.get(&call.name))
         .or_else(|| cx.unqualified_inline.get(&call.name));
     if let Some(mangled) = inline_mangled {
-        return cx.sigs.get(mangled).cloned();
+        return cx.fact_sigs(mangled).cloned();
     }
     let inline_file = cx
         .inline_unqualified_file
         .get(&env.fn_name)
         .and_then(|scope| scope.get(&call.name))
-        .or_else(|| cx.unqualified_file.get(&call.name));
+        .or_else(|| cx.fact_unqualified_file(&call.name));
     inline_file.and_then(|(_, function)| {
-        cx.import_sigs
-            .get(&(call.name.clone(), function.clone()))
+        cx.fact_import_sigs(&(call.name.clone(), function.clone()))
             .cloned()
     })
 }
@@ -2196,7 +2189,7 @@ fn method_arg_contract(
     cx: &Cx,
 ) -> Option<Vec<(AccessConvention, Type)>> {
     let ty = recv_type.as_ref()?;
-    let sig = cx.method_sigs.get(&(ty.clone(), method.to_string()))?;
+    let sig = cx.fact_method_sigs(&(ty.clone(), method.to_string()))?;
     Some(crate::Codegen::TIR::instantiate_method_sig(
         cx,
         ty,
@@ -3520,10 +3513,10 @@ pub(crate) fn grouped_enum_unit_variant(
         return None;
     }
     let variant = path[1..].join(".");
-    if cx.variant_owner.get(&variant).map(String::as_str) != Some(enum_name.as_str()) {
+    if cx.fact_variant_owner(&variant).map(String::as_str) != Some(enum_name.as_str()) {
         return None;
     }
-    let is_unit = cx.enum_variants.get(&enum_name).is_some_and(|variants| {
+    let is_unit = cx.fact_enum_variants(&enum_name).is_some_and(|variants| {
         variants.iter().any(|(name, payload)| {
             name == &variant && matches!(payload, crate::AST::VariantPayload::Unit)
         })
@@ -3666,9 +3659,7 @@ fn byte_text_exprs(parts: &[crate::AST::ByteTextPart], span: Span) -> Option<Vec
 fn lower_unit_text(value: TExpr, style: crate::AST::UnitFormat, cx: &Cx) -> TExpr {
     let original_ty = value.ty.clone();
     let raw = if let Type::Named(name) = &original_ty {
-        let base = cx
-            .distinct_types
-            .get(name)
+        let base = cx.fact_distinct_types(name)
             .map(|(base, _)| base.clone())
             .unwrap_or(Type::Float);
         TExpr {
@@ -3756,7 +3747,7 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
     // TIR with a `Print` whose payload type has no print dispatch, which the
     // resident JIT can only report as a compile gap and deopt on.
     if matches!(&value.ty, Type::Named(name) if name == Syntax::TYPE_COMPLEX)
-        && !cx.type_names.contains(Syntax::TYPE_COMPLEX)
+        && !cx.fact_type_name(Syntax::TYPE_COMPLEX)
     {
         return TExpr {
             ty: Type::String,
@@ -3771,7 +3762,7 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
     // display on the shared precise Prelude path so interpolation does not ask
     // the resident engine to treat the opaque rational handle as a user record.
     if matches!(&value.ty, Type::Named(name) if name == Syntax::TYPE_FRACTION)
-        && !cx.type_names.contains(Syntax::TYPE_FRACTION)
+        && !cx.fact_type_name(Syntax::TYPE_FRACTION)
     {
         return TExpr {
             ty: Type::String,
@@ -4184,8 +4175,7 @@ fn raw_contextual_return_enum(variant: &str, cx: &Cx, env: &LowerEnv) -> Option<
         .or_else(|| cx.core_qualified_rust_type_name(name))
         .unwrap_or(name.as_str());
     let declared = [name.as_str(), resolved].iter().any(|owner| {
-        cx.enum_variants
-            .get(*owner)
+        cx.fact_enum_variants(*owner)
             .is_some_and(|variants| variants.iter().any(|(candidate, _)| candidate == variant))
     }) || crate::Codegen::TIR::tir_to_mir_types::compiler_owned_enum_variants(name)
         .is_some_and(|variants| variants.contains(&variant))
@@ -4308,8 +4298,7 @@ fn invariant_violation_expr(span: Span, construct: impl Into<String>) -> TExpr {
 }
 
 fn checked_const_ref_name(name: &str, cx: &Cx) -> String {
-    cx.const_ref_keys
-        .get(name)
+    cx.fact_const_ref_keys(name)
         .cloned()
         .unwrap_or_else(|| name.to_string())
 }
@@ -4324,17 +4313,17 @@ fn lower_named_comptime_binding(name: &str, cx: &Cx, env: &LowerEnv) -> Option<T
             kind: TExprKind::Local(env.local_of(name)),
         });
     }
-    if !cx.consts.contains_key(name)
-        && !cx.const_values.contains_key(name)
-        && !cx.const_ref_keys.contains_key(name)
+    if !cx.fact_consts(name).is_some()
+        && !cx.fact_const_values(name).is_some()
+        && !cx.fact_const_ref_keys(name).is_some()
     {
         return None;
     }
     Some(in_own_frame(|| {
-        let value = cx.const_values.get(name);
+        let value = cx.fact_const_values(name);
         let ty = env
             .ty_of(name)
-            .or_else(|| cx.const_ref_types.get(name).cloned())
+            .or_else(|| cx.fact_const_ref_types(name).cloned())
             .or_else(|| value.map(crate::AST::CtValue::jet_type))
             .unwrap_or(Type::Int);
         TExpr {
@@ -4386,7 +4375,7 @@ fn prepared_constant_path_value<'a>(
         Expr::Paren(inner, _) | Expr::Copy(inner, _) => {
             prepared_constant_path_value(inner, cx, env)
         }
-        Expr::Ident(name, _) if !env.locals.contains_key(name) => cx.const_values.get(name),
+        Expr::Ident(name, _) if !env.locals.contains_key(name) => cx.fact_const_values(name),
         // Optional facts (`$exactness`, `$unit_scale_provenance`) prepare a
         // present carrier; a field read goes through it to the fact record.
         Expr::Field(base, field, _) => match prepared_constant_path_value(base, cx, env)? {
@@ -4707,13 +4696,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // locals. Parameters and local bindings shadow a same-named
                 // package constant just as every other lexical binding does.
                 // parity: guard tests/tir_patterns_and_fields.rs::lexical_parameter_shadows_same_named_comptime_constant_on_all_tiers
-                if cx.consts.contains_key(name) || cx.const_ref_keys.contains_key(name) {
+                if cx.fact_consts(name).is_some() || cx.fact_const_ref_keys(name).is_some() {
                     return in_own_frame(|| {
-                        let value = cx.const_values.get(name);
+                        let value = cx.fact_const_values(name);
                         let ty = env
                             .ty_of(name)
-                            .or_else(|| cx.const_ref_types.get(name).cloned())
-                            .or_else(|| cx.const_types.get(name).cloned())
+                            .or_else(|| cx.fact_const_ref_types(name).cloned())
+                            .or_else(|| cx.fact_const_types(name).cloned())
                             .or_else(|| value.map(crate::AST::CtValue::jet_type))
                             .unwrap_or(Type::Int);
                         return TExpr {
@@ -4728,20 +4717,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // c109 Phase 13: a bare function name used as a VALUE (not a local, not a
                 // const) emits `emit_named_fn_value` — `Box::new(move |…| __jet_<name>(…))
                 // as <fn-type>`. Mirrors `emit_expr`'s `Expr::Ident` arm (Expression.rs).
-                if !env.locals.contains_key(name) && !cx.consts.contains_key(name) {
-                    let fn_value_ty = cx
-                        .fn_types
-                        .get(name)
-                        .or_else(|| cx.fn_source_types.get(name));
+                if !env.locals.contains_key(name) && !cx.fact_consts(name).is_some() {
+                    let fn_value_ty = cx.fact_fn_types(name)
+                        .or_else(|| cx.fact_fn_source_types(name));
                     if let Some(ft @ Type::Fn { .. }) = fn_value_ty {
                         return in_own_frame(|| {
                             return TExpr {
                                 ty: ft.clone(),
                                 kind: TExprKind::FnValue {
-                                    kind: TFnValueKind::NamedFn {
-                                        name: Some(name.clone()),
-                                        lambda: None,
-                                    },
+                                    kind: TFnValueKind::NamedFn { name: Some(cx.function_value_name(&name)), lambda: None },
                                 },
                             };
                         });
@@ -4806,7 +4790,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // fragment with an invariant violation.
                 ty: env
                     .ty_of(name)
-                    .or_else(|| cx.const_ref_types.get(name).cloned())
+                    .or_else(|| cx.fact_const_ref_types(name).cloned())
                     .unwrap_or(Type::Int),
                 kind: TExprKind::ConstRef(checked_const_ref_name(name, cx)),
             }),
@@ -5011,9 +4995,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 ) = (expected_enum, &mut rhs.kind)
                 {
-                    let visible_owner_has_variant = cx
-                        .enum_variants
-                        .get(enum_type)
+                    let visible_owner_has_variant = cx.fact_enum_variants(enum_type)
                         .is_some_and(|variants| variants.iter().any(|(name, _)| name == variant));
                     if crate::Codegen::nominal_leaf(enum_type)
                         == crate::Codegen::nominal_leaf(&expected_enum)
@@ -5411,8 +5393,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         if matches!(left.as_str(), "Duration" | "Instant")
                             && matches!(right.as_str(), "Duration" | "Instant") =>
                     {
-                        let left_kind = cx.unit_facts.get(left).map(|fact| fact.kind);
-                        let right_kind = cx.unit_facts.get(right).map(|fact| fact.kind);
+                        let left_kind = cx.fact_unit_facts(left).map(|fact| fact.kind);
+                        let right_kind = cx.fact_unit_facts(right).map(|fact| fact.kind);
                         match (*op, left_kind, right_kind) {
                             (
                                 BinOp::Add | BinOp::Sub,
@@ -5452,8 +5434,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     } else if let Some(ty) = canonical_time_ty {
                         ty
                     } else if let (Type::Named(ln), Type::Named(rn)) = (&lhs.ty, &rhs.ty) {
-                        let lm = crate::Sema::is_math_type(ln) && !cx.type_names.contains(ln);
-                        let rm = crate::Sema::is_math_type(rn) && !cx.type_names.contains(rn);
+                        let lm = crate::Sema::is_math_type(ln) && !cx.fact_type_name(ln);
+                        let rm = crate::Sema::is_math_type(rn) && !cx.fact_type_name(rn);
                         if lm || rm {
                             crate::Sema::math_binop_result(*op, ln, rn)
                                 .unwrap_or_else(|| lhs.ty.clone())
@@ -5465,11 +5447,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             lhs.ty.clone()
                         }
                     } else if let Type::Named(ln) = &lhs.ty {
-                        if crate::Sema::is_math_type(ln) && !cx.type_names.contains(ln) {
+                        if crate::Sema::is_math_type(ln) && !cx.fact_type_name(ln) {
                             crate::Sema::math_scalar_binop_result(*op, ln, &rhs.ty)
                                 .unwrap_or_else(|| lhs.ty.clone())
                         } else if let Type::Named(rn) = &rhs.ty {
-                            if crate::Sema::is_math_type(rn) && !cx.type_names.contains(rn) {
+                            if crate::Sema::is_math_type(rn) && !cx.fact_type_name(rn) {
                                 crate::Sema::math_scalar_binop_result(*op, rn, &lhs.ty)
                                     .unwrap_or_else(|| lhs.ty.clone())
                             } else {
@@ -5479,7 +5461,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             lhs.ty.clone()
                         }
                     } else if let Type::Named(rn) = &rhs.ty {
-                        if crate::Sema::is_math_type(rn) && !cx.type_names.contains(rn) {
+                        if crate::Sema::is_math_type(rn) && !cx.fact_type_name(rn) {
                             crate::Sema::math_scalar_binop_result(*op, rn, &lhs.ty)
                                 .unwrap_or_else(|| lhs.ty.clone())
                         } else {
@@ -5793,9 +5775,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     if let Some((wrapper, policy)) = user_policy {
                         let callee_expr = &call.args.last().expect("checked above").expr;
                         let mut callee = lower_expr(callee_expr, cx, env);
-                        let policy_sig = cx
-                            .sigs
-                            .get(&wrapper)
+                        let policy_sig = cx.fact_sigs(&wrapper)
                             .expect("sema materialized the user policy wrapper");
                         // The wrapper's `call` parameter (after the policy
                         // parameters, before the target's own) is this
@@ -5944,7 +5924,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // A declared function of the same name wins over the local, exactly
                 // as sema's `check_call` resolves it.
                 if env.locals.contains_key(&call.name)
-                    && !cx.consts.contains_key(&call.name)
+                    && !cx.fact_consts(&call.name).is_some()
                     && !cx.sigs.contains_key(&call.name)
                 {
                     return in_own_frame(|| {
@@ -6252,7 +6232,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         };
                         let c_abi = extern_fn.c_abi;
                         return in_own_frame(|| {
-                            let sig = cx.sigs.get(&call.name).cloned();
+                            let sig = cx.fact_sigs(&call.name).cloned();
                             let eargs = call
                                 .args
                                 .iter()
@@ -6272,9 +6252,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             let lowered = TExpr {
                                 ty: return_type,
                                 kind: TExprKind::ExternCall {
-                                    symbol: cx
-                                        .foreign_call_keys
-                                        .get(&call.name)
+                                    symbol: cx.fact_foreign_call_key(&call.name)
                                         .cloned()
                                         .unwrap_or(wrapper),
                                     c_abi,
@@ -6292,16 +6270,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             };
                             return wrap_foreign_undo(
                                 lowered,
-                                cx.foreign_undos.get(&call.name).map(String::as_str),
+                                cx.fact_foreign_undo(&call.name).map(String::as_str),
                                 call.name_span.start as u32,
                                 cx,
                                 env,
                             );
                         });
                     }
-                    if let Some(foreign_key) = cx.foreign_call_keys.get(&call.name).cloned() {
+                    if let Some(foreign_key) = cx.fact_foreign_call_key(&call.name).cloned() {
                         return in_own_frame(|| {
-                            let sig = cx.sigs.get(&call.name).cloned();
+                            let sig = cx.fact_sigs(&call.name).cloned();
                             let eargs = call
                                 .args
                                 .iter()
@@ -6333,7 +6311,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             };
                             wrap_foreign_undo(
                                 lowered,
-                                cx.foreign_undos.get(&call.name).map(String::as_str),
+                                cx.fact_foreign_undo(&call.name).map(String::as_str),
                                 call.name_span.start as u32,
                                 cx,
                                 env,
@@ -6350,8 +6328,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         .cloned();
                     if let Some(mangled_key) = inline_mangled {
                         return in_own_frame(|| {
-                            let undo = cx.foreign_undos.get(&mangled_key).map(String::as_str);
-                            let sig = cx.sigs.get(&mangled_key).cloned();
+                            let undo = cx.fact_foreign_undo(&mangled_key).map(String::as_str);
+                            let sig = cx.fact_sigs(&mangled_key).cloned();
                             let args: Vec<_> = call
                                 .args
                                 .iter()
@@ -6422,17 +6400,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         .inline_unqualified_file
                         .get(&env.fn_name)
                         .and_then(|scope| scope.get(&call.name))
-                        .or_else(|| cx.unqualified_file.get(&call.name))
+                        .or_else(|| cx.fact_unqualified_file(&call.name))
                         .cloned();
                     if let Some((rust_mod, fn_name)) = inline_file {
                         return in_own_frame(|| {
-                            let undo = cx
-                                .foreign_undos
-                                .get(&format!("{rust_mod}::{fn_name}"))
+                            let undo = cx.fact_foreign_undo(&format!("{rust_mod}::{fn_name}"))
                                 .map(String::as_str);
-                            let sig = cx
-                                .import_sigs
-                                .get(&(call.name.clone(), fn_name.clone()))
+                            let sig = cx.fact_import_sigs(&(call.name.clone(), fn_name.clone()))
                                 .cloned();
                             let args = call
                                 .args
@@ -6560,7 +6534,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // D-DECIMAL1: `Decimal(…)` constructor.
                 if !env.locals.contains_key(&call.name)
                     && call.name == crate::Syntax::TYPE_DECIMAL
-                    && !cx.type_names.contains(&call.name)
+                    && !cx.fact_type_name(&call.name)
                 {
                     return in_own_frame(|| {
                         let targs: Vec<TExpr> = call
@@ -6582,7 +6556,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // construction share the precise builtin constructor seam.
                 if !env.locals.contains_key(&call.name)
                     && call.name == crate::Syntax::TYPE_COMPLEX
-                    && !cx.type_names.contains(&call.name)
+                    && !cx.fact_type_name(&call.name)
                 {
                     return in_own_frame(|| {
                         let targs: Vec<TExpr> = call
@@ -6604,7 +6578,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // float components and emit `{root}jet_math_<T>_new(…)`.
                 if !env.locals.contains_key(&call.name)
                     && crate::Sema::is_math_type(&call.name)
-                    && !cx.type_names.contains(&call.name)
+                    && !cx.fact_type_name(&call.name)
                 {
                     return in_own_frame(|| {
                         let targs: Vec<TExpr> = call
@@ -6640,7 +6614,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
                 if !env.locals.contains_key(&call.name) {
                     if let (Some((base, _)), Some(arg)) =
-                        (cx.distinct_types.get(&call.name), call.args.first())
+                        (cx.fact_distinct_types(&call.name), call.args.first())
                     {
                         return in_own_frame(|| {
                             return TExpr {
@@ -6709,7 +6683,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             args,
                         },
                     };
-                    if let Some((pre, _)) = cx.contract_sigs.get(&call.name) {
+                    if let Some((pre, _)) = cx.fact_contract_sigs(&call.name) {
                         let (bindings, contracts) = lower_call_pre_contracts(
                             call,
                             match &mut lowered.kind {
@@ -6751,9 +6725,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     // expression. This matters for task payloads, whose `Task<T>`
                     // element type is the callable's declared `T`, not its body
                     // reachability fact.
-                    let declared_never = cx
-                        .fn_source_types
-                        .get(&call.name)
+                    let declared_never = cx.fact_fn_source_types(&call.name)
                         .and_then(|ty| match ty {
                             Type::Fn { ret: Some(ret), .. } => Some(cx.expand_type_aliases(ret)),
                             _ => None,
@@ -6828,7 +6800,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         .map(String::as_str)
                         .unwrap_or(enum_name);
                     let is_variant = [enum_name, owner].into_iter().any(|enum_key| {
-                        cx.enum_variants.get(enum_key).is_some_and(|variants| {
+                        cx.fact_enum_variants(enum_key).is_some_and(|variants| {
                             variants.iter().any(|(candidate, _)| candidate == variant)
                         })
                     });
@@ -7200,12 +7172,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     // sema's synthetic patch item. Reconstruct that one derived
                     // shape from the base fields, preserving the computed-field
                     // exclusion owned by the patchable sema pass.
-                    let all = cx.struct_fields.get(base_name).map(|base_fields| {
+                    let all = cx.fact_struct_fields(base_name).map(|base_fields| {
                         base_fields
                             .iter()
                             .filter(|(name, _)| {
-                                !cx.computed_fields
-                                    .get(base_name)
+                                !cx.fact_computed_fields(base_name)
                                     .is_some_and(|computed| computed.contains(name))
                             })
                             .map(|(name, field_ty)| {
@@ -7253,7 +7224,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         .get(type_name)
                         .cloned()
                         .or_else(|| {
-                            if cx.struct_fields.contains_key(type_name) {
+                            if cx.fact_struct_fields(type_name).is_some() {
                                 Some(type_name.clone())
                             } else {
                                 cx.foreign_type_identity("", type_name)
@@ -7283,7 +7254,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             .count();
                         if same_leaf
                             && leaf_count > 1
-                            && cx.struct_fields.contains_key(context_name)
+                            && cx.fact_struct_fields(context_name).is_some()
                         {
                             resolved_name = context_name.to_string();
                         }
@@ -7303,7 +7274,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         .iter()
                         .map(|(n, _, fe)| {
                             let boxed =
-                                cx.boxed_edges.contains(&(resolved_name.clone(), n.clone()));
+                                cx.fact_box_edge(&resolved_name, &n);
                             let mut value = lower_owned_expr(fe, cx, env);
                             // D-UNIONTYPE1=A: member → union inject at Codable/struct field sites.
                             if let Some(fty) = struct_field_type(cx, &resolved_ty, n) {
@@ -7617,7 +7588,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         });
                     }
                     if env.ty_of(enum_name).is_none()
-                        && cx.variant_owner.get(member).map(String::as_str)
+                        && cx.fact_variant_owner(member).map(String::as_str)
                             == Some(enum_name.as_str())
                     {
                         return in_own_frame(|| {
@@ -7637,9 +7608,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         });
                     }
                     if env.ty_of(enum_name).is_none() {
-                        if let Some(owner) = cx
-                            .variant_owner
-                            .get(member)
+                        if let Some(owner) = cx.fact_variant_owner(member)
                             .filter(|owner| owner.rsplit("::").next() == Some(enum_name))
                         {
                             return in_own_frame(|| {
@@ -7843,9 +7812,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     None
                 };
                 if let Some(type_name) = field_owner {
-                    if cx
-                        .computed_fields
-                        .get(type_name)
+                    if cx.fact_computed_fields(type_name)
                         .is_some_and(|c| c.contains(member))
                     {
                         let field_ty =
@@ -7890,7 +7857,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
                 if let Type::Named(type_name) = &recv.ty {
                     if crate::Sema::is_swizzleable_math_type(type_name)
-                        && !cx.struct_fields.contains_key(type_name)
+                        && !cx.fact_struct_fields(type_name).is_some()
                     {
                         if let crate::Sema::SwizzleParse::Ok(lanes) =
                             crate::Sema::parse_swizzle_member(member, type_name)
@@ -7924,7 +7891,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // to the inner type (total fact from `cx.boxed_edges`, keyed on the receiver's
                 // resolved struct name — mirrors the AST `boxed_field_read`).
                 let boxed = match &recv.ty {
-                    Type::Named(n) => cx.boxed_edges.contains(&(n.clone(), member.to_string())),
+                    Type::Named(n) => cx.fact_box_edge(&n, &member),
                     _ => false,
                 };
                 TExpr {
@@ -8280,9 +8247,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
                 if let IndexKind::User(type_name) = kind {
                     return in_own_frame(|| {
-                        let value_ty = cx
-                            .index_hooks
-                            .get(type_name)
+                        let value_ty = cx.fact_index_hook(type_name)
                             .map(|h| h.value_type.clone())
                             .unwrap_or(Type::Int);
                         return TExpr {
@@ -9102,14 +9067,10 @@ fn unit_lit_elaborated(e: &Expr, cx: &Cx) -> Option<Expr> {
     let type_name = crate::AST::UnitFamilyDef::type_name(suffix);
     // Sema's `unit_literal("Time", suffix)` lookup, from the one fact a
     // lowering `Cx` does carry: the minted type's family name.
-    let canonical_time = cx
-        .unit_facts
-        .get(&type_name)
+    let canonical_time = cx.fact_unit_facts(&type_name)
         .is_some_and(|fact| fact.family == "Time");
     if !canonical_time
-        && cx
-            .distinct_types
-            .get(&type_name)
+        && cx.fact_distinct_types(&type_name)
             .is_some_and(|(base, numeric)| *numeric && *base == Type::Float)
     {
         return Some(Expr::MethodCall {
@@ -9151,7 +9112,7 @@ fn unit_lit_elaborated(e: &Expr, cx: &Cx) -> Option<Expr> {
 /// operation sema rejects.
 fn complexize_operands(op: BinOp, lhs: TExpr, rhs: TExpr, cx: &Cx) -> (TExpr, TExpr) {
     if !matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
-        || cx.type_names.contains(Syntax::TYPE_COMPLEX)
+        || cx.fact_type_name(Syntax::TYPE_COMPLEX)
     {
         return (lhs, rhs);
     }
@@ -9449,7 +9410,7 @@ pub(crate) fn wrap_foreign_undo(
     if let Some(flag) = &env.txn_undo_needed {
         flag.set(true);
     }
-    let inverse_params = cx.sigs.get(inverse).cloned().unwrap_or_default();
+    let inverse_params = cx.fact_sigs(inverse).cloned().unwrap_or_default();
     let mut forward_extern_args = Vec::with_capacity(args.len());
     let mut forward_module_args = Vec::with_capacity(args.len());
     let mut inverse_args = Vec::with_capacity(args.len());

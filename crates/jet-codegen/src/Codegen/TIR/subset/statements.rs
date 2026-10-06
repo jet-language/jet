@@ -121,7 +121,7 @@ fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool
                     || matches!(
                         pattern,
                         Pattern::Variant { variant, .. }
-                            if cx.variant_owner.contains_key(variant)
+                            if cx.fact_variant_owner(variant).is_some()
                     ) =>
                 {
                     let ok = !b.is_comptime
@@ -673,7 +673,7 @@ pub(crate) fn if_cond_in_subset(
                         _ => None,
                     })
                     .collect();
-                if let Some(owner) = cx.variant_owner.get(variant) {
+                if let Some(owner) = cx.fact_variant_owner(variant) {
                     let covered = if variant_pattern_uses_payload(pattern) {
                         enum_is_covered(owner, cx)
                     } else {
@@ -689,7 +689,7 @@ pub(crate) fn if_cond_in_subset(
             // D-TAG1: a binding-free variant/group test (`if d == .Fire { … }`)
             // is a plain Bool condition — the expression subset lowers it to
             // `matches!` (`TExprKind::PatternMatches`), no if-let, no bindings.
-            if bindings.is_empty() && cx.variant_owner.contains_key(variant) {
+            if bindings.is_empty() && cx.fact_variant_owner(variant).is_some() {
                 return Some(Vec::new());
             }
             return None;

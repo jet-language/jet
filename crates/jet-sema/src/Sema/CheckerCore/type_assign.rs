@@ -402,7 +402,7 @@ impl<'a> Checker<'a> {
                 if self.trait_reg.is_trait_name(n) {
                     return;
                 }
-                if self.registry.is_type_alias(n) {
+                if self.type_alias_binding(n).is_some() {
                     self.diags.push(Diagnostic::error(
                         "E0119",
                         format!("`{}` is a type alias and needs type arguments", n),
@@ -427,6 +427,13 @@ impl<'a> Checker<'a> {
                 }
                 if self.registry.contains(n) {
                     return;
+                }
+                if let Some(owner) = self.name_ledger.namespace_owner(self.module_idx, n)
+                    .or_else(|| self.name_ledger.generated_type_owner(n))
+                {
+                    if self.modules.is_some_and(|modules| modules[owner].registry.contains(n)) {
+                        return;
+                    }
                 }
                 // Canonical imported nominals are already resolved. Keep the
                 // fully-qualified identity through validation; only the leaf
@@ -503,6 +510,7 @@ impl<'a> Checker<'a> {
                     .contains("::")
                     .then(|| self.name_ledger.nominal_module(name))
                     .flatten();
+                let unqualified = canonical_owner.is_none() && import_ns.is_none();
                 if lookup_name == "Any" {
                     self.diags.push(no_any_type(span));
                     for arg in args {
@@ -510,44 +518,44 @@ impl<'a> Checker<'a> {
                     }
                     return;
                 }
-                let local_alias = canonical_owner.is_none() && import_ns.is_none();
-                if local_alias {
-                    if let Some((params, target)) = self.registry.type_alias(lookup_name) {
-                        if params.len() != args.len() {
-                            self.diags.push(Diagnostic::error(
-                                "E0119",
-                                format!(
-                                    "`{}` expects {} type argument{}, got {}",
-                                    name,
-                                    params.len(),
-                                    if params.len() == 1 { "" } else { "s" },
-                                    args.len()
-                                ),
-                                "every generic parameter needs a matching type argument"
-                                    .to_string(),
-                                format!(
-                                    "write `{}`<{}>",
-                                    name,
-                                    params
-                                        .iter()
-                                        .map(|p| p.name.as_str())
-                                        .collect::<Vec<_>>()
-                                        .join(", ")
-                                ),
-                                Some(span),
-                            ));
-                        }
-                        for arg in args {
-                            self.check_declared_type_rules(arg, span);
-                        }
-                        let subst: std::collections::HashMap<String, Type> = params
-                            .iter()
-                            .zip(args.iter())
-                            .map(|(p, a)| (p.name.clone(), a.clone()))
-                            .collect();
-                        self.check_declared_type_rules(&substitute_type(target, &subst), span);
-                        return;
+                if let Some((owner, params, target)) = self.type_alias_binding(name) {
+                    let binders: std::collections::HashSet<String> = params.iter()
+                        .map(|param| param.name.clone()).collect();
+                    let target = self.qualify_method_type(owner, target, &binders);
+                    if params.len() != args.len() {
+                        self.diags.push(Diagnostic::error(
+                            "E0119",
+                            format!(
+                                "`{}` expects {} type argument{}, got {}",
+                                name,
+                                params.len(),
+                                if params.len() == 1 { "" } else { "s" },
+                                args.len()
+                            ),
+                            "every generic parameter needs a matching type argument"
+                                .to_string(),
+                            format!(
+                                "write `{}`<{}>",
+                                name,
+                                params
+                                    .iter()
+                                    .map(|p| p.name.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                            Some(span),
+                        ));
                     }
+                    for arg in args {
+                        self.check_declared_type_rules(arg, span);
+                    }
+                    let subst: std::collections::HashMap<String, Type> = params
+                        .iter()
+                        .zip(args.iter())
+                        .map(|(p, a)| (p.name.clone(), a.clone()))
+                        .collect();
+                    self.check_declared_type_rules(&substitute_type(&target, &subst), span);
+                    return;
                 }
                 let core_generic_arity = match import_ns {
                     Some(namespace) => self
@@ -584,7 +592,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 let is_core_generic = core_generic_arity.is_some()
-                    || (local_alias
+                    || (unqualified
                         && matches!(
                             lookup_name,
                             "Task"
@@ -631,7 +639,7 @@ impl<'a> Checker<'a> {
                             // and one nominal space; transforms carry two.
                             | "Point2" | "Delta2" | "Transform" | "Transform2" | "Ray2"
                         ))
-                    || (local_alias && is_core_view_generic(ty));
+                    || (unqualified && is_core_view_generic(ty));
                 if is_core_generic
                     && matches!(
                         lookup_name,
@@ -1639,47 +1647,37 @@ impl<'a> Checker<'a> {
         // file alias (`vis2.bank.Account`) before display projection. Resolve
         // both through the ledger's one display map instead of comparing
         // spellings or inventing another alias table.
-        let current_prefix = self
-            .modules
-            .and_then(|modules| modules.get(self.module_idx))
-            .map(|module| format!("{}.", module.module_alias));
-        // A named helper, not a closure: the returned iterator borrows the
-        // caller's `name`, and a closure would tie that borrow to the
-        // closure's own inferred lifetime.
-        fn visible_spellings<'n>(
-            name: &'n str,
-            current_prefix: Option<&'n str>,
-        ) -> impl Iterator<Item = &'n str> {
-            std::iter::once(name).chain(current_prefix.and_then(|prefix| name.strip_prefix(prefix)))
-        }
+        let current_alias = self.name_ledger.module_alias(self.module_idx);
+        let stripped = current_alias.and_then(|alias|
+            spelling.strip_prefix(alias).and_then(|rest| rest.strip_prefix('.')));
         let Some(modules) = self.modules else {
             return None;
         };
         // A bare built-in spelling (`Path`) is the built-in, never a loaded
         // record that merely shares its leaf (`core.files.path`'s `Path`).
         let bare_builtin = namespace.is_none() && Syntax::typed_head_kind(spelling).is_some();
-        for (owner, module) in modules.iter().enumerate() {
-            for candidate in module.registry.types.keys() {
-                if owner != self.module_idx && !self.type_is_pub_in(owner, candidate) {
-                    continue;
-                }
-                if bare_builtin && self.record_distinct_from_builtin(owner, candidate) {
-                    continue;
-                }
-                let display =
-                    self.name_ledger
-                        .display_path(self.module_idx, candidate, Some(owner));
-                let matches = display
-                    .as_deref()
-                    .into_iter()
-                    .chain(std::iter::once(candidate.as_str()))
-                    .any(|target| {
-                        visible_spellings(spelling, current_prefix.as_deref())
-                            .any(|name| name == target)
-                    });
-                if matches {
-                    return Some(self.canonical_nominal_name(owner, candidate));
-                }
+        let candidates = self.name_ledger.declarations_named(leaf)
+            .chain(self.name_ledger.display_declarations(self.module_idx, spelling))
+            .chain(stripped.into_iter().flat_map(|name|
+                self.name_ledger.display_declarations(self.module_idx, name)));
+        for declaration in candidates {
+            let owner = declaration.module;
+            let candidate = &declaration.name;
+            if !modules[owner].registry.contains(candidate) {
+                continue;
+            }
+            if owner != self.module_idx && !self.type_is_pub_in(owner, candidate) {
+                continue;
+            }
+            if bare_builtin && self.record_distinct_from_builtin(owner, candidate) {
+                continue;
+            }
+            let display = self.name_ledger.display_path(self.module_idx, candidate, Some(owner));
+            let matches = display.as_deref().into_iter()
+                .chain(std::iter::once(candidate.as_str()))
+                .any(|target| std::iter::once(spelling).chain(stripped).any(|name| name == target));
+            if matches {
+                return Some(self.canonical_nominal_name(owner, candidate));
             }
         }
         None
@@ -1716,12 +1714,8 @@ impl<'a> Checker<'a> {
             })?;
         let owner = self
             .struct_owner_module(leaf, namespace)
-            .or_else(|| {
-                modules.iter().enumerate().find_map(|(idx, module)| {
-                    (module.module_alias == source.alias && module.registry.contains(leaf))
-                        .then_some(idx)
-                })
-            })?;
+            .or_else(|| self.name_ledger.module_by_alias(source.alias)
+                .filter(|&owner| modules[owner].registry.contains(leaf)))?;
         modules
             .get(owner)
             .filter(|module| module.registry.contains(leaf))?;

@@ -521,36 +521,31 @@ pub(crate) fn eval_comptime_items(
         // the files a module's constants read first (`comptime_module_order`)
         // and mirrors each value onto its module's comptime state; seed those
         // values here unless this module declares the name itself.
-        let declared_here: HashSet<String> = items
-            .iter()
-            .filter_map(|item| match item {
-                Item::Const(constant) => Some(constant.name.clone()),
-                Item::Func(function) => Some(function.name.clone()),
+        if items.iter().any(|item| matches!(item,
+            Item::Const(constant) if const_evaluated_at_build(constant) && constant.ct.is_none()))
+        {
+            let declared_here: HashSet<&str> = items.iter().filter_map(|item| match item {
+                Item::Const(constant) => Some(constant.name.as_str()),
+                Item::Func(function) => Some(function.name.as_str()),
                 _ => None,
-            })
-            .collect();
-        let mut sibling_values = Vec::new();
-        for sibling in name_ledger.namespace_siblings(module_idx) {
-            for item in &states[sibling].items {
-                let Item::Const(constant) = item else {
-                    continue;
-                };
-                if let (Some(value), Some(ty)) = (&constant.ct, &constant.ty) {
-                    if !declared_here.contains(&constant.name) {
-                        sibling_values.push((constant.name.clone(), ty.clone(), value.clone()));
+            }).collect();
+            for sibling in name_ledger.namespace_siblings(module_idx) {
+                for index in 0..states[sibling].items.len() {
+                    let Item::Const(constant) = &states[sibling].items[index] else { continue };
+                    if declared_here.contains(constant.name.as_str())
+                        || globals.contains_key(&constant.name)
+                    {
+                        continue;
                     }
+                    let (Some(value), Some(ty)) = (&constant.ct, &constant.ty) else { continue };
+                    let (name, ty, value) = (constant.name.clone(), ty.clone(), value.clone());
+                    states[module_idx].consts.insert(name.clone(), ty);
+                    if let Some(env) = reuse {
+                        global_digests.insert(name.clone(), env.value_digest(&value));
+                    }
+                    globals.insert(name, value);
                 }
             }
-        }
-        for (name, ty, value) in sibling_values {
-            if globals.contains_key(&name) {
-                continue;
-            }
-            states[module_idx].consts.insert(name.clone(), ty);
-            if let Some(env) = reuse {
-                global_digests.insert(name.clone(), env.value_digest(&value));
-            }
-            globals.insert(name, value);
         }
         for index in 0..items.len() {
             let (name, value, known, known_ty, module_value) = match &items[index] {
@@ -1939,10 +1934,10 @@ pub(crate) fn check_strong_shared_cycles(
     struct_ids.sort();
 
     for owner in struct_ids {
-        let Some(fields) = graph.structs.get(&owner).cloned() else {
+        let Some(fields) = graph.structs.get(&owner).copied() else {
             continue;
         };
-        for (fname, fspan, fty) in &fields {
+        for (fname, fspan, fty) in fields {
             if let Some(through) =
                 graph.strong_shared_cycle_witness(&owner, owner.module, fty, &mut Vec::new())
             {
@@ -1969,7 +1964,7 @@ pub(crate) fn check_strong_shared_cycles(
 struct StrongSharedCycleGraph<'a> {
     states: &'a [ModuleState],
     name_ledger: &'a NameLedger,
-    structs: HashMap<StructId, Vec<(String, Span, Type)>>,
+    structs: HashMap<StructId, &'a [(String, Span, Type)]>,
     reaches: HashMap<(StructId, StructId), bool>,
 }
 
@@ -1994,7 +1989,7 @@ impl<'a> StrongSharedCycleGraph<'a> {
         for (module, state) in states.iter().enumerate() {
             for (name, def) in &state.registry.types {
                 if let TypeDef::Struct { fields, .. } = def {
-                    structs.insert(StructId::new(module, name), fields.clone());
+                    structs.insert(StructId::new(module, name), fields.as_slice());
                 }
             }
         }
@@ -2023,6 +2018,7 @@ impl<'a> StrongSharedCycleGraph<'a> {
                     .alias(from_module, namespace)
                     .and_then(|alias| alias.target_module)
             })?;
+        let owner = self.name_ledger.namespace_owner(owner, name).unwrap_or(owner);
         let key = self.struct_key(owner, name)?;
         self.name_ledger
             .visible(from_module, owner, name)
@@ -2032,6 +2028,11 @@ impl<'a> StrongSharedCycleGraph<'a> {
     fn resolve_struct(&self, from_module: usize, name: &str) -> Option<StructId> {
         if let Some(key) = self.struct_key(from_module, name) {
             return Some(key);
+        }
+        if let Some(owner) = self.name_ledger.namespace_owner(from_module, name)
+            .or_else(|| self.name_ledger.generated_type_owner(name))
+        {
+            if let Some(key) = self.struct_key(owner, name) { return Some(key) }
         }
 
         if let Some((namespace, leaf)) = name.rsplit_once("::") {
@@ -2064,14 +2065,15 @@ impl<'a> StrongSharedCycleGraph<'a> {
         }
 
         let mut found = None;
-        for key in self.structs.keys().filter(|key| key.name == name) {
+        for declaration in self.name_ledger.declarations_named(name) {
+            let Some(key) = self.struct_key(declaration.module, name) else { continue };
             if !self.name_ledger.visible(from_module, key.module, name) {
                 continue;
             }
-            if found.as_ref().is_some_and(|previous| previous != key) {
+            if found.as_ref().is_some_and(|previous| previous != &key) {
                 return None;
             }
-            found = Some(key.clone());
+            found = Some(key);
         }
         found
     }
@@ -2124,7 +2126,7 @@ impl<'a> StrongSharedCycleGraph<'a> {
                     return None;
                 }
                 stack.push(target.clone());
-                let fields = self.structs.get(&target).cloned();
+                let fields = self.structs.get(&target).copied();
                 let hit = fields.as_deref().and_then(|fields| {
                     fields.iter().find_map(|(_, _, fty)| {
                         self.strong_shared_cycle_witness(owner, target.module, fty, stack)
@@ -2167,11 +2169,11 @@ impl<'a> StrongSharedCycleGraph<'a> {
                     // the owner through a later sibling edge in this walk.
                     return (false, true);
                 }
-                let fields = self.structs.get(&target).cloned();
+                let fields = self.structs.get(&target).copied();
                 let mut reaches = false;
                 let mut cycle_cut = false;
                 if let Some(fields) = fields {
-                    for (_, _, fty) in &fields {
+                    for (_, _, fty) in fields {
                         let (hit, cut) =
                             self.payload_can_reach_owner_inner(owner, target.module, fty, active);
                         cycle_cut |= cut;
@@ -2551,11 +2553,11 @@ pub(crate) fn register_impl_methods(
 /// checker remains authoritative for arity, arguments, mutation, and failure.
 pub(crate) fn core_string_source_method<'a>(
     modules: &'a [ModuleState],
+    name_ledger: &NameLedger,
     method: &str,
 ) -> Option<&'a Func> {
-    let module = modules.iter().find(|module| {
-        module.module_alias == jet_foundation::CoreSourceParts::CORE_TEXT_STRING_ALIAS
-    })?;
+    let owner = name_ledger.module_by_alias(jet_foundation::CoreSourceParts::CORE_TEXT_STRING_ALIAS)?;
+    let module = modules.get(owner)?;
     let function = module.items.iter().find_map(|item| match item {
         Item::Func(function)
             if !function.is_pub && function.name == method && function.params.first().is_some() =>
