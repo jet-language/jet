@@ -208,7 +208,9 @@ fn jfmt_block_marker(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockMa
                 &args.push(JetFmtMarkerArgument.Text{value: reason})
             }
             loop declaration in policies {
-                if declaration.key != PolicyKey.Unsafe || declaration.target != Val(span) -> next
+                if declaration.key != PolicyKey.Unsafe -> next
+                target :: declaration.target ?? next
+                if target != span -> next
                 tracked :: if declaration.value == {
                     .Track | .Skip -> true
                     else -> false
@@ -914,10 +916,6 @@ pub fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
             jfmt_end_block(&f)
         }
     }
-}
-
-fn jfmt_saturating_sub(left: Int, right: Int) -> Int Never! {
-    if left > right -> left - right else -> 0
 }
 
 fn jfmt_fmt_for_stmt(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?, kind: ForKind, body: [Stmt], span: Span, arrow_body: Bool, label: NamedSpan?) {
