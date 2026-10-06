@@ -166,6 +166,16 @@ fn sema_expression_enum_variant_call(receiver: Expr, method: String, method_span
         if argument.label != None || argument.spread -> return unhandled
     }
     path :: sema_expression_enum_variant_path(receiver, method, environment, &scopes) ?? return unhandled
+    // `DataTree.Text("jet")` / `Tree.Int(7)` under an alias of the Core
+    // carrier builds the compiler-owned data literal, whose variants carry
+    // payloads the unit-only Core enum rows don't list. A declared enum of
+    // that name keeps its own variants.
+    if path.variant == method && (path.enum_name == "DBValue" || sema_data_is_json_name(path.enum_name)) {
+        owner :: sema_expression_type_symbol(&scopes, environment, path.enum_name)
+        declared_enum := false
+        if owner == .Val(symbol) -> declared_enum = sema_scope_declaration_is(environment, symbol.id, SemaScopeDeclarationKind.Enum)
+        if !declared_enum -> return sema_call_try_data_literal(Type.Named{name: path.enum_name}, path.variant, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     if !sema_expression_enum_declares_variant(path.enum_name, path.variant, environment, &scopes) -> return unhandled
     enum_args :: loop argument in args -> EnumLitArg.Positional{value: argument.expr}
     end := method_span.end
