@@ -4108,13 +4108,23 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
         modules[effect_index].functions = ^effects.modules[effect_module_index].functions
     }
     resolved_compute_facts := [SemaComputeFunctionFacts]{}
-    effect_solved_functions := [TFunc]{}
+    autodiff_obligations := 0
     loop module_index in 0..<modules.len() {
-        module_result :: modules[module_index]
-        loop function_facts in module_result.compute_facts -> &resolved_compute_facts.push(function_facts)
-        loop function in module_result.functions -> &effect_solved_functions.push(function)
+        loop function_facts in modules[module_index].compute_facts {
+            autodiff_obligations += function_facts.autodiff_obligations.len()
+            &resolved_compute_facts.push(function_facts)
+        }
     }
-    compute_diagnostics := sema_compute_validate_autodiff_purity(resolved_compute_facts, effect_solved_functions)
+    // The autodiff purity check reads the effect-solved functions only for an
+    // obligation, so a program without one never copies its checked bodies.
+    compute_diagnostics := [Diagnostic]{}
+    if autodiff_obligations > 0 {
+        effect_solved_functions := [TFunc]{}
+        loop module_index in 0..<modules.len() {
+            loop function in modules[module_index].functions -> &effect_solved_functions.push(function)
+        }
+        compute_diagnostics = sema_compute_validate_autodiff_purity(resolved_compute_facts, effect_solved_functions)
+    }
     loop diagnostic in compute_diagnostics {
         if diagnostic.span == {
             .Val(span) -> {
