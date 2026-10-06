@@ -1325,18 +1325,32 @@ fn jet_driver_package_facts(
 
 // Run-wide lookups every function closure of one comptime run shares, built
 // once instead of rescanning the graph or the checked functions per lookup.
+// The owner maps scan every function of the graph, so they are built at the
+// first owner lookup (`owners_built`), not for a run whose items reach no
+// function by key.
 struct JetDriverComptimeRunIndex {
     // Function key -> the module that registers it; `ambiguous_owners` holds
     // the keys registered more than once, which have no unique owner.
     owners: [String:String]
     ambiguous_owners: [String:Bool]
+    owners_built: Bool
     // `module\nkey` -> the first row of that function in the run's checked
     // functions.
     checked_rows: [String:Int]
 }
 
-fn jet_driver_comptime_run_index(graph: SemaRegistrationGraph, checked_functions: [SemaComptimeFunctionResult]) -> JetDriverComptimeRunIndex Never! {
-    index := JetDriverComptimeRunIndex{owners: [String:String]{}, ambiguous_owners: [String:Bool]{}, checked_rows: [String:Int]{}}
+fn jet_driver_comptime_run_index(checked_functions: [SemaComptimeFunctionResult]) -> JetDriverComptimeRunIndex Never! {
+    index := JetDriverComptimeRunIndex{owners: [String:String]{}, ambiguous_owners: [String:Bool]{}, owners_built: false, checked_rows: [String:Int]{}}
+    loop (row, checked) in checked_functions {
+        key :: "{checked.module_identity}\n{checked.function_key}"
+        if index.checked_rows.get(key) == None -> index.checked_rows[key] = row
+    }
+    index
+}
+
+// The owner maps of `graph`, which never changes during a run.
+fn jet_driver_comptime_owners_build(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex) Never! {
+    index.owners_built = true
     loop semantic_module in graph.modules {
         loop function in semantic_module.functions -> jet_driver_comptime_owner_add(&index, function.symbol.id.key, semantic_module.module_identity)
         loop nominal in semantic_module.nominals {
@@ -1346,11 +1360,6 @@ fn jet_driver_comptime_run_index(graph: SemaRegistrationGraph, checked_functions
             loop function in implementation.methods -> jet_driver_comptime_owner_add(&index, function.symbol.id.key, semantic_module.module_identity)
         }
     }
-    loop (row, checked) in checked_functions {
-        key :: "{checked.module_identity}\n{checked.function_key}"
-        if index.checked_rows.get(key) == None -> index.checked_rows[key] = row
-    }
-    index
 }
 
 fn jet_driver_comptime_owner_add(index: &JetDriverComptimeRunIndex, function_key: String, module_identity: String) Never! {
@@ -1362,7 +1371,7 @@ fn jet_driver_comptime_owner_add(index: &JetDriverComptimeRunIndex, function_key
 }
 
 // The one module that registers `function_key`, or None when no module or
-// more than one does.
+// more than one does (the owner maps are built: jet_driver_comptime_owners_build).
 fn jet_driver_comptime_function_owner(index: JetDriverComptimeRunIndex, function_key: String) -> String? {
     if index.ambiguous_owners.get(function_key) != None -> return None
     index.owners.get(function_key)
@@ -1407,14 +1416,17 @@ fn jet_driver_comptime_wait_add(dependencies: &[String], key: String) Never! {
 // (sema_comptime_program) and `available` its constant keys: every function
 // check re-targets the environment instead of copying the graph per function.
 // A function the run already checked completely is reused from
-// `checked_functions`.
+// `checked_functions`. `memory_plan` holds the run's memory plan once a
+// function is checked (zero or one row): it reads only function
+// declarations of `graph`, which staged values never change, so every
+// on-demand function check of the run shares the one built at the first.
 fn jet_driver_comptime_function_closure(
     graph: SemaRegistrationGraph,
     environment: &SemaScopeEnvironment, program: SemaProgramTables,
     probe: &SemaScopeProbe,
     available: SemaComptimeAvailableConstants,
     index: &JetDriverComptimeRunIndex,
-    memory_plan: SemaFunctionMemoryPlan,
+    memory_plan: &[SemaFunctionMemoryPlan],
     values: [SemaComptimeItemValue],
     checked_functions: &[SemaComptimeFunctionResult],
     request: SemaComptimeItemRequest,
@@ -1426,6 +1438,7 @@ fn jet_driver_comptime_function_closure(
     queued := [String:Bool]{}
     loop call in request.calls -> jet_driver_comptime_function_ref_add(&queue, &queued, call.module_identity, call.callee_key)
     loop function_key in request.reachable_function_keys {
+        if !index.owners_built -> jet_driver_comptime_owners_build(graph, &index)
         module_identity := jet_driver_comptime_function_owner(index, function_key)
         if module_identity == None {
             &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, request.module_identity, "E0003", request.span, "a comptime-reachable function has no unique registered module owner", "on-demand Sema function checks use the exact canonical module and symbol key", "retain the registered owner identity for every reachable function"))
@@ -1447,7 +1460,8 @@ fn jet_driver_comptime_function_closure(
         if index.checked_rows.get(checked_key) == .Val(row) {
             if checked_functions[row].complete -> reused_row = row
         }
-        checked := if reused_row >= 0 -> checked_functions[reused_row] else -> sema_check_comptime_function(graph, &environment, program, &probe, available, memory_plan, values, current.module_identity, current.function_key)
+        if reused_row < 0 && memory_plan.len() == 0 -> &memory_plan.push(sema_function_memory_plan_from_graph(graph))
+        checked := if reused_row >= 0 -> checked_functions[reused_row] else -> sema_check_comptime_function(graph, &environment, program, &probe, available, memory_plan[0], values, current.module_identity, current.function_key)
         loop dependency in checked.waiting_dependencies -> jet_driver_comptime_wait_add(&waiting, dependency)
         if {
             !checked.complete || jet_driver_has_errors(checked.diagnostics) -> {
@@ -1471,6 +1485,7 @@ fn jet_driver_comptime_function_closure(
         }
         loop call in checked.calls -> jet_driver_comptime_function_ref_add(&queue, &queued, call.module_identity, call.callee_key)
         loop function_key in checked.reachable_function_keys {
+            if !index.owners_built -> jet_driver_comptime_owners_build(graph, &index)
             module_identity := jet_driver_comptime_function_owner(index, function_key)
             if {
                 module_identity == None -> {
@@ -3051,8 +3066,9 @@ fn jet_driver_comptime_run(
 ) -> JetDriverComptimeRunResult {
     values := ~initial_values
     // The memory plan reads only function declarations, which staged values
-    // never change, so every on-demand function check shares this one.
-    memory_plan :: sema_function_memory_plan_from_graph(graph)
+    // never change, so every on-demand function check shares one, built at
+    // the run's first function check (jet_driver_comptime_function_closure).
+    memory_plan := [SemaFunctionMemoryPlan]{}
     checked_functions := ~initial_functions
     trace := jet_driver_empty_compile_trace()
     pending := sources
@@ -3071,7 +3087,7 @@ fn jet_driver_comptime_run(
     probe := sema_comptime_probe_init(sema_host_hook_access(request.eval_config.host_hooks))
     available := sema_comptime_available_constants(graph, values)
     resolved_count := values.len()
-    run_index := jet_driver_comptime_run_index(graph, checked_functions)
+    run_index := jet_driver_comptime_run_index(checked_functions)
     // Checked functions whose checked-text calls were already queued; the
     // run's checked functions only grow, so each is scanned once.
     scanned_functions := 0
@@ -3201,7 +3217,7 @@ fn jet_driver_comptime_run(
                     }
                 }
                 checked_mark := checked_functions.len()
-                closure := jet_driver_comptime_function_closure(graph, &environment, program, &probe, available, &run_index, memory_plan, values, &checked_functions, comptime_request, &diagnostics)
+                closure := jet_driver_comptime_function_closure(graph, &environment, program, &probe, available, &run_index, &memory_plan, values, &checked_functions, comptime_request, &diagnostics)
                 if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, closure.waiting_dependencies, diagnostics.len() > item_diagnostic_start || !closure.complete) {
                     loop diagnostics.len() > item_diagnostic_start {
                         _ := &diagnostics.pop()
