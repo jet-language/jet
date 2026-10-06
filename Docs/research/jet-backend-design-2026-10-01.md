@@ -389,8 +389,11 @@ owners. Write uses a genuinely mutable owned local; a borrowed kernel input may
 not be made mutable by casting its shared reference. That unsupported adaptation
 is reported as a native lowering failure, not silently changed to Read.
 `Tests/prepare-call-runtime.mjs --allparts` refreshes the current C ABI, generated
-routes and iterator adapters together for full-pack proofs; its default mode
-retains an emitted seed's paired route set.
+routes and iterator/task adapters together for full-pack proofs; its default mode
+retains an emitted seed's paired route set. Generated Rust programs carry only
+`CAbi.rs`: the routes name optional runtime modules a program gets only when it
+uses them, so `CAbiIter.rs`, `CAbiTask.rs` and `CAbiRoutes.rs` exist only in the
+all-parts native runtime crate.
 
 Task and channel adapters share the iterator's typed slot descriptors rather
 than introducing another erased value ABI. A native SendFn body writes its
