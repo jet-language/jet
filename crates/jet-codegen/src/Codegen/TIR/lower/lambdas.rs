@@ -53,12 +53,12 @@ pub(crate) fn spawn_label(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Option<Strin
         expr = inner;
     }
     match expr {
-        Expr::Call(call) if matches!(cx.fn_types.get(&call.name), Some(Type::Fn { .. })) => {
+        Expr::Call(call) if matches!(cx.fact_fn_types(&call.name), Some(Type::Fn { .. })) => {
             Some(call.name.clone())
         }
         Expr::Ident(name, _)
             if !env.locals.contains_key(name)
-                && matches!(cx.fn_types.get(name), Some(Type::Fn { .. })) =>
+                && matches!(cx.fact_fn_types(name), Some(Type::Fn { .. })) =>
         {
             Some(name.clone())
         }

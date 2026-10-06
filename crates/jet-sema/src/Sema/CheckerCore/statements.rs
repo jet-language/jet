@@ -425,7 +425,7 @@ impl<'a> Checker<'a> {
             LValue::Local { name, .. } => {
                 self.lookup(name).map(|info| info.ty.clone()).or_else(|| {
                     self.is_global_mutable_binding(name)
-                        .then(|| self.consts.get(name).cloned())
+                        .then(|| self.const_type(name).cloned())
                         .flatten()
                 })
             }
@@ -1285,7 +1285,7 @@ impl<'a> Checker<'a> {
                 .map(|info| info.ty.clone())
                 .or_else(|| {
                     self.is_global_mutable_binding(name)
-                        .then(|| self.consts.get(name).cloned())
+                        .then(|| self.const_type(name).cloned())
                         .flatten()
                 })
                 .and_then(|ty| {
@@ -1479,7 +1479,7 @@ impl<'a> Checker<'a> {
                                 // declaration registration.
                                 return;
                             }
-                            if self.consts.contains_key(name.as_str()) {
+                            if self.const_type(name.as_str()).is_some() {
                                 self.diags.push(Diagnostic::error(
                                     "E0111",
                                     format!("`{}` is a const and can never change", name),
@@ -2527,7 +2527,7 @@ impl<'a> Checker<'a> {
                         self.push_scope();
                         let vs = *var_span;
                         let v = var.clone();
-                        if self.lookup(&v).is_some() || self.consts.contains_key(&v) {
+                        if self.lookup(&v).is_some() || self.const_type(&v).is_some() {
                             self.diags.push(already_defined(&v, vs));
                         }
                         self.declare_in_scope(

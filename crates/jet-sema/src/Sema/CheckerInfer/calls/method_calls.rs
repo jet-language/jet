@@ -727,10 +727,10 @@ impl<'a> Checker<'a> {
             )),
             Expr::Ident(name, _) => {
                 let function = http_route_find_func_in_items(self.items, name).or_else(|| {
-                    self.modules
-                        .into_iter()
-                        .flat_map(|modules| modules.iter())
-                        .find_map(|module| http_route_find_func_in_items(&module.items, name))
+                    let (original, owner) = self.unqualified_file.get(name)
+                        .map(|(original, owner)| (original.as_str(), *owner))
+                        .or_else(|| self.namespace_function_owner(name).map(|owner| (name.as_str(), owner)))?;
+                    http_route_find_func_in_items(&self.modules?.get(owner)?.items, original)
                 })?;
                 Some((
                     function
@@ -747,10 +747,9 @@ impl<'a> Checker<'a> {
 
     fn http_route_struct_fields(&self, name: &str) -> Option<HashSet<String>> {
         let definition = http_route_find_struct_in_items(self.items, name).or_else(|| {
-            self.modules
-                .into_iter()
-                .flat_map(|modules| modules.iter())
-                .find_map(|module| http_route_find_struct_in_items(&module.items, name))
+            let (namespace, leaf) = Self::split_type_name(name);
+            let owner = self.struct_owner_module(leaf, namespace)?;
+            http_route_find_struct_in_items(&self.modules?.get(owner)?.items, leaf)
         })?;
         Some(
             definition
@@ -3566,9 +3565,7 @@ impl<'a> Checker<'a> {
                         || core_generic_struct_field(name, Syntax::METHOD_CALL, args).is_some()
                 }
                 Type::TraitObject(traits) => traits.iter().any(|trait_name| {
-                    self.trait_reg
-                        .traits
-                        .get(trait_name)
+                    self.trait_reg.trait_info(trait_name)
                         .is_some_and(|trait_def| {
                             trait_def.methods.contains_key(Syntax::METHOD_CALL)
                         })
@@ -4748,12 +4745,11 @@ impl<'a> Checker<'a> {
                                     .and_then(|mangled| find_job(self.items, mangled))
                             })
                             .or_else(|| {
-                                self.unqualified_file
-                                    .get(job_name)
+                                self.file_function_binding(job_name)
                                     .and_then(|(function_name, module_idx)| {
                                         self.modules
-                                            .and_then(|modules| modules.get(*module_idx))
-                                            .and_then(|module| find_job(&module.items, function_name))
+                                            .and_then(|modules| modules.get(module_idx))
+                                            .and_then(|module| find_job(&module.items, &function_name))
                                     })
                             }),
                         _ => None,
@@ -6789,16 +6785,12 @@ impl<'a> Checker<'a> {
                 let known_method = bounds
                     .iter()
                     .find_map(|trait_name| {
-                        self.trait_reg
-                            .traits
-                            .get(trait_name)
+                        self.trait_reg.trait_info(trait_name)
                             .and_then(|info| info.methods.get(method))
                             .map(|msig| (trait_name.clone(), msig.clone()))
                     })
                     .or_else(|| {
-                        self.trait_reg
-                            .traits
-                            .iter()
+                        self.trait_reg.trait_infos()
                             .filter_map(|(trait_name, info)| {
                                 info.methods.get(method).map(|msig| (trait_name, msig))
                             })
@@ -7793,7 +7785,7 @@ impl<'a> Checker<'a> {
         // for the canonical primitive, never for user nominal types.
         if matches!(&recv_ty, Type::String)
             && self.modules.map_or(false, |modules| {
-                crate::Sema::Registration::core_string_source_method(modules, method)
+                crate::Sema::Registration::core_string_source_method(modules, self.name_ledger, method)
                     .is_some()
             })
         {
@@ -7918,9 +7910,7 @@ impl<'a> Checker<'a> {
             // them. First match wins (S48 single-trait dispatch is the n=1 case of
             // this loop, unchanged).
             let sig = trait_names.iter().find_map(|tn| {
-                self.trait_reg
-                    .traits
-                    .get(tn)
+                self.trait_reg.trait_info(tn)
                     .and_then(|t| t.methods.get(method))
                     .map(|msig| (tn.clone(), msig.clone()))
             });

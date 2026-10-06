@@ -727,10 +727,6 @@ fn specialize_struct(
     result
 }
 
-pub(super) fn clone_struct(source: &crate::AST::StructDef) -> crate::AST::StructDef {
-    source.clone()
-}
-
 fn specialize_enum(
     source: &crate::AST::EnumDef,
     alias: &str,
@@ -835,10 +831,6 @@ fn specialize_enum(
         .map(|(name, span)| (mapped_definition_name(name, &types), *span))
         .collect();
     result
-}
-
-pub(super) fn clone_enum(source: &crate::AST::EnumDef) -> crate::AST::EnumDef {
-    source.clone()
 }
 
 #[derive(Clone)]
