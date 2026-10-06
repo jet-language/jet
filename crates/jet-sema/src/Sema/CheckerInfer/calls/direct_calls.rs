@@ -1697,8 +1697,15 @@ impl<'a> Checker<'a> {
                         .map(|a| a.expr.span().end)
                         .unwrap_or(name_span.end);
                     let span = Span::new(name_span.start, end);
+                    let invalid_reads_before = self.invalid_binding_reads;
                     let ret = self.infer_call_value(&mut callee, &mut args, span);
                     call.args = args;
+                    // A poisoned callee (its initializer already failed, such
+                    // as an untyped lambda parameter, E0801) yields no type
+                    // without a new report: that error owns it, not E0116.
+                    if ret.is_none() && self.invalid_binding_reads != invalid_reads_before {
+                        return None;
+                    }
                     return Some(ret);
                 }
             }
