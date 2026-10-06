@@ -171,7 +171,7 @@ For C and C++, the driver-specific options are `--project-root`, `--build-root`,
 `--target`. The exact acceptance and forwarding behavior is documented in
 [CC driver hosts](cc-driver.md).
 
-## Jet-hosted `check`, `build`, `run`, `test`, and `new`
+## Jet-hosted `check`, `build`, `run`, `test`, `new`, and `fmt`
 
 The Jet-hosted CLI ([`Compiler/JetCli`](../../../Compiler/JetCli)) runs
 `jet check <file>`, `jet build <file>`, `jet run <file>`, and
@@ -250,3 +250,18 @@ homes for `overrides`, and `.gitignore`, then the status lines on stderr
 (muted by `--quiet`). A bare `jet new` prints the command help with exit 2.
 The backend scaffolds (`jet new service|route|job|migration`) are refused with
 E2104 until they are ported.
+
+`jet fmt [paths…] [-]` formats `.jet` sources with the Jet port of the
+formatter ([`Compiler/JetParser/Source/Formatter`](../../../Compiler/JetParser/Source/Formatter),
+one module per Rust `Formatter` module) the way CmdCompile.rs `run_fmt` does:
+no paths walk the project root (the nearest `package.jet` directory, else the
+working directory), a directory is walked sorted with the ignored directories
+and snapshot trees skipped, every file is formatted before any is written, and
+one read or parse failure reports every failure with exit 2 (exit 1 under
+`--check`). `--check` lists the files that would change (root-relative,
+sorted) and exits 1; `--diff` adds unified diffs; `--dry-run` is both; `-`
+formats stdin to stdout under the `--stdin-path=` label; `--simplify` enables
+the ratified rewrites. The retired-spelling status lines go to stderr unless
+`--quiet`. `package.jet` and other Package/Config record sources (the typed
+Package formatter), `--lang`, `--changed`, and `--explicit-copies` are refused
+with E2104 until they are ported.
