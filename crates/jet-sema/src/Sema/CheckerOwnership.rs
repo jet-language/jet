@@ -4544,6 +4544,32 @@ impl<'a> Checker<'a> {
         reuse_span: Span,
         moved_ty: Option<&Type>,
     ) -> Diagnostic {
+        // D-CALLSITE-MARK1=A: a lambda that moved a capture runs once.
+        if let Some(capture) = self
+            .lookup(moved_place)
+            .and_then(|info| self.once_lambdas.get(&info.def_span))
+        {
+            let label = if moved_at.span == reuse_span {
+                format!("`{moved_place}` ran here on an earlier loop iteration")
+            } else {
+                format!("`{moved_place}` ran here")
+            };
+            return Diagnostic::error(
+                "E0121",
+                format!("`{moved_place}` can run only once, and it already ran"),
+                format!(
+                    "`{moved_place}` takes its captured `{capture}` with the move marker `{}`, so its first call gave `{capture}` away",
+                    Syntax::SIGIL_MOVE
+                ),
+                format!(
+                    "call `{moved_place}` once, or let it pass a copy of `{capture}` with the copy marker `{}` (`{}{capture}`) instead of taking it",
+                    Syntax::SIGIL_COPY,
+                    Syntax::SIGIL_COPY
+                ),
+                Some(reuse_span),
+            )
+            .with_label(moved_at.span, label);
+        }
         let consumer = moved_at.consumer.as_str();
         let note = if moved_ty.is_some_and(|ty| self.is_resource_type(ty)) {
             Some(format!(
@@ -4844,6 +4870,58 @@ impl<'a> Checker<'a> {
         self.diags.push(crate::Sema::Diagnostics::aliasing_take_while_lent(
             name, callee, *span,
         ));
+        true
+    }
+
+    /// E0225 (D-CALLSITE-MARK1=A): `&` on an argument whose parameter only
+    /// reads it. A written `&` must always mean the call edits the place, so
+    /// a mark the signature does not back is refused with a Safe removal.
+    /// A write window parameter (`ViewMut<T>`) is passed through its `&`
+    /// place and keeps the mark. Returns whether it reported.
+    pub(crate) fn reject_unbacked_write_mark(
+        &mut self,
+        callee: &str,
+        arg: &crate::AST::CallArg,
+        param_ty: &Type,
+    ) -> bool {
+        if arg.convention != AccessConvention::Write
+            || arg.spread
+            || crate::Sema::ReceiverMarks::is_window_type(param_ty)
+            || crate::Sema::ReceiverMarks::is_window_type(&self.resolve_type(param_ty.clone()))
+        {
+            return false;
+        }
+        let place_start = crate::Sema::ReceiverMarks::place_span(&arg.expr).start;
+        let mark_start = self
+            .source
+            .get(..place_start)
+            .map(|before| before.trim_end())
+            .filter(|before| before.ends_with(Syntax::SIGIL_WRITE))
+            .map(|before| before.len() - Syntax::SIGIL_WRITE.len());
+        let mark_span = mark_start
+            .map(|start| Span::new(start, start + Syntax::SIGIL_WRITE.len()))
+            .unwrap_or(arg.span);
+        let mut diagnostic = Diagnostic::error(
+            "E0225",
+            format!(
+                "`{callee}` only reads this argument, so it takes no `{}` mark",
+                Syntax::SIGIL_WRITE
+            ),
+            format!(
+                "a mark shows that a call writes (`{}`) or takes (`{}`) the named place; `{callee}` declares this parameter read-only, so the call leaves the place unmarked",
+                Syntax::SIGIL_WRITE,
+                Syntax::SIGIL_MOVE,
+            ),
+            format!("remove `{}`", Syntax::SIGIL_WRITE),
+            Some(mark_span),
+        );
+        if mark_start.is_some() {
+            diagnostic = diagnostic.with_edit(TextEdit {
+                span: mark_span,
+                new_text: String::new(),
+            });
+        }
+        self.diags.push(diagnostic);
         true
     }
 
@@ -6782,6 +6860,13 @@ impl<'a> Checker<'a> {
         } else if arg.convention == AccessConvention::Write && matches!(arg.expr, Expr::Slice { .. }) {
             self.diags
                 .push(crate::Sema::Diagnostics::write_range_window_argument(arg.span));
+        }
+        // D-CALLSITE-MARK1=A: a written `&` always means the call edits.
+        if param_conv == AccessConvention::Read
+            && expr_root_ident(&arg.expr).is_some()
+            && self.reject_unbacked_write_mark(call_name, arg, param_ty)
+        {
+            return;
         }
 
         match (param_conv, arg.convention) {

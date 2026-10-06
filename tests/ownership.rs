@@ -2567,10 +2567,10 @@ msg :: "hello"
     );
 }
 
-/// D-COPY-DEFAULT1=A: one name in two take slots of one call. The later slot
-/// is the last use, so the earlier one is E0209 (`both(~t, t)`).
+/// D-CALLSITE-MARK1=A: one name in two take slots of one call has no last
+/// use in that call, so each take slot is E0209 (`both(~t, ^t)` is the fix).
 #[test]
-fn unmarked_take_argument_twice_in_one_call_reports_the_earlier_slot() {
+fn unmarked_take_argument_twice_in_one_call_reports_each_slot() {
     let src = r#"
 fn both(a: ^String, b: ^String) -> String { "{a}{b}" }
 
@@ -2581,10 +2581,65 @@ fn run() {
 "#;
     let diags = jet::compile(src).expect_err("should error");
     let e0209: Vec<_> = diags.iter().filter(|d| d.code == "E0209").collect();
-    assert_eq!(e0209.len(), 1, "{diags:?}");
-    let span = e0209[0].span.expect("E0209 span");
-    assert_eq!(&src[span.start..span.end], "t");
-    assert_eq!(span.start, src.find("both(t").unwrap() + 5, "{diags:?}");
+    assert_eq!(e0209.len(), 2, "{diags:?}");
+    let first = src.find("both(t").unwrap() + 5;
+    let starts: Vec<usize> = e0209.iter().map(|d| d.span.expect("E0209 span").start).collect();
+    assert!(starts.contains(&first) && starts.contains(&(first + 3)), "{diags:?}");
+    assert!(e0209.iter().all(|d| d.what.contains("more than once")), "{diags:?}");
+}
+
+/// D-CALLSITE-MARK1=A: `&` on an argument whose parameter only reads it is
+/// E0225 with a Safe edit that removes the mark.
+#[test]
+fn write_mark_on_read_parameter_is_e0225() {
+    let src = r#"
+fn show(n: Int) { print(n) }
+
+fn bump(n: &Int) { n += 1 }
+
+fn run() {
+    score := 41
+    bump(&score)
+    show(&score)
+}
+"#;
+    let diags = jet::compile(src).expect_err("should error");
+    let e0225: Vec<_> = diags.iter().filter(|d| d.code == "E0225").collect();
+    assert_eq!(e0225.len(), 1, "{diags:?}");
+    let span = e0225[0].span.expect("E0225 span");
+    assert_eq!(span.start, src.find("show(&").unwrap() + 5, "{diags:?}");
+    assert_eq!(&src[span.start..span.end], "&");
+}
+
+/// D-CALLSITE-MARK1=A: `^` on a captured name inside a lambda moves it into
+/// the lambda; one call runs, a second call on any path is E0121.
+#[test]
+fn lambda_taking_a_capture_runs_once() {
+    let once = r#"
+fn archive(name: ^String) -> String { name }
+
+fn run() {
+    title :: "vault"
+    keep :: () -> print(archive(^title))
+    keep()
+}
+"#;
+    jet::compile(once).expect("one call of a run-once lambda is accepted");
+    for second in ["keep()\n    keep()", "loop i in 0..<2 {\n        keep()\n    }", "keep()\n    print(title)"] {
+        let src = format!(
+            r#"
+fn archive(name: ^String) -> String {{ name }}
+
+fn run() {{
+    title :: "vault"
+    keep :: () -> print(archive(^title))
+    {second}
+}}
+"#
+        );
+        let diags = jet::compile(&src).expect_err("a second run or a later use is refused");
+        assert!(diags.iter().any(|d| d.code == "E0121"), "{second}: {diags:?}");
+    }
 }
 
 /// #4702: one call that reads a name and takes it is E0204, never a MIR

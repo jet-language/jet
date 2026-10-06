@@ -152,6 +152,17 @@ impl<'a> Checker<'a> {
                 self.check_foreign_transaction_call(&sig, name, span);
             }
         }
+        // D-CALLSITE-MARK1=A: a lambda that takes a capture with `^` runs
+        // once; its call moves the binding, so a later call is E0121.
+        if let Expr::Ident(name, name_span) = callee.as_ref() {
+            let once = self
+                .lookup(name)
+                .and_then(|info| self.once_lambdas.get(&info.def_span))
+                .is_some();
+            if once {
+                self.mark_moved_exact(name.clone(), *name_span, "its first call");
+            }
+        }
         match effect_bound {
             // A yielding loop uses a compiler-private immediately evaluated
             // carrier. Its body already records effects in the enclosing

@@ -114,6 +114,8 @@ pub(crate) fn checker_for_module<'a>(
         loop_exit_depth: None,
         share_sites: Vec::new(),
         implicit_take_sites: HashMap::new(),
+        once_lambda_sites: HashMap::new(),
+        once_lambdas: HashMap::new(),
         implicit_loop_subject_depth: 0,
         subject_shorthand_depth: 0,
         source_nesting: 0,
