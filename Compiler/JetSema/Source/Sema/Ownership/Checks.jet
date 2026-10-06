@@ -901,10 +901,11 @@ fn sema_ownership_anchor_held(merged: [SemaOwnershipReference], anchors: SemaOwn
     false
 }
 
-// Merge only reference anchors from a deferred body.  Moves and write windows
-// in a lambda body belong to the lambda's execution state, not construction.
-pub fn sema_ownership_merge_references(state: &SemaOwnershipState, deferred: SemaOwnershipState) Never! {
-    loop reference in deferred.references {
+// Merge only reference anchors from a deferred body (the reference rows it
+// added).  Moves and write windows in a lambda body belong to the lambda's
+// execution state, not construction.
+pub fn sema_ownership_merge_references(state: &SemaOwnershipState, references: [SemaOwnershipReference]) Never! {
+    loop reference in references {
         if sema_ownership_anchor_held(state.references, state.anchors, state.references.len(), reference) -> next
         sema_ownership_admit_reference(&state, reference)
     }
@@ -2750,51 +2751,60 @@ pub fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, s
         }
         .If(condition, then_body, then_value, else_body, else_value, _) -> {
             valid := sema_ownership_check_expression(&state, condition, scopes, &diagnostics)
-            before :: sema_ownership_state_snapshot(state)
-            then_state := sema_ownership_state_snapshot(before)
-            sema_ownership_enter_scope(&then_state)
-            if !sema_ownership_check_statements(&then_state, then_body, scopes, &diagnostics).complete -> valid = false
-            if !sema_ownership_check_expression(&then_state, then_value, scopes, &diagnostics) -> valid = false
-            sema_ownership_leave_scope(&then_state)
-            else_state := sema_ownership_state_snapshot(before)
-            sema_ownership_enter_scope(&else_state)
-            if !sema_ownership_check_statements(&else_state, else_body, scopes, &diagnostics).complete -> valid = false
-            if !sema_ownership_check_expression(&else_state, else_value, scopes, &diagnostics) -> valid = false
-            sema_ownership_leave_scope(&else_state)
-            sema_ownership_join_paths(&state, before, then_state, else_state, true)
+            // Each arm runs on the live state inside a fork and is rolled
+            // back; the join is that of the arms' whole-state copies.
+            fork :: sema_ownership_fork(&state)
+            sema_ownership_enter_scope(&state)
+            if !sema_ownership_check_statements(&state, then_body, scopes, &diagnostics).complete -> valid = false
+            if !sema_ownership_check_expression(&state, then_value, scopes, &diagnostics) -> valid = false
+            sema_ownership_leave_scope(&state)
+            then_path :: sema_ownership_fork_path(state, fork)
+            sema_ownership_fork_rollback(&state, fork)
+            sema_ownership_enter_scope(&state)
+            if !sema_ownership_check_statements(&state, else_body, scopes, &diagnostics).complete -> valid = false
+            if !sema_ownership_check_expression(&state, else_value, scopes, &diagnostics) -> valid = false
+            sema_ownership_leave_scope(&state)
+            else_path :: sema_ownership_fork_path(state, fork)
+            sema_ownership_fork_rollback(&state, fork)
+            sema_ownership_fork_join_close(&state, fork, then_path, else_path, true)
             valid
         }
         .OrFallback(value, fallback, _, _) -> {
             valid := sema_ownership_check_expression(&state, value, scopes, &diagnostics)
-            before :: sema_ownership_state_snapshot(state)
-            fallback_state := sema_ownership_state_snapshot(before)
+            fork :: sema_ownership_fork(&state)
             // A fallback route that leaves (`return`, `panic`, `break`,
             // `next`, or a block that always does) never reaches the join, so
             // its moves must not poison later uses.
             fallback_reaches_merge := false
             if fallback == {
                 .Value(other) -> {
-                    if !sema_ownership_check_expression(&fallback_state, other, scopes, &diagnostics) -> valid = false
+                    if !sema_ownership_check_expression(&state, other, scopes, &diagnostics) -> valid = false
                     fallback_reaches_merge = true
                 }
                 .Block(body, result, _) -> {
-                    sema_ownership_enter_scope(&fallback_state)
-                    nested :: sema_ownership_check_statements(&fallback_state, body, scopes, &diagnostics)
+                    sema_ownership_enter_scope(&state)
+                    nested :: sema_ownership_check_statements(&state, body, scopes, &diagnostics)
                     if !nested.complete -> valid = false
                     fallback_reaches_merge = nested.falls_through
                     if result == .Val(result_expr) {
-                        if !sema_ownership_check_expression(&fallback_state, result_expr, scopes, &diagnostics) -> valid = false
+                        if !sema_ownership_check_expression(&state, result_expr, scopes, &diagnostics) -> valid = false
                     }
-                    sema_ownership_leave_scope(&fallback_state)
+                    sema_ownership_leave_scope(&state)
                 }
                 .Return(other, _) -> {
                     if other == .Val(returned) {
-                        if !sema_ownership_check_expression(&fallback_state, returned, scopes, &diagnostics) -> valid = false
+                        if !sema_ownership_check_expression(&state, returned, scopes, &diagnostics) -> valid = false
                     }
                 }
                 else -> {}
             }
-            if fallback_reaches_merge -> sema_ownership_join_paths(&state, before, before, fallback_state, true)
+            fallback_path :: sema_ownership_fork_path(state, fork)
+            sema_ownership_fork_rollback(&state, fork)
+            if fallback_reaches_merge {
+                sema_ownership_fork_join_close(&state, fork, sema_ownership_fork_base(fork), fallback_path, true)
+            } else {
+                sema_ownership_fork_close(&state, fork)
+            }
             valid
         }
         .PatternTest(subject, _, _) -> sema_ownership_check_expression(&state, subject, scopes, &diagnostics)
@@ -2804,19 +2814,23 @@ pub fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, s
             valid
         }
         .Lambda(lambda) -> {
-            // Lambda bodies execute later.  Check them on a fork so a move in
-            // the body cannot accidentally consume an enclosing local now.
-            deferred := sema_ownership_state_snapshot(state)
+            // Lambda bodies execute later.  Check them on a fork, rolled back,
+            // so a move in the body cannot accidentally consume an enclosing
+            // local now; only the body's reference anchors are merged.
+            fork :: sema_ownership_fork(&state)
             if lambda.body == {
                 .Expr(value) -> {
-                    _ := sema_ownership_check_expression(&deferred, value, scopes, &diagnostics)
+                    _ := sema_ownership_check_expression(&state, value, scopes, &diagnostics)
                 }
                 .Block(body) -> {
-                    _ := sema_ownership_check_statements(&deferred, body, scopes, &diagnostics)
+                    _ := sema_ownership_check_statements(&state, body, scopes, &diagnostics)
                 }
             }
+            deferred :: sema_ownership_fork_path(state, fork)
+            sema_ownership_fork_rollback(&state, fork)
+            sema_ownership_fork_close(&state, fork)
             if !sema_ownership_check_lambda_captures(&state, lambda, scopes, &diagnostics) -> return false
-            sema_ownership_merge_references(&state, deferred)
+            sema_ownership_merge_references(&state, deferred.references)
             true
         }
         else -> true
@@ -3017,6 +3031,14 @@ pub fn sema_ownership_fork_drop(state: &SemaOwnershipState, fork: SemaOwnershipF
     sema_ownership_fork_close(&state, fork)
     loop site in first -> sema_ownership_note_share_found(&state, site)
     loop site in second -> sema_ownership_note_share_found(&state, site)
+}
+
+// Joins two paths of `fork` (after its rollback) as sema_ownership_join_paths
+// joins the arms' whole-state copies, applies the join and closes the fork.
+fn sema_ownership_fork_join_close(state: &SemaOwnershipState, fork: SemaOwnershipFork, first: SemaOwnershipPath, second: SemaOwnershipPath, has_else: Bool) Never! {
+    joined :: sema_ownership_path_join(state, fork, first, second, has_else, state.share_found)
+    sema_ownership_fork_apply(&state, joined)
+    sema_ownership_fork_close(&state, fork)
 }
 
 // Appends a joined path to the state of its fork (after the rollback).
@@ -3374,22 +3396,26 @@ pub fn sema_ownership_check_statement(state: &SemaOwnershipState, statement: Stm
         }
         .While(condition, body, _, _, _) -> {
             valid := sema_ownership_check_expression(&state, condition, scopes, &diagnostics)
-            before :: sema_ownership_state_snapshot(state)
-            body_state := sema_ownership_state_snapshot(before)
-            sema_ownership_enter_scope(&body_state)
-            nested :: sema_ownership_check_statements(&body_state, body, scopes, &diagnostics)
-            sema_ownership_leave_scope(&body_state)
-            sema_ownership_join_paths(&state, before, body_state, before, false)
+            // The body runs on the live state inside a fork, rolled back and
+            // joined with the path that skips it.
+            fork :: sema_ownership_fork(&state)
+            sema_ownership_enter_scope(&state)
+            nested :: sema_ownership_check_statements(&state, body, scopes, &diagnostics)
+            sema_ownership_leave_scope(&state)
+            body_path :: sema_ownership_fork_path(state, fork)
+            sema_ownership_fork_rollback(&state, fork)
+            sema_ownership_fork_join_close(&state, fork, body_path, sema_ownership_fork_base(fork), false)
             if !nested.complete -> valid = false
             SemaOwnershipFlowResult{complete: valid, falls_through: true}
         }
         .Loop(body, _, _, _) -> {
-            before :: sema_ownership_state_snapshot(state)
-            body_state := sema_ownership_state_snapshot(before)
-            sema_ownership_enter_scope(&body_state)
-            nested :: sema_ownership_check_statements(&body_state, body, scopes, &diagnostics)
-            sema_ownership_leave_scope(&body_state)
-            sema_ownership_join_paths(&state, before, body_state, before, false)
+            fork :: sema_ownership_fork(&state)
+            sema_ownership_enter_scope(&state)
+            nested :: sema_ownership_check_statements(&state, body, scopes, &diagnostics)
+            sema_ownership_leave_scope(&state)
+            body_path :: sema_ownership_fork_path(state, fork)
+            sema_ownership_fork_rollback(&state, fork)
+            sema_ownership_fork_join_close(&state, fork, body_path, sema_ownership_fork_base(fork), false)
             SemaOwnershipFlowResult{complete: nested.complete, falls_through: true}
         }
         .For(var, var_span, _, kind, body, _, _, _, _) -> {
@@ -3405,18 +3431,19 @@ pub fn sema_ownership_check_statement(state: &SemaOwnershipState, statement: Stm
                     if step != None && !sema_ownership_check_expression(&state, step, scopes, &diagnostics) -> valid = false
                 }
             }
-            before :: sema_ownership_state_snapshot(state)
-            body_state := sema_ownership_state_snapshot(before)
-            sema_ownership_enter_scope(&body_state)
+            fork :: sema_ownership_fork(&state)
+            sema_ownership_enter_scope(&state)
             if sema_scope_resolve_index_at(scopes, var, var_span) == .Val(loop_binding_index) {
                 loop_symbol :: scopes.bindings[loop_binding_index].symbol
-                if sema_ownership_declaration_index(&body_state, loop_symbol.id.key) == None {
-                    sema_ownership_declare_binding(&body_state, loop_symbol, false)
+                if sema_ownership_declaration_index(&state, loop_symbol.id.key) == None {
+                    sema_ownership_declare_binding(&state, loop_symbol, false)
                 }
             }
-            nested :: sema_ownership_check_statements(&body_state, body, scopes, &diagnostics)
-            sema_ownership_leave_scope(&body_state)
-            sema_ownership_join_paths(&state, before, body_state, before, false)
+            nested :: sema_ownership_check_statements(&state, body, scopes, &diagnostics)
+            sema_ownership_leave_scope(&state)
+            body_path :: sema_ownership_fork_path(state, fork)
+            sema_ownership_fork_rollback(&state, fork)
+            sema_ownership_fork_join_close(&state, fork, body_path, sema_ownership_fork_base(fork), false)
             if !nested.complete -> valid = false
             SemaOwnershipFlowResult{complete: valid, falls_through: true}
         }
@@ -3464,16 +3491,19 @@ pub fn sema_ownership_check_statement(state: &SemaOwnershipState, statement: Stm
         .Transact(_, _, body, _, _) -> sema_ownership_check_scoped_body(&state, body, scopes, &diagnostics)
         .ComptimeIf(condition, _, then_body, else_body, _, _) -> {
             valid := sema_ownership_check_expression(&state, condition, scopes, &diagnostics)
-            before :: sema_ownership_state_snapshot(state)
-            then_state := sema_ownership_state_snapshot(before)
-            nested_then :: sema_ownership_check_statements(&then_state, then_body, scopes, &diagnostics)
+            fork :: sema_ownership_fork(&state)
+            nested_then :: sema_ownership_check_statements(&state, then_body, scopes, &diagnostics)
             if !nested_then.complete -> valid = false
-            else_state := sema_ownership_state_snapshot(before)
+            then_path :: sema_ownership_fork_path(state, fork)
+            sema_ownership_fork_rollback(&state, fork)
+            else_path := sema_ownership_fork_base(fork)
             if else_body != None {
-                nested_else :: sema_ownership_check_statements(&else_state, else_body, scopes, &diagnostics)
+                nested_else :: sema_ownership_check_statements(&state, else_body, scopes, &diagnostics)
                 if !nested_else.complete -> valid = false
+                else_path = sema_ownership_fork_path(state, fork)
+                sema_ownership_fork_rollback(&state, fork)
             }
-            sema_ownership_join_paths(&state, before, then_state, else_state, else_body != None)
+            sema_ownership_fork_join_close(&state, fork, then_path, else_path, else_body != None)
             SemaOwnershipFlowResult{complete: valid, falls_through: true}
         }
         else -> SemaOwnershipFlowResult{complete: true, falls_through: true}
