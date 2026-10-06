@@ -3135,6 +3135,12 @@ pub fn sema_comptime_value_sites(graph: SemaRegistrationGraph) -> SemaComptimeVa
     SemaComptimeValueSites{sites: sites, constants: constants}
 }
 
+// No value sites: the placeholder a comptime run's staging holds until the
+// run's program tables exist (sema_comptime_value_sites).
+pub fn sema_comptime_value_sites_empty() -> SemaComptimeValueSites Never! {
+    SemaComptimeValueSites{sites: [String:[SemaComptimeValueSite]]{}, constants: [String:[Int]]{}}
+}
+
 // sema_comptime_graph_apply_values on a graph whose sites are `sites`: each
 // site of a value takes it under the same test that rewrite applies, so the
 // graph ends exactly as there.

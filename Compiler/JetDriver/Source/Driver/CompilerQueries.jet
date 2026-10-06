@@ -11,6 +11,7 @@ use jet_sema.[
     SemaComptimeFunctionResult,
     SemaComptimeItemValue,
     SemaForeignProviderInput,
+    SemaGraphModuleResult,
     SemaGraphResult,
     SemaRegistrationGraph,
     SemaRegistrationModuleInput,
@@ -212,13 +213,16 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
     initial_values := [SemaComptimeItemValue]{ }
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
-    // The declaration pass's graph copy becomes the run's environment graph.
+    // The declaration pass's graph copy becomes the run's environment graph,
+    // and its modules move into the run, which hands them back.
     staged_graph := ^stage.graph
     stage.graph = None
+    declared_modules := ^stage.modules
+    stage.modules = [SemaGraphModuleResult]{}
     run := jet_driver_run_comptime(
         registration,
         ^staged_graph,
-        stage.modules,
+        ^declared_modules,
         stage.sources,
         stage.names,
         initial_values,
@@ -227,6 +231,7 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
         input.request,
         &stage_diagnostics,
     )
+    jet_driver_comptime_return_declared(&stage, &run)
     load.diagnostics = stage_diagnostics
     if run.soft_stop -> return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, None)
     if !run.complete {
