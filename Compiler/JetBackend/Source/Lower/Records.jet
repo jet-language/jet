@@ -15,7 +15,9 @@
 // its tag and writes the payload through one out pointer. A constructor
 // borrows String handles and Option boxes of a String or Int (null is None;
 // the payload is the box's first word) and takes nested record handles. A
-// fieldless Core enum inside a record crosses as its variant index.
+// fieldless Core enum inside a record crosses as its variant index. The rows
+// below have hand exports in CAbi.rs; every other record's schema and exports
+// are generated (RuntimeRoutes.jet LOWER_GENERATED_RECORDS, CAbiRoutes.rs).
 use jet_foundation.[MIRProgram, MIRType, MIRTypeDef, mir_type_display_name]
 
 // The shape the runtime's exports were written for. A MIR definition of the
@@ -44,27 +46,96 @@ fn lower_record_schema(p: MIRProgram, ty: MIRType) -> LowerRecordSchema? {
         loop schema in LOWER_RECORD_SCHEMAS {
             if schema.jet_name != name.name -> next
             definition :: lower_type_def(p, ty) ?? return None
-            if !lower_record_shape_matches(definition, schema) -> return None
+            if !lower_record_shape_matches(p, definition, schema) -> return None
             return Val(~schema)
+        }
+        // A generated row (RuntimeRoutes.jet) is keyed by the runtime type the
+        // Jet type's handle row names.
+        row :: lower_runtime_handle(name.name) ?? return None
+        loop schema in LOWER_GENERATED_RECORDS {
+            if schema.jet_name != row.runtime -> next
+            definition :: lower_type_def(p, ty) ?? return None
+            if !lower_record_shape_matches(p, definition, schema) -> return None
+            return Val(LowerRecordSchema{jet_name: name.name, variants: schema.variants, fields: schema.fields})
         }
     }
     None
 }
 
-fn lower_record_shape_matches(definition: MIRTypeDef, schema: LowerRecordSchema) -> Bool Never! {
-    names := [String]{}
+// A schema entry is `name` or, for a generated row, `name=kind`: the carrier
+// the runtime's export reads or writes for that member.
+fn lower_record_entry_name(entry: String) -> String Never! {
+    entry.split("=").to_list()[0]
+}
+
+fn lower_record_entry_kind(entry: String) -> String Never! {
+    parts :: entry.split("=").to_list()
+    if parts.len() < 2 -> return ""
+    parts[1]
+}
+
+// Whether a member of `ty` crosses as the runtime's member `kind`
+// (gen-c-abi-routes.mjs recordMember); "" (a hand row) checks names only.
+fn lower_record_kind_matches(p: MIRProgram, ty: MIRType, kind: String) -> Bool Never! {
+    if kind == "" -> return true
+    if kind == "Text" -> return ty.kind == .String
+    if kind == "Int" -> return lower_is_exact_int(ty)
+    if kind == "Flag" -> return ty.kind == .Bool
+    if kind == "Float" -> return ty.kind == .Float
+    if kind.starts_with("Opt") {
+        if ty.kind == .Option(inner) -> return lower_record_kind_matches(p, inner, lower_record_tail(kind, 3))
+        return false
+    }
+    if kind.starts_with("Tag.") {
+        if !lower_record_is_index(p, ty) -> return false
+        if ty.kind == .Apply(name, _) {
+            row :: lower_runtime_handle(name.name) ?? return false
+            return row.runtime == lower_record_tail(kind, 4)
+        }
+        return false
+    }
+    if kind.starts_with("Rec.") {
+        runtime :: lower_record_handle(p, ty) ?? return false
+        return runtime == lower_record_tail(kind, 4)
+    }
+    false
+}
+
+// `text` after its first `from` (ASCII) bytes.
+fn lower_record_tail(text: String, from: Int) -> String Never! {
+    bytes :: text.bytes()
+    String.from_bytes(bytes.slice(from, bytes.len())) ?? ""
+}
+
+fn lower_record_shape_matches(p: MIRProgram, definition: MIRTypeDef, schema: LowerRecordSchema) -> Bool Never! {
     if definition.kind == .Enum(variants, _) {
-        loop variant in variants -> &names.push(variant.name)
-        return schema.fields == "" && names.join(",") == schema.variants
+        if schema.fields != "" || schema.variants == "" -> return false
+        listed :: schema.variants.split(",").to_list()
+        if listed.len() != variants.len() -> return false
+        loop (index, variant) in variants {
+            if variant.name != lower_record_entry_name(listed[index]) -> return false
+            kind :: lower_record_entry_kind(listed[index])
+            if kind == "" -> next
+            if variant.payload == .Single(inner) {
+                if !lower_record_kind_matches(p, inner, kind) -> return false
+            } else {
+                return false
+            }
+        }
+        return true
     }
     if definition.kind == .Struct(fields, _) {
         if schema.variants != "" -> return false
         listed :: schema.fields.split(",").to_list()
         stored :: lower_stored_fields(fields)
         if stored.len() != listed.len() -> return false
-        loop name in listed {
+        loop entry in listed {
             found := false
-            loop field in stored { if field.name == name -> found = true }
+            loop field in stored {
+                if field.name == lower_record_entry_name(entry) {
+                    found = lower_record_kind_matches(p, field.ty, lower_record_entry_kind(entry))
+                }
+            }
             if !found -> return false
         }
         return true
@@ -319,9 +390,9 @@ fn lower_helper_record_out(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> L
     }
     if definition.kind == .Struct(fields, _) {
         args := [LIRValueID]{}
-        loop name in schema.fields.split(",").to_list() {
+        loop entry in schema.fields.split(",").to_list() {
             loop field in lower_stored_fields(fields) {
-                if field.name != name -> next
+                if field.name != lower_record_entry_name(entry) -> next
                 info :: lower_struct_field(p, glue.ty, field.id) ?? panic("a stored field has storage")
                 &args.push(lower_record_member_arg(p, &m, &f, field.ty, value, info.offset, info.boxed))
             }
