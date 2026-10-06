@@ -740,3 +740,15 @@ fresh heap blocks with `0xbe`, so a native read of uninitialized heap
 diverges). The gate is zero reports and zero divergences; `--no-leaks`
 drops LeakSanitizer and the summary records it. Shadow checks emitted by the
 native code generator are the next step for this mode.
+
+Fuzz corpus (#4619): `Tools/agent/safety-fuzz.mjs <outdir> --seed N --count K`
+writes K type-directed generated programs and their expected stdout in the
+Examples/features layout (`<outdir>/corpus/Examples/features/fuzz/`), then runs
+run-goldens, run-differential and run-lint-corpus over it through
+`JET_GOLDEN_FEATURES`. The expected output comes from a model evaluator with
+i64 semantics; programs whose evaluation overflows, divides by zero, indexes
+out of range or runs too long are redrawn, so every case is defined
+behavior. `fuzz.tsv` adds the Rust path against the model (`model-agree`,
+`model-differs`, `rust-error`) to each case's differential and lint
+verdicts; the gate fails on any Rust-path error or model difference, any
+native divergence and any lint finding. A case reproduces from its seed.
