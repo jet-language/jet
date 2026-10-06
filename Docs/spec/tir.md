@@ -98,6 +98,11 @@ Arrow import preserves the checked batch owner and row type, and query consumes
 that owner. Canonical Core-data query heads select the existing native Query
 operation rows: collection remains the checked `[T] !DataError` materialization
 boundary, not a source-record method shim.
+Builtin `ParseError` is a valid typed failure domain for parsing operations.
+Locally matching its outcome preserves the carrier and binds success/error
+payloads; recognizing that domain does not declare a conversion into default
+`Err`. Ordinary fallible bindings still propagate, so diagnostic-policy probes
+handle a decoder call directly instead of first binding only its success value.
 
 
 Shared collection kernels narrow owned exact `Int` arguments through

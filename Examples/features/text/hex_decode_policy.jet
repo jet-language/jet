@@ -5,20 +5,19 @@ fn run() {
     valid :: hex.decode("4869") ?? return Err("valid hex failed")
     print("valid-len={valid.len()}")
 
-    whitespace :: hex.decode(" 4869 ")
-    if whitespace == {
+    // An ordinary binding would propagate failure; this policy probe handles
+    // the decoder's carrier locally and retains its typed error.
+    if hex.decode(" 4869 ") == {
         .Ok(_) -> { print("whitespace=accepted") }
         .Err(error) -> { print("whitespace={error}") }
     }
 
-    odd :: hex.decode("abc")
-    if odd == {
+    if hex.decode("abc") == {
         .Ok(_) -> { print("odd=accepted") }
         .Err(error) -> { print("odd={error}") }
     }
 
-    non_hex :: hex.decode("zz")
-    if non_hex == {
+    if hex.decode("zz") == {
         .Ok(_) -> print("non-hex=accepted")
         .Err(error) -> print("non-hex={error}")
     }

@@ -1697,6 +1697,7 @@ pub(crate) fn is_core_error_type(name: &str) -> bool {
             | "UIHostError"
             | "KeyWrapError"
             | "NetError"
+            | "ParseError"
             | "PluginError"
             | "RangeError"
             | "ServiceError"
