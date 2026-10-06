@@ -15,8 +15,10 @@ use jet_driver.[
     JetDriverAuthorizedSourceSnapshot,
     JetDriverCompileMode,
     JetDriverCompileResult,
+    JetDriverDocModule,
     JetDriverVerbOutput,
     JET_DRIVER_EXIT_OK,
+    JET_DRIVER_EXIT_USAGE,
     JET_DRIVER_EXIT_USER_ERROR,
     jet_driver_check_outcome,
     jet_driver_is_a11y_lint,
@@ -27,6 +29,9 @@ use jet_foundation.[
     Diagnostic,
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
+    Span,
+    diagnostic_from_registry,
+    diagnostic_render_all,
     mir_sha256_hex,
 ]
 
@@ -472,6 +477,77 @@ fn jet_cli_new_project(name: String, template: String, annotated: Bool, quiet: B
     JetDriverVerbOutput{stdout: "", stderr: "{status}  .gitignore\nnext: cd {name} && jet {next_command}\n", exit_code: JET_DRIVER_EXIT_OK}
 }
 
+// CmdDoc.rs `undocumented_diagnostics` + `render_doc_diagnostics`: one L2201
+// per public item with no summary, rendered against its own module, the
+// modules in path order.
+fn jet_cli_doc_undocumented_report(graph: JetCLIDocGraph, modules: [JetDriverDocModule], color: Bool) -> String Never! {
+    paths := [String]{}
+    loop item in jet_cli_doc_undocumented_public(graph) {
+        if !paths.contains(item.source.path) -> &paths.push(item.source.path)
+    }
+    jet_cli_doc_sort_strings(&paths)
+    rendered := ""
+    loop path in paths {
+        doc_module :: loop candidate in modules {
+            if jet_cli_doc_stable_path(candidate.path) == path -> break candidate
+        } ?? next
+        diagnostics := [Diagnostic]{}
+        loop item in jet_cli_doc_undocumented_public(graph) {
+            if item.source.path != path -> next
+            name :: item.qualified_name
+            &diagnostics.push(diagnostic_from_registry(
+                "L2201",
+                Val(Span{start: item.source.start, end: item.source.end}),
+                "Public API item `{name}` has no documentation",
+                "Generated reference documentation needs a summary for every public API item so users can find and understand the supported surface.",
+                "Add a `///` summary before `{name}`, or remove `pub` when it is not part of the public API.",
+            ))
+        }
+        rendered = "{rendered}{diagnostic_render_all(path, doc_module.source, diagnostics, color)}"
+    }
+    rendered
+}
+
+// `jet doc <file>` (CmdDoc.rs `run_doc`): check the file, project its
+// documentation, then report the `--check` verdict, print the `--json`
+// status, or write `docs/index.html` and `docs/index.md` beside the entry.
+fn jet_cli_compile_doc(file: String, source: String, color: Bool, json: Bool, check: Bool) -> JetDriverVerbOutput {
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    compiled :: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Doc)
+    if compiled == {
+        .Refused(refusal) -> output = ~refusal
+        .Compiled(result, snapshot) -> output = jet_cli_doc_result(file, source, color, json, check, result, snapshot)
+    }
+    output
+}
+
+fn jet_cli_doc_result(file: String, source: String, color: Bool, json: Bool, check: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
+    diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+    if jet_cli_errors(diagnostics).len() > 0 {
+        if json -> return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "`jet doc --json` on a file with errors is not part of the Jet-hosted CLI yet", jet_cli_why("E2104"), "run `jet doc {file}` to read the errors, or use the Rust `jet` for their JSON reports", color), exit_code: JET_DRIVER_EXIT_USAGE}
+        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+    graph :: jet_cli_build_doc_graph(result.doc_modules, jet_cli_application_authority(result, None))
+    if check {
+        if jet_cli_doc_undocumented_public(graph).len() > 0 {
+            if json -> return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "`jet doc --check --json` with undocumented public items is not part of the Jet-hosted CLI yet", jet_cli_why("E2104"), "run `jet doc --check {file}` to read the reports, or use the Rust `jet` for their JSON form", color), exit_code: JET_DRIVER_EXIT_USAGE}
+            return JetDriverVerbOutput{stdout: "", stderr: jet_cli_doc_undocumented_report(graph, result.doc_modules, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        }
+        if json -> return JetDriverVerbOutput{stdout: "{jet_cli_doc_status_json(graph)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        return JetDriverVerbOutput{stdout: "doc check: passed ({graph.doctests.len()} doctest block(s))\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    if json -> return JetDriverVerbOutput{stdout: "{jet_cli_doc_status_json(graph)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    parent :: jet_cli_parent(file) ?? ""
+    directory :: if parent == "" -> "." else -> parent
+    output_dir :: if parent == "" && file.starts_with("/") -> "/docs" else -> "{directory}/docs"
+    unwritable :: "correct the named problem, then run the command again"
+    cli_files.create_dir_all(output_dir) ?? return jet_cli_build_failed("couldn't write generated documentation in `{output_dir}`: {err}", jet_cli_why("E2105"), unwritable, color)
+    cli_files.write("{output_dir}/index.html", jet_cli_doc_html(graph)) ?? return jet_cli_build_failed("couldn't write generated documentation in `{output_dir}`: {err}", jet_cli_why("E2105"), unwritable, color)
+    cli_files.write("{output_dir}/index.md", jet_cli_doc_markdown(graph)) ?? return jet_cli_build_failed("couldn't write generated documentation in `{output_dir}`: {err}", jet_cli_why("E2105"), unwritable, color)
+    JetDriverVerbOutput{stdout: "doc: generated {output_dir}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
 // Unannotated because the compile verbs are (Request.jet `jet_cli_compile_file`).
 pub fn jet_cli_main(args: [String]) -> Int {
     plan :: jet_cli_front(args)
@@ -485,6 +561,7 @@ pub fn jet_cli_main(args: [String]) -> Int {
         .New(name, template, annotated, quiet, color) -> output = jet_cli_new_project(name, template, annotated, quiet, color)
         .Inspect(job) -> output = jet_cli_inspect_host(job)
         .InspectB(plan) -> output = jet_cli_inspect_b_host(plan)
+        .Doc(file, source, color, json, check) -> output = jet_cli_compile_doc(file, source, color, json, check)
     }
     if output.stdout.len() > 0 {
         out :: cli_term.stdout()
