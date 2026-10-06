@@ -8061,6 +8061,18 @@ pub enum TPatternShape {
         rest: Option<crate::Diagnostics::Span>,
         span: crate::Diagnostics::Span,
     },
+    /// D-PAT-RECORD1: `[first, ..rest]`.
+    List {
+        items: Vec<TPatternBinding>,
+        rest: Option<TListPatternRest>,
+        span: crate::Diagnostics::Span,
+    },
+    /// D-PAT-MAP1: `["type": .Text(kind), "nick"?: nick, ..]`.
+    Map {
+        entries: Vec<TMapPatternEntry>,
+        rest: bool,
+        span: crate::Diagnostics::Span,
+    },
     Text(Vec<TTextPatternPart>, crate::Diagnostics::Span),
     Binary(Vec<TBinaryPatternPart>, crate::Diagnostics::Span),
 }
@@ -8078,6 +8090,8 @@ pub enum TPatternBinding {
     },
     /// S31: a nested pattern tests this payload slot.
     Nested(Box<TPatternShape>),
+    /// D-PAT-RECORD1 / D-PAT-MAP1: the slot equals this value.
+    Value(Box<TExpr>),
 }
 
 #[derive(Clone)]
@@ -8092,6 +8106,28 @@ pub enum TPatternField {
         value: Box<TExpr>,
         span: crate::Diagnostics::Span,
     },
+    /// D-PAT-RECORD1: the field matches a nested pattern.
+    Nested {
+        field: String,
+        shape: Box<TPatternShape>,
+        span: crate::Diagnostics::Span,
+    },
+}
+
+/// D-PAT-RECORD1: the `..` / `..name` of a list pattern.
+#[derive(Clone)]
+pub struct TListPatternRest {
+    pub name: Option<String>,
+    pub span: crate::Diagnostics::Span,
+}
+
+/// D-PAT-MAP1: one map-pattern entry.
+#[derive(Clone)]
+pub struct TMapPatternEntry {
+    pub key: Box<TExpr>,
+    pub optional: bool,
+    pub slot: TPatternBinding,
+    pub span: crate::Diagnostics::Span,
 }
 
 #[derive(Debug, Clone)]

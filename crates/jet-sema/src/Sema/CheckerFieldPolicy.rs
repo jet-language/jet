@@ -29,8 +29,8 @@ use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::AST::{
-    AccessConvention, EnumLitArg, Expr, Field, Func, Item, OrFallback, Param, Pattern, Stmt,
-    StrPart, StructDef, StructPatField, Type,
+    AccessConvention, EnumLitArg, Expr, Field, Func, Item, OrFallback, Param, Stmt, StrPart,
+    StructDef, Type,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -339,13 +339,7 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
             subject, pattern, ..
         } => {
             rewrite_field_refs(subject, names, receiver);
-            if let Pattern::Struct { fields, .. } = pattern {
-                for field in fields {
-                    if let StructPatField::Value { value, .. } = field {
-                        rewrite_field_refs(value, names, receiver);
-                    }
-                }
-            }
+            pattern.for_each_value_expr_mut(&mut |value| rewrite_field_refs(value, names, receiver));
         }
         Expr::Str(parts, _) => {
             for p in parts {

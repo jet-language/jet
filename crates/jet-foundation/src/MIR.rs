@@ -4271,9 +4271,25 @@ pub enum MirPatternShape {
         alternatives: Vec<MirPatternShape>,
         span: Span,
     },
+    /// D-DESTRUCT1 / D-PAT-RECORD1: field tests on a struct value. Field
+    /// names resolve against the subject's checked owner when the test is
+    /// lowered, so a struct pattern nested at any depth needs no owner here.
     Struct {
         fields: Vec<MirPatternField>,
         rest: Option<Span>,
+        span: Span,
+    },
+    /// D-PAT-RECORD1: one length test, then one item test per written item.
+    /// `rest` admits longer lists; its name binds the remaining items.
+    List {
+        items: Vec<MirPatternBinding>,
+        rest: Option<MirListPatternRest>,
+        span: Span,
+    },
+    /// D-PAT-MAP1: one lookup per key; exact unless `rest`.
+    Map {
+        entries: Vec<MirMapPatternEntry>,
+        rest: bool,
         span: Span,
     },
     Text(Vec<MirTextPatternPart>, Span),
@@ -4293,20 +4309,44 @@ pub enum MirPatternBinding {
     },
     /// S31: a nested pattern tests this payload slot.
     Nested(Box<MirPatternShape>),
+    /// D-PAT-RECORD1 / D-PAT-MAP1: the slot equals this checked value.
+    Value(MirValueId),
 }
 
 #[derive(Debug, Clone)]
 pub enum MirPatternField {
     Bind {
-        field: MirFieldId,
+        field: String,
         local: String,
         span: Span,
     },
     Value {
-        field: MirFieldId,
+        field: String,
         value: MirValueId,
         span: Span,
     },
+    /// D-PAT-RECORD1: the field matches a nested pattern.
+    Nested {
+        field: String,
+        shape: Box<MirPatternShape>,
+        span: Span,
+    },
+}
+
+/// D-PAT-RECORD1: the `..` / `..name` of a list pattern.
+#[derive(Debug, Clone)]
+pub struct MirListPatternRest {
+    pub name: Option<String>,
+    pub span: Span,
+}
+
+/// D-PAT-MAP1: one `key: slot` / `key?: slot` entry.
+#[derive(Debug, Clone)]
+pub struct MirMapPatternEntry {
+    pub key: MirValueId,
+    pub optional: bool,
+    pub slot: MirPatternBinding,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

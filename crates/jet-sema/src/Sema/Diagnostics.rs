@@ -927,6 +927,8 @@ pub(crate) fn pattern_variant_name(pattern: &Pattern) -> Option<String> {
         // don't cover a single variant name.
         Pattern::Range { .. }
         | Pattern::Struct { .. }
+        | Pattern::List { .. }
+        | Pattern::Map { .. }
         | Pattern::StrMatch { .. }
         | Pattern::BinMatch { .. } => None,
     }
