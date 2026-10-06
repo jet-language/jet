@@ -72,6 +72,14 @@ pub fn parse_lexed(lexed: Lexed) -> ParseResult {
     parser_parse_lexed_lines(lexed, [U8]{}, [Int]{})
 }
 
+// Parse a Jetpack config surface (Rust `parse_config_with_source`): the
+// config lexer keeps `$NAME` as one identifier token, which this parser reads
+// as the typed environment read (D-ONCE-DOLLAR1=B); `source` stays available
+// for config values whose spelling is not a general Jet expression.
+pub fn parse_config_with_source(lexed: Lexed, source: [U8]) -> ParseResult {
+    parser_parse_lexed_lines(lexed, source, parser_line_starts(source))
+}
+
 fn parser_parse_lexed_lines(lexed: Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
     source_end :: if lexed.tokens.len() > 0 -> lexed.tokens[lexed.tokens.len() - 1].span.start else -> 0
     parser_parse_prepared(parser_prepare_tokens(lexed.tokens), lexed.diagnostics, source_end, line_starts, source)
