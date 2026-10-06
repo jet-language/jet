@@ -1,0 +1,21 @@
+// A compound update needs the same operator hook as binary arithmetic.
+struct Point {
+    x: Int
+}
+
+struct Holder {
+    point: Point
+}
+
+fn run() {
+    point := Point{x: 1}
+    point += Point{x: 2}
+    point -= Point{x: 2}
+    point *= Point{x: 2}
+    point /= Point{x: 2}
+    holder := Holder{point: Point{x: 1}}
+    holder.point += Point{x: 2}
+    holders := [Holder]{{point: Point{x: 1}}}
+    holders[0].point += Point{x: 2}
+    print("{point.x} {holder.point.x} {holders[0].point.x}")
+}

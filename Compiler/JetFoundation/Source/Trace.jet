@@ -1,9 +1,10 @@
 // The compiler's streaming trace, reached only through the host. With
 // `JET_TRACE_FILE` set the host writes one Chrome trace event per call and
-// flushes it, stamping wall time and memory itself, so a running compile can
-// be watched; without it the request carries no sink and every call site is
-// one `if trace_sink == .Val(sink)` branch. The compiler never formats or
-// buffers events.
+// flushes it, stamping wall time and memory itself (resident and peak
+// memory on every `end`; the live heap, `heap_kb`, on a phase's `end`), so a
+// running compile can be watched; without it the request carries no sink
+// and every call site is one `if trace_sink == .Val(sink)` branch. The
+// compiler never formats or buffers events.
 //
 // `name` is the stable span kind (`load`, `sema.check`, `sema.module`, ...);
 // `detail` labels one item (a module or function name, "" for a phase);

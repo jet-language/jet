@@ -205,8 +205,14 @@ D-DOTCTOR3 whole-value reading, so `evens: [Int] :: xs.map(f)` becomes
 Never on a local binding. Never `Type name`.
 
 **S17 — Compound assignment**: `+=` `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=`
-`>>=`. Arithmetic four on Int/Float; the rest Int-only. LHS must be a mutable
-binding or `&` parameter.
+`>>=`. Arithmetic four on Int/Float; the rest Int-only. `String += piece`
+appends text (a String or a borrowed text view); ordinary text construction
+still uses interpolation, not binary `+`. The append preserves explicitly
+copied values. The place must be mutable or reached through an `&` parameter.
+Fields, including fields reached through list elements, support text append;
+direct indexed compound updates remain E0164 (copy, update, then store).
+User-record compound arithmetic requires the same operator hook as its binary
+form; without that hook sema reports E0360, before any execution tier runs.
 
 **D-INCR1 — Increment/decrement** *(retired 2026-09-28, owner decision, card
 #3727)*: `++` and `--` are not Jet operators. `x += 1` / `x -= 1` (S17) is the

@@ -17202,6 +17202,44 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     }
                     return Ok(RuntimeValue::Data(MirEvalValue::List(items)));
                 }
+                // `jet_list_slice`: start and end clamp into the list, and an
+                // empty or inverted window is an empty list. A `[U8]` carrier
+                // may be packed bytes.
+                "list_slice" => {
+                    let [receiver, start, end] = args.as_slice() else {
+                        return Err(mir_error_at(
+                            "MIR List.slice route requires a list, start and end",
+                            span,
+                        ));
+                    };
+                    let receiver =
+                        runtime_to_data(self.materialize_runtime(receiver.clone(), span)?, span)?;
+                    let start = int_value(runtime_to_data(start.clone(), span)?, span)?;
+                    let end = int_value(runtime_to_data(end.clone(), span)?, span)?;
+                    fn clamped_window<T>(mut items: Vec<T>, start: i64, end: i64) -> Vec<T> {
+                        let len = i64::try_from(items.len()).unwrap_or(i64::MAX);
+                        let from = start.clamp(0, len) as usize;
+                        let to = end.clamp(0, len) as usize;
+                        if to <= from {
+                            return Vec::new();
+                        }
+                        items.truncate(to);
+                        items.drain(..from);
+                        items
+                    }
+                    let sliced = match receiver {
+                        MirEvalValue::List(items) => {
+                            MirEvalValue::List(clamped_window(items, start, end))
+                        }
+                        MirEvalValue::Bytes(bytes) => {
+                            MirEvalValue::Bytes(clamped_window(bytes, start, end))
+                        }
+                        _ => {
+                            return Err(mir_error_at("MIR List.slice receiver is not a List", span));
+                        }
+                    };
+                    return Ok(RuntimeValue::Data(sliced));
+                }
                 // `jet_iter_indexes(n)`: every valid index `0..<n` of a
                 // sequence of length `n` (a negative length has none).
                 "indexes" => {

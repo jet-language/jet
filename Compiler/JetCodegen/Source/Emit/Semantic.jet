@@ -207,7 +207,14 @@ fn jet_rust_emit_borrowed_value_reference(ctx: &JetRustEmitContext, function: MI
         }
         else -> {}
     }
-    jet_rust_emit_value_reference(ctx, value, mutable)
+    reference :: jet_rust_emit_value_reference(ctx, value, mutable)
+    // A view slot already holds a reference: reborrow its referent, not
+    // the carrier (&&[T] would make generic collection calls infer &[T]).
+    if jet_rust_emit_is_view_type(jet_rust_emit_value_type(ctx, function, value)) {
+        borrow :: if mutable -> "&mut " else -> "&"
+        return "{borrow}**({reference})"
+    }
+    reference
 }
 
 // ---- Print / AmbientInput / LayoutCompare -----------------------------------

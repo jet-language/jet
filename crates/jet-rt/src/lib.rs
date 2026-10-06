@@ -241,7 +241,8 @@ pub struct JetArena {
     /// created or first used: a list's elements, or a map's keys. Handles past
     /// the end are `IntCells::Exact`.
     int_cells: Vec<IntCells>,
-    /// Map handles whose values are fixed-width 64-bit words (#4576).
+    /// Map handles whose values are raw words, not exact Ints: fixed-width
+    /// 64-bit integers and floats (#4576).
     map_word_values: Vec<bool>,
 }
 
@@ -605,8 +606,8 @@ impl JetArena {
         self.set_int_cells(map, IntCells::Word { unsigned });
     }
 
-    /// Store `map`'s values as fixed-width 64-bit words, never retained as
-    /// exact-integer pointers (#4576).
+    /// Store `map`'s values as raw words (fixed-width 64-bit integers or
+    /// floats), never retained as exact-integer pointers (#4576).
     pub fn set_map_word_values(&mut self, map: i64) {
         let index = map as usize;
         if self.map_word_values.len() <= index {

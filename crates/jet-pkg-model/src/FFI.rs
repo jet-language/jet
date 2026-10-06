@@ -2322,7 +2322,7 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
     ),
     (
         "wasmtime",
-        "{ version = \"26\", features = [\"component-model\"] }",
+        "{ version = \"25\", features = [\"component-model\"] }",
     ),
     (
         "x25519-dalek",
@@ -2453,9 +2453,9 @@ pub const WASMTIME_CRATE_SPEC: (&str, &str) = ("wasmtime", "25");
 /// descriptor-relative, no-follow plugin reads. Keep the path in the cache
 /// identity through the dependency map rather than duplicating its limits.
 const JET_FOUNDATION_CRATE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-foundation");
+/// Foundation's own path dependency; Cargo reads it at its host path too.
+const JET_UNICODE_CRATE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-unicode");
 const JET_FOUNDATION_SOURCE_SCHEMA: &str = "jet-ffi-foundation-source-v3";
-const JET_FOUNDATION_UNICODE_CRATE_PATH: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-unicode");
 const JET_FOUNDATION_CODEGEN_PRELUDE_PATH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-codegen/src/Prelude");
 const JET_FOUNDATION_ARCHIVE_SOURCE_PATH: &str =
@@ -2472,6 +2472,8 @@ const JET_FOUNDATION_CODEGEN_INPUTS: &[&str] = &[
     "Core/TimeMonotonic.rs",
     "Core/MapKey.rs",
     "Markers.jet",
+    // jet-unicode (Foundation's path dependency) includes the generated tables.
+    "CoreLib/Top/UnicodeTables.rs",
 ];
 const JET_FOUNDATION_ARCHIVE_INPUTS: &[&str] = &["archive.jet", "gzip.jet", "zstd.jet"];
 const JET_FOUNDATION_TEXT_INPUTS: &[&str] = &["string.jet"];
@@ -2532,8 +2534,7 @@ fn foundation_input_digest(
 
 fn jet_foundation_sources() -> Result<JetFoundationSources, String> {
     let foundation = verified_source_directory(Path::new(JET_FOUNDATION_CRATE_PATH), "crate")?;
-    let unicode =
-        verified_source_directory(Path::new(JET_FOUNDATION_UNICODE_CRATE_PATH), "Unicode crate")?;
+    let unicode = verified_source_directory(Path::new(JET_UNICODE_CRATE_PATH), "unicode crate")?;
     let codegen_prelude =
         verified_source_directory(Path::new(JET_FOUNDATION_CODEGEN_PRELUDE_PATH), "codegen")?;
     let archive_source =

@@ -22,6 +22,9 @@ fn language_callables_and_types_match_interpreter_jit_and_aot() {
         "basics/callbacks",
         "basics/pattern_matching",
         "basics/variadics_spread",
+        // #4572: `text += piece` on locals, fields, list-element fields,
+        // and `&String` parameters must append on every tier.
+        "basics/string_append",
         "effects/effect_higher_order",
         "memory/parameter_modes",
         "patterns/struct_destructure",
@@ -130,6 +133,8 @@ fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
         "memory/shared_transact",
         "memory/copy_verb",
         "memory/string_view",
+        // #4392: returned views name their proven owners' lifetime on AOT.
+        "memory/view_return_lifetimes",
         "streams/generators",
     ];
     run_child_stem_battery(
