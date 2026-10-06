@@ -492,8 +492,8 @@ fn sema_taint_validate_tag_graph(tag_value: String, module_identity: String, gra
     sema_taint_collect_tag_declarations(&catalog, graph, &temporary)
     sema_taint_validate_tag_in_catalog(tag_value, module_identity, catalog, graph, span, &diagnostics)
 }
-pub fn sema_taint_validate_tag(tag_value: String, env: SemaScopeEnvironment, span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    if env.registration_graph == {
+pub fn sema_taint_validate_tag(tag_value: String, env: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    if program.registration_graph == {
         .Val(value) -> return sema_taint_validate_tag_graph(tag_value, env.module_identity, value, span, &diagnostics)
         .None -> {}
     }

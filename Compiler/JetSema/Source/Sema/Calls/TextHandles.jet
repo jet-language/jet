@@ -100,11 +100,11 @@ fn sema_text_handle_nominal_owner(ty: Type) -> String? {
     }
 }
 
-fn sema_text_handle_is_canonical(receiver_type: Type, owner: String, environment: SemaScopeEnvironment) -> Bool Never! {
+fn sema_text_handle_is_canonical(receiver_type: Type, owner: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     actual :: sema_text_handle_nominal_owner(receiver_type) ?? return false
     if actual != owner -> return false
     expected_module := sema_text_handle_owner_module(owner)
-    graph_option :: environment.registration_graph
+    graph_option :: program.registration_graph
     graph :: graph_option ?? return true
     resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
     if resolved == .Val(symbol) -> return symbol.symbol.kind == SymbolKind.Type && (sema_registration_module_name(graph, symbol.symbol.module_name) ?? "") == expected_module
@@ -113,19 +113,19 @@ fn sema_text_handle_is_canonical(receiver_type: Type, owner: String, environment
 
 // Nominal MIME and Regex/Match methods. The matching TIR kinds already
 // have Source codegen routes and do not repeat typed-literal validation.
-pub fn sema_call_try_text_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+pub fn sema_call_try_text_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     owner :: sema_text_handle_nominal_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if (owner != "MIME" && owner != "Regex" && owner != "Match") || !sema_text_handle_is_canonical(receiver_value.ty, owner, environment) || !sema_text_handle_known_method(owner, method) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if (owner != "MIME" && owner != "Regex" && owner != "Match") || !sema_text_handle_is_canonical(receiver_value.ty, owner, environment, program) || !sema_text_handle_known_method(owner, method) -> return SemaMethodSpecialCheck{handled: false, value: None}
     spec := sema_text_handle_regex_spec(owner, method, args.len())
     if spec == None {
-        sema_network_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        sema_network_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", sema_text_handle_expected_arity(owner, method), args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     signature := spec ?? SemaNetworkHandleSpec{operation: THandleOp.URLMIMEMethod{kind: "MIME", method: method}, result_type: Type.Named{name: "Unit"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: Val("")}
     signature.effect_name = Val("")
-    typed_args :: sema_network_handle_checked_args(method, signature.params, args, Val(receiver), AccessConvention.Read, signature.callback_non_escaping, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_network_handle_finish(receiver_value, signature.operation, typed_args, signature.result_type, signature.effect_name, "{owner}.{method}", span, expected, environment, &scopes, &context, &diagnostics)
+    typed_args :: sema_network_handle_checked_args(method, signature.params, args, Val(receiver), AccessConvention.Read, signature.callback_non_escaping, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    sema_network_handle_finish(receiver_value, signature.operation, typed_args, signature.result_type, signature.effect_name, "{owner}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
 fn sema_email_handle_spec(owner: String, method: String, argc: Int) -> SemaNetworkHandleSpec? {
@@ -138,18 +138,18 @@ fn sema_email_handle_spec(owner: String, method: String, argc: Int) -> SemaNetwo
 // The native EmailMethod lowering remains a primitive structural operation;
 // this producer preserves the exact checker contract without inventing a
 // Prelude symbol or an Email effect row that the native method contract lacks.
-pub fn sema_call_try_email_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+pub fn sema_call_try_email_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     owner :: sema_text_handle_nominal_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if (owner != "Message" && owner != "Mailer") || !sema_text_handle_is_canonical(receiver_value.ty, owner, environment) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if (owner != "Message" && owner != "Mailer") || !sema_text_handle_is_canonical(receiver_value.ty, owner, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
     if (owner == "Message" && method != "envelope" && method != "with_envelope") || (owner == "Mailer" && method != "send") -> return SemaMethodSpecialCheck{handled: false, value: None}
     spec := sema_email_handle_spec(owner, method, args.len())
     if spec == None {
-        sema_network_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        sema_network_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         expected_count := if method == "envelope" -> 0 else -> 1
         &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", expected_count, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     signature :: spec ?? SemaNetworkHandleSpec{operation: THandleOp.EmailMethod{method: method}, result_type: Type.Named{name: "Unit"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: Val("")}
-    typed_args :: sema_network_handle_checked_args(method, signature.params, args, Val(receiver), signature.receiver_convention, false, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_network_handle_finish(receiver_value, signature.operation, typed_args, signature.result_type, signature.effect_name, "{owner}.{method}", span, expected, environment, &scopes, &context, &diagnostics)
+    typed_args :: sema_network_handle_checked_args(method, signature.params, args, Val(receiver), signature.receiver_convention, false, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    sema_network_handle_finish(receiver_value, signature.operation, typed_args, signature.result_type, signature.effect_name, "{owner}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }

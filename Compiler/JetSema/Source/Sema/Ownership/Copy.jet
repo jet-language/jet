@@ -521,7 +521,7 @@ fn sema_copy_apply_facts(
 pub fn sema_copy_classify(
     source: Type,
     intent: SemaCopyIntent,
-    env: SemaScopeEnvironment,
+    env: SemaScopeEnvironment, program: SemaProgramTables,
     generic_params: [TGenericParam],
     string_view: Bool,
 ) -> SemaCopyFacts Never! {
@@ -529,9 +529,9 @@ pub fn sema_copy_classify(
     target :: owned.ty
     materializes_view :: owned.materialized
     source_walk := sema_copy_walk()
-    source_facts :: sema_copy_type_facts(source, env.registration_graph, env.module_identity, generic_params, &source_walk)
+    source_facts :: sema_copy_type_facts(source, program.registration_graph, env.module_identity, generic_params, &source_walk)
     target_walk := sema_copy_walk()
-    target_facts :: sema_copy_type_facts(target, env.registration_graph, env.module_identity, generic_params, &target_walk)
+    target_facts :: sema_copy_type_facts(target, program.registration_graph, env.module_identity, generic_params, &target_walk)
     lowering :: if {
         materializes_view -> SemaCopyLowering.MaterializeView
         intent == SemaCopyIntent.Explicit -> SemaCopyLowering.ExplicitCopy
