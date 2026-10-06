@@ -1897,6 +1897,13 @@ pub fn mir_value_consumption_transfers(consumption: MIRValueConsumption) -> Bool
     }
 }
 
+pub fn mir_value_consumption_requires_owner(consumption: MIRValueConsumption) -> Bool Never! {
+    if consumption == {
+        .Yes(requires_owner) -> requires_owner
+        else -> false
+    }
+}
+
 pub fn mir_call_arg_consumes(arg: MIRCallArg) -> Bool Never! {
     !(arg.implicit_clone || arg.shared_auto_clone || arg.widen_fixed_to_list) && (arg.access == .Move || arg.owned_last_use)
 }
@@ -1981,8 +1988,8 @@ pub fn mir_operation_value_consumption(operation: MIROperation, value: MIRValueI
                 }
                 .StaticPreludeCall(_, args, _, _) | .HardwareCall(_, _, _, args) | .ClosureMethod(_, args, _) | .HostCall(_, args) | .AllocNew(_, _, _, args) -> mir_call_value_consumption(args, value)
                 .TaskGroup(_, _, tasks) -> {
-                    loop task in tasks {
-                        if task == value -> return MIRValueConsumption.Yes{requires_owner: true}
+                    loop member in tasks {
+                        if member == value -> return MIRValueConsumption.Yes{requires_owner: true}
                     }
                     MIRValueConsumption.No
                 }
@@ -2067,11 +2074,11 @@ fn mir_snapshot_type_may_borrow(ty: MIRType) -> Bool Never! {
         .Map(key, value) -> mir_snapshot_type_may_borrow(key) || mir_snapshot_type_may_borrow(value)
         .Result(ok, err) -> mir_snapshot_type_may_borrow(ok) || mir_snapshot_type_may_borrow(err)
         .Tuple(fields) -> {
-            loop field in fields -> if mir_snapshot_type_may_borrow(field.ty) -> return true
+            loop field in fields { if mir_snapshot_type_may_borrow(field.ty) -> return true }
             false
         }
         .Union(members) -> {
-            loop member in members -> if mir_snapshot_type_may_borrow(member) -> return true
+            loop member in members { if mir_snapshot_type_may_borrow(member) -> return true }
             false
         }
         // Nominal layouts and callable captures are unavailable to this
@@ -2084,7 +2091,7 @@ fn mir_snapshot_dependence_carrier(operation: MIROperation, value: MIRValueFact)
     if value.ownership.mode == .ReadBorrow || value.ownership.mode == .WriteBorrow -> return true
     if operation == {
         .ReadPlace(_) | .MovePlace(_) | .Move(_) | .Phi(_) | .AttachTag(_, _) | .Closure(_, _, _) -> return true
-        .Convert(_, _, _, conversion) -> if conversion == .Transparent || conversion == .SendFn -> return true
+        .Convert(_, _, _, conversion) -> { if conversion == .Transparent || conversion == .SendFn -> return true }
         else -> {}
     }
     mir_snapshot_type_may_borrow(value.ty)
@@ -2188,7 +2195,7 @@ fn mir_read_snapshot_unstable(function: MIRFunction, candidates: [U64:Bool], rou
             loop place in mir_operation_place_uses(instruction.operation) {
                 position :: places.get(place.value) ?? next
                 key :: place_roots[position]
-                loop source in stored.get(key) ?? [Int]{} -> &edges[source].push(target)
+                loop source in (stored.get(key) ?? [Int]{}) -> &edges[source].push(target)
             }
         }
     }
@@ -2260,19 +2267,19 @@ fn mir_read_snapshot_unstable(function: MIRFunction, candidates: [U64:Bool], rou
                 if !mir_runtime_owned_ownership(function.values[source].ownership) -> next
                 consumption :: if route == .Val(position) -> mir_operation_value_consumption(instruction.operation, operand, prelude[position].signature.borrow_mask) else -> mir_operation_value_consumption(instruction.operation, operand, [Bool]{})
                 if mir_value_consumption_transfers(consumption) {
-                    loop origin in ssa_owners.get(operand.value) ?? [Int]{} -> _ := &dirty.add(origin, true)
+                    loop origin in (ssa_owners.get(operand.value) ?? [Int]{}) -> _ := &dirty.add(origin, true)
                 }
             }
             loop place in mir_operation_mutated_places(instruction.operation) {
                 position :: places.get(place.value) ?? next
                 root :: function.places[position]
-                loop origin in owners.get(place_roots[position]) ?? [Int]{} -> _ := &dirty.add(origin, true)
+                loop origin in (owners.get(place_roots[position]) ?? [Int]{}) -> _ := &dirty.add(origin, true)
                 if instruction.operation == .AddressOf(_, .Write) {
-                    loop origin in owners.get(place_roots[position]) ?? [Int]{} -> _ := &unstable.add(function.values[origin].id.value, true)
+                    loop origin in (owners.get(place_roots[position]) ?? [Int]{}) -> _ := &unstable.add(function.values[origin].id.value, true)
                 }
                 // Writing through the prospective snapshot would also change
                 // the source owner after refinement, even without a later use.
-                loop source in stored.get(place_roots[position]) ?? [Int]{} {
+                loop source in (stored.get(place_roots[position]) ?? [Int]{}) {
                     loop origin in origins[source] -> _ := &unstable.add(function.values[origin].id.value, true)
                 }
                 if root.base == {
@@ -3019,7 +3026,7 @@ pub fn mir_operation_place_uses(operation: MIROperation) -> [MIRPlaceID] Never! 
         .AddressOf(place, _) -> [MIRPlaceID]{place}
         .Closure(_, captures, _) -> {
             places := [MIRPlaceID]{}
-            loop capture in captures -> if capture == .Place(place) -> &places.push(place)
+            loop capture in captures { if capture == .Place(place) -> &places.push(place) }
             places
         }
         .Semantic(semantic) -> mir_semantic_op_place_uses(semantic)

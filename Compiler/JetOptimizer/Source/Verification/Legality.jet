@@ -58,6 +58,7 @@ use jet_foundation.[
     mir_operation_value_consumption,
     mir_terminator_value_consumption,
     mir_value_consumption_transfers,
+    mir_value_consumption_requires_owner,
     mir_runtime_owned_ownership,
     mir_semantic_op_place_uses,
     mir_semantic_op_prelude_calls,
@@ -1942,7 +1943,7 @@ fn mir_pass_consume_value(function: MIRFunction, definitions: MIRPassDefinitions
     if !mir_value_consumption_transfers(consumption) -> return None
     ownership :: mir_pass_value_ownership(function, definitions, value) ?? return Val("consumed value has no ownership metadata")
     if !mir_runtime_owned_ownership(ownership) {
-        if check && consumption == .Yes(true) -> return Val("dropless or borrowed value is consumed")
+        if check && mir_value_consumption_requires_owner(consumption) -> return Val("dropless or borrowed value is consumed")
         return None
     }
     if check && (moved.get(value.value) ?? false) -> return Val("value is consumed more than once")

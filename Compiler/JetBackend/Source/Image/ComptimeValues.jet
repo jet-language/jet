@@ -178,12 +178,13 @@ pub fn x64_comptime_decode_scalar(runtime: X64Runtime, ty: MIRType, word: Int) -
 pub fn x64_comptime_drop_scalar(runtime: X64Runtime, ty: MIRType, word: Int) -> [String] {
     if ty.kind == .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return x64_comptime_drop_scalar(runtime, inner, word)
     if !x64_comptime_scalar_supported(ty) -> return [String]{"cannot release unsupported native compiler scalar"}
-    symbol :: if ty.kind == {
+    symbol := ""
+    if ty.kind == {
         .Int -> {
             if word >= -4611686018427387904 && word < 4611686018427387904 -> return [String]{}
-            "jet_rt_int_drop"
+            symbol = "jet_rt_int_drop"
         }
-        .String -> "jet_rt_string_drop"
+        .String -> symbol = "jet_rt_string_drop"
         else -> return [String]{}
     }
     if runtime.errors.len() > 0 -> return runtime.errors

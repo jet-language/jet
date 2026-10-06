@@ -9,7 +9,6 @@ use jet_foundation.[
     MIRCaptureFacts,
     MIRCaptureParam,
     MIRConstant,
-    MIRConversion,
     MIRCoreCall,
     MIRDropKind,
     MIRFieldID,
@@ -1142,7 +1141,7 @@ fn jet_codegen_operation_ownership(builder: JetCodegenBuilder, ty: Type, operati
         .MovePlace(_) | .Move(_) -> return mir_ownership_from_access(MIRAccess.Move)
         .AddressOf(_, access) -> return mir_ownership_from_access(access)
         .RawAddressOf(_) -> return MIROwnership{mode: MIROwnershipMode.ReadBorrow, drop: MIRDropKind.NoDrop, moved: false, last_use: false, gc_root: false}
-        .AttachTag(value, _) | .Convert(value, _, _, MIRConversion.Transparent) | .Convert(value, _, _, MIRConversion.SendFn) -> {
+        .AttachTag(value, _) | .Convert(value, _, _, .Transparent) | .Convert(value, _, _, .SendFn) -> {
             row :: builder.value_positions.get(value.value) ?? panic("checked carrier transfer has no source ownership fact")
             ownership := builder.values[row].ownership
             ownership.moved = false

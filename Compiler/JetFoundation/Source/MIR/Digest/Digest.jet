@@ -3571,8 +3571,11 @@ fn mir_digest_local(writer: &MIRCanonicalWriter, value: MIRLocal) Never! {
     mir_digest_type(&writer, value.ty)
     mir_digest_u64(&writer, value.place.value)
     if value.ssa_value == {
-        .Val(bound) -> { mir_digest_bool(&writer, true); mir_digest_u64(&writer, bound.value) }
-        .None -> mir_digest_bool(&writer, false)
+        None -> mir_digest_bool(&writer, false)
+        Val(bound) -> {
+            mir_digest_bool(&writer, true)
+            mir_digest_u64(&writer, bound.value)
+        }
     }
     mir_digest_string(&writer, mir_digest_ownership_debug(value.ownership))
     mir_digest_bool(&writer, value.mutable)
