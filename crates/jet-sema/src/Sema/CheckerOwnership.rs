@@ -2421,6 +2421,21 @@ impl<'a> Checker<'a> {
                             Syntax::KW_SELF
                         ),
                     )
+                } else if info.param_conv == Some(AccessConvention::Read) {
+                    // D-PARAM-CONST1=A: an unmarked parameter is read access
+                    // for the whole call; the fix is the parameter's `&` mark.
+                    (
+                        format!(
+                            "cannot write to `{}` — it does not have the write-access marker `&`; required before calling `.{}()`",
+                            root, method
+                        ),
+                        format!(
+                            "change the parameter to `{}: {}{}` with the write-access marker `&`, and write `&` at its call sites",
+                            root,
+                            Syntax::SIGIL_WRITE,
+                            info.ty.name()
+                        ),
+                    )
                 } else {
                     (
                         format!(
