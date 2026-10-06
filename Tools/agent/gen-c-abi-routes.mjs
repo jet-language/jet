@@ -5,7 +5,7 @@
 //
 // usage: node Tools/agent/gen-c-abi-routes.mjs <runtime.rs> [--check]
 //   <runtime.rs> is the compiled runtime's Rust text as emitted for the
-//   all-parts seed (`jet emit --rust Compiler/JetBackend/Tests/allparts-seed.jet`;
+//   all-parts seed (Compiler/JetBackend/Tests/emit-allparts-runtime.mjs <jet> <out.rs>;
 //   emission selects runtime parts by the Core modules a program uses, and the
 //   seed imports every one): the exact items the `jet_runtime` crate holds, so
 //   every kernel's module path and signature come from the runtime itself,
