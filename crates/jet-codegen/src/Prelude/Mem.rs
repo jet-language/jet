@@ -153,8 +153,11 @@
     }
 
     // The Jet-native backend's raw-pointer adapters (Lower/Pointers.jet): the
-    // same sentry kernel facts for a native storage size and alignment.
-    #[cfg(not(target_arch = "wasm32"))]
+    // same sentry kernel facts for a native storage size and alignment. They
+    // are C-ABI exports of a generated runtime (crate::jet_c_abi); the
+    // evaluator host (jet-evalhost, cfg jet_evalhost) includes this file
+    // without that module and exports nothing.
+    #[cfg(all(not(target_arch = "wasm32"), not(jet_evalhost)))]
     #[no_mangle]
     pub extern "C" fn jet_rt_sentry_address_of(ptr: *const u8, bytes: usize) -> i64 {
         crate::jet_c_abi::guard(|| {
@@ -165,7 +168,7 @@
 
     /// Validates a read of `bytes` at the word address `address` and returns
     /// it as the pointer the native caller loads from.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), not(jet_evalhost)))]
     #[no_mangle]
     pub extern "C" fn jet_rt_sentry_read(address: i64, bytes: usize, align: usize) -> *const u8 {
         crate::jet_c_abi::guard(|| {

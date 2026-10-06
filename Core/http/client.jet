@@ -61,7 +61,7 @@ pub fn header(client: Client, line: String) -> Client Never! {
     Client{
         method: ~client.method,
         url: ~client.url,
-        headers: append_header(~client.headers, line),
+        headers: append_header(client.headers, line),
         redirects: client.redirects,
         proxy: ~client.proxy,
     }
@@ -71,7 +71,7 @@ pub fn set_header(client: Client, name: String, value: String) -> Client Never! 
     Client{
         method: ~client.method,
         url: ~client.url,
-        headers: set_header_line(~client.headers, name, value),
+        headers: set_header_line(client.headers, name, value),
         redirects: client.redirects,
         proxy: ~client.proxy,
     }
@@ -103,7 +103,7 @@ pub fn session() -> Session Never! {
 
 pub fn session_header(s: Session, name: String, value: String) -> Session Never! {
     Session{
-        headers: set_header_line(~s.headers, name, value),
+        headers: set_header_line(s.headers, name, value),
         cookies: ~s.cookies,
         timeout_ms: s.timeout_ms,
         retries: s.retries,
@@ -293,7 +293,7 @@ pub fn content_type(client: Client, mime: String) -> Client Never! { set_header(
 fn session_headers(s: Session) -> [String] Never! {
     h := ~s.headers
     if s.user.bytes().len() > 0 -> h = set_header_line(h, "Authorization", http.basic_auth(s.user, s.password))
-    jar :: cookie_header(~s.cookies)
+    jar :: cookie_header(s.cookies)
     if jar.bytes().len() > 0 -> h = set_header_line(h, "Cookie", jar)
     h
 }

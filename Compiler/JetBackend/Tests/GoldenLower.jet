@@ -13,7 +13,7 @@
 // per case goes to stdout as soon as the case is done, so run-goldens.mjs can
 // restart after a crash. The unit is assembled by run-goldens.mjs and never
 // listed in Compiler/Bootstrap/sources.list.
-use jet_backend.[lir_lower_entry, lir_print_module, x64_link_executable, x64_relocatable_object, x64_static_executable]
+use jet_backend.[lir_lower_entry, lir_print_module, lir_sanitize_module, x64_link_executable, x64_relocatable_object, x64_static_executable]
 use core.files as files
 use core.math as math
 use core.time as time
@@ -103,6 +103,16 @@ fn gl_case(name: String, pack: GLPack?) -> String {
         return "unsupported"
     }
     files.write_bytes("{name}.o", object.bytes) ?? panic("cannot write {name}.o")
+    // `sanitize.txt` asks for the AddressSanitizer-instrumented object too, as
+    // `<case>.asan.o` (run-sanitized.mjs links it with an ASan runtime).
+    if files.exists("sanitize.txt") {
+        instrumented :: x64_relocatable_object(lir_sanitize_module(lowered.lir), entry)
+        if instrumented.errors.len() > 0 {
+            files.write("{name}.asan-issues", "{instrumented.errors[0]}\n") ?? panic("cannot write {name}.asan-issues")
+        } else {
+            files.write_bytes("{name}.asan.o", instrumented.bytes) ?? panic("cannot write {name}.asan.o")
+        }
+    }
     if pack == .Val(runtime) {
         watch :: time.start()
         linked :: x64_link_executable([String]{"{name}.o", runtime.path}, ^[[U8]]{object.bytes, runtime.bytes})

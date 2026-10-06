@@ -75,7 +75,7 @@ fn slice_u8(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     i := start
     loop {
-        if i >= end || i >= bytes.len() -> return ~out
+        if i >= end || i >= bytes.len() -> return out
         &out.push(bytes[i])
         i = i + 1
     }
@@ -171,8 +171,8 @@ fn sha512_bytes(data: [U8]) -> [U8] Never! { crypto.sha512(data).bytes }
 
 fn ed25519_sign_raw(seed: [U8], msg: [U8]) -> [U8] Never! {
     h :: sha512_bytes(seed)
-    a := clamp_scalar(le_int(slice_u8(~h, 0, 32)))
-    prefix :: slice_u8(~h, 32, 64)
+    a := clamp_scalar(le_int(slice_u8(h, 0, 32)))
+    prefix :: slice_u8(h, 32, 64)
     point_a :: ed_scalarmult(a, C_ED_BX, C_ED_BY)
     r_mat := [U8]{}
     loop b in prefix -> &r_mat.push(b)
@@ -195,11 +195,11 @@ fn ed25519_sign_raw(seed: [U8], msg: [U8]) -> [U8] Never! {
 
 fn ed25519_verify_raw(pk: [U8], msg: [U8], sig: [U8]) -> Bool Never! {
     if pk.len() != 32 || sig.len() != 64 -> return false
-    point_a :: ed_decode(~pk) ?? return false
-    encoded_r :: slice_u8(~sig, 0, 32)
-    s :: le_int(slice_u8(~sig, 32, 64))
+    point_a :: ed_decode(pk) ?? return false
+    encoded_r :: slice_u8(sig, 0, 32)
+    s :: le_int(slice_u8(sig, 32, 64))
     if s >= C_ED_L -> return false
-    point_r :: ed_decode(~encoded_r) ?? return false
+    point_r :: ed_decode(encoded_r) ?? return false
     k_mat := [U8]{}
     loop b in encoded_r -> &k_mat.push(b)
     loop b in pk -> &k_mat.push(b)
@@ -295,18 +295,18 @@ fn chacha20_block(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
         0x3320646e,
         0x79622d32,
         0x6b206574,
-        u32le(~key, 0),
-        u32le(~key, 4),
-        u32le(~key, 8),
-        u32le(~key, 12),
-        u32le(~key, 16),
-        u32le(~key, 20),
-        u32le(~key, 24),
-        u32le(~key, 28),
+        u32le(key, 0),
+        u32le(key, 4),
+        u32le(key, 8),
+        u32le(key, 12),
+        u32le(key, 16),
+        u32le(key, 20),
+        u32le(key, 24),
+        u32le(key, 28),
         wrap32(counter),
-        u32le(~nonce, 0),
-        u32le(~nonce, 4),
-        u32le(~nonce, 8),
+        u32le(nonce, 0),
+        u32le(nonce, 4),
+        u32le(nonce, 8),
     }
     w := copy_ints(st)
     loop _ in 0..<10 {
@@ -352,11 +352,11 @@ fn chacha20_xor(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never
     i := 0
     ctr := counter
     loop {
-        if i >= plain.len() -> return ~out
-        block :: chacha20_block(~key, ~nonce, ctr)
+        if i >= plain.len() -> return out
+        block :: chacha20_block(key, nonce, ctr)
         ctr = ctr + 1
         loop j in 0..<64 {
-            if i >= plain.len() -> return ~out
+            if i >= plain.len() -> return out
             &out.push(to_u8(u8_int(plain[i]) ~| u8_int(block[j])))
             i = i + 1
         }
@@ -364,9 +364,9 @@ fn chacha20_xor(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never
 }
 
 fn poly1305(key: [U8], data: [U8]) -> [U8] Never! {
-    r := le_int(slice_u8(~key, 0, 16))
+    r := le_int(slice_u8(key, 0, 16))
     r = r & 0x0ffffffc0ffffffc0ffffffc0fffffff
-    s := le_int(slice_u8(~key, 16, 32))
+    s := le_int(slice_u8(key, 16, 32))
     acc := 0
     poly_p :: (1 << 130) - 5
     i := 0
@@ -374,7 +374,7 @@ fn poly1305(key: [U8], data: [U8]) -> [U8] Never! {
         if i >= data.len() -> break
         chunk_len := 16
         if i + chunk_len > data.len() -> chunk_len = data.len() - i
-        n :: le_int(slice_u8(~data, i, i + chunk_len)) + (1 << (8 * chunk_len))
+        n :: le_int(slice_u8(data, i, i + chunk_len)) + (1 << (8 * chunk_len))
         acc = ((acc + n) * r) % poly_p
         i = i + chunk_len
     }
@@ -390,8 +390,8 @@ fn pad16(n: Int) -> [U8] Never! {
 }
 
 fn chacha_poly_seal(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] Never! {
-    otk :: chacha20_block(~key, ~nonce, 0)
-    ct :: chacha20_xor(~key, ~nonce, 1, plain)
+    otk :: chacha20_block(key, nonce, 0)
+    ct :: chacha20_xor(key, nonce, 1, plain)
     mac_data := [U8]{}
     loop b in aad -> &mac_data.push(b)
     loop b in pad16(aad.len()) -> &mac_data.push(b)
@@ -408,9 +408,9 @@ fn chacha_poly_seal(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] Neve
 
 fn chacha_poly_open(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
     if cipher.len() < 16 -> return None
-    ct :: slice_u8(~cipher, 0, cipher.len() - 16)
-    auth_tag :: slice_u8(~cipher, cipher.len() - 16, cipher.len())
-    otk :: chacha20_block(~key, ~nonce, 0)
+    ct :: slice_u8(cipher, 0, cipher.len() - 16)
+    auth_tag :: slice_u8(cipher, cipher.len() - 16, cipher.len())
+    otk :: chacha20_block(key, nonce, 0)
     mac_data := [U8]{}
     loop b in aad -> &mac_data.push(b)
     loop b in pad16(aad.len()) -> &mac_data.push(b)
@@ -431,18 +431,18 @@ fn hchacha20(key: [U8], nonce16: [U8]) -> [U8] Never! {
         0x3320646e,
         0x79622d32,
         0x6b206574,
-        u32le(~key, 0),
-        u32le(~key, 4),
-        u32le(~key, 8),
-        u32le(~key, 12),
-        u32le(~key, 16),
-        u32le(~key, 20),
-        u32le(~key, 24),
-        u32le(~key, 28),
-        u32le(~nonce16, 0),
-        u32le(~nonce16, 4),
-        u32le(~nonce16, 8),
-        u32le(~nonce16, 12),
+        u32le(key, 0),
+        u32le(key, 4),
+        u32le(key, 8),
+        u32le(key, 12),
+        u32le(key, 16),
+        u32le(key, 20),
+        u32le(key, 24),
+        u32le(key, 28),
+        u32le(nonce16, 0),
+        u32le(nonce16, 4),
+        u32le(nonce16, 8),
+        u32le(nonce16, 12),
     }
     loop _ in 0..<10 {
         qr(&st, 0, 4, 8, 12)
@@ -468,16 +468,16 @@ fn hchacha_word(out: &[U8], value: Int) Never! {
 }
 
 fn xchacha_seal(key: [U8], nonce24: [U8], aad: [U8], plain: [U8]) -> [U8] Never! {
-    sub :: hchacha20(key, slice_u8(~nonce24, 0, 16))
+    sub :: hchacha20(key, slice_u8(nonce24, 0, 16))
     nonce := [U8]{0, 0, 0, 0}
-    loop b in slice_u8(~nonce24, 16, 24) -> &nonce.push(b)
+    loop b in slice_u8(nonce24, 16, 24) -> &nonce.push(b)
     chacha_poly_seal(sub, nonce, aad, plain)
 }
 
 fn xchacha_open(key: [U8], nonce24: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
-    sub :: hchacha20(key, slice_u8(~nonce24, 0, 16))
+    sub :: hchacha20(key, slice_u8(nonce24, 0, 16))
     nonce := [U8]{0, 0, 0, 0}
-    loop b in slice_u8(~nonce24, 16, 24) -> &nonce.push(b)
+    loop b in slice_u8(nonce24, 16, 24) -> &nonce.push(b)
     chacha_poly_open(sub, nonce, aad, cipher)
 }
 
@@ -531,18 +531,18 @@ pub fn ed25519_verify_strict(public: [U8], message: [U8], signature: [U8]) -> Bo
     if public.len() != 32 || signature.len() != 64 || message.len() > 1073741824 {
         return Err(.Length)
     }
-    point_a :: ed_decode(~public) ?? return Err(.KeyRejected)
+    point_a :: ed_decode(public) ?? return Err(.KeyRejected)
     canonical_public :: ed_encode(point_a.x, point_a.y)
     public_equal :: constant_time_equal_bytes(~public, canonical_public) ?? return Err(.KeyRejected)
     if public_equal {
         if ed_small_order(point_a) -> return Ok(false)
-        encoded_r :: slice_u8(~signature, 0, 32)
-        point_r :: ed_decode(~encoded_r) ?? return Ok(false)
+        encoded_r :: slice_u8(signature, 0, 32)
+        point_r :: ed_decode(encoded_r) ?? return Ok(false)
         canonical_r :: ed_encode(point_r.x, point_r.y)
         r_equal :: constant_time_equal_bytes(~encoded_r, canonical_r) ?? return Err(.KeyRejected)
         if r_equal {
             if ed_small_order(point_r) -> return Ok(false)
-            s :: le_int(slice_u8(~signature, 32, 64))
+            s :: le_int(slice_u8(signature, 32, 64))
             if s >= C_ED_L -> return Ok(false)
             return Ok(ed25519_verify_raw(public, message, signature))
         }
@@ -567,7 +567,7 @@ pub fn hkdf_sha256_raw(ikm: [U8], salt: [U8], info: [U8], len: Int) -> Secret Cr
         loop b in previous -> &material.push(b)
         loop b in info -> &material.push(b)
         &material.push(to_u8(counter))
-        previous = hmac_sha256_local(~prk, material)
+        previous = hmac_sha256_local(prk, material)
         loop b in previous {
             if out.len() >= len -> break
             &out.push(b)

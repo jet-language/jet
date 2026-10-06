@@ -1246,8 +1246,10 @@ pub(crate) fn resolve_closure_op(
         }
         "scan" if is_sequence && has_args(2) => TClosureOp::Scan,
         "fold" if is_map && has_args(2) => TClosureOp::MapFold,
-        "fold" if is_view && has_args(2) => TClosureOp::ViewFold,
-        "fold" if (is_list || is_iter) && has_args(2) => TClosureOp::Fold,
+        // A list folds through the borrowed view route: the step reads each
+        // element (`&T`), so the receiver is never copied to be consumed.
+        "fold" if (is_view || is_list) && has_args(2) => TClosureOp::ViewFold,
+        "fold" if is_iter && has_args(2) => TClosureOp::Fold,
         "position" if is_sequence && has_args(1) => TClosureOp::Position,
         "min_by" if is_sequence && has_args(1) => TClosureOp::MinBy,
         "max_by" if is_sequence && has_args(1) => TClosureOp::MaxBy,

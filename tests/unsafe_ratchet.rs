@@ -125,3 +125,75 @@ pub fn generated_ffi_does_not_move_baseline() {
     );
     assert_eq!(before, fs::read_to_string(fixture.baseline()).unwrap());
 }
+
+pub fn corelib_wrapper_needs_unsafe_or_proof() {
+    let fixture = Fixture::new("corelib");
+    let laundering = "pub fn fork() -> Int IOError! {\n    #Unsafe(\"posix fork\") {\n        return core.sys.fork()\n    }\n}\n";
+    fixture.write("Core/sys/sys.jet", laundering);
+    let output = ratchet(&fixture, true);
+    assert!(
+        !output.status.success(),
+        "a laundering CoreLib wrapper must fail"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("fn fork opens #Unsafe"), "{stderr}");
+
+    fixture.write(
+        "Core/sys/sys.jet",
+        "pub fn fork() -> Int IOError! {\n    core.sys.fork()\n}\n",
+    );
+    let output = ratchet(&fixture, true);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "an ungated raw operation must fail"
+    );
+    assert!(
+        stderr.contains("POSIX control outside an audited #Unsafe gate"),
+        "{stderr}"
+    );
+
+    fixture.write(
+        "Core/sys/sys.jet",
+        "#Unsafe(\"the caller reaps the child\") pub fn fork() -> Int IOError! {\n    core.sys.fork()\n}\n",
+    );
+    seed(&fixture);
+    let output = ratchet(&fixture, false);
+    assert!(
+        output.status.success(),
+        "an #Unsafe CoreLib function passes: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    fixture.write("Core/sys/sys.jet", laundering);
+    let registry = "\n<!-- unsafe-abstractions:begin -->\n```json\n[{\"file\": \"Core/sys/sys.jet\", \"function\": \"fork\", \"proof\": \"fixture proof: the wrapper reaps the child it creates\"}]\n```\n<!-- unsafe-abstractions:end -->\n";
+    let mut baseline = fs::read_to_string(fixture.baseline()).unwrap();
+    baseline.push_str(registry);
+    fs::write(fixture.baseline(), baseline).unwrap();
+    seed(&fixture);
+    let output = ratchet(&fixture, false);
+    assert!(
+        output.status.success(),
+        "a recorded safe abstraction passes: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    fixture.write("Core/sys/sys.jet", "#Unsafe(\"the caller reaps the child\") pub fn fork() -> Int IOError! {\n    core.sys.fork()\n}\n");
+    seed_allowing_corelib(&fixture);
+    let output = ratchet(&fixture, false);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "a stale safe-abstraction row must fail"
+    );
+    assert!(stderr.contains("stale safe-abstraction row"), "{stderr}");
+}
+
+fn seed_allowing_corelib(fixture: &Fixture) {
+    let output = ratchet(fixture, true);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("baseline updated"),
+        "baseline update failed: {stdout}"
+    );
+}
