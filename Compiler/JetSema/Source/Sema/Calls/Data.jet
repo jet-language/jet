@@ -36,12 +36,12 @@ fn sema_data_source_type_name(environment: SemaScopeEnvironment, leaf: String) -
         if module_row.module_name != "core.data" -> next
         loop nominal in module_row.nominals {
             if nominal.symbol.name == leaf {
-                if nominal.compiler_owned -> return leaf
+                if nominal.compiler_owned -> return "{leaf}"
                 return "{nominal.symbol.module_name}::{leaf}"
             }
         }
     }
-    leaf
+    "{leaf}"
 }
 
 fn sema_data_is_json_name(name: String) -> Bool Never! {

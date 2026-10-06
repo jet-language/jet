@@ -1884,10 +1884,14 @@ fn jet_rust_emit_unused_place_read(ctx: &JetRustEmitContext, function: MIRFuncti
     }
     if jet_rust_emit_value_users(ctx, function, value).len() != 0 -> return false
     loop scope in function.scopes {
-        if scope.deadline == Val(value) -> return false
+        if scope.deadline == .Val(deadline) {
+            if deadline == value -> return false
+        }
     }
     loop place in function.places {
-        if place.base == .Temporary(value) -> return false
+        if place.base == .Temporary(temporary) {
+            if temporary == value -> return false
+        }
     }
     id :: place_id ?? return false
     loop place in function.places {

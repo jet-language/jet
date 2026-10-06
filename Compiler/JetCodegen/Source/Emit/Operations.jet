@@ -4666,7 +4666,10 @@ fn jet_rust_emit_handle_method_values(ctx: &JetRustEmitContext, function: MIRFun
                 }
                 &rendered.push(jet_rust_emit_borrowed_value_reference(&ctx, function, value, access))
             }
-            index > 0 && jet_rust_emit_handle_native_int_arg(row, jet_rust_emit_value_type(ctx, function, value)) -> &rendered.push(jet_rust_emit_native_int_argument(&ctx, jet_rust_emit_value_consume(ctx, function, value), None))
+            index > 0 && jet_rust_emit_handle_native_int_arg(row, jet_rust_emit_value_type(ctx, function, value)) -> {
+                consumed :: jet_rust_emit_value_consume(ctx, function, value)
+                &rendered.push(jet_rust_emit_native_int_argument(&ctx, consumed, None))
+            }
             else -> &rendered.push(jet_rust_emit_value_consume(ctx, function, value))
         }
     }
@@ -5260,7 +5263,8 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                     row :: jet_rust_emit_prelude_route(ctx, call, false)
                     if row == .Val(route) {
                         if route.member == "Shared.strong_count" && result == .Val(value) {
-                            return jet_rust_emit_native_int_result(&ctx, emitted, jet_rust_emit_value_type(ctx, function, value)) ?? emitted
+                            result_type :: jet_rust_emit_value_type(ctx, function, value)
+                            return jet_rust_emit_native_int_result(&ctx, emitted, result_type) ?? emitted
                         }
                     }
                     return emitted
@@ -5333,7 +5337,8 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
         }
         .Todo(call, todo_location, expected_type) -> {
             expected_name :: if expected_type == .Val(ty) -> mir_type_display_name(ty) else -> "(unknown)"
-            emitted :: jet_rust_emit_route_call(&ctx, call, [String]{jet_rust_emit_source_path(&ctx, todo_location.file), "{todo_location.line}u32", jet_rust_emit_quote(expected_name)})
+            source_path :: jet_rust_emit_source_path(&ctx, todo_location.file)
+            emitted :: jet_rust_emit_route_call(&ctx, call, [String]{source_path, "{todo_location.line}u32", jet_rust_emit_quote(expected_name)})
             expected :: if expected_type == .Val(ty) -> jet_rust_emit_type(&ctx, ty) else -> "()"
             return "{{ let _: {expected} = {emitted}; unreachable!(\"MIR Todo at {todo_location.file.value}:{todo_location.line}:{todo_location.column}\") }}"
         }

@@ -245,18 +245,23 @@ fn jet_codegen_auto_derives_append_core_error_display(ctx: &JetRustEmitContext, 
 
 
 fn jet_codegen_auto_derives_append_selected_display(ctx: &JetRustEmitContext, definition: MIRTypeDef, emit_show: Bool, lines: &[String]) Never! {
-    generics :: jet_rust_emit_type_def_generics(ctx, definition, jet_rust_emit_generic_params(ctx, definition.generic_params))
+    params :: jet_rust_emit_generic_params(&ctx, definition.generic_params)
+    generics :: jet_rust_emit_type_def_generics(ctx, definition, params)
     args :: jet_rust_emit_type_def_impl_args(ctx, definition, jet_codegen_auto_derives_type_args(definition))
     name :: "{jet_rust_emit_type_name(&ctx, definition.id)}{args}"
     // Source Display owns bare and nested display; do not replace it with a
-    // structural Printable rendering.
+    // structural Printable rendering. Mirrors MIRRust emit_selected_display_impl.
     &lines.push("impl{generics} JetDisplay for {name} {{")
-    &lines.push("    fn jet_display(&self) -> String {{ <Self as __jet_Display>::display(self) }}")
+    &lines.push("    fn jet_display(&self) -> String {{")
+    &lines.push("        <Self as __jet_Display>::display(self)")
+    &lines.push("    }}")
     &lines.push("}}")
     if emit_show {
         &lines.push("")
         &lines.push("impl{generics} JetShow for {name} {{")
-        &lines.push("    fn jet_show(&self) -> String {{ <Self as __jet_Display>::display(self) }}")
+        &lines.push("    fn jet_show(&self) -> String {{")
+        &lines.push("        <Self as __jet_Display>::display(self)")
+        &lines.push("    }}")
         &lines.push("}}")
     }
 }
@@ -273,7 +278,7 @@ pub fn jet_codegen_auto_derive_lines(ctx: &JetRustEmitContext, definition: MIRTy
     emit_show :: facts.printable && !jet_codegen_auto_derives_impl_selected(&ctx, definition, "Printable")
     emit_debug :: facts.debug && !jet_codegen_auto_derives_impl_selected(&ctx, definition, "Debug")
     selected_display :: jet_codegen_auto_derives_impl_selected(&ctx, definition, "Display")
-    alias :: if definition.kind == { .Alias(_) -> true else -> false }
+    alias :: definition.kind == .Alias(_)
     if selected_display && !alias {
         jet_codegen_auto_derives_append_selected_display(&ctx, definition, emit_show, &lines)
         &lines.push("")

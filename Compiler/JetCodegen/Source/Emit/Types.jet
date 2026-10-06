@@ -1840,7 +1840,8 @@ fn jet_rust_emit_record_type_phantom_initializer(ctx: &JetRustEmitContext, ty: M
 fn jet_rust_emit_record_named_phantom_initializer(ctx: &JetRustEmitContext, name: String) -> String Never! {
     rows :: ctx.type_rows_by_spelling.get(name) ?? return ""
     if rows.len() == 0 -> return ""
-    jet_rust_emit_record_phantom_initializer(&ctx, ctx.program.types[rows[0]].id)
+    id :: MIRTypeID{value: ctx.program.types[rows[0]].id.value}
+    jet_rust_emit_record_phantom_initializer(&ctx, id)
 }
 
 // MIRRust declares_type_def: type rows whose Rust declaration this artifact
