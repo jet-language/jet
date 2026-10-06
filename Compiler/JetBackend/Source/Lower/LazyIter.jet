@@ -5,7 +5,8 @@
 use jet_foundation.[
     MIRAccess, MIRCallArg, MIRFunction, MIRFunctionSignature, MIRInstruction,
     MIRLoopSourceKind, MIROperation, MIRPlaceID, MIRPreludeCall, MIRPreludeCallID,
-    MIRProgram, MIRType, MIRValueID, mir_type_display_name,
+    MIRProgram, MIRType, MIRTypeKind, MIRValueID, mir_type_display_name,
+    mir_type_from_kind,
 ]
 
 fn lower_lazy_element(ty: MIRType) -> MIRType? {
@@ -431,9 +432,32 @@ fn lower_lazy_route(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 }
 
 fn lower_lazy_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, receiver: MIRValueID, receiver_place: MIRPlaceID?, args: [MIRValueID]) -> Bool Never! {
+    if lower_lazy_reduce(p, c, &m, &f, instruction, row, receiver, args) -> return true
     values := [MIRValueID]{receiver}
     loop arg in args -> &values.push(arg)
     lower_lazy_route(p, c, &m, &f, instruction, row, values)
+}
+
+// `iter.sum()` / `iter.product()` over an exact Int Iter (the shared
+// jet_list_sum/product routes take the Iter by value): the remaining items
+// drain into a List (jet_rt_native_iter_to_list consumes the handle), which
+// the List reduction folds in order and then drops.
+fn lower_lazy_reduce(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, receiver: MIRValueID, args: [MIRValueID]) -> Bool Never! {
+    symbol :: lower_runtime_symbol(row)
+    product :: symbol == "jet_list_product"
+    if symbol != "jet_list_sum" && !product -> return false
+    if args.len() != 0 -> return false
+    source_ty :: lower_value_type(c, receiver) ?? return false
+    elem :: lower_lazy_element(source_ty) ?? return false
+    source :: lower_use(&m, &f, receiver) ?? return true
+    list_ty :: mir_type_from_kind(MIRTypeKind.List{inner: elem})
+    list :: lower_new_storage(p, &f, list_ty)
+    lower_call_runtime(&m, &f, "jet_rt_native_iter_to_list", [LIRValueID]{source, list}, None)
+    total :: lower_list_reduce_int(p, &m, &f, list, elem, product, row.member) ?? return true
+    lower_inline_drop(p, &m, &f, list, list_ty)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_emit(&f, LIRInst.Move{dst: dst, src: total})
+    true
 }
 
 fn lower_lazy_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, args: [MIRCallArg], row: MIRPreludeCall) -> Bool Never! {
@@ -606,6 +630,15 @@ fn lower_lazy_cursor_more(m: &LowerModule, f: &LowerFunction, cursor: LIRValueID
     lower_logic(&f, available, true, more, ready)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{available})})
     lower_start(&f, list, [LIRValueID]{})
+    // A Range value's cursor (Iter.jet lower_range_cursor_init) has no List.
+    ranged :: lower_iter_range_test(&f, cursor)
+    range_block :: lower_new_block(&f)
+    list_block :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: ranged, then_target: lower_target(range_block, [LIRValueID]{}), else_target: lower_target(list_block, [LIRValueID]{})})
+    lower_start(&f, range_block, [LIRValueID]{})
+    range_more :: lower_iter_range_more(&f, cursor)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{range_more})})
+    lower_start(&f, list_block, [LIRValueID]{})
     list_more :: lower_iter_more(&f, cursor)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{list_more})})
     result :: lower_flag(&f)
@@ -627,6 +660,23 @@ fn lower_lazy_cursor_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     lower_call_runtime(&m, &f, "jet_rt_native_iter_cursor_value", [LIRValueID]{handle, slot, owned}, None)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, list, [LIRValueID]{})
+    if lower_repr(p, ty) == .Word {
+        // A Range value's cursor yields its current native word as an Int.
+        ranged :: lower_iter_range_test(&f, cursor)
+        range_block :: lower_new_block(&f)
+        list_block :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: ranged, then_target: lower_target(range_block, [LIRValueID]{}), else_target: lower_target(list_block, [LIRValueID]{})})
+        lower_start(&f, range_block, [LIRValueID]{})
+        current :: lower_list_word(&f, cursor, 0)
+        item := current
+        if lower_is_exact_int(ty) {
+            item = lower_word(&f)
+            lower_convert_exact(&m, &f, item, current, "jet_int_owned_from_i64", false)
+        }
+        lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: item})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, list_block, [LIRValueID]{})
+    }
     source :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Load{dst: source, base: cursor, offset: 0})
     data :: lower_list_data(&f, source)

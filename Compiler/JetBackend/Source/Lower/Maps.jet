@@ -34,7 +34,9 @@ fn lower_sequence_element(ty: MIRType) -> MIRType? {
 }
 
 // How two keys are ordered: "int" (exact Int), "string", "word" (signed
-// word or Bool byte), "uword" (unsigned word), "" (not lowered).
+// word or Bool byte), "uword" (unsigned word), "inline" (a tuple or struct of
+// ordered members, D-MAP-KEY1: lexicographic in member order, as the derived
+// Ord of the Rust tuple/struct key), "" (not lowered).
 fn lower_map_key_kind(p: MIRProgram, ty: MIRType) -> String Never! {
     if ty.kind == {
         .String -> return "string"
@@ -51,6 +53,15 @@ fn lower_map_key_kind(p: MIRProgram, ty: MIRType) -> String Never! {
     }
     if lower_repr(p, ty) == {
         .Word | .Flag | .Discriminant -> "word"
+        .Inline(_) -> {
+            if lower_sequence_element(ty) != None -> return ""
+            members :: lower_inline_members(p, ty)
+            if members.len() == 0 -> return ""
+            loop member in members {
+                if lower_map_key_kind(p, member.ty) == "" -> return ""
+            }
+            "inline"
+        }
         else -> ""
     }
 }
@@ -98,6 +109,12 @@ fn lower_map_key_order(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MI
     } else if kind == "string" {
         order :: lower_word(&f)
         lower_call_runtime(&m, &f, "jet_rt_string_compare", [LIRValueID]{left, right}, Val(order))
+        zero :: lower_const(&f, 0)
+        lower_emit(&f, LIRInst.Compare{dst: less, condition: LIRCondition.Lt, left: order, right: zero})
+        lower_emit(&f, LIRInst.Compare{dst: equal, condition: LIRCondition.Eq, left: order, right: zero})
+    } else if kind == "inline" {
+        order :: lower_word(&f)
+        lower_call_helper(&m, &f, "map.key_compare", ty, [LIRValueID]{left, right}, Val(order))
         zero :: lower_const(&f, 0)
         lower_emit(&f, LIRInst.Compare{dst: less, condition: LIRCondition.Lt, left: order, right: zero})
         lower_emit(&f, LIRInst.Compare{dst: equal, condition: LIRCondition.Eq, left: order, right: zero})
@@ -246,6 +263,7 @@ fn lower_map_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     if lower_map_entry(ty) == None -> return false
     if row.family != .BuiltinMethod || row.module_name != "core.builtin" -> return false
     symbol :: lower_runtime_symbol(row)
+    if lower_map_method_more(p, c, &m, &f, instruction, row, symbol, receiver, receiver_place, args, ty) -> return true
     counted :: symbol == "jet_map_len" || symbol == "jet_map_is_empty"
     keyed :: symbol == "jet_map_get_opt" || symbol == "jet_map_has_key" || symbol == "jet_map_pop_kernel"
     inserting :: symbol == "jet_map_insert"
@@ -296,11 +314,371 @@ fn lower_map_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     true
 }
 
+// Key/value views, merge and update builtins (Core.rs jet_map_keys,
+// jet_map_values, jet_map_merge, jet_map_merge_with, jet_map_update_all),
+// as generated LIR. False when `symbol` is not one.
+//
+// jet_map_keys/values return a lazy JetIter over the map's shared storage
+// that later map mutations never reach (the map copies on write): the same
+// sequence is a List of the entries' copies, in key order, handed to the
+// shared Iter runtime by value.
+fn lower_map_method_more(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, symbol: String, receiver: MIRValueID, receiver_place: MIRPlaceID?, args: [MIRValueID], ty: MIRType) -> Bool Never! {
+    if lower_map_method_query(p, c, &m, &f, instruction, row, symbol, receiver, receiver_place, args, ty) -> return true
+    viewing :: symbol == "jet_map_keys" || symbol == "jet_map_values"
+    merging :: symbol == "jet_map_merge" || symbol == "jet_map_update_all"
+    resolving :: symbol == "jet_map_merge_with"
+    if !viewing && !merging && !resolving -> return false
+    arity :: if viewing -> 0 else if merging -> 1 else -> 2
+    if args.len() != arity {
+        lower_fail(&m, &f, "Map {row.member} with {args.len()} arguments is not lowered at O0 yet")
+        return true
+    }
+    shape :: lower_map_shape(p, ty) ?? {
+        lower_fail(&m, &f, "Map {row.member} over {mir_type_display_name(ty)} is not lowered at O0 yet")
+        return true
+    }
+    if viewing {
+        keys :: symbol == "jet_map_keys"
+        item_ty :: if keys -> shape.key else -> shape.value
+        offset :: if keys -> shape.key_offset else -> shape.value_offset
+        if lower_repr(p, item_ty) == .Absent {
+            lower_fail(&m, &f, "Map {row.member} of {mir_type_display_name(item_ty)} is not lowered at O0 yet")
+            return true
+        }
+        map :: lower_use(&m, &f, receiver) ?? return true
+        length :: lower_list_word(&f, map, 0)
+        stride :: lower_list_stride(p, item_ty)
+        data :: lower_list_buffer(&m, &f, length, stride)
+        items :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.StackSlot{dst: items, size: 24, align: 8})
+        lower_emit(&f, LIRInst.Store{base: items, offset: 0, value: length})
+        lower_emit(&f, LIRInst.Store{base: items, offset: 8, value: length})
+        lower_emit(&f, LIRInst.Store{base: items, offset: 16, value: data})
+        each :: lower_each_begin(p, &f, map, shape.entry, [LIRValueID]{})
+        from :: lower_address(&f, each.address, offset)
+        to :: lower_list_address(&f, data, each.at, stride)
+        lower_list_clone_element(p, &m, &f, from, to, item_ty)
+        lower_each_end(&f, each, [LIRValueID]{})
+        meta :: lower_lazy_meta(p, &m, &f, item_ty)
+        moved :: lower_const_flag(&f, 1)
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+        lower_call_runtime(&m, &f, "jet_rt_native_iter_from_list", [LIRValueID]{items, meta, moved}, Val(dst))
+        return true
+    }
+    if lower_repr(p, shape.value) == .Absent {
+        lower_fail(&m, &f, "Map {row.member} of {mir_type_display_name(shape.value)} values is not lowered at O0 yet")
+        return true
+    }
+    other :: lower_use(&m, &f, args[0]) ?? return true
+    target := LIRValueID{value: -1}
+    if symbol == "jet_map_update_all" {
+        target = lower_receiver_header(p, c, &m, &f, receiver_place, "Map") ?? return true
+        lower_alias_absent(&f, instruction)
+    } else {
+        left :: lower_use(&m, &f, receiver) ?? return true
+        target = lower_result(p, c, &m, &f, instruction) ?? return true
+        lower_storage_into(p, &f, target, ty)
+        lower_inline_clone(p, &m, &f, left, target, ty)
+    }
+    closure := LIRValueID?{None}
+    closure_ty := ty
+    if resolving {
+        closure = lower_use(&m, &f, args[1])
+        if closure == None -> return true
+        closure_ty = lower_value_type(c, args[1]) ?? {
+            lower_fail(&m, &f, "Map merge conflict callback without a checked type is not lowered at O0 yet")
+            return true
+        }
+    }
+    // Right wins: each entry of `other`, in key order, is set as a copy; with
+    // a conflict callback a shared key's value becomes
+    // `conflict(&key, left value moved out, copy of right value)`.
+    each :: lower_each_begin(p, &f, other, shape.entry, [LIRValueID]{})
+    key :: lower_read_at(p, &f, each.address, shape.key_offset, shape.key) ?? return true
+    value :: lower_read_at(p, &f, each.address, shape.value_offset, shape.value) ?? return true
+    owned_value :: lower_new_like(&f, value)
+    lower_clone_into(p, &m, &f, value, owned_value, shape.value)
+    if closure == .Val(callback) {
+        found :: lower_word(&f)
+        lower_call_helper(&m, &f, "map.find", ty, [LIRValueID]{target, key}, Val(found))
+        zero :: lower_const(&f, 0)
+        shared :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: shared, condition: LIRCondition.Ge, left: found, right: zero})
+        resolve :: lower_new_block(&f)
+        insert :: lower_new_block(&f)
+        next_block :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: shared, then_target: lower_target(resolve, [LIRValueID]{}), else_target: lower_target(insert, [LIRValueID]{})})
+        lower_start(&f, resolve, [LIRValueID]{})
+        data :: lower_list_data(&f, target)
+        entry :: lower_list_address(&f, data, found, shape.stride)
+        slot :: lower_address(&f, entry, shape.value_offset)
+        left_value :: lower_read_at(p, &f, slot, 0, shape.value) ?? return true
+        resolved :: lower_call_closure_box(p, &m, &f, callback, [LIRValueID]{key, left_value, owned_value}, shape.value) ?? return true
+        // A value parameter the callback takes by Read stays ours to drop.
+        if !lower_closure_param_moves(closure_ty, 1) -> lower_drop_stored(p, &m, &f, slot, 0, shape.value)
+        if !lower_closure_param_moves(closure_ty, 2) -> lower_map_drop_value(p, &m, &f, owned_value, shape.value)
+        lower_write_at(p, &f, slot, 0, resolved, shape.value)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(next_block, [LIRValueID]{})})
+        lower_start(&f, insert, [LIRValueID]{})
+        owned_key :: lower_new_like(&f, key)
+        lower_clone_into(p, &m, &f, key, owned_key, shape.key)
+        lower_call_helper(&m, &f, "map.set", ty, [LIRValueID]{target, owned_key, owned_value}, None)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(next_block, [LIRValueID]{})})
+        lower_start(&f, next_block, [LIRValueID]{})
+    } else {
+        owned_key :: lower_new_like(&f, key)
+        lower_clone_into(p, &m, &f, key, owned_key, shape.key)
+        lower_call_helper(&m, &f, "map.set", ty, [LIRValueID]{target, owned_key, owned_value}, None)
+    }
+    lower_each_end(&f, each, [LIRValueID]{})
+    if closure == .Val(callback) {
+        if lower_value_owned(c, args[1]) -> lower_map_drop_value(p, &m, &f, callback, closure_ty)
+    }
+    true
+}
+
+// Query and single-entry builtins (Core.rs / Collections.rs jet_map_equal,
+// jet_map_contains_value, jet_map_first_key, jet_map_min/max_value_kernel,
+// jet_map_intersection, jet_map_add_new, jet_map_setdefault,
+// jet_map_pop_first), as generated LIR. Results that are copies clone out of
+// the borrowed entries. False when `symbol` is not one.
+fn lower_map_method_query(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, symbol: String, receiver: MIRValueID, receiver_place: MIRPlaceID?, args: [MIRValueID], ty: MIRType) -> Bool Never! {
+    nullary :: symbol == "jet_map_first_key" || symbol == "jet_map_min_value_kernel" || symbol == "jet_map_max_value_kernel" || symbol == "jet_map_pop_first"
+    unary :: symbol == "jet_map_equal" || symbol == "jet_map_contains_value" || symbol == "jet_map_intersection"
+    binary :: symbol == "jet_map_add_new" || symbol == "jet_map_setdefault"
+    if !nullary && !unary && !binary -> return false
+    if args.len() != (if nullary -> 0 else if unary -> 1 else -> 2) {
+        lower_fail(&m, &f, "Map {row.member} with {args.len()} arguments is not lowered at O0 yet")
+        return true
+    }
+    shape :: lower_map_shape(p, ty) ?? {
+        lower_fail(&m, &f, "Map {row.member} over {mir_type_display_name(ty)} is not lowered at O0 yet")
+        return true
+    }
+    if lower_repr(p, shape.value) == .Absent {
+        lower_fail(&m, &f, "Map {row.member} of {mir_type_display_name(shape.value)} values is not lowered at O0 yet")
+        return true
+    }
+    zero :: lower_const(&f, 0)
+    if binary || symbol == "jet_map_pop_first" {
+        map :: lower_receiver_header(p, c, &m, &f, receiver_place, "Map") ?? return true
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+        if symbol == "jet_map_pop_first" {
+            // The first (least) key's value, moved out; None when empty.
+            length :: lower_list_word(&f, map, 0)
+            empty :: lower_flag(&f)
+            lower_emit(&f, LIRInst.Compare{dst: empty, condition: LIRCondition.Eq, left: length, right: zero})
+            removal :: lower_new_block(&f)
+            done :: lower_new_block(&f)
+            null :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+            lower_seal(&f, LIRTerminator.Branch{condition: empty, then_target: lower_target(done, [LIRValueID]{null}), else_target: lower_target(removal, [LIRValueID]{})})
+            lower_start(&f, removal, [LIRValueID]{})
+            data :: lower_list_data(&f, map)
+            key :: lower_read_at(p, &f, data, shape.key_offset, shape.key) ?? return true
+            taken :: lower_pointer(&f)
+            lower_call_helper(&m, &f, "map.remove", ty, [LIRValueID]{map, key}, Val(taken))
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{taken})})
+            lower_start(&f, done, [LIRValueID]{dst})
+            return true
+        }
+        key :: lower_use(&m, &f, args[0]) ?? return true
+        value :: lower_use(&m, &f, args[1]) ?? return true
+        found :: lower_word(&f)
+        lower_call_helper(&m, &f, "map.find", ty, [LIRValueID]{map, key}, Val(found))
+        present :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: present, condition: LIRCondition.Ge, left: found, right: zero})
+        hit :: lower_new_block(&f)
+        miss :: lower_new_block(&f)
+        join :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: present, then_target: lower_target(hit, [LIRValueID]{}), else_target: lower_target(miss, [LIRValueID]{})})
+        // A present key keeps its entry: the offered key and value drop.
+        lower_start(&f, hit, [LIRValueID]{})
+        if lower_value_owned(c, args[0]) -> lower_map_drop_value(p, &m, &f, key, shape.key)
+        if lower_value_owned(c, args[1]) -> lower_map_drop_value(p, &m, &f, value, shape.value)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{found})})
+        lower_start(&f, miss, [LIRValueID]{})
+        owned_key := key
+        if !lower_value_owned(c, args[0]) {
+            owned_key = lower_new_like(&f, key)
+            lower_clone_into(p, &m, &f, key, owned_key, shape.key)
+        }
+        owned_value := value
+        if !lower_value_owned(c, args[1]) {
+            owned_value = lower_new_like(&f, value)
+            lower_clone_into(p, &m, &f, value, owned_value, shape.value)
+        }
+        lower_call_helper(&m, &f, "map.set", ty, [LIRValueID]{map, owned_key, owned_value}, None)
+        minus_one :: lower_const(&f, -1)
+        point :: lower_word(&f)
+        lower_emit(&f, LIRInst.Binary{dst: point, op: LIRBinaryOp.Sub, left: minus_one, right: found})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{point})})
+        index :: lower_word(&f)
+        lower_start(&f, join, [LIRValueID]{index})
+        if symbol == "jet_map_add_new" {
+            lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Lt, left: found, right: zero})
+            return true
+        }
+        // setdefault: a copy of the value now under the key.
+        data :: lower_list_data(&f, map)
+        entry :: lower_list_address(&f, data, index, shape.stride)
+        stored :: lower_read_at(p, &f, entry, shape.value_offset, shape.value) ?? return true
+        if lower_is_inline(p, shape.value) {
+            lower_storage_into(p, &f, dst, shape.value)
+            lower_inline_clone(p, &m, &f, stored, dst, shape.value)
+        } else {
+            lower_clone_into(p, &m, &f, stored, dst, shape.value)
+        }
+        return true
+    }
+    map :: lower_use(&m, &f, receiver) ?? return true
+    if symbol == "jet_map_equal" {
+        other :: lower_use(&m, &f, args[0]) ?? return true
+        same :: lower_equal_values(p, &m, &f, ty, Val(map), Val(other)) ?? return true
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+        lower_emit(&f, LIRInst.Move{dst: dst, src: same})
+        return true
+    }
+    if symbol == "jet_map_intersection" {
+        other :: lower_use(&m, &f, args[0]) ?? return true
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+        lower_storage_into(p, &f, dst, ty)
+        lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: zero})
+        lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: zero})
+        lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: zero})
+        each :: lower_each_begin(p, &f, map, shape.entry, [LIRValueID]{})
+        key :: lower_read_at(p, &f, each.address, shape.key_offset, shape.key) ?? return true
+        found :: lower_word(&f)
+        lower_call_helper(&m, &f, "map.find", ty, [LIRValueID]{other, key}, Val(found))
+        shared :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: shared, condition: LIRCondition.Ge, left: found, right: zero})
+        keep :: lower_new_block(&f)
+        skip :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: shared, then_target: lower_target(keep, [LIRValueID]{}), else_target: lower_target(skip, [LIRValueID]{})})
+        lower_start(&f, keep, [LIRValueID]{})
+        value :: lower_read_at(p, &f, each.address, shape.value_offset, shape.value) ?? return true
+        owned_key :: lower_new_like(&f, key)
+        lower_clone_into(p, &m, &f, key, owned_key, shape.key)
+        owned_value :: lower_new_like(&f, value)
+        lower_clone_into(p, &m, &f, value, owned_value, shape.value)
+        lower_call_helper(&m, &f, "map.set", ty, [LIRValueID]{dst, owned_key, owned_value}, None)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(skip, [LIRValueID]{})})
+        lower_start(&f, skip, [LIRValueID]{})
+        lower_each_end(&f, each, [LIRValueID]{})
+        return true
+    }
+    if symbol == "jet_map_contains_value" {
+        needle :: lower_use(&m, &f, args[0]) ?? return true
+        no :: lower_const_flag(&f, 0)
+        done :: lower_new_block(&f)
+        each :: lower_each_begin(p, &f, map, shape.entry, [LIRValueID]{})
+        value :: lower_render_load(p, &f, each.address, shape.value_offset, shape.value, false)
+        same :: lower_equal_values(p, &m, &f, shape.value, value, Val(needle)) ?? return true
+        hit :: lower_new_block(&f)
+        miss :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: same, then_target: lower_target(hit, [LIRValueID]{}), else_target: lower_target(miss, [LIRValueID]{})})
+        lower_start(&f, hit, [LIRValueID]{})
+        yes :: lower_const_flag(&f, 1)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{yes})})
+        lower_start(&f, miss, [LIRValueID]{})
+        lower_each_end(&f, each, [LIRValueID]{})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{no})})
+        found :: lower_flag(&f)
+        lower_start(&f, done, [LIRValueID]{found})
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+        lower_emit(&f, LIRInst.Move{dst: dst, src: found})
+        return true
+    }
+    // first_key / min / max: a copy of the chosen key or value in an Option
+    // box, None when the map is empty. min keeps the first least value, max
+    // the last greatest (Iterator::min / max); equal values are equal copies.
+    keyed :: symbol == "jet_map_first_key"
+    item_ty :: if keyed -> shape.key else -> shape.value
+    offset :: if keyed -> shape.key_offset else -> shape.value_offset
+    if !keyed && lower_map_key_kind(p, item_ty) == "" {
+        lower_fail(&m, &f, "Map {row.member} of {mir_type_display_name(item_ty)} values is not lowered at O0 yet")
+        return true
+    }
+    length :: lower_list_word(&f, map, 0)
+    empty :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: empty, condition: LIRCondition.Eq, left: length, right: zero})
+    pick :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    lower_seal(&f, LIRTerminator.Branch{condition: empty, then_target: lower_target(done, [LIRValueID]{null}), else_target: lower_target(pick, [LIRValueID]{})})
+    lower_start(&f, pick, [LIRValueID]{})
+    data :: lower_list_data(&f, map)
+    chosen := data
+    if !keyed {
+        // The address of the chosen entry, scanning from the first.
+        each :: lower_each_begin(p, &f, map, shape.entry, [LIRValueID]{data})
+        best :: each.state[0]
+        candidate :: lower_read_at(p, &f, each.address, offset, item_ty) ?? return true
+        incumbent :: lower_read_at(p, &f, best, offset, item_ty) ?? return true
+        order :: if symbol == "jet_map_min_value_kernel" -> lower_map_key_order(p, &m, &f, item_ty, candidate, incumbent) else -> lower_map_key_order(p, &m, &f, item_ty, incumbent, candidate)
+        replace := order.less
+        if symbol == "jet_map_max_value_kernel" {
+            replace = lower_flag(&f)
+            lower_logic(&f, replace, false, order.less, order.same)
+        }
+        better :: lower_new_block(&f)
+        join :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: replace, then_target: lower_target(better, [LIRValueID]{}), else_target: lower_target(join, [LIRValueID]{best})})
+        lower_start(&f, better, [LIRValueID]{})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{each.address})})
+        kept :: lower_pointer(&f)
+        lower_start(&f, join, [LIRValueID]{kept})
+        lower_each_end(&f, each, [LIRValueID]{kept})
+        chosen = each.exit[0]
+    }
+    boxed :: lower_pointer(&f)
+    lower_alloc(&m, &f, boxed, lower_option_box_size(p, item_ty))
+    from :: lower_address(&f, chosen, offset)
+    lower_list_clone_element(p, &m, &f, from, boxed, item_ty)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{boxed})})
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_start(&f, done, [LIRValueID]{dst})
+    true
+}
+
 // ---------------------------------------------------------------------------
 // Generated helpers, one per Map type: map.find (the entry index of a key,
-// or -1 - its insertion point), map.set, map.insert, map.get, map.remove.
+// or -1 - its insertion point), map.set, map.insert, map.get, map.remove;
+// and map.key_compare, one per tuple or struct key type.
+
+// The order of two tuple or struct keys of `glue.ty` (both addresses) as -1,
+// 0 or 1: the first member pair that differs decides (derived Ord).
+fn lower_helper_map_key_compare(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_word()))
+    left :: ~f.open_params[0]
+    right :: ~f.open_params[1]
+    loop member in lower_inline_members(p, glue.ty) {
+        a :: lower_read_at(p, &f, left, member.offset, member.ty) ?? next
+        b :: lower_read_at(p, &f, right, member.offset, member.ty) ?? next
+        order :: lower_map_key_order(p, &m, &f, member.ty, a, b)
+        before :: lower_new_block(&f)
+        differ :: lower_new_block(&f)
+        after :: lower_new_block(&f)
+        same :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: order.same, then_target: lower_target(same, [LIRValueID]{}), else_target: lower_target(differ, [LIRValueID]{})})
+        lower_start(&f, differ, [LIRValueID]{})
+        lower_seal(&f, LIRTerminator.Branch{condition: order.less, then_target: lower_target(before, [LIRValueID]{}), else_target: lower_target(after, [LIRValueID]{})})
+        lower_start(&f, before, [LIRValueID]{})
+        minus_one :: lower_const(&f, -1)
+        lower_seal(&f, LIRTerminator.Return{value: Val(minus_one)})
+        lower_start(&f, after, [LIRValueID]{})
+        plus_one :: lower_const(&f, 1)
+        lower_seal(&f, LIRTerminator.Return{value: Val(plus_one)})
+        lower_start(&f, same, [LIRValueID]{})
+    }
+    zero :: lower_const(&f, 0)
+    lower_seal(&f, LIRTerminator.Return{value: Val(zero)})
+    lir_builder_finish(f.builder)
+}
 
 fn lower_helper_map(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if glue.helper == "map.key_compare" -> return lower_helper_map_key_compare(p, &m, glue)
     shape :: lower_map_shape(p, glue.ty) ?? panic("Map helper {glue.helper} has no Map type")
     if glue.helper == "map.find" -> return lower_helper_map_find(p, &m, glue, shape)
     if glue.helper == "map.set" || glue.helper == "map.insert" -> return lower_helper_map_insert(p, &m, glue, shape, glue.helper == "map.insert")

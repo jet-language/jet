@@ -1744,26 +1744,30 @@ fn lower_drop_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // places are read from memory like projections (Closures.jet).
 fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, place: MIRPlaceID, moving: Bool) Never! {
     row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
-    slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
     if lower_repr(p, row.ty) == .Absent -> return lower_alias_absent(&f, instruction)
     inline :: lower_is_inline(p, row.ty)
     if moving && row.projections.len() > 0 && !lower_projected_move_supported(&m, &f, row.projections) -> return
     walk := LowerFieldAddress{base: LIRValueID{value: -1}, offset: 0}
-    if c.slots[slot].cell {
-        walk = lower_cell_walk(p, c, &m, &f, slot, row) ?? return
+    if row.base == .Static(name) {
+        walk = lower_static_walk(p, &m, &f, row, name) ?? return
     } else {
-        held :: ~f.current[slot]
-        root :: held ?? return lower_fail(&m, &f, "place {place.value} has no value")
-        if row.projections.len() == 0 {
-            if !moving && lower_read_owns(p, c, instruction, row.ty) {
-                dst :: lower_result(p, c, &m, &f, instruction) ?? return
-                return lower_clone_into(p, &m, &f, root, dst, row.ty)
+        slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
+        if c.slots[slot].cell {
+            walk = lower_cell_walk(p, c, &m, &f, slot, row) ?? return
+        } else {
+            held :: ~f.current[slot]
+            root :: held ?? return lower_fail(&m, &f, "place {place.value} has no value")
+            if row.projections.len() == 0 {
+                if !moving && lower_read_owns(p, c, instruction, row.ty) {
+                    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+                    return lower_clone_into(p, &m, &f, root, dst, row.ty)
+                }
+                lower_alias(c, &f, instruction, root)
+                if moving -> lower_clear_slot(p, c, &f, slot)
+                return
             }
-            lower_alias(c, &f, instruction, root)
-            if moving -> lower_clear_slot(p, c, &f, slot)
-            return
+            walk = lower_walk_projections(p, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
         }
-        walk = lower_walk_projections(p, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
     }
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     if moving && inline {
@@ -1826,6 +1830,13 @@ fn lower_stored_operands(operation: MIROperation) -> [MIRValueID] Never! {
 // written in memory like projections.
 fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, place: MIRPlaceID, value: MIRValueID, replace: Bool) Never! {
     row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
+    if row.base == .Static(name) {
+        if lower_is_absent(f, value) -> return
+        stored :: lower_use(&m, &f, value) ?? return
+        walk :: lower_static_walk(p, &m, &f, row, name) ?? return
+        if replace -> lower_drop_stored(p, &m, &f, walk.base, walk.offset, row.ty)
+        return lower_write_at(p, &f, walk.base, walk.offset, stored, row.ty)
+    }
     slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
     if lower_is_absent(f, value) -> return
     lowered :: lower_use(&m, &f, value) ?? return
@@ -3047,7 +3058,8 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "list.join" -> return lower_helper_list_join(p, &m, glue)
     if glue.helper == "list.pop" -> return lower_helper_list_pop(p, &m, glue)
     if glue.helper == "list.get" -> return lower_helper_list_get(p, &m, glue)
-    if glue.helper == "list.starts_with" -> return lower_helper_list_starts_with(p, &m, glue)
+    if glue.helper == "list.starts_with" || glue.helper == "list.ends_with" -> return lower_helper_list_starts_with(p, &m, glue)
+    if glue.helper == "list.remove_value" || glue.helper == "list.remove_slot" -> return lower_helper_list_remove(p, &m, glue)
     if glue.helper == "list.index_of" -> return lower_helper_list_index_of(p, &m, glue)
     if glue.helper == "list.insert" -> return lower_helper_list_insert(p, &m, glue)
     if glue.helper == "list.sort" -> return lower_helper_list_sort(p, &m, glue)

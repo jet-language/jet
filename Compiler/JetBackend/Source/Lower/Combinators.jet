@@ -6,7 +6,8 @@
 // copies; a closure argument moved into the method is dropped after it.
 use jet_foundation.[
     MIRCallArg, MIRInstruction, MIRPreludeCallID, MIRProgram, MIRType,
-    MIRTypeKind, MIRValueID, mir_type_display_name, mir_type_from_kind,
+    MIRTypeKind, MIRValueID, mir_nominal_ref, mir_type_display_name,
+    mir_type_from_kind,
 ]
 
 // One element loop over a List header: the open block is the body, with the
@@ -100,8 +101,10 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     // A list or view folds through the borrowed `jet_view_fold` route; a view
     // shares the List header layout, so both walk the same buffer.
     folds :: symbol == "jet_list_fold" || symbol == "jet_view_fold"
-    if args.len() != (if folds -> 2 else -> 1) -> return lower_fail(&m, &f, unsupported)
-    closure_arg :: args[args.len() - 1]
+    // update_first(predicate, replacement): the closure comes first.
+    updates :: symbol == "jet_list_update_first"
+    if args.len() != (if folds || updates -> 2 else -> 1) -> return lower_fail(&m, &f, unsupported)
+    closure_arg :: if updates -> args[0] else -> args[args.len() - 1]
     closure_ty :: lower_value_type(c, closure_arg.value) ?? return lower_fail(&m, &f, unsupported)
     if symbol == "jet_option_map_ref" {
         inner :: lower_option_inner(receiver_ty) ?? return lower_fail(&m, &f, unsupported)
@@ -129,12 +132,16 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
         return
     }
     elem :: lower_list_element(receiver_ty) ?? return lower_fail(&m, &f, unsupported)
-    if symbol == "jet_list_sort_by" || symbol == "jet_list_sort_by_desc" || symbol == "jet_list_sort_by_compare" {
-        mode :: if symbol == "jet_list_sort_by" -> 0 else if symbol == "jet_list_sort_by_desc" -> 1 else -> 2
+    if symbol == "jet_list_sort_by" || symbol == "jet_list_sort_by_desc" || symbol == "jet_list_sort_by_compare" || symbol == "jet_list_try_sort_by" || symbol == "jet_list_try_sort_by_desc" {
+        mode :: if symbol == "jet_list_sort_by" -> 0 else if symbol == "jet_list_sort_by_desc" -> 1 else if symbol == "jet_list_sort_by_compare" -> 2 else if symbol == "jet_list_try_sort_by" -> 3 else -> 4
         return lower_closure_sort(p, c, &m, &f, instruction, receiver, receiver_ty, elem, closure_arg, closure_ty, mode)
     }
     if lower_repr(p, elem) == .Absent -> return lower_fail(&m, &f, unsupported)
-    if symbol == "jet_list_filter" || symbol == "jet_list_map" {
+    if symbol == "jet_list_each" -> return lower_closure_each(p, c, &m, &f, instruction, receiver, elem, closure_arg, closure_ty)
+    if updates -> return lower_closure_update_first(p, c, &m, &f, instruction, receiver, elem, closure_arg, closure_ty, args[1])
+    if symbol == "jet_list_group_by" -> return lower_closure_group_by(p, c, &m, &f, instruction, receiver, elem, closure_arg, closure_ty, result_ty)
+    if folds && (lower_needs_drop(p, result_ty) || lower_is_inline(p, result_ty)) -> return lower_closure_fold_owned(p, c, &m, &f, instruction, receiver, elem, args[0], closure_arg, closure_ty, result_ty)
+    if symbol == "jet_list_filter" || symbol == "jet_list_map" || symbol == "jet_view_map" {
         produced :: lower_list_element(result_ty) ?? return lower_fail(&m, &f, unsupported)
         if lower_repr(p, produced) == .Absent -> return lower_fail(&m, &f, unsupported)
         list :: lower_use(&m, &f, receiver) ?? return
@@ -147,7 +154,7 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
         lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: zero})
         each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
         item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
-        if symbol == "jet_list_map" {
+        if symbol != "jet_list_filter" {
             out :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, produced) ?? return
             lower_call_helper(&m, &f, "list.push", result_ty, [LIRValueID]{dst, out}, None)
         } else {
@@ -172,9 +179,8 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     }
     if symbol == "jet_list_count_where" || folds {
         // The carried value is a plain word: a count, or an accumulator that
-        // owns nothing (an owning one would need the step's parameter
-        // conventions to know who drops the previous value).
-        if folds && (lower_needs_drop(p, result_ty) || lower_is_inline(p, result_ty) || lower_repr_layout(lower_repr(p, result_ty)) == None) {
+        // owns nothing (lower_closure_fold_owned carries an owning one).
+        if folds && lower_repr_layout(lower_repr(p, result_ty)) == None {
             return lower_fail(&m, &f, "ClosureMethod {row.module_name}.{row.member} with a {mir_type_display_name(result_ty)} accumulator is not lowered at O0 yet")
         }
         list :: lower_use(&m, &f, receiver) ?? return
@@ -207,6 +213,167 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
         return
     }
     lower_fail(&m, &f, unsupported)
+}
+
+// Whether the closure of `ty` takes parameter `index` by Move (it then owns
+// and drops that argument); Read otherwise (MIR.rs callable_parameter_access).
+fn lower_closure_param_moves(ty: MIRType, index: Int) -> Bool Never! {
+    if ty.kind == .Fn(signature) -> return lower_lazy_callback_access(signature, index) == .Move
+    false
+}
+
+// `xs.each(f)` (Core.rs jet_list_each): `f(&item)` once per element, in
+// order; a result the closure returns is dropped.
+fn lower_closure_each(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, elem: MIRType, closure_arg: MIRCallArg, closure_ty: MIRType) Never! {
+    ret := mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}})
+    if closure_ty.kind == .Fn(signature) {
+        if signature.ret == .Val(produced) -> ret = produced
+    }
+    list :: lower_use(&m, &f, receiver) ?? return
+    closure :: lower_use(&m, &f, closure_arg.value) ?? return
+    each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
+    item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
+    if lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, ret) == .Val(out) {
+        if lower_is_inline(p, ret) {
+            lower_inline_drop(p, &m, &f, out, ret)
+        } else {
+            lower_map_drop_value(p, &m, &f, out, ret)
+        }
+    }
+    lower_each_end(&f, each, [LIRValueID]{})
+    if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
+    lower_alias_absent(&f, instruction)
+}
+
+// `&xs.update_first(predicate, replacement)` (JetStd/Iter.rs
+// jet_list_update_first_kernel): the first element the predicate accepts is
+// dropped and replaced in place; true when a write happened. An unused
+// replacement is dropped.
+fn lower_closure_update_first(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, elem: MIRType, closure_arg: MIRCallArg, closure_ty: MIRType, replacement_arg: MIRCallArg) Never! {
+    list :: lower_use(&m, &f, receiver) ?? return
+    closure :: lower_use(&m, &f, closure_arg.value) ?? return
+    replacement :: lower_use(&m, &f, replacement_arg.value) ?? return
+    owned :: replacement_arg.access == .Move && lower_value_owned(c, replacement_arg.value)
+    done :: lower_new_block(&f)
+    each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
+    item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
+    keep :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, mir_type_from_kind(MIRTypeKind.Bool)) ?? return
+    hit :: lower_new_block(&f)
+    miss :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: keep, then_target: lower_target(hit, [LIRValueID]{}), else_target: lower_target(miss, [LIRValueID]{})})
+    lower_start(&f, hit, [LIRValueID]{})
+    stored := replacement
+    if !owned {
+        stored = lower_new_like(&f, replacement)
+        lower_clone_into(p, &m, &f, replacement, stored, elem)
+    }
+    lower_drop_stored(p, &m, &f, each.address, 0, elem)
+    lower_write_at(p, &f, each.address, 0, stored, elem)
+    wrote :: lower_const_flag(&f, 1)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{wrote})})
+    lower_start(&f, miss, [LIRValueID]{})
+    lower_each_end(&f, each, [LIRValueID]{})
+    if owned -> lower_map_drop_value(p, &m, &f, replacement, elem)
+    unchanged :: lower_const_flag(&f, 0)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{unchanged})})
+    written :: lower_flag(&f)
+    lower_start(&f, done, [LIRValueID]{written})
+    if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_emit(&f, LIRInst.Move{dst: dst, src: written})
+}
+
+// `xs.group_by(key)` (Collections.rs jet_list_group_by): each element, in
+// order, appended (as a copy) to the List under its key, created on first use;
+// the Map's ascending key order is BTreeMap's.
+fn lower_closure_group_by(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, elem: MIRType, closure_arg: MIRCallArg, closure_ty: MIRType, result_ty: MIRType) Never! {
+    shape :: lower_map_shape(p, result_ty) ?? return lower_fail(&m, &f, "group_by into {mir_type_display_name(result_ty)} is not lowered at O0 yet")
+    if lower_list_element(shape.value) == None -> return lower_fail(&m, &f, "group_by into {mir_type_display_name(result_ty)} is not lowered at O0 yet")
+    list :: lower_use(&m, &f, receiver) ?? return
+    closure :: lower_use(&m, &f, closure_arg.value) ?? return
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_storage_into(p, &f, dst, result_ty)
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: zero})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: zero})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: zero})
+    each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
+    item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
+    key :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, shape.key) ?? return
+    found :: lower_word(&f)
+    lower_call_helper(&m, &f, "map.find", result_ty, [LIRValueID]{dst, key}, Val(found))
+    present :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: present, condition: LIRCondition.Ge, left: found, right: zero})
+    hit :: lower_new_block(&f)
+    miss :: lower_new_block(&f)
+    join :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: present, then_target: lower_target(hit, [LIRValueID]{}), else_target: lower_target(miss, [LIRValueID]{})})
+    lower_start(&f, hit, [LIRValueID]{})
+    lower_map_drop_value(p, &m, &f, key, shape.key)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{found})})
+    lower_start(&f, miss, [LIRValueID]{})
+    empty :: lower_new_storage(p, &f, shape.value)
+    lower_emit(&f, LIRInst.Store{base: empty, offset: 0, value: zero})
+    lower_emit(&f, LIRInst.Store{base: empty, offset: 8, value: zero})
+    lower_emit(&f, LIRInst.Store{base: empty, offset: 16, value: zero})
+    lower_call_helper(&m, &f, "map.set", result_ty, [LIRValueID]{dst, key, empty}, None)
+    // map.find's miss is -1 - the insertion point, the new entry's index.
+    minus_one :: lower_const(&f, -1)
+    point :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: point, op: LIRBinaryOp.Sub, left: minus_one, right: found})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{point})})
+    index :: lower_word(&f)
+    lower_start(&f, join, [LIRValueID]{index})
+    data :: lower_list_data(&f, dst)
+    entry :: lower_list_address(&f, data, index, shape.stride)
+    group :: lower_address(&f, entry, shape.value_offset)
+    appended := item
+    if lower_needs_drop(p, elem) || lower_is_inline(p, elem) {
+        appended = lower_new_like(&f, item)
+        lower_clone_into(p, &m, &f, item, appended, elem)
+    }
+    lower_call_helper(&m, &f, "list.push", shape.value, [LIRValueID]{group, appended}, None)
+    lower_each_end(&f, each, [LIRValueID]{})
+    if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
+}
+
+// `fold(init, step)` with an accumulator that owns resources or is an inline
+// aggregate (Collections.rs jet_list_fold, Core.rs jet_view_fold:
+// `acc = f(&acc, x)` per element, in order, the previous accumulator dropped
+// unless the step takes it by Move). An inline accumulator lives in the
+// result's storage, which each step's result replaces.
+fn lower_closure_fold_owned(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, elem: MIRType, init_arg: MIRCallArg, closure_arg: MIRCallArg, closure_ty: MIRType, result_ty: MIRType) Never! {
+    if lower_repr_layout(lower_repr(p, result_ty)) == None -> return lower_fail(&m, &f, "fold with a {mir_type_display_name(result_ty)} accumulator is not lowered at O0 yet")
+    consumed :: lower_closure_param_moves(closure_ty, 0)
+    list :: lower_use(&m, &f, receiver) ?? return
+    init :: lower_use(&m, &f, init_arg.value) ?? return
+    closure :: lower_use(&m, &f, closure_arg.value) ?? return
+    start := init
+    if init_arg.access != .Move || !lower_value_owned(c, init_arg.value) {
+        start = lower_new_like(&f, init)
+        lower_clone_into(p, &m, &f, init, start, result_ty)
+    }
+    if lower_is_inline(p, result_ty) {
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return
+        lower_storage_into(p, &f, dst, result_ty)
+        lower_write_at(p, &f, dst, 0, start, result_ty)
+        each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
+        item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
+        out :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{dst, item}, result_ty) ?? return
+        if !consumed -> lower_inline_drop(p, &m, &f, dst, result_ty)
+        lower_write_at(p, &f, dst, 0, out, result_ty)
+        lower_each_end(&f, each, [LIRValueID]{})
+    } else {
+        each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{start})
+        item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
+        current :: each.state[0]
+        stepped :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{current, item}, result_ty) ?? return
+        if !consumed -> lower_map_drop_value(p, &m, &f, current, result_ty)
+        lower_each_end(&f, each, [LIRValueID]{stepped})
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return
+        lower_emit(&f, LIRInst.Move{dst: dst, src: each.exit[0]})
+    }
+    if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
 }
 
 // A word slot `at` of an 8-byte-per-slot scratch buffer.
@@ -243,9 +410,13 @@ fn lower_sort_loop(f: &LowerFunction, start: LIRValueID, end: LIRValueID) -> Low
 // (jet_list_sort_by_compare, a stable sort under the comparator). A stable
 // insertion sort orders a permutation of positions; the elements then move
 // once into a new buffer in that order. `mode`: 0 key ascending, 1 key
-// descending, 2 comparator.
+// descending, 2 comparator, 3/4 fallible key ascending/descending
+// (jet_list_try_sort_by[_desc]: the first Err key stops before any later key
+// is computed and leaves the List as it was; the method's Result is that Err,
+// else Ok).
 fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, receiver_ty: MIRType, elem: MIRType, closure_arg: MIRCallArg, closure_ty: MIRType, mode: Int) Never! {
     by_key :: mode != 2
+    ascending :: mode == 0 || mode == 3
     if lower_view_element(receiver_ty) != None -> return lower_fail(&m, &f, "sorting a View in place is not lowered at O0 yet")
     if lower_repr(p, elem) == .Absent -> return lower_fail(&m, &f, "sorting a List of {mir_type_display_name(elem)} is not lowered at O0 yet")
     signature :: if closure_ty.kind == .Fn(row) -> row else -> {
@@ -253,7 +424,21 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
         return
     }
     ret :: signature.ret ?? return lower_fail(&m, &f, "sort_by closure without a result type is not lowered at O0 yet")
-    if by_key && lower_map_key_kind(p, ret) == "" -> return lower_fail(&m, &f, "sort_by with a {mir_type_display_name(ret)} key is not lowered at O0 yet")
+    key_ty := ret
+    key_err := MIRType?{None}
+    // The byte size of the method's own Result<(), E> box (try_sort_by), 0
+    // for a Unit result.
+    outcome_size := 0
+    if mode >= 3 {
+        if ret.kind == .Result(ok, err) {
+            key_ty = ok
+            key_err = Val(err)
+        }
+        result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "try_sort_by without a checked result type is not lowered at O0 yet")
+        if result_ty.kind == .Result(ok, err) -> outcome_size = lower_result_box_size(p, ok, err)
+    }
+    if key_err != None && outcome_size == 0 -> return lower_fail(&m, &f, "try_sort_by with a fallible key and no Result is not lowered at O0 yet")
+    if by_key && lower_map_key_kind(p, key_ty) == "" -> return lower_fail(&m, &f, "sort_by with a {mir_type_display_name(key_ty)} key is not lowered at O0 yet")
     less_index := 0
     if !by_key {
         definition :: lower_type_def(p, ret) ?? return lower_fail(&m, &f, "sort_by comparator result {mir_type_display_name(ret)} has no definition")
@@ -271,6 +456,7 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     order :: lower_list_buffer(&m, &f, length, 8)
     keys := order
     if by_key -> keys = lower_list_buffer(&m, &f, length, 8)
+    finish :: lower_new_block(&f)
 
     // Positions in List order; each key computed once, in that order.
     fill :: lower_sort_loop(&f, zero, length)
@@ -279,9 +465,43 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     if by_key {
         item_address :: lower_list_address(&f, data, fill.at, stride)
         item :: lower_read_at(p, &f, item_address, 0, elem) ?? return
-        key :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, ret) ?? return lower_fail(&m, &f, "sort_by key closure has no result")
+        computed :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, ret) ?? return lower_fail(&m, &f, "sort_by key closure has no result")
+        key := computed
+        if key_err == .Val(err_ty) {
+            // A Result box: tag 1 Ok / 0 Err at 0, payload at 8.
+            shell_size :: lower_result_box_size(p, key_ty, err_ty)
+            outcome_tag :: lower_word(&f)
+            lower_emit(&f, LIRInst.Load{dst: outcome_tag, base: computed, offset: 0})
+            failed :: lower_flag(&f)
+            lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: outcome_tag, right: zero})
+            stop :: lower_new_block(&f)
+            keep :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(keep, [LIRValueID]{})})
+            lower_start(&f, stop, [LIRValueID]{})
+            if lower_needs_drop(p, key_ty) {
+                release :: lower_sort_loop(&f, zero, fill.at)
+                release_slot :: lower_sort_slot(&f, keys, release.at)
+                stale :: lower_read_at(p, &f, release_slot, 0, key_ty) ?? return
+                lower_map_drop_value(p, &m, &f, stale, key_ty)
+                lower_each_end(&f, release, [LIRValueID]{})
+            }
+            lower_list_free_buffer(&m, &f, order, length, 8)
+            lower_list_free_buffer(&m, &f, keys, length, 8)
+            failure :: lower_pointer(&f)
+            lower_alloc(&m, &f, failure, outcome_size)
+            lower_emit(&f, LIRInst.Store{base: failure, offset: 0, value: zero})
+            moved_from :: lower_address(&f, computed, 8)
+            moved_to :: lower_address(&f, failure, 8)
+            lower_list_move(p, &f, moved_to, moved_from, err_ty)
+            lower_free_shell(&m, &f, computed, shell_size)
+            if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(finish, [LIRValueID]{failure})})
+            lower_start(&f, keep, [LIRValueID]{})
+            key = lower_read_at(p, &f, computed, 8, key_ty) ?? return
+            lower_free_shell(&m, &f, computed, shell_size)
+        }
         key_slot :: lower_sort_slot(&f, keys, fill.at)
-        lower_write_at(p, &f, key_slot, 0, key, ret)
+        lower_write_at(p, &f, key_slot, 0, key, key_ty)
     }
     lower_each_end(&f, fill, [LIRValueID]{})
 
@@ -305,9 +525,9 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     if by_key {
         current_slot :: lower_sort_slot(&f, keys, j)
         previous_slot :: lower_sort_slot(&f, keys, previous)
-        current_key :: lower_read_at(p, &f, current_slot, 0, ret) ?? return
-        previous_key :: lower_read_at(p, &f, previous_slot, 0, ret) ?? return
-        ordered :: if mode == 0 -> lower_map_key_order(p, &m, &f, ret, current_key, previous_key) else -> lower_map_key_order(p, &m, &f, ret, previous_key, current_key)
+        current_key :: lower_read_at(p, &f, current_slot, 0, key_ty) ?? return
+        previous_key :: lower_read_at(p, &f, previous_slot, 0, key_ty) ?? return
+        ordered :: if ascending -> lower_map_key_order(p, &m, &f, key_ty, current_key, previous_key) else -> lower_map_key_order(p, &m, &f, key_ty, previous_key, current_key)
         before = ordered.less
     } else {
         current_at :: lower_sort_load(&f, order, j)
@@ -351,15 +571,34 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     lower_emit(&f, LIRInst.Store{base: list, offset: 8, value: length})
     lower_emit(&f, LIRInst.Store{base: list, offset: 16, value: sorted})
 
-    if by_key && lower_needs_drop(p, ret) {
+    if by_key && lower_needs_drop(p, key_ty) {
         release :: lower_sort_loop(&f, zero, length)
         release_slot :: lower_sort_slot(&f, keys, release.at)
-        key :: lower_read_at(p, &f, release_slot, 0, ret) ?? return
-        lower_map_drop_value(p, &m, &f, key, ret)
+        key :: lower_read_at(p, &f, release_slot, 0, key_ty) ?? return
+        lower_map_drop_value(p, &m, &f, key, key_ty)
         lower_each_end(&f, release, [LIRValueID]{})
     }
     lower_list_free_buffer(&m, &f, order, length, 8)
     if by_key -> lower_list_free_buffer(&m, &f, keys, length, 8)
     if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
-    lower_alias_absent(&f, instruction)
+    if outcome_size == 0 {
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(finish, [LIRValueID]{})})
+        lower_start(&f, finish, [LIRValueID]{})
+        return lower_alias_absent(&f, instruction)
+    }
+    success :: lower_pointer(&f)
+    lower_alloc(&m, &f, success, outcome_size)
+    lower_emit(&f, LIRInst.Store{base: success, offset: 0, value: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(finish, [LIRValueID]{success})})
+    settled :: lower_pointer(&f)
+    lower_start(&f, finish, [LIRValueID]{settled})
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_emit(&f, LIRInst.Move{dst: dst, src: settled})
+}
+
+// Frees a box's own `bytes` (its payload already moved out).
+fn lower_free_shell(m: &LowerModule, f: &LowerFunction, boxed: LIRValueID, bytes: Int) Never! {
+    size :: lower_const(&f, if bytes < 8 -> 8 else -> bytes)
+    align :: lower_const(&f, 8)
+    lower_call_runtime(&m, &f, "jet_rt_free", [LIRValueID]{boxed, size, align}, None)
 }
