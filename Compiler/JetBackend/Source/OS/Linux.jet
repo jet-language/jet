@@ -128,6 +128,20 @@ fn os_store_word(address: Int, value: Int) {
     """
 }
 
+#[Unsafe("reads one word at an address the caller owns and has mapped readable"), FFI(asm)]
+fn os_load_word(address: Int) -> Int -> {
+    """
+    mov rax, qword ptr [{address}] ; -> return
+    """
+}
+
+#[Unsafe("reads one byte at an address the caller owns and has mapped readable"), FFI(asm)]
+fn os_load_byte(address: Int) -> Int -> {
+    """
+    movzx rax, byte ptr [{address}] ; -> return
+    """
+}
+
 // Copy `bytes` to `address` one little-endian word at a time. The last word
 // is padded with zero bytes, so the destination must hold `bytes.len()`
 // rounded up to 8 bytes (a page-rounded mapping always does).
@@ -142,7 +156,7 @@ fn os_copy_in(address: Int, bytes: [U8]) {
             // The top byte carries the sign of the 64-bit word.
             if k == 7 && byte >= 128 -> byte = byte - 256
             word = word + byte * scale
-            scale = scale * 256
+            if k < 7 -> scale = scale * 256
         }
         #Unsafe("the caller owns the destination words") {
             os_store_word(address + at, word)
@@ -157,8 +171,26 @@ fn os_copy_in(address: Int, bytes: [U8]) {
 #[Unsafe("calls machine code; the caller vouches for the code and its System V signature"), FFI(asm)]
 fn os_call_address(address: Int, argument: Int) -> Int {
     """
-    mov rdi, {argument}
-    call {address}
+    push {address}
+    push {argument}
+    pop rdi
+    pop r11
+    call r11
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    """
+}
+
+#[Unsafe("calls machine code; the caller vouches for the code and its two-word System V signature"), FFI(asm)]
+fn os_call_address_two(address: Int, first: Int, second: Int) -> Int -> {
+    """
+    push {address}
+    push {first}
+    push {second}
+    pop rsi
+    pop rdi
+    pop r11
+    call r11
     mov rax, rax ; -> return
     ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
     """

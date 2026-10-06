@@ -1,0 +1,336 @@
+// Value representation (design doc "Value layouts"). Structs and tuples are
+// inline aggregates: a value is a pointer to storage holding the stored
+// fields at natural offsets. Whoever holds the storage owns it (a frame stack
+// slot, a caller's result slot, a box payload, a list element or static
+// data); the value never frees it, so drop glue only drops the owned contents
+// and clone glue copies into storage the caller supplies. Box payloads
+// (Option, Result, enum) and list elements use the same byte layout, so an
+// inline aggregate stored in one is its bytes, not a further box. Recursive
+// edges stay boxed through the one-value wrapper.
+use jet_foundation.[
+    MIRBlockID, MIRFieldID, MIRProgram, MIRType, MIRTypeDef, MIRTypeKind,
+    MIRVariant, mir_field_id, mir_type_from_kind, mir_type_identity_key,
+]
+
+struct LowerSize {
+    pub size: Int
+    pub align: Int
+}
+
+// One stored member of an inline aggregate or variant payload at its byte
+// offset. A boxed (recursive) edge is one pointer to a wrapper box holding
+// the member's value.
+struct LowerMember {
+    pub id: MIRFieldID
+    pub name: String
+    pub offset: Int
+    pub ty: MIRType
+    pub boxed: Bool
+}
+
+fn lower_align_up(value: Int, align: Int) -> Int Never! {
+    if align <= 1 || value % align == 0 -> return value
+    value + align - value % align
+}
+
+// The aggregate type an inline value of `ty` lays out (through tags,
+// aliases and distinct types), or None when `ty` is not inline.
+fn lower_inline_type(p: MIRProgram, ty: MIRType) -> MIRType? {
+    if lower_repr(p, ty) == .Inline(aggregate) -> return Val(aggregate)
+    None
+}
+
+fn lower_is_inline(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    lower_inline_type(p, ty) != None
+}
+
+// Bytes and alignment a value of `ty` occupies in any storage. Inline
+// aggregates are 8-aligned and padded to whole words, so copies move words.
+fn lower_size(p: MIRProgram, ty: MIRType) -> LowerSize Never! {
+    if lower_repr(p, ty) == {
+        .Absent -> LowerSize{size: 0, align: 1}
+        .Flag -> LowerSize{size: 1, align: 1}
+        .Inline(aggregate) -> LowerSize{size: lower_inline_size(p, aggregate), align: 8}
+        else -> LowerSize{size: 8, align: 8}
+    }
+}
+
+fn lower_member_size(p: MIRProgram, member: LowerMember) -> LowerSize Never! {
+    if member.boxed -> return LowerSize{size: 8, align: 8}
+    lower_size(p, member.ty)
+}
+
+// Members laid out in order from `start`, each at the next multiple of its
+// alignment.
+fn lower_place_members(p: MIRProgram, members: [LowerMember], start: Int) -> [LowerMember] Never! {
+    placed := [LowerMember]{}
+    offset := start
+    loop member in members {
+        size :: lower_member_size(p, member)
+        offset = lower_align_up(offset, size.align)
+        &placed.push(LowerMember{id: member.id, name: member.name, offset: offset, ty: member.ty, boxed: member.boxed})
+        offset += size.size
+    }
+    placed
+}
+
+// One past the last byte any member uses (at least `start`).
+fn lower_members_end(p: MIRProgram, members: [LowerMember], start: Int) -> Int Never! {
+    end := start
+    loop member in members {
+        last :: member.offset + lower_member_size(p, member).size
+        if last > end -> end = last
+    }
+    end
+}
+
+// The stored members of an inline aggregate (a struct's non-computed fields
+// in declaration order, or a tuple's elements), at their offsets.
+fn lower_inline_members(p: MIRProgram, ty: MIRType) -> [LowerMember] Never! {
+    rows := [LowerMember]{}
+    if ty.kind == .Tuple(fields) {
+        identity :: mir_type_identity_key(ty)
+        loop row in fields -> &rows.push(LowerMember{id: mir_field_id("{identity}::{row.name}"), name: row.name, offset: 0, ty: row.ty, boxed: false})
+    } else if lower_type_def(p, ty) == .Val(definition) {
+        if definition.kind == .Struct(fields, _) {
+            loop row in lower_stored_fields(fields) -> &rows.push(LowerMember{id: row.id, name: row.name, offset: 0, ty: row.ty, boxed: lower_declared_boxed_edge(definition, row.name)})
+        }
+    }
+    lower_place_members(p, rows, 0)
+}
+
+// A List or Map is an inline [len, cap, data] header (Lists.jet, Maps.jet), a
+// View<T> window the same header borrowing its buffer.
+fn lower_inline_size(p: MIRProgram, ty: MIRType) -> Int Never! {
+    if ty.kind == .List(_) | .Map(_, _) -> return 24
+    if lower_view_element(ty) != None -> return 24
+    lower_align_up(lower_members_end(p, lower_inline_members(p, ty), 0), 8)
+}
+
+// A variant's stored payload members, laid out after the discriminant word.
+fn lower_variant_members(p: MIRProgram, definition: MIRTypeDef, variant: MIRVariant) -> [LowerMember] Never! {
+    rows := [LowerMember]{}
+    if variant.payload == {
+        .Unit -> {}
+        .Single(inner) -> &rows.push(LowerMember{id: mir_field_id("{definition.key}.{variant.name}"), name: variant.name, offset: 0, ty: inner, boxed: lower_declared_boxed_edge(definition, variant.name)})
+        .Named(fields) -> {
+            loop row in lower_stored_fields(fields) -> &rows.push(LowerMember{id: row.id, name: row.name, offset: 0, ty: row.ty, boxed: lower_declared_boxed_edge(definition, "{variant.name}.{row.name}")})
+        }
+    }
+    lower_place_members(p, rows, 8)
+}
+
+// Box sizes; construction and glue both use these, so an allocation is
+// always freed with its own size.
+fn lower_option_box_size(p: MIRProgram, inner: MIRType) -> Int Never! {
+    size :: lower_align_up(lower_size(p, inner).size, 8)
+    if size < 8 -> 8 else -> size
+}
+
+fn lower_result_box_size(p: MIRProgram, ok: MIRType, err: MIRType) -> Int Never! {
+    ok_size :: lower_size(p, ok).size
+    err_size :: lower_size(p, err).size
+    widest :: lower_align_up(if ok_size > err_size -> ok_size else -> err_size, 8)
+    8 + (if widest < 8 -> 8 else -> widest)
+}
+
+fn lower_enum_box_size(p: MIRProgram, definition: MIRTypeDef) -> Int Never! {
+    end := 8
+    if definition.kind == .Enum(variants, _) {
+        loop variant in variants {
+            last :: lower_members_end(p, lower_variant_members(p, definition, variant), 8)
+            if last > end -> end = last
+        }
+    }
+    lower_align_up(end, 8)
+}
+
+// The size of the box a Boxed value of `ty` points at (0 when unknown).
+fn lower_box_size(p: MIRProgram, ty: MIRType) -> Int Never! {
+    if ty.kind == {
+        .Option(inner) -> lower_option_box_size(p, inner)
+        .Result(ok, err) -> lower_result_box_size(p, ok, err)
+        else -> {
+            definition :: lower_type_def(p, ty) ?? return 0
+            if definition.kind == .Enum(_, _) -> lower_enum_box_size(p, definition) else -> 0
+        }
+    }
+}
+
+// Bytes between consecutive list elements: a whole number of words.
+fn lower_list_stride(p: MIRProgram, elem: MIRType) -> Int Never! {
+    lower_option_box_size(p, elem)
+}
+
+// The type a member's storage holds: a boxed edge holds its wrapper, which
+// has the present Option layout (one box holding the value).
+fn lower_member_storage_type(member: LowerMember) -> MIRType Never! {
+    if member.boxed -> return mir_type_from_kind(MIRTypeKind.Option{inner: member.ty})
+    member.ty
+}
+
+// ---------------------------------------------------------------------------
+// Moving values in and out of storage.
+
+// base + offset as a new pointer (base itself at offset 0).
+fn lower_address(f: &LowerFunction, base: LIRValueID, offset: Int) -> LIRValueID Never! {
+    if offset == 0 -> return ~base
+    bytes :: lower_const(&f, offset)
+    address :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.PointerAdd{dst: address, base: base, offset: bytes})
+    address
+}
+
+// Defines `dst` as the value of `ty` stored at base + offset; an inline
+// aggregate's value is the address of its bytes.
+fn lower_read_into(p: MIRProgram, f: &LowerFunction, dst: LIRValueID, base: LIRValueID, offset: Int, ty: MIRType) Never! {
+    if lower_is_inline(p, ty) {
+        bytes :: lower_const(&f, offset)
+        lower_emit(&f, LIRInst.PointerAdd{dst: dst, base: base, offset: bytes})
+        return
+    }
+    lower_emit(&f, LIRInst.Load{dst: dst, base: base, offset: offset})
+}
+
+// The value of `ty` stored at base + offset, without a drop action; None
+// for Unit.
+fn lower_read_at(p: MIRProgram, f: &LowerFunction, base: LIRValueID, offset: Int, ty: MIRType) -> LIRValueID? {
+    layout :: lower_repr_layout(lower_repr(p, ty)) ?? return None
+    if lower_is_inline(p, ty) -> return Val(lower_address(&f, base, offset))
+    value :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
+    lower_emit(&f, LIRInst.Load{dst: value, base: base, offset: offset})
+    Val(value)
+}
+
+// Moves `value` of `ty` into base + offset: an inline aggregate's bytes are
+// copied (ownership of its contents moves with them).
+fn lower_write_at(p: MIRProgram, f: &LowerFunction, base: LIRValueID, offset: Int, value: LIRValueID, ty: MIRType) Never! {
+    if lower_is_inline(p, ty) -> return lower_copy_bytes(&f, base, offset, value, 0, lower_size(p, ty).size)
+    if lower_repr_layout(lower_repr(p, ty)) == None -> return
+    lower_emit(&f, LIRInst.Store{base: base, offset: offset, value: value})
+}
+
+fn lower_copy_bytes(f: &LowerFunction, to: LIRValueID, to_offset: Int, from: LIRValueID, from_offset: Int, size: Int) Never! {
+    at := 0
+    loop at < size {
+        word :: lower_word(&f)
+        lower_emit(&f, LIRInst.Load{dst: word, base: from, offset: from_offset + at})
+        lower_emit(&f, LIRInst.Store{base: to, offset: to_offset + at, value: word})
+        at += 8
+    }
+}
+
+// Zeroes the storage of a moved-out value: every owned handle or box in it
+// reads as null, which glue skips.
+fn lower_clear_at(p: MIRProgram, f: &LowerFunction, base: LIRValueID, offset: Int, ty: MIRType) Never! {
+    if lower_is_inline(p, ty) {
+        size :: lower_size(p, ty).size
+        zero :: lower_const(&f, 0)
+        at := 0
+        loop at < size {
+            lower_emit(&f, LIRInst.Store{base: base, offset: offset + at, value: zero})
+            at += 8
+        }
+        return
+    }
+    layout :: lower_repr_layout(lower_repr(p, ty)) ?? return
+    empty :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
+    lower_emit(&f, LIRInst.Const{dst: empty, value: 0})
+    lower_emit(&f, LIRInst.Store{base: base, offset: offset, value: empty})
+}
+
+// Frame storage of its own for one inline aggregate of `ty`, defining `dst`.
+fn lower_storage_into(p: MIRProgram, f: &LowerFunction, dst: LIRValueID, ty: MIRType) Never! {
+    size :: lower_size(p, ty).size
+    lower_emit(&f, LIRInst.StackSlot{dst: dst, size: if size < 8 -> 8 else -> size, align: 8})
+}
+
+fn lower_new_storage(p: MIRProgram, f: &LowerFunction, ty: MIRType) -> LIRValueID Never! {
+    dst :: lower_pointer(&f)
+    lower_storage_into(p, &f, dst, ty)
+    dst
+}
+
+// Heap storage for a box of `size` bytes.
+fn lower_alloc_bytes(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, size: Int) Never! {
+    bytes :: lower_const(&f, if size < 8 -> 8 else -> size)
+    align :: lower_const(&f, 8)
+    lower_call_runtime(&m, &f, "jet_rt_alloc", [LIRValueID]{bytes, align}, Val(dst))
+}
+
+// ---------------------------------------------------------------------------
+// Inline glue: drop glue takes the aggregate's address and drops its owned
+// members (null-safe, so a moved-out slot's placeholder is harmless); clone
+// glue takes (source, target) and fills the target with a deep copy.
+
+fn lower_needs_drop(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    if lower_repr(p, ty) == {
+        .Handle(_, _) -> true
+        .Boxed(_) -> true
+        .Inline(aggregate) -> {
+            // A List or Map always owns its buffer.
+            if aggregate.kind == .List(_) | .Map(_, _) -> return true
+            loop member in lower_inline_members(p, aggregate) {
+                if member.boxed || lower_needs_drop(p, member.ty) -> return true
+            }
+            false
+        }
+        else -> false
+    }
+}
+
+fn lower_inline_drop(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value: LIRValueID, ty: MIRType) Never! {
+    aggregate :: lower_inline_type(p, ty) ?? return
+    if !lower_needs_drop(p, aggregate) -> return
+    signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
+    id :: lower_glue_id(&m, aggregate)
+    lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Function{id: id}, args: [LIRValueID]{value}})
+}
+
+fn lower_inline_clone(p: MIRProgram, m: &LowerModule, f: &LowerFunction, source: LIRValueID, target: LIRValueID, ty: MIRType) Never! {
+    aggregate :: lower_inline_type(p, ty) ?? return
+    if !lower_needs_drop(p, aggregate) -> return lower_copy_bytes(&f, target, 0, source, 0, lower_inline_size(p, aggregate))
+    signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
+    id :: lower_clone_glue_id(&m, aggregate)
+    lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Function{id: id}, args: [LIRValueID]{source, target}})
+}
+
+fn lower_inline_glue_fields(p: MIRProgram, ty: MIRType) -> [LowerGlueField] Never! {
+    rows := [LowerGlueField]{}
+    loop member in lower_inline_members(p, ty) -> &rows.push(LowerGlueField{offset: member.offset, ty: lower_member_storage_type(member)})
+    rows
+}
+
+fn lower_inline_drop_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
+    f := lower_new_function(glue.id, "drop.{glue.key}", signature, MIRBlockID{value: U64.MAX})
+    value :: lower_pointer(&f)
+    entry :: lower_new_block(&f)
+    lower_start(&f, entry, [LIRValueID]{value})
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    absent :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: absent, condition: LIRCondition.Eq, left: value, right: null})
+    done :: lower_new_block(&f)
+    live :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(live, [LIRValueID]{})})
+    lower_start(&f, live, [LIRValueID]{})
+    lower_glue_drop_fields(p, &m, &f, value, lower_inline_glue_fields(p, glue.ty))
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_inline_clone_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
+    f := lower_new_function(glue.id, "clone.{glue.key}", signature, MIRBlockID{value: U64.MAX})
+    source :: lower_pointer(&f)
+    target :: lower_pointer(&f)
+    entry :: lower_new_block(&f)
+    lower_start(&f, entry, [LIRValueID]{source, target})
+    lower_copy_bytes(&f, target, 0, source, 0, lower_inline_size(p, glue.ty))
+    lower_glue_clone_fields(p, &m, &f, source, target, lower_inline_glue_fields(p, glue.ty))
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}

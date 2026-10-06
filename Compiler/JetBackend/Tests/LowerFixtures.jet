@@ -130,7 +130,7 @@ use jet_foundation.[
     mir_type_with_identity,
     stable_id,
 ]
-use jet_backend.[LIRFunctionID, lir_lower_program, lir_print_module, x64_relocatable_object, x64_static_executable]
+use jet_backend.[LIRFunctionID, LIRModule, lir_lint_module, lir_lower_entry, lir_print_module, x64_relocatable_object, x64_static_executable]
 use core.files as files
 
 fn fx_span() -> Span Never! { Span{start: 0, end: 0} }
@@ -327,6 +327,7 @@ fn fx_prelude_rows() -> [MIRPreludeCall] Never! {
         fx_prelude(MIRPreludeFamily.StaticPrelude, "core.loop", "loop_range_has_next", "jet_loop_range_has_next", 1, MIRPreludeABI.Value),
         fx_prelude(MIRPreludeFamily.StaticPrelude, "core.loop", "loop_range_value", "jet_loop_range_value", 1, MIRPreludeABI.Value),
         fx_prelude(MIRPreludeFamily.StaticPrelude, "core.loop", "loop_range_advance", "jet_loop_range_advance", 1, MIRPreludeABI.Value),
+        fx_prelude(MIRPreludeFamily.StaticPrelude, "core.convert", "char_to_string", "jet_rt_char_to_string", 1, MIRPreludeABI.Value),
     }
 }
 
@@ -639,49 +640,191 @@ fn fx_compare_value(b: &FxBuilder, operation: MIROperation) -> MIRValueID Never!
 // Lower `program`, print its LIR and issues, and, when it is clean, compile
 // it (entry `run`) to a static x86-64 executable `<name>.elf`, a relocatable
 // object `<name>.o` for the compiled runtime, and an in-memory image
-// `<name>.image` with its load manifest `<name>.mem` (`entry <offset>`, then
-// one `import <slot offset> <symbol>` line per runtime import), in the
+// `<name>.image` with its load manifest `<name>.mem` (`align <origin>`,
+// `entry <offset>`, one `import <slot offset> <symbol>` line per runtime
+// import, then one `reloc <at> <target offset>` line per data pointer), in the
 // working directory; check-native-fixtures.mjs runs, links and loads them.
 fn fx_report(name: String, program: MIRProgram) -> Bool {
-    lowered :: lir_lower_program(program)
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
     print("== {name}")
     print(lir_print_module(lowered.lir))
     loop issue in lowered.issues -> print("issue {issue.function}: {issue.message}")
     if lowered.issues.len() > 0 -> return false
-    print("{name}: lint-clean")
+    entry :: lowered.entry ?? panic("lowering without issues has an entry")
+    fx_report_image(name, lowered.lir, entry.value)
+}
+
+// The compile/write half of fx_report for a lint-clean LIR module (hand LIR
+// fixtures enter here directly, after their own lint): its entry is `run`.
+fn fx_report_lir(name: String, program: LIRModule) -> Bool {
     entry := -1
-    loop function in lowered.lir.functions { if function.name == "run" -> entry = function.id.value }
-    image :: x64_static_executable(lowered.lir, LIRFunctionID{value: entry})
+    loop function in program.functions { if function.name == "run" -> entry = function.id.value }
+    fx_report_image(name, program, entry)
+}
+
+// Lints `program` and writes its images, started at function `entry` (a
+// lowered program's may be the generated entry, Lower/Entry.jet).
+fn fx_report_image(name: String, program: LIRModule, entry: Int) -> Bool {
+    issues :: lir_lint_module(program)
+    loop issue in issues -> print("issue {issue.function}: {issue.message}")
+    if issues.len() > 0 -> return false
+    print("{name}: lint-clean")
+    image :: x64_static_executable(program, LIRFunctionID{value: entry})
     loop error in image.errors -> print("native {name}: {error}")
     if image.errors.len() > 0 -> return false
     path :: "{name}.elf"
     files.write_bytes(path, image.bytes) ?? panic("cannot write {path}")
     files.set_mode(path, 0o755) ?? panic("cannot make {path} executable")
     print("{name}: native image {path} ({image.bytes.len()} bytes)")
-    relocatable :: x64_relocatable_object(lowered.lir, LIRFunctionID{value: entry})
+    relocatable :: x64_relocatable_object(program, LIRFunctionID{value: entry})
     loop error in relocatable.errors -> print("object {name}: {error}")
     if relocatable.errors.len() > 0 -> return false
     object_path :: "{name}.o"
     files.write_bytes(object_path, relocatable.bytes) ?? panic("cannot write {object_path}")
     print("{name}: object {object_path} ({relocatable.bytes.len()} bytes)")
-    memory :: x64_memory_image(lowered.lir, LIRFunctionID{value: entry})
+    memory :: x64_memory_image(program, LIRFunctionID{value: entry})
     loop error in memory.errors -> print("in-memory {name}: {error}")
     if memory.errors.len() > 0 -> return false
     image_path :: "{name}.image"
     files.write_bytes(image_path, memory.text) ?? panic("cannot write {image_path}")
-    manifest := "entry {memory.entry}\n"
+    manifest := "align {memory.align}\nentry {memory.entry}\ndata {memory.data_offset}\n"
     loop (index, symbol) in memory.imports -> manifest = "{manifest}import {memory.slots[index]} {symbol}\n"
+    loop reloc in memory.relocs -> manifest = "{manifest}reloc {reloc.at} {reloc.target}\n"
     files.write("{name}.mem", manifest) ?? panic("cannot write {name}.mem")
     print("{name}: in-memory image {image_path} ({memory.text.len()} bytes, {memory.imports.len()} runtime imports)")
+    true
+}
+
+// A hand-linked static executable (hand LIR plus an x64 driver).
+fn fx_report_executable(name: String, image: X64ExecutableResult) -> Bool {
+    print("== {name}")
+    loop error in image.errors -> print("native {name}: {error}")
+    if image.errors.len() > 0 -> return false
+    path :: "{name}.elf"
+    files.write_bytes(path, image.bytes) ?? panic("cannot write {path}")
+    files.set_mode(path, 0o755) ?? panic("cannot make {path} executable")
+    print("{name}: native image {path} ({image.bytes.len()} bytes)")
     true
 }
 
 fn run() {
     abi_fixtures()
     clean := true
+    if !fx_reach_graph_checks() {
+        print("issue reach: graph closure checks failed")
+        clean = false
+    }
+    if !fx_mono_structural_checks() {
+        print("issue mono: structural inventory checks failed")
+        clean = false
+    }
+    if !fx_mono_rejection_checks() {
+        print("issue mono: rejection checks failed")
+        clean = false
+    }
+    if !fx_opaque_enum_rejection_checks() {
+        print("issue opaque-enum: rejection checks failed")
+        clean = false
+    }
     if !fx_report("hello", fx_hello()) -> clean = false
     if !fx_report("arithmetic", fx_arithmetic()) -> clean = false
     if !fx_report("control-flow", fx_control_flow()) -> clean = false
     if !fx_report("aggregates", fx_aggregates()) -> clean = false
+    // Tests/Fixtures/*.jet
+    if !fx_report("layout", fx_layout()) -> clean = false
+    if !fx_report("negate-min", fx_negate_min()) -> clean = false
+    if !fx_report("write-params", fx_write_params()) -> clean = false
+    if !fx_report("payload", fx_payload()) -> clean = false
+    if !fx_report("payload-move", fx_payload_move()) -> clean = false
+    if !fx_report("lists", fx_lists()) -> clean = false
+    if !fx_report("lists-oob", fx_lists_oob()) -> clean = false
+    if !fx_report("strings", fx_strings()) -> clean = false
+    if !fx_report("strings-predicates", fx_strings_predicates()) -> clean = false
+    if !fx_report("display", fx_display()) -> clean = false
+    if !fx_report("display-custom", fx_display_custom()) -> clean = false
+    if !fx_report("constants-boxed", fx_constants_boxed()) -> clean = false
+    if !fx_report("iter", fx_iter()) -> clean = false
+    if !fx_report("iter-zero-step", fx_iter_zero_step()) -> clean = false
+    if !fx_report("iter-large-step", fx_iter_large_step()) -> clean = false
+    if !fx_report("iter-big-step", fx_iter_big_step()) -> clean = false
+    if !fx_report("iter-big-step-overflow", fx_iter_big_step_overflow()) -> clean = false
+    if !fx_report("tuple", fx_tuple()) -> clean = false
+    if !fx_report("tuple-members", fx_tuple_members()) -> clean = false
+    if !fx_report("struct-literal", fx_struct_literal()) -> clean = false
+    if !fx_report("values-inline", fx_values_inline()) -> clean = false
+    if !fx_report("values-loop", fx_values_loop()) -> clean = false
+    if !fx_report("values-phi", fx_values_phi()) -> clean = false
+    if !fx_report("values-payload", fx_values_payload()) -> clean = false
+    if !fx_report("reach", fx_reach()) -> clean = false
+    if !fx_report("mono-three-types", fx_mono_three_types()) -> clean = false
+    if !fx_report("mono-nested-call", fx_mono_nested_call()) -> clean = false
+    if !fx_report("mono-generic-struct", fx_mono_generic_struct()) -> clean = false
+    if !fx_report("mono-owner-methods", fx_mono_owner_methods()) -> clean = false
+    if !fx_report("mono-recursive", fx_mono_recursive()) -> clean = false
+    if !fx_report("mono-identity-collisions", fx_mono_identity_collisions()) -> clean = false
+    if !fx_report("mono-render", fx_mono_render()) -> clean = false
+    if !fx_report("constants", fx_constants()) -> clean = false
+    if !fx_report("constants-tags", fx_constants_tags()) -> clean = false
+    if !fx_report("unsigned", fx_unsigned()) -> clean = false
+    if !fx_report("unsigned-add-overflow", fx_unsigned_add_overflow()) -> clean = false
+    if !fx_report("unsigned-sub-overflow", fx_unsigned_sub_overflow()) -> clean = false
+    if !fx_report("unsigned-mul-overflow", fx_unsigned_mul_overflow()) -> clean = false
+    if !fx_report("unsigned-div-zero", fx_unsigned_div_zero()) -> clean = false
+    if !fx_report("unsigned-rem-zero", fx_unsigned_rem_zero()) -> clean = false
+    if !fx_report("narrow", fx_narrow_program()) -> clean = false
+    if !fx_report("narrow-add-overflow", fx_narrow_add_overflow()) -> clean = false
+    if !fx_report("narrow-sub-overflow", fx_narrow_sub_overflow()) -> clean = false
+    if !fx_report("narrow-mul-overflow", fx_narrow_mul_overflow()) -> clean = false
+    if !fx_report("narrow-div-overflow", fx_narrow_div_overflow()) -> clean = false
+    if !fx_report("narrow-div-zero", fx_narrow_div_zero()) -> clean = false
+    if !fx_report("narrow-shift-range", fx_narrow_shift_range()) -> clean = false
+    if !fx_report("narrow-neg-overflow", fx_narrow_neg_overflow()) -> clean = false
+    if !fx_report("implicit-ok", fx_implicit_ok()) -> clean = false
+    if !fx_report("closures", fx_closures()) -> clean = false
+    if !fx_report_executable("bool-abi", fx_bool_abi_executable()) -> clean = false
+    alignments :: [Int]{16, 64, 256, 8192, 8388608}
+    loop align in alignments {
+        if !fx_report_lir("align{align}", fx_align_module(align)) -> clean = false
+    }
+    if !fx_report("statics", fx_statics()) -> clean = false
+    if !fx_report_lir("statics-addresses", fx_statics_addresses_module()) -> clean = false
+    if !fx_report("statics-list", fx_statics_list()) -> clean = false
+    if !fx_report("statics-strings", fx_statics_strings()) -> clean = false
+    if !fx_report("require-pass", fx_require_pass()) -> clean = false
+    if !fx_report("require-fail", fx_require_fail()) -> clean = false
+    if !fx_report("require-eq-int", fx_require_eq_int()) -> clean = false
+    if !fx_report("require-eq-string", fx_require_eq_string()) -> clean = false
+    if !fx_report("panic-message", fx_panic_message()) -> clean = false
+    if !fx_report("require-default", fx_require_default()) -> clean = false
+    if !fx_report("require-empty", fx_require_empty()) -> clean = false
+    if !fx_report("require-locals", fx_require_locals()) -> clean = false
+    if !fx_report("numeric", fx_numeric()) -> clean = false
+    if !fx_report("numeric-add-stop", fx_numeric_add_stop()) -> clean = false
+    if !fx_report("numeric-sub-stop", fx_numeric_sub_stop()) -> clean = false
+    if !fx_report("numeric-mul-stop", fx_numeric_mul_stop()) -> clean = false
+    if !fx_report("numeric-div-stop", fx_numeric_div_stop()) -> clean = false
+    if !fx_report("numeric-zero-stop", fx_numeric_zero_stop()) -> clean = false
+    if !fx_report("numeric-rem-zero-stop", fx_numeric_rem_zero_stop()) -> clean = false
+    if !fx_report("numeric-wrapping-zero-stop", fx_numeric_wrapping_zero_stop()) -> clean = false
+    if !fx_report("numeric-saturating-zero-stop", fx_numeric_saturating_zero_stop()) -> clean = false
+    if !fx_report("numeric-pow-stop", fx_numeric_pow_stop()) -> clean = false
+    if !fx_report("numeric-pow-negative-stop", fx_numeric_pow_negative_stop()) -> clean = false
+    if !fx_report("numeric-pow-range-stop", fx_numeric_pow_range_stop()) -> clean = false
+    if !fx_report("numeric-rotate-stop", fx_numeric_rotate_stop()) -> clean = false
+    if !fx_report("numeric-euclid-zero-stop", fx_numeric_euclid_zero_stop()) -> clean = false
+    if !fx_report("convert", fx_convert()) -> clean = false
+    if !fx_report("convert-prelude", fx_convert_prelude()) -> clean = false
+    if !fx_report("convert-big-positive", fx_convert_big_positive()) -> clean = false
+    if !fx_report("convert-big-negative", fx_convert_big_negative()) -> clean = false
+    if !fx_report("convert-big-float", fx_convert_big_float()) -> clean = false
+    if !fx_report("convert-big-i64-overflow", fx_convert_big_i64_overflow()) -> clean = false
+    if !fx_report("convert-big-char", fx_convert_big_char()) -> clean = false
+    if !fx_report("convert-char-surrogate", fx_convert_char_surrogate()) -> clean = false
+    if !fx_report("convert-char-large", fx_convert_char_large()) -> clean = false
+    if !fx_report("convert-char-negative", fx_convert_char_negative()) -> clean = false
+    if !fx_convert_rejection_checks() {
+        print("issue convert: rejection checks failed")
+        clean = false
+    }
     print(if clean -> "all fixtures lowered lint-clean and compiled" else -> "FIXTURE ISSUES")
 }

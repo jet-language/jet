@@ -1,0 +1,408 @@
+// Core records: MIR-defined Core types (the general `Err`, `IOError`,
+// `IOContext`) that runtime routes carry as a handle to the runtime's own
+// Rust value. The native value keeps its MIR layout, so constructors, matches
+// and field reads stay native; a route boundary converts it member by member
+// through the runtime's record exports (crates/jet-codegen/src/Prelude/Core/CAbi.rs):
+//
+//   jet_rt_record_tag_<R>(h) -> variant index          payload enum
+//   jet_rt_record_get_<R>_<field>(h) -> carrier        struct field
+//   jet_rt_record_get_<R>_<Variant>(h) -> carrier      Single payload
+//   jet_rt_record_new_<R>(fields...) -> h              struct, schema order
+//   jet_rt_record_new_<R>_<Variant>(payload) -> h      enum variant
+//
+// <R> is the runtime type of the type's handle row (RuntimeRoutes.jet). A
+// getter borrows `h` and returns an owned carrier; an Option getter returns
+// its tag and writes the payload through one out pointer. A constructor
+// borrows String handles and Option boxes of a String or Int (null is None;
+// the payload is the box's first word) and takes nested record handles. A
+// fieldless Core enum inside a record crosses as its variant index.
+use jet_foundation.[MIRProgram, MIRType, MIRTypeDef, mir_type_display_name]
+
+// The shape the runtime's exports were written for. A MIR definition of the
+// same name with any other shape is not a record, so a changed Core type is
+// reported at its route instead of being marshaled with stale offsets.
+struct LowerRecordSchema {
+    pub jet_name: String
+    // An enum's variant names in the runtime's order ("" for a struct).
+    pub variants: String
+    // A struct's stored field names in constructor order ("" for an enum).
+    pub fields: String
+}
+
+LOWER_RECORD_SCHEMAS :: prep { [LowerRecordSchema]{
+    LowerRecordSchema{jet_name: "Err", variants: "", fields: "message,code,cause"},
+    LowerRecordSchema{jet_name: "IOContext", variants: "", fields: "operation,resource,os_code,cause"},
+    LowerRecordSchema{jet_name: "IOError", variants: "InvalidInput,NotFound,PermissionDenied,TimedOut,Cancelled,Closed,Protocol,Other,ResourceLimit", fields: ""},
+    LowerRecordSchema{jet_name: "IOOperation", variants: "Read,Write,Flush,Connect,Accept,Close,Resolve,Codec", fields: ""},
+    LowerRecordSchema{jet_name: "ProcessResourceLimit", variants: "WallTime,CpuTime,Memory,OpenFiles,Output", fields: ""},
+} }
+
+fn lower_record_schema(p: MIRProgram, ty: MIRType) -> LowerRecordSchema? {
+    if ty.kind == .Apply(name, args) {
+        if args.len() > 0 -> return None
+        loop schema in LOWER_RECORD_SCHEMAS {
+            if schema.jet_name != name.name -> next
+            definition :: lower_type_def(p, ty) ?? return None
+            if !lower_record_shape_matches(definition, schema) -> return None
+            return Val(~schema)
+        }
+    }
+    None
+}
+
+fn lower_record_shape_matches(definition: MIRTypeDef, schema: LowerRecordSchema) -> Bool Never! {
+    names := [String]{}
+    if definition.kind == .Enum(variants, _) {
+        loop variant in variants -> &names.push(variant.name)
+        return schema.fields == "" && names.join(",") == schema.variants
+    }
+    if definition.kind == .Struct(fields, _) {
+        if schema.variants != "" -> return false
+        listed :: schema.fields.split(",").to_list()
+        stored :: lower_stored_fields(fields)
+        if stored.len() != listed.len() -> return false
+        loop name in listed {
+            found := false
+            loop field in stored { if field.name == name -> found = true }
+            if !found -> return false
+        }
+        return true
+    }
+    false
+}
+
+// The runtime type a record of `ty` crosses a route as: a payload enum or a
+// struct with a record schema and a runtime handle row. A fieldless record
+// enum is its variant index, never a handle.
+fn lower_record_handle(p: MIRProgram, ty: MIRType) -> String? {
+    if lower_repr(p, ty) == {
+        .Boxed(_) | .Inline(_) -> {}
+        else -> return None
+    }
+    schema :: lower_record_schema(p, ty) ?? return None
+    runtime :: lower_runtime_handle(schema.jet_name) ?? return None
+    Val(runtime.runtime)
+}
+
+// A fieldless record enum member: its index crosses unchanged.
+fn lower_record_is_index(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    lower_repr(p, ty) == .Discriminant && lower_record_schema(p, ty) != None
+}
+
+// Whether `ty` crosses inside a record as one carrier word: a String handle,
+// an exact Int, a Float, a Bool or a record enum index.
+fn lower_record_is_leaf(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    if ty.kind == .String || ty.kind == .Bool || ty.kind == .Float -> return true
+    if lower_is_exact_int(ty) -> return true
+    lower_record_is_index(p, ty)
+}
+
+// Whether the runtime's exports carry every member of record `ty`.
+fn lower_record_members_cross(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    definition :: lower_type_def(p, ty) ?? return false
+    members := [MIRType]{}
+    if definition.kind == .Struct(fields, _) {
+        loop field in lower_stored_fields(fields) -> &members.push(field.ty)
+    }
+    if definition.kind == .Enum(variants, _) {
+        loop variant in variants {
+            if variant.payload == {
+                .Unit -> {}
+                .Single(inner) -> &members.push(inner)
+                .Named(fields) -> {
+                    loop field in lower_stored_fields(fields) -> &members.push(field.ty)
+                }
+            }
+        }
+    }
+    loop member in members {
+        if lower_record_is_leaf(p, member) || lower_record_handle(p, member) != None -> next
+        if member.kind == .Option(inner) {
+            if inner.kind == .String || lower_is_exact_int(inner) || lower_record_handle(p, inner) != None -> next
+        }
+        return false
+    }
+    true
+}
+
+// ---------------------------------------------------------------------------
+// Route boundary.
+
+// A runtime handle of the record native `value` of `ty` for a route argument,
+// dropped by the caller after the call.
+fn lower_record_to_runtime(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, runtime: String, value: LIRValueID) -> LIRValueID Never! {
+    handle :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_{runtime}"}, None)
+    lower_call_helper(&m, &f, "record.out", ty, [LIRValueID]{value}, Val(handle))
+    handle
+}
+
+// The native value of `ty` for the owned runtime record `handle` a route
+// returned, defining `dst` (None when the result is unused); drops `handle`.
+fn lower_record_from_runtime(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, handle: LIRValueID, dst: LIRValueID?) Never! {
+    if dst == .Val(kept) {
+        if lower_is_inline(p, ty) {
+            lower_storage_into(p, &f, kept, ty)
+            lower_call_helper(&m, &f, "record.in", ty, [LIRValueID]{handle, kept}, None)
+        } else {
+            slot :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 8, align: 8})
+            lower_call_helper(&m, &f, "record.in", ty, [LIRValueID]{handle, slot}, None)
+            lower_emit(&f, LIRInst.Load{dst: kept, base: slot, offset: 0})
+        }
+    }
+    lower_emit(&f, LIRInst.Drop{value: handle})
+}
+
+// The text of the borrowed native record `operand` of `ty` from its runtime
+// type's own rendering, or None when `ty` is not a record the mode renders.
+fn lower_record_render(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, operand: LIRValueID, mode: LowerRenderMode) -> LowerText? {
+    runtime :: lower_record_handle(p, ty) ?? return None
+    schema :: lower_record_schema(p, ty) ?? return None
+    row :: lower_runtime_handle(schema.jet_name) ?? return None
+    rendered :: if mode == {
+        .Display -> row.display
+        .Show -> row.show
+        .Debug -> row.debug
+    }
+    if !rendered -> return None
+    handle :: lower_record_to_runtime(p, &m, &f, ty, runtime, operand)
+    text :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_handle_{lower_render_helper(mode)}_{runtime}", [LIRValueID]{handle}, Val(text))
+    lower_emit(&f, LIRInst.Drop{value: handle})
+    Val(LowerText{value: text, owned: true})
+}
+
+// Stores the native value of the owned runtime record whose handle a route
+// wrote to `slot` at base + offset, then drops the handle.
+fn lower_record_store_from_slot(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, runtime: String, slot: LIRValueID, base: LIRValueID, offset: Int) Never! {
+    handle :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_{runtime}"}, None)
+    lower_emit(&f, LIRInst.Load{dst: handle, base: slot, offset: 0})
+    target :: lower_address(&f, base, offset)
+    lower_call_helper(&m, &f, "record.in", ty, [LIRValueID]{handle, target}, None)
+    lower_emit(&f, LIRInst.Drop{value: handle})
+}
+
+// ---------------------------------------------------------------------------
+// Generated helpers.
+
+// "record.in" (runtime handle, target): writes the native value of the
+// helper's type for the borrowed handle at target (an inline record's bytes,
+// a payload enum's box pointer).
+fn lower_helper_record_in(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
+    handle :: ~f.open_params[0]
+    target :: ~f.open_params[1]
+    runtime :: lower_record_handle(p, glue.ty) ?? panic("record.in is requested for records")
+    definition :: lower_type_def(p, glue.ty) ?? panic("a record has a definition")
+    if !lower_record_members_cross(p, glue.ty) {
+        lower_fail(&m, &f, "record {mir_type_display_name(glue.ty)} has a member no runtime export carries")
+        lower_seal(&f, LIRTerminator.Unreachable)
+        return lir_builder_finish(f.builder)
+    }
+    if definition.kind == .Struct(fields, _) {
+        loop field in lower_stored_fields(fields) {
+            info :: lower_struct_field(p, glue.ty, field.id) ?? panic("a stored field has storage")
+            lower_record_load_member(p, &m, &f, handle, "jet_rt_record_get_{runtime}_{field.name}", field.ty, target, info.offset, info.boxed)
+        }
+        lower_seal(&f, LIRTerminator.Return{value: None})
+        return lir_builder_finish(f.builder)
+    }
+    variants :: if definition.kind == .Enum(rows, _) -> rows else -> panic("a record is a struct or an enum")
+    box :: lower_pointer(&f)
+    lower_alloc(&m, &f, box, lower_enum_box_size(p, definition))
+    lower_emit(&f, LIRInst.Store{base: target, offset: 0, value: box})
+    variant_index :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_record_tag_{runtime}", [LIRValueID]{handle}, Val(variant_index))
+    lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: variant_index})
+    done :: lower_new_block(&f)
+    loop (index, variant) in variants {
+        if variant.payload == .Unit -> next
+        expected :: lower_const(&f, lower_discriminant(index))
+        selected :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: selected, condition: LIRCondition.Eq, left: variant_index, right: expected})
+        body :: lower_new_block(&f)
+        next_block :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(next_block, [LIRValueID]{})})
+        lower_start(&f, body, [LIRValueID]{})
+        if variant.payload == .Single(inner) {
+            info :: lower_enum_payload_info(p, definition, variant, 0) ?? panic("a Single payload has storage")
+            lower_record_load_member(p, &m, &f, handle, "jet_rt_record_get_{runtime}_{variant.name}", inner, box, info.offset, info.boxed)
+        }
+        if variant.payload == .Named(fields) {
+            loop (position, field) in fields {
+                if field.computed -> next
+                info :: lower_enum_payload_info(p, definition, variant, position) ?? panic("a stored payload field has storage")
+                lower_record_load_member(p, &m, &f, handle, "jet_rt_record_get_{runtime}_{variant.name}_{field.name}", field.ty, box, info.offset, info.boxed)
+            }
+        }
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, next_block, [LIRValueID]{})
+    }
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+// One member through its getter into base + offset; a recursive edge gets
+// its wrapper box first.
+fn lower_record_load_member(p: MIRProgram, m: &LowerModule, f: &LowerFunction, handle: LIRValueID, getter: String, ty: MIRType, base: LIRValueID, offset: Int, boxed: Bool) Never! {
+    if !boxed -> return lower_record_load_value(p, &m, &f, handle, getter, ty, base, offset)
+    wrapper :: lower_pointer(&f)
+    lower_alloc(&m, &f, wrapper, lower_option_box_size(p, ty))
+    lower_record_load_value(p, &m, &f, handle, getter, ty, wrapper, 0)
+    lower_emit(&f, LIRInst.Store{base: base, offset: offset, value: wrapper})
+}
+
+fn lower_record_load_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, handle: LIRValueID, getter: String, ty: MIRType, base: LIRValueID, offset: Int) Never! {
+    if ty.kind == .Option(inner) {
+        slot :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 8, align: 8})
+        zero :: lower_const(&f, 0)
+        lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: zero})
+        presence :: lower_word(&f)
+        lower_call_runtime(&m, &f, getter, [LIRValueID]{handle, slot}, Val(presence))
+        present :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: present, condition: LIRCondition.Ne, left: presence, right: zero})
+        some_block :: lower_new_block(&f)
+        none_block :: lower_new_block(&f)
+        merge :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: present, then_target: lower_target(some_block, [LIRValueID]{}), else_target: lower_target(none_block, [LIRValueID]{})})
+        lower_start(&f, some_block, [LIRValueID]{})
+        box :: lower_pointer(&f)
+        lower_alloc(&m, &f, box, lower_option_box_size(p, inner))
+        if lower_record_handle(p, inner) == .Val(runtime) {
+            lower_record_store_from_slot(p, &m, &f, inner, runtime, slot, box, 0)
+        } else {
+            layout :: lower_repr_layout(lower_repr(p, inner)) ?? panic("an Option record member is a String or an Int")
+            payload :: lower_new_value(&f, layout, LIRDrop.Trivial, inner.identity)
+            lower_emit(&f, LIRInst.Load{dst: payload, base: slot, offset: 0})
+            lower_write_at(p, &f, box, 0, payload, inner)
+        }
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{box})})
+        lower_start(&f, none_block, [LIRValueID]{})
+        null :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{null})})
+        joined :: lower_pointer(&f)
+        lower_start(&f, merge, [LIRValueID]{joined})
+        lower_emit(&f, LIRInst.Store{base: base, offset: offset, value: joined})
+        return
+    }
+    if lower_record_handle(p, ty) == .Val(runtime) {
+        nested :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_{runtime}"}, None)
+        lower_call_runtime(&m, &f, getter, [LIRValueID]{handle}, Val(nested))
+        target :: lower_address(&f, base, offset)
+        lower_call_helper(&m, &f, "record.in", ty, [LIRValueID]{nested, target}, None)
+        lower_emit(&f, LIRInst.Drop{value: nested})
+        return
+    }
+    layout :: lower_repr_layout(lower_repr(p, ty)) ?? panic("a record leaf has a layout")
+    value :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
+    lower_call_runtime(&m, &f, getter, [LIRValueID]{handle}, Val(value))
+    lower_write_at(p, &f, base, offset, value, ty)
+}
+
+// "record.out" (native value) -> runtime handle: the runtime's own value for
+// the borrowed native record.
+fn lower_helper_record_out(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    value :: ~f.open_params[0]
+    runtime :: lower_record_handle(p, glue.ty) ?? panic("record.out is requested for records")
+    schema :: lower_record_schema(p, glue.ty) ?? panic("a record has a schema")
+    definition :: lower_type_def(p, glue.ty) ?? panic("a record has a definition")
+    if !lower_record_members_cross(p, glue.ty) {
+        lower_fail(&m, &f, "record {mir_type_display_name(glue.ty)} has a member no runtime export carries")
+        lower_seal(&f, LIRTerminator.Unreachable)
+        return lir_builder_finish(f.builder)
+    }
+    if definition.kind == .Struct(fields, _) {
+        args := [LIRValueID]{}
+        loop name in schema.fields.split(",").to_list() {
+            loop field in lower_stored_fields(fields) {
+                if field.name != name -> next
+                info :: lower_struct_field(p, glue.ty, field.id) ?? panic("a stored field has storage")
+                &args.push(lower_record_member_arg(p, &m, &f, field.ty, value, info.offset, info.boxed))
+            }
+        }
+        made :: lower_pointer(&f)
+        lower_call_runtime(&m, &f, "jet_rt_record_new_{runtime}", args, Val(made))
+        lower_seal(&f, LIRTerminator.Return{value: Val(made)})
+        return lir_builder_finish(f.builder)
+    }
+    variants :: if definition.kind == .Enum(rows, _) -> rows else -> panic("a record is a struct or an enum")
+    variant_index :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: variant_index, base: value, offset: 0})
+    done :: lower_new_block(&f)
+    loop (index, variant) in variants {
+        expected :: lower_const(&f, lower_discriminant(index))
+        selected :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: selected, condition: LIRCondition.Eq, left: variant_index, right: expected})
+        body :: lower_new_block(&f)
+        next_block :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(next_block, [LIRValueID]{})})
+        lower_start(&f, body, [LIRValueID]{})
+        args := [LIRValueID]{}
+        if variant.payload == .Single(inner) {
+            info :: lower_enum_payload_info(p, definition, variant, 0) ?? panic("a Single payload has storage")
+            &args.push(lower_record_member_arg(p, &m, &f, inner, value, info.offset, info.boxed))
+        }
+        if variant.payload == .Named(fields) {
+            loop (position, field) in fields {
+                if field.computed -> next
+                info :: lower_enum_payload_info(p, definition, variant, position) ?? panic("a stored payload field has storage")
+                &args.push(lower_record_member_arg(p, &m, &f, field.ty, value, info.offset, info.boxed))
+            }
+        }
+        made :: lower_pointer(&f)
+        lower_call_runtime(&m, &f, "jet_rt_record_new_{runtime}_{variant.name}", args, Val(made))
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{made})})
+        lower_start(&f, next_block, [LIRValueID]{})
+    }
+    lower_seal(&f, LIRTerminator.Unreachable)
+    result :: lower_pointer(&f)
+    lower_start(&f, done, [LIRValueID]{result})
+    lower_seal(&f, LIRTerminator.Return{value: Val(result)})
+    lir_builder_finish(f.builder)
+}
+
+// The constructor argument for the member of `ty` at base + offset: a leaf
+// word, a borrowed Option box, or a nested record's new handle (taken by the
+// constructor; null for an absent Option).
+fn lower_record_member_arg(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, base: LIRValueID, offset: Int, boxed: Bool) -> LIRValueID Never! {
+    holder := base
+    at := offset
+    if boxed {
+        wrapper :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Load{dst: wrapper, base: base, offset: offset})
+        holder = wrapper
+        at = 0
+    }
+    if ty.kind == .Option(inner) {
+        box :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Load{dst: box, base: holder, offset: at})
+        runtime :: lower_record_handle(p, inner) ?? return box
+        null :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+        absent :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: absent, condition: LIRCondition.Eq, left: box, right: null})
+        present :: lower_new_block(&f)
+        join :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(join, [LIRValueID]{null}), else_target: lower_target(present, [LIRValueID]{})})
+        lower_start(&f, present, [LIRValueID]{})
+        inner_value :: lower_read_at(p, &f, box, 0, inner) ?? panic("a record has storage")
+        converted :: lower_pointer(&f)
+        lower_call_helper(&m, &f, "record.out", inner, [LIRValueID]{inner_value}, Val(converted))
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{converted})})
+        joined :: lower_pointer(&f)
+        lower_start(&f, join, [LIRValueID]{joined})
+        return joined
+    }
+    member :: lower_read_at(p, &f, holder, at, ty) ?? panic("a record member has storage")
+    if lower_record_handle(p, ty) == .Val(_) {
+        converted :: lower_pointer(&f)
+        lower_call_helper(&m, &f, "record.out", ty, [LIRValueID]{member}, Val(converted))
+        return converted
+    }
+    member
+}
