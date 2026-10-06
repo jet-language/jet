@@ -2131,10 +2131,10 @@ fn sema_ownership_argument_name(arg: CallArg) -> String Never! {
 // receiver convention.  It reserves the receiver only for the duration of a
 // call and therefore cannot leak a Rust-style borrow into later statements.
 pub fn sema_ownership_check_call_receiver(state: &SemaOwnershipState, receiver: Expr, convention: AccessConvention, scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    sema_ownership_check_call_receiver_as(&state, receiver, convention, true, scopes, span, &diagnostics)
+    sema_ownership_check_call_receiver_as(&state, receiver, convention, true, "", scopes, span, &diagnostics)
 }
 
-fn sema_ownership_check_call_receiver_as(state: &SemaOwnershipState, receiver: Expr, convention: AccessConvention, capability: Bool, scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_ownership_check_call_receiver_as(state: &SemaOwnershipState, receiver: Expr, convention: AccessConvention, capability: Bool, method: String, scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     sema_receiver_mark_note(&state, receiver, convention)
     places :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
     if places.len() == 0 {
@@ -2145,10 +2145,42 @@ fn sema_ownership_check_call_receiver_as(state: &SemaOwnershipState, receiver: E
         return true
     }
     if convention == {
-        .Write -> if capability -> sema_ownership_check_write(&state, receiver, "", scopes, &diagnostics) else -> sema_ownership_check_write_change(&state, receiver, "", scopes, &diagnostics)
+        .Write -> if {
+            capability && method != "" -> sema_ownership_check_receiver_write(&state, receiver, method, scopes, &diagnostics)
+            capability -> sema_ownership_check_write(&state, receiver, "", scopes, &diagnostics)
+            else -> sema_ownership_check_write_change(&state, receiver, "", scopes, &diagnostics)
+        }
         .Move -> sema_ownership_mark_move(&state, receiver, scopes, "a consuming method call", &diagnostics)
         else -> sema_ownership_check_use(&state, receiver, scopes, &diagnostics)
     }
+}
+
+// Rust `check_mutating_method_receiver`: the receiver's change checks use the
+// method's own wording, and an immutable root reports E0202 naming the
+// method. A parameter's write access comes from `&` on the parameter and at
+// the call site, so its fix never re-declares it with `:=`.
+fn sema_ownership_check_receiver_write(state: &SemaOwnershipState, receiver: Expr, method: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    action :: "be changed by `.{method}()`"
+    binding :: sema_ownership_binding_for_expr(&state, receiver, scopes)
+    immutable :: if binding == {
+        .Val(info) -> !info.mutable && info.access != AccessConvention.Write && !sema_ownership_binding_is_edit_shared_guard(info)
+        .None -> false
+    }
+    if !immutable || sema_ownership_view_exists_for_expr(&state, receiver, scopes) || sema_ownership_writes_read_shared_guard(receiver, scopes) {
+        return sema_ownership_check_write(&state, receiver, action, scopes, &diagnostics)
+    }
+    if !sema_ownership_check_write_change(&state, receiver, action, scopes, &diagnostics) -> return false
+    info :: binding ?? return false
+    root :: sema_receiver_mark_place_root(receiver) ?? info.symbol.name
+    what :: "cannot write to `{root}` — it does not have the write-access marker `&`; required before calling `.{method}()`"
+    why :: "this method edits the value it's called on; the write-access marker `&` is required"
+    diagnostic :: if {
+        root == "self" -> sema_error("E0202", expr_span(receiver), "`.{method}()` edits `self`, but this method has read access only", why, "declare the enclosing method with the write-access marker `&`: `&self`")
+        info.symbol.kind == SymbolKind.Parameter -> sema_error("E0202", expr_span(receiver), what, why, "change the parameter to `{root}: &{type_name(info.symbol.ty ?? Type.Named{name: "Unit"})}` and pass the argument with `&` at the call site")
+        else -> sema_error("E0202", expr_span(receiver), what, why, "declare `{root} := ...`")
+    }
+    &diagnostics.push(diagnostic)
+    false
 }
 
 // D-CAP-RECEIVER1=D: mark the value, not the call. The method-call check lifts
@@ -2281,7 +2313,7 @@ pub fn sema_ownership_check_handle_method_call(state: &SemaOwnershipState, calle
 }
 
 fn sema_ownership_check_method_call_as(state: &SemaOwnershipState, callee: String, receiver: Expr, receiver_convention: AccessConvention, capability: Bool, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
-    accepted :: sema_ownership_check_call_receiver_as(&state, receiver, receiver_convention, capability, scopes, span, &diagnostics)
+    accepted :: sema_ownership_check_call_receiver_as(&state, receiver, receiver_convention, capability, sema_window_plain_name(callee), scopes, span, &diagnostics)
     receiver_places :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
     accesses :: loop receiver_place in receiver_places -> SemaOwnershipCallAccess{place: receiver_place, access: receiver_convention, span: span}
     sema_ownership_check_call_arguments_with_accesses(&state, callee, params, &args, scopes, &diagnostics, ^accesses, accepted, true)
