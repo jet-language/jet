@@ -1294,7 +1294,8 @@ fn sema_derive_expand_body(expansion: &SemaDeriveExpansion, body: [DeriveBodyIte
                 } else {
                     // Rust `exec_block`: a statement between template items
                     // runs against the template scope; it generates nothing.
-                    sema_derive_exec_stmt(&expansion, sema_derive_expand_stmt(&expansion, stmt))
+                    expanded :: sema_derive_expand_stmt(&expansion, stmt)
+                    sema_derive_exec_stmt(&expansion, expanded)
                     if expansion.failure != None -> return
                 }
             }
@@ -1363,7 +1364,8 @@ fn sema_derive_exec_stmt(expansion: &SemaDeriveExpansion, stmt: Stmt) Never! {
         .Expr(value) -> sema_derive_exec_expr(&expansion, value)
         .Val(binding) -> {
             value :: sema_derive_static_value(expansion, binding.init) ?? {
-                sema_derive_fail(&expansion, sema_derive_binding_failure(expansion, binding.name_span, binding.init))
+                failure :: sema_derive_binding_failure(expansion, binding.name_span, binding.init)
+                sema_derive_fail(&expansion, failure)
                 return
             }
             &expansion.scope.push(NamedCtValue{name: binding.name, value: value})
