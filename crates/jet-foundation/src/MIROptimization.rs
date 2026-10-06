@@ -1607,7 +1607,14 @@ fn verify_ownership(
     value: MirValueId,
 ) -> Result<(), MirLegalityError> {
     let valid = match ownership.mode {
-        MirOwnershipMode::Copy => ownership.drop == crate::MIR::MirDropKind::None && !ownership.moved,
+        // Semantic Copy is independent of the physical carrier: an exact `Int`
+        // is Copy+Value (`MirOwnership::copy_value`), whose drop obligation and
+        // consuming moves are tracked like any owned carrier.
+        MirOwnershipMode::Copy => match ownership.drop {
+            crate::MIR::MirDropKind::None => !ownership.moved,
+            crate::MIR::MirDropKind::Value => true,
+            _ => false,
+        },
         MirOwnershipMode::Owned => matches!(ownership.drop, crate::MIR::MirDropKind::Value | crate::MIR::MirDropKind::ForeignHandle),
         MirOwnershipMode::Shared => ownership.drop == crate::MIR::MirDropKind::Shared,
         MirOwnershipMode::ReadBorrow => matches!(ownership.drop, crate::MIR::MirDropKind::None | crate::MIR::MirDropKind::View),
