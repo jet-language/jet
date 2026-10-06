@@ -447,7 +447,9 @@ routes and iterator/task adapters together for full-pack proofs; its default mod
 retains an emitted seed's paired route set. Generated Rust programs carry only
 `CAbi.rs`: the routes name optional runtime modules a program gets only when it
 uses them, so `CAbiIter.rs`, `CAbiTask.rs` and `CAbiRoutes.rs` exist only in the
-all-parts native runtime crate.
+all-parts native runtime crate. Native-only owner releases (`jet_rt_int_drop`)
+live in `CAbiIter.rs` for the same reason: the shared generated prefix gains no
+unsafe for the native backend.
 
 Task and channel adapters share the iterator's typed slot descriptors rather
 than introducing another erased value ABI. A native SendFn body writes its

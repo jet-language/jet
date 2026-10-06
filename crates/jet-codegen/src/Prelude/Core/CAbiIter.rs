@@ -251,6 +251,16 @@ pub(crate) mod jet_c_abi_iter {
             Err(_) => ptr::null_mut(),
         }
     }
+    /// Consumes one exact-Int owner; an inline carrier needs no allocation or
+    /// release. Native-runtime only, like every adapter in this module: generated
+    /// Rust programs never release exact Ints through a raw word.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_int_drop(value: i64) {
+        guard(|| {
+            // SAFETY: the checked MIR drop edge transfers the caller's owner.
+            drop(unsafe { jet_foundation::Numeric::JetInt::from_raw_owned(value) });
+        });
+    }
     #[no_mangle]
     pub unsafe extern "C" fn jet_rt_native_iter_from_list(source: *mut Header, meta: *const NativeMeta, by_value: u8) -> *mut NativeIter {
         guard(|| handle(JetIter(Box::new(list_from(source, Meta::copy(meta), by_value)))))
