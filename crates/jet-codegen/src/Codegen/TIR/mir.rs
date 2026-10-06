@@ -3738,6 +3738,7 @@ pub fn lower_checked_mir_program_for_with_debug(
             format!("canonical MIR optimization failed: {error}"),
         )
     })?;
+    jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::FunctionsLowered, mir.functions.len());
     // Debug hook for the Jet backend harness (Compiler/JetBackend/Tests):
     // JET_DUMP_MIR=<path> writes the canonical program's Debug form. Inert
     // when unset.

@@ -190,6 +190,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
         .iter()
         .enumerate()
         .map(|(module_idx, m)| {
+            count_program_copy(m.items.len());
             ModuleState {
                 module_path: m.display.clone(),
                 source: m.source.clone(),
@@ -438,6 +439,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
     for idx in 0..comptime_states.len() {
         let module = &bundle.modules[idx];
         comptime_states[idx].items = module.items.clone();
+        count_program_copy(module.items.len());
         comptime_states[idx].core_imports = ct_core_imports[idx].clone();
         comptime_states[idx].core_item_imports = ct_core_item_imports[idx].clone();
         for import in &module.imports {
@@ -2272,6 +2274,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
     let final_fact_registry = std::sync::Arc::new(final_fact_registry);
     for (state, module) in states.iter_mut().zip(&bundle.modules) {
         state.items.clone_from(&module.items);
+        count_program_copy(module.items.len());
         state.fact_registry = std::sync::Arc::clone(&final_fact_registry);
     }
     let diverging_functions = super::Validation::collect_diverging_functions(&states);
@@ -2447,4 +2450,11 @@ fn comptime_module_order(
         }
     }
     order
+}
+
+/// #4601: one copy of a whole module item list.
+fn count_program_copy(elements: usize) {
+    use jet_foundation::WorkCounters::{add, Work};
+    add(Work::ProgramCopies, 1);
+    add(Work::ProgramCopyElements, elements);
 }
