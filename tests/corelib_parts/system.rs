@@ -54,6 +54,38 @@ fn run() {
 }
 
 #[test]
+fn core_tdigest_source_preserves_step_quantiles_aliasing_and_display() {
+    assert!(common::have_rustc(), "source digest proof requires rustc");
+    let dir = std::env::temp_dir().join(format!("jet_corelib_tdigest_source_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir, "tdigest_source", r#"
+use core.data.sketch.tdigest as td
+
+fn run() {
+    digest :: td.new()
+    print(digest)
+    print(digest.quantile(0.5))
+    alias :: ~digest
+    alias.add(2.0)
+    digest.add(1.0)
+    print(digest.quantile(0.5))
+    print(alias.quantile(0.51))
+    print(digest.quantile(-1.0))
+    print(digest.quantile(2.0))
+    repeated :: td.new()
+    loop _ in 0..<500 -> repeated.add(1.0)
+    print(repeated.quantile(0.5))
+}
+"#, &[], None,
+    );
+    assert_eq!(code, 0, "source digest failed: {stderr}");
+    assert_eq!(stdout, "TDigest\n0.0\n1.0\n2.0\n1.0\n2.0\n1.0\n");
+    assert_eq!(stderr, "");
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn text_unicode_audit_surface_runs() {
     let have_rustc = common::have_rustc();
     if !have_rustc {

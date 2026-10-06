@@ -477,7 +477,7 @@ fn jet_codegen_handle_sketch_route(sketch: String, method: String) -> JetCodegen
         (sketch == "HyperLogLog" && method == "count") || (sketch == "ReservoirSampler" && method == "sample") -> {
             1
         }
-        (sketch == "TDigest" && (method == "add" || method == "quantile")) || (sketch == "ReservoirSampler" && method == "add") -> {
+        (sketch == "ReservoirSampler" && method == "add") -> {
             2
         }
         else -> {
@@ -486,7 +486,7 @@ fn jet_codegen_handle_sketch_route(sketch: String, method: String) -> JetCodegen
     }
     mask := if {
         arity == 1 -> [Bool]{true}
-        sketch == "TDigest" || sketch == "ReservoirSampler" -> [Bool]{true, false}
+        sketch == "ReservoirSampler" -> [Bool]{true, false}
         else -> [Bool]{true, true}
     }
     Val(jet_codegen_handle_h("{sketch}.{method}", "Jet{sketch}::{method}", mask, None))

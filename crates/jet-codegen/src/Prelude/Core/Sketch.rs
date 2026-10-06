@@ -58,69 +58,6 @@ impl JetHyperLogLog {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct JetTDigest(std::sync::Arc<std::sync::Mutex<Vec<(f64, f64)>>>);
-
-impl JetTDigest {
-    const DELTA: f64 = 100.0;
-
-    pub(crate) fn new() -> Self {
-        Self::from_centroids(Vec::new())
-    }
-
-    pub(crate) fn from_centroids(centroids: Vec<(f64, f64)>) -> Self {
-        Self(std::sync::Arc::new(std::sync::Mutex::new(centroids)))
-    }
-
-    pub(crate) fn centroids(&self) -> Vec<(f64, f64)> {
-        self.0.lock().unwrap().clone()
-    }
-
-    pub(crate) fn add(&self, value: f64) {
-        let mut centroids = self.0.lock().unwrap();
-        let index = centroids.partition_point(|&(mean, _)| mean < value);
-        centroids.insert(index, (value, 1.0));
-        let total: f64 = centroids.iter().map(|(_, weight)| weight).sum();
-        let mut merged: Vec<(f64, f64)> = Vec::with_capacity(centroids.len());
-        let mut cumulative = 0.0;
-        for &(mean, weight) in centroids.iter() {
-            if merged.is_empty() {
-                merged.push((mean, weight));
-                cumulative += weight;
-                continue;
-            }
-            let last = merged.last_mut().unwrap();
-            let quantile = cumulative / total;
-            let limit = 4.0 * total * quantile * (1.0 - quantile) / Self::DELTA;
-            if last.1 + weight <= limit.max(1.0) {
-                let new_weight = last.1 + weight;
-                last.0 = (last.0 * last.1 + mean * weight) / new_weight;
-                last.1 = new_weight;
-            } else {
-                merged.push((mean, weight));
-                cumulative += weight;
-            }
-        }
-        *centroids = merged;
-    }
-
-    pub(crate) fn quantile(&self, quantile: f64) -> f64 {
-        let centroids = self.0.lock().unwrap();
-        if centroids.is_empty() {
-            return 0.0;
-        }
-        let total: f64 = centroids.iter().map(|(_, weight)| weight).sum();
-        let target = quantile * total;
-        let mut cumulative = 0.0;
-        for &(mean, weight) in centroids.iter() {
-            cumulative += weight;
-            if cumulative >= target {
-                return mean;
-            }
-        }
-        centroids.last().unwrap().0
-    }
-}
 
 pub(crate) const JET_CMS_COLS: usize = 256;
 

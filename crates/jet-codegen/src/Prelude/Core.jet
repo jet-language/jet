@@ -68,7 +68,7 @@ module core.data.sketch.hll exports { new, HLL } types { HLL:plain } depends_on 
 source_module core.data.sketch.hll path Core/data/sketch/hll.jet alias core_core_data_sketch_hll owns { new }
 module core.data.sketch.reservoir exports { new, Reservoir } types { Reservoir:plain } depends_on [core.data]
 source_module core.data.sketch.reservoir path Core/data/sketch/reservoir.jet alias core_core_data_sketch_reservoir owns { new }
-module core.data.sketch.tdigest exports { new, Centroid, Packed, TDigest } types { Centroid:plain, Packed:plain, TDigest:plain } depends_on [core.data, core.math]
+module core.data.sketch.tdigest exports { new, Centroid, TDigest } types { Centroid:plain, TDigest:plain } depends_on [core.data]
 source_module core.data.sketch.tdigest path Core/data/sketch/tdigest.jet alias core_core_data_sketch_tdigest owns { new }
 module core.db exports { decode, migrate, open, open_memory, pool, policy, policy_audit, row_bool, row_float, row_int, row_text, row_value, transaction, DBConnection, DBScope, DBPool, DBLease, DBPoolReceipt, DBError, DBValue, SQL } types { DBConnection:plain, DBScope:plain, DBPool:plain, DBLease:plain, DBPoolReceipt:plain, DBError:plain, DBValue:plain(Null|Int|Float|Text|Bool|Blob), SQL:plain } depends_on [core.encoding]
 source_module core.db path Core/db/db.jet alias core_core_db owns { decode, migrate, open, open_memory, policy, policy_audit, pool, row_bool, row_float, row_int, row_text, row_value, transaction }
@@ -1714,7 +1714,6 @@ dispatcher_row plain core.web auth_show | CoreCallRecord::new("core.web", "auth_
 dispatcher_row plain core.web.devserver for_app | CoreCallRecord::new( "core.web.devserver", "for_app", "jet_devserver_for_app", true, &[true], )
 dispatcher_row plain core.web.devserver app | CoreCallRecord::new("core.web.devserver", "app", "jet_devserver_app", true, &[])
 dispatcher_row plain core.data.sketch.hll new | CoreCallRecord::new( "core.data.sketch.hll", "new", "JetHyperLogLog::new", false, &[], ) .with_pure_route(CoreCallPureRoute::SketchHll)
-dispatcher_row plain core.data.sketch.tdigest new | CoreCallRecord::new( "core.data.sketch.tdigest", "new", "JetTDigest::new", false, &[], ) .with_pure_route(CoreCallPureRoute::SketchTDigest)
 dispatcher_row plain core.data.sketch.cms new | CoreCallRecord::new( "core.data.sketch.cms", "new", "JetCountMinSketch::new", false, &[], ) .with_pure_route(CoreCallPureRoute::SketchCms)
 dispatcher_row plain core.data.sketch.reservoir new | CoreCallRecord::new( "core.data.sketch.reservoir", "new", "JetReservoirSampler::new", false, &[false], ) .with_pure_route(CoreCallPureRoute::SketchReservoir)
 dispatcher_row plain core.web.browser profile | CoreCallRecord::new( "core.web.browser", "profile", "jet_browser_profile", false, &[true], )
@@ -1978,9 +1977,6 @@ dispatcher_row receiver - sqrt | CoreCallRecord::receiver(&["Measurement"], "sqr
 dispatcher_row receiver - new | CoreCallRecord::receiver(&["HyperLogLog"], "new", &[])
 dispatcher_row receiver - add | CoreCallRecord::receiver(&["HyperLogLog"], "add", &[true])
 dispatcher_row receiver - count | CoreCallRecord::receiver(&["HyperLogLog"], "count", &[])
-dispatcher_row receiver - new | CoreCallRecord::receiver(&["TDigest"], "new", &[])
-dispatcher_row receiver - add | CoreCallRecord::receiver(&["TDigest"], "add", &[false])
-dispatcher_row receiver - quantile | CoreCallRecord::receiver(&["TDigest"], "quantile", &[false])
 dispatcher_row receiver - new | CoreCallRecord::receiver(&["CountMinSketch"], "new", &[])
 dispatcher_row receiver - add | CoreCallRecord::receiver(&["CountMinSketch"], "add", &[true])
 dispatcher_row receiver - count | CoreCallRecord::receiver(&["CountMinSketch"], "count", &[true])
@@ -1991,7 +1987,7 @@ dispatcher_row receiver - new | CoreCallRecord::receiver(&["Solver"], "new", &[f
 dispatcher_row receiver - require | CoreCallRecord::receiver(&["Solver"], "require", &[false])
 dispatcher_row receiver - failure_count | CoreCallRecord::receiver(&["Solver"], "failure_count", &[])
 dispatcher_row receiver - status | CoreCallRecord::receiver(&["Solver"], "status", &[])
-dispatcher_row receiver - TDigest | CoreCallRecord::receiver( &[ "HyperLogLog", "TDigest", "CountMinSketch", "ReservoirSampler", "Solver", "ServiceUpgradeReceipt", "DataError", VAULT_KEY_REF_TYPE, ], "__display", &[], )
+dispatcher_row receiver - __display | CoreCallRecord::receiver( &[ "HyperLogLog", "CountMinSketch", "ReservoirSampler", "Solver", "ServiceUpgradeReceipt", "DataError", VAULT_KEY_REF_TYPE, ], "__display", &[], )
 dispatcher_row plain core.http.server bind | CoreCallRecord::new( "core.http.server", "bind", "jet_http_server_bind", false, &[true, false, false, false], ) .with_max_arity(4) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot()
 dispatcher_row plain core.data inner_join | CoreCallRecord::new( "core.data", "inner_join", "jet_data_inner_join_checked_default", true, &[true, true, false, false], ) .without_direct_aot()
 
@@ -2117,7 +2113,6 @@ ambient_route core.files lock
 ambient_route core.files read_link
 ambient_route core.files temp_dir
 ambient_route core.files temp_file
-ambient_route core.term confirm
 ambient_route core.term choose
 ambient_route core.term input_secret
 ambient_route core.term read_all_input
@@ -2286,8 +2281,6 @@ ambient_route core.http.server request_id
 ambient_route core.files write_at
 ambient_route core.files write_bytes
 ambient_route core.files write_atomic
-ambient_route core.term buffered
-ambient_route core.term binwrite
 ambient_route core.encoding.csv query
 ambient_route core.crypto.vault prepare_rotate
 ambient_route core.crypto.vault authorize_write

@@ -112,6 +112,12 @@ the canonical stdin and filesystem operations instead of native forwarding APIs.
 Confirmation likewise owns its prompt, whitespace/case handling and safe false
 answer on empty/closed input or an IO failure in Jet.
 
+`core.data.sketch.tdigest` has one source-owned `TDigest` carrier over `Shared`
+centroid storage. It retains the shipped unit-weight insertion/compression and
+step-quantile behavior, including empty and out-of-range queries; aliases share
+updates. The divergent weighted/interpolating source implementation is removed,
+not retained as an alternate mode.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

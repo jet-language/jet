@@ -459,7 +459,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "WebStoreTransaction" | "WebStoreEvent" | "WebStoreInspection"
         | "WebStorePatch" | "WebStore" | "WebStoreSubscription"
         // D-APPROX1=A: approximate sketch data structures.
-        | "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
+        | "HyperLogLog" | "CountMinSketch" | "ReservoirSampler"
         // D-TIMEDEPTH1=A: civil-time types.
         | "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant" | "Period" | "Zone"
         | "ZonedDateTime"
