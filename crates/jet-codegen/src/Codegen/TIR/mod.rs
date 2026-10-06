@@ -12600,7 +12600,8 @@ pub enum TClosureOp {
     FloatAddParaFold {
         f32: bool,
     },
-    /// `fold(init, f)` — `jet_list_fold((recv).clone(), init, f)`.
+    /// `iter.fold(init, f)` — `jet_list_fold(recv, init, f)`; a list or view
+    /// folds through the borrowed `ViewFold`.
     Fold,
     GroupBy,
     /// `count_by(f)` — `jet_list_count_by((recv).clone(), f)`.
