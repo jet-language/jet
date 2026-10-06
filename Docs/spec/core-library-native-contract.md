@@ -97,6 +97,19 @@ A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
 
+`core.data.load` constructs a loader without reading its source. Jet selects
+the format from the final path component before any query or fragment and
+selects a URL loader only for `http://` and `https://`. `load_default` applies
+`DataLimits.safe()` to that same operation. Extensionless sources and
+provider-owned formats return structured `DataError` values with kind `Bridge`; native
+and web adapters do not repeat extension detection or default selection.
+
+`core.tasks.current_task` formats its control trace in Jet and supplies idle
+defaults there. Its native leaves return optional raw TLS pause and cancellation
+flags, without formatting or choosing an idle value. Terminal `eprint` owns its
+newline/error-discard policy in Jet; `buffered`, `binread`, and `binwrite` compose
+the canonical stdin and filesystem operations instead of native forwarding APIs.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

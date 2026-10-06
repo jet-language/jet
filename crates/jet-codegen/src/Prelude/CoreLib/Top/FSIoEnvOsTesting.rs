@@ -147,9 +147,6 @@ fn jet_std_io_prompt_read() -> Result<JetTermRead, jet_std::IOError> {
 }
 
 // D-IO-PROMPT1=A: safe defaults and one terminal-owned secret-input path.
-fn jet_std_io_eprint(text: &String) {
-    let _ = jet_term_write_stderr_line(text, false);
-}
 
 fn jet_std_io_confirm(prompt: &String) -> bool {
     jet_term_confirm_with_io(
@@ -252,9 +249,6 @@ fn jet_std_io_input_secret(prompt: &String) -> Result<String, jet_std::IOError> 
 // #1480 / D-STDIN1: line-stream ownership moved to the shared
 // Core/StdinReader.rs fragment so AOT, JIT, and Source use one reader kernel.
 
-fn jet_std_io_binread(path: &str) -> Result<Vec<u8>, jet_std::IOError> {
-    jet_std_fs_read_bytes(path)
-}
 
 // D-COREIO1=A: stdout/stderr stream handles and TTY-aware terminal helpers.
 // The handles are zero-sized tokens for the process streams; their methods

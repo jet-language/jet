@@ -2896,45 +2896,6 @@ fn jet_data_loader_validate_runtime<T>(
         .map_err(jet_data_loader_kernel_error)
 }
 
-fn jet_data_loader_format_for_locator(
-    locator: &str,
-) -> Result<jet_std::DataFormat, jet_std::DataError> {
-    let path = locator
-        .split(|character| character == '?' || character == '#')
-        .next()
-        .unwrap_or(locator);
-    let path = path.rsplit_once('/').map_or(path, |(_, path)| path);
-    let Some(extension) = path.rsplit_once('.').map(|(_, extension)| extension) else {
-        return Err(jet_data_loader_error(
-            jet_std::DataErrorKind::Bridge,
-            "data.load",
-            "source has no core format; import a provider package",
-        ));
-    };
-    jet_data_loader_format(extension)
-}
-
-fn jet_data_loader_load<T>(
-    locator: &String,
-    limits: &jet_std::DataLimits,
-) -> Result<jet_std::DataLoader<T>, jet_std::DataError> {
-    let format = jet_data_loader_format_for_locator(locator)?;
-    if locator.starts_with("http://") || locator.starts_with("https://") {
-        return jet_data_loader_url(
-            locator,
-            &format.as_str().to_string(),
-            &"network".to_string(),
-            limits,
-        );
-    }
-    jet_data_loader_file(locator, &format.as_str().to_string(), limits)
-}
-
-fn jet_data_loader_load_default<T>(
-    locator: &String,
-) -> Result<jet_std::DataLoader<T>, jet_std::DataError> {
-    jet_data_loader_load(locator, &jet_std::DataLimits::safe())
-}
 
 fn jet_data_loader_file<T>(
     path: &String,
@@ -4494,14 +4455,6 @@ mod jet_data_web {
             })
         };
         let loader = match operation {
-            "load" => {
-                let locator = text(value(0)?, operation)?;
-                jet_data_loader_load::<T>(&locator, &limits(values.get(1))?)?
-            }
-            "load_default" => {
-                let locator = text(value(0)?, operation)?;
-                jet_data_loader_load_default::<T>(&locator)?
-            }
             "file" => {
                 let path = text(value(0)?, operation)?;
                 let format = format(value(1)?, operation)?;
@@ -4593,9 +4546,7 @@ mod jet_data_web {
         let value = |index: usize| values.get(index).ok_or_else(|| error(jet_std::DataErrorKind::InvalidArgument, &operation, "missing argument"));
         let typed = matches!(
             operation.as_str(),
-            "load"
-                | "load_default"
-                | "file"
+            "file"
                 | "file_member"
                 | "url"
                 | "database"
@@ -4618,7 +4569,7 @@ mod jet_data_web {
             }
         }
         match operation.as_str() {
-            "load" | "load_default" | "file" | "file_member" | "url" | "database" | "value" => {
+            "file" | "file_member" | "url" | "database" | "value" => {
                 Ok(store(typed_handle(root, &operation)?))
             }
             "bind" => {

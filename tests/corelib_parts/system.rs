@@ -1,4 +1,38 @@
 #[test]
+fn core_term_source_composes_byte_files_streams_and_stderr() {
+    assert!(common::have_rustc(), "terminal source composition proof requires rustc");
+    let dir = std::env::temp_dir().join(format!("jet_corelib_term_source_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("bytes.bin").to_string_lossy().replace('\\', "\\\\");
+    let source = format!(r#"
+use core.term as term
+
+fn run() {{
+    bytes :: [U8]{{0, 255, 10, 195, 169}}
+    term.binwrite("{path}", bytes) ?? panic("write bytes")
+    actual :: term.binread("{path}") ?? panic("read bytes")
+    print(actual == bytes)
+    term.eprint("héllo")
+    term.eprint("")
+    reader := term.buffered()
+    first :: &reader.read_line() ?? panic("read first")
+    second :: &reader.read_line() ?? panic("read second")
+    end :: &reader.read_line() ?? panic("read end")
+    print(first ?? "missing")
+    print(second ?? "missing")
+    print(end == None)
+}}
+"#);
+    let (code, stdout, stderr) = build_and_run(
+        &dir, "term_source", &source, &[], Some("first\r\nsecond\n"),
+    );
+    assert_eq!(code, 0, "terminal source composition failed: {stderr}");
+    assert_eq!(stdout, "true\nfirst\nsecond\ntrue\n");
+    assert_eq!(stderr, "héllo\n\n");
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn text_unicode_audit_surface_runs() {
     let have_rustc = common::have_rustc();
     if !have_rustc {

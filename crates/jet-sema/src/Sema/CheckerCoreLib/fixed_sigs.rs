@@ -2510,6 +2510,9 @@ fn core_fixed_sig_impl(
         )),
         ("core.tasks", "yield_now") => Some((vec![], Some(unit))),
         ("core.tasks", "current_task") => Some((vec![], Some(string.clone()))),
+        ("core.tasks", "__task_paused" | "__task_cancelled") => {
+            Some((vec![], Some(Type::Option(Box::new(Type::Bool)))))
+        }
         ("core.time", "start") => Some((vec![], Some(Type::Named("Stopwatch".to_string())))),
         ("core.time", "instant") => Some((vec![], Some(Type::Named("Instant".to_string())))),
         ("core.time", "now") | ("core.time", "now_utc") => {

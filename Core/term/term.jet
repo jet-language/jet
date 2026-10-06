@@ -52,7 +52,10 @@ pub fn print(text: String) Never! -[IO, Time.Wait]> {
     &out.write_line(text).drop("stdout write")
 }
 
-pub fn eprint(text: String) Never! -[IO]> { core.term.eprint(text) }
+pub fn eprint(text: String) Never! -[IO]> {
+    out :: stderr()
+    &out.write("{text}\n").drop("stderr write")
+}
 
 pub fn input(prompt: String{""}) -[IO, Time.Wait]> String IOError! {
     core.term.input(prompt)
@@ -72,11 +75,11 @@ pub fn read_until(delimiter: String) -[IO, Time.Wait]> String IOError! {
 }
 
 pub fn binread(path: String) -[IO, Time.Wait]> [U8] IOError! {
-    core.term.binread(path)
+    core.files.read_bytes(path)
 }
 
 pub fn binwrite(path: String, bytes: [U8]) IOError! -[IO, Time.Wait]> {
-    core.term.binwrite(path, bytes)
+    core.files.write_bytes(path, bytes)
 }
 
 pub fn confirm(prompt: String) -[IO, Time.Wait]> Bool Never! { core.term.confirm(prompt) }
@@ -92,7 +95,7 @@ pub fn stdout() -> Stdout Never! { core.term.stdout() }
 
 pub fn stderr() -> Stderr Never! { core.term.stderr() }
 
-pub fn buffered() -> StdinHandle Never! { core.term.buffered() }
+pub fn buffered() -> StdinHandle Never! { stdin() }
 
 pub fn terminal_width() -[IO]> Int Never! { core.term.terminal_width() }
 

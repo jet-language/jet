@@ -21770,7 +21770,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             "after" => "jet_std::after_value",
             "interval" => "jet_std::interval",
             "yield_now" => "jet_std::jet_task_yield",
-            "current_task" => "jet_std::jet_task_current_trace",
+            "__task_paused" => "jet_scheduler_task_paused",
+            "__task_cancelled" => "jet_scheduler_task_cancelled",
             _ => {
                 return Err(mir_error_at(
                     "MIR core.tasks runtime call has an unknown member",
@@ -21828,9 +21829,19 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 crate::scheduler::jet_scheduler_yield_now();
                 Ok(RuntimeValue::Data(MirEvalValue::Unit))
             }
-            ("current_task", []) => Ok(RuntimeValue::Data(MirEvalValue::String(
-                crate::scheduler::jet_scheduler_current_task_trace(),
-            ))),
+            ("__task_paused" | "__task_cancelled", []) => {
+                let flag = if member == "__task_paused" {
+                    crate::scheduler::jet_scheduler_task_paused()
+                } else {
+                    crate::scheduler::jet_scheduler_task_cancelled()
+                };
+                Ok(match flag {
+                    Some(flag) => RuntimeValue::Data(MirEvalValue::Present(Box::new(
+                        MirEvalValue::Bool(flag),
+                    ))),
+                    None => RuntimeValue::Absent { element: None },
+                })
+            }
             _ => Err(mir_error_at(
                 "MIR core.tasks runtime call received the wrong arguments",
                 span,
@@ -22383,7 +22394,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         if row.module == "core.tasks"
             && matches!(
                 row.member.as_str(),
-                "after" | "interval" | "yield_now" | "current_task"
+                "after" | "interval" | "yield_now" | "__task_paused" | "__task_cancelled"
             )
         {
             return self.eval_task_runtime_call(&row.member, row.symbol.name(), args, span);
