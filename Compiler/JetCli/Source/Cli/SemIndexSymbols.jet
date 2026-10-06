@@ -866,13 +866,13 @@ fn jet_cli_symbol_canonical_name(modules: [JetDriverDocModule], module_path: Str
         if doc_module.path != module_path && doc_module.alias != module_path -> next
         storage :: doc_module.name_ledger ?? return fallback
         permit :: storage.guard_read()
-        module :: doc_module.name_module_index
-        if name_ledger_display_path_at(permit.value, module, span, name, owner, Val(module)) == .Val(path) -> return path
+        module_index :: doc_module.name_module_index
+        if name_ledger_display_path_at(permit.value, module_index, span, name, owner, Val(module_index)) == .Val(path) -> return path
         if owner == .Val(value) {
-            path :: name_ledger_display_path(permit.value, module, value, Val(module)) ?? (name_ledger_canonical_path(permit.value, module, value) ?? value)
+            path :: name_ledger_display_path(permit.value, module_index, value, Val(module_index)) ?? (name_ledger_canonical_path(permit.value, module_index, value) ?? value)
             return "{path}.{name}"
         }
-        return name_ledger_display_path(permit.value, module, name, Val(module)) ?? (name_ledger_canonical_path(permit.value, module, name) ?? name)
+        return name_ledger_display_path(permit.value, module_index, name, Val(module_index)) ?? (name_ledger_canonical_path(permit.value, module_index, name) ?? name)
     }
     fallback
 }
