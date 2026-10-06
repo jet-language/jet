@@ -206,7 +206,7 @@ for (const entry of sources) {
   if (/\/Tests\//.test(entry.sourcePath)) fail(`${entry.where}: test sources belong in tests.list`);
 }
 for (const entry of tests) {
-  if (!/^(?:Jetpack\/[^/]+|Compiler\/JetFoundation)\/Tests\//.test(entry.sourcePath)) fail(`${entry.where}: tests.list names only Jetpack/<Area>/Tests or shared Compiler/JetFoundation/Tests sources`);
+  if (!/^Jetpack\/[^/]+\/Tests\//.test(entry.sourcePath)) fail(`${entry.where}: tests.list names only Jetpack/<Area>/Tests sources`);
 }
 
 // Every Jetpack source and test file must be listed; an unlisted file is

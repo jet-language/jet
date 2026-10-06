@@ -381,7 +381,7 @@ fn jet_cli_compile_test(file: String, source: String, color: Bool, verbose: Bool
         &stderr_handle.write(options.status).drop("jet stderr")
     }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color, false, threads, JetDriverCompileMode.Test)
+    compiled :: jet_cli_compile_file(file, color, true, threads, JetDriverCompileMode.Test)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
         .Compiled(result, snapshot) -> output = jet_cli_test_result(file, source, color, verbose, options, result, snapshot)

@@ -27,11 +27,11 @@
     "tir_variants": 150,
     "expr_variants": 103,
     "stmt_variants": 47,
-    "core_records": 1037,
-    "core_plain_records": 778,
+    "core_records": 1038,
+    "core_plain_records": 779,
     "core_receiver_records": 259,
-    "differential_programs": 1187,
-    "tsv_rows": 1196
+    "differential_programs": 1188,
+    "tsv_rows": 1197
   },
   "source_roots": {
     "aot_rust": [
@@ -89,25 +89,25 @@
     },
     "core_call": {
       "aot_rust": {
-        "covered": 768,
+        "covered": 769,
         "refused": 69,
         "absent": 200,
         "dynamic": 269
       },
       "interpreter": {
-        "covered": 1037,
+        "covered": 1038,
         "refused": 0,
         "absent": 0,
         "dynamic": 0
       },
       "cranelift": {
-        "covered": 700,
+        "covered": 701,
         "refused": 259,
         "absent": 78,
         "dynamic": 337
       },
       "web": {
-        "covered": 731,
+        "covered": 732,
         "refused": 102,
         "absent": 204,
         "dynamic": 306
@@ -72866,6 +72866,120 @@
       },
       "source_span_hash": "2c443bce063850f2bfca4545b1012d3c7513d06895e628d69a0c8703a1a8ad21",
       "differential_program": "tests/fixtures/tier-census/programs.json#core-0177"
+    },
+    {
+      "surface": "core_call",
+      "id": "core-0178",
+      "record_kind": "plain",
+      "module": "core.math",
+      "member": "digits",
+      "receiver_types": [],
+      "symbol": "jet_std_math_digits",
+      "symbol_kind": "prelude",
+      "arity": 1,
+      "max_arity": 1,
+      "direct": {
+        "aot": true,
+        "jit": true
+      },
+      "routes": {
+        "pure": null,
+        "interpreter": "TypedIntrinsic"
+      },
+      "aot_projection_status": "covered",
+      "interpreter_route": "TypedIntrinsic",
+      "interpreter_route_declared": "Default",
+      "jit_symbol": "jet_std_math_digits",
+      "jit_symbols": [],
+      "identifier": "core.math.digits",
+      "declaration": {
+        "file": "crates/jet-foundation/src/Syntax/core_calls.rs",
+        "line": 1676,
+        "text": "CoreCallRecord::new(\"core.math\", \"digits\", \"jet_std_math_digits\", true, &[false]),",
+        "span_hash": "884e1349fbf85b0db65974e684204bcbabf5994f1c0be9368f1a45b4bb277710"
+      },
+      "consumers": {
+        "aot_rust": {
+          "status": "covered",
+          "evidence": [
+            {
+              "file": "crates/jet-codegen/src/Codegen/MIRRust.rs",
+              "line": 1024,
+              "text": "fn core_symbol(&self, id: MirCoreCallId) -> String {",
+              "span_hash": "1b2c1397d576e216721e095bed1c82f6c6c2da7274ddc76bb19fce4d4cf08b0a"
+            },
+            {
+              "file": "crates/jet-foundation/src/Syntax/core_calls.rs",
+              "line": 1676,
+              "text": "CoreCallRecord::new(\"core.math\", \"digits\", \"jet_std_math_digits\", true, &[false]),",
+              "span_hash": "884e1349fbf85b0db65974e684204bcbabf5994f1c0be9368f1a45b4bb277710"
+            }
+          ],
+          "reason": "generic CoreCall AOT projection"
+        },
+        "interpreter": {
+          "status": "covered",
+          "evidence": [
+            {
+              "file": "crates/jet-codegen/src/Codegen/MIREval.rs",
+              "line": 1684,
+              "text": "fn eval_core_call_binding(",
+              "span_hash": "ef058c3d5c329ed316b2bf7f537bc6b7a5039610b72c2df3a18a5d291d20bf80"
+            },
+            {
+              "file": "crates/jet-foundation/src/Syntax/core_calls.rs",
+              "line": 716,
+              "text": "const fn default_interpreter_route(module: &str, member: &str) -> CoreCallInterpreterRoute {",
+              "span_hash": "1f1a6a8760297e92c16c41f26050bc1740f4a5fc1d1b0217cca055fb134cf996"
+            },
+            {
+              "file": "crates/jet-foundation/src/Syntax/core_calls.rs",
+              "line": 1676,
+              "text": "CoreCallRecord::new(\"core.math\", \"digits\", \"jet_std_math_digits\", true, &[false]),",
+              "span_hash": "884e1349fbf85b0db65974e684204bcbabf5994f1c0be9368f1a45b4bb277710"
+            }
+          ],
+          "reason": "TypedIntrinsic route plus shared interpreter projection"
+        },
+        "cranelift": {
+          "status": "covered",
+          "evidence": [
+            {
+              "file": "crates/jet-foundation/src/Syntax/core_calls.rs",
+              "line": 1676,
+              "text": "CoreCallRecord::new(\"core.math\", \"digits\", \"jet_std_math_digits\", true, &[false]),",
+              "span_hash": "884e1349fbf85b0db65974e684204bcbabf5994f1c0be9368f1a45b4bb277710"
+            },
+            {
+              "file": "crates/jet-jit/src/MathExtra.rs",
+              "line": 400,
+              "text": "digits: \"jet_jit_math_digits\" => jet_jit_math_digits: i64_i64;",
+              "span_hash": "6fe1719948e09e7614dfd946f30035fe8d6d27fbda7495f41c0918b71efdbb83"
+            }
+          ],
+          "reason": "resident-JIT host symbol declaration"
+        },
+        "web": {
+          "status": "covered",
+          "evidence": [
+            {
+              "file": "crates/jet-codegen/src/Codegen/MIRWeb.rs",
+              "line": 3533,
+              "text": "const WEB_PRELUDE_LINKS: &[(&str, &str)] = &[",
+              "span_hash": "9d2ae9927a50986bf5ccebdf492eb24942cbf64a82f7ce8e74a4985e041863fc"
+            },
+            {
+              "file": "crates/jet-foundation/src/Syntax/core_calls.rs",
+              "line": 1676,
+              "text": "CoreCallRecord::new(\"core.math\", \"digits\", \"jet_std_math_digits\", true, &[false]),",
+              "span_hash": "884e1349fbf85b0db65974e684204bcbabf5994f1c0be9368f1a45b4bb277710"
+            }
+          ],
+          "reason": "MIR Web CoreCall resolver accepts the canonical symbol"
+        }
+      },
+      "source_span_hash": "884e1349fbf85b0db65974e684204bcbabf5994f1c0be9368f1a45b4bb277710",
+      "differential_program": "tests/fixtures/tier-census/programs.json#core-0178"
     },
     {
       "surface": "core_call",
