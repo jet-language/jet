@@ -1,9 +1,12 @@
 // Callable signatures and CFG body wrappers.
 use jet_foundation.[
     MIRAccess,
+    MIRCallee,
     MIRCaptureParam,
+    MIRCopyFact,
     MIRFieldID,
     MIRFunction,
+    MIRFunctionID,
     MIRGenericParam,
     MIRImplDef,
     MIRLocal,
@@ -17,6 +20,7 @@ use jet_foundation.[
     MIRType,
     MIRTypeID,
     MIRValueFact,
+    mir_type_id,
     mir_type_same_checked_type,
 ]
 
@@ -1145,7 +1149,166 @@ fn jet_rust_emit_function_signature(ctx: &JetRustEmitContext, function: MIRFunct
     visibility :: jet_rust_emit_function_visibility(function)
     generic_params :: ~ctx.current_generic_params
     generics :: jet_rust_emit_signature_generics(lifetimes, jet_rust_emit_generic_params(&ctx, generic_params))
-    "{visibility}{unsafe_prefix}fn {jet_rust_emit_function_name(&ctx, function.id)}{generics}({params.join(", ")}) -> {ret} {{"
+    "{visibility}{unsafe_prefix}fn {jet_rust_emit_function_name(&ctx, function.id)}{generics}({params.join(", ")}) -> {ret}{jet_rust_emit_clone_where(&ctx, function.id)} {{"
+}
+
+// One requirement edge of jet_rust_emit_collect_clone_bounds: when `callee`
+// needs `Clone` for its parameter `param`, `caller` needs it for every
+// parameter of `scope` that `ty` names (`same`: the parameter of that name).
+pub struct JetRustEmitCloneEdge {
+    pub caller: String
+    pub callee: String
+    pub param: String
+    pub ty: MIRType?
+    pub scope: [MIRGenericParam]
+}
+
+// The generic parameters whose Rust bound needs `Clone`, per function id key
+// (#4609). Jet copies values of an unbounded parameter
+// (sema_copy_generic_param_facts) and the emitted body clones them, so the
+// Rust bound must say so: a checked copy of a value whose type names the
+// parameter, or a call or closure whose callee needs `Clone` for a type
+// argument naming it (to a fixed point over the call graph).
+fn jet_rust_emit_collect_clone_bounds(ctx: &JetRustEmitContext) -> [String:[String]] Never! {
+    needs := [String:[String]]{}
+    edges := [JetRustEmitCloneEdge]{}
+    loop function in ctx.program.functions {
+        scope :: jet_rust_emit_merge_generic_params(jet_rust_emit_function_owner_generic_params(&ctx, function), function.generic_params)
+        if scope.len() == 0 -> next
+        key :: jet_rust_emit_id_key(function.id.value)
+        direct := [String]{}
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                if instruction.operation == {
+                    .Copy(_, fact) -> {
+                        if fact != MIRCopyFact.ViewMaterialize && instruction.ty == .Val(ty) {
+                            if !jet_rust_emit_copy_carrier(ctx, ty) -> jet_rust_emit_clone_type_params(ty, scope, &direct)
+                        }
+                    }
+                    .Call(callee, _, type_args) -> jet_rust_emit_clone_call_edges(&ctx, key, scope, callee, type_args, &edges)
+                    // A lambda body names its parent's parameters by name.
+                    .Closure(target, _, _) -> {
+                        loop parameter in scope -> &edges.push(JetRustEmitCloneEdge{caller: key, callee: jet_rust_emit_id_key(target.value), param: parameter.name, ty: None, scope: scope})
+                    }
+                    else -> {}
+                }
+            }
+        }
+        if direct.len() > 0 -> needs[key] = direct
+    }
+    changed := true
+    loop changed {
+        changed = false
+        loop edge in edges {
+            callee_needs :: needs.get(edge.callee) ?? next
+            if !jet_rust_emit_clone_names_contain(callee_needs, edge.param) -> next
+            current := needs.get(edge.caller) ?? [String]{}
+            before :: current.len()
+            if edge.ty == {
+                Val(ty) -> jet_rust_emit_clone_type_params(ty, edge.scope, &current)
+                None -> {
+                    if !jet_rust_emit_clone_names_contain(current, edge.param) -> &current.push(edge.param)
+                }
+            }
+            if current.len() != before {
+                needs[edge.caller] = current
+                changed = true
+            }
+        }
+    }
+    needs
+}
+
+// Edges from a direct call: the callee's own parameters bind the call's type
+// arguments; a method's owner parameters bind the owner type's arguments at
+// the same positions as the callee's declared owner.
+fn jet_rust_emit_clone_call_edges(ctx: &JetRustEmitContext, caller: String, scope: [MIRGenericParam], callee: MIRCallee, type_args: [MIRType], edges: &[JetRustEmitCloneEdge]) Never! {
+    target := MIRFunctionID?{None}
+    owner := MIRType?{None}
+    if callee == {
+        .User(function) -> target = Val(function)
+        .Associated(function, owner_type) -> {
+            target = Val(function)
+            owner = Val(owner_type)
+        }
+        .Method(function, owner_type) -> {
+            target = Val(function)
+            owner = Val(owner_type)
+        }
+        else -> {}
+    }
+    if target == .Val(id) {
+        if jet_rust_emit_function_index(ctx, id) == .Val(position) {
+            callee_key :: jet_rust_emit_id_key(id.value)
+            loop (index, parameter) in ctx.program.functions[position].generic_params {
+                if index < type_args.len() -> &edges.push(JetRustEmitCloneEdge{caller: caller, callee: callee_key, param: parameter.name, ty: Val(type_args[index]), scope: scope})
+            }
+            declared_owner := MIRType?{None}
+            if ctx.program.functions[position].form == {
+                .Method(ty, _) -> declared_owner = Val(ty)
+                .TraitMethod(ty, _, _, _) -> declared_owner = Val(ty)
+                else -> {}
+            }
+            if declared_owner == .Val(declared) && owner == .Val(actual) {
+                if declared.kind == .Apply(_, declared_args) && actual.kind == .Apply(_, actual_args) {
+                    loop (index, argument) in declared_args {
+                        if index < actual_args.len() && argument.kind == .Apply(name, nested) {
+                            if nested.len() == 0 -> &edges.push(JetRustEmitCloneEdge{caller: caller, callee: callee_key, param: name.name, ty: Val(actual_args[index]), scope: scope})
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn jet_rust_emit_clone_names_contain(names: [String], name: String) -> Bool Never! {
+    loop candidate in names {
+        if candidate == name -> return true
+    }
+    false
+}
+
+// The parameters of `scope` that `ty` names where a Rust clone of `ty` clones
+// them; shared, callable and trait-object carriers clone without their
+// parameters.
+fn jet_rust_emit_clone_type_params(ty: MIRType, scope: [MIRGenericParam], names: &[String]) Never! {
+    if ty.kind == {
+        .List(inner) | .Option(inner) | .Tagged(_, inner) -> jet_rust_emit_clone_type_params(inner, scope, &names)
+        .FixedList(elem, _) -> jet_rust_emit_clone_type_params(elem, scope, &names)
+        .InlineRange(base, _, _) | .Quantity(base, _) -> jet_rust_emit_clone_type_params(base, scope, &names)
+        .Map(key, value) -> {
+            jet_rust_emit_clone_type_params(key, scope, &names)
+            jet_rust_emit_clone_type_params(value, scope, &names)
+        }
+        .Result(ok, err) -> {
+            jet_rust_emit_clone_type_params(ok, scope, &names)
+            jet_rust_emit_clone_type_params(err, scope, &names)
+        }
+        .Tuple(fields) -> {
+            loop field in fields -> jet_rust_emit_clone_type_params(field.ty, scope, &names)
+        }
+        .Union(members) -> {
+            loop member in members -> jet_rust_emit_clone_type_params(member, scope, &names)
+        }
+        .Apply(name, args) -> {
+            if args.len() == 0 {
+                loop parameter in scope {
+                    if parameter.name == name.name && name.id == mir_type_id(parameter.name) && !jet_rust_emit_clone_names_contain(names, parameter.name) -> &names.push(parameter.name)
+                }
+            }
+            loop argument in args -> jet_rust_emit_clone_type_params(argument, scope, &names)
+        }
+        else -> {}
+    }
+}
+
+// ` where __jet_T: Clone, …` for the function's parameters that need `Clone`.
+fn jet_rust_emit_clone_where(ctx: &JetRustEmitContext, id: MIRFunctionID) -> String Never! {
+    names :: ctx.clone_bounds.get(jet_rust_emit_id_key(id.value)) ?? return ""
+    rendered := [String]{}
+    loop name in names -> &rendered.push("{jet_rust_emit_mangle(name)}: Clone")
+    " where {rendered.join(", ")}"
 }
 
 fn jet_rust_emit_function_has_sentry_scope(function: MIRFunction) -> Bool Never! {
@@ -1617,10 +1780,29 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
     generics :: jet_rust_emit_signature_generics(view_lifetimes, type_generics)
     direct_call :: "{jet_rust_emit_function_name(&ctx, function.id)}({call_args.join(", ")})"
     call_expression :: if function.is_unsafe -> "unsafe {{ {direct_call} }}" else -> direct_call
-    &lines.push("    {method_visibility}{unsafe_prefix}fn {method_name}{generics}({params.join(", ")}) -> {return_type} {{")
+    // A trait impl's `Clone` requirements bind on its header instead
+    // (jet_rust_emit_impl_clone_where): a method may not narrow the trait.
+    method_where :: if implementation.trait_ref == None -> jet_rust_emit_clone_where(&ctx, function.id) else -> ""
+    &lines.push("    {method_visibility}{unsafe_prefix}fn {method_name}{generics}({params.join(", ")}) -> {return_type}{method_where} {{")
     &lines.push("        {call_expression}")
     &lines.push("    }}")
     &lines.push("")
+}
+
+// ` where __jet_T: Clone, …` on a trait impl header for the impl parameters
+// any of its methods needs `Clone` for (jet_rust_emit_collect_clone_bounds).
+fn jet_rust_emit_impl_clone_where(ctx: &JetRustEmitContext, implementation: MIRImplDef, impl_scope: [MIRGenericParam]) -> String Never! {
+    names := [String]{}
+    loop method_id in implementation.methods {
+        needed :: ctx.clone_bounds.get(jet_rust_emit_id_key(method_id.value)) ?? next
+        loop parameter in impl_scope {
+            if jet_rust_emit_clone_names_contain(needed, parameter.name) && !jet_rust_emit_clone_names_contain(names, parameter.name) -> &names.push(parameter.name)
+        }
+    }
+    if names.len() == 0 -> return ""
+    rendered := [String]{}
+    loop name in names -> &rendered.push("{jet_rust_emit_mangle(name)}: Clone")
+    " where {rendered.join(", ")}"
 }
 
 // MIRRust emit_impl carrier_trait: an inherent impl on a carrier the runtime
@@ -1694,7 +1876,7 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
             rhs :: implementation.operator_rhs ?? implementation.self_type
             trait_text = "{trait_text}<{jet_rust_emit_type(&ctx, rhs)}>"
         }
-        &lines.push("impl{impl_generics} {trait_text} for {jet_rust_emit_type(&ctx, implementation.self_type)} {{")
+        &lines.push("impl{impl_generics} {trait_text} for {jet_rust_emit_type(&ctx, implementation.self_type)}{jet_rust_emit_impl_clone_where(&ctx, implementation, impl_scope)} {{")
         }
         else -> {
         if carrier_trait == .Val(carrier) {
