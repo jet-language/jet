@@ -619,23 +619,42 @@ fn sema_ownership_recompute_reference_counts(state: &SemaOwnershipState) Never! 
     }
 }
 
-// Exact reference anchor: definition key plus use span.
-fn sema_ownership_reference_anchor(reference: SemaOwnershipReference) -> String Never! {
-    "{reference.use_span.start}:{reference.use_span.end}:{reference.def_key}"
+// Exact reference anchor: definition key plus use span. The rows of `merged`
+// already admitted, bucketed by use-span start, so a lookup compares a few
+// rows instead of formatting and hashing a text key per reference.
+struct SemaOwnershipAnchors {
+    slots: [Int:Int]
+    rows: [[Int]]
 }
 
-fn sema_ownership_reference_anchors(references: [SemaOwnershipReference]) -> [String:Bool] Never! {
-    anchors := [String:Bool]{}
-    loop reference in references -> anchors[sema_ownership_reference_anchor(reference)] = true
+fn sema_ownership_anchor_add(anchors: &SemaOwnershipAnchors, start: Int, row: Int) Never! {
+    if anchors.slots.get(start) == .Val(slot) {
+        &anchors.rows[slot].push(row)
+        return
+    }
+    anchors.slots[start] = anchors.rows.len()
+    &anchors.rows.push([Int]{row})
+}
+
+fn sema_ownership_reference_anchors(references: [SemaOwnershipReference]) -> SemaOwnershipAnchors Never! {
+    anchors := SemaOwnershipAnchors{slots: [Int:Int]{}, rows: [[Int]]{}}
+    loop (row, reference) in references -> sema_ownership_anchor_add(&anchors, reference.use_span.start, row)
     anchors
 }
 
-// Appends each reference whose anchor `anchors` does not hold yet.
-fn sema_ownership_admit_references(merged: &[SemaOwnershipReference], anchors: &[String:Bool], references: [SemaOwnershipReference]) Never! {
+fn sema_ownership_anchor_held(merged: [SemaOwnershipReference], anchors: SemaOwnershipAnchors, reference: SemaOwnershipReference) -> Bool Never! {
+    slot :: anchors.slots.get(reference.use_span.start) ?? return false
+    loop row in anchors.rows[slot] {
+        if merged[row].use_span.end == reference.use_span.end && merged[row].def_key == reference.def_key -> return true
+    }
+    false
+}
+
+// Appends each reference whose anchor `merged` does not hold yet.
+fn sema_ownership_admit_references(merged: &[SemaOwnershipReference], anchors: &SemaOwnershipAnchors, references: [SemaOwnershipReference]) Never! {
     loop reference in references {
-        anchor :: sema_ownership_reference_anchor(reference)
-        if anchors.get(anchor) != None -> next
-        anchors[anchor] = true
+        if sema_ownership_anchor_held(merged, anchors, reference) -> next
+        sema_ownership_anchor_add(&anchors, reference.use_span.start, merged.len())
         &merged.push(reference)
     }
 }
