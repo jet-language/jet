@@ -48,6 +48,8 @@ mod text_kernel {
             Closed(IOContext),
             Protocol(IOContext),
             Other(IOContext),
+            AlreadyExists(IOContext),
+            Unsupported(IOContext),
         }
 
         impl IOError {
@@ -72,7 +74,17 @@ mod text_kernel {
                 error.raw_os_error().map(i64::from),
                 Some(error.to_string()),
             );
+            let not_supported = matches!(
+                error.raw_os_error(),
+                Some(code) if (cfg!(target_os = "linux") && code == 95)
+                    || (cfg!(target_os = "macos") && (code == 45 || code == 102))
+            );
+            if not_supported {
+                return IOError::Unsupported(context);
+            }
             match error.kind() {
+                std::io::ErrorKind::AlreadyExists => IOError::AlreadyExists(context),
+                std::io::ErrorKind::Unsupported => IOError::Unsupported(context),
                 std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
                     IOError::InvalidInput(context)
                 }
@@ -137,6 +149,7 @@ mod text_kernel {
         }
 
         include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs");
+        include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/FileHandles.rs");
     }
 
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
@@ -644,6 +657,8 @@ fn io_error_ct(error: text_kernel::jet_std::IOError) -> crate::AST::CtValue {
 
         text_kernel::jet_std::IOError::Protocol(context) => ("Protocol", context),
         text_kernel::jet_std::IOError::Other(context) => ("Other", context),
+        text_kernel::jet_std::IOError::AlreadyExists(context) => ("AlreadyExists", context),
+        text_kernel::jet_std::IOError::Unsupported(context) => ("Unsupported", context),
     };
     crate::AST::CtValue::Enum {
         type_name: "IOError".to_string(),
@@ -1001,38 +1016,100 @@ pub(super) fn fs_canonicalize(path: &str) -> FsResult<String> {
 pub(super) fn fs_absolute(path: &str) -> FsResult<String> {
     text_kernel::jet_std_fs_absolute(&path.to_string()).map_err(io_error_ct)
 }
-pub(super) fn fs_stat(path: &str) -> FsResult<crate::AST::CtValue> {
-    text_kernel::jet_fs_stat(&path.to_string())
-        .map(|stat| crate::AST::CtValue::Struct {
-            type_name: "Stat".to_string(),
-            fields: vec![
-                ("size".to_string(), crate::AST::CtValue::Int(stat.size)),
-                (
-                    "modified_ms".to_string(),
-                    crate::AST::CtValue::Int(stat.modified_ms),
-                ),
-                (
-                    "created_ms".to_string(),
-                    crate::AST::CtValue::Int(stat.created_ms),
-                ),
-                (
-                    "readonly".to_string(),
-                    crate::AST::CtValue::Bool(stat.readonly),
-                ),
-                (
-                    "is_file".to_string(),
-                    crate::AST::CtValue::Bool(stat.is_file),
-                ),
-                ("is_dir".to_string(), crate::AST::CtValue::Bool(stat.is_dir)),
-                (
-                    "is_symlink".to_string(),
-                    crate::AST::CtValue::Bool(stat.is_symlink),
-                ),
-                ("kind".to_string(), crate::AST::CtValue::Str(stat.kind)),
-                ("mode".to_string(), crate::AST::CtValue::Int(stat.mode)),
-            ],
+/// #3593: the interpreter adapter for the `core.files.__*` provider leaves.
+/// Each arm only converts CtValue arguments and results; the leaf itself is
+/// the shared Prelude FileHandles.rs / FileStream.rs function AOT calls.
+/// `Err(String)` is a malformed call, which the caller reports.
+pub(crate) fn apply_files_leaf(
+    method: &str,
+    args: &[crate::AST::CtValue],
+) -> Option<Result<crate::AST::CtValue, String>> {
+    use crate::AST::CtValue;
+    let int = |i: usize| match args.get(i) {
+        Some(CtValue::Int(value)) => Ok(*value),
+        _ => Err(format!("core.files.{method} argument {i} must be an Int")),
+    };
+    let boolean = |i: usize| match args.get(i) {
+        Some(CtValue::Bool(value)) => Ok(*value),
+        _ => Err(format!("core.files.{method} argument {i} must be a Bool")),
+    };
+    let text = |i: usize| match args.get(i) {
+        Some(CtValue::Str(value)) => Ok(value.clone()),
+        _ => Err(format!("core.files.{method} argument {i} must be a String")),
+    };
+    let bytes = |i: usize| match args.get(i) {
+        Some(CtValue::Bytes(value)) => Ok(value.clone()),
+        Some(CtValue::List(values)) => values
+            .iter()
+            .map(|value| match value {
+                CtValue::Int(byte) => u8::try_from(*byte).map_err(|_| format!("core.files.{method} received an invalid U8")),
+                _ => Err(format!("core.files.{method} expects [U8]")),
+            })
+            .collect::<Result<Vec<u8>, String>>(),
+        _ => Err(format!("core.files.{method} argument {i} must be [U8]")),
+    };
+    fn done<T>(result: Result<T, text_kernel::jet_std::IOError>, value: impl FnOnce(T) -> CtValue) -> CtValue {
+        match result {
+            Ok(ok) => CtValue::Present(Box::new(value(ok))),
+            Err(error) => CtValue::failed(Box::new(io_error_ct(error))),
+        }
+    }
+    let unit = |_: ()| CtValue::Unit;
+    let run = || -> Result<CtValue, String> {
+        Ok(match method {
+            "__open_reader" => done(text_kernel::jet_std_files_open_reader(int(0)?, &text(1)?, int(2)?), |reader| {
+                opaque_file(FileReaderHandle(std::sync::Arc::new(std::sync::Mutex::new(Some(reader)))))
+            }),
+            "__open_writer" => done(
+                text_kernel::jet_std_files_open_writer(int(0)?, &text(1)?, boolean(2)?, int(3)?, int(4)?, int(5)?),
+                |writer| opaque_file(FileWriterHandle(std::sync::Arc::new(std::sync::Mutex::new(Some(writer))))),
+            ),
+            "__open_directory" => done(text_kernel::jet_std::jet_fs_directory_open(int(0)?, &text(1)?), CtValue::Int),
+            "__close_directory" => {
+                text_kernel::jet_std::jet_fs_directory_close(int(0)?);
+                CtValue::Unit
+            }
+            "__fsync_directory" => done(text_kernel::jet_std::jet_fs_directory_fsync(int(0)?), unit),
+            "__create_directory" => done(text_kernel::jet_std::jet_fs_directory_create(int(0)?, &text(1)?, int(2)?), unit),
+            "__list_directory" => done(text_kernel::jet_std::jet_fs_directory_list(int(0)?), |entries| {
+                CtValue::List(
+                    entries
+                        .into_iter()
+                        .map(|entry| CtValue::Struct {
+                            type_name: "DirEntry".to_string(),
+                            fields: vec![
+                                ("name".to_string(), CtValue::Str(entry.name)),
+                                ("path".to_string(), CtValue::Str(entry.path)),
+                                ("is_dir".to_string(), CtValue::Bool(entry.is_dir)),
+                            ],
+                        })
+                        .collect(),
+                )
+            }),
+            "__stat_at" => done(text_kernel::jet_std::jet_fs_stat_at(int(0)?, &text(1)?, boolean(2)?), |row| {
+                CtValue::List(row.into_iter().map(CtValue::Int).collect())
+            }),
+            "__rename_at" => done(
+                text_kernel::jet_std::jet_fs_rename_at(int(0)?, &text(1)?, int(2)?, &text(3)?, int(4)?),
+                unit,
+            ),
+            "__remove_at" => done(text_kernel::jet_std::jet_fs_remove_at(int(0)?, &text(1)?, boolean(2)?), unit),
+            "__read_link_at" => done(text_kernel::jet_std::jet_fs_read_link_at(int(0)?, &text(1)?), CtValue::Str),
+            "__xattr_names" => done(text_kernel::jet_std::jet_fs_xattr_names(&text(0)?), |names| {
+                CtValue::List(names.into_iter().map(CtValue::Str).collect())
+            }),
+            "__xattr_get" => done(text_kernel::jet_std::jet_fs_xattr_get(&text(0)?, &text(1)?), |value| match value {
+                Some(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                None => CtValue::absent(crate::AST::Type::List(Box::new(crate::AST::Type::Named("U8".to_string())))),
+            }),
+            "__xattr_set" => done(text_kernel::jet_std::jet_fs_xattr_set(&text(0)?, &text(1)?, &bytes(2)?), unit),
+            _ => return Err(format!("core.files.{method} is not a provider leaf")),
         })
-        .map_err(io_error_ct)
+    };
+    if !method.starts_with("__") {
+        return None;
+    }
+    Some(run())
 }
 pub(super) fn fs_glob(pattern: &str) -> FsResult<Vec<String>> {
     text_kernel::jet_fs_glob(pattern).map_err(|error| {

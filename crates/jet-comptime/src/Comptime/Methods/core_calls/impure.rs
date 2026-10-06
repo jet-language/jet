@@ -470,28 +470,21 @@ pub fn apply_impure_core_call_with_type_args(
                 Err(error) => CtValue::failed(Box::new(error)),
             })
         }
-        ("core.files", "open" | "create" | "append") => {
-            let path = as_string(one(0)?, span)?;
-            use crate::Comptime::TextLite as files_kernel;
-            let result = match method {
-                "open" => files_kernel::fs_open(path),
-                "create" => files_kernel::fs_create(path),
-                "append" => files_kernel::fs_append_stream(path),
-                _ => unreachable!("streaming file route is closed"),
-            };
-            Ok(match result {
-                Ok(value) => CtValue::Present(Box::new(value)),
-                Err(error) => CtValue::failed(Box::new(error)),
-            })
+        // #3593: the policy-free provider leaves behind Core/files/files.jet.
+        ("core.files", leaf) if leaf.starts_with("__") => {
+            match crate::Comptime::TextLite::apply_files_leaf(leaf, &args) {
+                Some(result) => result.map_err(|message| unsupported(&message, span)),
+                None => Err(unsupported(&format!("core.files.{leaf}"), span)),
+            }
         }
 
         (
             "core.files",
             "read" | "read_bytes" | "write" | "write_bytes" | "append_all" | "exists" | "is_dir"
             | "create_dir" | "create_dir_all" | "remove" | "remove_dir" | "remove_all"
-            | "list_dir" | "copy" | "copy_dir" | "rename" | "symlink" | "hard_link"
+            | "list_dir" | "copy" | "copy_dir" | "symlink" | "hard_link"
             | "read_link" | "canonicalize" | "glob" | "walk" | "walk_parallel"
-            | "walk_files" | "stat" | "fsync" | "set_mode",
+            | "walk_files" | "fsync" | "set_mode",
         ) => {
             let path_arg = |value: &CtValue| -> Result<String, Diagnostic> {
                 Ok(as_string(value, span)?.to_string())
@@ -543,7 +536,6 @@ pub fn apply_impure_core_call_with_type_args(
                 "set_mode" => unit(files_kernel::fs_set_mode(&path, as_int(one(1)?, span)?)),
                 "exists" => CtValue::Bool(files_kernel::fs_exists(&path)),
                 "is_dir" => CtValue::Bool(files_kernel::fs_is_dir(&path)),
-                "stat" => present(files_kernel::fs_stat(&path)),
                 "create_dir" => unit(files_kernel::fs_create_dir(&path)),
                 "create_dir_all" => unit(files_kernel::fs_create_dir_all(&path)),
                 "remove" => unit(files_kernel::fs_remove(&path)),
@@ -551,7 +543,6 @@ pub fn apply_impure_core_call_with_type_args(
                 "remove_all" => unit(files_kernel::fs_remove_all(&path)),
                 "copy" => unit(files_kernel::fs_copy(&path, &path_arg(one(1)?)?)),
                 "copy_dir" => unit(files_kernel::fs_copy_dir(&path, &path_arg(one(1)?)?)),
-                "rename" => unit(files_kernel::fs_rename(&path, &path_arg(one(1)?)?)),
                 "symlink" => unit(files_kernel::fs_symlink(&path, &path_arg(one(1)?)?)),
                 "hard_link" => unit(files_kernel::fs_hard_link(&path, &path_arg(one(1)?)?)),
                 "read_link" => present(files_kernel::fs_read_link(&path).map(CtValue::Str)),

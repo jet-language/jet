@@ -1235,7 +1235,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-LSDIR1=A: fs.list_dir returns [DirEntry].
         "DirEntry" => Some("DirEntry"),
         // D-FSOPS1 / D-WATCH-SCOPE1: typed filesystem and watcher values.
-        "Stat" => Some("Stat"),
         "WalkEntry" => Some("WalkEntry"),
         "WatchEvent" => Some("WatchEvent"),
         // stdlib-api-laws D4: `WatchEvent`'s two closed field enums.

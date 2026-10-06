@@ -43,7 +43,7 @@ struct FFIBuildLock {
                 }
             }
             if files.stat(dir) == .Ok(stat) {
-                age_ms :: time.unix_ms(time.now()) - stat.modified_ms
+                age_ms :: time.unix_ms(time.now()) - stat.modified.to_unix_ms()
                 if age_ms > 120000 {
                     files.remove_dir(dir).drop("another process may have released the stale lock first")
                     next

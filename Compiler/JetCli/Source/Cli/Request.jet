@@ -78,7 +78,7 @@ fn jet_cli_authority_path(root: String, relative: String) -> String Never! {
 // gives an object without them: kind, length, and modification time. Core
 // reports the modification time in milliseconds.
 fn jet_cli_identity_key(kind: String, stat: cli_files.Stat) -> String Never! {
-    "authority-file-v1;kind={kind};length={stat.size};modified_ns={stat.modified_ms * 1000000};device=none;inode=none"
+    "authority-file-v1;kind={kind};length={stat.size};modified_ns={stat.modified.to_unix_ms() * 1000000};device=none;inode=none"
 }
 
 fn jet_cli_is_project_boundary(directory: String) -[FS]> Bool Never! {

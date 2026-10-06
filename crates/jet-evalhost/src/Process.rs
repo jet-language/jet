@@ -18,6 +18,7 @@ use jet_foundation::Outcome::JetAbsent;
 pub(crate) type JitProcessSpec = process_prelude::ProcessSpec;
 pub(crate) type JitProcessChild = process_prelude::ProcessChild;
 
+
 #[derive(Default)]
 struct InterpreterProcessState {
     specs: Vec<JitProcessSpec>,
@@ -330,6 +331,12 @@ pub(crate) fn mir_io_error(error: process_prelude::IOError) -> MirRuntimeValue {
         }
         process_prelude::IOError::Other(context) => {
             ("Other", vec![(None, mir_io_context(context))])
+        }
+        process_prelude::IOError::AlreadyExists(context) => {
+            ("AlreadyExists", vec![(None, mir_io_context(context))])
+        }
+        process_prelude::IOError::Unsupported(context) => {
+            ("Unsupported", vec![(None, mir_io_context(context))])
         }
         process_prelude::IOError::ResourceLimit(limit) => {
             ("ResourceLimit", vec![(None, mir_process_resource_limit(limit))])

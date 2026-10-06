@@ -4,20 +4,6 @@ fn jet_std_fs_read_link(path: &String) -> Result<String, jet_std::IOError> {
 fn jet_std_fs_hard_link(from: &String, to: &String) -> Result<(), jet_std::IOError> {
     jet_std_fs_hard_link_path(from, to)
 }
-fn jet_std_fs_stat(path: &String) -> Result<jet_std::Stat, jet_std::IOError> {
-    jet_fs_stat(path).map(|stat| jet_std::Stat {
-        size: stat.size,
-        modified_ms: stat.modified_ms,
-        created_ms: stat.created_ms,
-        readonly: stat.readonly,
-        is_file: stat.is_file,
-        is_dir: stat.is_dir,
-        is_symlink: stat.is_symlink,
-        kind: stat.kind,
-        mode: stat.mode,
-    })
-}
-
 fn jet_std_fs_walk(
     path: &String,
     ignore_name: JetOutcome<String, JetAbsent>,

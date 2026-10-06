@@ -83,6 +83,8 @@ pub(crate) mod process_prelude {
             Protocol(IOContext),
             Other(IOContext),
             ResourceLimit(ProcessResourceLimit),
+            AlreadyExists(IOContext),
+            Unsupported(IOContext),
         }
 
         impl IOError {
@@ -107,7 +109,17 @@ pub(crate) mod process_prelude {
                 error.raw_os_error().map(i64::from),
                 Some(error.to_string()),
             );
+            let not_supported = matches!(
+                error.raw_os_error(),
+                Some(code) if (cfg!(target_os = "linux") && code == 95)
+                    || (cfg!(target_os = "macos") && (code == 45 || code == 102))
+            );
+            if not_supported {
+                return IOError::Unsupported(context);
+            }
             match error.kind() {
+                std::io::ErrorKind::AlreadyExists => IOError::AlreadyExists(context),
+                std::io::ErrorKind::Unsupported => IOError::Unsupported(context),
                 std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
                     IOError::InvalidInput(context)
                 }
@@ -120,6 +132,16 @@ pub(crate) mod process_prelude {
                 _ => IOError::Other(context),
             }
         }
+
+        #[derive(Clone, Debug, PartialEq)]
+        pub struct DirEntry {
+            pub name: String,
+            pub path: String,
+            pub is_dir: bool,
+        }
+
+        // #3593: the same held-directory and *at(2) leaves AOT embeds.
+        include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/FileHandles.rs");
 
         #[derive(Clone, Debug, PartialEq)]
         pub enum EnvError {

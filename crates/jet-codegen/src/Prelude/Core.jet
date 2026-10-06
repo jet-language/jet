@@ -100,8 +100,8 @@ module core.encoding.xml exports { XMLCanonical, XMLCanonicalMode, XMLEncoding, 
 source_module core.encoding.xml path Core/encoding/xml.jet alias core_core_encoding_xml owns { attribute, canonical, content, parse, parse_bytes, parse_with, reader, root, to_bytes, to_string }
 module core.event exports { async_result, decision_hook, hook, new, policy_sync, scope, with_policy, Event, AsyncEvent, Hook, DecisionHook, HookDecision, HookOutcome, Subscription, EventScope, EventPolicy, EventTrace, AsyncPolicy, Overflow, FailurePolicy, DispatchReport, DispatchFailure, DispatchState, HookPolicy, EventConfigError } types { Event:generic(1), AsyncEvent:generic(2), Hook:generic(2), DecisionHook:generic(2), HookDecision:generic(2), HookOutcome:generic(2), Subscription:plain, EventScope:plain, EventPolicy:plain, EventTrace:plain, AsyncPolicy:plain, Overflow:plain(Block|DropNewest|DropOldest), FailurePolicy:plain(StopFirst|Collect|Log|Ignore), DispatchReport:generic(1), DispatchFailure:generic(1), DispatchState:plain(Delivered|HandlerFailed|DroppedNewest|DroppedOldest|Closed|Cancelled|DeadlineExceeded), HookPolicy:plain(FirstCancelElseTransform), EventConfigError:plain(InvalidCapacity) } depends_on [core.mem]
 source_module core.event path Core/event/event.jet alias core_core_event owns { async_result, decision_hook, hook, new, policy_sync, scope, with_policy }
-module core.files exports { absolute, append, append_all, basename, canonicalize, commonpath, copy, copy_dir, create, create_dir, create_dir_all, cwd, getcwd, dirname, exists, expanduser, fnmatch, fsync, glob, hard_link, home, is_absolute, is_dir, is_file, is_symlink, join, list_dir, listdir, lock, map, open, read, read_at, read_bytes, read_lines, read_link, relative, relocate, remove, remove_all, remove_dir, rename, scope, set_mode, stat, stem, suffix, symlink, temp_dir, temp_file, touch, walk, walk_files, walk_parallel, which, with_name, with_suffix, write, write_at, write_atomic, write_bytes, write_lines, DirEntry, FileLock, FileReader, FileScope, FileWriter, MappedFile, Stat, TempDir, TempFile, WalkEntry, collapse, commonprefix, copy2, ensure_parent, expandvars, fnmatch_filter, getmtime, getsize, glob_match, glob_recursive, is_abs, is_mount, lexists, makedirs, move, normpath, rmtree, samefile, split, split_slash, splitext, replace, relativeto, chmod, copyfile, mkdir, rmdir, unlink, joinpath, chdir, scandir, gettempdir, getenv, chown, is_fifo, is_socket, lstat, mkdtemp, mktemp, readdir, truncate, walkdir, createdirectory, filesize, delete, cp, rm, realpath, pwd, tmpdir, topath, cd } types { FileScope:plain, DirEntry:plain, FileLock:plain, FileReader:plain, FileWriter:plain, MappedFile:plain, Stat:plain, TempDir:plain, TempFile:plain, WalkEntry:plain } depends_on [core.text, core.sys]
-source_module core.files path Core/files/files.jet alias core_core_files owns { basename, is_absolute, is_file, scope, stem, suffix, with_name, with_suffix, is_abs, split_slash, collapse, join, dirname, glob_match, relative, is_symlink, cwd, home, expanduser, touch, relocate, replace, relativeto, chmod, copy2, copyfile, mkdir, rmdir, unlink, joinpath, getcwd, chdir, scandir, gettempdir, getenv, read_lines, write_lines, commonpath, fnmatch, which, splitext, split, normpath, getsize, getmtime, lexists, samefile, commonprefix, expandvars, move, rmtree, makedirs, listdir, glob_recursive, fnmatch_filter, is_mount, ensure_parent, readdir, walkdir, truncate, createdirectory, filesize, delete, cp, rm, realpath, pwd, tmpdir, topath, cd }
+module core.files exports { absolute, append, append_all, basename, canonicalize, commonpath, copy, copy_dir, create, create_dir, create_dir_all, cwd, getcwd, dirname, exists, expanduser, fnmatch, fsync, glob, hard_link, home, is_absolute, is_dir, is_file, is_symlink, join, list_dir, listdir, lock, map, open, open_directory, read, read_at, read_bytes, read_lines, read_link, relative, relocate, remove, remove_all, remove_dir, rename, scope, set_mode, stat, stem, suffix, symlink, temp_dir, temp_file, touch, walk, walk_files, walk_parallel, which, with_name, with_suffix, write, write_at, write_atomic, write_bytes, write_lines, extended_attribute, extended_attribute_names, set_extended_attribute, CreateIfExists, DirEntry, Directory, FileID, FileLock, FileReader, FileScope, FileWriter, LinkPolicy, MappedFile, RenameIfExists, Stat, TempDir, TempFile, WalkEntry, collapse, commonprefix, copy2, ensure_parent, expandvars, fnmatch_filter, getmtime, getsize, glob_match, glob_recursive, is_abs, is_mount, lexists, makedirs, move, normpath, rmtree, samefile, split, split_slash, splitext, replace, relativeto, chmod, copyfile, mkdir, rmdir, unlink, joinpath, chdir, scandir, gettempdir, getenv, chown, is_fifo, is_socket, lstat, mkdtemp, mktemp, readdir, truncate, walkdir, createdirectory, filesize, delete, cp, rm, realpath, pwd, tmpdir, topath, cd } types { FileScope:plain, DirEntry:plain, FileLock:plain, FileReader:plain, FileWriter:plain, MappedFile:plain, Stat:plain, TempDir:plain, TempFile:plain, WalkEntry:plain, Directory:plain, FileID:plain, CreateIfExists:plain(Replace|Refuse), LinkPolicy:plain(Follow|Refuse), RenameIfExists:plain(Replace|Refuse|Swap) } depends_on [core.text, core.sys, core.time]
+source_module core.files path Core/files/files.jet alias core_core_files owns { basename, is_absolute, is_file, scope, stem, suffix, with_name, with_suffix, is_abs, split_slash, collapse, join, dirname, glob_match, relative, is_symlink, cwd, home, expanduser, touch, relocate, replace, relativeto, chmod, copy2, copyfile, mkdir, rmdir, unlink, joinpath, getcwd, chdir, scandir, gettempdir, getenv, read_lines, write_lines, commonpath, fnmatch, which, splitext, split, normpath, getsize, getmtime, lexists, samefile, commonprefix, expandvars, move, rmtree, makedirs, listdir, glob_recursive, fnmatch_filter, is_mount, ensure_parent, readdir, walkdir, truncate, createdirectory, filesize, delete, cp, rm, realpath, pwd, tmpdir, topath, cd, open, create, append, stat, lstat, rename, open_directory, extended_attribute_names, extended_attribute, set_extended_attribute }
 module core.encoding.yaml exports { decode, parse, to_string } depends_on [core.encoding, core.encoding.json]
 source_module core.encoding.yaml path Core/encoding/yaml.jet alias core_core_encoding_yaml owns { parse }
 module core.files.path exports { Path, as_posix, cwd, exists, glob, home, is_absolute, is_dir, is_file, is_relative, is_symlink, iterdir, join, join_path, mkdir, name, of, parent, parts, read_bytes, read_text, relative_to, rename, replace, resolve, rmdir, show, stem, suffix, suffixes, touch, unlink, with_name, with_stem, with_suffix, write_bytes, write_text, absolute, anchor, append_text, as_uri, as_windows, chmod, collapse, copy_file, copy_into, drive, ensure_dir, equals, expanduser, from_parts, hardlink_to, is_empty, is_relative_to, join_many, match_glob, match_path, mtime, open_read, open_write, parents, read_lines, readlink, resolve_pure, rglob, rmtree, root, samefile, size, stat, symlink_to, walk, which, with_segments, write_lines, path } types { Path:plain } depends_on [core.files]
@@ -292,12 +292,9 @@ dispatcher_row plain core.files create_dir_all | CoreCallRecord::new( "core.file
 dispatcher_row plain core.files is_dir | CoreCallRecord::new("core.files", "is_dir", "jet_std_fs_is_dir", true, &[true])
 dispatcher_row plain core.files copy | CoreCallRecord::new("core.files", "copy", "jet_std_fs_copy", true, &[true, true])
 dispatcher_row plain core.files copy_dir | CoreCallRecord::new( "core.files", "copy_dir", "jet_std_fs_copy_dir", true, &[true, true], )
-dispatcher_row plain core.files rename | CoreCallRecord::new( "core.files", "rename", "jet_std_fs_rename", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.files symlink | CoreCallRecord::new( "core.files", "symlink", "jet_std_fs_symlink", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.files read_link | CoreCallRecord::new( "core.files", "read_link", "jet_std_fs_read_link", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.files hard_link | CoreCallRecord::new( "core.files", "hard_link", "jet_std_fs_hard_link", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-dispatcher_row plain core.files stat | CoreCallRecord::new("core.files", "stat", "jet_std_fs_stat", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-dispatcher_row plain core.files lstat | CoreCallRecord::new("core.files", "lstat", "jet_std_fs_stat", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.files is_fifo | CoreCallRecord::new("core.files", "is_fifo", "jet_std_fs_is_fifo", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.files is_socket | CoreCallRecord::new("core.files", "is_socket", "jet_std_fs_is_socket", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.files chown | CoreCallRecord::new("core.files", "chown", "jet_std_fs_chown", true, &[true, false, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
@@ -1033,9 +1030,20 @@ dispatcher_row plain core.encoding.base32 b32encode | CoreCallRecord::new( "core
 dispatcher_row plain core.encoding.base32 b32decode | CoreCallRecord::new( "core.encoding.base32", "b32decode", "jet_std_base32_decode", true, &[true], )
 dispatcher_row plain core.encoding.base32 b32hexencode | CoreCallRecord::new( "core.encoding.base32", "b32hexencode", "jet_std_base32hex_encode", true, &[true], )
 dispatcher_row plain core.encoding.base32 b32hexdecode | CoreCallRecord::new( "core.encoding.base32", "b32hexdecode", "jet_std_base32hex_decode", true, &[true], )
-dispatcher_row plain core.files open | CoreCallRecord::new("core.files", "open", "jet_std_files_open", true, &[true])
-dispatcher_row plain core.files create | CoreCallRecord::new( "core.files", "create", "jet_std_files_create", true, &[true], )
-dispatcher_row plain core.files append | CoreCallRecord::new( "core.files", "append", "jet_std_files_append", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.files __open_reader | CoreCallRecord::new("core.files", "__open_reader", "jet_std_files_open_reader", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.files __open_writer | CoreCallRecord::new("core.files", "__open_writer", "jet_std_files_open_writer", true, &[false, true, false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.files __open_directory | CoreCallRecord::new("core.files", "__open_directory", "jet_std::jet_fs_directory_open", true, &[false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.files __close_directory | CoreCallRecord::new("core.files", "__close_directory", "jet_std::jet_fs_directory_close", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.files __fsync_directory | CoreCallRecord::new("core.files", "__fsync_directory", "jet_std::jet_fs_directory_fsync", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.files __create_directory | CoreCallRecord::new("core.files", "__create_directory", "jet_std::jet_fs_directory_create", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.files __list_directory | CoreCallRecord::new("core.files", "__list_directory", "jet_std::jet_fs_directory_list", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.files __stat_at | CoreCallRecord::new("core.files", "__stat_at", "jet_std::jet_fs_stat_at", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.files __rename_at | CoreCallRecord::new("core.files", "__rename_at", "jet_std::jet_fs_rename_at", true, &[false, true, false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.files __remove_at | CoreCallRecord::new("core.files", "__remove_at", "jet_std::jet_fs_remove_at", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.files __read_link_at | CoreCallRecord::new("core.files", "__read_link_at", "jet_std::jet_fs_read_link_at", true, &[false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.files __xattr_names | CoreCallRecord::new("core.files", "__xattr_names", "jet_std::jet_fs_xattr_names", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.files __xattr_get | CoreCallRecord::new("core.files", "__xattr_get", "jet_std::jet_fs_xattr_get", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.files __xattr_set | CoreCallRecord::new("core.files", "__xattr_set", "jet_std::jet_fs_xattr_set", true, &[true, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.net.url parse | CoreCallRecord::new("core.net.url", "parse", "jet_url_parse", true, &[true])
 dispatcher_row plain core.net.url from_parts | CoreCallRecord::new( "core.net.url", "from_parts", "jet_url_from_parts", true, &[true, true, true, true, true], )
 dispatcher_row plain core.net.url file | CoreCallRecord::new("core.net.url", "file", "jet_url_file", true, &[true])
@@ -2104,7 +2112,7 @@ ambient_route core.sys getsid
 ambient_route core.sys times
 ambient_route core.sys wait
 ambient_route core.testing fixture
-ambient_route core.files rename
+ambient_route core.files __rename_at
 ambient_route core.files fsync
 ambient_route core.files symlink
 ambient_route core.files walk
@@ -2113,11 +2121,20 @@ ambient_route core.files walk_files
 ambient_route core.files glob
 ambient_route core.files canonicalize
 ambient_route core.files absolute
-ambient_route core.files stat
+ambient_route core.files __stat_at
 ambient_route core.files set_mode
-ambient_route core.files open
-ambient_route core.files create
-ambient_route core.files append
+ambient_route core.files __open_reader
+ambient_route core.files __open_writer
+ambient_route core.files __open_directory
+ambient_route core.files __close_directory
+ambient_route core.files __fsync_directory
+ambient_route core.files __create_directory
+ambient_route core.files __list_directory
+ambient_route core.files __remove_at
+ambient_route core.files __read_link_at
+ambient_route core.files __xattr_names
+ambient_route core.files __xattr_get
+ambient_route core.files __xattr_set
 ambient_route core.files hard_link
 ambient_route core.files lock
 ambient_route core.files read_link

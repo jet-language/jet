@@ -59,7 +59,7 @@ const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("core.encoding.toml", &["core.encoding"]),
     ("core.encoding.xml", &["core.encoding"]),
     ("core.event", &["core.mem"]),
-    ("core.files", &["core.text", "core.sys"]),
+    ("core.files", &["core.text", "core.sys", "core.time"]),
     ("core.encoding.yaml", &["core.encoding", "core.encoding.json"]),
     ("core.files.path", &["core.files"]),
     ("core.game.raylib", &["core.game"]),

@@ -6,7 +6,20 @@
             e.raw_os_error().map(i64::from),
             Some(e.to_string()),
         );
+        // D-CORE-FILEERROR1=A: EEXIST/ERROR_FILE_EXISTS/ERROR_ALREADY_EXISTS
+        // are AlreadyExists; ENOTSUP/EOPNOTSUPP/ENOSYS/ERROR_NOT_SUPPORTED are
+        // Unsupported. Rust already sorts all but ENOTSUP into these kinds.
+        let not_supported = matches!(
+            e.raw_os_error(),
+            Some(code) if (cfg!(target_os = "linux") && code == 95)
+                || (cfg!(target_os = "macos") && (code == 45 || code == 102))
+        );
+        if not_supported {
+            return IOError::Unsupported(context);
+        }
         match e.kind() {
+            std::io::ErrorKind::AlreadyExists => IOError::AlreadyExists(context),
+            std::io::ErrorKind::Unsupported => IOError::Unsupported(context),
             std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
                 IOError::InvalidInput(context)
             }
