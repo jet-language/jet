@@ -8,6 +8,8 @@
 use core.files as cli_files
 use core.sys as cli_sys
 use jet_foundation.[
+    AppAuthorizedDirectory,
+    AppAuthorizedDirectoryEntry,
     CompilerThreads,
 ]
 use jet_driver.[
@@ -42,6 +44,11 @@ JET_CLI_PROJECT_MARKERS :: [String]{"package.jet", "pkg.jet", "workspace.jet", "
 // Names the source walk never enters or reads (Authority.rs
 // `discover_source_files_from`), besides every name that starts with `.`.
 JET_CLI_SKIPPED_NAMES :: [String]{"target", "build", "node_modules", "bin"}
+
+// What the host's lossy name decoding puts in place of bytes that are not
+// UTF-8 (Rust `to_string_lossy`). Until Core lists raw names (CoreFiles3's
+// `Directory.list`), a retained name holding it counts as non-Unicode.
+JET_CLI_LOSSY_REPLACEMENT :: "�"
 
 // Generated foreign-binding caches and the sidecars each binding may carry
 // (Native.rs `collect_authorized_foreign_cache_files`).
@@ -89,12 +96,28 @@ fn jet_cli_is_project_boundary(directory: String) -[FS]> Bool Never! {
 // Authority.rs `discover_source_files_from`: entries in name order, so the
 // files come out in relative-path order; a symlinked directory is skipped and
 // any other symlink refused; dot names, build output, and nested projects stay
-// out. Returns the problem that stopped the walk.
-fn jet_cli_walk_sources(root: String, relative: String, depth: Int, files: &[JetDriverAuthorizedSourceFile]) -[FS]> String? Never! {
+// out. With `retain_directories`, every walked directory's complete immediate
+// listing (taken before those filters, empty directories included) goes to
+// `directories` for App convention routing. Returns the problem that stopped
+// the walk.
+fn jet_cli_walk_sources(root: String, relative: String, depth: Int, files: &[JetDriverAuthorizedSourceFile], directories: &[AppAuthorizedDirectory], retain_directories: Bool) -[FS]> String? Never! {
     directory :: if relative == "" -> root else -> jet_cli_authority_path(root, relative)
-    names := cli_files.listdir(directory) ?? return Val("cannot list `{directory}`: {err}")
-    &names.sort()
-    loop name in names {
+    // Core lists a directory's entries already sorted by name (D-LSDIR1).
+    listing :: cli_files.list_dir(directory) ?? return Val("cannot list `{directory}`: {err}")
+    if retain_directories {
+        entries := [AppAuthorizedDirectoryEntry]{}
+        loop entry in listing {
+            &entries.push(AppAuthorizedDirectoryEntry{
+                name: entry.name,
+                path: jet_cli_authority_path(directory, entry.name),
+                is_directory: entry.is_dir,
+                name_is_unicode: !entry.name.contains(JET_CLI_LOSSY_REPLACEMENT),
+            })
+        }
+        &directories.push(AppAuthorizedDirectory{path: directory, entries: entries})
+    }
+    loop entry in listing {
+        name :: entry.name
         child :: if relative == "" -> name else -> "{relative}/{name}"
         path :: jet_cli_authority_path(root, child)
         if cli_files.is_symlink(path) {
@@ -105,7 +128,7 @@ fn jet_cli_walk_sources(root: String, relative: String, depth: Int, files: &[Jet
         if cli_files.is_dir(path) {
             if jet_cli_is_project_boundary(path) -> next
             if depth >= JET_CLI_MAX_TREE_DEPTH -> return Val("the source walk exceeds the {JET_CLI_MAX_TREE_DEPTH}-level depth bound at `{path}`")
-            if jet_cli_walk_sources(root, child, depth + 1, &files) == .Val(problem) -> return Val(problem)
+            if jet_cli_walk_sources(root, child, depth + 1, &files, &directories, retain_directories) == .Val(problem) -> return Val(problem)
             next
         }
         if !name.ends_with(".jet") -> next
@@ -250,7 +273,8 @@ pub fn jet_cli_compile_entry(file: String, color: Bool, threads: Int?, mode: Jet
     root :: jet_cli_source_root(entry_path)
     root_stat :: cli_files.stat(root) ?? return jet_cli_refused("can't securely read the source root `{root}`", "check that the directory exists and is readable", color)
     files := [JetDriverAuthorizedSourceFile]{}
-    if jet_cli_walk_sources(root, "", 0, &files) == .Val(problem) {
+    directories := [AppAuthorizedDirectory]{}
+    if jet_cli_walk_sources(root, "", 0, &files, &directories, true) == .Val(problem) {
         return jet_cli_refused("can't securely read the sources under `{root}`: {problem}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
     }
     entry_found := false
@@ -272,7 +296,7 @@ pub fn jet_cli_compile_entry(file: String, color: Bool, threads: Int?, mode: Jet
     }
     root_identity :: jet_cli_identity_key("directory", root_stat)
     snapshot :: JetDriverAuthorizedSourceSnapshot{
-        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root, identity: root_identity, allow_hardlinks: false, files: files, foreign_cache_files: caches}},
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root, identity: root_identity, allow_hardlinks: false, files: files, foreign_cache_files: caches, directories: directories}},
         entry_root_identity: root_identity,
         entry_path: entry_path,
     }

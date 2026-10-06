@@ -24,6 +24,7 @@ jet_driver_mask_inline_package,
 jet_driver_parse_user_source,
 ]
 use jet_foundation.[
+AppAuthorizedDirectory,
 Diagnostic,
 DIAGNOSTIC_ERROR,
 ImportKind,
@@ -483,7 +484,8 @@ fn jet_cli_function_count(program: Program, wanted: String) -> Int Never! {
 // Authority.rs `discover_source_files` under `root`, or the problem that
 // stopped the walk.
 fn jet_cli_discover_sources(root: String, files: &[JetDriverAuthorizedSourceFile]) -[FS]> String? Never! {
-    jet_cli_walk_sources(root, "", 0, &files)
+    unretained := [AppAuthorizedDirectory]{}
+    jet_cli_walk_sources(root, "", 0, &files, &unretained, false)
 }
 
 // Package/mod.rs `source_files_checked`: the package's discovered sources
