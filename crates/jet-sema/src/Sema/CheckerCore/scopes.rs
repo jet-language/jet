@@ -287,6 +287,7 @@ impl<'a> Checker<'a> {
     /// or the flow-narrowed refinement of it when a proven test recorded one
     /// at the same depth or deeper (D-FLOWTYPE1).
     pub(crate) fn lookup(&self, name: &str) -> Option<&LocalInfo> {
+        jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::ScopeLookups, 1);
         if name == "_" {
             return None;
         }
@@ -304,6 +305,7 @@ impl<'a> Checker<'a> {
     /// Keep the permission fact on the declaration; do not create a second
     /// mutable-binding table beside `consts`.
     pub(crate) fn is_global_mutable_binding(&self, name: &str) -> bool {
+        jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::ItemScans, self.items.len());
         self.items.iter().any(|item| {
             matches!(
                 item,

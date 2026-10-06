@@ -767,6 +767,8 @@ fn mir_program_uses_arrow(program: &MirProgram) -> bool {
 pub fn emit_mir_program(program: &MirProgram, config: &MirRustConfig) -> String {
     let mut out = String::new();
     emit_mir_program_into(program, config, &mut out);
+    jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::FunctionsEmitted, program.functions.len());
+    jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::EmittedBytes, out.len());
     out
 }
 
