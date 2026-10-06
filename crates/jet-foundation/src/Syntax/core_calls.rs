@@ -1407,7 +1407,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 1a943765bc81026e393f994b66eb7de3912d7fbba91229d732a2644bf3b662e4
+// Source SHA-256: ff0a7cee384626a27ad179fd537086e8cf2fcbafe2b575a5d5b6bb4f63f35a51
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1587,7 +1587,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.math", "from_bits"),
     ("core.math.random", "seed"),
     ("core.math.random", "split"),
-    ("core.crypto.random", "bytes"),
+    ("core.crypto.random", "__os_entropy"),
     ("core.time", "now"),
     ("core.time", "sleep"),
     ("core.time", "start"),
@@ -2096,7 +2096,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math.stats", "covariance_population", "jet_stats_covariance_population", true, &[true, true]),
     CoreCallRecord::new( "core.math.random", "seed", "jet_std_random_seed", true, &[false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.math.random", "getrandbits", "jet_std_random_getrandbits", true, &[false], ) .with_native_int_result(),
-    CoreCallRecord::new( "core.crypto.random", "bytes", "jet_std_crypto_random_bytes_controlled", true, &[false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new( "core.crypto.random", "__os_entropy", "jet_crypto_random_os_entropy", true, &[false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.math.random", "rng", "jet_std_rng_new", true, &[false]),
     CoreCallRecord::new( "core.math.random", "split", "jet_std_random_split", true, &[false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.time", "now", "jet_std_time_now", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),

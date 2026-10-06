@@ -1252,12 +1252,12 @@ fn jet_ffi_callback_panic(payload: Box<dyn std::any::Any + Send>) -> ! {
     }
 }
 
-/// A cryptographic random draw is intentionally not replayed by a
-/// deterministic world. Route the canonical AOT Core entry through this
-/// boundary so it cannot silently fall back to operating-system entropy.
-/// A missing or rejected provider is `None`; the Jet wrapper in
-/// `Core/crypto/random.jet` reports it as `CryptoError.Unavailable`.
-fn jet_std_crypto_random_bytes_controlled(n: i64) -> Option<Vec<u8>> {
+/// `core.crypto.random.__os_entropy`: the one host step behind the Jet
+/// `core.crypto.random.bytes` policy (bounds, length check and error meaning
+/// live in `Core/crypto/random.jet`). A cryptographic draw is never replayed by
+/// a deterministic world, so the boundary rejects it there; otherwise this is a
+/// single fail-closed OS CSPRNG fill. A rejected provider is `None`.
+fn jet_crypto_random_os_entropy(n: i64) -> Option<Vec<u8>> {
     jet_scheduler_world_reject_uncontrolled("entropy");
     jet_crypto_entropy_bytes(n).ok()
 }

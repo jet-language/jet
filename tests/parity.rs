@@ -2165,7 +2165,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         "ViewMut.join Covered (JoinSep)"
     );
     assert_eq!(
-        record(&records, Surface::Fixed, "core.crypto.random", "bytes").class,
+        record(&records, Surface::Fixed, "core.crypto.random", "__os_entropy").class,
         Class::Boundary
     );
 
