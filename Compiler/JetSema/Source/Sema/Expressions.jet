@@ -2972,9 +2972,12 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
             .Int(value, _, width, raw) -> return sema_expr_negative_integer(sema_expr_exact_integer_literal(value, raw), width, expected, span, environment, &diagnostics)
             // D-TYPE2-DEFAULT1: `-1.5` is one exact Decimal literal; the sign
             // folds into its spelling unless a Float carrier is expected.
-            .Float(_, _, _, raw) -> {
-                if raw == .Val(text) {
-                    if !sema_expr_expects_machine_float(expected) -> return sema_expr_expected(sema_expr_decimal_literal("-{text}", span), expected, environment, &diagnostics)
+            // Parentheses are transparent, so `-(2.5)` folds too (#4646).
+            .Float(_, _, _, _) | .Paren(_, _) -> {
+                if sema_failure_union_unparen(operand) == .Float(_, _, _, raw) {
+                    if raw == .Val(text) {
+                        if !sema_expr_expects_machine_float(expected) -> return sema_expr_expected(sema_expr_decimal_literal("-{text}", span), expected, environment, &diagnostics)
+                    }
                 }
             }
             else -> {}

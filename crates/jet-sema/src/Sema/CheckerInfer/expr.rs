@@ -4732,8 +4732,14 @@ impl<'a> Checker<'a> {
                     }
                     // D-TYPE2-DEFAULT1: `-1.5` is one exact Decimal literal,
                     // so the sign folds into its spelling before the operand
-                    // is inferred. A Float context keeps the machine path.
-                    if let Expr::Float(_, _, _, raw) = inner.as_mut() {
+                    // is inferred. Parentheses are transparent (D-FMTPARENS1),
+                    // so `-(2.5)` folds the same way (#4646). A Float context
+                    // keeps the machine path.
+                    let mut literal: &mut Expr = inner.as_mut();
+                    while let Expr::Paren(next, _) = literal {
+                        literal = next.as_mut();
+                    }
+                    if let Expr::Float(_, _, _, raw) = literal {
                         if raw.is_some()
                             && !matches!(self.expected_type, Some(Type::Float | Type::Float32))
                         {
