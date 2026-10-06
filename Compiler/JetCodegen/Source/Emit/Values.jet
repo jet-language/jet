@@ -1874,7 +1874,8 @@ fn jet_rust_emit_nonowning_drop_value(ctx: &JetRustEmitContext, function: MIRFun
 }
 
 // MIRRust unused_place_read: a discarded root read needs no owned copy.
-// Projected reads and operands retained outside the value-use rows stay live.
+// Projected reads and operands retained outside the value-use rows stay live:
+// scope deadlines, temporary place bases, and place index/range operands.
 fn jet_rust_emit_unused_place_read(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
     producer :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return false
     place_id := MIRPlaceID?{None}
@@ -1891,6 +1892,13 @@ fn jet_rust_emit_unused_place_read(ctx: &JetRustEmitContext, function: MIRFuncti
     loop place in function.places {
         if place.base == .Temporary(temporary) {
             if temporary == value -> return false
+        }
+        loop projection in place.projections {
+            if projection == {
+                .Index(_, index, _, _, _, _, _) -> { if index == value -> return false }
+                .Range(range, _, _) -> { if range == value -> return false }
+                else -> {}
+            }
         }
     }
     id :: place_id ?? return false

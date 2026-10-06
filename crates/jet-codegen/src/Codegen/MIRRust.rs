@@ -19852,7 +19852,9 @@ impl<'a> RustEmitter<'a> {
 
     /// A discarded root-place read (for example a lexical allocator context
     /// input) needs no owned SSA copy. Projected reads still perform their
-    /// checked access, and deadline/temporary-place consumers retain their slot.
+    /// checked access, and deadline/temporary-place consumers retain their slot,
+    /// as does an index or range operand of a place projection (the value-use
+    /// rows list instruction operands only).
     fn unused_place_read(&self, function: &MirFunction, value: MirValueId) -> bool {
         let Some(MirOperation::ReadPlace(place)) = self.value_definition(function, value) else {
             return false;
@@ -19860,7 +19862,12 @@ impl<'a> RustEmitter<'a> {
         self.place_row(function, *place).is_some_and(|place| place.projections.is_empty())
             && self.function_index(function).uses.get(&value).is_none_or(Vec::is_empty)
             && !function.scopes.iter().any(|scope| scope.deadline == Some(value))
-            && !function.places.iter().any(|place| place.base == MirPlaceBase::Temporary(value))
+            && !function.places.iter().any(|place| {
+                place.base == MirPlaceBase::Temporary(value)
+                    || place.projections.iter().any(|projection| matches!(projection,
+                        MirProjection::Index { index: operand, .. }
+                        | MirProjection::Range { range: operand, .. } if *operand == value))
+            })
     }
 
     fn prepare_partial_read(&self, node: &PartialMoveNode, fields: &[MirFieldId]) -> String {
