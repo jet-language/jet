@@ -3,6 +3,7 @@ use jet_foundation.[
     CompilerThreads,
     CompilerTraceSink,
     Diagnostic,
+    ImportDecl,
     Item,
     JetReleaseDevtoolsPolicy,
     MIRAllocatorPolicy,
@@ -19,6 +20,7 @@ use jet_foundation.[
     Record,
     RecordSection,
     Span,
+    TFunc,
     diagnostic_from_registry,
     diagnostic_registry_row,
     diagnostic_with_source_path,
@@ -31,6 +33,8 @@ use jet_foundation.[
     record_encode,
 ]
 use jet_sema.[
+    SemaCallSiteFact,
+    SemaNameReferenceFact,
     SemaRegistrationImportEdge,
     SemaSourceOrigin,
     SemaSourceSegment,
@@ -92,17 +96,26 @@ pub enum JetDriverCompileMode {
     Doc
 }
 
-// One user module of the checked bundle as `jet doc` reads it (Rust
-// `ProgramModule`: `alias`, `source`, `pub_file`, and the post-sema `items`,
-// so derived impls and inferred failure contracts are the ones the checker
-// settled). `path` is the module's display path: relative to the entry root
-// when beneath it, which is the stable path `jet doc` prints.
+// One user module of the checked bundle as `jet doc` and the semantic index
+// read it (Rust `ProgramModule`: `alias`, `source`, `pub_file`, the post-sema
+// `items`, and `block_spans`, so derived impls and inferred failure contracts
+// are the ones the checker settled). `path` is the module's display path:
+// relative to the entry root when beneath it, which is the stable path
+// `jet doc` prints. `module_name`, `functions`, `name_references`, and
+// `call_facts` are the module's checked rows (Rust `SemIndexEffectFacts`
+// summaries and the name ledger's references).
 pub struct JetDriverDocModule {
     pub path: String
     pub alias: String
     pub source: String
     pub pub_file: Bool
     pub items: [Item]
+    pub block_spans: [Span]{[Span]{}}
+    pub imports: [ImportDecl]{[ImportDecl]{}}
+    pub module_name: String{""}
+    pub functions: [TFunc]{[TFunc]{}}
+    pub name_references: [SemaNameReferenceFact]{[SemaNameReferenceFact]{}}
+    pub call_facts: [SemaCallSiteFact]{[SemaCallSiteFact]{}}
 }
 
 // One Core library source module the host embeds, mirroring a Rust
