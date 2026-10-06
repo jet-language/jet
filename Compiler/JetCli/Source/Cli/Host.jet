@@ -159,22 +159,22 @@ fn jet_cli_compile_lint_a11y(file: String, source: String, color: Bool) -> JetDr
 // summary; stdout is the Rust of the dev-mode artifact: the runtime/Core
 // prefix (MIRRust `emit_mir_runtime_text` under the development devtools
 // policy) followed by the emitted program.
-fn jet_cli_compile_emit(file: String, source: String, color: Bool) -> JetDriverVerbOutput {
+fn jet_cli_compile_emit(file: String, source: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
     requires_run :: jet_cli_entry_lacks_run(source)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Program)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
-        .Compiled(result, snapshot) -> output = jet_cli_emit_result(file, source, color, requires_run, result, snapshot)
+        .Compiled(result, snapshot) -> output = jet_cli_emit_result(file, source, color, json, requires_run, result, snapshot)
     }
     output
 }
 
-fn jet_cli_emit_result(file: String, source: String, color: Bool, requires_run: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS]> JetDriverVerbOutput Never! {
+fn jet_cli_emit_result(file: String, source: String, color: Bool, json: Bool, requires_run: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS]> JetDriverVerbOutput Never! {
     diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
     if requires_run -> &diagnostics.push(jet_cli_no_run_diagnostic())
     errors :: jet_cli_errors(diagnostics)
-    if errors.len() > 0 -> return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    if errors.len() > 0 -> return jet_cli_emit_check_failure(file, source, errors, color, json)
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing `{file}`")
     lints := [Diagnostic]{}
@@ -1312,7 +1312,7 @@ pub fn jet_cli_main(args: [String]) -> Int {
         .New(name, template, annotated, quiet, color) -> output = jet_cli_new_project(name, template, annotated, quiet, color)
 
         .Doc(file, source, color, json, check) -> output = jet_cli_compile_doc(file, source, color, json, check)
-        .Emit(file, source, color) -> output = jet_cli_compile_emit(file, source, color)
+        .Emit(file, source, color, json) -> output = jet_cli_compile_emit(file, source, color, json)
         .Lint(file, source, color, notice) -> {
             jet_cli_write_notice(notice)
             output = jet_cli_compile_lint_a11y(file, source, color)

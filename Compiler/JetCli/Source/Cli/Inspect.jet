@@ -661,8 +661,8 @@ fn jet_cli_inspect_reads_bytes(file: String) -[FS]> Bool Never! {
 // CmdCompile.rs `run_compiler_api`: an unknown operation and an unreadable
 // input are versioned error documents (Rust `io::Error` wording); lex and
 // parse project the Jet lexer and parser over the inline-package-masked
-// source, and source-map reads the `// jet:` markers of generated Rust. The
-// checked-file projection (Compiler.rs `checked_value`) is not ported yet.
+// source, source-map reads the `// jet:` markers of generated Rust, and check
+// projects the checked file (InspectCompiler.jet, Compiler.rs `checked_value`).
 fn jet_cli_inspect_compiler(args: [String], color: Bool) -[FS]> JetCLIPlan Never! {
     operation :: if args.len() > 1 -> args[1] else -> ""
     file :: if args.len() > 2 -> args[2] else -> ""
@@ -674,7 +674,7 @@ fn jet_cli_inspect_compiler(args: [String], color: Bool) -[FS]> JetCLIPlan Never
         if !jet_cli_inspect_reads_bytes(file) -> return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: Permission denied (os error 13)")
         return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: stream did not contain valid UTF-8")
     }
-    if operation == "check" -> return jet_cli_not_ported("inspect compiler check", color)
+    if operation == "check" -> return JetCLIPlan.Done{output: jet_cli_inspect_compiler_check(file, cli_files.read(file) ?? "")}
     source :: cli_files.read(file) ?? ""
     // Compiler.rs `compiler_json` names source-map `source_map` in both the
     // action and the payload.
