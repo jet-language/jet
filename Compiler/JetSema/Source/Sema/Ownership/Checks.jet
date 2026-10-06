@@ -596,8 +596,8 @@ fn sema_ownership_mark_dirty(state: &SemaOwnershipState, row: Int) Never! {
 
 fn sema_ownership_note_undo(state: &SemaOwnershipState, row: Int) Never! {
     if state.forks == 0 -> return
-    fact :: state.declarations[row]
-    &state.trail.push(SemaOwnershipUndo{row: row, references: fact.references, writes: fact.writes, active: fact.active, single_use: fact.single_use})
+    undo :: SemaOwnershipUndo{row: row, references: state.declarations[row].references, writes: state.declarations[row].writes, active: state.declarations[row].active, single_use: state.declarations[row].single_use}
+    &state.trail.push(undo)
 }
 
 // The counts the full recount gives `row`: the first row of a key holds
