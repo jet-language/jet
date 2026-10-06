@@ -2681,6 +2681,12 @@ fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, me
 
     reactive := sema_call_try_reactive_handle_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if reactive.handled -> return reactive
+    // D-TRAIT-OVERLOAD1=A: Complex is not Numeric; its magnitude is its own
+    // `abs` method (a Float), lowered to the MathBuiltin route `math.abs` uses.
+    if receiver_value.ty == (Type.Named{name: "Complex"}) && method == "abs" && args.len() == 0 {
+        magnitude := sema_tir_expr(Type.Float, TExprKind.MathBuiltin{type_name: "Complex", function: "abs", args: [TExpr]{receiver_value}}, span)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(magnitude, expected, environment, &diagnostics)}
+    }
     game := sema_call_try_game_method(receiver, receiver_value, method, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if game == .Val(check) {
         if check.handled -> return check

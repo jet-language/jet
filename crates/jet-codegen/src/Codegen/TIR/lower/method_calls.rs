@@ -10203,6 +10203,27 @@ fn lower_method_call_impl(
             }
         }
     }
+    // D-TRAIT-OVERLOAD1=A: `z.abs()` on a Complex is its magnitude (a Float),
+    // lowered to the same MathBuiltin route `math.abs` used for Complex.
+    if let Some(handle) = recv_type {
+        if handle == Syntax::TYPE_COMPLEX
+            && method == "abs"
+            && args.is_empty()
+            && !cx.type_names.contains(handle)
+        {
+            return in_own_frame(|| {
+                let recv_t = lower_expr(receiver, cx, env);
+                return TExpr {
+                    ty: Type::Float,
+                    kind: TExprKind::MathBuiltin {
+                        type_name: Syntax::TYPE_COMPLEX.to_string(),
+                        func: "abs".to_string(),
+                        args: vec![recv_t],
+                    },
+                };
+            });
+        }
+    }
     // c109 Phase 13: a method ON a handle. The gate proved `recv_type ==
     // Some(<handle>)` + a covered handle op. Resolve the handle-receiver branch HERE
     // into a total `THandleOp` (reproducing the handle arms of `emit_builtin_method`),

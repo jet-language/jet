@@ -557,6 +557,12 @@ pub fn builtin_method_return(
         Type::Named(n) if n == crate::Syntax::TYPE_FRACTION => {
             crate::Numeric::fraction_method_return(method, arg_count)
         }
+        // D-TRAIT-OVERLOAD1=A: Complex is not Numeric (it has no order); its
+        // magnitude is its own `abs` method and answers a Float.
+        Type::Named(n) if n == Syntax::TYPE_COMPLEX => match (method, arg_count) {
+            ("abs", 0) => Some(Some(Type::Float)),
+            _ => None,
+        },
         Type::Named(n) if n == Syntax::TYPE_BUILD_CONTEXT => {
             build_context_method_return(method, arg_count)
         }
