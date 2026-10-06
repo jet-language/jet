@@ -276,17 +276,19 @@ fn fx_record_enum_projection_check() -> Bool Never! {
     true
 }
 
-// `cell :: 1337; p :: *cell; print(p.*)`: the raw-addressed local is a cell,
-// the Ptr word becomes a typed pointer only through jet_rt_sentry_read, and
-// the whole module lowers and lints with no issue.
+// `cell :: I64{1337}; p :: *cell; print(p.*)`: the raw-addressed local is a
+// cell, the Ptr word becomes a typed pointer only through jet_rt_sentry_read,
+// and the whole module lowers and lints with no issue. The pointee is a
+// physically trivial I64: a bitwise Ptr read of an owning value (exact Int,
+// String) is rejected, as the sentry read is a plain ptr::read.
 fn fx_raw_pointer_lowering_check() -> Bool Never! {
-    ptr_ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Ptr"), args: [MIRType]{fx_int()}})
+    ptr_ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Ptr"), args: [MIRType]{fx_i64()}})
     b := fx_builder()
-    cell :: fx_local(&b, "cell", fx_int(), mir_copy_ownership())
-    value :: fx_int_const(&b, 1337)
+    cell :: fx_local(&b, "cell", fx_i64(), mir_copy_ownership())
+    value :: fx_i64_const(&b, 1337)
     fx_do(&b, MIROperation.WritePlace{place: cell, value: value})
     pointer :: fx_copy(&b, ptr_ty, MIROperation.RawAddressOf{place: cell})
-    read :: fx_copy(&b, fx_int(), MIROperation.Deref{value: pointer})
+    read :: fx_copy(&b, fx_i64(), MIROperation.Deref{value: pointer})
     fx_print(&b, read)
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     program :: fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
