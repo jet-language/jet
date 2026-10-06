@@ -812,7 +812,7 @@ impl<'a> Checker<'a> {
                 }).collect();
                 let invocation = method_call(Expr::Ident(value_name.clone(), span), function.name.clone(), invocation_args, function.name_span);
                 let handler = Expr::Lambda(Box::new(crate::AST::Lambda {
-                    take_names: Vec::new(), params, result_type: None, error_type: None,
+                    take_names: Vec::new(), params,
                     effects: None, body: LambdaBody::Expr(Box::new(invocation)),
                     span: marker.span, meta: crate::AST::LambdaMeta {
                         http_route_source: Some(format!("{source_owner}::{}", function.name)),
@@ -825,8 +825,8 @@ impl<'a> Checker<'a> {
         }
         *expression = Expr::CallValue {
             callee: Box::new(Expr::Lambda(Box::new(crate::AST::Lambda {
-                take_names: Vec::new(), params: Vec::new(), result_type: None,
-                error_type: None, effects: None, body: LambdaBody::Block(body),
+                take_names: Vec::new(), params: Vec::new(),
+                effects: None, body: LambdaBody::Block(body),
                 span, meta: crate::AST::LambdaMeta::default(),
             }))),
             args: Vec::new(), span,
