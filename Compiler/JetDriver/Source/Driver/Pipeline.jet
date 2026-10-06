@@ -2299,8 +2299,18 @@ fn jet_driver_comptime_stage(
             &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, head.module_identity, "E0003", head.span, "the staged comptime declaration graph lost a registered module", "temporary interpreter MIR retains every module identity from the registered graph", "preserve the complete resolved module set while applying staged values"))
             return Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
         }
-        loop runtime_module in staged_modules {
-            if runtime_module.module_identity != graph.canonical_effect_module_identity -> &staging.runtime_modules.push(runtime_module)
+        // Assembly reads only the runtime modules' count and foreign rows,
+        // and foreign lowering reads nothing else when no module has foreign
+        // rows (jet_driver_comptime_bare_ok), so the bare modules stand in for
+        // a copy of every staged module then.
+        if staging.bare_ok {
+            loop index in 0..<graph.modules.len() {
+                if graph.modules[index].module_identity != graph.canonical_effect_module_identity -> &staging.runtime_modules.push(sema_comptime_bare_module(graph.modules[index]))
+            }
+        } else {
+            loop runtime_module in staged_modules {
+                if runtime_module.module_identity != graph.canonical_effect_module_identity -> &staging.runtime_modules.push(runtime_module)
+            }
         }
         session := jet_codegen_comptime_session(^staged_modules, load.source_files)
         // The rows of the values so far join the declared modules as later
