@@ -5040,9 +5040,10 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgra
                 if index < widen_to_vec.len() -> widen = widen_to_vec[index]
                 lowered := jet_codegen_lower_core_call_arg(&builder, program, args[index], index, canonical_record, widen)
                 // Bounded Core slots take I64, but a volatile store writes
-                // the checked T through Ptr<T> without narrowing exact Int.
-                typed_pointer_value :: canonical_record.module_name == "core.mem" && canonical_record.member == "volatile_write" && index == 1
-                if !typed_pointer_value && index < canonical_record.signature.borrow_mask.len() && !canonical_record.signature.borrow_mask[index] {
+                // the checked T through Ptr<T> and `keep<T>` returns its
+                // argument at the checked type: neither narrows exact Int.
+                typed_carrier_value :: (canonical_record.module_name == "core.mem" && canonical_record.member == "volatile_write" && index == 1) || (canonical_record.module_name == "core.prelude" && canonical_record.member == "keep")
+                if !typed_carrier_value && index < canonical_record.signature.borrow_mask.len() && !canonical_record.signature.borrow_mask[index] {
                     lowered.value = jet_codegen_builtin_native_int(&builder, program, lowered.value, args[index].ty, args[index].span)
                 }
                 &lowered_args.push(lowered)
