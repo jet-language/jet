@@ -25,7 +25,7 @@ impl EncodingLimits {
 
 // BEGIN GENERATED CORE ENCODING FORMATS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 28572868b459addaa191864a3f3652f6ae8a0a97e45f258ac7798b656dcd9673
+// Source SHA-256: 7cd20e413ae41b40e56d6f371a62780aa442736aa1612a14ee307ada34c260c8
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub enum EncodingFormat {
     JSON,

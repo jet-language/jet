@@ -3762,7 +3762,7 @@ fn core_fixed_sig_impl(
         ("core.files", "__list_directory") => Some((
             vec![(read, Type::Int)],
             Some(result_ty(
-                Type::List(Box::new(Type::Named("DirEntry".to_string()))),
+                Type::List(Box::new(Type::List(Box::new(u8_ty())))),
                 io.clone(),
             )),
         )),

@@ -1408,7 +1408,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 28572868b459addaa191864a3f3652f6ae8a0a97e45f258ac7798b656dcd9673
+// Source SHA-256: 7cd20e413ae41b40e56d6f371a62780aa442736aa1612a14ee307ada34c260c8
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1522,6 +1522,9 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.files", "__xattr_names"),
     ("core.files", "__xattr_get"),
     ("core.files", "__xattr_set"),
+    ("core.files", "__reader_stat"),
+    ("core.files", "__writer_stat"),
+    ("core.files", "__writer_set_mode"),
     ("core.files", "hard_link"),
     ("core.files", "lock"),
     ("core.files", "read_link"),
