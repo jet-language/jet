@@ -43,15 +43,14 @@ pub struct MirFragmentCoreSourceModule {
     /// Every top-level constant of the module, so a demanded body reads its
     /// same-module tables (`C_SHA256_K[t]`) as runtime lowering does.
     pub constants: Vec<crate::AST::ConstDef>,
-    /// The module's own `use` aliases of user modules and Core runtime units,
-    /// source alias to the imported module's `core_source_bodies` key (its
-    /// loader alias).
+    /// User file module: its own `use` aliases, source alias to the imported
+    /// module's `core_source_bodies` key (its loader alias). Empty for Core.
     pub module_imports: HashMap<String, String>,
-    /// Member-imported functions of those modules (`use c.[f]`), local name
-    /// to (`core_source_bodies` key, function name).
+    /// User file module: member-imported functions (`use c.[f]`), local name
+    /// to (`core_source_bodies` key, function name). Empty for Core.
     pub imported_functions: HashMap<String, (String, String)>,
-    /// Declared signatures of those cross-module callees, keyed by (source
-    /// alias or local name, function name).
+    /// User file module: declared signatures of its cross-module callees,
+    /// keyed by (source alias or local name, function name).
     pub import_signatures: HashMap<(String, String), MirFragmentCoreSourceSignature>,
     /// User file module: its source type spellings (`Point`, `c.Shape`) to
     /// canonical `package::module::Type` identities. Empty for Core.

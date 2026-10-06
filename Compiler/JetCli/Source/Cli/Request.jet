@@ -227,7 +227,7 @@ pub fn jet_cli_compile_file(file: String, color: Bool, emit_rust: Bool, threads:
     loop row in JET_CLI_CORE_SOURCE_ROWS {
         core_path :: jet_cli_authority_path(toolchain, row.path)
         body :: cli_files.read(core_path) ?? return jet_cli_refused("can't read the Core library source `{core_path}`", "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`", color)
-        &core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, source: body})
+        &core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, source: body})
     }
     root_identity :: jet_cli_identity_key("directory", root_stat)
     snapshot :: JetDriverAuthorizedSourceSnapshot{

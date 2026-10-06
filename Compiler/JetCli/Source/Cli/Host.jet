@@ -213,7 +213,7 @@ enum JetCLIBuilt {
 
 // Write `.jet/build/<stem>` in the source root for a compile with no errors,
 // through the backend the profile selects; `command` is the verb asking.
-fn jet_cli_build_binary(file: String, command: String, color: Bool, release: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[FS, Env, Exec, Time.Wait]> JetCLIBuilt Never! {
+fn jet_cli_build_binary(file: String, command: String, color: Bool, release: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetCLIBuilt Never! {
     if result.internal_problem == .Val(problem) -> return JetCLIBuilt.Failed{output: jet_cli_ice(problem)}
     if !result.complete -> return JetCLIBuilt.Failed{output: jet_cli_ice("the Jet compiler stopped before finishing `{file}`")}
     root :: snapshot.roots[0].canonical_path
@@ -381,7 +381,7 @@ fn jet_cli_compile_test(file: String, source: String, color: Bool, verbose: Bool
         &stderr_handle.write(options.status).drop("jet stderr")
     }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color, false, threads, JetDriverCompileMode.Test)
+    compiled :: jet_cli_compile_file(file, color, true, threads, JetDriverCompileMode.Test)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
         .Compiled(result, snapshot) -> output = jet_cli_test_result(file, source, color, verbose, options, result, snapshot)

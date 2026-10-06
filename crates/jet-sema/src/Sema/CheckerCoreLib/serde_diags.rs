@@ -198,11 +198,6 @@ pub(crate) fn unknown_core_module(module: &str, span: Span) -> Diagnostic {
     if let Some(diagnostic) = Syntax::retired_core_module_diagnostic(module, span) {
         return diagnostic;
     }
-    if let Some(diagnostic) =
-        jet_foundation::CoreSourceParts::core_private_unit_diagnostic(module, span)
-    {
-        return diagnostic;
-    }
     Diagnostic::error(
         "E1001",
         format!("there is no core module `{module}`"),
