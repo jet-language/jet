@@ -479,7 +479,7 @@ fn jet_cli_doc_collect_items(items: [Item], unit: JetCLIDocUnit, parent: String,
 
 // Build.rs `function_parameter_parts` with `fn_signature`'s access sigils and
 // written defaults; `self` is not a call parameter.
-fn jet_cli_doc_parameter_parts(params: [Param], source: String) -> [String] Never! {
+fn jet_cli_doc_parameter_parts(params: [Param], source: String) -> [String] {
     shown_params := [Param]{}
     loop parameter in params {
         if parameter.name != "self" -> &shown_params.push(parameter)
@@ -516,7 +516,7 @@ fn jet_cli_doc_parameter_parts(params: [Param], source: String) -> [String] Neve
 // Build.rs `fn_signature` for a member fact: the call surface, the effect
 // ceiling, returned views, and the effective failure route. Callable
 // `#Policy` rows are not rendered.
-fn jet_cli_doc_member_signature(function: Func, source: String) -> String Never! {
+fn jet_cli_doc_member_signature(function: Func, source: String) -> String {
     contract :: failure_contract_of_function(function.return_type, function.return_type_span)
     shown := [String]{}
     if function.declared_effects == .Val(rows) {
@@ -551,7 +551,7 @@ fn jet_cli_doc_define_function(index: &JetCLIDocIndex, module_path: String, func
     &index.definitions.push(JetCLIDocDefinition{module_path: module_path, name: function.name, start: function.name_span.start, end: function.name_span.end, contract: Val(failure_contract_of_function(function.return_type, function.return_type_span)), nominal: false})
 }
 
-fn jet_cli_doc_define_trait_block(index: &JetCLIDocIndex, unit: JetCLIDocUnit, owner: String, block: TraitImplBlock) Never! {
+fn jet_cli_doc_define_trait_block(index: &JetCLIDocIndex, unit: JetCLIDocUnit, owner: String, block: TraitImplBlock) {
     loop method in block.methods {
         &index.members.push(JetCLIDocMember{owner: owner, trait_name: block.trait_name, signature: jet_cli_doc_member_signature(method, unit.source)})
         jet_cli_doc_define_function(&index, unit.path, method)
@@ -561,7 +561,7 @@ fn jet_cli_doc_define_trait_block(index: &JetCLIDocIndex, unit: JetCLIDocUnit, o
 // The definitions and trait-impl members of one module, in the semindex
 // walk order (Build.rs `collect_item`): generic module bodies are not
 // indexed, code module bodies are.
-fn jet_cli_doc_index_items(index: &JetCLIDocIndex, unit: JetCLIDocUnit, items: [Item]) Never! {
+fn jet_cli_doc_index_items(index: &JetCLIDocIndex, unit: JetCLIDocUnit, items: [Item]) {
     loop item in items {
         if item == {
             .Func(function) -> jet_cli_doc_define_function(&index, unit.path, function)
@@ -675,7 +675,9 @@ fn jet_cli_doc_enrich(items: &[JetCLIDocItem], index: JetCLIDocIndex, modules: [
 fn jet_cli_doc_fence_is_jet(fence: String) -> Bool Never! {
     bytes :: fence.bytes()
     start := 0
-    loop start < bytes.len() && bytes[start] == (U8{96}) -> start += 1
+    loop start < bytes.len() && bytes[start] == (U8{96}) {
+        start += 1
+    }
     language :: jet_cli_doc_text(bytes, start, bytes.len()).trim()
     language == "" || jet_cli_ascii_lower(language) == "jet"
 }
@@ -893,7 +895,7 @@ fn jet_cli_doc_sort_tests(values: &[JetCLIDocTest]) Never! {
 
 // Docs.rs `build_doc_graph`: the projection of the checked modules, with the
 // application authority of the same checked program.
-pub fn jet_cli_build_doc_graph(modules: [JetDriverDocModule], effect_projection: JetCLIAuthority) -> JetCLIDocGraph Never! {
+pub fn jet_cli_build_doc_graph(modules: [JetDriverDocModule], effect_projection: JetCLIAuthority) -> JetCLIDocGraph {
     protocol_names := [String]{}
     loop doc_module in modules -> jet_cli_doc_collect_protocol_names(doc_module.items, &protocol_names)
     graph := JetCLIDocGraph{
