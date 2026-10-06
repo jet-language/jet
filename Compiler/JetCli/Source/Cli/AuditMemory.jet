@@ -40,7 +40,7 @@ fn jet_cli_memory_string(value: JetCLIStatusValue, name: String, line: Int) -> S
 
 fn jet_cli_memory_safe(value: JetCLIStatusValue, name: String, line: Int) -> String String! {
     text :: jet_cli_memory_string(value, name, line)
-    if text == "" || text.len() > 4096 || jet_cli_text_has_control(text) {
+    if text == "" || text.bytes().len() > 4096 || jet_cli_text_has_control(text) {
         return Err("memory ledger row {line} `{name}` is empty, unsafe, or too long")
     }
     Ok(text)
@@ -49,7 +49,9 @@ fn jet_cli_memory_safe(value: JetCLIStatusValue, name: String, line: Int) -> Str
 fn jet_cli_memory_uint(value: JetCLIStatusValue, name: String, line: Int) -> Int String! {
     field :: jet_cli_memory_field(value, name, line)
     number :: jet_cli_status_integer(Val(field)) ?? return Err("memory ledger row {line} `{name}` is not a non-negative integer")
-    if number < 0 -> return Err("memory ledger row {line} `{name}` is not a non-negative integer")
+    if number < 0 || number > 18446744073709551615 {
+        return Err("memory ledger row {line} `{name}` is not a non-negative integer")
+    }
     Ok(number)
 }
 
