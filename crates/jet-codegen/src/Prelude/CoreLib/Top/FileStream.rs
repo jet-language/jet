@@ -160,3 +160,135 @@ pub(crate) fn jet_std_file_writer_flush(
 pub(crate) fn jet_std_file_writer_path(writer: &JetFileWriter) -> String {
     writer.path.clone()
 }
+
+/// The largest count one `FileReader.read` call asks the system for; a larger
+/// `max` reads at most this many bytes per call.
+const JET_FILE_READ_CHUNK_LIMIT: usize = 1 << 24;
+
+/// #3593: read up to `max` bytes from the reader's current position. Bytes a
+/// previous `read_line` buffered come first. An empty result is end of file.
+pub(crate) fn jet_std_file_reader_read(
+    reader: &mut JetFileReader,
+    max: i64,
+) -> Result<Vec<u8>, jet_std::IOError> {
+    use std::io::Read;
+
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(reader.path.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
+    if max <= 0 {
+        return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+            jet_std::IOOperation::Read,
+            Some(reader.path.clone()),
+            None,
+            Some(format!("read needs a positive byte count, got {max}")),
+        )));
+    }
+    let want = usize::try_from(max).unwrap_or(usize::MAX).min(JET_FILE_READ_CHUNK_LIMIT);
+    let mut bytes = vec![0u8; want];
+    loop {
+        match reader.inner.read(&mut bytes) {
+            Ok(count) => {
+                bytes.truncate(count);
+                return Ok(bytes);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => {
+                return Err(jet_std::io_error_at(jet_std::IOOperation::Read, &reader.path, error))
+            }
+        }
+    }
+}
+
+/// #3593 / D-CORE-FILESTAT1: metadata of the open file (fstat), as the row
+/// Core's `Stat` constructor reads.
+pub(crate) fn jet_std_file_reader_stat(reader: &JetFileReader) -> Result<Vec<i64>, jet_std::IOError> {
+    jet_std::jet_fs_stat_file(reader.inner.get_ref(), &reader.path)
+}
+
+/// #3593: write every byte of `bytes` (buffered; `flush`/`fsync` push them out).
+pub(crate) fn jet_std_file_writer_write_all(
+    writer: &mut JetFileWriter,
+    bytes: &Vec<u8>,
+) -> Result<(), jet_std::IOError> {
+    use std::io::Write;
+
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(writer.path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
+    writer
+        .inner
+        .write_all(bytes)
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, &writer.path, error))
+}
+
+/// #3593: flush buffered bytes, then make the file's data and metadata durable
+/// (fsync).
+pub(crate) fn jet_std_file_writer_fsync(writer: &mut JetFileWriter) -> Result<(), jet_std::IOError> {
+    use std::io::Write;
+
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(writer.path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
+    writer
+        .inner
+        .flush()
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Flush, &writer.path, error))?;
+    writer
+        .inner
+        .get_ref()
+        .sync_all()
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Flush, &writer.path, error))
+}
+
+/// #3593 / D-CORE-FILESTAT1: metadata of the open file (fstat). Bytes still
+/// buffered by `write_all`/`write_line` are not counted until a flush.
+pub(crate) fn jet_std_file_writer_stat(writer: &JetFileWriter) -> Result<Vec<i64>, jet_std::IOError> {
+    jet_std::jet_fs_stat_file(writer.inner.get_ref(), &writer.path)
+}
+
+/// #3593: set the open file's permission bits (fchmod). Windows keeps only the
+/// read-only flag: it is set when no write bit is present.
+pub(crate) fn jet_std_file_writer_set_mode(writer: &JetFileWriter, mode: i64) -> Result<(), jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(writer.path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
+    if !(0..=0o7777).contains(&mode) {
+        return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+            jet_std::IOOperation::Write,
+            Some(writer.path.clone()),
+            None,
+            Some(format!("mode {mode:#o} is outside 0o0..0o7777")),
+        )));
+    }
+    let file = writer.inner.get_ref();
+    let mut permissions = file
+        .metadata()
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, &writer.path, error))?
+        .permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(mode as u32);
+    }
+    #[cfg(not(unix))]
+    permissions.set_readonly(mode & 0o222 == 0);
+    file.set_permissions(permissions)
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, &writer.path, error))
+}

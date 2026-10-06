@@ -3552,8 +3552,10 @@ pub fn file_handle_method_return(
             "read_line" if n_args == 0 => {
                 Some(Some(result_ty(Type::Option(Box::new(Type::String)), io)))
             }
+            // #3593: `.read(max)` — up to `max` bytes; an empty list at EOF.
+            "read" if n_args == 1 => Some(Some(result_ty(Type::List(Box::new(u8_ty())), io))),
             // Wrong direction: writing to a reader.
-            "write_line" | "flush" => {
+            "write_line" | "flush" | "write_all" | "fsync" | "set_mode" => {
                 diags.push(Diagnostic::error(
                     "E2501",
                     format!("`{}` is not available on a read-only file handle", method),
@@ -3570,9 +3572,12 @@ pub fn file_handle_method_return(
             // `.write_line(text)` — writes a line followed by a newline.
             "write_line" if n_args == 1 => Some(Some(result_ty(unit.clone(), io.clone()))),
             // `.flush()` — ensure buffered bytes reach disk.
-            "flush" if n_args == 0 => Some(Some(result_ty(unit, io))),
+            "flush" if n_args == 0 => Some(Some(result_ty(unit.clone(), io.clone()))),
+            // #3593: `.write_all(bytes)` — buffered; `.fsync()` flushes then syncs.
+            "write_all" if n_args == 1 => Some(Some(result_ty(unit.clone(), io.clone()))),
+            "fsync" if n_args == 0 => Some(Some(result_ty(unit, io))),
             // Wrong direction: reading from a writer.
-            "lines" | "read_line" => {
+            "lines" | "read_line" | "read" => {
                 diags.push(Diagnostic::error(
                     "E2501",
                     format!("`{}` is not available on a write-only file handle", method),

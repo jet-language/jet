@@ -16037,8 +16037,11 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 "file_reader.path"
                     | "file_writer.path"
                     | "file_reader.read_line"
+                    | "file_reader.read"
                     | "file_writer.write_line"
                     | "file_writer.flush"
+                    | "file_writer.write_all"
+                    | "file_writer.fsync"
             )
         {
             let mut call_args = args.into_iter();

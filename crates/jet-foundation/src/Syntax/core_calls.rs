@@ -489,6 +489,8 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "__read_link_at",
                 "__xattr_names",
                 "__xattr_get",
+                "__reader_stat",
+                "__writer_stat",
             ],
         )
     {
@@ -527,6 +529,7 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "__rename_at",
                 "__remove_at",
                 "__xattr_set",
+                "__writer_set_mode",
             ],
         )
     {
@@ -679,9 +682,10 @@ pub const fn receiver_effect_leaf(type_name: &str, method: &str) -> Option<&'sta
         || (same_text(type_name, "Shared")
             && one_of(method, &["read", "edit", "guard_read", "guard_edit"]))
         || (same_text(type_name, "RealtimeStream") && same_text(method, "cancel"))
-        || (same_text(type_name, "FileReader") && one_of(method, &["lines", "read_line"]))
+        || (same_text(type_name, "FileReader") && one_of(method, &["lines", "read_line", "read"]))
         || (same_text(type_name, "FileScope") && same_text(method, "read"))
-        || (same_text(type_name, "FileWriter") && one_of(method, &["write_line", "flush"]))
+        || (same_text(type_name, "FileWriter")
+            && one_of(method, &["write_line", "flush", "write_all", "fsync"]))
         || ((same_text(type_name, "Stdout") || same_text(type_name, "Stderr"))
             && one_of(method, &["write", "write_line", "write_bytes", "flush"]))
         || (same_text(type_name, "ProcessChild") && same_text(method, "wait"))
@@ -1422,7 +1426,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 8eb382e9908bbfefc44c64663288de81bb43353c3f2db2cde7ae9a3f0ec093e5
+// Source SHA-256: 39e4d5d18f50e816eb5553350448afc6a67f4f0368873ddb3fc5afa8b022b523
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2564,6 +2568,9 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.files", "__xattr_names", "jet_std::jet_fs_xattr_names", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__xattr_get", "jet_std::jet_fs_xattr_get", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__xattr_set", "jet_std::jet_fs_xattr_set", true, &[true, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__reader_stat", "jet_std_file_reader_stat", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__writer_stat", "jet_std_file_writer_stat", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__writer_set_mode", "jet_std_file_writer_set_mode", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.net.url", "parse", "jet_url_parse", true, &[true]),
     CoreCallRecord::new( "core.net.url", "from_parts", "jet_url_from_parts", true, &[true, true, true, true, true], ),
     CoreCallRecord::new("core.net.url", "file", "jet_url_file", true, &[true]),
