@@ -1,5 +1,5 @@
 #[test]
-fn perf_static_api_lowers_to_core_helpers() {
+fn perf_static_api_lowers_to_jet_source() {
     let out = compile_temp(
         "perf_static.jet",
         r#"
@@ -11,10 +11,14 @@ fn run() {
 }
 "#,
     );
-    assert!(out.rust.contains("jet_perf_default_fidelity()"));
-    assert!(out.rust.contains("jet_perf_override_fidelity(0.25"));
-    assert!(out.rust.contains("jet_perf_fidelity()"));
-    assert!(out.rust.contains("jet_perf_reset_fidelity()"));
+    assert!(out.rust.contains("::default_fidelity()"));
+    assert!(out.rust.contains("::override_fidelity(0.25"));
+    assert!(out.rust.contains("::fidelity()"));
+    assert!(out.rust.contains("::reset_fidelity()"));
+    assert!(out.rust.contains("jet_perf_read_bits"));
+    assert!(out.rust.contains("jet_perf_write_bits"));
+    assert!(!out.rust.contains("fn jet_perf_override_fidelity"));
+    assert!(!out.rust.contains("fn jet_perf_reset_fidelity"));
 }
 
 #[test]
