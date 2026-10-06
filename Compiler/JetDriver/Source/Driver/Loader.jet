@@ -1948,15 +1948,15 @@ fn jet_driver_module_source_bytes(unit: JetDriverSourceUnit, roots: [JetDriverAu
     roots[unit.root_index].files[unit.file_index].source.bytes()
 }
 
-// D-MOD-CYCLE1=A: the source bytes of one default (a parameter default, or a
-// field default or computed value) that a call or struct literal splices into
-// the calling module's body, where its names resolve. `key` is the name the
-// caller spells (function or method); "" marks a default reached from every
-// module: a field default (a literal or derived `Default` may not spell its
-// struct), a trait method's (dispatch may be implicit), or one inside a
-// template body (its generated owner may carry a name no source spells). The
-// range runs from the declared type to the next declaration, so it covers the
-// whole default expression.
+// D-MOD-CYCLE1=A: the source bytes of one default (a parameter default or
+// precondition, or a field default or computed value) that a call or struct
+// literal splices into the calling module's body, where its names resolve.
+// `key` is the name the caller spells (function or method); "" marks a
+// default reached from every module: a field default (a literal or derived
+// `Default` may not spell its struct), a trait method's (dispatch may be
+// implicit), or one inside a template body (its generated owner may carry a
+// name no source spells). A default's range runs from the declared type to
+// the next declaration, so it covers the whole default expression.
 struct JetDriverDefaultRegion {
     key: String
     module_index: Int
@@ -1978,9 +1978,15 @@ fn jet_driver_default_key(template: Bool, name: String) -> String Never! {
 }
 
 fn jet_driver_func_default_regions(function: Func, template: Bool, module_index: Int, regions: &[JetDriverDefaultRegion]) Never! {
+    key :: jet_driver_default_key(template, function.name)
     last_end := function.span.end
     if function.return_type_span == .Val(span) -> last_end = span.start
-    jet_driver_param_default_regions(jet_driver_default_key(template, function.name), function.params, last_end, module_index, &regions)
+    jet_driver_param_default_regions(key, function.params, last_end, module_index, &regions)
+    // A precondition is checked at each call site, in the caller's scope.
+    loop clause in function.pre {
+        end :: if clause.message_span.end > clause.span.end -> clause.message_span.end else -> clause.span.end
+        &regions.push(JetDriverDefaultRegion{key: key, module_index: module_index, start: clause.span.start, end: end})
+    }
 }
 
 fn jet_driver_default_regions(items: [Item], template: Bool, module_index: Int, regions: &[JetDriverDefaultRegion]) Never! {
