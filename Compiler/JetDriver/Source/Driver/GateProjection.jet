@@ -1,0 +1,38 @@
+// The driver retains one shared GateLedger for all checked documentation rows.
+// The host supplies owning package policies and external lock/trust/build facts;
+// no CLI reader re-scans source text to discover an unsafe operation.
+use jet_foundation.GateLedger
+use jet_sema.[SemaGateModule, SemaGraphResult, SemaRegistrationGraph, sema_gate_ledger_collect, sema_gate_checked_text_names]
+use jet_driver.[JetDriverDocModule, JetDriverCompileRequest]
+
+fn jet_driver_doc_gate_projection(docs: &[JetDriverDocModule], graph: SemaGraphResult, registration: SemaRegistrationGraph, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo]) Never! {
+    modules := [SemaGateModule]{}
+    loop doc in docs {
+        index :: doc.name_module_index
+        if index < 0 || index >= graph.programs.len() || index >= registration.modules.len() -> next
+        owner :: registration.modules[index].package_identity
+        row := SemaGateModule{source: doc.path, program: graph.programs[index]}
+        loop package in packages {
+            if package.identity == owner {
+                row.policy_path = Val(jet_driver_display_path(package.root_path, doc.physical_path))
+                break
+            }
+        }
+        loop policy in request.gate_policies {
+            if policy.package_identity != owner -> next
+            row.declarations = policy.declarations
+            row.unsafe_paths = policy.unsafe_paths
+            row.expert = policy.expert
+            break
+        }
+        &modules.push(row)
+    }
+    // MIR name facts are the checked compiler's sole structure-fact owner.
+    if docs.len() == 0 {
+        return
+    }
+    storage :: docs[0].name_ledger ?? panic("checked documentation row lost its NameLedger")
+    permit :: storage.guard_read()
+    ledger :: shared sema_gate_ledger_collect(modules, permit.value, request.gate_set, request.external_gate_entries, sema_gate_checked_text_names(graph.programs))
+    loop index in 0..<docs.len() -> docs[index].gate_ledger = Val(ledger)
+}

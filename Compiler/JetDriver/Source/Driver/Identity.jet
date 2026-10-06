@@ -4,6 +4,10 @@ use jet_foundation.[
     CompilerThreads,
     CompilerTraceSink,
     Diagnostic,
+    GateLedger,
+    GateEntry,
+    GateSet,
+    PolicyDeclaration,
     ImportDecl,
     Item,
     JetReleaseDevtoolsPolicy,
@@ -132,6 +136,7 @@ pub struct JetDriverDocModule {
     pub call_facts: [SemaCallSiteFact]{[SemaCallSiteFact]{}}
     // Shared once per checked bundle; module positions retain Sema's ordering.
     pub name_ledger: Shared<NameLedger>?{None}
+    pub gate_ledger: Shared<GateLedger>?{None}
     pub memory_facts: Shared<SemaCheckedMemoryFacts>?{None}
     pub module_identity: String{""}
     pub target_triple: String{""}
@@ -175,6 +180,17 @@ pub struct JetDriverCompileRequest {
     // the same diagnostics and output bytes.
     pub compiler_threads: CompilerThreads
     pub mode: JetDriverCompileMode{JetDriverCompileMode.Program}
+    pub gate_set: GateSet{GateSet{}}
+    pub gate_policies: [JetDriverGatePolicy]{[JetDriverGatePolicy]{}}
+    // External lock/trust/forced-build writers use the canonical gate row.
+    pub external_gate_entries: [GateEntry]{[GateEntry]{}}
+}
+
+pub struct JetDriverGatePolicy {
+    pub package_identity: String
+    pub declarations: [PolicyDeclaration]{[PolicyDeclaration]{}}
+    pub unsafe_paths: [String]?{None}
+    pub expert: Bool?{None}
 }
 
 // The compiler's record store, reached only through the host, which owns

@@ -1,0 +1,19 @@
+// GateLedger.rs forced-build-fact test, using the existing Jet fact resolver.
+fn run() Never! {
+    span :: Span{start: 7, end: 12}
+    contribution :: FactContribution.new("Build.Settings.tls", FactValue.Bool(false), SourceScope.Package, ContributionLayer.System, "system.jet").at(span).force_with_reason("fleet certification")
+    fact :: pkg_fact_resolve(FactKey.new("Build.Settings.tls"), [contribution]) ?? panic("forced writer must resolve")
+    resolved :: fact ?? panic("forced writer must produce a value")
+    ledger := GateLedger{}
+    jet_cli_gate_append_build_facts(&ledger, [resolved])
+    if ledger.rows.len() != 1 -> panic("forced writer must produce one gate")
+    entry :: ledger.rows[0]
+    if entry.kind != GateKind.BuildFlag || entry.domain != "build" || entry.subject != "Build.Settings.tls" || entry.source != "system.jet" || entry.reason != (Val("fleet certification")) || entry.span != (Val(span)) {
+        panic("forced writer projection lost its identity or provenance")
+    }
+    selected :: jet_cli_gate_entries_at(ledger, "system.jet", Span{start: 0, end: 20})
+    if selected.len() != 1 -> panic("source range selection lost gate")
+    if jet_cli_gate_entries_at(ledger, "other.jet", Span{start: 0, end: 20}).len() != 0 {
+        panic("source selection crossed modules")
+    }
+}

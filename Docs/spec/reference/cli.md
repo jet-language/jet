@@ -336,3 +336,10 @@ declarations. It retains each low-level operation, its typed obligations
 (`valid_ptr`, `aligned`, `no_alias`), the immediately following assertion, and
 the policy provenance. Nested unsafe regions own their proofs independently;
 an assertion cannot discharge an operation across a region boundary.
+
+The checked documentation seam retains a shared `GateLedger` alongside its
+name and memory facts. Gate readers select these rows rather than interpreting
+source strings: security gates sort before knowledge and structure gates,
+duplicate facts merge all provenance, and unsafe rows retain their operation
+proofs and diagnostics. Package policy, invocation choices, and external
+lock/trust/forced-build writers enter through the driver's typed gate inputs.
