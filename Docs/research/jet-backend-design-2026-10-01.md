@@ -239,6 +239,11 @@ reject additional cell writers and require canonical live-flag updates on every
 definition and selected consuming edge. Schema-7 observations require a compiler
 that produces the field; old schema-6 dumps must not acquire a guessed `None`.
 
+The storage association and physical facts are a prerequisite tranche;
+retirement + flag-discipline validation pending. Native prep remains OFF.
+Existing semantic-Copy cleanup registration remains unchanged in this tranche;
+the new facts do not by themselves establish complete SSA lifetimes.
+
 Post-last-use place-read refinement is also a Foundation fact, not a native
 clone heuristic. A read without a physical-transfer user becomes ReadBorrow
 only when a CFG may-written proof shows its owner remains stable through every
@@ -446,9 +451,10 @@ than introducing another erased value ABI. A native SendFn body writes its
 result directly into an owned slot; Sema's sendability facts authorize moving
 the body and its captures to a scheduler thread. The existing task, task-group
 and channel kernels retain responsibility for ordering, cancellation and error
-policy. Consuming operands register as ownership sinks before lowering place
-reads: a task group cannot destructively consume a borrowed list header, and
-join/detach cannot consume a borrowed task. Loaded code and its destructors must
+policy. Consuming operands use checked physical ownership facts; independent
+owned place reads do not rely on a backend sink heuristic. A task group cannot
+consume a borrowed list header, and join/detach cannot consume a borrowed task.
+Loaded code and its destructors must
 remain mapped until every task body and returned value owner has finished.
 Opaque runtime-owned enums do not expose a native discriminant or payload
 layout. Their construction, variant tests and payload projections report a
