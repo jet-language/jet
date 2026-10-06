@@ -269,8 +269,129 @@ fn lower_task_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRVal
             if symbol == "jet_std::JetTask::join" || symbol == "jet_std::jet_task_join_result" || symbol == "jet_task_join_result" || symbol == "jet_std::JetTask::detach" -> &stored.push(receiver)
             if symbol == "jet_std::JetSender::send" && args.len() == 1 -> &stored.push(args[0])
         }
+        // Shared.new takes its initial value and Shared.read / Shared.edit
+        // their callback when MIR moves them.
+        if semantic == .StaticPreludeCall(call, args, _, _) {
+            row :: lower_prelude_row(p, call) ?? return stored
+            if mir_symbol_name(row.symbol) == "jet_std::JetShared::new" {
+                loop arg in args { if arg.access == .Move -> &stored.push(arg.value) }
+            }
+        }
+        if semantic == .HostCall(call, args) {
+            row :: lower_prelude_row(p, call) ?? return stored
+            symbol :: mir_symbol_name(row.symbol)
+            if symbol == "jet_shared_read" || symbol == "jet_shared_edit" {
+                loop arg in args { if arg.access == .Move -> &stored.push(arg.value) }
+            }
+        }
     }
     stored
+}
+
+// ---------------------------------------------------------------------------
+// Shared<T>: JetShared<NativeValue> (CAbiTask.rs). `shared x` builds the cell
+// from the native slot of `x`; a field read or write is `Shared.read` /
+// `Shared.edit` with a callback run under the shared lock on the cell's slot.
+
+// The native slot of a call argument the runtime takes: the value's own when
+// MIR moves an owned value, else a clone.
+fn lower_shared_taken_slot(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, arg: MIRCallArg, ty: MIRType) -> LIRValueID? {
+    if arg.access == .Move && lower_value_owned(c, arg.value) {
+        lowered :: lower_use(&m, &f, arg.value) ?? return None
+        return Val(lower_lazy_value_slot(p, &m, &f, lowered, ty))
+    }
+    lowered :: lower_use(&m, &f, arg.value) ?? return None
+    if lower_is_inline(p, ty) {
+        held :: lower_new_storage(p, &f, ty)
+        lower_inline_clone(p, &m, &f, lowered, held, ty)
+        return Val(held)
+    }
+    layout :: lower_value_layout(f, lowered)
+    copied :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
+    lower_clone_into(p, &m, &f, lowered, copied, ty)
+    Val(lower_lazy_value_slot(p, &m, &f, copied, ty))
+}
+
+fn lower_shared_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
+    row :: lower_prelude_row(p, call) ?? return false
+    if mir_symbol_name(row.symbol) != "jet_std::JetShared::new" -> return false
+    result_ty :: lower_checked_type(c, instruction) ?? {
+        lower_fail(&m, &f, "Shared.new has no checked result type")
+        return true
+    }
+    inner := MIRType?{None}
+    if result_ty.kind == .Shared(value) -> inner = Val(value)
+    inner_ty :: inner ?? {
+        lower_fail(&m, &f, "Shared.new producing {mir_type_display_name(result_ty)} is not lowered at O0 yet")
+        return true
+    }
+    if args.len() != 1 {
+        lower_fail(&m, &f, "Shared.new with {args.len()} arguments is not lowered at O0 yet")
+        return true
+    }
+    slot :: lower_shared_taken_slot(p, c, &m, &f, args[0], inner_ty) ?? return true
+    meta :: lower_lazy_meta(p, &m, &f, inner_ty)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_call_runtime(&m, &f, "jet_rt_native_shared_new", [LIRValueID]{slot, meta}, Val(dst))
+    true
+}
+
+// `Shared.read(shared, callback)` / `Shared.edit(shared, callback)`: the
+// callback (LazyIter.jet "lazy.callback.owned": a Write parameter receives the
+// cell's slot itself) runs under the lock and writes its result to `out`.
+fn lower_shared_access(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
+    row :: lower_prelude_row(p, call) ?? return false
+    symbol :: mir_symbol_name(row.symbol)
+    edits :: symbol == "jet_shared_edit"
+    if symbol != "jet_shared_read" && !edits -> return false
+    if args.len() != 2 {
+        lower_fail(&m, &f, "{symbol} with {args.len()} arguments is not lowered at O0 yet")
+        return true
+    }
+    shared_ty :: lower_value_type(c, args[0].value) ?? return true
+    is_shared := false
+    if shared_ty.kind == .Shared(_) -> is_shared = true
+    if !is_shared {
+        lower_fail(&m, &f, "{symbol} over {mir_type_display_name(shared_ty)} is not lowered at O0 yet")
+        return true
+    }
+    closure_ty :: lower_value_type(c, args[1].value) ?? return true
+    params := 0
+    if closure_ty.kind == .Fn(signature) -> params = signature.params.len()
+    if params != 1 {
+        lower_fail(&m, &f, "{symbol} callback {mir_type_display_name(closure_ty)} is not lowered at O0 yet")
+        return true
+    }
+    shared :: lower_use(&m, &f, args[0].value) ?? return true
+    closure :: lower_use(&m, &f, args[1].value) ?? return true
+    invoke :: lower_lazy_helper_address(&m, &f, "lazy.callback.owned", closure_ty)
+    result_ty :: lower_checked_type(c, instruction)
+    value_ty := MIRType?{None}
+    if result_ty == .Val(ty) {
+        if lower_repr(p, ty) == .Absent -> lower_alias_absent(&f, instruction) else -> value_ty = Val(ty)
+    }
+    // An inline result is written straight into its own frame storage; any
+    // other result goes through one word slot.
+    stored := LIRValueID?{None}
+    dst := LIRValueID?{None}
+    if value_ty == .Val(ty) {
+        if lower_is_inline(p, ty) {
+            storage :: lower_result(p, c, &m, &f, instruction) ?? return true
+            lower_storage_into(p, &f, storage, ty)
+            stored = Val(storage)
+        } else {
+            dst = lower_result(p, c, &m, &f, instruction)
+        }
+    }
+    out :: stored ?? lower_pointer(&f)
+    if stored == None -> lower_emit(&f, LIRInst.StackSlot{dst: out, size: 8, align: 8})
+    lower_call_runtime(&m, &f, if edits -> "jet_rt_native_shared_edit" else -> "jet_rt_native_shared_read", [LIRValueID]{shared, closure, invoke, out}, None)
+    if dst == .Val(value) {
+        if value_ty == .Val(ty) -> lower_read_into(p, &f, value, out, 0, ty)
+    }
+    // A moved callback box is released here; a borrowed one stays its owner's.
+    if args[1].access == .Move && lower_value_owned(c, args[1].value) -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
+    true
 }
 
 // ---------------------------------------------------------------------------
