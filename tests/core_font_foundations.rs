@@ -19,6 +19,6 @@ fn run() {
     print("{mono.family}|{mono.size}")
 }
 "#,
-        "system-ui|14\nsystem-ui|24\nmonospace|14\n",
+        "system-ui|14.0\nsystem-ui|24.0\nmonospace|14.0\n",
     );
 }

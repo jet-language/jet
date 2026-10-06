@@ -98,11 +98,66 @@ fn render_value(value: DBValue) -> String Never! {
     if value == {
         .Null -> "null"
         .Int(number) -> "{number}"
-        .Float(number) -> "{number}"
+        .Float(number) -> float_text(number)
         .Text(text) -> text
         .Bool(boolean) -> "{boolean}"
         .Blob(bytes) -> "{bytes}"
     }
+}
+
+// SQL values use the shortest decimal f64 display spelling, not Jet's debug
+// spelling (which preserves ".0" and may use an exponent).
+fn float_text(value: Float) -> String Never! {
+    text :: "{value}"
+    raw :: text.bytes()
+    exponent_at := -1
+    dot_at := -1
+    loop i in 0..<raw.len() {
+        if raw[i] == (U8{101}) -> exponent_at = i
+        if raw[i] == (U8{46}) -> dot_at = i
+    }
+    if exponent_at < 0 {
+        if raw.len() >= 2 && raw[raw.len() - 2] == (U8{46}) && raw[raw.len() - 1] == (U8{48}) {
+            out := [U8]{}
+            loop i in 0..<raw.len() - 2 -> &out.push(raw[i])
+            return String.from_bytes(out) ?? panic("decimal float text must be UTF-8")
+        }
+        return text
+    }
+    exponent := 0
+    at := exponent_at + 1
+    negative :: raw[at] == (U8{45})
+    if negative || raw[at] == (U8{43}) -> at += 1
+    loop at < raw.len() {
+        exponent = exponent * 10 + Int.from_u8(raw[at]) - 48
+        at += 1
+    }
+    if negative -> exponent = 0 - exponent
+    start :: if raw[0] == (U8{45}) -> 1 else -> 0
+    point :: if dot_at >= 0 -> dot_at - start else -> exponent_at - start
+    count := exponent_at - start
+    if dot_at >= 0 -> count -= 1
+    end := exponent_at
+    loop end > start && raw[end - 1] == (U8{48}) {
+        end -= 1
+        count -= 1
+    }
+    decimal :: point + exponent
+    out := [U8]{}
+    if start == 1 -> &out.push(U8{45})
+    if decimal <= 0 {
+        &out.push(U8{48})
+        &out.push(U8{46})
+        loop _ in 0..<0 - decimal -> &out.push(U8{48})
+    }
+    loop digit in 0..<count {
+        if decimal > 0 && digit == decimal -> &out.push(U8{46})
+        index := start + digit
+        if dot_at >= 0 && index >= dot_at -> index += 1
+        &out.push(raw[index])
+    }
+    loop _ in count..<decimal -> &out.push(U8{48})
+    String.from_bytes(out) ?? panic("decimal float text must be UTF-8")
 }
 
 // Typed row projection is a compiler lowering. Keeping the call routed through
@@ -134,5 +189,20 @@ pub fn migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int
     if row_int(row, "text") == {
         .Ok(_) -> assert(false)
         .Err(error) -> assert_eq(error.message, "expected an int, got jet")
+    }
+    floating :: [String: DBValue]{"value": DBValue.Float(1.0)}
+    if row_int(floating, "value") == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "expected an int, got 1")
+    }
+    large :: [String: DBValue]{"value": DBValue.Float(1e21)}
+    if row_int(large, "value") == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "expected an int, got 1000000000000000000000")
+    }
+    blob :: [String: DBValue]{"value": DBValue.Blob([U8]{1, 2})}
+    if row_text(blob, "value") == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "expected text, got [1, 2]")
     }
 }

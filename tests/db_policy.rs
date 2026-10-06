@@ -348,6 +348,10 @@ fn run() {
         "one": DBValue.Int(1),
         "two": DBValue.Int(2),
         "null": DBValue.Null,
+        "whole-float": DBValue.Float(1.0),
+        "large-float": DBValue.Float(1e21),
+        "small-float": DBValue.Float(1e-7),
+        "blob": DBValue.Blob([U8]{1, 2}),
     }
     print(db.row_int(row, "integer") ?? -1)
     print(db.row_float(row, "integer") ?? -1.0)
@@ -361,8 +365,12 @@ fn run() {
     db.row_float(row, "null") ? _ -> print("unexpected") ! error -> print(error.message)
     db.row_text(row, "integer") ? _ -> print("unexpected") ! error -> print(error.message)
     db.row_bool(row, "two") ? _ -> print("unexpected") ! error -> print(error.message)
+    db.row_int(row, "whole-float") ? _ -> print("unexpected") ! error -> print(error.message)
+    db.row_int(row, "large-float") ? _ -> print("unexpected") ! error -> print(error.message)
+    db.row_int(row, "small-float") ? _ -> print("unexpected") ! error -> print(error.message)
+    db.row_text(row, "blob") ? _ -> print("unexpected") ! error -> print(error.message)
 }
 "#,
-        "42\n42\n1.5\njet\ntrue\nfalse\ntrue\nmissing column `missing`\nexpected an int, got jet\nexpected a float, got null\nexpected text, got 42\nexpected a bool, got 2\n",
+        "42\n42.0\n1.5\njet\ntrue\nfalse\ntrue\nmissing column `missing`\nexpected an int, got jet\nexpected a float, got null\nexpected text, got 42\nexpected a bool, got 2\nexpected an int, got 1\nexpected an int, got 1000000000000000000000\nexpected an int, got 0.0000001\nexpected text, got [1, 2]\n",
     );
 }
