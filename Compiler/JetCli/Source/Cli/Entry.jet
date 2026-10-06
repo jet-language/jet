@@ -31,6 +31,7 @@ Item,
 Program,
 Span,
 diagnostic_from_registry,
+diagnostic_render_all,
 ]
 use jet_lexer.[
 TOKEN_BLOCK_COMMENT,
@@ -1241,8 +1242,10 @@ pub fn jet_cli_resolve_source_path(command: String, raw: String, color: Bool, no
 // The notices resolution wrote, ahead of the report that stopped it.
 fn jet_cli_with_notices(notices: [String], plan: JetCLIPlan) -> JetCLIPlan Never! {
     if notices.len() == 0 -> return ~plan
-    if plan == .Done(output) {
-        return jet_cli_done(output.stdout, "{notices.join("")}{output.stderr}", output.exit_code)
+    if plan == {
+        .Done(output) -> return jet_cli_done(output.stdout, "{notices.join("")}{output.stderr}", output.exit_code)
+        .Refused(report, color, exit_code) -> return jet_cli_done("", "{notices.join("")}{diagnostic_render_all("", "", [Diagnostic]{report}, color)}", exit_code)
+        else -> {}
     }
     ~plan
 }

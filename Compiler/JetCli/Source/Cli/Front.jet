@@ -32,8 +32,13 @@ pub enum JetCLIPlan {
     // resolution chose it), its bytes, the output policy, and the
     // `--threads` cap. `project` is the project scope of a bare or directory
     // check (main.rs `check_project_scope`); `notice` is the stderr status
-    // entry resolution wrote. The host compiles it and renders the outcome.
-    Check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, notice: String)
+    // entry resolution wrote. The host compiles it and renders the outcome,
+    // as machine reports when `json`.
+    Check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, notice: String, json: Bool)
+    // A command refused before it ran (main.rs `emit_cli_report`): one
+    // spanless CLI report and its exit status. `jet_cli_front` prints it as
+    // the `cli` status envelope under `--json`; the host renders it as text.
+    Refused(report: Diagnostic, color: Bool, exit_code: Int)
     // `jet build <file>`: the entry and its bytes; `release` selects the
     // rustc/LLVM backend, otherwise the Jet-native backend builds it;
     // `invocation` holds the `--allow`/`--deny` rows.
@@ -140,7 +145,7 @@ fn jet_cli_done(stdout: String, stderr: String, exit_code: Int) -> JetCLIPlan Ne
 }
 
 fn jet_cli_fail(code: String, what: String, why: String, fix: String, color: Bool, exit_code: Int) -> JetCLIPlan Never! {
-    jet_cli_done("", jet_cli_report(code, what, why, fix, color), exit_code)
+    JetCLIPlan.Refused{report: diagnostic_from_registry(code, None, what, why, fix), color: color, exit_code: exit_code}
 }
 
 // A real `jet` command whose Jet port has not landed: refused, never guessed.
@@ -382,8 +387,9 @@ enum JetCLIThreads {
 // (Entry.jet, D-CLI-BARE1=A) and checks it in project scope; a file target
 // is read as the user typed it (or with `.jet` appended). A bare or
 // directory `build` is not ported yet. `--show-default` reports the stock
-// default, and `-p <member>` picks a workspace member.
-fn jet_cli_check(jet_argv: [String], args: [String], command: String, color: Bool, quiet: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+// default, and `-p <member>` picks a workspace member. `json` carries
+// `--json` to the check outcome.
+fn jet_cli_check(jet_argv: [String], args: [String], command: String, color: Bool, quiet: Bool, threads: Int?, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     show_default :: jet_argv.contains("--show-default")
     member_flag :: jet_cli_option_value(jet_argv, "-p")
     status :: if show_default && !quiet -> "jet {command}: using stock default\n" else -> ""
@@ -395,7 +401,7 @@ fn jet_cli_check(jet_argv: [String], args: [String], command: String, color: Boo
         }
         notices := [String]{}
         if jet_cli_resolve_bare_entry(command, directory, member_flag, !show_default, color, &notices) == {
-            .Entry(entry) -> return jet_cli_read_entry(entry.path, command, color, quiet, threads, command == "check", "{notices.join("")}{status}")
+            .Entry(entry) -> return jet_cli_read_entry(entry.path, command, color, quiet, threads, command == "check", "{notices.join("")}{status}", json)
             .Refused(plan) -> return jet_cli_with_notices(notices, plan)
             .Absent -> return jet_cli_with_notices(notices, jet_cli_missing_bare_entry(command, directory, color))
         }
@@ -404,34 +410,34 @@ fn jet_cli_check(jet_argv: [String], args: [String], command: String, color: Boo
     if cli_files.is_dir(target) {
         if command == "build" -> return jet_cli_not_ported("{command} <directory>", color)
         if jet_cli_resolve_directory_target(command, target, member_flag, !show_default, color) == {
-            .File(path, _, notice) -> return jet_cli_read_entry(path, command, color, quiet, threads, command == "check", "{notice}{status}")
+            .File(path, _, notice) -> return jet_cli_read_entry(path, command, color, quiet, threads, command == "check", "{notice}{status}", json)
             .Refused(plan) -> return plan
         }
     }
     file := target
     if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") -> file = "{target}.jet"
-    jet_cli_read_entry(file, command, color, quiet, threads, false, status)
+    jet_cli_read_entry(file, command, color, quiet, threads, false, status, json)
 }
 
 // Read the entry `jet_cli_check` chose (CmdCompile.rs `run_native_execution`
 // source read): an unreadable stock `run.jet` inside a project teaches how
 // to create it; any other unreadable file is E2105. `notice` precedes the
 // report on stderr.
-fn jet_cli_read_entry(file: String, command: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, notice: String) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_read_entry(file: String, command: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, notice: String, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     source :: cli_files.read(file) ?? {
         parent :: jet_cli_parent(file) ?? "."
         default_entry :: file == "run.jet" || file.ends_with("/run.jet")
         fix :: if default_entry && jet_cli_has_manifest_above(parent) -> "create `run.jet` in the project, or run `jet {command} <file.jet>`" else -> "check the spelling, or run jet from the folder that contains it"
         return jet_cli_done("", "{notice}{jet_cli_report("E2105", "can't securely read the file `{file}`", jet_cli_why("E2105"), fix, color)}", JET_DRIVER_EXIT_USER_ERROR)
     }
-    JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads, project: project, notice: notice}
+    JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads, project: project, notice: notice, json: json}
 }
 
 // `jet doc [<file>]`: the entry resolves as `jet check` resolves it.
 fn jet_cli_doc(args: [String], color: Bool, quiet: Bool, json: Bool, check: Bool) -[FS, Env]> JetCLIPlan Never! {
-    entry :: jet_cli_check(args, "doc", color, quiet, None)
+    entry :: jet_cli_check(args, args, "doc", color, quiet, None, json)
     if entry == {
-        .Check(file, source, _, _, _) -> return JetCLIPlan.Doc{file: file, source: source, color: color, json: json, check: check}
+        .Check(file, source, _, _, _, _, _, _) -> return JetCLIPlan.Doc{file: file, source: source, color: color, json: json, check: check}
         else -> {}
     }
     entry
@@ -551,9 +557,9 @@ fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool, t
         .Refused(refusal) -> return refusal
         .Selected(selected) -> release = selected
     }
-    entry :: jet_cli_check(jet_argv, args, "build", color, quiet, threads)
+    entry :: jet_cli_check(jet_argv, args, "build", color, quiet, threads, false)
     if entry == {
-        .Check(file, source, _, _, _, _, notice) -> return JetCLIPlan.Build{file: file, source: source, color: color, release: release, threads: threads, invocation: invocation, notice: notice}
+        .Check(file, source, _, _, _, _, notice, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, release: release, threads: threads, invocation: invocation, notice: notice}
         else -> {}
     }
     entry
@@ -592,9 +598,9 @@ fn jet_cli_run(jet_argv: [String], args: [String], passthrough: [String]?, short
         .Refused(refusal) -> return refusal
         .Selected(selected) -> release = selected
     }
-    entry :: jet_cli_check(jet_argv, args, "run", color, quiet, threads)
+    entry :: jet_cli_check(jet_argv, args, "run", color, quiet, threads, false)
     if entry == {
-        .Check(file, source, _, _, _, _, notice) -> {
+        .Check(file, source, _, _, _, _, notice, _) -> {
             program_args :: passthrough ?? jet_cli_tail(args, 2)
             return JetCLIPlan.Run{file: file, source: source, color: color, release: release, verbose: verbose, threads: threads, program_args: program_args, invocation: invocation, notice: notice}
         }
@@ -863,9 +869,8 @@ fn jet_cli_new(jet_argv: [String], args: [String], color: Bool, quiet: Bool) -[F
     JetCLIPlan.New{name: name, template: template, annotated: jet_argv.contains("--annotated"), quiet: quiet, color: color}
 }
 
-// Plan one `jet` invocation; `raw` is argv without the program name.
-pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
-    // Output flags, parsed once from the jet-owned prefix before `--`.
+// The jet-owned argv prefix before the first standalone `--`.
+fn jet_cli_owned_flags(raw: [String]) -> [String] Never! {
     output_end := raw.len()
     loop (index, argument) in raw {
         if argument == "--" {
@@ -873,7 +878,36 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
             break
         }
     }
-    owned :: jet_cli_prefix(raw, output_end)
+    jet_cli_prefix(raw, output_end)
+}
+
+// Source/main.rs `OutputMode::json`: `--json` before `--`, or the `compiler`
+// inspect plane, which is machine output by construction.
+fn jet_cli_wants_json(owned: [String]) -> Bool Never! {
+    json := owned.contains("--json") || (owned.len() > 0 && owned[0] == "compiler")
+    loop index in 1..<owned.len() {
+        if owned[index - 1] == "inspect" && owned[index] == "compiler" -> json = true
+    }
+    json
+}
+
+// Plan one `jet` invocation; `raw` is argv without the program name. Under
+// `--json` a refusal is the `cli` status envelope on stdout (main.rs
+// `emit_cli_report`).
+pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
+    plan :: jet_cli_plan(raw)
+    if plan == {
+        .Refused(report, _, exit_code) -> {
+            if jet_cli_wants_json(jet_cli_owned_flags(raw)) -> return jet_cli_done(jet_cli_report_status_json(report), "", exit_code)
+        }
+        else -> {}
+    }
+    plan
+}
+
+fn jet_cli_plan(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
+    // Output flags, parsed once from the jet-owned prefix before `--`.
+    owned :: jet_cli_owned_flags(raw)
     color := false
     loop argument in owned {
         if argument == "--color" -> color = true
@@ -888,14 +922,11 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
     }
     quiet :: owned.contains("--quiet")
     verbose :: owned.contains("--verbose") || owned.contains("-v")
-    json := owned.contains("--json") || (owned.len() > 0 && owned[0] == "compiler")
-    loop index in 1..<owned.len() {
-        if owned[index - 1] == "inspect" && owned[index] == "compiler" -> json = true
-    }
+    json :: jet_cli_wants_json(owned)
     if raw.len() == 0 -> return jet_cli_not_ported("repl", color)
     if raw[0] == "?" -> return jet_cli_not_ported("?", color)
     // The inspect group renders its own `--json` envelopes (Inspect.jet).
-    if json && raw[0] != "inspect" && raw[0] != "doc" -> return jet_cli_not_ported("{raw[0]} --json", color)
+    if json && raw[0] != "inspect" && raw[0] != "doc" && raw[0] != "check" -> return jet_cli_not_ported("{raw[0]} --json", color)
 
     // Retired, moved, and grouped spellings (Source/main.rs `normalize_frequency_ring_argv`).
     if jet_cli_retired_report(raw, color) == .Val(report) -> return jet_cli_done("", report, JET_DRIVER_EXIT_USAGE)
@@ -1045,7 +1076,7 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
             return jet_cli_done(jet_cli_usage_page(order), "", JET_DRIVER_EXIT_OK)
         }
         "explain" -> return jet_cli_explain(jet_argv, args, color)
-        "check" -> return jet_cli_check(jet_argv, args, "check", color, quiet, threads)
+        "check" -> return jet_cli_check(jet_argv, args, "check", color, quiet, threads, json)
         "build" -> return jet_cli_build(jet_argv, args, color, quiet, threads)
         "run" -> return jet_cli_run(jet_argv, args, passthrough, false, color, quiet, verbose, threads)
         "test" -> return jet_cli_test(jet_argv, color, quiet, verbose, threads)
