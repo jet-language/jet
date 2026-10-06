@@ -46,6 +46,7 @@ use jet_foundation.[
     TParameter,
     TStmt,
     TTargetApplicability,
+    TTestFact,
     TTypeDef,
     TUnsafeGate,
     TVisibility,
@@ -63,6 +64,7 @@ use jet_foundation.[
     expr_span,
     symbol_id,
     tir_symbol_local,
+    tir_test_artifact_fact,
     type_name,
     type_with_effective_fn_returns,
 ]
@@ -120,6 +122,10 @@ pub struct SemaGraphModuleResult {
     // Rust reference pushes them as module items), so the driver's identity
     // check admits exactly these keys beside the registered declarations.
     pub injected_function_keys: [String]{[String]{}}
+    // Test mode (Rust `CompileMode::Test`): one fact per named `#Test` of this
+    // module whose body checked, in declaration order; the checked synthetic
+    // function is in `functions` and its key in `injected_function_keys`.
+    pub tests: [TTestFact]{[TTestFact]{}}
 }
 
 // #3708: what one checked function body propagates: the keys of the declared
@@ -2035,6 +2041,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
     // driver's internal-problem report.
     incomplete_reasons := [String]{}
     injected_function_keys := [String]{}
+    tests := [TTestFact]{}
     if !graph.complete -> &incomplete_reasons.push("registration graph is incomplete")
     if !sema_registration_apply_graph_module(graph, source_module.module_identity, &scopes, &diagnostics) {
         complete = false
@@ -2207,6 +2214,32 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
                         }
                     }
                 }
+                // Rust `check_module_bodies` under `CompileMode::Test`: a named
+                // test body is one more body job in item order, checked as its
+                // synthetic function (Sema/Tests.jet); a property test's
+                // ungeneratable parameter types (E0613) come before the body's
+                // diagnostics. Other modes only register the name (above).
+                .Test(test) -> {
+                    if graph.test_mode && test.name != None {
+                        loop diagnostic in sema_property_param_diagnostics(test) -> &diagnostics.push(diagnostic)
+                        checked_test :: sema_check_test_function(test, environment, scopes)
+                        loop diagnostic in checked_test.diagnostics -> &diagnostics.push(diagnostic)
+                        loop fact in checked_test.call_facts -> &call_facts.push(fact)
+                        loop request in checked_test.comptime_requests -> &comptime_requests.push(request)
+                        loop reference in checked_test.name_references -> &name_references.push(reference)
+                        loop event in checked_test.copy_events -> &copy_events.push(event)
+                        exact_int_reachable = exact_int_reachable || checked_test.exact_int_reachable
+                        if !checked_test.complete {
+                            complete = false
+                            &incomplete_reasons.push("test `{test.name ?? ""}`: body check is incomplete")
+                        }
+                        if checked_test.function == .Val(function) {
+                            &injected_function_keys.push(function.key)
+                            &functions.push(function)
+                            &tests.push(tir_test_artifact_fact(environment.module_identity, test))
+                        }
+                    }
+                }
                 else -> {}
             }
             item_index += 1
@@ -2325,6 +2358,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
         failure_facts: failure_facts,
         incomplete_reasons: incomplete_reasons,
         injected_function_keys: injected_function_keys,
+        tests: tests,
     }
 }
 

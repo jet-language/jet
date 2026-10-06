@@ -5504,8 +5504,8 @@ fn jet_codegen_pattern_variant_owner(builder: JetCodegenBuilder, program: JetCod
     if subject_type == .Union(members) {
         identity :: jet_codegen_lower_type_for_function(subject_type, builder, program).identity ?? panic("checked union pattern subject has no MIR identity")
         loop member in members {
-            tag :: jet_codegen_union_member_tag(member)
-            if tag == variant || type_name(jet_codegen_unwrap_pattern_tags(member)) == variant -> return JetCodegenVariantOwner{owner: identity, variant: tag, union_member: Val(member)}
+            member_tag :: jet_codegen_union_member_tag(member)
+            if member_tag == variant || type_name(jet_codegen_unwrap_pattern_tags(member)) == variant -> return JetCodegenVariantOwner{owner: identity, variant: member_tag, union_member: Val(member)}
         }
         panic("checked union pattern names no member of its subject")
     }
