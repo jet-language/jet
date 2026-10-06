@@ -3663,15 +3663,6 @@ fn sema_failure_inference_candidate(func: Func) -> Bool Never! {
     !func.compiler_generated && !func.is_comptime && !func.is_job && func.every == None && func.inline_foreign == None && !func.gc_return && func.pre.len() == 0 && func.post.len() == 0 && func.web_marker == None && func.external_type == None
 }
 
-// The declaration of the top-level function `function_key` that
-// `module_index` registers, through `callable_rows` (one keyed lookup, not a
-// scan of the module's functions).
-fn sema_failure_registered_declaration(graph: SemaRegistrationGraph, module_index: Int, function_key: String) -> Func? {
-    row :: sema_failure_function_row(graph, module_index, function_key)
-    if row < 0 -> return None
-    Val(graph.modules[module_index].functions[row].declaration)
-}
-
 // #3708 (D-FAILURE-FOUNDATION1=A): "Every function has the structured Error
 // route by default. Sema removes it when impossible." After every body is
 // checked, a greatest fixpoint over the bundle's propagation edges finds the
@@ -3691,8 +3682,8 @@ fn sema_failure_solve(graph: SemaRegistrationGraph, modules: [SemaGraphModuleRes
         source_index :: sema_registration_module_index(graph, module_result.module_identity) ?? next
         loop facts in module_result.failure_facts {
             if facts.direct || address_taken.get(facts.function_key) != None -> next
-            declaration :: sema_failure_registered_declaration(graph, source_index, facts.function_key) ?? next
-            if !sema_failure_inference_candidate(declaration) -> next
+            row :: sema_failure_function_row(graph, source_index, facts.function_key)
+            if row < 0 || !sema_failure_inference_candidate(graph.modules[source_index].functions[row].declaration) -> next
             &candidates.push(facts)
             inferred[facts.function_key] = true
         }

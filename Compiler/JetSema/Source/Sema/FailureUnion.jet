@@ -65,7 +65,8 @@ struct SemaFailureUnionRow {
     general: Bool
     edges: [String]
     cases: [SemaFailureCase]
-    declaration: Func
+    // Position of the function's registry row in its module's `functions`.
+    function_row: Int
 }
 
 // A typed failure a caller could match: not the general `Err`, a message,
@@ -252,7 +253,7 @@ fn sema_failure_union_mint(graph: &SemaRegistrationGraph, row: SemaFailureUnionR
         }
         &variants.push(Variant{name: case_row.name, name_span: case_row.span, payload: payload, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
     }
-    definition :: sema_failure_union_enum(owned, row.declaration, variants)
+    definition :: sema_failure_union_enum(owned, graph.modules[row.module_index].functions[row.function_row].declaration, variants)
     item :: Item.Enum{value: definition}
     registered := graph.modules[row.module_index]
     first_nominal :: registered.nominals.len()
@@ -426,9 +427,9 @@ pub fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGra
     loop module_result in modules {
         module_index :: sema_registration_module_index(graph, module_result.module_identity) ?? next
         loop facts in module_result.failure_facts {
-            declaration :: sema_failure_registered_declaration(graph, module_index, facts.function_key) ?? next
-            if !sema_failure_inference_candidate(declaration) -> next
-            &rows.push(SemaFailureUnionRow{key: ~facts.function_key, name: ~declaration.name, module_index: module_index, members: ~facts.union_members, general: facts.union_general, edges: ~facts.union_edges, cases: ~facts.union_cases, declaration: declaration})
+            function_row :: sema_failure_function_row(graph, module_index, facts.function_key)
+            if function_row < 0 || !sema_failure_inference_candidate(graph.modules[module_index].functions[function_row].declaration) -> next
+            &rows.push(SemaFailureUnionRow{key: ~facts.function_key, name: ~graph.modules[module_index].functions[function_row].declaration.name, module_index: module_index, members: ~facts.union_members, general: facts.union_general, edges: ~facts.union_edges, cases: ~facts.union_cases, function_row: function_row})
         }
     }
     if rows.len() == 0 -> return projected
@@ -489,7 +490,7 @@ pub fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGra
         if function_row < 0 -> next
         members := ~row.members
         if row.general || !settled -> &members.push(Type.Named{name: "Err"})
-        contract :: Type.Result{ok: sema_failure_union_success(row.declaration), err: sema_failure_union_canonical(members)}
+        contract :: Type.Result{ok: sema_failure_union_success(graph.modules[row.module_index].functions[row.function_row].declaration), err: sema_failure_union_canonical(members)}
         &projections.push(SemaFailureProjection{key: row.key, module_index: row.module_index, row: function_row, return_type: contract})
         &projected.keys.push(row.key)
         &projected.modules.push(row.module_index)
