@@ -143,17 +143,17 @@ pub fn cpu_count() -[Env]> Int Never! {
     count
 }
 
-pub fn getppid() -[Env]> Int Never! { core.sys.getppid() }
+pub fn getppid() -[Env]> Int Never! { posix_identity(core.sys.__getppid()) }
 
-pub fn getuid() -[Env]> Int Never! { core.sys.getuid() }
+pub fn getuid() -[Env]> Int Never! { posix_identity(core.sys.__getuid()) }
 
-pub fn geteuid() -[Env]> Int Never! { core.sys.geteuid() }
+pub fn geteuid() -[Env]> Int Never! { posix_identity(core.sys.__geteuid()) }
 
-pub fn getgid() -[Env]> Int Never! { core.sys.getgid() }
+pub fn getgid() -[Env]> Int Never! { posix_identity(core.sys.__getgid()) }
 
-pub fn getegid() -[Env]> Int Never! { core.sys.getegid() }
+pub fn getegid() -[Env]> Int Never! { posix_identity(core.sys.__getegid()) }
 
-pub fn getpgrp() -[Env]> Int Never! { core.sys.getpgrp() }
+pub fn getpgrp() -[Env]> Int Never! { posix_identity(core.sys.__getpgrp()) }
 
 #Unsafe("posix umask: the caller owns the process file-creation mask and restores it when other code relies on it") pub fn umask(mask: Int) -[FS, Env]> Int Never! {
     core.sys.umask(mask)
@@ -314,4 +314,15 @@ fn ascii_lower(text: String) -> String {
         if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(byte)
     }
     String.from_bytes(out) ?? text
+}
+
+// A platform with no POSIX identity syscall keeps the public zero fact.
+// The provider reports availability, never supplies this fallback.
+fn posix_identity(value: Int?) -> Int Never! { value ?? 0 }
+
+#Test
+fn posix_identity_policy() {
+    assert(posix_identity(None) == 0)
+    assert(posix_identity(Val(0)) == 0)
+    assert(posix_identity(Val(4294967295)) == 4294967295)
 }

@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 4a4388a01d86ddba45e0abaaee0dc7a057152586064ef220170bf2d8ef888c9d
+// Source SHA-256: 1a943765bc81026e393f994b66eb7de3912d7fbba91229d732a2644bf3b662e4
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -492,7 +492,7 @@ const CORE_MODULE_79_MEMBERS: &[&str] = &["RowPolicy", "SyncCounter", "SyncList"
 const CORE_MODULE_79_TYPES: &[(&str, CoreLeafKind)] = &[("RowPolicy", CoreLeafKind::Plain), ("SyncCounter", CoreLeafKind::Plain), ("SyncList", CoreLeafKind::Plain), ("SyncMap", CoreLeafKind::Plain), ("SyncText", CoreLeafKind::Plain), ("LWW", CoreLeafKind::Plain), ("RGAItem", CoreLeafKind::Plain)];
 const CORE_MODULE_79_DEPENDENCIES: &[&str] = &["core.data", "core.tasks"];
 
-const CORE_MODULE_80_MEMBERS: &[&str] = &["arch", "atexit", "close_fd", "cpu_count", "current_dir", "decode", "executable", "exitcode", "expand", "family", "fork", "get", "getegid", "geteuid", "getgid", "getgroups", "getpgid", "getpgrp", "getpid", "getppid", "getpriority", "getsid", "getuid", "home_dir", "hostname", "initgroups", "kill", "loadavg", "mkfifo", "name", "pid", "pipe", "release", "set", "set_current_dir", "setgid", "setpgid", "setpgrp", "setpriority", "setsid", "setuid", "stop", "success", "sync", "temp_dir", "times", "umask", "unset", "uptime", "username", "utime", "vars", "version", "wait", "waitpid", "EnvError", "platform", "is_windows", "is_unix", "is_linux", "is_macos", "uname", "sysname", "machine", "getenv", "pathsep", "linesep"];
+const CORE_MODULE_80_MEMBERS: &[&str] = &["arch", "atexit", "close_fd", "cpu_count", "current_dir", "decode", "executable", "exitcode", "expand", "family", "fork", "get", "getegid", "geteuid", "getgid", "getgroups", "getpgid", "getpgrp", "getpid", "getppid", "getpriority", "getsid", "getuid", "home_dir", "hostname", "initgroups", "kill", "loadavg", "mkfifo", "name", "pid", "pipe", "release", "set", "set_current_dir", "setgid", "setpgid", "setpgrp", "setpriority", "setsid", "setuid", "stop", "success", "sync", "temp_dir", "times", "umask", "unset", "uptime", "username", "utime", "vars", "version", "wait", "waitpid", "EnvError", "platform", "is_windows", "is_unix", "is_linux", "is_macos", "uname", "sysname", "machine", "getenv", "pathsep", "linesep", "__getppid", "__getuid", "__geteuid", "__getgid", "__getegid", "__getpgrp"];
 const CORE_MODULE_80_TYPES: &[(&str, CoreLeafKind)] = &[("EnvError", CoreLeafKind::Plain)];
 const CORE_MODULE_80_DEPENDENCIES: &[&str] = &["core.files"];
 

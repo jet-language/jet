@@ -169,7 +169,7 @@ module core.service exports { Delivery, DeliveryEvent, DeliveryReceipt, Delivery
 source_module core.service path Core/service/service.jet alias core_core_service owns { tree, runtime, state_store, restart_one_for_one, restart_one_for_all, restart_rest_for_one, delivery_at_most_once, delivery_durable }
 module core.sync exports { RowPolicy, SyncCounter, SyncList, SyncMap, SyncText, counter_inc, counter_merge, counter_new, counter_value, list_merge, list_new, list_push, list_show, map_get, map_merge, map_new, map_set, map_show, policy_allows, policy_new, policy_show, text_edit, text_merge, text_metadata, text_new, text_set, text_show, LWW, RGAItem, counter_for, map_for, map_delete, map_contains, map_keys, list_for, list_remove, list_contains, text_for, text_append, text_clock, text_replica, policy_grant, policy_deny, policy_revoke } types { RowPolicy:plain, SyncCounter:plain, SyncList:plain, SyncMap:plain, SyncText:plain, LWW:plain, RGAItem:plain } depends_on [core.data, core.tasks]
 source_module core.sync path Core/sync/sync.jet alias core_core_sync owns { counter_inc, counter_merge, counter_new, counter_value, list_merge, list_new, list_push, list_show, map_get, map_merge, map_new, map_set, map_show, policy_allows, policy_new, policy_show, text_edit, text_merge, text_metadata, text_new, text_set, text_show, counter_for, map_for, map_delete, map_contains, map_keys, list_for, list_remove, list_contains, text_for, text_append, text_clock, text_replica, policy_grant, policy_deny, policy_revoke }
-module core.sys exports { arch, atexit, close_fd, cpu_count, current_dir, decode, executable, exitcode, expand, family, fork, get, getegid, geteuid, getgid, getgroups, getpgid, getpgrp, getpid, getppid, getpriority, getsid, getuid, home_dir, hostname, initgroups, kill, loadavg, mkfifo, name, pid, pipe, release, set, set_current_dir, setgid, setpgid, setpgrp, setpriority, setsid, setuid, stop, success, sync, temp_dir, times, umask, unset, uptime, username, utime, vars, version, wait, waitpid, EnvError, platform, is_windows, is_unix, is_linux, is_macos, uname, sysname, machine, getenv, pathsep, linesep } types { EnvError:plain } depends_on [core.files]
+module core.sys exports { arch, atexit, close_fd, cpu_count, current_dir, decode, executable, exitcode, expand, family, fork, get, getegid, geteuid, getgid, getgroups, getpgid, getpgrp, getpid, getppid, getpriority, getsid, getuid, home_dir, hostname, initgroups, kill, loadavg, mkfifo, name, pid, pipe, release, set, set_current_dir, setgid, setpgid, setpgrp, setpriority, setsid, setuid, stop, success, sync, temp_dir, times, umask, unset, uptime, username, utime, vars, version, wait, waitpid, EnvError, platform, is_windows, is_unix, is_linux, is_macos, uname, sysname, machine, getenv, pathsep, linesep, __getppid, __getuid, __geteuid, __getgid, __getegid, __getpgrp } types { EnvError:plain } depends_on [core.files]
 source_module core.sys path Core/sys/sys.jet alias core_sys owns { success, arch, close_fd, cpu_count, current_dir, executable, exitcode, expand, family, fork, get, getegid, getenv, geteuid, getgid, getgroups, getpgid, getpgrp, getpid, getppid, getpriority, getsid, getuid, home_dir, hostname, initgroups, is_linux, is_macos, is_unix, is_windows, kill, linesep, loadavg, machine, mkfifo, name, pathsep, pid, pipe, platform, release, set, set_current_dir, setgid, setpgid, setpgrp, setpriority, setsid, setuid, stop, sync, sysname, temp_dir, times, umask, uname, unset, uptime, username, utime, vars, version, wait, waitpid }
 module core.tasks exports { after, current_task, interval, yield_now, Receiver, TaskState, delay_ms, is_interval, is_timer, recv, get, result, wait, channel, put, clear, shutdown, stop, reset, lock, acquire, release, notify, start, run, waitall, waitany, is_cancelled, is_ready, timeout, sleep, try_recv, cancel, is_closed, is_locked, size, capacity, generation, spawn_name, __task_paused, __task_cancelled } types { Receiver:plain, TaskState:plain } depends_on [core.time]
 source_module core.tasks path Core/tasks/tasks.jet alias core_core_tasks owns { acquire, after, channel, clear, current_task, delay_ms, get, interval, is_interval, is_timer, lock, notify, put, recv, release, reset, result, run, shutdown, start, stop, wait, waitall, waitany, yield_now, is_cancelled, is_ready, timeout, sleep, try_recv, cancel, is_closed, is_locked, size, capacity, generation, spawn_name }
@@ -360,13 +360,13 @@ dispatcher_row plain core.sys username | CoreCallRecord::new("core.sys", "userna
 dispatcher_row plain core.sys release | CoreCallRecord::new("core.sys", "release", "jet_std_os_release", true, &[])
 dispatcher_row plain core.sys version | CoreCallRecord::new("core.sys", "version", "jet_std_os_version", true, &[])
 dispatcher_row plain core.sys expand | CoreCallRecord::new("core.sys", "expand", "jet_std_os_expand", true, &[true])
-dispatcher_row plain core.sys getppid | CoreCallRecord::new("core.sys", "getppid", "jet_std_os_getppid", true, &[]) .with_native_int_result()
-dispatcher_row plain core.sys getuid | CoreCallRecord::new("core.sys", "getuid", "jet_std_os_getuid", true, &[]) .with_native_int_result()
-dispatcher_row plain core.sys geteuid | CoreCallRecord::new("core.sys", "geteuid", "jet_std_os_geteuid", true, &[]) .with_native_int_result()
-dispatcher_row plain core.sys getgid | CoreCallRecord::new("core.sys", "getgid", "jet_std_os_getgid", true, &[]) .with_native_int_result()
-dispatcher_row plain core.sys getegid | CoreCallRecord::new("core.sys", "getegid", "jet_std_os_getegid", true, &[]) .with_native_int_result()
+dispatcher_row plain core.sys __getppid | CoreCallRecord::new("core.sys", "__getppid", "jet_sys_getppid_raw", true, &[])
+dispatcher_row plain core.sys __getuid | CoreCallRecord::new("core.sys", "__getuid", "jet_sys_getuid_raw", true, &[])
+dispatcher_row plain core.sys __geteuid | CoreCallRecord::new("core.sys", "__geteuid", "jet_sys_geteuid_raw", true, &[])
+dispatcher_row plain core.sys __getgid | CoreCallRecord::new("core.sys", "__getgid", "jet_sys_getgid_raw", true, &[])
+dispatcher_row plain core.sys __getegid | CoreCallRecord::new("core.sys", "__getegid", "jet_sys_getegid_raw", true, &[])
 dispatcher_row plain core.sys getgroups | CoreCallRecord::new("core.sys", "getgroups", "jet_std_os_getgroups", true, &[]) .with_native_int_result()
-dispatcher_row plain core.sys getpgrp | CoreCallRecord::new("core.sys", "getpgrp", "jet_std_os_getpgrp", true, &[]) .with_native_int_result()
+dispatcher_row plain core.sys __getpgrp | CoreCallRecord::new("core.sys", "__getpgrp", "jet_sys_getpgrp_raw", true, &[])
 dispatcher_row plain core.sys uptime | CoreCallRecord::new("core.sys", "uptime", "jet_std_os_uptime", true, &[])
 dispatcher_row plain core.sys loadavg | CoreCallRecord::new("core.sys", "loadavg", "jet_std_os_loadavg", true, &[])
 dispatcher_row plain core.sys times | CoreCallRecord::new("core.sys", "times", "jet_std_os_times", true, &[])
@@ -1984,9 +1984,9 @@ ambient_route core.sys temp_dir
 ambient_route core.sys name
 ambient_route core.sys executable
 ambient_route core.sys version
-ambient_route core.sys getuid
-ambient_route core.sys geteuid
-ambient_route core.sys getgid
+ambient_route core.sys __getuid
+ambient_route core.sys __geteuid
+ambient_route core.sys __getgid
 ambient_route core.sys getsid
 ambient_route core.sys times
 ambient_route core.sys wait
@@ -2036,10 +2036,10 @@ ambient_route core.sys getpid
 ambient_route core.sys username
 ambient_route core.sys release
 ambient_route core.sys expand
-ambient_route core.sys getppid
-ambient_route core.sys getegid
+ambient_route core.sys __getppid
+ambient_route core.sys __getegid
 ambient_route core.sys getgroups
-ambient_route core.sys getpgrp
+ambient_route core.sys __getpgrp
 ambient_route core.sys uptime
 ambient_route core.sys loadavg
 ambient_route core.sys sync
