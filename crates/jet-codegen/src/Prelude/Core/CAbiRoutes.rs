@@ -13682,6 +13682,12 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_duration_difference(unsafe { &*a0 }, unsafe { &*a1 }))))
     }
 
+    /// core.handle.duration.divide
+    #[no_mangle]
+    pub extern "C" fn jet_duration_divide(a0: *mut crate::jet_std::Duration, a1: i64) -> *mut crate::jet_std::Duration {
+        guard(|| Box::into_raw(Box::new(crate::jet_duration_divide(unsafe { &*a0 }, &a1))))
+    }
+
     /// core.time.duration_new
     #[no_mangle]
     pub extern "C" fn jet_duration_from_float(a0: f64, a1: i64, ok: *mut *mut crate::jet_std::Duration, err: *mut *mut crate::jet_std::RangeError) -> i64 {
@@ -13725,6 +13731,18 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_duration_ns_value(a0: *mut crate::jet_std::Duration) -> i64 {
         guard(|| crate::jet_std::jet_int_from_i64(crate::jet_duration_ns_value(unsafe { &*a0 })))
+    }
+
+    /// core.handle.duration.round
+    #[no_mangle]
+    pub extern "C" fn jet_duration_round(a0: *mut crate::jet_std::Duration, a1: JetCString, a2: i64, a3: JetCString) -> *mut crate::jet_std::Duration {
+        guard(|| Box::into_raw(Box::new(crate::jet_duration_round(unsafe { &*a0 }, unsafe { &*a1 }, &a2, unsafe { &*a3 }))))
+    }
+
+    /// core.handle.duration.scale
+    #[no_mangle]
+    pub extern "C" fn jet_duration_scale(a0: *mut crate::jet_std::Duration, a1: i64) -> *mut crate::jet_std::Duration {
+        guard(|| Box::into_raw(Box::new(crate::jet_duration_scale(unsafe { &*a0 }, &a1))))
     }
 
     /// core.handle.duration.seconds_value
@@ -16287,6 +16305,18 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_numeric_checked_widen_at(a0: i64, a1: u8, a2: u8, a3: JetCString, a4: i64) -> f64 {
         guard(|| crate::jet_numeric_checked_widen_at(fixed::<u64>(a0), a1 != 0, a2 != 0, view(a3), fixed::<u32>(a4)))
+    }
+
+    /// core.builtin.ordering_reverse
+    #[no_mangle]
+    pub extern "C" fn jet_ordering_reverse(a0: i64) -> i64 {
+        guard(|| match crate::jet_ordering_reverse(&match a0 { 0 => crate::__jet_Ordering::__jet_Less, 1 => crate::__jet_Ordering::__jet_Equal, 2 => crate::__jet_Ordering::__jet_Greater, _ => range_stop() }) { crate::__jet_Ordering::__jet_Less => 0, crate::__jet_Ordering::__jet_Equal => 1, crate::__jet_Ordering::__jet_Greater => 2 })
+    }
+
+    /// core.builtin.ordering_then
+    #[no_mangle]
+    pub extern "C" fn jet_ordering_then(a0: i64, a1: i64) -> i64 {
+        guard(|| match crate::jet_ordering_then(&match a0 { 0 => crate::__jet_Ordering::__jet_Less, 1 => crate::__jet_Ordering::__jet_Equal, 2 => crate::__jet_Ordering::__jet_Greater, _ => range_stop() }, &match a1 { 0 => crate::__jet_Ordering::__jet_Less, 1 => crate::__jet_Ordering::__jet_Equal, 2 => crate::__jet_Ordering::__jet_Greater, _ => range_stop() }) { crate::__jet_Ordering::__jet_Less => 0, crate::__jet_Ordering::__jet_Equal => 1, crate::__jet_Ordering::__jet_Greater => 2 })
     }
 
     /// core.index.index_miss
@@ -23673,9 +23703,6 @@ mod jet_c_abi_routes {
 //   jet_devserver_app (core.web.devserver.app): no runtime function
 //   jet_devserver_for_app (core.web.devserver.for_app): no runtime function
 //   jet_devtools_publish (core.devtools.publish): generic
-//   jet_duration_divide (core.handle.duration.divide): parameter types d: &jet_std::Duration, factor: &i64
-//   jet_duration_round (core.handle.duration.round): parameter types  d: &jet_std::Duration, unit: &String, increment: &i64, mode: &String, 
-//   jet_duration_scale (core.handle.duration.scale): parameter types d: &jet_std::Duration, factor: &i64
 //   jet_edit_disjoint (TIR/routes.rs): generic
 //   jet_enc_cbor_reader (core.encoding.cbor.reader): parameter types input: JetFileReader, limits: jet_std::EncodingLimits
 //   jet_enc_cbor_reader_next (core.handle.cbor_reader.next): result type Result<JetOutcome<jet_std::DataEvent, JetAbsent>, jet_std::EncodingError>
@@ -23980,8 +24007,6 @@ mod jet_c_abi_routes {
 //   jet_numeric_float_to_int (core.numeric.float_to_int): result type Result<i128, &'static str>
 //   jet_numeric_try_from_fixed (core.numeric.fixed_try_from): result type Result<i128, &'static str>
 //   jet_option_map_ref (TIR/routes.rs): generic
-//   jet_ordering_reverse (core.builtin.ordering_reverse): parameter types value: &__jet_Ordering
-//   jet_ordering_then (core.builtin.ordering_then): parameter types first: &__jet_Ordering, second: &__jet_Ordering
 //   jet_parsed_flag (core.handle.parsed.flag): no runtime function
 //   jet_parsed_option (core.handle.parsed.option): no runtime function
 //   jet_parsed_option_float (core.handle.parsed.option_float): no runtime function

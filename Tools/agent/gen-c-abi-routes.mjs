@@ -497,6 +497,10 @@ function paramCarrier(ty, path) {
   if (ty === "&str") return one("Text", "JetCString", (a) => `view(${a})`);
   if (ty === "&String") return one("Text", "JetCString", (a) => `unsafe { &*${a} }`);
   if (ty === "String") return one("Text", "JetCString", (a) => `view(${a}).to_owned()`);
+  if (ty === "&i64") return one("Word", "i64", (a) => `&${a}`);
+  // The prelude Ordering (by value or borrowed): the Jet enum's variant index.
+  const ordering = /^(&?)__jet_Ordering$/.exec(ty);
+  if (ordering) return one(`Tag{name: "Ordering", variants: "Less,Equal,Greater"}`, "i64", (a) => `${ordering[1]}match ${a} { 0 => crate::__jet_Ordering::__jet_Less, 1 => crate::__jet_Ordering::__jet_Equal, 2 => crate::__jet_Ordering::__jet_Greater, _ => range_stop() }`);
   if (ty === "i64") return one("Word", "i64", (a) => a);
   if (fixedInts.has(ty)) return one("Word", "i64", (a) => `fixed::<${ty}>(${a})`);
   if (ty === "bool") return one("Flag", "u8", (a) => `${a} != 0`);
