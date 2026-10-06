@@ -715,3 +715,14 @@ interpreted unit (`Tests/GoldenLower.jet` plus a decoder generated from the
 schema), links each object with `JET_RUNTIME_C_LIB` and compares stdout with
 the golden. `<outdir>/summary.txt` counts pass, wrong, unsupported and harness
 verdicts and ranks the blockers by how many goldens each one stops.
+
+Native-vs-Rust differential (#4619): `Tests/run-differential.mjs <outdir>`
+reads a run-goldens output directory after its run stage and compares each
+native run (`run/<case>.stdout`, exit status) with the Rust path's `jet run`
+reference (`mir/<case>.ref`), not only with the golden. A native result that
+differs from the Rust path is `native-diverges`, separate from a golden both
+paths miss (`agree-off-golden`). The gate fails on any divergence; with
+`--require-native` also on any golden the Rust path passes that native does
+not agree on, and with `--baseline <differential.tsv>` on any case that
+agreed before and no longer does. It writes `differential.tsv` and
+`differential-summary.txt`.
