@@ -3709,7 +3709,7 @@ fn main() {
         "split" => {
             run_split(&args, &raw, mode);
         }
-        "Fold" => {
+        "fold" => {
             run_fold(&args, &raw, mode);
         }
         // D-OPTGC1=A: the grouped report is active; the old bare cleanup alias
