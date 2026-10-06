@@ -2196,7 +2196,9 @@ A second sender is made with `~tx`; there is no combined channel value from
 which to fetch one. `send` moves its value into the channel, and
 `receive() -> T !Closed` waits until a value arrives or all senders close.
 Channel payloads must be sendable (**E1102**). `channel<T>(capacity: N)` adds a
-bounded buffer. Seed a channel with `N` tokens when at most `N` workers may be
+bounded buffer of `N >= 1` values; a literal capacity below 1 is **E0395** and a
+run-time capacity below 1 stops the program, never clamping. Seed a channel with
+`N` tokens when at most `N` workers may be
 active; `Examples/features/concurrency/bounded_workers.jet` demonstrates the
 pattern (D-CONC-CHAN1).
 

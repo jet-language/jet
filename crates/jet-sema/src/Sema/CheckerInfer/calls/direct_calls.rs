@@ -2,8 +2,8 @@ use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Generics::{e0904, e0905, substitute_type, unify_types};
 use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::CheckerCoreLib::{
-    io_error_ty, is_simd_lane_type, math_constructor_arg_types, overflow_opt_in_error, result_ty,
-    wrong_core_arity,
+    io_error_ty, is_simd_lane_type, literal_int, math_constructor_arg_types,
+    overflow_opt_in_error, result_ty, wrong_core_arity,
 };
 use crate::Sema::CheckerOwnership::{e0142_aliased, e0143_drop_unaudited};
 use crate::Sema::Diagnostics::{
@@ -831,6 +831,16 @@ impl<'a> Checker<'a> {
                     ),
                     "bounded channels use a whole-number memory/backpressure limit".to_string(),
                     "write `channel<T>(capacity: 1)".to_string(),
+                    Some(argument.expr.span()),
+                ));
+            } else if let Some(capacity) = literal_int(&argument.expr).filter(|c| *c < 1) {
+                self.diags.push(Diagnostic::error(
+                    "E0395",
+                    format!("a channel capacity must be at least 1, not {capacity}"),
+                    "a bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel"
+                        .to_string(),
+                    "write `channel<T>(capacity: 1)` or larger, or `channel<T>()` for an unbounded channel"
+                        .to_string(),
                     Some(argument.expr.span()),
                 ));
             }

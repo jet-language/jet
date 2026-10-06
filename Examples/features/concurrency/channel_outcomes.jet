@@ -34,7 +34,8 @@ fn failure_label(error: TaskFailure) -> String {
 }
 
 fn run() {
-    // Capacity must be at least 1; a capacity below 1 is rejected.
+    // Capacity must be at least 1: a literal below 1 is E0395 and a run-time
+    // value below 1 stops (E3001); it is never clamped.
     // Capacity 1 holds one value; a second sender waits for the slot.
     (ftx, frx) :: channel<Int>(capacity: 1)
     ftx.send(1)

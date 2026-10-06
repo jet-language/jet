@@ -2993,12 +2993,16 @@ impl<T: Send> JetSchedulerChannel<T> {
         Self::with_capacity(None, JetChannelKind::Channel, 0)
     }
 
+    /// A bounded channel holds at least one value. A capacity below 1 has no
+    /// ratified meaning (no rendezvous channel), so it stops the program the
+    /// way sema's E0395 rejects a literal one; it is never clamped.
     pub fn bounded(capacity: i64) -> Self {
-        Self::with_capacity(
-            Some(capacity.max(1) as usize),
-            JetChannelKind::Channel,
-            0,
-        )
+        if capacity < 1 {
+            jet_scheduler_runtime_stop(&format!(
+                "channel capacity must be at least 1, got {capacity}"
+            ));
+        }
+        Self::with_capacity(Some(capacity as usize), JetChannelKind::Channel, 0)
     }
 
     pub fn timer(delay_ms: i64) -> Self {

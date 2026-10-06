@@ -2639,9 +2639,12 @@ sendability rules. The implementation is in
 
 Channels, tasks, and shared state are language primitives, not `core.tasks`
 helpers. `channel<T>()` and `channel<T>(capacity)` return
-`(Sender<T>, Receiver<T>)`; `rx.receive()` fails with the typed `Closed`
-failure once the channel is closed and drained, and `rx.try_receive()` polls
-without waiting. Tasks send owned values and do not use `async`/`await`
+`(Sender<T>, Receiver<T>)`. A bounded capacity must be at least 1: a literal
+below 1 is the compile error E0395, and a run-time value below 1 stops the
+program (E3001); it is never clamped. `rx.receive()` fails with the typed
+`Closed` failure once the channel is closed and drained, and
+`rx.try_receive()` polls without waiting. `task.timeout(delay)` installs a
+deadline on the current task. Tasks send owned values and do not use `async`/`await`
 (`D-CONC-CHAN1`; `D-SHAPE-COPY1`). `task { … }` starts work and `task.all`
 waits for several branches. Cancellation and pause/resume are control-plane
 requests on owned task handles (`D-COROUTINE1`), while shared memory uses

@@ -1,0 +1,10 @@
+// E0395: a bounded channel holds at least one value; 0 and negatives are
+// rejected instead of being clamped to 1.
+fn run() {
+    (zero_tx, _zero_rx) :: channel<Int>(capacity: 0)
+    (neg_tx, _neg_rx) :: channel<Int>(capacity: -1)
+    (one_tx, _one_rx) :: channel<Int>(capacity: 1)
+    zero_tx.send(1)
+    neg_tx.send(1)
+    one_tx.send(1)
+}
