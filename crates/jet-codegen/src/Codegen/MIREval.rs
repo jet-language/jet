@@ -12029,6 +12029,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 ("core.reactive", "derived")
             } else if matches!(&kind, MirCoreClosureKind::UiMount) {
                 ("core.ui", "reactive_render")
+            } else if _result_ty.is_some_and(|ty| ty.is_unit()) {
+                // D-REACTCORE1: `#Reactive { … }` roots its effect (no handle).
+                ("core.reactive", "scope")
             } else {
                 ("core.reactive", "effect")
             };

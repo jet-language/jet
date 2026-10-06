@@ -8464,10 +8464,10 @@ impl<'a> RustEmitter<'a> {
             | MirTypeKind::String
             | MirTypeKind::Char
             | MirTypeKind::IntN { .. } => true,
-            // IEEE floats have no total order: Rust `f64` is neither `Eq`
-            // nor `Ord`.
+            // IEEE floats have no total order: Rust `f64` is neither `Eq`,
+            // `Ord`, nor `Hash`.
             MirTypeKind::Float | MirTypeKind::Float32 | MirTypeKind::Measure(_) => {
-                !matches!(trait_name, "Eq" | "Ord")
+                !matches!(trait_name, "Eq" | "Ord" | "Hash")
             }
             MirTypeKind::Shared(_) | MirTypeKind::Fn(_) | MirTypeKind::SendFn { .. } => {
                 trait_name == "Clone"
@@ -8480,6 +8480,19 @@ impl<'a> RustEmitter<'a> {
                         .traits_by_name
                         .get(&bound.name)
                         .is_some_and(|symbol| self.dyn_clone_traits.contains(symbol)))
+            }
+            // `JetColumnList` implements only `Clone` and `Debug`.
+            MirTypeKind::List(inner)
+                if self.columnar_type_def(inner).is_some()
+                    && !matches!(trait_name, "Clone" | "Debug") =>
+            {
+                false
+            }
+            // Range and quantity carriers make no Rust `Hash` promise.
+            MirTypeKind::InlineRange { .. } | MirTypeKind::Quantity { .. }
+                if trait_name == "Hash" =>
+            {
+                false
             }
             MirTypeKind::List(inner)
             | MirTypeKind::Option(inner)
@@ -8497,7 +8510,7 @@ impl<'a> RustEmitter<'a> {
                     marker,
                     MirTagMarker::Internal(MirInternalTag::CppCallbackAbi)
                 ) {
-                    true
+                    trait_name != "Hash"
                 } else {
                     self.type_derive_capability(
                         inner,
@@ -8508,8 +8521,10 @@ impl<'a> RustEmitter<'a> {
                     )
                 }
             }
-            // The runtime `JetMap` carrier is `Eq` but has no Rust order.
-            MirTypeKind::Map { .. } if matches!(trait_name, "PartialOrd" | "Ord") => false,
+            // The runtime `JetMap` carrier is `Eq` but has no Rust order or hash.
+            MirTypeKind::Map { .. } if matches!(trait_name, "PartialOrd" | "Ord" | "Hash") => {
+                false
+            }
             MirTypeKind::Map { key, value }
             | MirTypeKind::Result {
                 ok: key,
@@ -8541,7 +8556,7 @@ impl<'a> RustEmitter<'a> {
             // Union values are spelled as the synthetic `__JetUnion_*` carrier,
             // which has no sema `Equatable` derive and so no Rust `PartialEq`.
             MirTypeKind::Union(members) => {
-                !matches!(trait_name, "PartialEq" | "Eq" | "PartialOrd" | "Ord")
+                !matches!(trait_name, "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash")
                     && members.iter().all(|member| {
                         self.type_derive_capability(
                             member,
@@ -8557,23 +8572,24 @@ impl<'a> RustEmitter<'a> {
                 // The Rust representation makes the capability boundary
                 // explicit instead of guessing from a source declaration.
                 if name.name == jet_foundation::Syntax::TYPE_PTR {
-                    return true;
+                    return trait_name != "Hash";
                 }
                 if name.name == "View" {
                     return trait_name == "Clone"
-                        || args.first().is_some_and(|inner| {
-                            self.type_derive_capability(
-                                inner,
-                                trait_name,
-                                visiting,
-                                bindings,
-                                generic_params,
-                            )
-                        });
+                        || (trait_name != "Hash"
+                            && args.first().is_some_and(|inner| {
+                                self.type_derive_capability(
+                                    inner,
+                                    trait_name,
+                                    visiting,
+                                    bindings,
+                                    generic_params,
+                                )
+                            }));
                 }
                 // D-PIN1=A: `Pin<T>` is the same exclusive `&mut T` window.
                 if name.name == "ViewMut" || name.name == jet_foundation::Syntax::TYPE_PIN {
-                    return trait_name != "Clone"
+                    return !matches!(trait_name, "Clone" | "Hash")
                         && args.first().is_some_and(|inner| {
                             self.type_derive_capability(
                                 inner,
@@ -8588,8 +8604,8 @@ impl<'a> RustEmitter<'a> {
                     return true;
                 }
                 let Some(def) = self.structural_type_def_for(ty) else {
-                    // Native carriers make no Rust total-order promise.
-                    if matches!(trait_name, "Eq" | "PartialOrd" | "Ord") {
+                    // Native carriers make no Rust total-order or hash promise.
+                    if matches!(trait_name, "Eq" | "PartialOrd" | "Ord" | "Hash") {
                         return false;
                     }
                     return args.iter().all(|arg| {
@@ -8618,11 +8634,21 @@ impl<'a> RustEmitter<'a> {
                 {
                     return false;
                 }
-                // Rust `Eq`/`PartialOrd`/`Ord` follow sema's structural
-                // `Comparable` derive the same way: a user `Comparable` impl
-                // orders by its own body, which a derived Rust order would
-                // silently disagree with.
-                if matches!(trait_name, "Eq" | "PartialOrd" | "Ord")
+                // Rust `Eq`/`Hash` follow sema's structural `Equatable` derive:
+                // a user `Equatable` impl compares by its own body, which a
+                // derived Rust equality would silently disagree with.
+                if matches!(trait_name, "Eq" | "Hash")
+                    && !matches!(&def.kind, MirTypeDefKind::Alias { .. })
+                    && (!self.derives_trait(def, crate::Generics::EQUATABLE)
+                        || self.selected_user_capability_impl(ty, crate::Generics::EQUATABLE)
+                        || def.name.starts_with("__JetUnion_"))
+                {
+                    return false;
+                }
+                // Rust `PartialOrd`/`Ord` follow sema's structural `Comparable`
+                // derive the same way: a user `Comparable` impl orders by its
+                // own body.
+                if matches!(trait_name, "PartialOrd" | "Ord")
                     && !matches!(&def.kind, MirTypeDefKind::Alias { .. })
                     && (!self.derives_trait(def, crate::Generics::COMPARABLE)
                         || !self.derives_trait(def, crate::Generics::EQUATABLE)
@@ -8734,7 +8760,7 @@ impl<'a> RustEmitter<'a> {
                         &next_bindings,
                         &next_generic_params,
                     ),
-                    MirTypeDefKind::UnitFamily { .. } => true,
+                    MirTypeDefKind::UnitFamily { .. } => trait_name != "Hash",
                 };
                 visiting.pop();
                 let floor = self.derive_capability_cycle_floor.get();
@@ -9333,6 +9359,24 @@ impl<'a> RustEmitter<'a> {
                     )
                 {
                     derives.push("PartialEq");
+                }
+            }
+        }
+        // Structural `Equatable` equality is reflexive whenever every field's
+        // is (no IEEE float reachable), so the row is Rust `Eq`, and `Hash`
+        // when every field hashes: hashed carriers (`Tally<T>`, sets) key on it.
+        if derives_allowed && derives.contains(&"PartialEq") {
+            for trait_name in ["Eq", "Hash"] {
+                if !derives.contains(&trait_name)
+                    && self.type_derive_capability(
+                        declared_ty,
+                        trait_name,
+                        &mut Vec::new(),
+                        &BTreeMap::new(),
+                        &BTreeSet::new(),
+                    )
+                {
+                    derives.push(trait_name);
                 }
             }
         }
@@ -26135,7 +26179,9 @@ impl<'a> RustEmitter<'a> {
             .map(|(symbol, _)| format!("{}{symbol}", self.config.root_prefix))
             .unwrap_or(symbol);
         let emitted = format!("{symbol}({})", args.join(", "));
-        self.numeric_conversion_result(&emitted, target, fallibility)
+        // The owned inline-range adapter already returns the exact `JetInt`.
+        let exact_int_raw = adapter.is_some() && member == "inline_range";
+        self.numeric_conversion_result(&emitted, target, fallibility, exact_int_raw)
     }
 
     fn numeric_conversion_parameter(
@@ -26157,9 +26203,12 @@ impl<'a> RustEmitter<'a> {
         emitted: &str,
         target: &MirType,
         fallibility: &MirCallFallibility,
+        exact_int_raw: bool,
     ) -> String {
         match fallibility {
-            MirCallFallibility::Infallible => self.numeric_conversion_value(emitted, target, false),
+            MirCallFallibility::Infallible => {
+                self.numeric_conversion_value(emitted, target, false, exact_int_raw)
+            }
             MirCallFallibility::Failure(MirFailureCarrier::Result { success, .. }) => {
                 let Some((ok, _error)) = target.result_parts() else {
                     panic!("MIR numeric conversion Result carrier has a non-Result target");
@@ -26167,7 +26216,12 @@ impl<'a> RustEmitter<'a> {
                 if !ok.same_checked_type(success) {
                     panic!("MIR numeric conversion Result carrier disagrees with its target");
                 }
-                let success = self.numeric_conversion_value("__jet_conversion_value", ok, true);
+                let success = self.numeric_conversion_value(
+                    "__jet_conversion_value",
+                    ok,
+                    true,
+                    exact_int_raw,
+                );
                 format!(
                     "match {emitted} {{ \
                         Ok(__jet_conversion_value) => Ok({success}), \
@@ -26189,6 +26243,7 @@ impl<'a> RustEmitter<'a> {
         raw: &str,
         target: &MirType,
         result_success: bool,
+        exact_int_raw: bool,
     ) -> String {
         fn exact_int_carrier(ty: &MirType) -> bool {
             match ty.kind() {
@@ -26202,7 +26257,9 @@ impl<'a> RustEmitter<'a> {
 
         let base = self.distinct_base(target);
         let base_ty = base.unwrap_or(target);
-        let cast = if result_success && exact_int_carrier(base_ty) {
+        let cast = if exact_int_raw && exact_int_carrier(base_ty) {
+            raw.to_string()
+        } else if result_success && exact_int_carrier(base_ty) {
             format!(
                 "{}jet_std::jet_int_owned_from_i128(({raw}) as i128)",
                 self.config.root_prefix
@@ -29308,9 +29365,10 @@ impl<'a> RustEmitter<'a> {
                        if {checks} {{ \
                            Err(jet_reader_pattern_miss(&*__jet_reader)) \
                        }} else {{ \
+                           let __jet_value = {tuple}; \
                            jet_reader_take_pattern_checked(\
                                __jet_reader, __jet_start, __jet_end); \
-                           Ok({tuple}) \
+                           Ok(__jet_value) \
                        }} \
                    }}, \
                    None => Err(jet_reader_pattern_miss(&*__jet_reader)), \

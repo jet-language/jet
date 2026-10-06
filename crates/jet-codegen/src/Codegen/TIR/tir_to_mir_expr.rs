@@ -3740,7 +3740,14 @@ pub(super) fn lower_expr(
         TExprKind::Todo { line } => {
             let call = ctx.intern_prelude_route(super::todo_route(&expr.ty, &carrier)?)?;
             let location = panic_location(ctx, *line);
-            let expected_type = Some(ctx.mir_type(&expr.ty)?);
+            // E3011 names the value type the goal stands for: a `Never`
+            // failure carrier around it is the function's contract, not the
+            // missing value (`-> Int` reports `Int`).
+            let goal_ty = match &expr.ty {
+                Type::Result { ok, err } if err.is_never() => ok.as_ref(),
+                ty => ty,
+            };
+            let expected_type = Some(ctx.mir_type(goal_ty)?);
             ctx.emit(
                 "todo",
                 Some(expr.ty.clone()),

@@ -791,14 +791,15 @@ fn lower_generic_params(params: &[crate::AST::TypeParam]) -> Vec<super::TGeneric
         .collect()
 }
 
-/// Sema attaches its structural `Equatable` provider (never a user impl) as a
-/// compiler-generated impl. That checked fact reaches MIR as the `Equatable`
-/// derive, which the Rust printer lowers to the native `PartialEq` that
-/// `jet_eq` (behind `assert_eq`) requires.
+/// Sema attaches its structural `Equatable` / `Comparable` providers (never a
+/// user impl) as compiler-generated impls. Those checked facts reach MIR as
+/// derives, which the Rust printer lowers to the native `PartialEq` that
+/// `jet_eq` (behind `assert_eq`) requires and the `Eq`/`Ord` that ordered
+/// carriers such as `JetMap` keys require.
 fn lower_derive_names(
     derives: &[(String, Span)],
     auto_debug: bool,
-    generated_equatable: bool,
+    trait_impls: &[TraitImplBlock],
 ) -> Vec<String> {
     let mut names = derives
         .iter()
@@ -808,17 +809,20 @@ fn lower_derive_names(
     if auto_debug && !names.iter().any(|name| name == crate::Generics::DEBUG) {
         names.push(crate::Generics::DEBUG.to_string());
     }
-    if generated_equatable && !names.iter().any(|name| name == crate::Generics::EQUATABLE) {
-        names.push(crate::Generics::EQUATABLE.to_string());
+    for provider in [crate::Generics::EQUATABLE, crate::Generics::COMPARABLE] {
+        if has_generated_block(trait_impls, provider) && !names.iter().any(|name| name == provider)
+        {
+            names.push(provider.to_string());
+        }
     }
     names
 }
 
 /// Struct and enum providers ride on the type as a compiler-generated block.
-fn has_generated_equatable_block(trait_impls: &[TraitImplBlock]) -> bool {
+fn has_generated_block(trait_impls: &[TraitImplBlock], trait_name: &str) -> bool {
     trait_impls
         .iter()
-        .any(|block| block.compiler_generated && block.trait_name == crate::Generics::EQUATABLE)
+        .any(|block| block.compiler_generated && block.trait_name == trait_name)
 }
 
 fn marker_arg_text(marker: &Marker) -> Option<String> {
@@ -1697,11 +1701,7 @@ fn lower_struct(
         public: definition.is_pub,
         package_public: definition.is_package_pub,
         generic_params: lower_generic_params(&definition.type_params),
-        derives: lower_derive_names(
-            &definition.derives,
-            auto_debug,
-            has_generated_equatable_block(&definition.trait_impls),
-        ),
+        derives: lower_derive_names(&definition.derives, auto_debug, &definition.trait_impls),
         auto_derive_default: definition.auto_derive_default,
         auto_printable,
         published_schema: definition.is_published_schema,
@@ -1787,11 +1787,7 @@ fn lower_enum(
         public: definition.is_pub,
         package_public: definition.is_package_pub,
         generic_params: lower_generic_params(&definition.type_params),
-        derives: lower_derive_names(
-            &definition.derives,
-            auto_debug,
-            has_generated_equatable_block(&definition.trait_impls),
-        ),
+        derives: lower_derive_names(&definition.derives, auto_debug, &definition.trait_impls),
         auto_derive_default: definition.auto_derive_default,
         auto_printable,
         published_schema: false,
@@ -1834,7 +1830,7 @@ fn lower_distinct(
         public: definition.is_pub,
         package_public: definition.is_package_pub,
         generic_params: Vec::new(),
-        derives: lower_derive_names(&definition.derives, false, false),
+        derives: lower_derive_names(&definition.derives, false, &[]),
         auto_derive_default: false,
         // D-CAPBUNDLE1: `#Printable` on a distinct type grants the base
         // type's rendering, so the adapters emit the same Printable surface
