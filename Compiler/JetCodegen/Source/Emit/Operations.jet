@@ -327,6 +327,14 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MIRFun
         // parameter accepts the `&String` through deref coercion.
         if jet_rust_emit_string_view_argument(&ctx, function, arg) == .Val(view) -> return "&{mir_view_copy_symbol(MIRViewCopyKind.String)}({view})"
     }
+    // D-MEMPROVENANCE2 (#4707): a `ViewMut<T>` crosses by value as the
+    // `&mut [T]` reborrow its read produced; it moves, it never clones
+    // (MIRRust call_arg_for_function).
+    if !borrowed && arg.access == MIRAccess.Read {
+        if jet_rust_emit_value_type(ctx, function, arg.value).kind == .Apply(type_name, type_args) {
+            if type_name.name == "ViewMut" && type_args.len() == 1 -> return jet_rust_emit_value_move(ctx, arg.value)
+        }
+    }
     trait_box :: jet_rust_emit_call_arg_trait_box(&ctx, function, arg)
     copied :: arg.implicit_clone || arg.shared_auto_clone
     has_coercion :: arg.authority_boundary || copied || arg.widen_fixed_to_list || arg.widen_to_union != None || trait_box || arg.fn_coercion != None

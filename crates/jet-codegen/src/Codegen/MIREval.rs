@@ -6184,7 +6184,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 if let Some(text) = self.plain_enum_display(frame_index, *call, args, span)? {
                     text
                 } else {
-                    let values = self.call_args(frame_index, args, span)?;
+                    let mut values = self.call_args(frame_index, args, span)?;
+                    self.lend_write_subrange_receiver(frame_index, *call, args, &mut values, span)?;
                     self.eval_prelude_runtime_values(*call, values, instruction.ty.as_ref(), span)?
                 }
             }
@@ -6245,7 +6246,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     self.prelude_row(*route, span)?.fallibility,
                     jet_foundation::MIR::MirCallFallibility::Infallible
                 );
-                let values = self.call_args(frame_index, args, span)?;
+                let mut values = self.call_args(frame_index, args, span)?;
+                self.lend_write_subrange_receiver(frame_index, *route, args, &mut values, span)?;
                 let value = self.eval_core_call(
                     *call,
                     *route,
@@ -24582,6 +24584,27 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     steps: alias.steps.clone(),
                 });
             }
+        }
+        Ok(())
+    }
+
+    /// D-MEMPROVENANCE2 (#4707): the receiver of `&view[a..b]` over a write
+    /// view parameter or local is lent as the address it was read from, so
+    /// the subrange is a window over the owner, not over a copy.
+    fn lend_write_subrange_receiver(
+        &self,
+        frame_index: usize,
+        call: MirPreludeCallId,
+        args: &[jet_foundation::MIR::MirCallArg],
+        values: &mut [RuntimeValue],
+        span: Span,
+    ) -> Result<(), Diagnostic> {
+        let row = self.prelude_row(call, span)?;
+        if row.family == jet_foundation::MIR::MirPreludeFamily::BuiltinMethod
+            && row.module == "core.builtin"
+            && row.member == "view_mut_new"
+        {
+            self.pass_write_subranges(frame_index, args, values, span)?;
         }
         Ok(())
     }

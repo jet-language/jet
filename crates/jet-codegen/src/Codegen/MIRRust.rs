@@ -27619,6 +27619,17 @@ impl<'a> RustEmitter<'a> {
             }
             return self.value_slot_reference(arg.value, false);
         }
+        // D-MEMPROVENANCE2 (#4707): a `ViewMut<T>` crosses by value as the
+        // `&mut [T]` reborrow its read produced; it moves, it never clones.
+        if !borrowed
+            && arg.access == MirAccess::Read
+            && matches!(
+                self.value_type(function, arg.value).kind(),
+                MirTypeKind::Apply { name, args } if name.name == "ViewMut" && args.len() == 1
+            )
+        {
+            return self.value_move(arg.value);
+        }
         let mut effective = arg.clone();
         if arg.box_as_trait.is_some() && !needs_trait_box {
             effective.box_as_trait = None;
