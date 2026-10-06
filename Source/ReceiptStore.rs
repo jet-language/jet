@@ -2796,6 +2796,12 @@ fn receipt_authority_roots(start: &Path) -> BTreeSet<PathBuf> {
 }
 
 fn target_path(verb: &str, argv: &[String], cwd: &Path) -> Option<PathBuf> {
+    // A stored budget report receipt (`BudgetStore`, verb `budget`, argv
+    // `budget check <report-id>`) covers the whole workspace; its trailing
+    // report id is a claim discriminator, not a source path.
+    if verb == "budget" {
+        return Some(receipt_authority_root(cwd));
+    }
     let mut skip_next = false;
     let mut positionals = Vec::new();
     let start = if verb == "budget check" { 2 } else { 1 };

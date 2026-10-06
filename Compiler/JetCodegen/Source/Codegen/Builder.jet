@@ -1126,6 +1126,9 @@ fn jet_codegen_scalar_copy_fact(builder: JetCodegenBuilder, operation: MIROperat
 fn jet_codegen_ownership(ty: Type) -> MIROwnership Never! {
     if ty == {
         .Int | .Float | .Float32 | .Bool | .Char -> mir_copy_ownership()
+        // D-TYPE2-SPELL1: an inline range is knowledge over its base carrier,
+        // not a runtime wrapper, so it carries exactly the base's ownership.
+        .InlineRange(base, _, _) -> jet_codegen_ownership(base)
         .Named(name) -> {
             if name == "Unit" || name == "Never" -> mir_copy_ownership()
             else -> mir_owned_ownership()
