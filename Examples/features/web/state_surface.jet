@@ -18,10 +18,12 @@ struct Row {
     active: Bool
 }
 
-fn rows() -> [Row] { [Row]{ }
-    Row{id: 1, name: "Ada", active: true},
-    Row{id: 2, name: "Grace", active: false},
-    Row{id: 3, name: "Linus", active: true},
+fn rows() -> [Row] {
+    [Row]{
+        Row{id: 1, name: "Ada", active: true},
+        Row{id: 2, name: "Grace", active: false},
+        Row{id: 3, name: "Linus", active: true},
+    }
 }
 
 fn row_key(row: Row) -> String Never! { "{row.id}" }
@@ -32,8 +34,8 @@ fn updated_row(row: Row) -> Row { Row{id: row.id, name: "Updated {row.name}", ac
 
 fn fetch_rows() -> String String! { Ok("rows") }
 fn send_mutation(payload: String) -> String String! { Ok(payload) }
-fn replay_mutation(_payload: String) -> Unit String! { Ok() }
-fn validate_name(value: String) -> Unit String! {
+fn replay_mutation(_payload: String) String! { return Ok() }
+fn validate_name(value: String) String! {
     if value == "bad" -> return Err("name rejected")
     return Ok()
 }

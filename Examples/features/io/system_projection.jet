@@ -6,15 +6,14 @@ use core.testing as testing
 fn run() {
     original :: sys.current_dir() ?? return
     print("cwd:{original}")
-    print("home:{sys.home_dir() ?? \"none\"}")
+    print("home:{sys.home_dir() ?? "none"}")
     root :: testing.temp_dir("system-projection")
     sys.set_current_dir(root) ?? return
-    path :: root + "/clock.txt"
+    path :: "{root}/clock.txt"
     files.write(path, "clock") ?? return
     sys.utime(path, 0, 0) ?? return
     sys.set_current_dir(original) ?? return
     print("directory:restored")
-    print("interrupt:{sys.on_interrupt(() -> {})}")
 
     #Unsafe("fork and reap both children before returning") {
         first :: sys.fork() ?? return
