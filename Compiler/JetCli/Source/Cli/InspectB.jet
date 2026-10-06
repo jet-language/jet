@@ -980,10 +980,7 @@ fn jet_cli_supply_render(file: String, raw: String, diagnostics: [Diagnostic], c
 // main.rs `emit_cli_diagnostics` without an active profile: a failed
 // `diagnostics` status line on stdout under `--json`, else rendered text.
 fn jet_cli_supply_emit(file: String, source: String, diagnostics: [Diagnostic], color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
-    if json {
-        reports :: loop diagnostic in diagnostics -> jet_cli_report_json(diagnostic)
-        return jet_cli_supply_output("{jet_cli_status_render_with_reports("diagnostics", false, reports, [JetCLIStatusField]{})}\n", "", JET_DRIVER_EXIT_USER_ERROR)
-    }
+    if json -> return jet_cli_supply_output(jet_cli_reports_status_json("diagnostics", false, None, file, source, diagnostics), "", JET_DRIVER_EXIT_USER_ERROR)
     jet_cli_supply_render(file, source, diagnostics, color)
 }
 
