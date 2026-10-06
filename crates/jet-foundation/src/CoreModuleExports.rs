@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 1a943765bc81026e393f994b66eb7de3912d7fbba91229d732a2644bf3b662e4
+// Source SHA-256: 36a74fa64e97bc52abcab8fda81107e05a2a9d06ea697fb9f1d50294b846dfc7
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -40,6 +40,14 @@ pub struct CoreSourceModule {
     pub alias: &'static str,
     pub path: &'static str,
     pub owned_members: &'static [&'static str],
+}
+
+/// One source-owned Core nominal: `name` is declared by the Core source at
+/// `path` and no tier projects it onto a native carrier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CoreSourceOwnedType {
+    pub path: &'static str,
+    pub name: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -859,6 +867,30 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.web.virtual", alias: "core_core_web_virtual", path: "Core/web/virtual.jet", owned_members: &["indices", "plan", "plan_facts", "plan_from_sizes", "plan_indices", "plan_measure", "plan_measured", "plan_resize", "plan_scroll_to", "plan_slice", "plan_viewport", "plan_viewport_measure", "plan_viewport_state", "slice", "window", "window_measured"] },
 ];
 
+pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
+    CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "ComputeError" },
+    CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "ComputeDevice" },
+    CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "Tensor" },
+    CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "ComputeStream" },
+    CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "SparseTensor" },
+    CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "VJPRun" },
+    CoreSourceOwnedType { path: "Core/compute/solve.jet", name: "LinearSolver" },
+    CoreSourceOwnedType { path: "Core/net/net.jet", name: "SocketAddr" },
+    CoreSourceOwnedType { path: "Core/net/net.jet", name: "UDPSocket" },
+    CoreSourceOwnedType { path: "Core/net/net.jet", name: "UDPPacket" },
+    CoreSourceOwnedType { path: "Core/net/net.jet", name: "UnixStream" },
+    CoreSourceOwnedType { path: "Core/net/net.jet", name: "UnixListener" },
+    CoreSourceOwnedType { path: "Core/net/net.jet", name: "SRVRecord" },
+    CoreSourceOwnedType { path: "Core/net/tls.jet", name: "TLSCertificate" },
+    CoreSourceOwnedType { path: "Core/net/tls.jet", name: "TLSPeerIdentity" },
+    CoreSourceOwnedType { path: "Core/web/query.jet", name: "WebQuery" },
+    CoreSourceOwnedType { path: "Core/web/query.jet", name: "WebQueryState" },
+    CoreSourceOwnedType { path: "Core/web/query.jet", name: "WebMutationState" },
+    CoreSourceOwnedType { path: "Core/web/query.jet", name: "WebQueryStatus" },
+    CoreSourceOwnedType { path: "Core/web/query.jet", name: "WebMutationStatus" },
+    CoreSourceOwnedType { path: "Core/web/query.jet", name: "WebQueryNetworkMode" },
+];
+
 pub const CORE_ROOT_TYPES: &[&str] = &["Date", "LocalDate", "LocalTime", "Decimal", "Fraction", "Duration", "Instant", "Authority"];
 // END GENERATED CORE DECLARATIONS
 
@@ -987,6 +1019,27 @@ pub fn core_source_owns_call(module: &str, member: &str, argc: usize) -> bool {
         return false;
     }
     core_source_owns(module, member)
+}
+
+/// Whether a checked Core nominal identity
+/// (`<corelib>/Core/net::Core/net/url.jet::URL`) names a source-owned Core type
+/// (`source_module … types { … }` in Prelude/Core.jet). An owned type is the
+/// Jet declaration on every tier: no tier projects it onto a native carrier
+/// or routes its methods to a compiler adapter.
+pub fn core_source_owns_type(name: &str) -> bool {
+    let Some(identity) = name.strip_prefix(crate::Diagnostics::CORE_SOURCE_ROOT) else {
+        return false;
+    };
+    let Some((owner, leaf)) = identity.strip_prefix('/').and_then(|rest| rest.rsplit_once("::"))
+    else {
+        return false;
+    };
+    let Some((_, file)) = owner.rsplit_once("::") else {
+        return false;
+    };
+    CORE_SOURCE_OWNED_TYPES
+        .iter()
+        .any(|owned| owned.name == leaf && owned.path == file)
 }
 
 /// The canonical bootstrap ordering consumed by sema and future MIR.
