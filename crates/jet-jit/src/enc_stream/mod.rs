@@ -1099,48 +1099,167 @@ fn option_bits(opt: Option<i64>) -> u64 {
     }
 }
 
-// ── core.files create / open ─────────────────────────────────────────────────
+// ── core.files provider leaves (#3593) ───────────────────────────────────────
+// Registered under the exact Core row symbols. Each host only marshals values
+// and calls the shared FileStream.rs / FileHandles.rs leaf (I9).
 
-pub(crate) fn jet_jit_fs_create(path: i64) -> i64 {
-    let p = crate::CoreHost::clone_path_arg(path);
-    match file_stream::jet_std_files_create(&p) {
-        Ok(writer) => {
-            let h = Concurrency::with_runtime_mut(|rt| {
-                rt.file_writers.push(FileWriterSlot::Live(writer));
-                rt.file_writers.len() as i64
-            });
-            push_ok_handle(h)
-        }
+use crate::ProcessPrelude::process_prelude::jet_std as files_leaf;
+
+fn files_unit(result: Result<(), SourceIoError>) -> i64 {
+    match result {
+        Ok(()) => result_ok(0),
         Err(error) => crate::Process::process_io_error_result(error),
     }
 }
 
-pub(crate) fn jet_jit_fs_append(path: i64) -> i64 {
-    let p = crate::CoreHost::clone_path_arg(path);
-    match file_stream::jet_std_files_append(&p) {
-        Ok(writer) => {
-            let handle = Concurrency::with_runtime_mut(|rt| {
-                rt.file_writers.push(FileWriterSlot::Live(writer));
-                rt.file_writers.len() as i64
-            });
-            push_ok_handle(handle)
+fn files_string_list(values: Vec<String>) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for value in values {
+            let id = rt.heap.alloc_string(value);
+            let _ = rt.heap.list_push_int(list, id);
         }
-        Err(error) => crate::Process::process_io_error_result(error),
-    }
+        list
+    })
 }
 
-pub(crate) fn jet_jit_fs_open(path: i64) -> i64 {
-    let p = crate::CoreHost::clone_path_arg(path);
-    match file_stream::jet_std_files_open(&p) {
-        Ok(r) => {
+pub(crate) fn jet_jit_files_open_reader(handle: i64, name: i64, links: i64) -> i64 {
+    let name = crate::CoreHost::clone_path_arg(name);
+    match file_stream::jet_std_files_open_reader(handle, &name, links) {
+        Ok(reader) => {
             let h = Concurrency::with_runtime_mut(|rt| {
-                rt.file_readers.push(FileReaderSlot::Live(r));
+                rt.file_readers.push(FileReaderSlot::Live(reader));
                 rt.file_readers.len() as i64
             });
             push_ok_handle(h)
         }
         Err(error) => crate::Process::process_io_error_result(error),
     }
+}
+
+pub(crate) fn jet_jit_files_open_writer(
+    handle: i64,
+    name: i64,
+    append: i8,
+    if_exists: i64,
+    mode: i64,
+    links: i64,
+) -> i64 {
+    let name = crate::CoreHost::clone_path_arg(name);
+    match file_stream::jet_std_files_open_writer(handle, &name, append != 0, if_exists, mode, links) {
+        Ok(writer) => {
+            let h = Concurrency::with_runtime_mut(|rt| {
+                rt.file_writers.push(FileWriterSlot::Live(writer));
+                rt.file_writers.len() as i64
+            });
+            push_ok_handle(h)
+        }
+        Err(error) => crate::Process::process_io_error_result(error),
+    }
+}
+
+fn jet_jit_files_directory_open(handle: i64, name: i64) -> i64 {
+    let name = crate::CoreHost::clone_path_arg(name);
+    match files_leaf::jet_fs_directory_open(handle, &name) {
+        Ok(key) => result_ok(key as u64),
+        Err(error) => crate::Process::process_io_error_result(error),
+    }
+}
+
+fn jet_jit_files_directory_close(handle: i64) {
+    files_leaf::jet_fs_directory_close(handle);
+}
+
+fn jet_jit_files_directory_fsync(handle: i64) -> i64 {
+    files_unit(files_leaf::jet_fs_directory_fsync(handle))
+}
+
+fn jet_jit_files_directory_create(handle: i64, name: i64, mode: i64) -> i64 {
+    let name = crate::CoreHost::clone_path_arg(name);
+    files_unit(files_leaf::jet_fs_directory_create(handle, &name, mode))
+}
+
+fn jet_jit_files_directory_list(handle: i64) -> i64 {
+    match files_leaf::jet_fs_directory_list(handle) {
+        Ok(entries) => {
+            let list = Concurrency::with_runtime_mut(|rt| {
+                let list = rt.heap.alloc_empty_list();
+                for entry in entries {
+                    let rec = rt.heap.alloc_record(3);
+                    let name = rt.heap.alloc_string(entry.name);
+                    let path = rt.heap.alloc_string(entry.path);
+                    let _ = rt.heap.record_set_string(rec, 0, name);
+                    let _ = rt.heap.record_set_string(rec, 1, path);
+                    let _ = rt.heap.record_set_bool(rec, 2, entry.is_dir);
+                    let _ = rt.heap.list_push_int(list, rec);
+                }
+                list
+            });
+            result_ok(list as u64)
+        }
+        Err(error) => crate::Process::process_io_error_result(error),
+    }
+}
+
+fn jet_jit_files_stat_at(handle: i64, name: i64, follow: i8) -> i64 {
+    let name = crate::CoreHost::clone_path_arg(name);
+    match files_leaf::jet_fs_stat_at(handle, &name, follow != 0) {
+        Ok(row) => {
+            let list = Concurrency::with_runtime_mut(|rt| {
+                let list = rt.heap.alloc_empty_list();
+                for value in row {
+                    let _ = rt.heap.list_push_int(list, value);
+                }
+                list
+            });
+            result_ok(list as u64)
+        }
+        Err(error) => crate::Process::process_io_error_result(error),
+    }
+}
+
+fn jet_jit_files_rename_at(from_handle: i64, from: i64, to_handle: i64, to: i64, if_exists: i64) -> i64 {
+    let from = crate::CoreHost::clone_path_arg(from);
+    let to = crate::CoreHost::clone_path_arg(to);
+    files_unit(files_leaf::jet_fs_rename_at(from_handle, &from, to_handle, &to, if_exists))
+}
+
+fn jet_jit_files_remove_at(handle: i64, name: i64, directory: i8) -> i64 {
+    let name = crate::CoreHost::clone_path_arg(name);
+    files_unit(files_leaf::jet_fs_remove_at(handle, &name, directory != 0))
+}
+
+fn jet_jit_files_read_link_at(handle: i64, name: i64) -> i64 {
+    let name = crate::CoreHost::clone_path_arg(name);
+    match files_leaf::jet_fs_read_link_at(handle, &name) {
+        Ok(text) => result_ok(Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text)) as u64),
+        Err(error) => crate::Process::process_io_error_result(error),
+    }
+}
+
+fn jet_jit_files_xattr_names(path: i64) -> i64 {
+    let path = crate::CoreHost::clone_path_arg(path);
+    match files_leaf::jet_fs_xattr_names(&path) {
+        Ok(names) => result_ok(files_string_list(names) as u64),
+        Err(error) => crate::Process::process_io_error_result(error),
+    }
+}
+
+fn jet_jit_files_xattr_get(path: i64, name: i64) -> i64 {
+    let path = crate::CoreHost::clone_path_arg(path);
+    let name = crate::CoreHost::clone_path_arg(name);
+    match files_leaf::jet_fs_xattr_get(&path, &name) {
+        Ok(None) => result_ok(option_bits(None)),
+        Ok(Some(bytes)) => result_ok(option_bits(Some(crate::Marshal::alloc_byte_list(&bytes)))),
+        Err(error) => crate::Process::process_io_error_result(error),
+    }
+}
+
+fn jet_jit_files_xattr_set(path: i64, name: i64, value: i64) -> i64 {
+    let path = crate::CoreHost::clone_path_arg(path);
+    let name = crate::CoreHost::clone_path_arg(name);
+    let value = crate::Marshal::clone_bytes(value);
+    files_unit(files_leaf::jet_fs_xattr_set(&path, &name, &value))
 }
 
 // ── writers / readers ────────────────────────────────────────────────────────
@@ -1678,10 +1797,38 @@ host_fns! {
             sig_quinary.params.push(AbiParam::new(types::I64));
         }
         sig_quinary.returns.push(AbiParam::new(types::I64));
+        // #3593 provider leaves: a `Bool` argument crosses as I8.
+        let mut sig_files_open_writer = Signature::new(cc);
+        sig_files_open_writer.params.push(AbiParam::new(types::I64));
+        sig_files_open_writer.params.push(AbiParam::new(types::I64));
+        sig_files_open_writer.params.push(AbiParam::new(types::I8));
+        for _ in 0..3 {
+            sig_files_open_writer.params.push(AbiParam::new(types::I64));
+        }
+        sig_files_open_writer.returns.push(AbiParam::new(types::I64));
+        let mut sig_files_handle_name_flag = Signature::new(cc);
+        sig_files_handle_name_flag.params.push(AbiParam::new(types::I64));
+        sig_files_handle_name_flag.params.push(AbiParam::new(types::I64));
+        sig_files_handle_name_flag.params.push(AbiParam::new(types::I8));
+        sig_files_handle_name_flag.returns.push(AbiParam::new(types::I64));
+        let mut sig_files_void_unary = Signature::new(cc);
+        sig_files_void_unary.params.push(AbiParam::new(types::I64));
     }
     encoding_limits_safe: "jet_std::EncodingLimits::safe" => jet_jit_encoding_limits_safe: sig_nullary;
-    fs_create: "jet_jit_fs_create" => jet_jit_fs_create: sig_unary;
-    fs_open: "jet_jit_fs_open" => jet_jit_fs_open: sig_unary;
+    files_open_reader: "jet_std_files_open_reader" => jet_jit_files_open_reader: sig_ternary;
+    files_open_writer: "jet_std_files_open_writer" => jet_jit_files_open_writer: sig_files_open_writer;
+    files_directory_open: "jet_std::jet_fs_directory_open" => jet_jit_files_directory_open: sig_binary;
+    files_directory_close: "jet_std::jet_fs_directory_close" => jet_jit_files_directory_close: sig_files_void_unary;
+    files_directory_fsync: "jet_std::jet_fs_directory_fsync" => jet_jit_files_directory_fsync: sig_unary;
+    files_directory_create: "jet_std::jet_fs_directory_create" => jet_jit_files_directory_create: sig_ternary;
+    files_directory_list: "jet_std::jet_fs_directory_list" => jet_jit_files_directory_list: sig_unary;
+    files_stat_at: "jet_std::jet_fs_stat_at" => jet_jit_files_stat_at: sig_files_handle_name_flag;
+    files_rename_at: "jet_std::jet_fs_rename_at" => jet_jit_files_rename_at: sig_quinary;
+    files_remove_at: "jet_std::jet_fs_remove_at" => jet_jit_files_remove_at: sig_files_handle_name_flag;
+    files_read_link_at: "jet_std::jet_fs_read_link_at" => jet_jit_files_read_link_at: sig_binary;
+    files_xattr_names: "jet_std::jet_fs_xattr_names" => jet_jit_files_xattr_names: sig_unary;
+    files_xattr_get: "jet_std::jet_fs_xattr_get" => jet_jit_files_xattr_get: sig_binary;
+    files_xattr_set: "jet_std::jet_fs_xattr_set" => jet_jit_files_xattr_set: sig_ternary;
     json_writer: "jet_jit_json_writer" => jet_jit_json_writer: sig_ternary;
     json_reader: "jet_jit_json_reader" => jet_jit_json_reader: sig_binary;
     jsonl_writer: "jet_jit_jsonl_writer" => jet_jit_jsonl_writer: sig_binary;

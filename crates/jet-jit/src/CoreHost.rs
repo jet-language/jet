@@ -941,10 +941,6 @@ fn jet_jit_fs_write(path: i64, text: i64) -> i64 {
     }
 }
 
-fn jet_jit_fs_append(path: i64) -> i64 {
-    super::enc_stream::jet_jit_fs_append(path)
-}
-
 fn jet_jit_fs_append_all(path: i64, text: i64) -> i64 {
     use os_rt::jet_std::IOOperation;
     let p = clone_path_arg(path);
@@ -2172,7 +2168,6 @@ host_fns! {
     fs_map_len: "jet_jit_fs_map_len" => jet_jit_fs_map_len: sig_unary_i64;
     fs_map_is_empty: "jet_jit_fs_map_is_empty" => jet_jit_fs_map_is_empty: sig_i64_i8;
     fs_write: "jet_jit_fs_write" => jet_jit_fs_write: sig_i64_i64_i64;
-    fs_append: "jet_jit_fs_append" => jet_jit_fs_append: sig_unary_i64;
     fs_append_all: "jet_jit_fs_append_all" => jet_jit_fs_append_all: sig_i64_i64_i64;
     fs_write_bytes: "jet_jit_fs_write_bytes" => jet_jit_fs_write_bytes: sig_i64_i64_i64;
     io_binwrite: "jet_jit_io_binwrite" => jet_jit_io_binwrite: sig_i64_i64_i64;
