@@ -641,7 +641,7 @@ struct ServeArgs {
 fn run(args: ServeArgs) {
     print(args.port)
     print(args.verbose)
-    print((~args.config) ?? "(none)")
+    print((args.config.copy()) ?? "(none)")
 }
 "#;
     let (code, stdout, stderr) =

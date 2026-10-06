@@ -64,7 +64,7 @@ pub fn decode_argv(argv: [String]) -> DataTree Never! {
             i = i + 1
             loop {
                 if i >= argv.len() -> break
-                &positionals.push(DataTree.Text(~argv[i]))
+                &positionals.push(DataTree.Text(argv[i].copy()))
                 i = i + 1
             }
             break
@@ -111,10 +111,10 @@ pub fn decode_argv(argv: [String]) -> DataTree Never! {
             i = i + 1
             next
         }
-        &positionals.push(DataTree.Text(~a))
+        &positionals.push(DataTree.Text(a.copy()))
         i = i + 1
     }
-    if argv.len() > 0 -> put_entry(&entries, "0", DataTree.Text(~argv[0]))
+    if argv.len() > 0 -> put_entry(&entries, "0", DataTree.Text(argv[0].copy()))
     _ :: &entries.add("_", DataTree.Array(positionals))
     DataTree.Object(entries)
 }
@@ -126,7 +126,7 @@ pub fn merge(base: DataTree, overlay: DataTree) -> DataTree Never! {
         .Object(over) -> {
             if base == {
                 .Object(under) -> {
-                    out := ~under
+                    out := under.copy()
                     loop key in over.keys() {
                         ov :: over.get(key) ?? DataTree.Null
                         un :: under.get(key)
@@ -139,10 +139,10 @@ pub fn merge(base: DataTree, overlay: DataTree) -> DataTree Never! {
                     }
                     return DataTree.Object(out)
                 }
-                else -> return ~overlay
+                else -> return overlay.copy()
             }
         }
-        else -> return ~overlay
+        else -> return overlay.copy()
     }
 }
 
@@ -161,11 +161,11 @@ fn parse_atom(text: String) -> DataTree {
         sign = -1
         i = 1
     }
-    if i >= raw.len() -> DataTree.Text(~text)
+    if i >= raw.len() -> DataTree.Text(text.copy())
     loop {
         if i >= raw.len() -> return DataTree.Int(sign * n)
         d :: raw[i]
-        if d < 48 || d > 57 -> return DataTree.Text(~text)
+        if d < 48 || d > 57 -> return DataTree.Text(text.copy())
         n = n * 10 + (d - 48)
         i = i + 1
     }
@@ -255,7 +255,7 @@ pub fn get_text(tree: DataTree, key: String) -> String Never! {
             v :: entries.get(key)
             value :: v ?? return ""
             if value == {
-                .Text(s) -> return ~s
+                .Text(s) -> return s.copy()
                 .Int(n) -> return "{n}"
                 .Float(n) -> return "{n}"
                 .Bool(b) -> {
@@ -315,7 +315,7 @@ pub fn positionals(tree: DataTree) -> [String] Never! {
                 .Array(items) -> {
                     loop item in items {
                         if item == {
-                            .Text(s) -> &out.push(~s)
+                            .Text(s) -> &out.push(s.copy())
                             else -> { _ := 0 }
                         }
                     }
@@ -333,8 +333,8 @@ pub fn program(tree: DataTree) -> String Never! { get_text(tree, "0") }
 pub fn help_text(name: String, summary: String) -> String Never! { "{name} — {summary}\n\nOptions:\n  -h, --help    Show this help\n  --flag        Boolean flag\n  --key value   Key/value option\n" }
 pub fn flag(spec: ArgsSpec, name: String) -> ArgsSpec Never! {
     flags := [String]{}
-    loop item in spec.flags -> &flags.push(~item)
-    &flags.push(~name)
+    loop item in spec.flags -> &flags.push(item.copy())
+    &flags.push(name.copy())
     ArgsSpec{flags: flags}
 }
 
@@ -407,14 +407,14 @@ pub fn default_value(def: ArgDef, value: String) -> ArgDef Never! {
 
 pub fn get_or(tree: DataTree, key: String, fallback: String) -> String Never! {
     if has(tree, key) -> return get_text(tree, key)
-    ~fallback
+    fallback.copy()
 }
 pub fn get_choice(tree: DataTree, key: String, choices: [String]) -> String? Never! {
     v :: get_text(tree, key)
     if v.bytes().len() == 0 -> return None
-    result :: ~v
+    result :: v.copy()
     loop c in choices {
-        if c == ~v -> return Val(~result)
+        if c == v.copy() -> return Val(result.copy())
     }
     None
 }
@@ -422,7 +422,7 @@ pub fn get_choice(tree: DataTree, key: String, choices: [String]) -> String? Nev
 pub fn missing_required(tree: DataTree, defs: [ArgDef]) -> [String] Never! {
     out := [String]{}
     loop d in defs {
-        if d.required && !has(tree, d.dest) && !has(tree, d.name) -> &out.push(~d.name)
+        if d.required && !has(tree, d.dest) && !has(tree, d.name) -> &out.push(d.name.copy())
     }
     out
 }
@@ -430,10 +430,10 @@ pub fn apply_defaults(tree: DataTree, defs: [ArgDef]) -> DataTree Never! {
     out := tree
     loop d in defs {
         if d.default_text.bytes().len() == 0 -> next
-        if ~out == {
+        if out.copy() == {
             .Object(entries) -> {
                 if entries.get(d.dest) == .None && entries.get(d.name) == .None {
-                    next_entries := ~entries
+                    next_entries := entries.copy()
                     _ :: &next_entries.add(d.dest, parse_atom(d.default_text))
                     out = DataTree.Object(next_entries)
                 }

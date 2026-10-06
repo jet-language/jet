@@ -116,7 +116,7 @@ fn trust_pin_top_block_body(text: String, key: String) -> String? Never! {
             index += 1
             next
         }
-        start :: ~index
+        start :: index.copy()
         index = trust_pin_ident_end(raw, start)
         colon :: trust_text_skip_ascii_space(raw, index)
         if pkg_bytes_text(raw, start, index) != key || pkg_bytes_code(raw, colon) != TRUST_COLON -> next
@@ -184,7 +184,7 @@ fn trust_pin_simple_field(body: String, key: String) -> String? Never! {
             index += 1
             next
         }
-        start :: ~index
+        start :: index.copy()
         index = trust_pin_ident_end(raw, start)
         colon :: trust_text_skip_ascii_space(raw, index)
         if pkg_bytes_text(raw, start, index) != key || pkg_bytes_code(raw, colon) != TRUST_COLON -> next
@@ -242,7 +242,7 @@ fn trust_pin_top_level_simple_field(text: String, key: String) -> String? Never!
             index += 1
             next
         }
-        start :: ~index
+        start :: index.copy()
         index = trust_pin_ident_end(raw, start)
         if pkg_bytes_text(raw, start, index) != key -> next
         colon :: trust_text_skip_ascii_space(raw, index)
@@ -325,7 +325,7 @@ fn trust_pin_is_named_channel(channel: String) -> Bool Never! {
 pub fn trust_pin_channel_of(version: String) -> String Never! {
     parts :: trust_text_split(version, TRUST_DOT)
     if parts.len() >= 2 -> return "{parts[0]}.{parts[1]}"
-    ~version
+    version.copy()
 }
 
 // ── T2: channel resolution + lock record ──
@@ -342,7 +342,7 @@ pub fn trust_pin_resolve_channel(channel: String) -[Env]> String TrustError! {
 fn trust_pin_version_of_channel(channel: String) -> String Never! {
     parts :: trust_text_split(channel, TRUST_DOT)
     if parts.len() == 2 -> return "{parts[0]}.{parts[1]}.0"
-    ~channel
+    channel.copy()
 }
 
 // The locked compiler pin: the `[[toolchain]]` whose object id starts with

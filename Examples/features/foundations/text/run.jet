@@ -122,7 +122,7 @@ fn scan_logs(path: Path) -> ScanResult {
     match_count := 0
     loop line in mapped.lines() {
         line_count += 1
-        value :: String.from_bytes(~line) ?? panic("decode mapped log line")
+        value :: String.from_bytes(line.copy()) ?? panic("decode mapped log line")
         if pattern.is_match(value) -> match_count += 1
     }
     return ScanResult{

@@ -2421,7 +2421,7 @@ struct Reservation {
     guest: String
 
     #Transition(_, Pending) fn book(guest: String) -> Reservation {
-        return Reservation{guest: ~guest}
+        return Reservation{guest: guest.copy()}
     }
 
     #Transition(Pending, Confirmed) fn pay(self: ^Reservation) -> Reservation {
@@ -2976,7 +2976,7 @@ fn run() {
 
 #[test]
 fn fmt_copy_sigil_d_shape_copy1_stability() {
-    // D-SHAPE-COPY1=A (supersedes D-CAP2/D-MEM1/S4): `~x` is a prefix-verb
+    // D-SHAPE-COPY1=A (supersedes D-CAP2/D-MEM1/S4): `x.copy()` is a prefix-verb
     // expression — must survive fmt unchanged in binding position, call-arg
     // position, and on a field.
     let src = "\
@@ -2991,15 +2991,15 @@ fn archive(t: ^Ticket) -> String {
 
 fn run() {
     name :: \"vault\"
-    saved :: ~name
+    saved :: name.copy()
     t :: Ticket{id: 1, label: \"root\"}
-    print(archive(~t))
-    print(~t.label)
+    print(archive(t.copy()))
+    print(t.label.copy())
 }
 ";
     assert_fmt_keeps(
         src,
-        &["saved :: ~name", "print(archive(~t))", "print(~t.label)"],
+        &["saved :: name.copy()", "print(archive(t.copy()))", "print(t.label.copy())"],
         "D-SHAPE-COPY1 copy sigil",
     );
 }
@@ -3804,13 +3804,13 @@ fn run() {
 #[test]
 fn fmt_place_access_stability() {
     // D-SHAPE-PLACE1=A: formatting once must retain every bare/read, `&` write,
-    // and `~` owned-copy token; formatting twice must be byte-identical.
+    // and `.copy()` owned-copy token; formatting twice must be byte-identical.
     let src = "\
 fn run() {
     values := [1, 2, 3, 4]
     read :: values[0..1]
     edit :: &values[2..3].sort()
-    owned :: ~values[0..1]
+    owned :: values[0..1].copy()
     print(\"{read.len()},{edit.len()},{owned.len()}\")
 }
 ";
@@ -4222,7 +4222,7 @@ fn generic_modules_roundtrip_templates_symbolic_lengths_nested_items_and_alias_c
 #Meta(category: label)
 SIZE :: prep { capacity }
 pub struct Buffer { slots: [T#capacity] }
-module nested<U> { pub fn keep(value: U) -> U { return ~value } }
+module nested<U> { pub fn keep(value: U) -> U { return value.copy() } }
 module inner :: nested<T>
 #Meta(category: label)
 pub fn adjusted() -> Int { return capacity + 1 }

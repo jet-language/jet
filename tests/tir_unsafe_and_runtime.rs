@@ -562,7 +562,7 @@ struct Pair<T> {
     second: T
 }
 fn make_pair<T>(a: T, b: T) -> Pair<T> {
-    return Pair<T>{first: ~a, second: ~b}
+    return Pair<T>{first: a.copy(), second: b.copy()}
 }
 struct Stack<T> {
     items: [T]
@@ -571,7 +571,7 @@ fn empty_stack<T>() -> Stack<T> {
     return Stack<T>{items: []}
 }
 fn push<T>(s: Stack<T>, item: T) -> Stack<T> {
-    dup := ~s
+    dup := s.copy()
     dup.items.push(item)
     return dup
 }
@@ -1308,7 +1308,7 @@ fn channel_send_receive() {
     let src = r#"
 fn run() {
 (s1, ch) :: channel<Int>()
-    s2 :: ~s1
+    s2 :: s1.copy()
     t1 :: task {
         s1.send(30)
     }

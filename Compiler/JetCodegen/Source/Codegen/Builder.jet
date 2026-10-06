@@ -258,7 +258,7 @@ fn jet_codegen_qualified_function_key(module_identity: String, key: String) -> S
 
 // The index owns its function rows, taken from the caller: program lowering
 // moves the checked rows in and back out (lower_functions), and a caller that
-// keeps its input, such as a comptime session, passes a copy (`~`).
+// keeps its input, such as a comptime session, passes a copy (`.copy()`).
 fn jet_codegen_function_index(functions: ^[TFunc]) -> JetCodegenFunctionIndex Never! {
     first_by_key := [String:Int]{}
     first_by_name := [String:Int]{}
@@ -1169,10 +1169,10 @@ fn jet_codegen_emit_mir_type(builder: &JetCodegenBuilder, program: JetCodegenPro
 // share) of a Copy-ABI value is a bitwise `Scalar` read.
 fn jet_codegen_scalar_copy_fact(builder: JetCodegenBuilder, program: JetCodegenProgram, operation: MIROperation) -> MIROperation Never! {
     if operation == .Copy(value, fact) {
-        at :: builder.value_positions.get(value.value) ?? return ~operation
+        at :: builder.value_positions.get(value.value) ?? return operation.copy()
         return MIROperation.Copy{value: value, fact: mir_copy_fact_for_ownership(fact, builder.values[at].ownership.mode)}
     }
-    ~operation
+    operation.copy()
 }
 
 fn jet_codegen_ownership(ty: Type) -> MIROwnership Never! {
@@ -1878,7 +1878,7 @@ fn jet_codegen_bind_local_alias(builder: &JetCodegenBuilder, program: JetCodegen
     })
     if !mutable -> _ := &builder.read_alias_places.add(place.value, true)
     &builder.bindings.push(JetCodegenBinding{name: local.name, symbol_key: symbol_key, ty: ty, place: place, local: local_id, depth: builder.scope_depth})
-    ~place
+    place.copy()
 }
 
 fn jet_codegen_bind_capture_local(builder: &JetCodegenBuilder, program: JetCodegenProgram, local: TLocal, ty: Type, value: MIRValueID, access: MIRAccess, ownership: MIROwnership, string_view: Bool) -> MIRPlaceID Never! {

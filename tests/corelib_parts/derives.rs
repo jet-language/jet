@@ -186,7 +186,7 @@ struct Email { addr: String }
 
 impl Email.Encode {
     fn encode(self) -> DataTree {
-        m :: [String:DataTree]{ "email": DataTree.Text(~self.addr) }
+        m :: [String:DataTree]{ "email": DataTree.Text(self.addr.copy()) }
         return DataTree.Object(m)
     }
 }
@@ -240,7 +240,7 @@ struct DerivedEmail { address: String }
 
 struct HandEmail { address: String }
 impl HandEmail.Encode {
-    fn encode(self) -> DataTree { DataTree.Object(["address": DataTree.Text(~self.address)]) }
+    fn encode(self) -> DataTree { DataTree.Object(["address": DataTree.Text(self.address.copy())]) }
 }
 impl HandEmail.Decode {
     fn decode(tree: DataTree) -> HandEmail [FieldError]! {
@@ -898,7 +898,7 @@ fn user_derive_generic_impl_runs_in_aot_and_default_dev() {
 derive T.TypeName {
     info :: T.reflect()
     param :: info.type_params[0].name
-    fn get_value(self) -> @param { ~self.value }
+    fn get_value(self) -> @param { self.value.copy() }
     fn type_name(self) -> String { T.$name }
 }
 
@@ -953,7 +953,7 @@ fn run() {
 fn user_derive_generated_non_clonable_copy_is_rejected_in_sema() {
     let src = r#"
 derive T.CopyCallback {
-    fn duplicate(self) -> fn(Int) -> Int { ~self.callback }
+    fn duplicate(self) -> fn(Int) -> Int { self.callback.copy() }
 }
 
 #CopyCallback
@@ -1077,7 +1077,7 @@ fn structure_once_example_runs_aot_with_generated_meaning() {
 }
 
 /// #495 / I2: a field read from a bare (`Read`) parameter is still rooted in
-/// the borrowed parameter. The explicit `~` required by E0209 must produce
+/// the borrowed parameter. The explicit `.copy()` required by E0209 must produce
 /// owned values for both shallow and nested fields, compile through rustc, and
 /// run with the expected data.
 #[test]
@@ -1103,13 +1103,13 @@ fn pick() -> Int {
 }
 
 fn encoded(e: Email, i: Int) -> String {
-    shallow := DataTree.Text(~e.addr)
-    nested := DataTree.Text(~e.nested.text)
-    indexed := DataTree.Text(~e.items[0].text)
-    computed := DataTree.Text(~e.items[i + 1].text)
-    called := DataTree.Text(~e.items[pick()].text)
-    parenthesized := DataTree.Text(~e.items[-(-i)].text)
-    conditional := DataTree.Text(~e.items[if i == 0 -> 0 else -> 1].text)
+    shallow := DataTree.Text(e.addr.copy())
+    nested := DataTree.Text(e.nested.text.copy())
+    indexed := DataTree.Text(e.items[0].text.copy())
+    computed := DataTree.Text(e.items[i + 1].text.copy())
+    called := DataTree.Text(e.items[pick()].text.copy())
+    parenthesized := DataTree.Text(e.items[-(-i)].text.copy())
+    conditional := DataTree.Text(e.items[if i == 0 -> 0 else -> 1].text.copy())
     return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}|{json.to_string(called)}|{json.to_string(parenthesized)}|{json.to_string(conditional)}"
 }
 

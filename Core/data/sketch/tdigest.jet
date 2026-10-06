@@ -92,7 +92,7 @@ fn compress(means: [Float], weights: [Float], delta: Float, total: Float) -> Pac
         if cap < (Float{1.0}) -> cap = Float{1.0}
         candidate :: ow[ow.len() - 1] + weights[i]
         if candidate <= cap {
-            old_weight :: ~ow[ow.len() - 1]
+            old_weight :: ow[ow.len() - 1].copy()
             ow[ow.len() - 1] = candidate
             om[om.len() - 1] = (om[om.len() - 1] * old_weight + means[i] * weights[i]) / candidate
         } else {
@@ -112,10 +112,10 @@ fn insert_sorted(means: &[Float], weights: &[Float]) {
             if j <= 0 -> break
             if means[j - 1] < means[j] -> break
             if means[j - 1] == means[j] && weights[j - 1] <= weights[j] -> break
-            tm :: ~means[j]
+            tm :: means[j].copy()
             means[j] = means[j - 1]
             means[j - 1] = tm
-            tw :: ~weights[j]
+            tw :: weights[j].copy()
             weights[j] = weights[j - 1]
             weights[j - 1] = tw
             j = j - 1

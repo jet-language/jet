@@ -764,36 +764,36 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         allow_string_view_read: source.allow_string_view_read,
         suppress_partial_move_root_read: source.suppress_partial_move_root_read,
         allow_fixed_constructor: source.allow_fixed_constructor,
-        generic_params: ~source.generic_params,
+        generic_params: source.generic_params.copy(),
         lambda_escapes: source.lambda_escapes,
-        lambda_statement_tails: ~source.lambda_statement_tails,
-        call_facts: ~source.call_facts,
+        lambda_statement_tails: source.lambda_statement_tails.copy(),
+        call_facts: source.call_facts.copy(),
         hardware_use: sema_hardware_use_snapshot(source.hardware_use),
-        call_return_views: ~source.call_return_views,
-        local_view_provenance: ~source.local_view_provenance,
+        call_return_views: source.call_return_views.copy(),
+        local_view_provenance: source.local_view_provenance.copy(),
         return_view_receiver_key: source.return_view_receiver_key,
-        return_view_parameter_keys: ~source.return_view_parameter_keys,
-        return_view_provenance: ~source.return_view_provenance,
-        name_references: ~source.name_references,
-        comptime_requests: ~source.comptime_requests,
-        comptime_body_sources: ~source.comptime_body_sources,
-        comptime_body_values: ~source.comptime_body_values,
-        compute_calls: ~source.compute_calls,
-        autodiff_obligations: ~source.autodiff_obligations,
+        return_view_parameter_keys: source.return_view_parameter_keys.copy(),
+        return_view_provenance: source.return_view_provenance.copy(),
+        name_references: source.name_references.copy(),
+        comptime_requests: source.comptime_requests.copy(),
+        comptime_body_sources: source.comptime_body_sources.copy(),
+        comptime_body_values: source.comptime_body_values.copy(),
+        compute_calls: source.compute_calls.copy(),
+        autodiff_obligations: source.autodiff_obligations.copy(),
         autodiff_safe_panic: source.autodiff_safe_panic,
         autodiff_unsafe_panic: source.autodiff_unsafe_panic,
         autodiff_safe_panic_context: source.autodiff_safe_panic_context,
-        copy_events: ~source.copy_events,
-        loop_value_frames: ~source.loop_value_frames,
+        copy_events: source.copy_events.copy(),
+        loop_value_frames: source.loop_value_frames.copy(),
         loop_break_flows: sema_loop_break_flows_snapshot(source.loop_break_flows),
         pending_loop_value: source.pending_loop_value,
-        collect_item_types: ~source.collect_item_types,
+        collect_item_types: source.collect_item_types.copy(),
         last_loop_result_type: source.last_loop_result_type,
         arrow_loop_body: source.arrow_loop_body,
-        reactive_upgrades: ~source.reactive_upgrades,
-        reactive_upgrade_names: ~source.reactive_upgrade_names,
-        reactive_local_keys: ~source.reactive_local_keys,
-        reactive_shared_keys: ~source.reactive_shared_keys,
+        reactive_upgrades: source.reactive_upgrades.copy(),
+        reactive_upgrade_names: source.reactive_upgrade_names.copy(),
+        reactive_local_keys: source.reactive_local_keys.copy(),
+        reactive_shared_keys: source.reactive_shared_keys.copy(),
         taskgroups: sema_taskgroup_state_snapshot(source.taskgroups),
         failure_carrier_root: source.failure_carrier_root,
         failure_success_view: source.failure_success_view,
@@ -802,14 +802,14 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         failure_contract_source: source.failure_contract_source,
         function_name: source.function_name,
         fallback_err_denial: source.fallback_err_denial,
-        noelse_chain_starts: ~source.noelse_chain_starts,
+        noelse_chain_starts: source.noelse_chain_starts.copy(),
         lost_tail_span: source.lost_tail_span,
         value_tail_span: source.value_tail_span,
-        failure_edges: ~source.failure_edges,
+        failure_edges: source.failure_edges.copy(),
         failure_direct_source: source.failure_direct_source,
-        failure_union_members: ~source.failure_union_members,
-        failure_union_cases: ~source.failure_union_cases,
-        failure_union_edges: ~source.failure_union_edges,
+        failure_union_members: source.failure_union_members.copy(),
+        failure_union_cases: source.failure_union_cases.copy(),
+        failure_union_edges: source.failure_union_edges.copy(),
         failure_union_general: source.failure_union_general,
         source_nesting: source.source_nesting,
         implicit_loop_subject_depth: source.implicit_loop_subject_depth,
@@ -879,15 +879,15 @@ pub fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMar
             allow_string_view_read: context.allow_string_view_read,
             suppress_partial_move_root_read: context.suppress_partial_move_root_read,
             allow_fixed_constructor: context.allow_fixed_constructor,
-            generic_params: ~context.generic_params,
+            generic_params: context.generic_params.copy(),
             lambda_escapes: context.lambda_escapes,
-            lambda_statement_tails: ~context.lambda_statement_tails,
+            lambda_statement_tails: context.lambda_statement_tails.copy(),
             call_facts: [SemaCallSiteFact]{},
             hardware_use: sema_hardware_use_snapshot(context.hardware_use),
             call_return_views: [SemaCallReturnView]{},
             local_view_provenance: [SemaLocalViewProvenance]{},
             return_view_receiver_key: context.return_view_receiver_key,
-            return_view_parameter_keys: ~context.return_view_parameter_keys,
+            return_view_parameter_keys: context.return_view_parameter_keys.copy(),
             return_view_provenance: context.return_view_provenance,
             name_references: [SemaNameReferenceFact]{},
             comptime_requests: [SemaComptimeRequest]{},
@@ -899,16 +899,16 @@ pub fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMar
             autodiff_unsafe_panic: context.autodiff_unsafe_panic,
             autodiff_safe_panic_context: context.autodiff_safe_panic_context,
             copy_events: [SemaCopyEvent]{},
-            loop_value_frames: ~context.loop_value_frames,
+            loop_value_frames: context.loop_value_frames.copy(),
             loop_break_flows: sema_loop_break_flows_snapshot(context.loop_break_flows),
             pending_loop_value: context.pending_loop_value,
-            collect_item_types: ~context.collect_item_types,
+            collect_item_types: context.collect_item_types.copy(),
             last_loop_result_type: context.last_loop_result_type,
             arrow_loop_body: context.arrow_loop_body,
-            reactive_upgrades: ~context.reactive_upgrades,
-            reactive_upgrade_names: ~context.reactive_upgrade_names,
-            reactive_local_keys: ~context.reactive_local_keys,
-            reactive_shared_keys: ~context.reactive_shared_keys,
+            reactive_upgrades: context.reactive_upgrades.copy(),
+            reactive_upgrade_names: context.reactive_upgrade_names.copy(),
+            reactive_local_keys: context.reactive_local_keys.copy(),
+            reactive_shared_keys: context.reactive_shared_keys.copy(),
             taskgroups: sema_taskgroup_state_snapshot(context.taskgroups),
             failure_carrier_root: context.failure_carrier_root,
             failure_success_view: context.failure_success_view,
@@ -926,7 +926,7 @@ pub fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMar
             failure_union_cases: [SemaFailureCase]{},
             failure_union_edges: [String]{},
             failure_union_general: context.failure_union_general,
-            iter_borrowed: ~context.iter_borrowed,
+            iter_borrowed: context.iter_borrowed.copy(),
             binding_initializer: context.binding_initializer,
             source_nesting: context.source_nesting,
             implicit_loop_subject_depth: context.implicit_loop_subject_depth,
@@ -968,26 +968,26 @@ pub fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckCo
     context.allow_string_view_read = saved.allow_string_view_read
     context.suppress_partial_move_root_read = saved.suppress_partial_move_root_read
     context.allow_fixed_constructor = saved.allow_fixed_constructor
-    context.generic_params = ~saved.generic_params
+    context.generic_params = saved.generic_params.copy()
     context.lambda_escapes = saved.lambda_escapes
-    context.lambda_statement_tails = ~saved.lambda_statement_tails
+    context.lambda_statement_tails = saved.lambda_statement_tails.copy()
     context.hardware_use = sema_hardware_use_snapshot(saved.hardware_use)
     context.return_view_receiver_key = saved.return_view_receiver_key
-    context.return_view_parameter_keys = ~saved.return_view_parameter_keys
+    context.return_view_parameter_keys = saved.return_view_parameter_keys.copy()
     context.return_view_provenance = saved.return_view_provenance
     context.autodiff_safe_panic = saved.autodiff_safe_panic
     context.autodiff_unsafe_panic = saved.autodiff_unsafe_panic
     context.autodiff_safe_panic_context = saved.autodiff_safe_panic_context
-    context.loop_value_frames = ~saved.loop_value_frames
+    context.loop_value_frames = saved.loop_value_frames.copy()
     context.loop_break_flows = sema_loop_break_flows_snapshot(saved.loop_break_flows)
     context.pending_loop_value = saved.pending_loop_value
-    context.collect_item_types = ~saved.collect_item_types
+    context.collect_item_types = saved.collect_item_types.copy()
     context.last_loop_result_type = saved.last_loop_result_type
     context.arrow_loop_body = saved.arrow_loop_body
-    context.reactive_upgrades = ~saved.reactive_upgrades
-    context.reactive_upgrade_names = ~saved.reactive_upgrade_names
-    context.reactive_local_keys = ~saved.reactive_local_keys
-    context.reactive_shared_keys = ~saved.reactive_shared_keys
+    context.reactive_upgrades = saved.reactive_upgrades.copy()
+    context.reactive_upgrade_names = saved.reactive_upgrade_names.copy()
+    context.reactive_local_keys = saved.reactive_local_keys.copy()
+    context.reactive_shared_keys = saved.reactive_shared_keys.copy()
     context.taskgroups = sema_taskgroup_state_snapshot(saved.taskgroups)
     context.failure_carrier_root = saved.failure_carrier_root
     context.failure_success_view = saved.failure_success_view
@@ -1000,7 +1000,7 @@ pub fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckCo
     context.value_tail_span = saved.value_tail_span
     context.failure_direct_source = saved.failure_direct_source
     context.failure_union_general = saved.failure_union_general
-    context.iter_borrowed = ~saved.iter_borrowed
+    context.iter_borrowed = saved.iter_borrowed.copy()
     context.binding_initializer = saved.binding_initializer
     context.source_nesting = saved.source_nesting
     context.implicit_loop_subject_depth = saved.implicit_loop_subject_depth
@@ -1021,11 +1021,11 @@ fn sema_scope_hardware_transfers_snapshot(source: [SemaHardwareDMATransferFact])
 
 pub fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
     SemaScopeTable{
-        frames: ~source.frames,
-        bindings: ~source.bindings,
-        name_slots: ~source.name_slots,
-        name_positions: ~source.name_positions,
-        loop_labels: ~source.loop_labels,
+        frames: source.frames.copy(),
+        bindings: source.bindings.copy(),
+        name_slots: source.name_slots.copy(),
+        name_positions: source.name_positions.copy(),
+        loop_labels: source.loop_labels.copy(),
         hardware_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_transfers),
         hardware_definite_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_definite_transfers),
         hardware_pending_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_pending_transfers),
@@ -1040,7 +1040,7 @@ pub fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
         transaction_wall_depth: source.transaction_wall_depth,
         unit_explicit_units: source.unit_explicit_units,
         copies_explicit: source.copies_explicit,
-        binding_undo: ~source.binding_undo,
+        binding_undo: source.binding_undo.copy(),
         open_marks: source.open_marks,
         location_function: source.location_function,
     }
@@ -1059,7 +1059,7 @@ pub fn sema_scope_mark(table: &SemaScopeTable) -> SemaScopeMark Never! {
             bindings: [SemaScopeBinding]{},
             name_slots: [String:Int]{},
             name_positions: [[Int]]{},
-            loop_labels: ~table.loop_labels,
+            loop_labels: table.loop_labels.copy(),
             hardware_transfers: sema_scope_hardware_transfers_snapshot(table.hardware_transfers),
             hardware_definite_transfers: sema_scope_hardware_transfers_snapshot(table.hardware_definite_transfers),
             hardware_pending_transfers: sema_scope_hardware_transfers_snapshot(table.hardware_pending_transfers),
@@ -1089,7 +1089,7 @@ pub fn sema_scope_rollback(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
     loop undo_index > mark.undo {
         undo_index -= 1
         restored_index :: table.binding_undo[undo_index].index
-        if restored_index < mark.bindings -> table.bindings[restored_index] = ~table.binding_undo[undo_index].binding
+        if restored_index < mark.bindings -> table.bindings[restored_index] = table.binding_undo[undo_index].binding.copy()
     }
     loop table.binding_undo.len() > mark.undo -> _ := &table.binding_undo.pop()
     loop table.bindings.len() > mark.bindings {
@@ -1099,7 +1099,7 @@ pub fn sema_scope_rollback(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
     }
     loop table.frames.len() > mark.frames -> _ := &table.frames.pop()
     saved :: mark.saved
-    table.loop_labels = ~saved.loop_labels
+    table.loop_labels = saved.loop_labels.copy()
     table.hardware_transfers = sema_scope_hardware_transfers_snapshot(saved.hardware_transfers)
     table.hardware_definite_transfers = sema_scope_hardware_transfers_snapshot(saved.hardware_definite_transfers)
     table.hardware_pending_transfers = sema_scope_hardware_transfers_snapshot(saved.hardware_pending_transfers)
@@ -1122,7 +1122,7 @@ pub fn sema_scope_rollback(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
 // point can restore the old row.
 pub fn sema_scope_note_binding_edit(table: &SemaScopeTable, index: Int) Never! {
     if table.open_marks == 0 -> return
-    previous :: ~table.bindings[index]
+    previous :: table.bindings[index].copy()
     &table.binding_undo.push(SemaScopeBindingUndo{index: index, binding: previous})
 }
 
@@ -1335,7 +1335,7 @@ fn sema_knowledge_gate_allows(plane: SemaKnowledgePlane, gate: SemaKnowledgeGate
 }
 
 pub fn sema_scope_push_knowledge_gate(table: &SemaScopeTable, gate: SemaKnowledgeGate) -> SemaKnowledgeGate? {
-    previous :: ~table.knowledge_gate
+    previous :: table.knowledge_gate.copy()
     table.knowledge_gate = Val(gate)
     previous
 }

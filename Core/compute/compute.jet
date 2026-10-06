@@ -781,7 +781,7 @@ fn tensor_device_name(device: String) -> String Never! {
     if device == "metal" || device == "Metal" -> return "Metal"
     if device == "vulkan" || device == "Vulkan" -> return "Vulkan"
     if device == "webgpu" || device == "WebGPU" -> return "WebGPU"
-    return ~device
+    return device.copy()
 }
 
 fn select_device(kind: String) -> String? {
@@ -793,9 +793,9 @@ fn select_device(kind: String) -> String? {
 
 fn profile_placement(device: String, profile: String) -> String {
     requested :: tensor_device_name(device)
-    requested_f32 := ~requested
-    requested_default := ~requested
-    requested_unavailable := ~requested
+    requested_f32 := requested.copy()
+    requested_default := requested.copy()
+    requested_unavailable := requested.copy()
     selected := requested
     if selected == "Auto" -> selected = "CPU"
     if selected != "CPU" -> return "Placement(requested={requested_unavailable}, selected={selected}, backend=unavailable, version=none, profile={profile}, cache=none, abilities=[], reason=provider=unavailable)"

@@ -10,6 +10,12 @@ fn is_adjacent_call_result(expr: &Expr) -> bool {
     }
 }
 
+/// D-COPY-WORD1=A: a bare PascalCase name is a type (D-SHAPE-CASE1), so
+/// `Type.copy()` is an associated call, never the built-in value copy.
+fn is_type_receiver(expr: &Expr) -> bool {
+    matches!(expr, Expr::Ident(name, _) if name.starts_with(|c: char| c.is_ascii_uppercase()))
+}
+
 /// The written place of a retired `++`/`--` step, when it is a name or field
 /// chain that `+= 1` can update.
 fn retired_step_place(expr: &Expr) -> Option<String> {
@@ -117,6 +123,7 @@ impl<'a> Parser<'a> {
 
 impl<'a> Parser<'a> {
     pub(super) fn expr_postfix(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+        let chain_start = self.peek().span.start;
         let mut expr = self.expr_primary(allow_struct_lit)?;
         loop {
             match &self.peek().kind {
@@ -263,6 +270,20 @@ impl<'a> Parser<'a> {
                             }
                         }
                         self.expect_closer(TokKind::RParen, "to finish the call", "call")?;
+                        // D-COPY-WORD1=A: `value.copy()` is the compiler-owned
+                        // copy, resolved here before ordinary method lookup so
+                        // no type can redefine it. A type receiver
+                        // (`Recipe.copy()`) stays an associated call.
+                        if member == Syntax::METHOD_COPY
+                            && args.is_empty()
+                            && type_args.is_empty()
+                            && !is_type_receiver(&expr)
+                        {
+                            let close = self.toks[self.pos - 1].span;
+                            let full = Span::new(chain_start.min(expr.span().start), close.end);
+                            expr = Expr::Copy(Box::new(expr), full);
+                            continue;
+                        }
                         self.parse_generate_template_arg(&member, &mut args)?;
                         // D-CONC-SHARE1=A (card #1561): `Shared.new(x)` is
                         // retired — `shared x` is the one construction

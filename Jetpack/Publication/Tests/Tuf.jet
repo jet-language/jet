@@ -120,7 +120,7 @@ fn publication_tuf_test_root(label: String) -[FS, Env]> String Never! {
     first :: publication_tuf_next_log_record([PublicationLogRecord]{}, "publish", entry) ?? panic("publish record")
     records := [PublicationLogRecord]{first}
     publication_tuf_validate_log(records) ?? panic("valid publish")
-    yanked := ~entry
+    yanked := entry.copy()
     yanked.yanked = true
     second :: publication_tuf_next_log_record(records, "yank", yanked) ?? panic("yank record")
     &records.push(second)
@@ -132,7 +132,7 @@ fn publication_tuf_test_root(label: String) -[FS, Env]> String Never! {
         .Ok(_) -> panic("second identical yank reused an immutable identity (Main Rust tandem)")
         .Err(error) -> assert("{error}".contains("registry transparency log reuses or changes an immutable package version"))
     }
-    changed := ~entry
+    changed := entry.copy()
     changed.content_hash = "sha256-other"
     mutation :: publication_tuf_next_log_record([PublicationLogRecord]{first}, "yank", changed) ?? panic("mutation record")
     if publication_tuf_validate_log([PublicationLogRecord]{first, mutation}) == .Ok(_) -> panic("immutable mutation accepted")
@@ -140,16 +140,16 @@ fn publication_tuf_test_root(label: String) -[FS, Env]> String Never! {
     if publication_tuf_validate_log([PublicationLogRecord]{unpublished}) == .Ok(_) -> panic("unpublished yank accepted")
     migrate :: publication_tuf_next_log_record([PublicationLogRecord]{}, "migrate", yanked) ?? panic("migration may begin with yanked history")
     publication_tuf_validate_log([PublicationLogRecord]{migrate}) ?? panic("valid historical migration")
-    forged := ~first
+    forged := first.copy()
     forged.leaf = "sha256-forged"
     if publication_tuf_validate_log([PublicationLogRecord]{forged}) == .Ok(_) -> panic("forged leaf accepted")
-    forged = ~first
+    forged = first.copy()
     forged.sequence = 2
     if publication_tuf_validate_log([PublicationLogRecord]{forged}) == .Ok(_) -> panic("noncontiguous sequence accepted")
-    forged = ~first
+    forged = first.copy()
     forged.previous = "different"
     if publication_tuf_validate_log([PublicationLogRecord]{forged}) == .Ok(_) -> panic("wrong predecessor accepted")
-    forged = ~first
+    forged = first.copy()
     forged.entry.yanked = true
     if publication_tuf_validate_log([PublicationLogRecord]{forged}) == .Ok(_) -> panic("already yanked publish accepted")
     if publication_tuf_parse_log(publication_tuf_log_text([PublicationLogRecord]{first}).replace("\tpublish\t", "\tunknown\t")) == .Ok(_) -> panic("unknown operation accepted")
@@ -160,7 +160,7 @@ fn publication_tuf_test_root(label: String) -[FS, Env]> String Never! {
         .Ok(_) -> panic("u64 overflow accepted")
         .Err(error) -> assert("{error}".contains("registry transparency log sequence is invalid"))
     }
-    edge := ~last
+    edge := last.copy()
     edge.sequence = 18446744073709551614
     record :: publication_tuf_next_log_record([PublicationLogRecord]{edge}, "publish", publication_tuf_test_entry("p", "2", false)) ?? panic("max sequence is representable")
     assert_eq(record.sequence, Int{18446744073709551615})

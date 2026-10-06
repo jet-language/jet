@@ -43,7 +43,7 @@ pub fn parser_split_type_markers(markers: [Marker]) -> (derives: [NamedSpan], se
 }
 
 pub fn parser_apply_struct_type_markers(value: &StructDef, markers: [Marker]) Never! {
-    value.type_markers = ~markers
+    value.type_markers = markers.copy()
     (derives, serde_markers) := parser_split_type_markers(markers)
     value.serde_markers = serde_markers
     value.derives = derives
@@ -52,7 +52,7 @@ pub fn parser_apply_struct_type_markers(value: &StructDef, markers: [Marker]) Ne
 }
 
 pub fn parser_apply_enum_type_markers(value: &EnumDef, markers: [Marker]) Never! {
-    value.type_markers = ~markers
+    value.type_markers = markers.copy()
     (derives, serde_markers) := parser_split_type_markers(markers)
     value.serde_markers = serde_markers
     value.derives = derives

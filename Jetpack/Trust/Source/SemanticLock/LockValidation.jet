@@ -88,7 +88,7 @@ fn trust_lock_cycle_from(start: String, edges: [String: String]) -> String? Neve
         slow = edges.get(slow) ?? return None
         fast_step :: edges.get(fast) ?? return None
         fast = edges.get(fast_step) ?? return None
-        if slow == fast -> return Val(~slow)
+        if slow == fast -> return Val(slow.copy())
     }
 }
 
@@ -98,19 +98,19 @@ fn trust_lock_record_issues(lock: SemanticLockFile) -> [ValidationIssue] Never! 
     loop record in lock.records {
         key :: record.identity.semantic_key()
         if record.identity.hash == "" {
-            &issues.push(ValidationIssue.MissingHash{semantic_key: ~key})
-            &issues.push(ValidationIssue.OfflineIncomplete{semantic_key: ~key})
+            &issues.push(ValidationIssue.MissingHash{semantic_key: key.copy()})
+            &issues.push(ValidationIssue.OfflineIncomplete{semantic_key: key.copy()})
         }
         loop rationale in record.rationales {
             if rationale.cache_provenance.contains("signed") && rationale.signature == "" {
-                &issues.push(ValidationIssue.MissingSignature{semantic_key: ~key})
+                &issues.push(ValidationIssue.MissingSignature{semantic_key: key.copy()})
             }
         }
         if record.identity.platform == "" -> next
         if seen_platform.get(key) == {
             .Val(previous) -> {
                 if previous != record.identity.platform {
-                    &issues.push(ValidationIssue.DomainConflict{key: ~key, left: previous, right: record.identity.platform})
+                    &issues.push(ValidationIssue.DomainConflict{key: key.copy(), left: previous, right: record.identity.platform})
                 }
             }
             .None -> seen_platform[key] = record.identity.platform
@@ -145,16 +145,16 @@ fn trust_lock_source_map_issues(lock: SemanticLockFile) -> [ValidationIssue] Nev
 
 // `registry:<source>:<package>` names its package after the last `:`.
 fn trust_lock_source_package(key: String) -> String Never! {
-    if !key.starts_with("registry:") -> return ~key
+    if !key.starts_with("registry:") -> return key.copy()
     if trust_text_split_last(key.removeprefix("registry:"), TRUST_COLON) == {
         .Val(parts) -> parts.after
-        .None -> ~key
+        .None -> key.copy()
     }
 }
 
 // A `registry:` source's authority is its text before the first `;`.
 fn trust_lock_source_authority(source: String) -> String Never! {
-    if !source.starts_with("registry:") -> return ~source
+    if !source.starts_with("registry:") -> return source.copy()
     rest :: source.removeprefix("registry:")
     if trust_text_split_first(rest, TRUST_SEMICOLON) == {
         .Val(parts) -> parts.before

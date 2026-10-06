@@ -205,9 +205,9 @@ module everything<T> {
     struct Boxed { value: T }
     enum Maybe { Empty Value(T) }
     impl Boxed.Show { fn show(self) -> T { return self.value } }
-    fn id(value: T) -> T { return ~value }
+    fn id(value: T) -> T { return value.copy() }
     module nested { fn nested() {} }
-    module inner<U> { fn inner(value: U) -> U { return ~value } }
+    module inner<U> { fn inner(value: U) -> U { return value.copy() } }
     module int_inner :: inner<Int>
     #Test("smoke") { expect(@answer == 42) }
     #Test("work") { .measure { assert(@answer == 42) } }

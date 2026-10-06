@@ -781,10 +781,10 @@ fn jet_driver_foreign_same_signature(left: ExternFn, right: ExternFn) -> Bool Ne
 
 fn jet_driver_foreign_parse_cache(file: JetDriverAuthorizedSourceFile, diagnostics: &[Diagnostic]) -> Program? {
     lexed :: lex_generated(file.source.bytes())
-    loop diagnostic in lexed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(~diagnostic, file.path, jet_driver_foreign_diagnostic_offset(diagnostic)))
+    loop diagnostic in lexed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), file.path, jet_driver_foreign_diagnostic_offset(diagnostic)))
     if jet_driver_has_errors(lexed.diagnostics) -> return None
     parsed := parse_lexed(lexed)
-    loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(~diagnostic, file.path, jet_driver_foreign_diagnostic_offset(diagnostic)))
+    loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), file.path, jet_driver_foreign_diagnostic_offset(diagnostic)))
     if jet_driver_has_errors(parsed.diagnostics) -> return None
     Val(^parsed.program)
 }
@@ -817,12 +817,12 @@ fn jet_driver_foreign_find_generated_module(program: Program, language: String, 
 
 fn jet_driver_foreign_make_adapter_function(handle: String, raw_function: String, origin_path: String, diagnostics: &[Diagnostic]) -> Func? {
     adapter_name :: "__jet_ffi_close_{handle}"
-    source :: "fn {adapter_name}(handle: ^{handle}) {{\n    {raw_function}(~handle)\n}}\n"
+    source :: "fn {adapter_name}(handle: ^{handle}) {{\n    {raw_function}(handle.copy())\n}}\n"
     lexed :: lex_generated(source.bytes())
-    loop diagnostic in lexed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(~diagnostic, origin_path, jet_driver_foreign_diagnostic_offset(diagnostic)))
+    loop diagnostic in lexed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), origin_path, jet_driver_foreign_diagnostic_offset(diagnostic)))
     if jet_driver_has_errors(lexed.diagnostics) -> return None
     parsed :: parse_lexed(lexed)
-    loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(~diagnostic, origin_path, jet_driver_foreign_diagnostic_offset(diagnostic)))
+    loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), origin_path, jet_driver_foreign_diagnostic_offset(diagnostic)))
     if jet_driver_has_errors(parsed.diagnostics) -> return None
     loop item in parsed.program.items {
         if item == {
@@ -941,7 +941,7 @@ fn jet_driver_foreign_adapter_path(surface: JetDriverForeignSurface, index: Int)
 }
 
 fn jet_driver_foreign_adapter_source(adapter: SemaForeignCloseAdapterInput) -> String Never! {
-    "fn __jet_ffi_close_{adapter.handle_type}(handle: ^{adapter.handle_type}) {{\n    {adapter.raw_function}(~handle)\n}}\n"
+    "fn __jet_ffi_close_{adapter.handle_type}(handle: ^{adapter.handle_type}) {{\n    {adapter.raw_function}(handle.copy())\n}}\n"
 }
 
 fn jet_driver_foreign_source_for_path(load: JetDriverLoadResult, path: String) -> String Never! {
@@ -1010,7 +1010,7 @@ fn jet_driver_foreign_parse_shifted(path: String, source: String, offset: Int, d
     if jet_driver_has_errors(lexed.diagnostics) -> return None
     loop token_index in 0..<lexed.tokens.len() -> jet_driver_foreign_shift_token(&lexed.tokens[token_index], offset)
     parsed := parse_lexed(lexed)
-    loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(~diagnostic, path, offset))
+    loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), path, offset))
     if jet_driver_has_errors(parsed.diagnostics) -> return None
     Val(^parsed.program)
 }

@@ -179,7 +179,7 @@ fn jet_web_emit_module_registry(ctx: &JetWebEmitContext, out: &[String]) Never! 
 fn jet_web_emit_js_entry(ctx: &JetWebEmitContext, out: &[String]) Never! {
     entry_is_js :: jet_web_function_in_bucket(ctx.entry, MIRWebBucket.JS)
     if !entry_is_js && jet_web_function_in_bucket(ctx.entry, MIRWebBucket.Wasm) && ctx.entry.generator != None {
-        entry_name := ~ctx.entry.name
+        entry_name := ctx.entry.name.copy()
         entry_span := ctx.entry.span
         jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "Web Wasm entry cannot be a generator", entry_name, Val(entry_span))
         return

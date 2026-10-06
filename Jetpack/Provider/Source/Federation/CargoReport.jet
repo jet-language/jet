@@ -201,7 +201,7 @@ fn provider_toml_assignments(document: String) -> [TOMLAssignment] Never! {
         pair :: line.split_once("=") ?? next
         key :: pair.before.trim()
         if key == "" -> next
-        &assignments.push(TOMLAssignment{section: ~section, array_table: array_table, key: key, value: pair.after.trim()})
+        &assignments.push(TOMLAssignment{section: section.copy(), array_table: array_table, key: key, value: pair.after.trim()})
     }
     assignments
 }
@@ -239,7 +239,7 @@ fn provider_toml_value_without_comment(value: String) -> String Never! {
         }
         escaped = code == 92 && !escaped
     }
-    ~value
+    value.copy()
 }
 
 fn provider_toml_quoted(value: String) -> Bool Never! {

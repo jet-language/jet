@@ -217,7 +217,7 @@ fn assert_matrix_cells() {
                 row.owner
             );
         }
-        let print_call = format!("print(~{})", row.binding);
+        let print_call = format!("print({}.copy())", row.binding);
         assert_eq!(
             SOURCE.matches(print_call.as_str()).count(),
             1,

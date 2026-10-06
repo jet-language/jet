@@ -2110,7 +2110,7 @@ pub(crate) struct Checker<'a> {
     /// reuse on a later iteration.
     loop_exit_depth: Option<(usize, usize)>,
     /// D-COPY-DEFAULT1=A: unmarked move sites that a later use turned into
-    /// shares. After the body check each site becomes `~name`; the paired
+    /// shares. After the body check each site becomes `name.copy()`; the paired
     /// E0121 is reported only if that site cannot be found in the body.
     share_sites: Vec<(Span, Diagnostic)>,
     /// D-LOOP-SUBJECT1=A: active bindingless collecting-loop subjects.
@@ -2343,7 +2343,7 @@ pub(crate) struct Checker<'a> {
     /// binding so codegen can place and lifetime-order its inline backing.
     allow_fixed_constructor: bool,
     /// D-MEM-COPYSEM1: true while inferring a string-view fact for a direct
-    /// non-owning operation, the operand of `~`, or a read-only view entering
+    /// non-owning operation, the operand of `.copy()`, or a read-only view entering
     /// an owning destination. The general `Expr::Ident` arm reports E2307
     /// when this is false and `copies: .Explicit` has disabled materialization.
     allow_string_view_read: bool,

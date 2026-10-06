@@ -50,7 +50,7 @@ JET_CLI_RETIRED :: prep { [JetCLIRetiredSpec]{
 // `text` left-aligned in `width` characters (Rust `{:<width}`).
 pub fn jet_cli_pad(text: String, width: Int) -> String Never! {
     padding :: width - text.len()
-    if padding <= 0 -> return ~text
+    if padding <= 0 -> return text.copy()
     "{text}{" ".repeat(padding)}"
 }
 
@@ -137,7 +137,7 @@ fn jet_cli_retired_fix(retired: JetCLIRetiredSpec, argv: [String]) -> String Nev
         retired.spelling == "store lock" && argv.len() > 2 -> return "jet fetch --lock {argv[2]}"
         else -> {}
     }
-    ~retired.fix
+    retired.fix.copy()
 }
 
 // E2101 for a retired route, or None when `argv` names no retired spelling.
@@ -266,7 +266,7 @@ fn jet_cli_action_help_summary(group: String, action: JetCLIActionSpec) -> Strin
             else -> {}
         }
     }
-    ~action.summary
+    action.summary.copy()
 }
 
 // One group's usage block: its own usage row, then one row per action form.

@@ -32,7 +32,7 @@ pub struct FlakeGraph {
         loop assignment in trust_nix_input_assignments(stripped) {
             name :: trust_text_trim_byte(assignment.path, TRUST_DOT)
             if name == "" -> return Err(TrustError.EmptyInputName)
-            entry := by_name.get(name) ?? FlakeInput{name: ~name, url: "", revision: "", follows: "", provenance: "{source}:inputs.{assignment.path}.{assignment.field}"}
+            entry := by_name.get(name) ?? FlakeInput{name: name.copy(), url: "", revision: "", follows: "", provenance: "{source}:inputs.{assignment.path}.{assignment.field}"}
             if assignment.field == {
                 "url" -> {
                     if entry.url != "" && entry.url != assignment.value -> return Err(TrustError.ConflictingInput{input: name, field: assignment.field})
@@ -140,7 +140,7 @@ pub struct FlakeGraph {
         }
         self.registries = trust_flake_sorted_registries(registries)
         loop index in 0..<self.inputs.len() {
-            input :: ~self.inputs[index]
+            input :: self.inputs[index].copy()
             reference :: root_inputs.get(input.name) ?? return Err(TrustError.IO("flake.lock has no root input `{input.name}`"))
             resolved :: trust_flake_lock_node_name(Val(reference), nodes, "root")
             node_name :: resolved ?? return Err(TrustError.IO("flake.lock root input `{input.name}` has no node reference"))
@@ -165,7 +165,7 @@ pub struct FlakeGraph {
     // An input that follows another takes the revision its chain resolves to.
     fn propagate_follows(&self) TrustError! {
         facts := [String: FlakeInput]{}
-        loop input in self.inputs -> facts[input.name] = ~input
+        loop input in self.inputs -> facts[input.name] = input.copy()
         loop index in 0..<self.inputs.len() {
             follows :: self.inputs[index].follows
             if follows == "" -> next
@@ -282,8 +282,8 @@ pub struct FlakeGraph {
             identity :: LockIdentity{
                 kind: LockRecordKind.AdapterOutput,
                 key: "flake-output:{output.name}",
-                exact: ~exact,
-                hash: trust_sha256_nul_joined([String]{~exact, output.provenance}),
+                exact: exact.copy(),
+                hash: trust_sha256_nul_joined([String]{exact.copy(), output.provenance}),
                 platform: output.system
             }
             rationale := LockRationale.empty()
@@ -304,7 +304,7 @@ pub struct FlakeGraph {
             rationale.source_ref = self.source
             rationale.provider = "flake"
             rationale.reason = "unsupported foreign fact retained for L0204"
-            &records.push(SemanticRecord.new(LockIdentity{kind: LockRecordKind.FlakeUnsupported, key: "flake-unsupported:{field}", exact: ~field, hash: pkg_sha256_hex(field.bytes()), platform: ""}, rationale))
+            &records.push(SemanticRecord.new(LockIdentity{kind: LockRecordKind.FlakeUnsupported, key: "flake-unsupported:{field}", exact: field.copy(), hash: pkg_sha256_hex(field.bytes()), platform: ""}, rationale))
         }
         records
     }
@@ -367,21 +367,21 @@ pub struct FlakeGraph {
         inputs := [String]{}
         loop input in self.inputs {
             &inputs.push(trust_json_object_text([TrustJSONField]{
-                TrustJSONField{key: "name", value: DataTree.Text(~input.name)},
-                TrustJSONField{key: "url", value: DataTree.Text(~input.url)},
-                TrustJSONField{key: "revision", value: DataTree.Text(~input.revision)},
-                TrustJSONField{key: "follows", value: DataTree.Text(~input.follows)},
-                TrustJSONField{key: "provenance", value: DataTree.Text(~input.provenance)}
+                TrustJSONField{key: "name", value: DataTree.Text(input.name.copy())},
+                TrustJSONField{key: "url", value: DataTree.Text(input.url.copy())},
+                TrustJSONField{key: "revision", value: DataTree.Text(input.revision.copy())},
+                TrustJSONField{key: "follows", value: DataTree.Text(input.follows.copy())},
+                TrustJSONField{key: "provenance", value: DataTree.Text(input.provenance.copy())}
             }))
         }
         outputs := [String]{}
         loop output in self.outputs {
             &outputs.push(trust_json_object_text([TrustJSONField]{
-                TrustJSONField{key: "name", value: DataTree.Text(~output.name)},
+                TrustJSONField{key: "name", value: DataTree.Text(output.name.copy())},
                 TrustJSONField{key: "kind", value: DataTree.Text(output.kind.label())},
-                TrustJSONField{key: "system", value: DataTree.Text(~output.system)},
-                TrustJSONField{key: "attribute", value: DataTree.Text(~output.attribute)},
-                TrustJSONField{key: "provenance", value: DataTree.Text(~output.provenance)}
+                TrustJSONField{key: "system", value: DataTree.Text(output.system.copy())},
+                TrustJSONField{key: "attribute", value: DataTree.Text(output.attribute.copy())},
+                TrustJSONField{key: "provenance", value: DataTree.Text(output.provenance.copy())}
             }))
         }
         lock_nodes := [String]{}
@@ -521,7 +521,7 @@ fn trust_path_has_parent_component(path: String) -> Bool Never! {
 // components.
 fn trust_path_within(path: String, root: String) -> Bool Never! {
     if path == root -> return true
-    prefix :: if root.ends_with("/") -> ~root else -> "{root}/"
+    prefix :: if root.ends_with("/") -> root.copy() else -> "{root}/"
     path.starts_with(prefix)
 }
 
@@ -654,7 +654,7 @@ fn trust_flake_lock_source(lock: SemanticLockFile, supplied: String) -> String N
         if record.identity.kind != LockRecordKind.AdapterOutput -> next
         if record.rationales.len() > 0 && record.rationales[0].source_ref != "" -> return record.rationales[0].source_ref
     }
-    ~supplied
+    supplied.copy()
 }
 
 // The flake.nix fingerprint the lock was cut from, or "".
@@ -668,7 +668,7 @@ fn trust_flake_lock_fingerprint(lock: SemanticLockFile) -> String Never! {
 // A record's provenance: its first rationale's reason, else `source`.
 fn trust_flake_record_provenance(record: SemanticRecord, source: String) -> String Never! {
     if record.rationales.len() > 0 && record.rationales[0].reason != "" -> return record.rationales[0].reason
-    ~source
+    source.copy()
 }
 
 // The inputs a semantic lock pins: every `[[lock_input]]` needs a
@@ -704,7 +704,7 @@ fn trust_flake_lock_outputs(lock: SemanticLockFile, source: String) -> [FlakeOut
     loop record in lock.records {
         if record.identity.kind != LockRecordKind.AdapterOutput || !record.identity.key.starts_with("flake-output:") -> next
         exact :: record.identity.exact
-        kind_text := ~exact
+        kind_text := exact.copy()
         system := ""
         attribute := ""
         if trust_text_split_first(exact, TRUST_COLON) == {
@@ -720,7 +720,7 @@ fn trust_flake_lock_outputs(lock: SemanticLockFile, source: String) -> [FlakeOut
             }
             .None -> {}
         }
-        kind :: FlakeOutputKind.from_label(kind_text) ?? return Err(TrustError.InvalidAssignment(~exact))
+        kind :: FlakeOutputKind.from_label(kind_text) ?? return Err(TrustError.InvalidAssignment(exact.copy()))
         if attribute == "" -> return Err(TrustError.InvalidAssignment(exact))
         &outputs.push(FlakeOutput{name: record.identity.key.removeprefix("flake-output:"), kind, system, attribute, provenance: trust_flake_record_provenance(record, source)})
     }

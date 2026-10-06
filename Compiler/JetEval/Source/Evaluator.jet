@@ -452,13 +452,13 @@ fn jet_eval_frame(function: MIRFunctionID, entry: MIRBlockID, args: [JetEvalRunt
 fn jet_eval_function_result(failure: MIRFailureCarrier, data: TComptimeValue) -> TComptimeValue Never! {
     if failure == {
         .Result(_, _) | .Optional(_) -> {
-            if data == .Present(_) -> return ~data
-            if data == .Failed(_) -> return ~data
+            if data == .Present(_) -> return data.copy()
+            if data == .Failed(_) -> return data.copy()
             return TComptimeValue.Present{value: data}
         }
         else -> {}
     }
-    ~data
+    data.copy()
 }
 fn jet_eval_result(machine: ^JetEvalMachine, value: JetEvalRuntimeValue?, complete: Bool) -> JetEvalResult Never! {
     jet_eval_session_result(JetEvalRuntimeSession{machine: machine, retired: false}, value, complete)
@@ -1958,7 +1958,7 @@ fn jet_eval_checked_nominal_name(machine: JetEvalMachine, id: MIRTypeID, raw: St
     loop index in 0..<machine.program.types.len() {
         if machine.program.types[index].key == raw || machine.program.types[index].name == raw -> return machine.program.types[index].name
     }
-    ~raw
+    raw.copy()
 }
 fn jet_eval_trait_box_target(machine: &JetEvalMachine, target: MIRTypeID, result_ty: MIRType?, span: Span) -> Bool Never! {
     instances :: machine.rows.type_instances.get(target.value) ?? [Int]{}
@@ -2078,7 +2078,7 @@ fn jet_eval_constant_instruction(machine: &JetEvalMachine, constant: MIRConstant
 
 fn jet_eval_option_element(ty: MIRType) -> MIRType Never! {
     if ty.kind == .Option(inner) -> return inner
-    ~ty
+    ty.copy()
 }
 
 fn jet_eval_binary_route_args(machine: &JetEvalMachine, call: MIRPreludeCallID, left: JetEvalRuntimeValue, right: JetEvalRuntimeValue, location: MIRPanicLoc?, span: Span) -> [JetEvalRuntimeValue]? {
@@ -3126,7 +3126,7 @@ fn jet_eval_closure_captures(machine: &JetEvalMachine, frame_index: Int, functio
     output := [JetEvalRuntimeValue]{}
     index := 0
     loop index < operands.len() {
-        parameter :: ~machine.program.functions[target].capture_params[index]
+        parameter :: machine.program.functions[target].capture_params[index].copy()
         operand := operands[index]
         if operand == {
             .Value(value) -> {
@@ -3380,7 +3380,7 @@ fn jet_eval_host_data_matches_type(machine: &JetEvalMachine, data: TComptimeValu
                 if data == .Bytes(_) -> return true
             }
             definition :: machine.rows.types.get(name.id.value) ?? return true
-            owner :: ~machine.program.types[definition]
+            owner :: machine.program.types[definition].copy()
             if owner.kind == {
                 .Struct(fields, _) -> {
                     if data == {
@@ -5460,7 +5460,7 @@ fn jet_eval_host_success_type(ty: MIRType) -> MIRType Never! {
         .Result(ok, _) -> return jet_eval_host_success_type(ok)
         else -> {}
     }
-    ~ty
+    ty.copy()
 }
 fn jet_eval_host_retype(source: MIRType, kind: MIRTypeKind) -> MIRType Never! {
     output := mir_type_from_kind(kind)
@@ -5503,7 +5503,7 @@ fn jet_eval_host_substitute_type(ty: MIRType, params: [MIRGenericParam], args: [
             return jet_eval_host_retype(ty, MIRTypeKind.Union{members: output})
         }
         .Quantity(inner, dimension) -> return jet_eval_host_retype(ty, MIRTypeKind.Quantity{base: jet_eval_host_substitute_type(inner, params, args), dimension: dimension})
-        else -> return ~ty
+        else -> return ty.copy()
     }
 }
 
@@ -6191,7 +6191,7 @@ fn jet_eval_drain_callbacks(machine: &JetEvalMachine, span: Span) -> Bool {
 // the boundary discharges each owned alias exactly once afterwards, whether
 // or not the exchange produced a value.
 fn jet_eval_discharge_boundary(machine: &JetEvalMachine, args: [JetEvalRuntimeValue], result: JetEvalRuntimeValue?, span: Span) -> JetEvalRuntimeValue? {
-    if jet_eval_drop_values(&machine, args, span) -> return ~result
+    if jet_eval_drop_values(&machine, args, span) -> return result.copy()
     if result == {
         Val(produced) -> jet_eval_drop_value(&machine, produced, span)
         None -> {}
@@ -6199,7 +6199,7 @@ fn jet_eval_discharge_boundary(machine: &JetEvalMachine, args: [JetEvalRuntimeVa
     None
 }
 fn jet_eval_discharge_call_boundary(machine: &JetEvalMachine, args: [JetEvalRuntimeValue], move_permissions: [Bool], result: JetEvalRuntimeValue?, span: Span) -> JetEvalRuntimeValue? {
-    if jet_eval_drop_call_values(&machine, args, move_permissions, span) -> return ~result
+    if jet_eval_drop_call_values(&machine, args, move_permissions, span) -> return result.copy()
     if result == {
         Val(produced) -> jet_eval_drop_value(&machine, produced, span)
         None -> {}
@@ -9427,23 +9427,23 @@ fn jet_eval_semantic(machine: &JetEvalMachine, frame_index: Int, operation: MIRS
     None
 }
 
-// These helpers intentionally use the checked Jet `~` operation over a full
+// These helpers intentionally use the checked Jet `.copy()` operation over a full
 // proven window. Their lowered MIR is MaterializeView, so the evaluator's own
 // generated code reaches the shared ViewCopy Prelude kernels instead of
 // carrying a second recursive clone policy.
 fn jet_eval_materialize_string_window(value: String) -> String {
     window :: value.after("")
-    ~window
+    window.copy()
 }
 
 fn jet_eval_materialize_list_window(value: [TComptimeValue]) -> [TComptimeValue] Never! {
     window :: value[0..<value.len()]
-    ~window
+    window.copy()
 }
 
 fn jet_eval_materialize_bytes_window(value: [U8]) -> [U8] Never! {
     window :: value[0..<value.len()]
-    ~window
+    window.copy()
 }
 
 

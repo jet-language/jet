@@ -39,9 +39,9 @@ pub fn channel(capacity: Int) -> TaskState Never! {
 }
 
 pub fn put(state: TaskState, value: Int) -> TaskState Never! {
-    if state.closed -> return ~state
-    if state.capacity > 0 && state.values.len() >= state.capacity -> return ~state
-    values := ~state.values
+    if state.closed -> return state.copy()
+    if state.capacity > 0 && state.values.len() >= state.capacity -> return state.copy()
+    values := state.values.copy()
     &values.push(value)
     TaskState{
         values: values,
@@ -53,13 +53,13 @@ pub fn put(state: TaskState, value: Int) -> TaskState Never! {
 }
 
 pub fn clear(state: TaskState) -> TaskState Never! {
-    if state.values.len() == 0 -> return ~state
+    if state.values.len() == 0 -> return state.copy()
     TaskState{values: [Int]{}, capacity: state.capacity, closed: state.closed, locked: state.locked, generation: state.generation + 1}
 }
 
 pub fn shutdown(state: TaskState) -> TaskState Never! {
-    if state.closed -> return ~state
-    TaskState{values: ~state.values, capacity: state.capacity, closed: true, locked: state.locked, generation: state.generation + 1}
+    if state.closed -> return state.copy()
+    TaskState{values: state.values.copy(), capacity: state.capacity, closed: true, locked: state.locked, generation: state.generation + 1}
 }
 
 pub fn stop(state: TaskState) -> TaskState Never! { shutdown(state) }
@@ -71,20 +71,20 @@ pub fn reset(state: TaskState) -> TaskState Never! {
 pub fn lock() -> TaskState Never! { channel(1) }
 
 pub fn acquire(state: TaskState) -> TaskState Never! {
-    if state.closed || state.locked -> return ~state
-    TaskState{values: ~state.values, capacity: state.capacity, closed: state.closed, locked: true, generation: state.generation + 1}
+    if state.closed || state.locked -> return state.copy()
+    TaskState{values: state.values.copy(), capacity: state.capacity, closed: state.closed, locked: true, generation: state.generation + 1}
 }
 
 pub fn release(state: TaskState) -> TaskState Never! {
-    if !state.locked -> return ~state
-    TaskState{values: ~state.values, capacity: state.capacity, closed: state.closed, locked: false, generation: state.generation + 1}
+    if !state.locked -> return state.copy()
+    TaskState{values: state.values.copy(), capacity: state.capacity, closed: state.closed, locked: false, generation: state.generation + 1}
 }
 
 pub fn notify(state: TaskState) -> TaskState Never! {
-    TaskState{values: ~state.values, capacity: state.capacity, closed: state.closed, locked: state.locked, generation: state.generation + 1}
+    TaskState{values: state.values.copy(), capacity: state.capacity, closed: state.closed, locked: state.locked, generation: state.generation + 1}
 }
 
-pub fn start(rx: Receiver<Int>) -> Receiver<Int> Never! { ~rx }
+pub fn start(rx: Receiver<Int>) -> Receiver<Int> Never! { rx.copy() }
 
 pub fn run() Never! -[Time.Wait]> {
     yield_now()
@@ -167,7 +167,7 @@ pub fn try_recv(rx: Receiver<Int>) -> Int? Never! { rx.try_receive() }
 /// operation. The returned handle remains usable for identity/ownership.
 pub fn cancel(rx: Receiver<Int>) -[Time]> Receiver<Int> Never! {
     rx.close()
-    ~rx
+    rx.copy()
 }
 
 pub fn is_closed(state: TaskState) -> Bool Never! { state.closed }
@@ -177,7 +177,7 @@ pub fn capacity(state: TaskState) -> Int Never! { state.capacity }
 pub fn generation(state: TaskState) -> Int Never! { state.generation }
 
 pub fn spawn_name(name: String) -> String Never! {
-    ~name
+    name.copy()
 }
 
 

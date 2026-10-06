@@ -432,7 +432,7 @@ fn jet_rust_emit_sanitize(value: String) -> String Never! {
 // becomes `ct_name`; every name takes the single `__jet_` machine prefix.
 fn jet_rust_emit_mangle(name: String) -> String Never! {
     bytes :: name.bytes()
-    plain :: if name.starts_with("$") -> "ct_{String.from_bytes(~(bytes[1..<bytes.len()])) ?? ""}" else -> name
+    plain :: if name.starts_with("$") -> "ct_{String.from_bytes(bytes[1..<bytes.len()].copy()) ?? ""}" else -> name
     if plain.starts_with("__jet_") -> plain else -> "__jet_{plain}"
 }
 

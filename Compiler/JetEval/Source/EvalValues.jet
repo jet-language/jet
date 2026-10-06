@@ -1023,7 +1023,7 @@ fn jet_eval_shared_cell_swap_payload(machine: &JetEvalMachine, index: Int, value
     storage := cell.storage
     permit :: storage.guard_edit()
     previous := permit.value.value
-    permit.value.value = ~value
+    permit.value.value = value.copy()
     Val(previous)
 }
 
@@ -1362,7 +1362,7 @@ fn jet_eval_foreign_token_replace_payload(machine: JetEvalMachine, token: Int, p
     state :: jet_eval_registry_token(machine, token) ?? return false
     storage := state.storage
     permit :: storage.guard_edit()
-    permit.value.payload = ~payload
+    permit.value.payload = payload.copy()
     true
 }
 
@@ -1470,7 +1470,7 @@ fn jet_eval_validate_borrow(value: JetEvalRuntimeValue, machine: &JetEvalMachine
 
 fn jet_eval_borrow_value(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if !jet_eval_validate_borrow(value, &machine, span) -> return None
-    ~value
+    value.copy()
 }
 
 // Ownership-transferable check for values crossing to a native retained

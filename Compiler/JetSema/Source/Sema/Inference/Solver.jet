@@ -268,7 +268,7 @@ fn sema_inference_prepare_explicit(context: &SemaInferenceContext, explicit_type
     }
     conflict := SemaInferenceConflict?{None}
     loop index in 0..<context.type_params.len() {
-        name :: ~context.type_params[index].name
+        name :: context.type_params[index].name.copy()
         if !sema_inference_bind(&context, &bindings, name, explicit_type_args[index], "the explicit type argument", &conflict) -> return false
     }
     true
@@ -290,7 +290,7 @@ pub fn sema_infer_validate_explicit(graph: SemaRegistrationGraph?, context: &Sem
 // fallible callee's success value; only a Result expectation is the carrier.
 pub fn sema_inference_expected_return_view(declared_return: Type, expected: Type) -> Type Never! {
     if expected == {
-        .Result(_, _) -> return ~declared_return
+        .Result(_, _) -> return declared_return.copy()
         else -> {}
     }
     if declared_return == {

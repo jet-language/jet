@@ -160,7 +160,7 @@ fn equivalent_instances_are_interned_and_project_one_nominal_identity() {
     let src = r#"
 module boxed<T>(size: Int) {
     struct Box { value: T }
-    fn identity(value: Box) -> Box { return ~value }
+    fn identity(value: Box) -> Box { return value.copy() }
 }
 module other<T>(size: Int) { struct Box { value: T } }
 module first :: boxed<Int>(3)
@@ -169,11 +169,11 @@ module forward :: equivalent
 module different_type :: boxed<String>(3)
 module different_value :: boxed<Int>(4)
 module different_template :: other<Int>(3)
-fn accepts_first(value: first.Box) -> first.Box { return ~value }
-fn accepts_projection(value: equivalent.Box) -> first.Box { return ~value }
-fn accepts_chain(value: forward.Box) -> first.Box { return ~value }
-fn accepts_surface(value: first.Box) -> first.Box { return ~value }
-fn accepts_forward_surface(value: forward.Box) -> first.Box { return ~value }
+fn accepts_first(value: first.Box) -> first.Box { return value.copy() }
+fn accepts_projection(value: equivalent.Box) -> first.Box { return value.copy() }
+fn accepts_chain(value: forward.Box) -> first.Box { return value.copy() }
+fn accepts_surface(value: first.Box) -> first.Box { return value.copy() }
+fn accepts_forward_surface(value: forward.Box) -> first.Box { return value.copy() }
 fn run() {}
 "#;
     let (bundle, diagnostics) = check(src);
@@ -298,7 +298,7 @@ use templates.[boxed, other]
 module second :: boxed<Int>(3)
 module different_arg :: boxed<Int>(4)
 module different_template :: other<Int>(3)
-fn accepts_projection(value: second.Box) -> first.Box { return ~value }
+fn accepts_projection(value: second.Box) -> first.Box { return value.copy() }
 fn run() {}
 "#;
     let (bundle, diagnostics) = check_modules(&[
@@ -553,7 +553,7 @@ fn trait_impl_and_error_conversion_are_specialized_as_one_local_identity_graph()
     let src = r#"
 module laws<T> {
     tag Audited { deny: [Net] }
-    fn audited(value: #Audited T) -> #Audited T { return ~value }
+    fn audited(value: #Audited T) -> #Audited T { return value.copy() }
     trait Reveal {
         type Output
         fn reveal(self) -> T
@@ -675,7 +675,7 @@ fn nested_generic_alias_closes_over_outer_type_and_value_arguments() {
     let (bundle, diagnostics) = check(
         r#"
 module outer<T>(count: Int) {
-    module inner<U> { pub fn keep(value: T, other: U) -> T { return ~value } }
+    module inner<U> { pub fn keep(value: T, other: U) -> T { return value.copy() } }
     module fixed :: inner<Int>
     module forward :: fixed
 }

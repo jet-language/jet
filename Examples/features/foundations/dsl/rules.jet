@@ -83,7 +83,7 @@ fn matches(condition: Condition, value: Int) -> Bool {
 }
 
 fn apply(facts: &[String:Int], fact: String, action: Action) -> String {
-    current :: facts.get(~fact) ?? 0
+    current :: facts.get(fact.copy()) ?? 0
     if action == {
         .Add(delta) -> {
             next :: current + delta
@@ -103,9 +103,9 @@ fn apply(facts: &[String:Int], fact: String, action: Action) -> String {
 pub fn fire(facts: &[String:Int], rules: [Rule]) -> [String] {
     events := [String]{}
     loop rule in rules {
-        value :: facts.get(~rule.fact) ?? 0
-        if matches(~rule.condition, value) {
-            event :: apply(&facts, ~rule.fact, ~rule.action)
+        value :: facts.get(rule.fact.copy()) ?? 0
+        if matches(rule.condition.copy(), value) {
+            event :: apply(&facts, rule.fact.copy(), rule.action.copy())
             &events.push("{rule.name}:{event}")
         } else { &events.push("{rule.name}:skip") }
     }

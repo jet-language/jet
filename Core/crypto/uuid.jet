@@ -45,7 +45,7 @@ pub fn v5(namespace: String, name: String) -> String UUIDError! {
     input := copy_bytes(ns)
     loop b in name.bytes() -> &input.push(b)
     digest_hex :: crypto.sha1(input) ?? return Err(UUIDError{reason: "invalid UUID digest"})
-    digest :: hex_decode(~digest_hex) ?? return Err(UUIDError{reason: "invalid UUID digest"})
+    digest :: hex_decode(digest_hex.copy()) ?? return Err(UUIDError{reason: "invalid UUID digest"})
     if digest.len() != 20 -> return Err(UUIDError{reason: "invalid UUID digest length"})
     bytes := [U8]{}
     loop i in 0..<16 -> &bytes.push(digest[i])
@@ -88,7 +88,7 @@ fn parse_uuid(text: String) -> [U8]? {
         lo :: hex_value(digits[i * 2 + 1]) ?? return None
         &out.push(to_u8((hi << 4) | lo))
     }
-    Val(~out)
+    Val(out.copy())
 }
 
 fn hex_value(b: U8) -> Int? {
@@ -125,7 +125,7 @@ fn hex_decode(text: String) -> [U8]? {
         lo :: hex_value(raw[i + 1]) ?? return None
         &out.push(to_u8((hi << 4) | lo))
     }
-    Val(~out)
+    Val(out.copy())
 }
 
 /// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the

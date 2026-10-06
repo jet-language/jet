@@ -753,11 +753,11 @@ fn resident() -[]> String {
         letter: 'Z'
     }
     encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
-    decoded := cbor.decode<Packet>(~encoded) ?? panic("decode {err}")
+    decoded := cbor.decode<Packet>(encoded.copy()) ?? panic("decode {err}")
     roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
     boxed := cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
     boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
-    boxed_back := cbor.decode<Wrap<Int>>(~boxed_wire) ?? panic("generic roundtrip")
+    boxed_back := cbor.decode<Wrap<Int>>(boxed_wire.copy()) ?? panic("generic roundtrip")
     return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
 }
 
@@ -776,11 +776,11 @@ fn forced_deopt(seed: String) -[]> String {
         letter: 'Z'
     }
     encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
-    decoded := cbor.decode<Packet>(~encoded) ?? panic("decode {err}")
+    decoded := cbor.decode<Packet>(encoded.copy()) ?? panic("decode {err}")
     roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
     boxed := cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
     boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
-    boxed_back := cbor.decode<Wrap<Int>>(~boxed_wire) ?? panic("generic roundtrip")
+    boxed_back := cbor.decode<Wrap<Int>>(boxed_wire.copy()) ?? panic("generic roundtrip")
     return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
 }
 
@@ -867,7 +867,7 @@ fn decode_old() -[]> String {
         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
         0x09
     }
-    profile :: cbor.decode<Profile>(~bytes) ?? panic("decode")
+    profile :: cbor.decode<Profile>(bytes.copy()) ?? panic("decode")
     return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
 }
 
@@ -882,7 +882,7 @@ fn forced_deopt() -[]> String {
         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
         0x09
     }
-    profile :: cbor.decode<Profile>(~bytes) ?? panic("decode")
+    profile :: cbor.decode<Profile>(bytes.copy()) ?? panic("decode")
     return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
 }
 
@@ -896,7 +896,7 @@ fn failed_change() -[]> String {
         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
         0x09
     }
-    cbor.decode<Profile>(~bytes) ? _value -> return "accepted" ! error -> return "{error[0].path}:{error[0].reason}"
+    cbor.decode<Profile>(bytes.copy()) ? _value -> return "accepted" ! error -> return "{error[0].path}:{error[0].reason}"
 }
 
 fn run() {
@@ -1055,13 +1055,13 @@ fn invalid_fixed_bytes_error() -[]> String {
 
 fn forced_deopt() -[]> String {
     if text.casefold("Straße") != "strasse" { panic("casefold") }
-    signed := cbor.decode<I8>(~(cbor.to_bytes_canonical(I8{ -8 }) ?? panic("i8 encode"))) ?? panic("i8 decode")
-    unsigned := cbor.decode<U32>(~(cbor.to_bytes_canonical(U32{ 4000000000 }) ?? panic("u32 encode"))) ?? panic("u32 decode")
-    narrow := cbor.decode<F32>(~(cbor.to_bytes_canonical(F32{ 1.5 }) ?? panic("f32 encode"))) ?? panic("f32 decode")
-    pair := cbor.decode<[Int#2]>(~(cbor.to_bytes_canonical([Int#2]{ 1, 2 }) ?? panic("fixed encode"))) ?? panic("fixed decode")
-    bytes := cbor.decode<[U8#2]>(~(cbor.to_bytes_canonical([U8#2]{ 222, 173 }) ?? panic("bytes encode"))) ?? panic("bytes decode")
-    tree := cbor.decode<DataTree>(~(cbor.to_bytes_canonical(DataTree.Object(["n": DataTree.Int(7)])) ?? panic("tree encode"))) ?? panic("tree decode")
-    severity := cbor.decode<Severity>(~(cbor.to_bytes_canonical(Severity.from_int(7)) ?? panic("range encode"))) ?? panic("range decode")
+    signed := cbor.decode<I8>((cbor.to_bytes_canonical(I8{ -8 }) ?? panic("i8 encode")).copy()) ?? panic("i8 decode")
+    unsigned := cbor.decode<U32>((cbor.to_bytes_canonical(U32{ 4000000000 }) ?? panic("u32 encode")).copy()) ?? panic("u32 decode")
+    narrow := cbor.decode<F32>((cbor.to_bytes_canonical(F32{ 1.5 }) ?? panic("f32 encode")).copy()) ?? panic("f32 decode")
+    pair := cbor.decode<[Int#2]>((cbor.to_bytes_canonical([Int#2]{ 1, 2 }) ?? panic("fixed encode")).copy()) ?? panic("fixed decode")
+    bytes := cbor.decode<[U8#2]>((cbor.to_bytes_canonical([U8#2]{ 222, 173 }) ?? panic("bytes encode")).copy()) ?? panic("bytes decode")
+    tree := cbor.decode<DataTree>((cbor.to_bytes_canonical(DataTree.Object(["n": DataTree.Int(7)])) ?? panic("tree encode")).copy()) ?? panic("tree decode")
+    severity := cbor.decode<Severity>((cbor.to_bytes_canonical(Severity.from_int(7)) ?? panic("range encode")).copy()) ?? panic("range decode")
     tree_n := (&tree.field("n") ?? panic("tree field")).int() ?? panic("tree int")
     return "{signed}|{unsigned}|{narrow}|{pair[0]},{pair[1]}|{bytes[0]},{bytes[1]}|{tree_n}|{severity.raw()}|{invalid_i8_rejected()}|{invalid_u32_rejected()}|{invalid_f32_rejected()}|{invalid_fixed_rejected()}|{invalid_range_rejected()}|{invalid_i8_error()}|{invalid_u8_error()}|{invalid_fixed_bytes_error()}"
 }
@@ -1487,9 +1487,9 @@ fn run() {
     let xml = r#"
 fn xml_name(local: String) -[]> DataTree {
     return DataTree.Object([
-        "raw": DataTree.Text(~local),
+        "raw": DataTree.Text(local.copy()),
         "prefix": DataTree.Null,
-        "local": DataTree.Text(~local),
+        "local": DataTree.Text(local.copy()),
         "namespace_uri": DataTree.Null,
     ])
 }

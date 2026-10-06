@@ -172,7 +172,7 @@ pub fn inflate(data: [U8]) -> [U8] ArchiveError! {
         r.i = r.i + 1
     }
     if r.i != r.data.len() -> return Err(ArchiveError.Malformed)
-    Ok(~out)
+    Ok(out.copy())
 }
 
 /// Python `zlib.compress` / `zlib.decompress` compatible wrappers. Input above
@@ -209,7 +209,7 @@ fn slice_u8(data: [U8], start: Int, end: Int) -> [U8] Never! {
         &out.push(data[i])
         i = i + 1
     }
-    ~out
+    out.copy()
 }
 
 pub fn zip_decompress(data: [U8]) -> [U8] ArchiveError! {
@@ -362,7 +362,7 @@ pub fn tar_get(archive: [U8], name: String) -> [U8] ArchiveError! {
         normal_name :: tar_name(hdr)
         entry_name := normal_name
         if has_pending_name {
-            entry_name = ~pending_name
+            entry_name = pending_name.copy()
             has_pending_name = false
         }
         if !archive_name_valid(entry_name) -> return Err(ArchiveError.Malformed)
@@ -431,7 +431,7 @@ pub fn tar_names_json(archive: [U8]) -> String ArchiveError! {
         normal_name :: tar_name(hdr)
         nm := normal_name
         if has_pending_name {
-            nm = ~pending_name
+            nm = pending_name.copy()
             has_pending_name = false
         }
         if !archive_name_valid(nm) -> return Err(ArchiveError.Malformed)
@@ -601,7 +601,7 @@ fn zip_files(archive: [U8]) -> [ZipFile] ArchiveError! {
         if i + csz > archive.len() -> return Err(ArchiveError.Malformed)
         payload :: cut(archive, i, i + csz)
         i = i + csz
-        data := ~payload
+        data := payload.copy()
         if method == 8 {
             decoded :: inflate(payload)
             data = decoded
@@ -1196,13 +1196,13 @@ fn inflate_dynamic(r: &BitReader, out: &[U8]) -> Int Never! {
         cl_len[C_CL_ORDER[i]] = &tmp.get_bits_lsb(3)
         i = i + 1
     }
-    if tmp.bad || !huff_lengths_complete(~cl_len) {
+    if tmp.bad || !huff_lengths_complete(cl_len.copy()) {
         r.i = tmp.i
         r.bit = tmp.bit
         r.bad = tmp.bad
         return C_INFLATE_MALFORMED
     }
-    cl_codes :: huff_codes(~cl_len)
+    cl_codes :: huff_codes(cl_len.copy())
     all_len := [Int]{}
     need :: hlit + hdist
     prev := 0
@@ -1214,7 +1214,7 @@ fn inflate_dynamic(r: &BitReader, out: &[U8]) -> Int Never! {
             bit :: &tmp.get_bits_lsb(1)
             acc = (acc << 1) | bit
             len = len + 1
-            sym = huff_sym(~cl_len, ~cl_codes, acc, len)
+            sym = huff_sym(cl_len.copy(), cl_codes.copy(), acc, len)
             if sym >= 0 -> break
         }
         if sym < 0 -> break
@@ -1265,8 +1265,8 @@ fn inflate_dynamic(r: &BitReader, out: &[U8]) -> Int Never! {
     loop len in dist_len {
         if len > 0 -> has_dist = true
     }
-    if !huff_lengths_valid(~lit_len) ||
-        !huff_lengths_valid(~dist_len) ||
+    if !huff_lengths_valid(lit_len.copy()) ||
+        !huff_lengths_valid(dist_len.copy()) ||
         lit_len[256] == 0 ||
         !has_dist {
         r.i = tmp.i
@@ -1274,8 +1274,8 @@ fn inflate_dynamic(r: &BitReader, out: &[U8]) -> Int Never! {
         r.bad = tmp.bad
         return C_INFLATE_MALFORMED
     }
-    lit_codes :: huff_codes(~lit_len)
-    dist_codes :: huff_codes(~dist_len)
+    lit_codes :: huff_codes(lit_len.copy())
+    dist_codes :: huff_codes(dist_len.copy())
     loop {
         acc := 0
         len := 0
@@ -1284,7 +1284,7 @@ fn inflate_dynamic(r: &BitReader, out: &[U8]) -> Int Never! {
             bit :: &tmp.get_bits_lsb(1)
             acc = (acc << 1) | bit
             len = len + 1
-            sym = huff_sym(~lit_len, ~lit_codes, acc, len)
+            sym = huff_sym(lit_len.copy(), lit_codes.copy(), acc, len)
             if sym >= 0 -> break
         }
         if sym < 0 || tmp.bad {
@@ -1326,7 +1326,7 @@ fn inflate_dynamic(r: &BitReader, out: &[U8]) -> Int Never! {
                     bit :: &tmp.get_bits_lsb(1)
                     dacc = (dacc << 1) | bit
                     dlen = dlen + 1
-                    dcode = huff_sym(~dist_len, ~dist_codes, dacc, dlen)
+                    dcode = huff_sym(dist_len.copy(), dist_codes.copy(), dacc, dlen)
                     if dcode >= 0 -> break
                 }
                 if tmp.bad || dcode < 0 || dcode >= C_DIST_BASE.len() {

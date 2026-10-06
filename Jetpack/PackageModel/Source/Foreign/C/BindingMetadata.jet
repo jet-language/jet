@@ -105,7 +105,7 @@ fn pkg_cffi_split_nonblank(value: String, separator: String) -> [String] Never! 
 
 // A provenance artifact path: absolute as written, else beside the record.
 fn pkg_cffi_resolve_provenance_artifact(provenance_path: String, encoded: String) -> String Never! {
-    if files.is_absolute(encoded) -> return ~encoded
+    if files.is_absolute(encoded) -> return encoded.copy()
     parent :: files.dirname(provenance_path)
     files.join(if parent == "" -> "." else -> parent, encoded)
 }

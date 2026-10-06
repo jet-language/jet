@@ -68,7 +68,7 @@ fn jet_rust_emit_local_declaration(ctx: &JetRustEmitContext, local: MIRLocal) ->
 // value in a `JetSharedSlot`, whose readers borrow it in place.
 fn jet_rust_emit_value_declaration(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueFact) -> String Never! {
     if jet_rust_emit_shared_constant_value(&ctx, function, value.id) {
-        root :: ~ctx.config.root_prefix
+        root :: ctx.config.root_prefix.copy()
         return "let mut {jet_rust_emit_value_slot(value.id)}: {root}JetSharedSlot<{jet_rust_emit_type(&ctx, value.ty)}> = {root}JetSharedSlot::empty();"
     }
     "let mut {jet_rust_emit_value_slot(value.id)}: Option<{jet_rust_emit_type(&ctx, value.ty)}> = None;"
@@ -145,7 +145,7 @@ fn jet_rust_emit_localize_value_slots(ctx: &JetRustEmitContext, function: MIRFun
     loop value in function.values {
         if jet_rust_emit_value_slot_localizable(value.ty) -> &types.add("{value.id.value}", jet_rust_emit_type(&ctx, value.ty)).drop("value ids are unique")
     }
-    if types.len() == 0 -> return JetRustEmitLocalizedSlots{lines: ~lines, body_start: values_end}
+    if types.len() == 0 -> return JetRustEmitLocalizedSlots{lines: lines.copy(), body_start: values_end}
     declared := [String:Int]{}
     loop (index, entry) in lines {
         if index < values_start -> next
@@ -206,14 +206,14 @@ fn jet_rust_emit_localize_value_slots(ctx: &JetRustEmitContext, function: MIRFun
         }
         bytes :: body[line].bytes()
         indent :: indents[line]
-        rest :: if indent < bytes.len() -> String.from_bytes(~(bytes[indent..<bytes.len()])) ?? "" else -> ""
+        rest :: if indent < bytes.len() -> String.from_bytes(bytes[indent..<bytes.len()].copy()) ?? "" else -> ""
         defines :: (on_first_line.get(id) ?? 0) == 1 && (first_column.get(id) ?? -1) == indent && rest.starts_with("__jet_v_{id} = Some(")
         if defines && (last_line.get(id) ?? body.len()) < scope_end[line] {
             &localized.add(line, id).drop("one definition per line")
             &dropped.add(id, true).drop("value ids are unique")
         }
     }
-    if dropped.len() == 0 -> return JetRustEmitLocalizedSlots{lines: ~lines, body_start: values_end}
+    if dropped.len() == 0 -> return JetRustEmitLocalizedSlots{lines: lines.copy(), body_start: values_end}
     rebuilt := [String]{}
     loop (index, entry) in lines {
         if index >= values_end -> break
@@ -233,8 +233,8 @@ fn jet_rust_emit_localize_value_slots(ctx: &JetRustEmitContext, function: MIRFun
         bytes :: body[index].bytes()
         indent :: indents[index]
         prefix :: "__jet_v_{id} = ".bytes().len()
-        pad :: String.from_bytes(~(bytes[0..<indent])) ?? ""
-        tail :: String.from_bytes(~(bytes[indent + prefix..<bytes.len()])) ?? ""
+        pad :: String.from_bytes(bytes[0..<indent].copy()) ?? ""
+        tail :: String.from_bytes(bytes[indent + prefix..<bytes.len()].copy()) ?? ""
         &rebuilt.push("{pad}let mut __jet_v_{id}: Option<{types.get(id) ?? ""}> = {tail}")
     }
     JetRustEmitLocalizedSlots{lines: rebuilt, body_start: body_start}
@@ -250,7 +250,7 @@ fn jet_rust_emit_declared_value_id(line: String) -> String? Never! {
     end := start
     loop end < bytes.len() && Int.from_u8(bytes[end]) >= 48 && Int.from_u8(bytes[end]) <= 57 -> end += 1
     if end == start || end >= bytes.len() || Int.from_u8(bytes[end]) != 58 -> return None
-    Val(String.from_bytes(~(bytes[start..<end])) ?? "")
+    Val(String.from_bytes(bytes[start..<end].copy()) ?? "")
 }
 
 // MIRRust strip_enclosing_parens: `text` without parentheses enclosing all of it.
@@ -270,7 +270,7 @@ fn jet_rust_emit_fold_strip_parens(text: String) -> String Never! {
             }
         }
         if !encloses -> break
-        current = String.from_bytes(~(bytes[1..<bytes.len() - 1])) ?? ""
+        current = String.from_bytes(bytes[1..<bytes.len() - 1].copy()) ?? ""
     }
     current
 }
@@ -290,7 +290,7 @@ fn jet_rust_emit_fold_numbered(text: String, prefix: String, suffix: String) -> 
     start :: prefix.bytes().len()
     end :: bytes.len() - suffix.bytes().len()
     if end <= start || !text.starts_with(prefix) || !text.ends_with(suffix) -> return false
-    jet_rust_emit_fold_digits(~(bytes[start..<end]))
+    jet_rust_emit_fold_digits(bytes[start..<end].copy())
 }
 
 // MIRRust parameter_binding excludes `src_`, the module prefix of the Rust
@@ -315,7 +315,7 @@ fn jet_rust_emit_fold_parameter(text: String) -> Bool Never! {
     loop byte in bytes {
         if !jet_rust_emit_identifier_byte(byte) -> return false
     }
-    name :: String.from_bytes(~(bytes[6..<bytes.len()])) ?? ""
+    name :: String.from_bytes(bytes[6..<bytes.len()].copy()) ?? ""
     !jet_rust_emit_fold_numbered(name, "l_", "") && !jet_rust_emit_fold_numbered(name, "v_", "") && name != "string"
 }
 
@@ -353,7 +353,7 @@ fn jet_rust_emit_fold_field_place(text: String) -> Bool Never! {
     place :: jet_rust_emit_fold_strip_parens(text)
     bytes :: place.bytes()
     if place.starts_with("*") {
-        base :: String.from_bytes(~(bytes[1..<bytes.len()])) ?? ""
+        base :: String.from_bytes(bytes[1..<bytes.len()].copy()) ?? ""
         return jet_rust_emit_fold_parameter(base) || jet_rust_emit_fold_numbered(base, "__jet_l_", ".as_ref().expect(\"MIR local\")")
     }
     pattern :: ").__jet_".bytes()
@@ -369,7 +369,7 @@ fn jet_rust_emit_fold_field_place(text: String) -> Bool Never! {
     loop index in field_start..<bytes.len() {
         if !jet_rust_emit_identifier_byte(bytes[index]) -> return false
     }
-    jet_rust_emit_fold_field_place(String.from_bytes(~(bytes[1..<at])) ?? "")
+    jet_rust_emit_fold_field_place(String.from_bytes(bytes[1..<at].copy()) ?? "")
 }
 
 // MIRRust pure_slot_expression: an expression that only reads slots,
@@ -384,7 +384,7 @@ fn jet_rust_emit_fold_pure(expression: String) -> Bool Never! {
         start := int_prefix.bytes().len()
         if start < bytes.len() && Int.from_u8(bytes[start]) == 45 -> start += 1
         if bytes.len() - 1 <= start -> return false
-        return jet_rust_emit_fold_digits(~(bytes[start..<bytes.len() - 1]))
+        return jet_rust_emit_fold_digits(bytes[start..<bytes.len() - 1].copy())
     }
     string_prefix :: "{{ let mut __jet_string = String::new(); __jet_string.push_str(\""
     string_suffix :: "\"); __jet_string }}"
@@ -415,7 +415,7 @@ fn jet_rust_emit_fold_pure(expression: String) -> Bool Never! {
     if jet_rust_emit_fold_numbered(text, "__jet_v_", ".take().expect(\"MIR value\")") -> return true
     if !text.ends_with(".clone()") -> return false
     bytes :: text.bytes()
-    jet_rust_emit_fold_field_place(String.from_bytes(~(bytes[0..<bytes.len() - 8])) ?? "")
+    jet_rust_emit_fold_field_place(String.from_bytes(bytes[0..<bytes.len() - 8].copy()) ?? "")
 }
 
 // MIRRust borrowing_closure_expression: a closure carrier whose setup borrows
@@ -471,7 +471,7 @@ fn jet_rust_emit_fold_variables(expression: String) -> [String] Never! {
         end := at + 1
         loop end < bytes.len() && jet_rust_emit_identifier_byte(bytes[end]) -> end += 1
         if (at == 0 || Int.from_u8(bytes[at - 1]) != 46) && end - at >= 6 && bytes[at] == (U8{95}) && bytes[at + 1] == (U8{95}) && bytes[at + 2] == (U8{106}) && bytes[at + 3] == (U8{101}) && bytes[at + 4] == (U8{116}) && bytes[at + 5] == (U8{95}) {
-            name :: String.from_bytes(~(bytes[at..<end])) ?? ""
+            name :: String.from_bytes(bytes[at..<end].copy()) ?? ""
             slot :: jet_rust_emit_fold_numbered(name, "__jet_l_", "") || jet_rust_emit_fold_numbered(name, "__jet_v_", "")
             if slot || jet_rust_emit_fold_parameter(name) -> &names.push(name)
         }
@@ -523,7 +523,7 @@ fn jet_rust_emit_fold_indent(bytes: [U8]) -> Int Never! {
 fn jet_rust_emit_fold_definition(line: String) -> JetRustEmitSlotDefinition? Never! {
     bytes :: line.bytes()
     indent :: jet_rust_emit_fold_indent(bytes)
-    statement :: String.from_bytes(~(bytes[indent..<bytes.len()])) ?? ""
+    statement :: String.from_bytes(bytes[indent..<bytes.len()].copy()) ?? ""
     hoisted := true
     start := 8
     if statement.starts_with("let mut __jet_v_") {
@@ -536,8 +536,8 @@ fn jet_rust_emit_fold_definition(line: String) -> JetRustEmitSlotDefinition? Nev
     end := start
     loop end < text.len() && Int.from_u8(text[end]) >= 48 && Int.from_u8(text[end]) <= 57 -> end += 1
     if end == start -> return None
-    id :: String.from_bytes(~(text[start..<end])) ?? ""
-    rest :: String.from_bytes(~(text[end..<text.len()])) ?? ""
+    id :: String.from_bytes(text[start..<end].copy()) ?? ""
+    rest :: String.from_bytes(text[end..<text.len()].copy()) ?? ""
     marker := " = Some("
     if !hoisted {
         if !rest.starts_with(": Option<") -> return None
@@ -552,7 +552,7 @@ fn jet_rust_emit_fold_definition(line: String) -> JetRustEmitSlotDefinition? Nev
     payload_start :: open + marker.bytes().len()
     payload_end :: rest_bytes.len() - 2
     if payload_end < payload_start -> return None
-    Val(JetRustEmitSlotDefinition{indent: indent, id: id, payload: String.from_bytes(~(rest_bytes[payload_start..<payload_end])) ?? "", hoisted: hoisted})
+    Val(JetRustEmitSlotDefinition{indent: indent, id: id, payload: String.from_bytes(rest_bytes[payload_start..<payload_end].copy()) ?? "", hoisted: hoisted})
 }
 
 // Whether the statement at `index` carries an attribute such as
@@ -561,7 +561,7 @@ fn jet_rust_emit_fold_attributed(lines: [String], index: Int) -> Bool Never! {
     if index == 0 -> return false
     bytes :: lines[index - 1].bytes()
     indent :: jet_rust_emit_fold_indent(bytes)
-    rest :: String.from_bytes(~(bytes[indent..<bytes.len()])) ?? ""
+    rest :: String.from_bytes(bytes[indent..<bytes.len()].copy()) ?? ""
     rest.starts_with("#[")
 }
 
@@ -585,7 +585,7 @@ fn jet_rust_emit_fold_identifiers(bytes: [U8]) -> JetRustEmitFoldIdentifiers Nev
         end := at + 1
         loop end < bytes.len() && jet_rust_emit_identifier_byte(bytes[end]) -> end += 1
         if (at == 0 || Int.from_u8(bytes[at - 1]) != 46) && end - at >= 6 && bytes[at] == (U8{95}) && bytes[at + 1] == (U8{95}) && bytes[at + 2] == (U8{106}) && bytes[at + 3] == (U8{101}) && bytes[at + 4] == (U8{116}) && bytes[at + 5] == (U8{95}) {
-            name :: String.from_bytes(~(bytes[at..<end])) ?? ""
+            name :: String.from_bytes(bytes[at..<end].copy()) ?? ""
             if counts.get(name) == None -> &names.push(name)
             &counts.add(name, (counts.get(name) ?? 0) + 1).drop("replace identifier count")
         }
@@ -701,7 +701,7 @@ fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start
         bytes :: line.bytes()
         end := 20
         loop end < bytes.len() && Int.from_u8(bytes[end]) >= 48 && Int.from_u8(bytes[end]) <= 57 -> end += 1
-        if end > 20 -> &declarations.add(String.from_bytes(~(bytes[20..<end])) ?? "", index).drop("value ids are unique")
+        if end > 20 -> &declarations.add(String.from_bytes(bytes[20..<end].copy()) ?? "", index).drop("value ids are unique")
     }
     removed := [Bool]{}
     loop _ in body -> &removed.push(false)
@@ -732,14 +732,14 @@ fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start
             }
         }
         if at < 0 || jet_rust_emit_fold_inside_closure(bytes, at) -> next
-        before :: String.from_bytes(~(bytes[0..<at])) ?? ""
-        after :: String.from_bytes(~(bytes[at + form.bytes().len()..<bytes.len()])) ?? ""
+        before :: String.from_bytes(bytes[0..<at].copy()) ?? ""
+        after :: String.from_bytes(bytes[at + form.bytes().len()..<bytes.len()].copy()) ?? ""
         rest :: "{before}{after}"
         rest_bytes :: rest.bytes()
         target := ""
         assign :: jet_rust_emit_fold_find(rest_bytes, " = ".bytes(), indent)
         if assign > indent {
-            lhs :: String.from_bytes(~(rest_bytes[indent..<assign])) ?? ""
+            lhs :: String.from_bytes(rest_bytes[indent..<assign].copy()) ?? ""
             if jet_rust_emit_fold_numbered(lhs, "__jet_l_", "") -> target = lhs
         }
         rest_identifiers :: jet_rust_emit_fold_identifiers(rest_bytes)
@@ -760,7 +760,7 @@ fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start
             type_start :: jet_rust_emit_fold_find(declaration_bytes, ": Option<".bytes(), 0)
             suffix :: "> = None;"
             if type_start < 0 || !declaration.ends_with(suffix) -> next
-            declared :: String.from_bytes(~(declaration_bytes[type_start + 9..<declaration_bytes.len() - suffix.bytes().len()])) ?? ""
+            declared :: String.from_bytes(declaration_bytes[type_start + 9..<declaration_bytes.len() - suffix.bytes().len()].copy()) ?? ""
             replacement = "{{ let __jet_folded: {declared} = {definition.payload}; __jet_folded }}"
         }
         body[consumer] = "{before}{replacement}{after}"
@@ -785,7 +785,7 @@ fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start
         if definition.hoisted -> removed[declarations.get(definition.id) ?? index] = true
         folded = true
     }
-    if !folded -> return ~lines
+    if !folded -> return lines.copy()
     rebuilt := [String]{}
     loop (index, entry) in lines {
         if index >= values_start -> break
@@ -840,20 +840,20 @@ fn jet_rust_emit_unwrap_value_slots(lines: [String], start: Int) -> [String] Nev
         }
         definition :: jet_rust_emit_fold_definition(line) ?? next
         if definition.hoisted -> next
-        statement :: String.from_bytes(~(bytes[definition.indent..<bytes.len()])) ?? ""
+        statement :: String.from_bytes(bytes[definition.indent..<bytes.len()].copy()) ?? ""
         prefix :: "let mut __jet_v_{definition.id}: Option<"
         if !statement.starts_with(prefix) -> next
         statement_bytes :: statement.bytes()
         end :: jet_rust_emit_fold_find(statement_bytes, "> = Some(".bytes(), 0)
         if end < prefix.bytes().len() -> next
         &definitions.push(definition.id)
-        &types.add(definition.id, String.from_bytes(~(statement_bytes[prefix.bytes().len()..<end])) ?? "").drop("a later definition replaces the prior one")
+        &types.add(definition.id, String.from_bytes(statement_bytes[prefix.bytes().len()..<end].copy()) ?? "").drop("a later definition replaces the prior one")
     }
     plain := [String:Bool]{}
     loop id in definitions {
         if (mentions.get(id) ?? 0) == (borrows.get(id) ?? 0) + 1 -> &plain.add(id, jet_rust_emit_copy_scalar_type(types.get(id) ?? "")).drop("a later definition replaces the prior one")
     }
-    if plain.len() == 0 -> return ~lines
+    if plain.len() == 0 -> return lines.copy()
     rebuilt := [String]{}
     loop (index, entry) in lines {
         if index >= start -> break
@@ -867,7 +867,7 @@ fn jet_rust_emit_unwrap_value_slots(lines: [String], start: Int) -> [String] Nev
         if jet_rust_emit_fold_definition(line) == .Val(row) {
             if !row.hoisted && plain.get(row.id) != None {
                 bytes :: line.bytes()
-                pad :: String.from_bytes(~(bytes[0..<row.indent])) ?? ""
+                pad :: String.from_bytes(bytes[0..<row.indent].copy()) ?? ""
                 updated = "{pad}let __jet_v_{row.id}: {types.get(row.id) ?? ""} = {row.payload};"
             }
         }
@@ -1071,7 +1071,7 @@ fn jet_rust_emit_compact_function_text(lines: [String], start: Int) -> [String] 
         }
         if kind >= 0 {
             id_start :: index + prefix_width
-            key :: "{kind}:{String.from_bytes(~(text[id_start..<id_start + digits])) ?? ""}"
+            key :: "{kind}:{String.from_bytes(text[id_start..<id_start + digits].copy()) ?? ""}"
             number := names.get(key) ?? -1
             if number < 0 {
                 number = counts[kind]
@@ -1131,7 +1131,7 @@ fn jet_rust_emit_function_signature(ctx: &JetRustEmitContext, function: MIRFunct
             loop owner in owners {
                 parameter :: function.params[owner - function.capture_params.len()]
                 carries_view :: jet_rust_emit_type_carries_view(ctx, parameter.ty)
-                previous :: ~ctx.view_lifetime
+                previous :: ctx.view_lifetime.copy()
                 if carries_view -> ctx.view_lifetime = JET_RUST_EMIT_VIEW_LIFETIME
                 rendered :: jet_rust_emit_function_param_type(&ctx, function, parameter)
                 ctx.view_lifetime = previous
@@ -1143,7 +1143,7 @@ fn jet_rust_emit_function_signature(ctx: &JetRustEmitContext, function: MIRFunct
     }
     unsafe_prefix :: if function.is_unsafe -> "unsafe " else -> ""
     visibility :: jet_rust_emit_function_visibility(function)
-    generic_params :: ~ctx.current_generic_params
+    generic_params :: ctx.current_generic_params.copy()
     generics :: jet_rust_emit_signature_generics(lifetimes, jet_rust_emit_generic_params(&ctx, generic_params))
     "{visibility}{unsafe_prefix}fn {jet_rust_emit_function_name(&ctx, function.id)}{generics}({params.join(", ")}) -> {ret} {{"
 }
@@ -1312,7 +1312,7 @@ fn jet_rust_emit_trait_method_head(ctx: &JetRustEmitContext, trait_name: String,
             loop owner in owners {
                 parameter :: method.params[owner]
                 carries_view :: jet_rust_emit_type_carries_view(ctx, parameter.ty)
-                previous :: ~ctx.view_lifetime
+                previous :: ctx.view_lifetime.copy()
                 if carries_view -> ctx.view_lifetime = JET_RUST_EMIT_VIEW_LIFETIME
                 rendered :: jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
                 ctx.view_lifetime = previous
@@ -1589,7 +1589,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
                     loop owner_index in owners {
                         parameter :: function.params[owner_index + receiver_offset]
                         carries_view :: jet_rust_emit_type_carries_view(ctx, parameter.ty)
-                        previous :: ~ctx.view_lifetime
+                        previous :: ctx.view_lifetime.copy()
                         if carries_view -> ctx.view_lifetime = JET_RUST_EMIT_VIEW_LIFETIME
                         rendered :: jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
                         ctx.view_lifetime = previous
@@ -1636,7 +1636,7 @@ fn jet_rust_emit_impl_carrier_trait(ctx: &JetRustEmitContext, implementation: MI
     }
     identity :: owner_id ?? return None
     position :: jet_rust_emit_type_index(ctx, identity) ?? return None
-    definition :: ~ctx.program.types[position]
+    definition :: ctx.program.types[position].copy()
     if definition.id != identity -> return None
     if jet_rust_emit_module_selected(ctx, definition.module_id) && jet_rust_emit_declares_type_definition(&ctx, definition) -> return None
     Val("__jet_ext{jet_rust_emit_generated_path(implementation.key)}")
@@ -1711,7 +1711,7 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
         if jet_rust_emit_function_index(ctx, method_id) == .Val(function_index) {
             // The emitters below write through `ctx`, so they take a copy of
             // the row, as the one-row adapter this replaces did.
-            function :: ~ctx.program.functions[function_index]
+            function :: ctx.program.functions[function_index].copy()
             if function.id == method_id {
                 found = true
                 if rust_operator {
@@ -1761,7 +1761,7 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
             line :: lines[position]
             if !line.starts_with("    ") || !line.ends_with(" {{") -> next
             bytes :: line.bytes()
-            header :: String.from_bytes(~(bytes[4..<bytes.len() - 2])) ?? ""
+            header :: String.from_bytes(bytes[4..<bytes.len() - 2].copy()) ?? ""
             if !header.starts_with("fn ") && !header.starts_with("unsafe fn ") -> next
             &lines.push("    {header.replace("(mut ", "(").replace(", mut ", ", ")};")
         }
@@ -2049,7 +2049,7 @@ fn jet_rust_emit_text_index_from(texts: [String], text: String, start: Int) -> I
 // key is E2410 instead of the value's own failures). `edge` prefixes the field
 // name to form its recursive-box edge key.
 fn jet_rust_emit_native_record_decode(ctx: &JetRustEmitContext, definition: MIRTypeDef, head: String, edge: String, fields: [MIRField], keys: [String], required: [Bool], source: String) -> [String] Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     out := [String]{}
     slots := [String]{}
     matched := [String]{}
@@ -2094,7 +2094,7 @@ fn jet_rust_emit_native_derived_decode(ctx: &JetRustEmitContext, implementation:
     if codec != MIRSerdeCodec.Decode -> return false
     definition :: jet_rust_emit_native_codec_type_def(&ctx, implementation) ?? return false
     template :: jet_rust_emit_codec_template(&ctx, function) ?? return false
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     origin :: template.origin
     body := [String]{}
     if definition.kind == {
@@ -2176,7 +2176,7 @@ fn jet_rust_emit_native_derived_encode(ctx: &JetRustEmitContext, implementation:
     if codec != MIRSerdeCodec.Encode -> return false
     definition :: jet_rust_emit_native_codec_type_def(&ctx, implementation) ?? return false
     template :: jet_rust_emit_codec_template(&ctx, function) ?? return false
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     body := [String]{}
     if definition.kind == {
         .Struct(fields, _) -> {

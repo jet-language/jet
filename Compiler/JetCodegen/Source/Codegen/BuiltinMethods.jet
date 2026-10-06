@@ -75,7 +75,7 @@ fn jet_codegen_builtin_route(member: String, symbol: String, arity: Int, borrow_
 fn jet_codegen_builtin_untag(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> return jet_codegen_builtin_untag(inner)
-        else -> return ~ty
+        else -> return ty.copy()
     }
 }
 
@@ -743,7 +743,7 @@ fn jet_codegen_lower_builtin_receiver(builder: &JetCodegenBuilder, program: JetC
 }
 
 fn jet_codegen_builtin_native_int(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: MIRValueID, source: Type, span: Span) -> MIRValueID Never! {
-    if jet_codegen_builtin_untag(source) != Type.Int -> return ~value
+    if jet_codegen_builtin_untag(source) != Type.Int -> return value.copy()
     raw_type := Type.IntN{signed: true, bits: 64}
     target := jet_codegen_lower_type_for_function(raw_type, builder, program)
     route := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.numeric", "int_checked_fixed", "jet_std::jet_int_checked_fixed", 4, [Bool]{false, false, true, false}, None, TFailureCarrier.Infallible, MIRPreludeABI.Value)
@@ -868,7 +868,7 @@ fn jet_codegen_builtin_static_call(builder: &JetCodegenBuilder, program: JetCode
 }
 
 fn jet_codegen_builtin_option_zip_value(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, value: MIRValueID, source: Type, target: Type) -> MIRValueID Never! {
-    if source == target -> return ~value
+    if source == target -> return value.copy()
     target_inner := jet_codegen_builtin_untag(target)
     source_inner := jet_codegen_builtin_untag(source)
     trait_target := if target_inner == {

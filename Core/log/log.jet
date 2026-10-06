@@ -88,7 +88,7 @@ pub fn set_sink(kind: String, path: String) Never! -[Log]> {
     if normalized != "json" && normalized != "jsonl" && normalized != "text" {
         return reject_setting("log.set_sink: unsupported sink kind `{kind}`; the sink is unchanged (supported: stderr, json, jsonl, text)")
     }
-    if (normalized == "jsonl" || normalized == "text") && trim(~path).len() == 0 {
+    if (normalized == "jsonl" || normalized == "text") && trim(path.copy()).len() == 0 {
         return reject_setting("log.set_sink: the `{normalized}` sink needs a file path; the sink is unchanged")
     }
     core.log.set_sink(normalized, path)
@@ -101,7 +101,7 @@ pub fn sample_every(n: Int) Never! -[Log]> {
 pub fn counter(name: String, value: Int) -> LogField Never! { core.log.counter(name, value) }
 
 pub fn otlp_file(path: String) Never! -[Log, FS]> {
-    if trim(~path).len() > 0 -> core.log.otlp_file(path)
+    if trim(path.copy()).len() > 0 -> core.log.otlp_file(path)
 }
 
 pub fn set_level(level: String) Never! -[Log]> {
@@ -110,7 +110,7 @@ pub fn set_level(level: String) Never! -[Log]> {
 }
 
 pub fn set_trace_id(id: String) Never! -[Log]> {
-    if trim(~id).len() > 0 -> core.log.set_trace_id(id)
+    if trim(id.copy()).len() > 0 -> core.log.set_trace_id(id)
 }
 
 /// Apply comma-separated settings without handing the whole grammar to the
@@ -203,7 +203,7 @@ fn normalize_fields(fields: [LogField]) -> [LogField] {
             break
         }
     }
-    if !needs_normalization -> return ~fields
+    if !needs_normalization -> return fields.copy()
     out := [LogField]{}
     loop field in fields {
         if field.redacted {

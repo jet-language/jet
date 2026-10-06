@@ -106,8 +106,8 @@ fn x64_image_syscall(a: &X64ImageAsm, number: Int) Never! {
 }
 
 fn x64_image_finish(a: &X64ImageAsm, name: String) -> X64CompiledFunction Never! {
-    texts :: ~a.texts
-    text_labels :: ~a.text_labels
+    texts :: a.texts.copy()
+    text_labels :: a.text_labels.copy()
     loop (index, text) in texts {
         x64_image_bind(&a, text_labels[index])
         loop byte in text.bytes() -> &a.code.push(byte)

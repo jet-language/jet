@@ -56,28 +56,28 @@ pub fn send(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
 }
 
 pub fn header(client: Client, line: String) -> Client Never! {
-    _ :: header_name(line) ?? return ~client
-    _ :: header_value(line) ?? return ~client
+    _ :: header_name(line) ?? return client.copy()
+    _ :: header_value(line) ?? return client.copy()
     Client{
-        method: ~client.method,
-        url: ~client.url,
-        headers: append_header(~client.headers, line),
+        method: client.method.copy(),
+        url: client.url.copy(),
+        headers: append_header(client.headers.copy(), line),
         redirects: client.redirects,
-        proxy: ~client.proxy,
+        proxy: client.proxy.copy(),
     }
 }
 
 pub fn set_header(client: Client, name: String, value: String) -> Client Never! {
     Client{
-        method: ~client.method,
-        url: ~client.url,
-        headers: set_header_line(~client.headers, name, value),
+        method: client.method.copy(),
+        url: client.url.copy(),
+        headers: set_header_line(client.headers.copy(), name, value),
         redirects: client.redirects,
-        proxy: ~client.proxy,
+        proxy: client.proxy.copy(),
     }
 }
 pub fn with_proxy(client: Client, proxy: Proxy) -> Client Never! {
-    Client{method: ~client.method, url: ~client.url, headers: ~client.headers, redirects: client.redirects, proxy: ~proxy.url}
+    Client{method: client.method.copy(), url: client.url.copy(), headers: client.headers.copy(), redirects: client.redirects, proxy: proxy.url.copy()}
 }
 
 
@@ -85,7 +85,7 @@ pub fn timeout_redirects(client: Client, n: Int) -> Client Never! {
     limit := n
     if limit < 0 -> limit = 0
     if limit > C_MAX_REDIRECTS -> limit = C_MAX_REDIRECTS
-    Client{method: ~client.method, url: ~client.url, headers: ~client.headers, redirects: limit, proxy: ~client.proxy}
+    Client{method: client.method.copy(), url: client.url.copy(), headers: client.headers.copy(), redirects: limit, proxy: client.proxy.copy()}
 }
 
 pub fn session() -> Session Never! {
@@ -103,61 +103,61 @@ pub fn session() -> Session Never! {
 
 pub fn session_header(s: Session, name: String, value: String) -> Session Never! {
     Session{
-        headers: set_header_line(~s.headers, name, value),
-        cookies: ~s.cookies,
+        headers: set_header_line(s.headers.copy(), name, value),
+        cookies: s.cookies.copy(),
         timeout_ms: s.timeout_ms,
         retries: s.retries,
         redirects: s.redirects,
-        user: ~s.user,
-        password: ~s.password,
-        proxy: ~s.proxy,
+        user: s.user.copy(),
+        password: s.password.copy(),
+        proxy: s.proxy.copy(),
     }
 }
 
 pub fn session_timeout(s: Session, ms: Int) -> Session Never! {
     t := ms
     if t < 0 -> t = 0
-    Session{headers: ~s.headers, cookies: ~s.cookies, timeout_ms: t, retries: s.retries, redirects: s.redirects, user: ~s.user, password: ~s.password, proxy: ~s.proxy}
+    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: t, retries: s.retries, redirects: s.redirects, user: s.user.copy(), password: s.password.copy(), proxy: s.proxy.copy()}
 }
 
 pub fn session_retries(s: Session, n: Int) -> Session Never! {
     r := n
     if r < 0 -> r = 0
     if r > C_MAX_RETRIES -> r = C_MAX_RETRIES
-    Session{headers: ~s.headers, cookies: ~s.cookies, timeout_ms: s.timeout_ms, retries: r, redirects: s.redirects, user: ~s.user, password: ~s.password, proxy: ~s.proxy}
+    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: s.timeout_ms, retries: r, redirects: s.redirects, user: s.user.copy(), password: s.password.copy(), proxy: s.proxy.copy()}
 }
 
 pub fn session_redirects(s: Session, n: Int) -> Session Never! {
     r := n
     if r < 0 -> r = 0
     if r > C_MAX_REDIRECTS -> r = C_MAX_REDIRECTS
-    Session{headers: ~s.headers, cookies: ~s.cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: r, user: ~s.user, password: ~s.password, proxy: ~s.proxy}
+    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: s.timeout_ms, retries: s.retries, redirects: r, user: s.user.copy(), password: s.password.copy(), proxy: s.proxy.copy()}
 }
 
 pub fn session_auth(s: Session, user: String, password: String) -> Session Never! {
-    Session{headers: ~s.headers, cookies: ~s.cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: user, password: password, proxy: ~s.proxy}
+    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: user, password: password, proxy: s.proxy.copy()}
 }
 
 pub fn session_proxy(s: Session, url: String) -> Session Never! {
-    Session{headers: ~s.headers, cookies: ~s.cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: ~s.user, password: ~s.password, proxy: url}
+    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: s.user.copy(), password: s.password.copy(), proxy: url}
 }
 
 pub fn session_cookie(s: Session, cookie: String) -> Session Never! {
-    if !valid_cookie_pair(cookie) -> return ~s
+    if !valid_cookie_pair(cookie) -> return s.copy()
     cookies := [String]{}
-    name :: cookie_name(cookie) ?? return ~s
+    name :: cookie_name(cookie) ?? return s.copy()
     replaced := false
     loop c in s.cookies {
         current :: cookie_name(c) ?? next
         if current == name {
-            &cookies.push(~cookie)
+            &cookies.push(cookie.copy())
             replaced = true
         } else {
             &cookies.push(c)
         }
     }
     if !replaced -> &cookies.push(cookie)
-    Session{headers: ~s.headers, cookies: cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: ~s.user, password: ~s.password, proxy: ~s.proxy}
+    Session{headers: s.headers.copy(), cookies: cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: s.user.copy(), password: s.password.copy(), proxy: s.proxy.copy()}
 }
 
 pub fn cookie_header(cookies: [String]) -> String Never! {
@@ -191,13 +191,13 @@ fn session_follow(s: Session, method: String, url: String, body: String, h: [Str
     current_method := method
     current_url := url
     current_body := body
-    headers := ~h
+    headers := h.copy()
     loop {
         code := resp.status()
-        if code < 300 || code >= 400 -> return Ok(~resp)
-        if code != 301 && code != 302 && code != 303 && code != 307 && code != 308 -> return Ok(~resp)
-        if hops >= s.redirects -> return Ok(~resp)
-        loc :: &resp.header("Location") ?? return Ok(~resp)
+        if code < 300 || code >= 400 -> return Ok(resp.copy())
+        if code != 301 && code != 302 && code != 303 && code != 307 && code != 308 -> return Ok(resp.copy())
+        if hops >= s.redirects -> return Ok(resp.copy())
+        loc :: &resp.header("Location") ?? return Ok(resp.copy())
         next :: resolve_location(current_url, loc) ?? return Err(.InvalidURL)
         if is_https_downgrade(current_url, next) -> return Err(.Redirect{reason: "https downgrade"})
         on_same_origin := same_origin(current_url, next)
@@ -291,9 +291,9 @@ pub fn content_type(client: Client, mime: String) -> Client Never! { set_header(
 
 
 fn session_headers(s: Session) -> [String] Never! {
-    h := ~s.headers
+    h := s.headers.copy()
     if s.user.bytes().len() > 0 -> h = set_header_line(h, "Authorization", http.basic_auth(s.user, s.password))
-    jar :: cookie_header(~s.cookies)
+    jar :: cookie_header(s.cookies.copy())
     if jar.bytes().len() > 0 -> h = set_header_line(h, "Cookie", jar)
     h
 }
@@ -317,13 +317,13 @@ fn header_value(line: String) -> String? {
 }
 
 fn append_header(headers: [String], line: String) -> [String] {
-    out := ~headers
+    out := headers.copy()
     &out.push(line)
     out
 }
 
 fn set_header_line(headers: [String], name: String, value: String) -> [String] Never! {
-    if !valid_header_name(name) || has_ctl(value.bytes()) -> return ~headers
+    if !valid_header_name(name) || has_ctl(value.bytes()) -> return headers.copy()
     out := [String]{}
     want :: ascii_lower(name)
     replaced := false

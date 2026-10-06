@@ -164,14 +164,14 @@ pub fn reader(text: String) -> XMLReader EncodingError! {
 }
 
 pub fn attribute(name: String, value: String) -> DataTree Never! {
-    DataTree.Object(["name": DataTree.Text(~name), "value": DataTree.Text(~value)])
+    DataTree.Object(["name": DataTree.Text(name.copy()), "value": DataTree.Text(value.copy())])
 }
 
-pub fn content(text: String) -> DataTree Never! { DataTree.Text(~text) }
+pub fn content(text: String) -> DataTree Never! { DataTree.Text(text.copy()) }
 
-pub fn expanded_name(name: String) -> String Never! { ~name }
+pub fn expanded_name(name: String) -> String Never! { name.copy() }
 
-pub fn root(value: DataTree) -> DataTree Never! { ~value }
+pub fn root(value: DataTree) -> DataTree Never! { value.copy() }
 
 
 pub struct XMLWriter {
@@ -219,9 +219,9 @@ fn parse_xml_limited(text: String, limits: XMLLimits) -> DataTree EncodingError!
 
 fn element_tree(name: String, attrs: [DataTree], children: [DataTree]) -> DataTree Never! {
     entries := [String:DataTree]{}
-    _ :: &entries.add("name", DataTree.Text(~name))
-    _ :: &entries.add("attrs", DataTree.Array(~attrs))
-    _ :: &entries.add("children", DataTree.Array(~children))
+    _ :: &entries.add("name", DataTree.Text(name.copy()))
+    _ :: &entries.add("attrs", DataTree.Array(attrs.copy()))
+    _ :: &entries.add("children", DataTree.Array(children.copy()))
     DataTree.Object(entries)
 }
 
@@ -498,7 +498,7 @@ fn decode_entities(text: String) -> String EncodingError! {
         }
         i = j + 1
     }
-    Ok(String.from_bytes(out) ?? ~text)
+    Ok(String.from_bytes(out) ?? text.copy())
 }
 
 fn xml_entity_digit(b: U8, base: Int) -> Int Never! {
@@ -536,9 +536,9 @@ fn push_xml_utf8(out: &[U8], cp: Int) -> Bool EncodingError! {
 fn tree_field_or(value: DataTree, name: String, fallback: DataTree) -> DataTree Never! {
     if &value.field(name) == {
         .Ok(tree) -> return tree
-        .Err(_) -> return ~fallback
+        .Err(_) -> return fallback.copy()
     }
-    ~fallback
+    fallback.copy()
 }
 
 fn render_xml(value: DataTree) -> String Never! {

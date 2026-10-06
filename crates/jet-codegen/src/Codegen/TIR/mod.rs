@@ -11910,11 +11910,11 @@ pub enum TExprKind {
     },
     /// c109 Phase 6: the sema-inserted `.clone()` on an owning non-Copy field read
     /// or borrowed value. This is ordinary sharing/cloning semantics. The
-    /// user-written `~` copy has its own `ExplicitCopy` node so a Tensor does not
+    /// user-written `.copy()` copy has its own `ExplicitCopy` node so a Tensor does not
     /// silently turn compiler-inserted clones into deep storage copies. The
     /// fact (#4318) is the sema decision behind the copy; MIR keeps it on `Copy`.
     Clone(Box<TExpr>, jet_foundation::MIR::MirCopyFact),
-    /// D-MEM1/D-CAP2: the explicit Jet `~` copy signal. Backends route Tensor
+    /// D-MEM1/D-CAP2: the explicit Jet `.copy()` copy signal. Backends route Tensor
     /// values through the shared Prelude copy operation; non-Tensor values keep
     /// their ordinary clone/materialization semantics.
     ExplicitCopy(Box<TExpr>),
@@ -11924,7 +11924,7 @@ pub enum TExprKind {
         place: Box<TExpr>,
         mutable: bool,
     },
-    /// D-MEM-COPYSEM1: an explicit `~` or an implicit read-only view crossing
+    /// D-MEM-COPYSEM1: an explicit `.copy()` or an implicit read-only view crossing
     /// an owning destination materializes the owned target through the shared
     /// Prelude. A plain `.clone()` is not sufficient for string views: cloning
     /// a `&str` hands back another `&str`, not the owned `String` needed to leave

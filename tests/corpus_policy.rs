@@ -370,7 +370,7 @@ fn run() -[FS, IO]> {
             r#"use core.files as fs
 fn run() {
     path :: "input.txt"
-    text :: fs.read(~path)
+    text :: fs.read(path.copy())
 }"#,
             "readonly-copy",
         ),

@@ -8333,9 +8333,8 @@ impl<'a> Checker<'a> {
                             ),
                             "this function has read access only and does not own the value; the move marker `^` is required".to_string(),
                             format!(
-                                "call it on a copy: `({}{}).{}(...)` — or take ownership with the move marker `^`: `{}: {}{}`",
-                                Syntax::SIGIL_COPY,
-                                n,
+                                "call it on a copy: `{}.{}(...)` — or take ownership with the move marker `^`: `{}: {}{}`",
+                                Syntax::copy_call(n),
                                 method,
                                 n,
                                 Syntax::SIGIL_MOVE,

@@ -3273,7 +3273,7 @@ fn collect_call_inlay_hints(args: &[AST::CallArg], mp: &str, ctx: &mut WalkCtx<'
 
 fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
     // D-MEM-COPYSEM1=A: sema-inserted owning copies remain visible as a ghost
-    // hint. An authored `~` has a span beginning at its sigil; an implicit
+    // hint. An authored `.copy()` has a span beginning at its sigil; an implicit
     // materializer reuses the operand span, which is the one distinction the
     // semantic index needs to expose.
     if let AST::Expr::Copy(inner, copy_span) = e {

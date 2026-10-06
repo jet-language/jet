@@ -179,29 +179,29 @@ pub fn send_report(server: String, accepted: [RecipientReport], rejected: [Recip
 }
 
 pub fn address(text: String) -> Address EmailError! {
-    reject_controls(~text, "email address") ?? return Err(invalid_address("email address contains a forbidden control character"))
+    reject_controls(text.copy(), "email address") ?? return Err(invalid_address("email address contains a forbidden control character"))
     value := text.trim()
     if value.bytes().len() == 0 || value.bytes().len() > 512 {
         return Err(invalid_address("email address must contain 1 to 512 bytes"))
     }
-    opens := count_byte(~value, 60) ?? panic("count_byte failed")
-    closes := count_byte(~value, 62) ?? panic("count_byte failed")
+    opens := count_byte(value.copy(), 60) ?? panic("count_byte failed")
+    closes := count_byte(value.copy(), 62) ?? panic("count_byte failed")
     display := no_display()
-    mailbox := ~value
-    if opens == 0 && closes == 0 -> mailbox = ~value else if opens == 1 && closes == 1 && (ends_with_byte(~value, 62) ?? panic("ends_with_byte failed")) {
-        open := last_byte(~value, 60) ?? panic("last_byte failed")
-        shown := (slice_text(~value, 0, open) ?? panic("slice_text failed")).trim()
+    mailbox := value.copy()
+    if opens == 0 && closes == 0 -> mailbox = value.copy() else if opens == 1 && closes == 1 && (ends_with_byte(value.copy(), 62) ?? panic("ends_with_byte failed")) {
+        open := last_byte(value.copy(), 60) ?? panic("last_byte failed")
+        shown := (slice_text(value.copy(), 0, open) ?? panic("slice_text failed")).trim()
         if shown.bytes().len() == 0 -> return Err(invalid_address("display name cannot be empty"))
-        parsed :: parse_display(~shown) ?? return Err(invalid_address("invalid display name"))
+        parsed :: parse_display(shown.copy()) ?? return Err(invalid_address("invalid display name"))
         display = Val(parsed)
-        mailbox = (slice_text(~value, open + 1, value.bytes().len() - 1) ?? panic("slice_text failed")).trim()
+        mailbox = (slice_text(value.copy(), open + 1, value.bytes().len() - 1) ?? panic("slice_text failed")).trim()
     } else { return Err(invalid_address("display address must have one final `<mailbox>`")) }
-    validate_mailbox(~mailbox) ?? return Err(invalid_address("invalid mailbox"))
+    validate_mailbox(mailbox.copy()) ?? return Err(invalid_address("invalid mailbox"))
     Ok(Address{display: display, mailbox: mailbox})
 }
 
 pub fn attachment(name: String, mime: String, bytes: [U8]) -> Attachment EmailError! {
-    validate_attachment_parts(~name, ~mime, ~bytes) ?? return Err(invalid_attachment("invalid attachment"))
+    validate_attachment_parts(name.copy(), mime.copy(), bytes.copy()) ?? return Err(invalid_attachment("invalid attachment"))
     if bytes.len() > C_MAX_ATTACHMENT_BYTES {
         return Err(limit_error("attachment", "attachment exceeds 26214400 bytes"))
     }
@@ -250,32 +250,32 @@ pub fn serialize(message: Message) -> [U8] EmailError! {
     validate_message_value(message) ?? return Err(invalid_message("message is invalid"))
     mixed :: boundary(message, "mixed")
     alternative :: boundary(message, "alternative")
-    from := ~message.from
-    to := ~message.to
-    subject := ~message.subject
+    from := message.from.copy()
+    to := message.to.copy()
+    subject := message.subject.copy()
     out := [U8]{}
     add_header(&out, "From", render_address(from)) ?? return Err(invalid_message("invalid From header"))
     add_header(&out, "To", render_addresses(to, "To")) ?? return Err(invalid_message("invalid To header"))
-    add_header(&out, "Subject", encode_header(~subject)) ?? return Err(invalid_message("invalid Subject header"))
+    add_header(&out, "Subject", encode_header(subject.copy())) ?? return Err(invalid_message("invalid Subject header"))
     add_header(&out, "MIME-Version", "1.0") ?? return Err(invalid_message("invalid MIME header"))
     if message.attachments.len() == 0 {
-        render_body(&out, message, ~alternative) ?? return Err(invalid_message("invalid message body"))
+        render_body(&out, message, alternative.copy()) ?? return Err(invalid_message("invalid message body"))
     } else {
         add_header(&out, "Content-Type", "multipart/mixed; boundary=\"{mixed}\"") ?? return Err(invalid_message("invalid multipart header"))
         push_crlf(&out)
         push_text(&out, "--{mixed}")
         push_crlf(&out)
-        render_body(&out, message, ~alternative) ?? return Err(invalid_message("invalid message body"))
+        render_body(&out, message, alternative.copy()) ?? return Err(invalid_message("invalid message body"))
         loop item in message.attachments {
             push_crlf(&out)
             push_text(&out, "--{mixed}")
             push_crlf(&out)
-            add_header(&out, "Content-Type", ~item.mime) ?? return Err(invalid_attachment("invalid attachment MIME"))
+            add_header(&out, "Content-Type", item.mime.copy()) ?? return Err(invalid_attachment("invalid attachment MIME"))
             add_header(&out, "Content-Transfer-Encoding", "base64") ?? return Err(invalid_attachment("invalid attachment encoding"))
-            encoded_name :: percent_encode(~item.filename) ?? return Err(invalid_attachment("invalid attachment filename"))
+            encoded_name :: percent_encode(item.filename.copy()) ?? return Err(invalid_attachment("invalid attachment filename"))
             add_header(&out, "Content-Disposition", "attachment; filename*=UTF-8''{encoded_name}") ?? return Err(invalid_attachment("invalid attachment disposition"))
             push_crlf(&out)
-            push_text(&out, base64_lines(~item.bytes))
+            push_text(&out, base64_lines(item.bytes.copy()))
         }
         push_crlf(&out)
         push_text(&out, "--{mixed}--")
@@ -475,7 +475,7 @@ fn validate_smtp_config(config: SMTPConfig) -> EmailError? {
         .None -> { _ := 0 }
         .Val(error) -> return Val(error)
     }
-    limits := ~config.limits
+    limits := config.limits.copy()
     if limits.max_reply_line_bytes < 64 || limits.max_reply_line_bytes > 65536 {
         return Val(email_error("smtp", "max_reply_line_bytes must be between 64 and 65536; got {limits.max_reply_line_bytes}") ?? panic("total email error"))
     }
@@ -495,7 +495,7 @@ fn validate_smtp_config(config: SMTPConfig) -> EmailError? {
         return Val(email_error("smtp", "max_auth_challenge_bytes must be between 1 and 65536; got {limits.max_auth_challenge_bytes}") ?? panic("total email error"))
     }
 
-    host := ~config.host
+    host := config.host.copy()
     host_bytes := host.bytes()
     if host_bytes.len() == 0 || host_bytes.len() > 253 || !is_ascii(host) {
         return Val(email_error("smtp", "host must contain 1 to 253 non-whitespace ASCII bytes") ?? panic("total email error"))
@@ -525,7 +525,7 @@ fn validate_smtp_config(config: SMTPConfig) -> EmailError? {
     if config.trust == {
         .System -> { _ := 0 }
         .SystemPlusCa(pem) -> {
-            pem_error :: validate_ca_pem(~pem)
+            pem_error :: validate_ca_pem(pem.copy())
             if pem_error == {
                 .None -> { _ := 0 }
                 .Val(reason) -> return Val(email_error("smtp", reason) ?? panic("total email error"))
@@ -577,7 +577,7 @@ fn has_ascii_control(text: String) -> Bool {
 
 fn validate_ca_pem(pem: [U8]) -> String? {
     if pem.len() == 0 -> return Val("custom CA PEM must not be empty")
-    text :: String.from_bytes(~pem) ?? return Val("custom CA PEM must be UTF-8 text")
+    text :: String.from_bytes(pem.copy()) ?? return Val("custom CA PEM must be UTF-8 text")
     raw := text.bytes()
     begin := "-----BEGIN CERTIFICATE-----".bytes()
     end := "-----END CERTIFICATE-----".bytes()
@@ -603,7 +603,7 @@ fn validate_ca_pem(pem: [U8]) -> String? {
         }
         if !found_end -> return Val("custom CA PEM has an unterminated certificate")
         encoded_text :: String.from_bytes(encoded) ?? return Val("custom CA PEM contains invalid base64")
-        der :: base64.decode(~encoded_text) ?? return Val("custom CA PEM contains invalid base64")
+        der :: base64.decode(encoded_text.copy()) ?? return Val("custom CA PEM contains invalid base64")
         if der.len() < 4 || der[0] != (U8{48}) {
             return Val("custom CA PEM does not contain an X.509 DER certificate")
         }
@@ -627,10 +627,10 @@ fn bytes_at(raw: [U8], start: Int, value: [U8]) -> Bool Never! {
 }
 
 fn validate_dkim_config(dkim: DKIMConfig) -> EmailError? {
-    if !valid_dns_name(~dkim.domain) {
+    if !valid_dns_name(dkim.domain.copy()) {
         return Val(email_error("dkim", "domain must be a valid ASCII DNS name") ?? panic("total email error"))
     }
-    if dkim.selector.contains(".") || !valid_dns_name(~dkim.selector) {
+    if dkim.selector.contains(".") || !valid_dns_name(dkim.selector.copy()) {
         return Val(email_error("dkim", "selector must be one valid ASCII DNS label") ?? panic("total email error"))
     }
     if dkim.signed_headers.len() == 0 {
@@ -654,7 +654,7 @@ fn validate_dkim_config(dkim: DKIMConfig) -> EmailError? {
                 return Val(email_error("dkim", "signed_headers must contain valid header names") ?? panic("total email error"))
             }
         }
-        lower :: ascii_lower(~name)
+        lower :: ascii_lower(name.copy())
         if lower == "received" || lower == "return-path" || lower == "dkim-signature" || lower == "authentication-results" || lower == "arc-authentication-results" || lower == "arc-message-signature" || lower == "arc-seal" {
             return Val(email_error("dkim", "signed_headers contains forbidden hop header `{lower}`") ?? panic("total email error"))
         }
@@ -852,9 +852,9 @@ fn validate_mailbox(text: String) -> Bool EmailError! {
         n :: Int.from_u8(byte)
         if n >= 128 -> return Err(invalid_address("mailbox must be 1 to 254 ASCII bytes"))
     }
-    at :: mailbox_separator(~text) ?? return Err(invalid_address("mailbox needs one unquoted `@`"))
-    local := slice_text(~text, 0, at) ?? panic("slice_text failed")
-    domain := slice_text(~text, at + 1, raw.len()) ?? panic("slice_text failed")
+    at :: mailbox_separator(text.copy()) ?? return Err(invalid_address("mailbox needs one unquoted `@`"))
+    local := slice_text(text.copy(), 0, at) ?? panic("slice_text failed")
+    domain := slice_text(text.copy(), at + 1, raw.len()) ?? panic("slice_text failed")
     local_len :: local.bytes().len()
     domain_len :: domain.bytes().len()
     if local_len == 0 || domain_len == 0 || local_len > 64 || domain_len > 253 {
@@ -862,7 +862,7 @@ fn validate_mailbox(text: String) -> Bool EmailError! {
     }
     local_raw := local.bytes()
     if local_raw[0] == (U8{34}) {
-        if !(validate_quoted_local(~local) ?? panic("validate_quoted_local failed")) {
+        if !(validate_quoted_local(local.copy()) ?? panic("validate_quoted_local failed")) {
             return Err(invalid_address("quoted mailbox local part contains an invalid byte"))
         }
     } else {
@@ -878,7 +878,7 @@ fn validate_mailbox(text: String) -> Bool EmailError! {
             }
         }
     }
-    if !(valid_domain(~domain) ?? panic("valid_domain failed")) -> return Err(invalid_address("mailbox domain has an invalid label"))
+    if !(valid_domain(domain.copy()) ?? panic("valid_domain failed")) -> return Err(invalid_address("mailbox domain has an invalid label"))
     Ok(true)
 }
 
@@ -920,7 +920,7 @@ fn validate_attachment_parts(name: String, mime: String, bytes: [U8]) -> Bool Em
     if !physical_header_fits("Content-Type", mime.len()) {
         return Err(limit_error("attachment", "Content-Type physical header line exceeds 998 bytes"))
     }
-    if !physical_header_fits("Content-Disposition", 29 + percent_encoded_len(~name)) {
+    if !physical_header_fits("Content-Disposition", 29 + percent_encoded_len(name.copy())) {
         return Err(limit_error("attachment", "Content-Disposition physical header line exceeds 998 bytes"))
     }
     if bytes.len() > C_MAX_ATTACHMENT_BYTES {
@@ -978,10 +978,10 @@ fn validate_address(address: Address) -> Bool EmailError! {
             if display.bytes().len() == 0 || has_control(display) {
                 return Err(invalid_address("display name is empty or contains a forbidden control character"))
             }
-            parse_display(~display) ?? return Err(invalid_address("invalid display name"))
+            parse_display(display.copy()) ?? return Err(invalid_address("invalid display name"))
         }
     }
-    validate_mailbox(~address.mailbox) ?? return Err(invalid_address("invalid mailbox"))
+    validate_mailbox(address.mailbox.copy()) ?? return Err(invalid_address("invalid mailbox"))
     Ok(true)
 }
 
@@ -994,7 +994,7 @@ text: String,
 html: String,
 attachments: [Attachment],
 ) -> Bool EmailError! {
-    reject_controls(~subject, "subject") ?? return Err(invalid_header("subject contains a forbidden control character"))
+    reject_controls(subject.copy(), "subject") ?? return Err(invalid_header("subject contains a forbidden control character"))
     if subject.bytes().len() > C_MAX_HEADER_VALUE_BYTES {
         return Err(limit_error("message", "subject exceeds 65536 bytes"))
     }
@@ -1034,13 +1034,13 @@ attachments: [Attachment],
 ) -> Int Never! {
     total := 4096 + rendered_address_len(from)
     loop visible_recipient in to -> total += rendered_address_len(visible_recipient) + 4
-    total += encoded_header_len(~subject) + 32
+    total += encoded_header_len(subject.copy()) + 32
     total += base64_lines_len(text.bytes().len()) + 256
     total += base64_lines_len(html.bytes().len()) + 256
     loop item in attachments {
         total += base64_lines_len(item.bytes.len())
         total += item.mime.bytes().len()
-        total += percent_encoded_len(~item.filename)
+        total += percent_encoded_len(item.filename.copy())
         total += 512
     }
     total + attachments.len() * 256
@@ -1053,7 +1053,7 @@ fn validate_rendered_headers(from: Address, to: [Address], subject: String) -> B
     if !validate_folded_header("To", render_addresses(to, "To")) {
         return Err(invalid_header("To header is invalid"))
     }
-    if !validate_folded_header("Subject", encode_header(~subject)) {
+    if !validate_folded_header("Subject", encode_header(subject.copy())) {
         return Err(invalid_header("Subject header is invalid"))
     }
     Ok(true)
@@ -1073,7 +1073,7 @@ fn validate_message_value(message: Message) -> Bool EmailError! {
         return Err(limit_error("serialize", "serialized message size bound is invalid"))
     }
     validate_message_headers(message) ?? return Err(invalid_message("message headers are invalid"))
-    sender := ~message.envelope.from
+    sender := message.envelope.from.copy()
     validate_address(sender) ?? return Err(invalid_message("message envelope sender is invalid"))
     if message.envelope.recipients.len() == 0 || message.envelope.recipients.len() > C_MAX_RECIPIENTS {
         return Err(invalid_message("message envelope recipient count is outside the supported range"))
@@ -1085,8 +1085,8 @@ fn validate_message_value(message: Message) -> Bool EmailError! {
 }
 
 fn validate_attachment_record(item: Attachment) -> Bool EmailError! {
-    name := ~item.filename
-    mime := ~item.mime
+    name := item.filename.copy()
+    mime := item.mime.copy()
     if has_control(name) || has_control(mime) {
         return Err(invalid_attachment("attachment fields contain a forbidden control character"))
     }
@@ -1099,7 +1099,7 @@ fn validate_attachment_record(item: Attachment) -> Bool EmailError! {
     if !physical_header_fits("Content-Type", mime.len()) {
         return Err(limit_error("attachment", "Content-Type physical header line exceeds 998 bytes"))
     }
-    if !physical_header_fits("Content-Disposition", 29 + percent_encoded_len(~name)) {
+    if !physical_header_fits("Content-Disposition", 29 + percent_encoded_len(name.copy())) {
         return Err(limit_error("attachment", "Content-Disposition physical header line exceeds 998 bytes"))
     }
     if item.bytes.len() > C_MAX_ATTACHMENT_BYTES {
@@ -1109,7 +1109,7 @@ fn validate_attachment_record(item: Attachment) -> Bool EmailError! {
 }
 
 fn validate_message_record(message: Message) -> Bool EmailError! {
-    subject := ~message.subject
+    subject := message.subject.copy()
     if has_control(subject) {
         return Err(invalid_header("subject contains a forbidden control character"))
     }
@@ -1131,7 +1131,7 @@ fn validate_message_record(message: Message) -> Bool EmailError! {
     if message.text.bytes().len() > C_MAX_BODY_BYTES || message.html.bytes().len() > C_MAX_BODY_BYTES {
         return Err(limit_error("message", "each message body is limited to 1048576 bytes"))
     }
-    sender := ~message.from
+    sender := message.from.copy()
     validate_address(sender) ?? return Err(invalid_address("invalid sender address"))
     loop visible_recipient in message.to {
         validate_address(visible_recipient) ?? return Err(invalid_address("invalid visible recipient"))
@@ -1146,25 +1146,25 @@ fn validate_message_record(message: Message) -> Bool EmailError! {
 }
 
 fn prospective_message_wire_upper(message: Message) -> Int Never! {
-    sender := ~message.from
+    sender := message.from.copy()
     total := 4096 + rendered_address_len(sender)
     loop visible_recipient in message.to -> total += rendered_address_len(visible_recipient) + 4
-    total += encoded_header_len(~message.subject) + 32
+    total += encoded_header_len(message.subject.copy()) + 32
     total += base64_lines_len(message.text.bytes().len()) + 256
     total += base64_lines_len(message.html.bytes().len()) + 256
     loop item in message.attachments {
         total += base64_lines_len(item.bytes.len())
         total += item.mime.bytes().len()
-        total += percent_encoded_len(~item.filename)
+        total += percent_encoded_len(item.filename.copy())
         total += 512
     }
     total + message.attachments.len() * 256
 }
 
 fn validate_message_headers(message: Message) -> Bool EmailError! {
-    sender := ~message.from
-    visible := ~message.to
-    subject := ~message.subject
+    sender := message.from.copy()
+    visible := message.to.copy()
+    subject := message.subject.copy()
     validate_rendered_headers(sender, visible, subject)
 }
 
@@ -1208,7 +1208,7 @@ fn render_address(address: Address) -> String Never! {
         .None -> return address.mailbox
         .Val(display) -> {
             if is_ascii(display) -> return "{render_ascii_display(display)} <{address.mailbox}>"
-            return "{encode_header(~display)} <{address.mailbox}>"
+            return "{encode_header(display.copy())} <{address.mailbox}>"
         }
     }
     address.mailbox
@@ -1225,7 +1225,7 @@ fn render_ascii_display(display: String) -> String Never! {
         } else if !is_atext(raw[i]) -> phrase_safe = false
     }
     if start == raw.len() -> phrase_safe = false
-    if phrase_safe -> return ~display
+    if phrase_safe -> return display.copy()
     out := [U8]{34}
     loop byte in raw {
         if byte == (U8{92}) || byte == (U8{34}) -> &out.push(U8{92})
@@ -1243,7 +1243,7 @@ fn is_ascii(text: String) -> Bool Never! {
 }
 
 fn encode_header(text: String) -> String Never! {
-    if is_ascii(text) -> return ~text
+    if is_ascii(text) -> return text.copy()
     raw := text.bytes()
     out := [U8]{}
     start := 0
@@ -1289,7 +1289,7 @@ fn render_addresses(addresses: [Address], name: String) -> String Never! {
     loop address in addresses {
         rendered :: render_address(address)
         if item_index > 0 {
-            first_line :: first_line_len(~rendered)
+            first_line :: first_line_len(rendered.copy())
             if physical + 2 + first_line + 2 > C_MAX_HEADER_BYTES {
                 &out.push(U8{44})
                 push_crlf(&out)
@@ -1300,8 +1300,8 @@ fn render_addresses(addresses: [Address], name: String) -> String Never! {
                 physical += 2
             }
         }
-        push_text(&out, ~rendered)
-        if contains_crlf(~rendered) -> physical = last_line_len(~rendered) else {
+        push_text(&out, rendered.copy())
+        if contains_crlf(rendered.copy()) -> physical = last_line_len(rendered.copy()) else {
             physical += rendered.bytes().len()
         }
         item_index += 1
@@ -1388,7 +1388,7 @@ fn slice_u8(raw: [U8], start: Int, end: Int) -> [U8] Never! {
 }
 
 fn add_header(out: &[U8], name: String, value: String) -> Bool EmailError! {
-    if !validate_folded_header(~name, ~value) {
+    if !validate_folded_header(name.copy(), value.copy()) {
         return Err(invalid_header("{name} contains an invalid or oversized header line"))
     }
     push_text(&out, "{name}: {value}")
@@ -1426,19 +1426,19 @@ fn validate_folded_header(name: String, value: String) -> Bool Never! {
 
 fn render_body(out: &[U8], message: Message, alternative: String) -> Bool EmailError! {
     if message.html.bytes().len() == 0 {
-        text_part(&out, "text/plain", ~message.text) ?? return Err(invalid_message("invalid text body"))
+        text_part(&out, "text/plain", message.text.copy()) ?? return Err(invalid_message("invalid text body"))
     } else if message.text.bytes().len() == 0 {
-        text_part(&out, "text/html", ~message.html) ?? return Err(invalid_message("invalid HTML body"))
+        text_part(&out, "text/html", message.html.copy()) ?? return Err(invalid_message("invalid HTML body"))
     } else {
         add_header(&out, "Content-Type", "multipart/alternative; boundary=\"{alternative}\"") ?? return Err(invalid_header("invalid alternative content type"))
         push_crlf(&out)
         push_text(&out, "--{alternative}")
         push_crlf(&out)
-        text_part(&out, "text/plain", ~message.text) ?? return Err(invalid_message("invalid text body"))
+        text_part(&out, "text/plain", message.text.copy()) ?? return Err(invalid_message("invalid text body"))
         push_crlf(&out)
         push_text(&out, "--{alternative}")
         push_crlf(&out)
-        text_part(&out, "text/html", ~message.html) ?? return Err(invalid_message("invalid HTML body"))
+        text_part(&out, "text/html", message.html.copy()) ?? return Err(invalid_message("invalid HTML body"))
         push_crlf(&out)
         push_text(&out, "--{alternative}--")
         push_crlf(&out)

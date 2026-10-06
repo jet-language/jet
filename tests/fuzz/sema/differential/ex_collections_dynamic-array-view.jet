@@ -1,4 +1,4 @@
-// D-SHAPE-PLACE1=A: bare ranges read, `&` edits, `~` copies.
+// D-SHAPE-PLACE1=A: bare ranges read, `&` edits, `.copy()` copies.
 struct Incident {
     severity: Int
 }
@@ -12,7 +12,7 @@ fn run() {
         Incident{severity: 5}
     }
     // Explicit copy: `head` owns its own three `Incident`s.
-    head :: ~incidents[0..2]
+    head :: incidents[0..2].copy()
     print("copy-slice len: {head.len()}")
     // Bare range: `window` borrows straight into `incidents`' storage.
     window :: incidents[0..2]

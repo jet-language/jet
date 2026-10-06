@@ -14,7 +14,7 @@ fn candidate_size(commands: [DataTree]) -> DataTree {
     DataTree.Int(commands.len())
 }
 
-fn observe(value: DataTree) -> DataTree { ~value }
+fn observe(value: DataTree) -> DataTree { value.copy() }
 
 fn run() Err! {
     comparison :: api.histories<DataTree>(
@@ -43,7 +43,7 @@ fn candidate_size(commands: [HistoryStep]) -> DataTree {
     DataTree.Int(commands.len())
 }
 
-fn observe(value: DataTree) -> DataTree { ~value }
+fn observe(value: DataTree) -> DataTree { value.copy() }
 
 fn run() Err! {
     comparison :: api.histories<HistoryStep>(
@@ -69,7 +69,7 @@ fn candidate_size(commands: [DataTree]) -> DataTree {
     DataTree.Int(commands.len())
 }
 
-fn observe(value: DataTree) -> DataTree { ~value }
+fn observe(value: DataTree) -> DataTree { value.copy() }
 
 fn run() Err! {
     comparison :: api.histories<DataTree>(

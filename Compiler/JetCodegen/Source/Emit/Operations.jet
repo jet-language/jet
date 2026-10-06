@@ -361,8 +361,8 @@ fn jet_rust_emit_split_local_field_borrows(callee: String, args: String) -> Stri
         start := at
         loop start > 0 && Int.from_u8(bytes[start - 1]) >= 48 && Int.from_u8(bytes[start - 1]) <= 57 -> start -= 1
         if start == at || start < 8 -> next
-        if (String.from_bytes(~(bytes[start - 8..<start])) ?? "") != "__jet_l_" -> next
-        name :: String.from_bytes(~(bytes[start - 8..<at])) ?? ""
+        if (String.from_bytes(bytes[start - 8..<start].copy()) ?? "") != "__jet_l_" -> next
+        name :: String.from_bytes(bytes[start - 8..<at].copy()) ?? ""
         seen := false
         loop other in split {
             if other == name -> seen = true
@@ -376,7 +376,7 @@ fn jet_rust_emit_split_local_field_borrows(callee: String, args: String) -> Stri
     rewritten := partial.args
     loop name in split {
         name_bytes :: name.bytes()
-        id :: String.from_bytes(~(name_bytes[8..<name_bytes.len()])) ?? ""
+        id :: String.from_bytes(name_bytes[8..<name_bytes.len()].copy()) ?? ""
         binding :: "__jet_split_{id}"
         bindings = "{bindings}let {binding} = {name}{write}; "
         rewritten = rewritten.replace("{name}{write}", binding).replace("{name}{read}", binding)
@@ -434,7 +434,7 @@ fn jet_rust_emit_split_partial_field_borrows(args: String) -> JetRustEmitPartial
         if owned.len() < 2 || jet_rust_emit_fold_mentions(current.bytes(), slot).len() != owned.len() -> next
         slot_bytes :: slot.bytes()
         stem := slot
-        if slot.starts_with("__jet_") -> stem = String.from_bytes(~(slot_bytes[6..<slot_bytes.len()])) ?? ""
+        if slot.starts_with("__jet_") -> stem = String.from_bytes(slot_bytes[6..<slot_bytes.len()].copy()) ?? ""
         names := [String]{}
         wholes := [String]{}
         splits := [String]{}
@@ -453,11 +453,11 @@ fn jet_rust_emit_split_partial_field_borrows(args: String) -> JetRustEmitPartial
         rewritten := ""
         end := 0
         loop (index, borrow) in owned {
-            kept :: String.from_bytes(~(bytes[end..<borrow.start])) ?? ""
+            kept :: String.from_bytes(bytes[end..<borrow.start].copy()) ?? ""
             rewritten = "{rewritten}{kept}{names[index]}"
             end = borrow.end
         }
-        tail :: String.from_bytes(~(bytes[end..<bytes.len()])) ?? ""
+        tail :: String.from_bytes(bytes[end..<bytes.len()].copy()) ?? ""
         current = "{rewritten}{tail}"
     }
     JetRustEmitPartialFieldSplit{bindings: bindings, args: current}
@@ -544,9 +544,9 @@ fn jet_rust_emit_partial_field_borrow(bytes: [U8], at: Int) -> JetRustEmitPartia
     split_start :: divider + split_arm.len()
     split_end := close
     loop split_end > split_start && Int.from_u8(bytes[split_end - 1]) == 32 -> split_end -= 1
-    slot :: String.from_bytes(~(bytes[slot_start..<slot_end])) ?? ""
-    whole :: String.from_bytes(~(bytes[body_start..<divider])) ?? ""
-    split :: String.from_bytes(~(bytes[split_start..<split_end])) ?? ""
+    slot :: String.from_bytes(bytes[slot_start..<slot_end].copy()) ?? ""
+    whole :: String.from_bytes(bytes[body_start..<divider].copy()) ?? ""
+    split :: String.from_bytes(bytes[split_start..<split_end].copy()) ?? ""
     Val(JetRustEmitPartialFieldBorrow{start: at, end: close + 1, slot: slot, mutable: mutable, whole: whole, split: split})
 }
 
@@ -607,7 +607,7 @@ fn jet_rust_emit_exact_int_binary(ctx: &JetRustEmitContext, function: MIRFunctio
     if !jet_rust_emit_exact_int_carrier(jet_rust_emit_value_type(ctx, function, left)) || !jet_rust_emit_exact_int_carrier(jet_rust_emit_value_type(ctx, function, right)) -> return None
     owned :: jet_rust_emit_exact_int_helper(op) ?? return None
     contextual :: op == MIRBinaryOp.Div || op == MIRBinaryOp.FloorDiv || op == MIRBinaryOp.Mod || op == MIRBinaryOp.Rem || op == MIRBinaryOp.Pow || op == MIRBinaryOp.Shl || op == MIRBinaryOp.Shr
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     left_text :: jet_rust_emit_value_reference(ctx, left, false)
     right_text :: jet_rust_emit_value_reference(ctx, right, false)
     context := ""
@@ -624,7 +624,7 @@ fn jet_rust_emit_exact_int_binary(ctx: &JetRustEmitContext, function: MIRFunctio
 
 // MIRRust binary: the primitive operator spelling for non-Int operands.
 fn jet_rust_emit_primitive_binary(ctx: &JetRustEmitContext, op: MIRBinaryOp, left: String, right: String) -> String Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     if op == {
         .Compare -> "match ({left}).cmp(&({right})) {{ std::cmp::Ordering::Less => {root}__jet_Ordering::__jet_Less, std::cmp::Ordering::Equal => {root}__jet_Ordering::__jet_Equal, std::cmp::Ordering::Greater => {root}__jet_Ordering::__jet_Greater }}"
         .FloorDiv -> "({left}).jet_floordiv({right})"
@@ -747,8 +747,8 @@ fn jet_rust_emit_scalar_comparison_type(ctx: &JetRustEmitContext, source: MIRTyp
 
 // MIRRust canonical_type: a typed identity reads its canonical instance row.
 fn jet_rust_emit_canonical_instance(ctx: &JetRustEmitContext, ty: MIRType) -> MIRType Never! {
-    identity :: ty.identity ?? return ~ty
-    jet_rust_emit_type_instance(ctx, identity, true) ?? ~ty
+    identity :: ty.identity ?? return ty.copy()
+    jet_rust_emit_type_instance(ctx, identity, true) ?? ty.copy()
 }
 
 // MIRRust structural_type_def_for: the nominal or anonymous-union definition
@@ -807,7 +807,7 @@ fn jet_rust_emit_selected_trait_impl(ctx: &JetRustEmitContext, ty: MIRType, trai
         .Apply(name, _) -> Val(name.name)
         else -> String?{None}
     }
-    rows :: ~(ctx.impls_by_trait_name.get(trait_name) ?? [Int]{})
+    rows :: (ctx.impls_by_trait_name.get(trait_name) ?? [Int]{}).copy()
     loop row in rows {
         matches := mir_type_same_checked_type(ctx.program.impls[row].self_type, ty)
         if !matches && nominal == .Val(name) {
@@ -817,7 +817,7 @@ fn jet_rust_emit_selected_trait_impl(ctx: &JetRustEmitContext, ty: MIRType, trai
             }
         }
         if matches {
-            implementation :: ~ctx.program.impls[row]
+            implementation :: ctx.program.impls[row].copy()
             if jet_rust_emit_impl_target_enabled(&ctx, implementation) -> return implementation.trait_ref
         }
     }
@@ -1007,7 +1007,7 @@ fn jet_rust_emit_format_integer_kind(ty: MIRType) -> Int Never! {
 // their decimal text through the same decimal and radix kernels, and Float
 // selectors take the host `i64` precision.
 fn jet_rust_emit_string_format(ctx: &JetRustEmitContext, function: MIRFunction, format: MIRStringFormat, value: MIRValueID) -> String Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     borrowed :: jet_rust_emit_value_reference(ctx, value, false)
     shown :: "{root}jet_fmt_display({borrowed})"
     if format == {
@@ -1128,7 +1128,7 @@ fn jet_rust_emit_exact_adapter_target(root: String, symbol: String) -> String Ne
     if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fmt_hex") -> return "{root}jet_std::jet_fmt_hex_owned"
     if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fmt_bin") -> return "{root}jet_std::jet_fmt_bin_owned"
     if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fmt_oct") -> return "{root}jet_std::jet_fmt_oct_owned"
-    ~symbol
+    symbol.copy()
 }
 
 // The adapter of a checked call: taken only when every adapted argument of
@@ -1136,7 +1136,7 @@ fn jet_rust_emit_exact_adapter_target(root: String, symbol: String) -> String Ne
 // call no longer copies its whole function to wrap it in an Option.
 fn jet_rust_emit_exact_adapter(ctx: &JetRustEmitContext, function: MIRFunction, symbol: String, args: [MIRCallArg]) -> String Never! {
     target :: jet_rust_emit_exact_adapter_target(ctx.config.root_prefix, symbol)
-    if target == symbol || !jet_rust_emit_exact_adapter_integer_args(ctx, function, args, jet_rust_emit_exact_adapter_positions(target)) -> return ~symbol
+    if target == symbol || !jet_rust_emit_exact_adapter_integer_args(ctx, function, args, jet_rust_emit_exact_adapter_positions(target)) -> return symbol.copy()
     target
 }
 
@@ -1982,7 +1982,7 @@ fn jet_rust_emit_associated_dispatch(ctx: &JetRustEmitContext, id: MIRFunctionID
                         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait-associated dispatch owner/access is invalid", "trait-associated calls must target the checked owner without a receiver", Val(span))
                         return "unreachable!(\"invalid trait associated dispatch\")"
                     }
-                    method_name :: ~ctx.program.functions[candidate_index].name
+                    method_name :: ctx.program.functions[candidate_index].name.copy()
                     return "<{jet_rust_emit_type(&ctx, owner)} as {jet_rust_emit_trait_name(&ctx, trait_ref.id)}>::{jet_rust_emit_trait_impl_method_symbol(&ctx, trait_ref.id, method_name)}{generic}({rendered_args})"
                 }
                 .TopLevel -> {
@@ -2057,7 +2057,7 @@ fn jet_rust_emit_method_dispatch(ctx: &JetRustEmitContext, function: MIRFunction
                 arg_index += 1
             }
             generic :: jet_rust_emit_generic_call_args(&ctx, type_args)
-            method_name :: ~ctx.program.functions[candidate_index].name
+            method_name :: ctx.program.functions[candidate_index].name.copy()
             if dispatch_trait == .Val(trait_ref) {
                 trait_text := jet_rust_emit_trait_name(&ctx, trait_ref.id)
                 if arithmetic && rhs_type == .Val(rhs) -> trait_text = "{trait_text}<{jet_rust_emit_type(&ctx, rhs)}>"
@@ -2781,7 +2781,7 @@ fn jet_rust_emit_enum_value(ctx: &JetRustEmitContext, function: MIRFunction, own
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR enum variant has no row", "checked enum construction names one declared variant of an enum owner", Val(function.span))
         return "unreachable!(\"MIR enum variant\")"
     }
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     // MIRRust enum_value: the Core HTTP Body carrier constructs through its
     // native constructors; a native Prelude enum narrows Jet `Int` payloads into
     // its declared Rust slot; DataTree's exact Int and Map-backed Object cross
@@ -2856,17 +2856,17 @@ fn jet_rust_emit_is_core_http_type(definition: MIRTypeDef, leaf: String) -> Bool
 // MIRRust native_int_payload_value: a Jet `Int` stored in a fixed-width payload
 // slot narrows through the host word with a source-located range stop.
 fn jet_rust_emit_native_int_payload_value(ctx: &JetRustEmitContext, function: MIRFunction, value_id: MIRValueID, expected: MIRType, value: String, location: MIRPanicLoc?) -> String Never! {
-    if jet_rust_emit_value_type(ctx, function, value_id).kind != MIRTypeKind.Int -> return ~value
-    target := ~expected
+    if jet_rust_emit_value_type(ctx, function, value_id).kind != MIRTypeKind.Int -> return value.copy()
+    target := expected.copy()
     loop {
         if target.kind == {
-            .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> target = ~base
+            .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> target = base.copy()
             else -> break
         }
     }
     if target.kind == {
         .IntN(signed, bits) -> {
-            root :: ~ctx.config.root_prefix
+            root :: ctx.config.root_prefix.copy()
             file := "\"<mir>\""
             line := 0
             if location == .Val(loc) {
@@ -2877,14 +2877,14 @@ fn jet_rust_emit_native_int_payload_value(ctx: &JetRustEmitContext, function: MI
             if signed && bits == 64 -> return raw
             return "({raw}).try_into().unwrap_or_else(|_| {root}jet_arithmetic_stop({file}, {line}u32, \"native Int payload exceeds target range\"))"
         }
-        else -> return ~value
+        else -> return value.copy()
     }
 }
 
 // MIRRust native_int_input: narrow a Jet value into a native host slot (record
 // field or enum payload), the inverse of native_int_result for `Int` leaves.
 fn jet_rust_emit_native_int_input(ctx: &JetRustEmitContext, value: String, ty: MIRType, location: MIRPanicLoc?) -> String? {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     if ty.kind == {
         .Tagged(marker, inner) -> {
             if marker == (MIRTagMarker.Internal{internal_tag: MIRInternalTag.AllocatorView}) -> return None
@@ -3172,7 +3172,7 @@ fn jet_rust_emit_enum_payload(ctx: &JetRustEmitContext, function: MIRFunction, r
     }
     // A payload read only inspects its subject; the payload is cloned out.
     value :: jet_rust_emit_inspected_value_reference(&ctx, function, subject)
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     if jet_rust_emit_type_index(ctx, owner) == .Val(definition_index) {
         if ctx.program.types[definition_index].id == owner {
             if jet_rust_emit_is_core_http_type(ctx.program.types[definition_index], "Body") {
@@ -3355,7 +3355,7 @@ fn jet_rust_emit_field_row_type(ctx: &JetRustEmitContext, id: MIRFieldID) -> MIR
 // the email Address display, `Int` fields stored as host words).
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::operation_expression
 fn jet_rust_emit_field_read(ctx: &JetRustEmitContext, function: MIRFunction, base: MIRValueID, field: MIRFieldID) -> String Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     owner := Int?{None}
     field_row := MIRField?{None}
     loop row in jet_rust_emit_field_rows(ctx, field) {
@@ -3627,7 +3627,7 @@ fn jet_rust_emit_fixed_int_signed(ty: MIRType) -> Bool Never! {
 // MIRRust conversion NumericCast: exact Int stays exact, widens to Float through
 // the owned carrier, and fixed widths through 32 bits enter the native Int inline.
 fn jet_rust_emit_numeric_cast(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID, target: MIRType) -> String Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     source :: jet_rust_emit_value_type(ctx, function, value)
     rendered :: jet_rust_emit_value_owned(ctx, function, value)
     if source.kind == MIRTypeKind.Int {
@@ -3752,7 +3752,7 @@ fn jet_rust_emit_default_err_struct(ctx: &JetRustEmitContext, id: MIRTypeID, val
     definition := MIRTypeDef?{None}
     // The last type row with this id, as the original full scan kept.
     loop index in 0..<ctx.program.types.len() {
-        if ctx.program.types[index].id == id -> definition = Val(~ctx.program.types[index])
+        if ctx.program.types[index].id == id -> definition = Val(ctx.program.types[index].copy())
     }
     if definition == None {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "compiler-owned Err type row is missing", "the canonical default error constructor requires its checked field schema", None)
@@ -4666,7 +4666,7 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
     if !view_new && row.signature.borrow_mask.len() != values.len() -> return jet_rust_emit_semantic_values(&ctx, function, call, values)
     // MIRRust prelude_values_with_receiver: `Int.to_radix(base)` is checked `String`; the exact Int kernel takes both owned Ints by reference and its invalid-radix failure stops the program like any other Int fault.
     if row.module_name == "core.builtin" && row.member == "int_to_radix" && args.len() == 1 {
-        root :: ~ctx.config.root_prefix
+        root :: ctx.config.root_prefix.copy()
         receiver_text :: jet_rust_emit_borrowed_value_reference(&ctx, function, receiver, MIRAccess.Read)
         radix_text :: jet_rust_emit_borrowed_value_reference(&ctx, function, args[0], MIRAccess.Read)
         return "{root}jet_std::jet_int_owned_to_radix({receiver_text}, {radix_text}).unwrap_or_else(|error| {root}jet_arithmetic_stop(\"<mir>\", 0u32, &error))"
@@ -4832,7 +4832,7 @@ fn jet_rust_emit_copy(ctx: &JetRustEmitContext, function: MIRFunction, value: MI
 // MIRRust native_int_result: a native-word kernel result re-enters the exact
 // Int carrier, through refinements, carriers, tuples, lists and count maps.
 fn jet_rust_emit_native_int_result(ctx: &JetRustEmitContext, value: String, ty: MIRType) -> String? {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     if ty.kind == {
         .Tagged(marker, inner) -> {
             if marker == (MIRTagMarker.Internal{internal_tag: MIRInternalTag.AllocatorView}) -> return None
@@ -5106,7 +5106,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                     euclid_location :: location ?? panic("MIR exact Int Euclidean division is missing source location")
                     bytes :: emitted.bytes()
                     if bytes.len() == 0 || bytes[bytes.len() - 1] != (U8{41}) -> panic("MIR Prelude call text has no argument list")
-                    call_text :: String.from_bytes(~(bytes[0..<bytes.len() - 1])) ?? ""
+                    call_text :: String.from_bytes(bytes[0..<bytes.len() - 1].copy()) ?? ""
                     return "{call_text}, {jet_rust_emit_source_path(&ctx, euclid_location.file)}, {euclid_location.line}u32)"
                 }
                 .OverflowOption(call, left, right, overflow_location) -> return jet_rust_emit_overflow_option(&ctx, function, call, left, right, overflow_location)

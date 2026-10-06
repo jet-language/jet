@@ -272,7 +272,7 @@ struct NixEvalJSONParser {
     }
 
     fn number(&self) -> Int NixEvalError! {
-        start :: ~self.position
+        start :: self.position.copy()
         loop {
             value :: self.peek()
             if !(nixeval_is_ascii_digit(value) || value == 45 || value == 43 || value == 46 || value == 101 || value == 69) -> break
@@ -348,7 +348,7 @@ fn nixeval_json_parse_number(text: String) -> NixEvalJSONNumber? Never! {
             exponent_negative = sign == 45
             index += 1
         }
-        exponent_start :: ~index
+        exponent_start :: index.copy()
         loop nixeval_is_ascii_digit(nixeval_byte(bytes, index)) -> index += 1
         if index == exponent_start -> return None
         magnitude :: Int.parse(nixeval_slice(bytes, exponent_start, index)) ?? return None

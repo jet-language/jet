@@ -75,12 +75,12 @@ pub struct ReservedEntry {
     pub note: &'static str,
 }
 
-/// D-MEM1 / D-SHAPE-COPY1=A / D-CONST-RETIRE1: the five teaching-reserved
+/// D-MEM1 / D-SHAPE-COPY1=A / D-COPY-WORD1=A / D-CONST-RETIRE1: the five teaching-reserved
 /// words — real identifiers a user cannot bind because the lexer/parser
 /// recognizes them only to redirect to their current spelling. Never in
 /// `crate::Syntax::JET_KEYWORD_LIST`.
 pub const TEACHING_RESERVED: &[ReservedEntry] = &[
-    ReservedEntry { spelling: crate::Syntax::KW_COPY, kind: "teaching-reserved word", note: "retired; write `~value` instead (E0991)" },
+    ReservedEntry { spelling: crate::Syntax::KW_COPY, kind: "teaching-reserved word", note: "retired; write `value.copy()` instead (E0991)" },
     ReservedEntry { spelling: crate::Syntax::KW_MUTATE, kind: "teaching-reserved word", note: "retired; write `&value` instead (E0056)" },
     ReservedEntry { spelling: crate::Syntax::KW_MOVE, kind: "teaching-reserved word", note: "retired as a bare prefix; write `^value` instead (E0057); `.take(n)` stays a valid method" },
     ReservedEntry { spelling: crate::Syntax::KW_CONST, kind: "teaching-reserved word", note: "retired; write `@name` instead (E0374)" },
@@ -110,9 +110,9 @@ pub const RESERVED_SIGILS: &[ReservedEntry] = &[
         note: "take/move ownership (D-MEM1)",
     },
     ReservedEntry {
-        spelling: crate::Syntax::SIGIL_COPY,
-        kind: "sigil",
-        note: "produce an owned copy (D-SHAPE-COPY1)",
+        spelling: crate::Syntax::SIGIL_COPY_RETIRED,
+        kind: "retired sigil",
+        note: "retired as a prefix copy; write `value.copy()` instead (E0941, D-COPY-WORD1)",
     },
     ReservedEntry {
         spelling: crate::Syntax::COMPTIME_MARK,
@@ -724,7 +724,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--diff", help: "With fmt --check: Also print unified diffs for each changed file" },
     FlagSpec { long: "--simplify", help: "With fmt: Rewrite to the simplest ratified spelling" },
     FlagSpec { long: "--changed", help: "With fmt: Format only VCS-changed .jet files (requires git)" },
-    FlagSpec { long: "--explicit-copies", help: "With fmt: Materialize implicit read-view copies as `~`" },
+    FlagSpec { long: "--explicit-copies", help: "With fmt: Materialize implicit read-view copies as `.copy()`" },
     FlagSpec { long: "--skipped", help: "With project parts: Show modules omitted from automatic discovery" },
     FlagSpec { long: "--stdin-path", help: "With fmt -: Path label used in diagnostics when reading from stdin" },
     FlagSpec { long: "--small", help: "With build/run/jobs: Favor a smaller binary" },

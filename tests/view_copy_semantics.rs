@@ -222,12 +222,12 @@ fn evaluator_view_materialization_helpers_use_checked_jet_route() {
         );
     }
     assert!(
-        source.contains("window :: value.after(\"\")\n    ~window"),
-        "String evaluator materialization must lower through checked Jet `~`"
+        source.contains("window :: value.after(\"\")\n    window.copy()"),
+        "String evaluator materialization must lower through checked Jet `.copy()`"
     );
     assert_eq!(
         source
-            .matches("window :: value[0..<value.len()]\n    ~window")
+            .matches("window :: value[0..<value.len()]\n    window.copy()")
             .count(),
         2,
         "List and Bytes evaluator materialization must use checked full windows"
@@ -236,7 +236,7 @@ fn evaluator_view_materialization_helpers_use_checked_jet_route() {
 
 const OWNED_WINDOW_SOURCE: &str = r#"
 fn own_first(values: [Int]) -> [Int] {
-    return ~values[0..0]
+    return values[0..0].copy()
 }
 
 fn run() {
@@ -248,7 +248,7 @@ fn run() {
     print(copied[0])
 
     nested := [[1, 2], [3, 4]]
-    nested_copy := ~nested[0..0]
+    nested_copy := nested[0..0].copy()
     nested[0][0] = 6
     nested_copy[0][0] = 7
     print(nested[0][0])
@@ -260,28 +260,28 @@ const EMPTY_STRING_AND_LIST_SOURCE: &str = r#"
 fn run() {
     empty_string := ""
     empty_text_view :: empty_string.after("")
-    owned_empty_text :: ~empty_text_view
+    owned_empty_text :: empty_text_view.copy()
     print(owned_empty_text.len())
 
     unicode_text := "π🙂"
     full_text_view :: unicode_text.after("")
-    owned_unicode_text :: ~full_text_view
+    owned_unicode_text :: full_text_view.copy()
     print(owned_unicode_text == "π🙂")
 
     empty_values := [Int]{}
     empty_values_view :: empty_values[0..<empty_values.len()]
-    owned_empty_values :: ~empty_values_view
+    owned_empty_values :: empty_values_view.copy()
     print(owned_empty_values.len())
 
     bytes := unicode_text.bytes()
     bytes_view :: bytes[0..<bytes.len()]
-    owned_bytes :: ~bytes_view
+    owned_bytes :: bytes_view.copy()
     print(owned_bytes.len())
 }
 "#;
 const LIST_STRING_SOURCE: &str = r#"
 fn copy_values(values: [String]) -> [String] {
-    return ~values[0..<values.len()]
+    return values[0..<values.len()].copy()
 }
 
 fn run() {
@@ -340,7 +340,7 @@ fn string_view_materialization_uses_string_kernel_and_list_view_uses_list_kernel
 fn run() {
     text := "  x  "
     view :: text.trim()
-    print(~view)
+    print(view.copy())
 }
 "#;
     let string_compiled = jet::compile(string_source).expect("String View materializes");

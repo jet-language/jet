@@ -78,7 +78,7 @@ pub struct SemaDeriveExpansion {
 }
 
 fn sema_derive_bare(name: String) -> String Never! {
-    if name.starts_with("$") -> String.from_bytes(name.bytes()[1..<name.bytes().len()]) ?? ~name else -> ~name
+    if name.starts_with("$") -> String.from_bytes(name.bytes()[1..<name.bytes().len()]) ?? name.copy() else -> name.copy()
 }
 
 // The innermost scope row binding `name`, read in place by callers that only
@@ -424,7 +424,7 @@ fn sema_derive_expand_name(expansion: &SemaDeriveExpansion, name: String, span: 
     if value == {
         .Str(text) -> return text
         .Struct(_, _) -> {
-            if !explicit -> return ~name
+            if !explicit -> return name.copy()
             if sema_derive_struct_field(value, "name") == .Val(.Str(text)) -> return text
             sema_derive_fail(&expansion, sema_error("E0956", span, "compile-time name `${binding}` has no text name", "a generated item name needs the reflected value's `name` field", "bind the name to a String value"))
         }
@@ -432,7 +432,7 @@ fn sema_derive_expand_name(expansion: &SemaDeriveExpansion, name: String, span: 
             if explicit -> sema_derive_fail(&expansion, sema_error("E0956", span, "compile-time name `{name}` is not text", "a generated item name needs text, but this value is {sema_derive_value_type_name(value)}", "bind the name to a String value"))
         }
     }
-    ~name
+    name.copy()
 }
 
 fn sema_derive_expand_type(expansion: &SemaDeriveExpansion, ty: Type) -> Type Never! {
@@ -468,7 +468,7 @@ fn sema_derive_expand_type(expansion: &SemaDeriveExpansion, ty: Type) -> Type Ne
         }
         .Quantity(base, dimension) -> Type.Quantity{base: sema_derive_expand_type(&expansion, base), dimension: dimension}
         .InlineRange(base, lo, hi) -> Type.InlineRange{base: sema_derive_expand_type(&expansion, base), lo: lo, hi: hi}
-        else -> ~ty
+        else -> ty.copy()
     }
 }
 
@@ -599,8 +599,8 @@ fn sema_derive_payload_owner_for_subject(expansion: SemaDeriveExpansion, subject
 }
 
 fn sema_derive_fill_variant_bindings(expansion: SemaDeriveExpansion, variant: String, bindings: [PatSlot], span: Span, subject: Expr?) -> [PatSlot] Never! {
-    if bindings.len() != 0 -> return ~bindings
-    payload :: sema_derive_variant_payload_fields(expansion, variant) ?? return ~bindings
+    if bindings.len() != 0 -> return bindings.copy()
+    payload :: sema_derive_variant_payload_fields(expansion, variant) ?? return bindings.copy()
     owner :: sema_derive_payload_owner_for_subject(expansion, subject, variant)
     filled := [PatSlot]{}
     loop field in payload {
@@ -639,7 +639,7 @@ fn sema_derive_expand_pattern(expansion: &SemaDeriveExpansion, pattern: Pattern,
             expanded_variant :: sema_derive_expand_name(&expansion, variant, span)
             Pattern.Variant{variant: expanded_variant, bindings: sema_derive_fill_variant_bindings(expansion, expanded_variant, bindings, span, subject), leading_dot: leading_dot, span: span}
         }
-        else -> ~pattern
+        else -> pattern.copy()
     }
 }
 
@@ -674,11 +674,11 @@ fn sema_derive_coerce_enum_arm(expansion: SemaDeriveExpansion, cond: Expr, subje
     if cond == {
         .EnumLit(_, variant, _, args, _, span) -> sema_derive_pattern_test_from_enum_lit(expansion, subject, variant, args, span)
         .Binary(op, _, right, _) -> {
-            if op != BinOp.Eq -> return ~cond
+            if op != BinOp.Eq -> return cond.copy()
             if right == .EnumLit(_, variant, _, args, _, span) -> return sema_derive_pattern_test_from_enum_lit(expansion, subject, variant, args, span)
-            ~cond
+            cond.copy()
         }
-        else -> ~cond
+        else -> cond.copy()
     }
 }
 
@@ -737,7 +737,7 @@ fn sema_derive_expand_or_fallback(expansion: &SemaDeriveExpansion, fallback: OrF
         .Block(body, value, span) -> OrFallback.Block{body: sema_derive_expand_stmts(&expansion, body), value: sema_derive_expand_optional_expr(&expansion, value), span: span}
         .Return(value, span) -> OrFallback.Return{value: sema_derive_expand_optional_expr(&expansion, value), span: span}
         .Panic(name_span, args) -> OrFallback.Panic{name_span: name_span, args: sema_derive_expand_call_args(&expansion, args)}
-        else -> ~fallback
+        else -> fallback.copy()
     }
 }
 
@@ -759,7 +759,7 @@ fn sema_derive_expand_lambda(expansion: &SemaDeriveExpansion, lambda: Lambda) ->
 
 // Children first, then the node itself.
 fn sema_derive_expand_expr(expansion: &SemaDeriveExpansion, expression: Expr) -> Expr Never! {
-    if expansion.failure != None -> return ~expression
+    if expansion.failure != None -> return expression.copy()
     sema_derive_expand_expr_node(&expansion, expression)
 }
 
@@ -775,9 +775,9 @@ fn sema_derive_expand_expr_node(expansion: &SemaDeriveExpansion, expression: Exp
         .Slice(base, start, end, range, span) -> return Expr.Slice{base: sema_derive_expand_expr(&expansion, base), start: sema_derive_expand_expr(&expansion, start), end: sema_derive_expand_expr(&expansion, end), range: sema_derive_expand_optional_expr(&expansion, range), span: span}
         .Range(start, end, exclusive, span) -> return Expr.Range{start: sema_derive_expand_expr(&expansion, start), end: sema_derive_expand_expr(&expansion, end), exclusive: exclusive, span: span}
         .Ident(name, span) -> {
-            if !name.starts_with("$") -> return ~expression
-            value :: sema_derive_scope_value(expansion, name) ?? return ~expression
-            return sema_derive_literal_expr(value, span) ?? ~expression
+            if !name.starts_with("$") -> return expression.copy()
+            value :: sema_derive_scope_value(expansion, name) ?? return expression.copy()
+            return sema_derive_literal_expr(value, span) ?? expression.copy()
         }
         .Call(call) -> {
             updated := call
@@ -827,14 +827,14 @@ fn sema_derive_expand_expr_node(expansion: &SemaDeriveExpansion, expression: Exp
         .CallValue(callee, args, span) -> return Expr.CallValue{callee: sema_derive_expand_expr(&expansion, callee), args: sema_derive_expand_call_args(&expansion, args), span: span}
         .PtrFromAddr(alias, alias_span, elem, addr, span) -> return Expr.PtrFromAddr{alias: alias, alias_span: alias_span, elem: sema_derive_expand_type(&expansion, elem), addr: sema_derive_expand_expr(&expansion, addr), span: span}
         .ComptimeName(name, span, value) -> {
-            if value != None -> return ~expression
-            bound :: sema_derive_scope_value(expansion, name) ?? return ~expression
-            return sema_derive_literal_expr(bound, span) ?? ~expression
+            if value != None -> return expression.copy()
+            bound :: sema_derive_scope_value(expansion, name) ?? return expression.copy()
+            return sema_derive_literal_expr(bound, span) ?? expression.copy()
         }
         .Paren(value, span) -> return Expr.Paren{value: sema_derive_expand_expr(&expansion, value), span: span}
         else -> {}
     }
-    ~expression
+    expression.copy()
 }
 
 fn sema_derive_reflect_literal(expansion: SemaDeriveExpansion, receiver: Expr, span: Span) -> Expr? Never! {
@@ -859,7 +859,7 @@ fn sema_derive_expand_typed_body(expansion: &SemaDeriveExpansion, body: TypedLit
         .Value(value) -> return TypedLitBody.Value{value: sema_derive_expand_expr(&expansion, value)}
         else -> {}
     }
-    ~body
+    body.copy()
 }
 
 fn sema_derive_expand_enum_lit(expansion: &SemaDeriveExpansion, type_name: String, variant: String, variant_span: Span?, args: [EnumLitArg], leading_dot: Bool, span: Span) -> Expr Never! {
@@ -1012,7 +1012,7 @@ fn sema_derive_expand_binding(expansion: &SemaDeriveExpansion, binding: Binding)
         updated.pattern = Val(if pattern == {
             .Struct(type_name, type_span, fields, rest, span) -> BindPattern.Struct{type_name: sema_derive_expand_name(&expansion, type_name, type_span), type_span: type_span, fields: fields, rest: rest, span: span}
             .Refutable(inner, fallback, names, span) -> BindPattern.Refutable{pattern: sema_derive_expand_pattern(&expansion, inner, None), fallback: sema_derive_expand_or_fallback(&expansion, fallback), names: names, span: span}
-            else -> ~pattern
+            else -> pattern.copy()
         })
     }
     updated.init = sema_derive_expand_expr(&expansion, binding.init)
@@ -1043,7 +1043,7 @@ fn sema_derive_expand_lvalue(expansion: &SemaDeriveExpansion, target: LValue) ->
     if target == {
         .Index(base, index, span, kind) -> LValue.Index{base: sema_derive_expand_expr(&expansion, base), index: sema_derive_expand_expr(&expansion, index), span: span, kind: kind}
         .Field(base, field, span) -> LValue.Field{base: sema_derive_expand_expr(&expansion, base), field: field, span: span}
-        else -> ~target
+        else -> target.copy()
     }
 }
 
@@ -1100,7 +1100,7 @@ fn sema_derive_expand_stmt(expansion: &SemaDeriveExpansion, stmt: Stmt) -> Stmt 
         .Yield(value, span) -> Stmt.Yield{value: sema_derive_expand_expr(&expansion, value), span: span}
         .ScopeMember(name, name_span, args, args_span, body, dsl, dot_span, span) -> Stmt.ScopeMember{name: name, name_span: name_span, args: sema_derive_expand_exprs(&expansion, args), args_span: args_span, body: sema_derive_expand_stmts(&expansion, body), dsl: dsl, dot_span: dot_span, span: span}
         .DeferClose(close, span) -> Stmt.DeferClose{close: sema_derive_expand_expr(&expansion, close), span: span}
-        else -> ~stmt
+        else -> stmt.copy()
     }
 }
 
@@ -1260,7 +1260,7 @@ fn sema_derive_expand_item(expansion: &SemaDeriveExpansion, item: Item) -> Item 
             updated.trait_impls = sema_derive_expand_trait_blocks(&expansion, definition.trait_impls)
             Item.Enum{value: updated}
         }
-        else -> ~item
+        else -> item.copy()
     }
 }
 
@@ -1468,7 +1468,7 @@ fn sema_derive_distinct_type_info(definition: DistinctDef) -> CtValue {
 
 fn sema_derive_replace_provider_type(ty: Type, type_param: String, owner_type: Type) -> Type Never! {
     if ty == {
-        .Named(name) -> if name == type_param -> ~owner_type else -> ~ty
+        .Named(name) -> if name == type_param -> owner_type.copy() else -> ty.copy()
         .List(inner) -> Type.List{element: sema_derive_replace_provider_type(inner, type_param, owner_type)}
         .Shared(inner) -> Type.Shared{inner: sema_derive_replace_provider_type(inner, type_param, owner_type)}
         .Option(inner) -> Type.Option{inner: sema_derive_replace_provider_type(inner, type_param, owner_type)}
@@ -1498,7 +1498,7 @@ fn sema_derive_replace_provider_type(ty: Type, type_param: String, owner_type: T
             loop field in fields -> &replaced.push(TypeTupleField{name: field.name, ty: sema_derive_replace_provider_type(field.ty, type_param, owner_type)})
             Type.Tuple{fields: replaced}
         }
-        else -> ~ty
+        else -> ty.copy()
     }
 }
 

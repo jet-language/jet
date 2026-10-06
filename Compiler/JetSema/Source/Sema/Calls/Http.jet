@@ -286,7 +286,7 @@ pub fn sema_call_try_http_static(
 
     arg_types :: sema_call_http_static_arg_types(target.type_name, method, args.len())
     moving := if target.type_name == "Body" && method == "reader" -> [Int]{0} else -> [Int]{}
-    call_args := ~args
+    call_args := args.copy()
     loop index in 0..<call_args.len() {
         loop move_index in moving { if move_index == index -> call_args[index].convention = AccessConvention.Move }
     }
@@ -608,7 +608,7 @@ pub fn sema_call_try_http_method(
             value :: sema_check_expression(args[0].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             sema_call_http_check_serde(SemaSerdeDirection.Encode, value.ty, args[0].span, environment, &diagnostics)
             params := sema_call_http_ownership_params(args, [Type]{value.ty}, [Int]{})
-            call_args := ~args
+            call_args := args.copy()
             ownership := sema_ownership_check_method_call(&state, "HTTPRequest.json", receiver, AccessConvention.Read, params, &call_args, scopes, span, &diagnostics)
             if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
             tir := sema_call_http_emit_method(receiver_value, name, method, [TExpr]{value}, Type.Named{name: "HTTPRequest"}, span)
@@ -683,7 +683,7 @@ pub fn sema_call_try_http_method(
             values = checked
         }
         else -> {
-            call_args := ~args
+            call_args := args.copy()
             ownership := sema_ownership_check_method_call(&state, "{name}.{method}", receiver, AccessConvention.Read, [SemaCallParam]{}, &call_args, scopes, span, &diagnostics)
             if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
         }

@@ -1562,11 +1562,21 @@ impl<'a> Fmt<'a> {
                 self.write("*");
                 self.fmt_expr(inner, Prec::Unary);
             }
-            // D-SHAPE-COPY1=A (supersedes D-CAP2/S4): prefix `~x` — the one copy
-            // sigil.
+            // D-COPY-WORD1=A: a copy prints as the built-in method
+            // `x.copy()`. A trailing `?` keeps its parentheses so the call
+            // never reads as the optional chain `x?.copy()`.
             Expr::Copy(inner, _) => {
-                self.write(Syntax::SIGIL_COPY);
-                self.fmt_expr(inner, Prec::Unary);
+                let try_operand = matches!(inner.as_ref(), Expr::Try(..));
+                if try_operand {
+                    self.write("(");
+                    self.fmt_expr(inner, Prec::OrFallback);
+                    self.write(")");
+                } else {
+                    self.fmt_expr(inner, Prec::Postfix);
+                }
+                self.write(".");
+                self.write(Syntax::METHOD_COPY);
+                self.write("()");
             }
             Expr::Place(inner, access, _) => {
                 match access {

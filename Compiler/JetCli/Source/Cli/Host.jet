@@ -56,7 +56,7 @@ fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool,
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, false, threads, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> output = ~refusal
+        .Refused(refusal) -> output = refusal.copy()
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             output = jet_driver_check_outcome(file, source, diagnostics, color, quiet)
@@ -254,7 +254,7 @@ fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Boo
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, release, threads, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> output = ~refusal
+        .Refused(refusal) -> output = refusal.copy()
         .Compiled(result, snapshot) -> output = jet_cli_build_result(file, source, color, release, invocation, result, snapshot)
     }
     output
@@ -304,7 +304,7 @@ fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, 
     if verbose -> jet_cli_write_verbose_lints(file, source, color, diagnostics)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if jet_cli_build_binary(file, "run", color, release, result, snapshot) == {
-        .Failed(failure) -> output = ~failure
+        .Failed(failure) -> output = failure.copy()
         .Binary(binary) -> output = jet_cli_exec(binary, program_args, color)
     }
     output
@@ -314,7 +314,7 @@ fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool,
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, release, threads, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> output = ~refusal
+        .Refused(refusal) -> output = refusal.copy()
         .Compiled(result, snapshot) -> output = jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, result, snapshot)
     }
     output
@@ -383,7 +383,7 @@ fn jet_cli_compile_test(file: String, source: String, color: Bool, verbose: Bool
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, true, threads, JetDriverCompileMode.Test)
     if compiled == {
-        .Refused(refusal) -> output = ~refusal
+        .Refused(refusal) -> output = refusal.copy()
         .Compiled(result, snapshot) -> output = jet_cli_test_result(file, source, color, verbose, options, result, snapshot)
     }
     output
@@ -513,7 +513,7 @@ pub fn jet_cli_main(args: [String]) -> Int {
     plan :: jet_cli_front(args)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
     if plan == {
-        .Done(done) -> output = ~done
+        .Done(done) -> output = done.copy()
         .Check(file, source, color, quiet, threads) -> output = jet_cli_compile_check(file, source, color, quiet, threads)
         .Build(file, source, color, release, threads, invocation) -> output = jet_cli_compile_build(file, source, color, release, threads, invocation)
         .Run(file, source, color, release, verbose, threads, program_args, invocation) -> output = jet_cli_compile_run(file, source, color, release, verbose, threads, program_args, invocation)

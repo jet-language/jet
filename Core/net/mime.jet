@@ -17,10 +17,10 @@ pub struct MIME {
 
 impl MIME {
     /// The lowercase top-level type, such as `text`.
-    pub fn media_type(self) -> String Never! { ~self.top }
+    pub fn media_type(self) -> String Never! { self.top.copy() }
 
     /// The lowercase subtype, such as `html`.
-    pub fn subtype(self) -> String Never! { ~self.sub }
+    pub fn subtype(self) -> String Never! { self.sub.copy() }
 
     /// `type/subtype` without parameters.
     pub fn essence(self) -> String Never! { "{self.top}/{self.sub}" }
@@ -29,13 +29,13 @@ impl MIME {
     pub fn param(self, name: String) -> String? Never! {
         key :: ascii_lower(name)
         loop row in self.parameters {
-            if row[0] == key -> return Val(~row[1])
+            if row[0] == key -> return Val(row[1].copy())
         }
         None
     }
 
     /// Validated `[name, value]` parameter rows in source order.
-    pub fn params(self) -> [[String]] Never! { ~self.parameters }
+    pub fn params(self) -> [[String]] Never! { self.parameters.copy() }
 }
 
 pub fn parse(text: String) -> MIME MIMEError! {
@@ -145,15 +145,15 @@ pub fn extension(mime: String) -> String? Never! {
 }
 
 fn trim_dot(ext: String) -> String Never! {
-    raw :: (~ext).bytes()
+    raw :: (ext.copy()).bytes()
     i := 0
     loop i < raw.len() && raw[i] == (U8{46}) -> i = i + 1
     if i > 0 -> return slice(raw, i, raw.len())
-    return ~ext
+    return ext.copy()
 }
 
 fn trim_params(mime: String) -> String Never! {
-    raw :: (~mime).bytes()
+    raw :: (mime.copy()).bytes()
     loop i in 0..<raw.len() {
         if raw[i] == (U8{59}) -> return trim_ascii(slice(raw, 0, i))
     }

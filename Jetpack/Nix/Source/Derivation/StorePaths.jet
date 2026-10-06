@@ -101,7 +101,7 @@ pub fn nix_make_store_path(store_dir: String, type_text: String, hash_with_algo:
 
 // `drvName`, or `drvName-output` when the output is not `out`.
 pub fn nix_output_path_name(drv_name: String, output_name: String) -> String Never! {
-    if output_name == "out" -> return ~drv_name
+    if output_name == "out" -> return drv_name.copy()
     "{drv_name}-{output_name}"
 }
 
@@ -122,7 +122,7 @@ pub fn nix_make_fixed_output_path(store_dir: String, name: String, method_algo: 
 // Text-method content-addressed path (derivations): type `text{:ref}*` over
 // the sorted references.
 pub fn nix_make_text_path(store_dir: String, name: String, contents: [U8], references: [String]) -> String Never! {
-    sorted := ~references
+    sorted := references.copy()
     &sorted.sort()
     type_text := "text"
     loop reference in sorted -> type_text = "{type_text}:{reference}"
@@ -192,7 +192,7 @@ fn nix_debug_scalar(scalar: String) -> String Never! {
 }
 
 fn nix_debug_control(scalar: String, code: Int) -> String Never! {
-    if code >= 32 && code != 127 -> return ~scalar
+    if code >= 32 && code != 127 -> return scalar.copy()
     digits :: "0123456789abcdef".bytes()
     out := [U8]{}
     if code >= 16 -> &out.push(digits[code /% 16])

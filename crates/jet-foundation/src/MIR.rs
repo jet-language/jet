@@ -5517,7 +5517,7 @@ impl MirLoopSourceKind {
 /// without one (`verify_mir_legality` checks the fact against the type).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MirCopyFact {
-    /// The programmer wrote `~x`.
+    /// The programmer wrote `x.copy()`.
     Explicit,
     /// D-MEM-COPYSEM1: an owning destination filled from a value its scope keeps.
     Materialize,
@@ -5543,7 +5543,7 @@ impl MirCopyFact {
     }
 
     /// An implicit copy (materialize or share) of a Copy-ABI value is a
-    /// bitwise read; the user's `~` and view materialization keep their fact.
+    /// bitwise read; the user's `.copy()` and view materialization keep their fact.
     pub fn for_ownership(self, mode: MirOwnershipMode) -> Self {
         match self {
             Self::Materialize | Self::Share if mode == MirOwnershipMode::Copy => Self::Scalar,

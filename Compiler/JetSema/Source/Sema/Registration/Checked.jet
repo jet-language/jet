@@ -669,8 +669,8 @@ pub struct SemaCheckedForeignFunction {
 }
 
 fn sema_checked_foreign_key(module_identity: String, name: String) -> String Never! {
-    if module_identity == "" -> return ~name
-    if name == "" -> return ~module_identity
+    if module_identity == "" -> return name.copy()
+    if name == "" -> return module_identity.copy()
     "{module_identity}::{name}"
 }
 
@@ -1709,7 +1709,7 @@ fn sema_checked_restore_wire_word(word: String) -> String Never! {
         "mime" -> "MIME"
         else -> {
             bytes := word.bytes()
-            if bytes.len() == 0 -> return ~word
+            if bytes.len() == 0 -> return word.copy()
             code :: Int.from_u8(bytes[0])
             if code >= 97 && code <= 122 -> bytes[0] = U8{code - 32}
             rest :: String.from_bytes(bytes.slice(1, bytes.len())) ?? ""
@@ -1721,7 +1721,7 @@ fn sema_checked_restore_wire_word(word: String) -> String Never! {
 fn sema_checked_wire_case(style: String?, name: String) -> String Never! {
     style_value :: style ?? return name
     words :: sema_checked_wire_words(name)
-    if words.len() == 0 -> return ~name
+    if words.len() == 0 -> return name.copy()
     if style_value == {
         "kebab" | "snake" | "screaming" -> {
             rendered := [String]{}

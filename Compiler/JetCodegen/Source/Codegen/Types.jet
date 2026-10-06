@@ -342,12 +342,12 @@ fn jet_codegen_merge_nominal_spelling(found: JetCodegenNominalIdentity?, semanti
     if (name == nominal_name && jet_codegen_leaf_claims_bare_name(semantic_module.module_name, name)) || name == qualified_name {
         return jet_codegen_merge_nominal_identity(found, JetCodegenNominalIdentity{module_identity: semantic_module.module_identity, name: nominal_name, key: qualified_name, qualified_name: qualified_name})
     }
-    ~found
+    found.copy()
 }
 
 fn jet_codegen_type_key_leaf(name: String, prefix: String) -> String Never! {
     bytes :: name.bytes()
-    String.from_bytes(~(bytes[prefix.bytes().len()..<bytes.len()])) ?? ""
+    String.from_bytes(bytes[prefix.bytes().len()..<bytes.len()].copy()) ?? ""
 }
 
 // A bare built-in boundary spelling (`Path`, `URL`, `DateTime`) names only its
@@ -361,7 +361,7 @@ fn jet_codegen_leaf_claims_bare_name(module_name: String, name: String) -> Bool 
 
 fn jet_codegen_qualified_nominal_name(modules: [SemaGraphModuleResult], current_module_identity: String, name: String, generic_names: [String]) -> String Never! {
     nominal := jet_codegen_find_source_nominal_identity(modules, current_module_identity, name, generic_names)
-    if nominal == None -> return ~name
+    if nominal == None -> return name.copy()
     value :: nominal ?? panic("checked nominal type lookup lost its unique result")
     // Every spelling of a core.term stream handle is its bare native carrier.
     if jet_codegen_is_core_term_stream_carrier(modules, value.module_identity, value.name) -> return value.name

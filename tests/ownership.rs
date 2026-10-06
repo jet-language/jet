@@ -26,7 +26,7 @@ fn run() {
     assert!(
         diags
             .iter()
-            .all(|diagnostic| !diagnostic.fix.contains("~_")),
+            .all(|diagnostic| !diagnostic.fix.contains("_.copy()")),
         "a discard must never receive a copy suggestion: {diags:?}"
     );
 }
@@ -85,7 +85,7 @@ fn run() {
 fn generic_clone_bound_is_usage_sensitive() {
     let src = r#"
 fn inspect<T>(value: T) -> Int { 1 }
-fn duplicate<T>(value: T) -[..E]> T { return ~value }
+fn duplicate<T>(value: T) -[..E]> T { return value.copy() }
 fn increment(value: Int) -[]> Int { return value + 1 }
 
 fn run() {
@@ -413,7 +413,7 @@ fn shared_guard_is_owned_and_noncloneable() {
 fn run() {
     cell := shared 1
     guard :: cell.guard_read()
-    _ :: ~guard
+    _ :: guard.copy()
 }
 "#;
     let diagnostics = jet::compile(src).expect_err("a lock token must have one owner");
@@ -2537,7 +2537,7 @@ fn run() {
 
 /// E0209 liveness gate (was D-L0201): when the value is still used after the
 /// call, `^` would break that later use — E0209 still fires (hard error), but
-/// the fix menu offers `~name`/reorder instead of `^`.
+/// the fix menu offers `name.copy()`/reorder instead of `^`.
 #[test]
 fn implicit_clone_errors_with_reorder_menu_when_live_after_call() {
     let src = r#"
@@ -2763,12 +2763,12 @@ fn copied_range_is_owned_and_does_not_borrow_owner() {
     let src = r#"
 fn run() {
     xs := [1, 2, 3]
-    copied :: ~xs[0..1]
+    copied :: xs[0..1].copy()
     &xs.push(4)
     print(copied.len() + xs.len())
 }
 "#;
-    jet::compile(src).expect("`~range` must stay an independent owned copy");
+    jet::compile(src).expect("`range.copy()` must stay an independent owned copy");
 }
 
 #[test]
@@ -3083,7 +3083,7 @@ fn run() {
         Tile{ force: 11 }
     }
 
-    middle_before :: ~particles[1]
+    middle_before :: particles[1].copy()
     left :: &particles[0]
     right :: &particles[2]
     left.velocity += grid[0].force
@@ -3362,7 +3362,7 @@ fn run() {
 }
 
 /// #1164: returning a string view as owned String materializes the same copy
-/// that `~` requests — no extra E2305 from treating the ident as a boundary.
+/// that `.copy()` requests — no extra E2305 from treating the ident as a boundary.
 #[test]
 fn string_view_as_owned_return_materializes_copy_once() {
     let src = r#"
@@ -4616,7 +4616,7 @@ fn edit(values: &[Int]) -[]> Edit {
 fn run() {
     target := [1, 2]
     borrowed :: edit(&target)
-    duplicate :: ~borrowed
+    duplicate :: borrowed.copy()
     print(duplicate.values[0])
 }
 "#;
@@ -5473,7 +5473,7 @@ fn run() {
         .find(|diag| diag.code == "E0120")
         .expect("borrowed binding must report E0120 instead of cloning");
     assert!(
-        escape.fix.contains("~text"),
+        escape.fix.contains("text.copy()"),
         "fix must name explicit copy: {escape:?}"
     );
 }
@@ -5509,7 +5509,7 @@ fn run() { print(0) }
     let safe_fixed = jet::LSP::apply_edit(safe_src, safe_edit);
     assert!(
         jet::compile(&safe_fixed).is_ok(),
-        "the safe `~` edit must clear the E0120 report: {safe_fixed}"
+        "the safe `.copy()` edit must clear the E0120 report: {safe_fixed}"
     );
 
     let suggested_src = r#"
@@ -5527,18 +5527,18 @@ fn run() { print(0) }
         .iter()
         .find(|diagnostic| diagnostic.code == "E0120")
         .expect("suggested E0120");
-    // `~` on a value that cannot be copied is itself an error (E0211), so no
+    // `.copy()` on a value that cannot be copied is itself an error (E0211), so no
     // machine edit is offered at all.
     assert!(
         suggested.edit.is_none(),
-        "a non-cloneable E0120 must not offer a `~` edit"
+        "a non-cloneable E0120 must not offer a `.copy()` edit"
     );
     assert!(jet::LSP::fixes_from_diagnostics(suggested_diags.clone()).is_empty());
 }
 
-/// The `~` edit for a borrowed field or element starts at the root of the
+/// The `.copy()` edit for a borrowed field or element starts at the root of the
 /// place. Field and index nodes span only their selector, so an edit anchored
-/// there produced `outer.inner.~name` and `outer.names~[0]`, which do not
+/// there produced `outer.inner.name.copy()` and `outer.names~[0]`, which do not
 /// parse.
 #[test]
 fn ownership_copy_edit_wraps_the_whole_place() {
@@ -5574,7 +5574,7 @@ fn run() { print(0) }
             diagnostic
                 .edit
                 .clone()
-                .expect("a cloneable E0120 must carry the `~` edit")
+                .expect("a cloneable E0120 must carry the `.copy()` edit")
         })
         .collect();
     assert_eq!(edits.len(), 2);
@@ -5583,11 +5583,11 @@ fn run() { print(0) }
         assert_eq!(edit.new_text, "~");
         fixed = jet::LSP::apply_edit(&fixed, edit);
     }
-    assert!(fixed.contains("picked :: ~outer.inner.name ?? return"), "{fixed}");
-    assert!(fixed.contains("picked :: ~outer.names[0] ?? return"), "{fixed}");
+    assert!(fixed.contains("picked :: outer.inner.name.copy() ?? return"), "{fixed}");
+    assert!(fixed.contains("picked :: outer.names[0].copy() ?? return"), "{fixed}");
     assert!(
         jet::compile(&fixed).is_ok(),
-        "the `~` edits must clear the E0120 reports: {fixed}"
+        "the `.copy()` edits must clear the E0120 reports: {fixed}"
     );
 }
 
@@ -6364,7 +6364,7 @@ fn run() {
 fn borrowed_parameter_can_feed_stored_lambda_after_explicit_copy() {
     let src = r#"
 fn store(text: String) {
-    owned :: ~text
+    owned :: text.copy()
     callback :: () -> owned.len()
     print(callback())
 }
@@ -6377,7 +6377,7 @@ fn run() { store("read") }
 fn borrowed_parameter_can_feed_task_after_explicit_copy() {
     let src = r#"
 fn launch(text: String) {
-    owned :: ~text
+    owned :: text.copy()
     handle :: task owned.len()
     print(handle.join() ?? 0)
 }

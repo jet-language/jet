@@ -623,6 +623,20 @@ impl<'a> Parser<'a> {
                             }
                         }
                         self.expect_closer(TokKind::RParen, "to finish the call", "call")?;
+                        // D-COPY-WORD1=A: `name.copy()` is the built-in copy
+                        // (mirrors `expr_postfix`); `Type.copy()` stays an
+                        // associated call.
+                        if member == Syntax::METHOD_COPY
+                            && args.is_empty()
+                            && method_type_args.is_empty()
+                            && type_args.is_empty()
+                            && !type_name.starts_with(|c: char| c.is_ascii_uppercase())
+                        {
+                            self.allow_lowercase_leading_dot = previous_lowercase;
+                            let close = self.toks[self.pos - 1].span;
+                            let full = Span::new(span.start, close.end);
+                            return Ok(Expr::Copy(Box::new(Expr::Ident(type_name, span)), full));
+                        }
                         self.parse_generate_template_arg(&member, &mut args)?;
                         let receiver = Expr::Ident(type_name, span);
                         self.teach_retired_shared_new(&receiver, &member, member_span);

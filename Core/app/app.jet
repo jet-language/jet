@@ -51,7 +51,7 @@ pub fn auth_oauth(auth: Auth, providers: String) -> Auth Never! {
         loop raw in comma_group.split(" ") {
             provider :: raw.trim()
             if valid_provider(provider) && !contains_string(configured, provider) && configured.len() < AUTH_MAX_PROVIDERS {
-                &configured.push(~provider)
+                &configured.push(provider.copy())
             }
         }
     }
@@ -80,7 +80,7 @@ pub fn auth_show(auth: Auth) -> String Never! {
     "Auth(users={table}, providers=[{providers.join(",")}])"
 }
 fn canonical_table(value: String) -> String {
-    if valid_identifier(value) -> return ~value
+    if valid_identifier(value) -> return value.copy()
     ""
 }
 
@@ -88,7 +88,7 @@ fn canonical_providers(values: [String]) -> [String] {
     providers := [String]{}
     loop provider in values {
         if valid_provider(provider) && !contains_string(providers, provider) && providers.len() < AUTH_MAX_PROVIDERS {
-            &providers.push(~provider)
+            &providers.push(provider.copy())
         }
     }
     providers
@@ -195,7 +195,7 @@ fn footprint_atoms(value: String) -> [String] Never! {
             loop raw in semi_group.split(" ") {
                 atom :: raw.trim()
                 if atom == "" -> return [String]{}
-                &atoms.push(~atom)
+                &atoms.push(atom.copy())
             }
         }
     }
@@ -205,7 +205,7 @@ fn footprint_atoms(value: String) -> [String] Never! {
 fn canonical_footprint(value: String) -> String {
     paths := [String]{}
     loop atom in footprint_atoms(value) {
-        if !contains_string(paths, atom) -> &paths.push(~atom)
+        if !contains_string(paths, atom) -> &paths.push(atom.copy())
     }
     &paths.sort()
     paths.join(",")

@@ -71,6 +71,46 @@ pub(super) fn mark_at_maximal_place(expr: Expr, access: crate::AST::PlaceAccess,
     }
 }
 
+impl<'a> Parser<'a> {
+    /// D-COPY-WORD1=A: E0941 for the retired prefix copy sigil. The Safe fix
+    /// rewrites `~operand` to `operand.copy()` (parenthesized when the operand
+    /// is not a postfix chain); without source text the fix stays prose.
+    fn retired_copy_sigil(&self, sigil: Span, operand: &Expr) -> Diagnostic {
+        let full = Span::new(sigil.start, operand.span().end);
+        let operand_text = self
+            .source
+            .as_deref()
+            .and_then(|source| source.get(sigil.end..full.end))
+            .map(str::trim)
+            .filter(|text| !text.is_empty());
+        let replacement = Syntax::copy_call_source(operand_text.unwrap_or("x"));
+        let diagnostic = Diagnostic::error(
+            "E0941",
+            format!(
+                "the `{}` copy sigil is retired; a copy is the method `{}`",
+                Syntax::SIGIL_COPY_RETIRED,
+                Syntax::copy_call("x")
+            ),
+            "Jet has exactly one spelling for a deliberate copy, the built-in method `.copy()` \
+             (D-COPY-WORD1), so a copy reads as a word and chains like any method"
+                .to_string(),
+            format!("write `{replacement}`"),
+            Some(sigil),
+        );
+        if operand_text.is_none() {
+            return diagnostic;
+        }
+        diagnostic.with_edit_grade(
+            crate::Diagnostics::TextEdit {
+                span: full,
+                new_text: replacement,
+            },
+            crate::Diagnostics::FixApplicability::Safe,
+            crate::Diagnostics::FixSafety::BehaviorPreserving,
+        )
+    }
+}
+
 /// True when a projection chain passes through a method call, so a leading
 /// mark belongs to the place that call receives rather than to the chain.
 pub(super) fn contains_method_call(expr: &Expr) -> bool {
@@ -848,35 +888,35 @@ impl<'a> Parser<'a> {
                     checked_widen: false,
                 })
             }
-            // D-SHAPE-COPY1=A: `~x` — the one copy sigil, a prefix-verb
-            // expression form. Legal on any expression; most useful on a named
-            // binding. `.clone()` is not user-typable Jet syntax (I8).
+            // D-COPY-WORD1=A: prefix `~x` is retired — a copy is the built-in
+            // method `x.copy()`. Teach with a Safe rewrite, then recover as
+            // Expr::Copy so parsing continues.
             TokKind::Tilde => {
                 let span = self.bump().span;
                 let inner = self.expr_unary(allow_struct_lit)?;
                 let full = Span::new(span.start, inner.span().end);
+                let diagnostic = self.retired_copy_sigil(span, &inner);
+                self.diags.push(diagnostic);
                 Ok(Expr::Copy(Box::new(inner), full))
             }
-            // D-SHAPE-COPY1=A: the `copy` word is retired — copy is now the
-            // `~` sigil (was D-CAP2/S4). Teach, then recover as Expr::Copy so
-            // parsing continues.
+            // D-SHAPE-COPY1=A / D-COPY-WORD1=A: the `copy` word is retired —
+            // copy is the method `x.copy()` (was D-CAP2/S4). Teach, then
+            // recover as Expr::Copy so parsing continues.
             TokKind::KwCopy => {
                 let span = self.bump().span;
                 self.diags.push(Diagnostic::error(
                     "E0991",
                     format!(
-                        "`{}` is now the `{}` sigil",
+                        "`{}` is now the method `{}`",
                         Syntax::KW_COPY,
-                        Syntax::SIGIL_COPY
+                        Syntax::copy_call("x")
                     ),
+                    "Jet has exactly one spelling for a copy — the built-in method \
+                         `.copy()` (D-COPY-WORD1) — so all code reads the same"
+                        .to_string(),
                     format!(
-                        "Jet has exactly one spelling for a copy — the `{}` sigil \
-                             (D-SHAPE-COPY1) — so all code reads the same",
-                        Syntax::SIGIL_COPY
-                    ),
-                    format!(
-                        "write `{}name` in place of `{} name`",
-                        Syntax::SIGIL_COPY,
+                        "write `{}` in place of `{} name`",
+                        Syntax::copy_call("name"),
                         Syntax::KW_COPY
                     ),
                     Some(span),

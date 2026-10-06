@@ -44,7 +44,7 @@ fn lower_record_schema(p: MIRProgram, ty: MIRType) -> LowerRecordSchema? {
             if schema.jet_name != name.name -> next
             definition :: lower_type_def(p, ty) ?? return None
             if !lower_record_shape_matches(definition, schema) -> return None
-            return Val(~schema)
+            return Val(schema.copy())
         }
     }
     None
@@ -190,8 +190,8 @@ fn lower_record_store_from_slot(p: MIRProgram, m: &LowerModule, f: &LowerFunctio
 // a payload enum's box pointer).
 fn lower_helper_record_in(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
-    handle :: ~f.open_params[0]
-    target :: ~f.open_params[1]
+    handle :: f.open_params[0].copy()
+    target :: f.open_params[1].copy()
     runtime :: lower_record_handle(p, glue.ty) ?? panic("record.in is requested for records")
     definition :: lower_type_def(p, glue.ty) ?? panic("a record has a definition")
     if !lower_record_members_cross(p, glue.ty) {
@@ -307,7 +307,7 @@ fn lower_record_load_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ha
 // the borrowed native record.
 fn lower_helper_record_out(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
-    value :: ~f.open_params[0]
+    value :: f.open_params[0].copy()
     runtime :: lower_record_handle(p, glue.ty) ?? panic("record.out is requested for records")
     schema :: lower_record_schema(p, glue.ty) ?? panic("a record has a schema")
     definition :: lower_type_def(p, glue.ty) ?? panic("a record has a definition")

@@ -366,10 +366,10 @@ pub const SIZED_NUMERIC_TYPES: &[&str] = &[
     TYPE_F64,
 ];
 
-/// D-MEM1 / D-MEM-PARAM1=A / D-SHAPE-PLACE1=A (ratified, supersedes D-CAP7): memory model v5 sigils. Three
+/// D-MEM1 / D-MEM-PARAM1=A / D-SHAPE-PLACE1=A (ratified, supersedes D-CAP7): memory model v5 sigils. Two
 /// sigils plus unmarked: unmarked = read (enforced in S2), `&T` = exclusive
-/// write, `^T` = move (consume), `~T` = copy (D-SHAPE-COPY1=A, supersedes
-/// D-CAP2/S4's `copy` verb). D-CAP-RECEIVER1=D: at call sites `&`/`^` mark the
+/// write, `^T` = move (consume). A deliberate copy is the built-in method
+/// `x.copy()` (D-COPY-WORD1=A). D-CAP-RECEIVER1=D: at call sites `&`/`^` mark the
 /// named place a call writes or takes, receiver or argument alike
 /// (`&buf.append(x)`, `^buf.seal()`, `edit(&buf)`).
 pub const SIGIL_MOVE: &str = "^";
@@ -394,15 +394,70 @@ pub fn access_label(sigil: &str) -> &'static str {
 pub const PARAM_ZONE_POSITIONAL_ONLY: &str = "/";
 pub const PARAM_ZONE_LABEL_ONLY: &str = "*";
 
-/// D-SHAPE-COPY1=A (supersedes D-CAP2/S4): the one copy spelling — `~x`
-/// produces an owned, independent value. A temporary (no named binding
-/// survives to be used-after), so it never needs `^` and never trips E0209.
-/// `.clone()` is not user-typable Jet syntax (I8 — one way to mean it).
-pub const SIGIL_COPY: &str = "~";
+/// D-COPY-WORD1=A (amends D-SHAPE-COPY1=A's spelling): the one copy spelling
+/// is the compiler-owned method `x.copy()`, producing an owned, independent
+/// value. The parser resolves `receiver.copy()` (no arguments) to the copy
+/// node before ordinary method lookup, so no type can redefine it; a type
+/// receiver (`Recipe.copy()`) stays an ordinary associated call. A temporary
+/// (no named binding survives to be used-after), so it never needs `^` and
+/// never trips E0209. `.clone()` is not user-typable Jet syntax (I8).
+pub const METHOD_COPY: &str = "copy";
+
+/// The copy call spelled on `operand`, for diagnostics and fix-its.
+pub fn copy_call(operand: &str) -> String {
+    format!("{operand}.{METHOD_COPY}()")
+}
+
+/// The copy call for an authored operand's source text: `x.copy()` when the
+/// text is one postfix chain (a name, literal, or bracketed head followed by
+/// `.member`, calls, indexes, `?.member`), otherwise `(a + b).copy()` /
+/// `(x?).copy()` so the call applies to the whole operand.
+pub fn copy_call_source(text: &str) -> String {
+    if is_postfix_operand(text) {
+        copy_call(text)
+    } else {
+        copy_call(&format!("({text})"))
+    }
+}
+
+fn is_postfix_operand(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    let mut in_str = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_str {
+            match c {
+                b'\\' => i += 1,
+                b'"' => in_str = false,
+                _ => {}
+            }
+        } else {
+            match c {
+                b'"' => in_str = true,
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+                _ if depth > 0 => {}
+                b'.' => {}
+                b'?' if bytes.get(i + 1) == Some(&b'.') => {}
+                c if c.is_ascii_alphanumeric() || c == b'_' => {}
+                _ => return false,
+            }
+        }
+        i += 1;
+    }
+    depth == 0 && !in_str && !text.is_empty()
+}
+
+/// D-COPY-WORD1=A: the retired prefix copy sigil (was D-SHAPE-COPY1=A's
+/// spelling). Recognized only for the E0941 teaching error whose Safe fix
+/// rewrites `~x` to `x.copy()`.
+pub const SIGIL_COPY_RETIRED: &str = "~";
 
 /// D-SHAPE-COPY1=A: the retired `copy` word (was D-CAP2/S4's one copy
 /// spelling). Recognized only for the E0991 teaching error that points at
-/// the `~` sigil.
+/// `x.copy()` (D-COPY-WORD1=A).
 pub const KW_COPY: &str = "copy";
 
 /// S10 (M2) → D-MEM1: the retired write keyword. Recognized only for the E0056

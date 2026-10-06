@@ -65,7 +65,7 @@ struct SemaCrossingWalk {
 }
 
 fn sema_ownership_crossing_walk_key(identity: String, type_args: [Type]) -> String Never! {
-    if type_args.len() == 0 -> return ~identity
+    if type_args.len() == 0 -> return identity.copy()
     names := (loop arg in type_args -> type_name(arg))
     joined := names.join(", ")
     "{identity}<{joined}>"
@@ -88,7 +88,7 @@ fn sema_ownership_crossing_type_leaf(name: String) -> String Never! {
     if parts.len() > 1 -> return parts[parts.len() - 1]
     parts = name.split(".").to_list()
     if parts.len() > 1 -> return parts[parts.len() - 1]
-    ~name
+    name.copy()
 }
 
 fn sema_ownership_crossing_core_builtin(ty: Type, name: String, environment: SemaScopeEnvironment) -> Bool Never! {

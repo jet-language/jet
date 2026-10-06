@@ -127,7 +127,7 @@ module gui {
         next :: "{prefix}{replacement}{suffix}"
         cursor :: start + text.scalar_count(replacement)
         TextEdit{
-            text: ~next,
+            text: next.copy(),
             selection: TextSelection{anchor: cursor, active: cursor},
         }
     }
@@ -151,8 +151,8 @@ module gui {
     pub fn new_editor(body: String, title: String) -> EditorState {
         cursor :: text.scalar_count(body)
         EditorState{
-            body: ~body,
-            title: ~title,
+            body: body.copy(),
+            title: title.copy(),
             theme: "dark",
             settings_open: false,
             selection: TextSelection{anchor: cursor, active: cursor},
@@ -164,71 +164,71 @@ module gui {
         }
     }
 
-    pub fn body_of(state: EditorState) -> String { ~state.body }
+    pub fn body_of(state: EditorState) -> String { state.body.copy() }
 
-    pub fn title_of(state: EditorState) -> String { ~state.title }
+    pub fn title_of(state: EditorState) -> String { state.title.copy() }
 
-    pub fn theme_of(state: EditorState) -> String { ~state.theme }
+    pub fn theme_of(state: EditorState) -> String { state.theme.copy() }
 
     pub fn settings_open_of(state: EditorState) -> Bool { state.settings_open }
 
-    pub fn selection_of(state: EditorState) -> TextSelection { ~state.selection }
+    pub fn selection_of(state: EditorState) -> TextSelection { state.selection.copy() }
 
-    pub fn composition_of(state: EditorState) -> String { ~state.composition }
+    pub fn composition_of(state: EditorState) -> String { state.composition.copy() }
 
     pub fn revision_of(state: EditorState) -> Int { state.revision }
 
-    pub fn status_of(state: EditorState) -> String { ~state.status }
+    pub fn status_of(state: EditorState) -> String { state.status.copy() }
 
     fn commit_edit(state: EditorState, next: String, next_selection: TextSelection, status: String) -> EditorState {
         if state.body == next -> return state
         history := state.undo
         &history.push(state.body)
         EditorState{
-            body: ~next,
-            title: ~state.title,
-            theme: ~state.theme,
+            body: next.copy(),
+            title: state.title.copy(),
+            theme: state.theme.copy(),
             settings_open: state.settings_open,
             selection: next_selection,
             composition: "",
-            undo: ~history,
+            undo: history.copy(),
             redo: [String]{},
             revision: state.revision + 1,
-            status: ~status,
+            status: status.copy(),
         }
     }
 
     pub fn with_selection(state: EditorState, next: TextSelection) -> EditorState {
         normalized :: normalize_selection(state.body, next)
         EditorState{
-            body: ~state.body,
-            title: ~state.title,
-            theme: ~state.theme,
+            body: state.body.copy(),
+            title: state.title.copy(),
+            theme: state.theme.copy(),
             settings_open: state.settings_open,
             selection: normalized,
-            composition: ~state.composition,
-            undo: ~state.undo,
-            redo: ~state.redo,
+            composition: state.composition.copy(),
+            undo: state.undo.copy(),
+            redo: state.redo.copy(),
             revision: state.revision,
-            status: ~state.status,
+            status: state.status.copy(),
         }
     }
 
     pub fn apply_text(state: EditorState, replacement: String) -> EditorState {
         edit :: replace_selection(state.body, state.selection, replacement)
-        commit_edit(state, ~edit.text, edit.selection, "edited")
+        commit_edit(state, edit.text.copy(), edit.selection, "edited")
     }
 
     pub fn start_composition(state: EditorState) -> EditorState {
         EditorState{
-            body: ~state.body,
-            title: ~state.title,
-            theme: ~state.theme,
+            body: state.body.copy(),
+            title: state.title.copy(),
+            theme: state.theme.copy(),
             settings_open: state.settings_open,
             selection: state.selection,
             composition: "",
-            undo: ~state.undo,
-            redo: ~state.redo,
+            undo: state.undo.copy(),
+            redo: state.redo.copy(),
             revision: state.revision,
             status: "composing",
         }
@@ -236,34 +236,34 @@ module gui {
 
     pub fn update_composition(state: EditorState, composition: String) -> EditorState {
         EditorState{
-            body: ~state.body,
-            title: ~state.title,
-            theme: ~state.theme,
+            body: state.body.copy(),
+            title: state.title.copy(),
+            theme: state.theme.copy(),
             settings_open: state.settings_open,
             selection: state.selection,
-            composition: ~composition,
-            undo: ~state.undo,
-            redo: ~state.redo,
+            composition: composition.copy(),
+            undo: state.undo.copy(),
+            redo: state.redo.copy(),
             revision: state.revision,
             status: "composing",
         }
     }
 
     pub fn commit_composition(state: EditorState, composition: String) -> EditorState {
-        committed :: if composition == "" -> ~state.composition else -> ~composition
-        apply_text(state, ~committed)
+        committed :: if composition == "" -> state.composition.copy() else -> composition.copy()
+        apply_text(state, committed.copy())
     }
 
     pub fn cancel_composition(state: EditorState) -> EditorState {
         EditorState{
-            body: ~state.body,
-            title: ~state.title,
-            theme: ~state.theme,
+            body: state.body.copy(),
+            title: state.title.copy(),
+            theme: state.theme.copy(),
             settings_open: state.settings_open,
             selection: state.selection,
             composition: "",
-            undo: ~state.undo,
-            redo: ~state.redo,
+            undo: state.undo.copy(),
+            redo: state.redo.copy(),
             revision: state.revision,
             status: "composition-cancelled",
         }
@@ -280,14 +280,14 @@ module gui {
         &forward.push(state.body)
         cursor :: text.scalar_count(previous)
         EditorState{
-            body: ~previous,
-            title: ~state.title,
-            theme: ~state.theme,
+            body: previous.copy(),
+            title: state.title.copy(),
+            theme: state.theme.copy(),
             settings_open: state.settings_open,
             selection: TextSelection{anchor: cursor, active: cursor},
             composition: "",
-            undo: ~history,
-            redo: ~forward,
+            undo: history.copy(),
+            redo: forward.copy(),
             revision: state.revision + 1,
             status: "undo",
         }
@@ -300,14 +300,14 @@ module gui {
         &history.push(state.body)
         cursor :: text.scalar_count(next)
         EditorState{
-            body: ~next,
-            title: ~state.title,
-            theme: ~state.theme,
+            body: next.copy(),
+            title: state.title.copy(),
+            theme: state.theme.copy(),
             settings_open: state.settings_open,
             selection: TextSelection{anchor: cursor, active: cursor},
             composition: "",
-            undo: ~history,
-            redo: ~forward,
+            undo: history.copy(),
+            redo: forward.copy(),
             revision: state.revision + 1,
             status: "redo",
         }
@@ -315,44 +315,44 @@ module gui {
 
     pub fn set_theme(state: EditorState, theme: String) -> EditorState {
         EditorState{
-            body: ~state.body,
-            title: ~state.title,
-            theme: ~theme,
+            body: state.body.copy(),
+            title: state.title.copy(),
+            theme: theme.copy(),
             settings_open: state.settings_open,
             selection: state.selection,
-            composition: ~state.composition,
-            undo: ~state.undo,
-            redo: ~state.redo,
+            composition: state.composition.copy(),
+            undo: state.undo.copy(),
+            redo: state.redo.copy(),
             revision: state.revision,
-            status: ~state.status,
+            status: state.status.copy(),
         }
     }
 
     pub fn set_settings_open(state: EditorState, open: Bool) -> EditorState {
         EditorState{
-            body: ~state.body,
-            title: ~state.title,
-            theme: ~state.theme,
+            body: state.body.copy(),
+            title: state.title.copy(),
+            theme: state.theme.copy(),
             settings_open: open,
             selection: state.selection,
-            composition: ~state.composition,
-            undo: ~state.undo,
-            redo: ~state.redo,
+            composition: state.composition.copy(),
+            undo: state.undo.copy(),
+            redo: state.redo.copy(),
             revision: state.revision,
-            status: ~state.status,
+            status: state.status.copy(),
         }
     }
 
     pub fn mark_saved(state: EditorState) -> EditorState {
         EditorState{
-            body: ~state.body,
-            title: ~state.title,
-            theme: ~state.theme,
+            body: state.body.copy(),
+            title: state.title.copy(),
+            theme: state.theme.copy(),
             settings_open: state.settings_open,
             selection: state.selection,
-            composition: ~state.composition,
-            undo: ~state.undo,
-            redo: ~state.redo,
+            composition: state.composition.copy(),
+            undo: state.undo.copy(),
+            redo: state.redo.copy(),
             revision: state.revision,
             status: "saved",
         }
@@ -360,22 +360,22 @@ module gui {
 
     pub fn mark_error(state: EditorState, message: String) -> EditorState {
         EditorState{
-            body: ~state.body,
-            title: ~state.title,
-            theme: ~state.theme,
+            body: state.body.copy(),
+            title: state.title.copy(),
+            theme: state.theme.copy(),
             settings_open: state.settings_open,
             selection: state.selection,
-            composition: ~state.composition,
-            undo: ~state.undo,
-            redo: ~state.redo,
+            composition: state.composition.copy(),
+            undo: state.undo.copy(),
+            redo: state.redo.copy(),
             revision: state.revision,
-            status: ~message,
+            status: message.copy(),
         }
     }
 
     // Keep body and UI settings as separate records. This lets a reload recover
     // the Unicode document even when a host cancels its settings transaction.
-    pub fn persisted_body(state: EditorState) -> String { ~state.body }
+    pub fn persisted_body(state: EditorState) -> String { state.body.copy() }
 
     pub fn persisted_session(state: EditorState) -> String {
         mode :: if state.settings_open -> "open" else -> "closed"
@@ -389,13 +389,13 @@ module gui {
         theme := parts.get(1) ?? "dark"
         if theme == "" -> theme = "dark"
         mode :: parts.get(2) ?? "closed"
-        SessionSettings{theme: ~theme, settings_open: mode == "open"}
+        SessionSettings{theme: theme.copy(), settings_open: mode == "open"}
     }
 
     pub fn recover(body: String, raw_session: String, title: String) -> EditorState {
         session :: restore_session(raw_session)
         base :: new_editor(body, title)
-        themed :: set_theme(base, ~session.theme)
+        themed :: set_theme(base, session.theme.copy())
         set_settings_open(themed, session.settings_open)
     }
 

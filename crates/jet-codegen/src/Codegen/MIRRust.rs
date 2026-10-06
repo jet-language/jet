@@ -17141,7 +17141,7 @@ impl<'a> RustEmitter<'a> {
     }
 
     /// #4318 §8: the place read `value` transfers when `value` is a `Move`,
-    /// or a `Copy` that is neither the programmer's `~` nor a view
+    /// or a `Copy` that is neither the programmer's `.copy()` nor a view
     /// materialization, of a `ReadPlace` value. Such a transfer copies nothing
     /// a consumer that only inspects it needs: that consumer reads the place
     /// (`immutable_read_place`), and when every consumer does, neither the

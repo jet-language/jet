@@ -20,6 +20,7 @@ pub struct LexicalEntry {
 pub const LEXICAL_LEDGER: &[LexicalEntry] = &[
     LexicalEntry { spelling: "::", meaning: "immutable binding", decision: "D-BIND1" },
     LexicalEntry { spelling: ":=", meaning: "mutable binding", decision: "D-BIND1" },
+    LexicalEntry { spelling: "x.copy()", meaning: "the one deliberate copy: a compiler-owned method returning an independent owned value; the retired prefix `~x` teaches E0941 and the retired `copy x` word E0991", decision: "D-COPY-WORD1=A" },
     LexicalEntry { spelling: "#", meaning: "attached marker; #[A, B] stacks", decision: "D-VERDICT-732-1; D-MARK-STACK1" },
     LexicalEntry { spelling: ".expect_fail(message: \"text\")", meaning: "test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring", decision: "D-TEST-STOPMSG1=A" },
     LexicalEntry { spelling: "#DevPanel", meaning: "exported typed devtools panel marker", decision: "D-DX-PLUGIN1=D" },

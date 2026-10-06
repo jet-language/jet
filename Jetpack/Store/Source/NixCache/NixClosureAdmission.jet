@@ -85,7 +85,7 @@ pub struct NixAdmission {
         stage :: files.join(stage_parent, "{STORE_NIX_STAGE_PREFIX}{store_nix_unique_suffix()}")
         files.create_dir(stage) ?? return Err(store_nix_io_error(.Admission, err))
         store_nix_sweep_dead_admission_stages(stage_parent)
-        Ok(NixAdmission{verification: ~verification, roots, expected_closure_receipt, stage, committed: false})
+        Ok(NixAdmission{verification: verification.copy(), roots, expected_closure_receipt, stage, committed: false})
     }
 
     fn admit(&self, requested: [NixOutputRequest], offline: Bool, progress: ProgressHandle?) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
@@ -406,7 +406,7 @@ fn store_nix_validate_requests(requested: [NixOutputRequest]) -> [String: NixOut
         }
         store_nix_validate_store_path(request.store_path, "/nix/store")
         if result.has_key(request.name) -> return Err(NixCacheError.new(.DuplicateEntry, "Nix closure admission repeats an output name"))
-        result[request.name] = ~request
+        result[request.name] = request.copy()
     }
     Ok(result)
 }
@@ -417,7 +417,7 @@ fn store_nix_entries_by_store_path(entries: [StoreEntry]) -> [String: StoreEntry
     loop entry in entries {
         producer :: ProducerRecord.decode(entry.producer_record) ?? next
         store_path :: producer.facts.get("nix.store-path") ?? next
-        if !by_store_path.has_key(store_path) -> by_store_path[store_path] = ~entry
+        if !by_store_path.has_key(store_path) -> by_store_path[store_path] = entry.copy()
     }
     by_store_path
 }

@@ -717,7 +717,7 @@ struct Person {
     age: Int
 }
 fn name_of(p: Person) -[]> String {
-    return ~p.name
+    return p.name.copy()
 }
 fn run() {
     p :: Person{ name: \"Grace\", age: 40 }
@@ -1288,8 +1288,8 @@ fn run() {
 fn copied_string_slice_uses_string_builtin() {
     let src = "\
 fn strip_hash(reference: String) -> String {
-    text := ~reference
-    if (~text).starts_with(\"#\") -> text = (~text).slice(1, (~text).len() - 1)
+    text := reference.copy()
+    if (text.copy()).starts_with(\"#\") -> text = (text.copy()).slice(1, (text.copy()).len() - 1)
     return text
 }
 fn run() {
@@ -1373,7 +1373,7 @@ fn set_algebra_methods() {
     }
     let src = "\
 fn sorted(xs: [Int]) -[]> [Int] {
-    ys := ~xs
+    ys := xs.copy()
     ys.sort()
     return ys
 }
@@ -1504,7 +1504,7 @@ fn run() {
     print(mapped)
     print(mapped.len())
     visits := Cell.new(0)
-    visits_copy :: ~visits
+    visits_copy :: visits.copy()
     even := nums.map((n: Int) -> n + 1).filter((n: Int) -> count_and_keep(n, visits_copy) ?? false)
     print(even)
     print(visits.get())
@@ -1558,12 +1558,12 @@ fn list_and_map_remove() {
     }
     let src = "\
 fn drop_first(xs: [Int]) -[]> Int {
-    ys := ~xs
+    ys := xs.copy()
     r := ys.remove(0, .Slot)
     return ys.len()
 }
 fn drop_key(m: [String:Int]) -[]> Int {
-    m2 := ~m
+    m2 := m.copy()
     r := m2.remove(\"a\")
     return m2.len()
 }

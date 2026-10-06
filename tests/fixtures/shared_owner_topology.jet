@@ -59,14 +59,14 @@ fn run() {
     escaped :: extract_owner(^holder)
     print(escaped.strong_count())
     {
-        copied :: ~escaped
+        copied :: escaped.copy()
         print(copied.strong_count())
         print(escaped.strong_count())
     }
     print(escaped.strong_count())
     {
         snapshot :: escaped.capture()
-        snapshot_copy :: ~snapshot
+        snapshot_copy :: snapshot.copy()
         print(escaped.strong_count())
         print(snapshot_copy.value)
     }
@@ -80,7 +80,7 @@ fn run() {
     live :: weak.upgrade() ?? panic("moved aggregate released its owner")
     {
         counter :: make_counter(^live)
-        alias :: ~counter
+        alias :: counter.copy()
         print(counter(1))
         print(alias(2))
         print(counter(3))

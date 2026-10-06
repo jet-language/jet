@@ -514,7 +514,7 @@ fn run() { top() }
 fn fixed_list_refinement_discharges_panic_denial() {
     let src = r#"
 Die :: distinct Int(1..6)
-fn pick(faces: [String#6], roll: Die) -[!Panic]> String { ~faces[roll.raw() - 1] }
+fn pick(faces: [String#6], roll: Die) -[!Panic]> String { faces[roll.raw() - 1].copy() }
 fn run() {}
 "#;
     assert!(
@@ -545,7 +545,7 @@ fn declared_bound_matching_body_ok() {
     let src = r#"
 use core.files as fs
 fn load(path: String) -[FS]> String {
-    return fs.read(~path) ?? ""
+    return fs.read(path.copy()) ?? ""
 }
 fn run() { print(load("x")) }
 "#;
@@ -596,7 +596,7 @@ fn wider_bound_than_body_ok() {
     let src = r#"
 use core.files as fs
 fn load(path: String) -[FS, Net]> String {
-    return fs.read(~path) ?? ""
+    return fs.read(path.copy()) ?? ""
 }
 fn run() { print(load("x")) }
 "#;
@@ -1799,7 +1799,7 @@ fn invoke(p: String, act: fn(String) -[IO]>) {
     act(p)
 }
 fn read_it(p: String) {
-    x :: fs.read(~p) ?? ""
+    x :: fs.read(p.copy()) ?? ""
     print("{x}")
 }
 fn run() { invoke("f.txt", read_it) }

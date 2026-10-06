@@ -8188,7 +8188,7 @@ impl<'a> LowerCtx<'a> {
         // place reads that element in place. The copy of the whole container
         // (a whole `local.list` on every `local.list[i]` read) is never
         // observable through a read, and the element read copies the element
-        // as before. A user `~` copy is a distinct node and is never elided.
+        // as before. A user `.copy()` copy is a distinct node and is never elided.
         let base = match &base.kind {
             TExprKind::Clone(inner, _) if access == MirAccess::Read && tir_place_path(inner) => {
                 &**inner
@@ -8651,7 +8651,7 @@ impl<'a> LowerCtx<'a> {
 
     /// D-MEM-COPYSEM1: the place `expr` names when it is a plain local or
     /// field-read path (under at most a compiler-inserted clone or a sema
-    /// read window `Borrow`) over a read parameter. A user `~` copy is never
+    /// read window `Borrow`) over a read parameter. A user `.copy()` copy is never
     /// elided.
     pub(super) fn read_window_place(
         &mut self,

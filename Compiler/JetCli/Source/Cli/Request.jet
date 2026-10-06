@@ -237,7 +237,7 @@ pub fn jet_cli_compile_file(file: String, color: Bool, emit_rust: Bool, threads:
     }
     os :: cli_sys.name()
     request := JetDriverCompileRequest{
-        authorized_sources: ~snapshot,
+        authorized_sources: snapshot.copy(),
         canonical_effect_source: JET_CLI_EFFECT_SOURCE,
         core_sources: core_sources,
         host_facts: JetDriverHostFacts{target_triple: Val(jet_cli_host_triple(cli_sys.arch(), os)), active_os: Val(os), compiler_identity: cli_sys.get(JET_CLI_COMPILER_IDENTITY_ENV)},

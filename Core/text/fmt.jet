@@ -282,7 +282,7 @@ fn grouped_digits(text: String) -> String {
 fn pad_mode(text: String, width: Int, fill: String, mode: Int) -> String Never! {
     need := width - unicode.scalar_count(text)
     units :: unicode.scalars(fill)
-    if need <= 0 || units.len() == 0 -> return ~text
+    if need <= 0 || units.len() == 0 -> return text.copy()
     added := ""
     i := 0
     loop i < need {
@@ -327,7 +327,7 @@ fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] {
     out := [U8]{}
     i := start
     loop {
-        if i >= end || i < 0 || i >= raw.len() -> return ~out
+        if i >= end || i < 0 || i >= raw.len() -> return out.copy()
         &out.push(raw[i])
         i = i + 1
     }

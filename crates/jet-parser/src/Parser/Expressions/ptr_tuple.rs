@@ -165,10 +165,10 @@ impl<'a> Parser<'a> {
             self.bump();
             return Ok((Syntax::KW_IN.to_string(), span));
         }
-        // U20: `Recipe.copy()` uses the ordinary dot-member form, while `copy`
-        // is also the retired copy keyword (D-SHAPE-COPY1, now `~x`) in value
-        // position. Keep the keyword reserved everywhere else; permit it only
-        // after `.`.
+        // D-COPY-WORD1=A: `value.copy()` is the built-in copy and
+        // `Recipe.copy()` an ordinary associated call, while the bare word
+        // `copy` stays teaching-reserved (E0991) in value position. Permit it
+        // only after `.`.
         if matches!(self.peek().kind, TokKind::KwCopy) {
             let span = self.peek().span;
             self.bump();

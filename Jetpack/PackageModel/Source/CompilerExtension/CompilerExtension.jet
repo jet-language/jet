@@ -193,7 +193,7 @@ pub struct SpanFact {
     pub end: Int
 
     fn to_json_tree(self) -> DataTree Never! {
-        DataTree.Object(["end": DataTree.Int(self.end), "file": DataTree.Text(~self.file), "id": DataTree.Text(~self.id), "start": DataTree.Int(self.start)])
+        DataTree.Object(["end": DataTree.Int(self.end), "file": DataTree.Text(self.file.copy()), "id": DataTree.Text(self.id.copy()), "start": DataTree.Int(self.start)])
     }
 }
 
@@ -277,7 +277,7 @@ pub struct TypeFact {
     pub shape: TypeFactShape
 
     fn to_json_tree(self) -> DataTree Never! {
-        DataTree.Object(["id": DataTree.Text(~self.id), "repr": DataTree.Text(~self.repr), "shape": self.shape.to_json_tree()])
+        DataTree.Object(["id": DataTree.Text(self.id.copy()), "repr": DataTree.Text(self.repr.copy()), "shape": self.shape.to_json_tree()])
     }
 }
 
@@ -294,12 +294,12 @@ pub struct SymbolFact {
     fn to_json_tree(self) -> DataTree Never! {
         DataTree.Object([
             "effects": pkg_json_texts(self.effects),
-            "id": DataTree.Text(~self.id),
-            "kind": DataTree.Text(~self.kind),
-            "name": DataTree.Text(~self.name),
-            "provenance": DataTree.Text(~self.provenance),
-            "span_id": DataTree.Text(~self.span_id),
-            "type_id": DataTree.Text(~self.type_id)
+            "id": DataTree.Text(self.id.copy()),
+            "kind": DataTree.Text(self.kind.copy()),
+            "name": DataTree.Text(self.name.copy()),
+            "provenance": DataTree.Text(self.provenance.copy()),
+            "span_id": DataTree.Text(self.span_id.copy()),
+            "type_id": DataTree.Text(self.type_id.copy())
         ])
     }
 }
@@ -370,7 +370,7 @@ pub struct TypedSnapshot {
             "host_imports": DataTree.Array(imports),
             "protocol": DataTree.Int(self.protocol),
             "spans": DataTree.Array(spans),
-            "stage": DataTree.Text(~self.stage),
+            "stage": DataTree.Text(self.stage.copy()),
             "symbols": DataTree.Array(symbols),
             "trust": DataTree.Text(self.trust.as_str()),
             "types": DataTree.Array(types)
@@ -423,7 +423,7 @@ pub struct ExtensionFinding {
     pub severity: String
 
     fn to_json_tree(self) -> DataTree Never! {
-        DataTree.Object(["message": DataTree.Text(~self.message), "rule": DataTree.Text(~self.rule), "severity": DataTree.Text(~self.severity), "span_id": DataTree.Text(~self.span_id)])
+        DataTree.Object(["message": DataTree.Text(self.message.copy()), "rule": DataTree.Text(self.rule.copy()), "severity": DataTree.Text(self.severity.copy()), "span_id": DataTree.Text(self.span_id.copy())])
     }
 }
 
@@ -434,7 +434,7 @@ pub struct ExtensionProposedEdit {
     pub rationale: String
 
     fn to_json_tree(self) -> DataTree Never! {
-        DataTree.Object(["rationale": DataTree.Text(~self.rationale), "replacement": DataTree.Text(~self.replacement), "span_id": DataTree.Text(~self.span_id)])
+        DataTree.Object(["rationale": DataTree.Text(self.rationale.copy()), "replacement": DataTree.Text(self.replacement.copy()), "span_id": DataTree.Text(self.span_id.copy())])
     }
 }
 
@@ -567,7 +567,7 @@ pub struct ExtensionSession {
         if self.session_phase != ExtensionSessionPhase.Loaded -> return Err(ExtensionProtocolError.new("stage_response requires a Loaded session"))
         if self.committed -> return Err(ExtensionProtocolError.new("session already committed; open a new session"))
         response :: AnalyzeResponse.decode_and_validate(snapshot, bytes)
-        self.staged_response = Val(~response)
+        self.staged_response = Val(response.copy())
         Ok(response)
     }
 
@@ -580,7 +580,7 @@ pub struct ExtensionSession {
     // The host's explicit accept of staged output.
     fn accept_staged(&self) -> AnalyzeResponse ExtensionProtocolError! {
         if self.session_phase != ExtensionSessionPhase.Loaded -> return Err(ExtensionProtocolError.new("accept requires Loaded session"))
-        staged :: ~self.staged_response ?? return Err(ExtensionProtocolError.new("nothing staged to accept"))
+        staged :: self.staged_response.copy() ?? return Err(ExtensionProtocolError.new("nothing staged to accept"))
         self.staged_response = None
         self.committed = true
         Ok(staged)
@@ -590,7 +590,7 @@ pub struct ExtensionSession {
     // returning what the closer reports (false when no handle was live).
     // Staged output is cleared and the session ends Closed.
     fn close(&self, close_guest: fn(Int) -> Bool Never!) -> Bool Never! {
-        live :: ~self.handle
+        live :: self.handle.copy()
         self.handle = None
         self.staged_response = None
         self.committed = false
@@ -663,7 +663,7 @@ pub fn pkg_extension_message_exposes_rustc(message: String) -> Bool Never! {
 // A failure message with any leaked internal diagnostic replaced.
 fn pkg_extension_public_error(error: ExtensionProtocolError) -> ExtensionProtocolError Never! {
     if pkg_extension_message_exposes_rustc(error.message) -> return ExtensionProtocolError.new(EXTENSION_INTERNAL_FAILURE)
-    ~error
+    error.copy()
 }
 
 // Load, analyze, validate and stage, accept, and close through one supplied
@@ -843,10 +843,10 @@ fn pkg_extension_host_import_json(import: MIRHostImportFact) -> DataTree Never! 
         .None -> DataTree.Null
     }
     DataTree.Object([
-        "id": DataTree.Text(~import.id),
-        "operation": DataTree.Text(~import.operation),
+        "id": DataTree.Text(import.id.copy()),
+        "operation": DataTree.Text(import.operation.copy()),
         "parameter_type_ids": pkg_json_texts(import.parameter_type_ids),
-        "required_right": DataTree.Text(~import.required_right),
+        "required_right": DataTree.Text(import.required_right.copy()),
         "result_type_id": result_type
     ])
 }

@@ -59,7 +59,7 @@ fn fx_static_print(b: &FxBuilder, record: MIRValueID) Never! {
 //   owned := saved; owned.label = "changed"; print(owned.label); print(owned.choice.Text); owned.drop();
 //   print(saved.label); print(saved.choice.Text); reader();
 //   print(greeting); print(greeting == "héllo");
-//   owned_string :: ~greeting; owned_string.drop(); print(greeting);
+//   owned_string :: greeting.copy(); owned_string.drop(); print(greeting);
 // }
 // expect-stdout statics: "frozen\nnested\nfrozen\nnested\nchanged\nnested\nfrozen\nnested\nfrozen\nhéllo\ntrue\nhéllo\n"
 // expect-static-only statics
@@ -128,8 +128,8 @@ fn fx_statics_addresses_module() -> LIRModule Never! {
     p.constants = [MIRConstantDef]{fx_static_record()}
     lowered :: lir_lower_entry(p, mir_function_id("run"))
     if lowered.issues.len() != 0 -> panic("statics-addresses lowering: {lowered.issues[0].message}")
-    lir := ~lowered.lir
-    entry := ~lir.functions[0]
+    lir := lowered.lir.copy()
+    entry := lir.functions[0].copy()
     pointers := [LIRValueID]{}
     roots := [Int]{}
     owners := [LIRValueID]{}

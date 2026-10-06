@@ -429,9 +429,9 @@ pub fn hosts(net: Network) -> [IPv4] Never! {
 }
 
 pub fn interface(text: String) -> IPv4Interface IOError! {
-    network_value :: network(~text) ?? return Err(net_err("invalid interface network"))
+    network_value :: network(text.copy()) ?? return Err(net_err("invalid interface network"))
     slash := -1
-    raw :: (~text).bytes()
+    raw :: (text.copy()).bytes()
     loop i in 0..<raw.len() {
         if raw[i] == (U8{47}) {
             slash = i
@@ -439,7 +439,7 @@ pub fn interface(text: String) -> IPv4Interface IOError! {
         }
     }
     host := text
-    if slash >= 0 -> host = slice_str(~text, 0, slash)
+    if slash >= 0 -> host = slice_str(text.copy(), 0, slash)
     addr :: parse_ipv4(host) ?? return Err(net_err("invalid interface address"))
     Ok(IPv4Interface{addr: addr, network: network_value})
 }

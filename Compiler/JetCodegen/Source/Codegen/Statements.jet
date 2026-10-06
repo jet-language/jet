@@ -2459,10 +2459,10 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, program: JetCodegenP
 }
 
 fn jet_codegen_fallback_join_value(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, source_type: Type, value: MIRValueID) -> MIRValueID Never! {
-    if type_identity_key(source_type) == type_identity_key(expression.ty) -> return ~value
+    if type_identity_key(source_type) == type_identity_key(expression.ty) -> return value.copy()
     // A literal keeps its written nominal name (`Effect`) while a declared
     // slot carries the canonical `module::Effect`; both qualify to one type.
-    if type_identity_key(jet_codegen_qualify_type(source_type, program.modules, builder.function.module_identity, builder.generic_type_names)) == type_identity_key(jet_codegen_qualify_type(expression.ty, program.modules, builder.function.module_identity, builder.generic_type_names)) -> return ~value
+    if type_identity_key(jet_codegen_qualify_type(source_type, program.modules, builder.function.module_identity, builder.generic_type_names)) == type_identity_key(jet_codegen_qualify_type(expression.ty, program.modules, builder.function.module_identity, builder.generic_type_names)) -> return value.copy()
     if expression.ty == {
         .TraitObject(_) -> {
             jet_codegen_require_trait_box_target(expression.ty, builder, program)

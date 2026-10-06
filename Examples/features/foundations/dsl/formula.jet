@@ -67,7 +67,7 @@ pub fn parse(source: String) -> Book? {
             assignment :: line.split_once("=") ?? return None
             name :: assignment.before.trim()
             if name == "" -> return None
-            if cells.get(~name) != None -> return None
+            if cells.get(name.copy()) != None -> return None
             formula :: parse_formula(assignment.after.trim()) ?? return None
             cells.add(name.copy(), formula).drop("formula names are unique")
             &order.push(name)
@@ -84,20 +84,20 @@ pub fn parse(source: String) -> Book? {
 
 fn valid_operand(operand: String, book: Book, visiting: &[String]) -> Bool {
     if Int.parse(operand) == .Val(_) -> return true
-    return valid_cell(operand, ~book, visiting)
+    return valid_cell(operand, book.copy(), visiting)
 }
 
 fn valid_formula(formula: Formula, book: Book, visiting: &[String]) -> Bool {
     if formula.kind == 0 -> return true
-    if formula.kind == 3 -> return valid_operand(formula.left, ~book, visiting)
-    return valid_operand(formula.left, ~book, visiting) && valid_operand(formula.right, ~book, visiting)
+    if formula.kind == 3 -> return valid_operand(formula.left, book.copy(), visiting)
+    return valid_operand(formula.left, book.copy(), visiting) && valid_operand(formula.right, book.copy(), visiting)
 }
 
 fn valid_cell(name: String, book: Book, visiting: &[String]) -> Bool {
-    if visiting.contains(~name) -> return false
-    formula :: book.cells.get(~name) ?? return false
+    if visiting.contains(name.copy()) -> return false
+    formula :: book.cells.get(name.copy()) ?? return false
     &visiting.push(name)
-    result :: valid_formula(~formula, ~book, visiting)
+    result :: valid_formula(formula.copy(), book.copy(), visiting)
     _ :: &visiting.pop()
     return result
 }
@@ -105,7 +105,7 @@ fn valid_cell(name: String, book: Book, visiting: &[String]) -> Bool {
 fn valid_book(book: Book) -> Bool {
     loop name in book.order {
         visiting := [String]{}
-        if !valid_cell(~name, ~book, &visiting) -> return false
+        if !valid_cell(name.copy(), book.copy(), &visiting) -> return false
     }
     return true
 }
@@ -118,7 +118,7 @@ seen: &[String],
 ) -> Bool {
     if Int.parse(operand) == .Val(_) -> return false
     if operand == target -> return true
-    return depends_on_cell(operand, target, ~book, seen)
+    return depends_on_cell(operand, target, book.copy(), seen)
 }
 
 fn depends_on_formula(
@@ -128,8 +128,8 @@ book: Book,
 seen: &[String],
 ) -> Bool {
     if formula.kind == 0 -> return false
-    if formula.kind == 3 -> return depends_on_operand(formula.left, target, ~book, seen)
-    return depends_on_operand(formula.left, target, ~book, seen) || depends_on_operand(formula.right, target, ~book, seen)
+    if formula.kind == 3 -> return depends_on_operand(formula.left, target, book.copy(), seen)
+    return depends_on_operand(formula.left, target, book.copy(), seen) || depends_on_operand(formula.right, target, book.copy(), seen)
 }
 
 fn depends_on_cell(
@@ -138,10 +138,10 @@ target: String,
 book: Book,
 seen: &[String],
 ) -> Bool {
-    if seen.contains(~name) -> return false
-    formula :: book.cells.get(~name) ?? return false
+    if seen.contains(name.copy()) -> return false
+    formula :: book.cells.get(name.copy()) ?? return false
     &seen.push(name)
-    result :: depends_on_formula(~formula, target, ~book, seen)
+    result :: depends_on_formula(formula.copy(), target, book.copy(), seen)
     _ :: &seen.pop()
     return result
 }
@@ -153,7 +153,7 @@ values: &[String:Int],
 visiting: &[String],
 ) -> Int? {
     if Int.parse(operand) == .Val(value) -> return Val(value)
-    return eval_cell(operand, ~book, values, visiting)
+    return eval_cell(operand, book.copy(), values, visiting)
 }
 
 fn eval_cell(
@@ -162,20 +162,20 @@ book: Book,
 values: &[String:Int],
 visiting: &[String],
 ) -> Int? {
-    if values.get(~name) == .Val(cached) -> return Val(cached)
-    if visiting.contains(~name) -> return None
-    formula :: book.cells.get(~name) ?? return None
+    if values.get(name.copy()) == .Val(cached) -> return Val(cached)
+    if visiting.contains(name.copy()) -> return None
+    formula :: book.cells.get(name.copy()) ?? return None
     &visiting.push(name)
     value :: if formula.kind == 0 -> {
         Val(formula.value)
     } else if formula.kind == 3 -> {
-        resolve_operand(formula.left, ~book, values, visiting)
+        resolve_operand(formula.left, book.copy(), values, visiting)
     } else -> {
-        left :: resolve_operand(formula.left, ~book, values, visiting) ?? {
+        left :: resolve_operand(formula.left, book.copy(), values, visiting) ?? {
             _ :: &visiting.pop()
             return None
         }
-        right :: resolve_operand(formula.right, ~book, values, visiting) ?? {
+        right :: resolve_operand(formula.right, book.copy(), values, visiting) ?? {
             _ :: &visiting.pop()
             return None
         }
@@ -198,22 +198,22 @@ previous: [String:Int],
 changed: String,
 new_value: Int,
 ) -> Recalc? {
-    if book.cells.get(~changed) == .None -> return None
-    if !valid_book(~book) -> return None
+    if book.cells.get(changed.copy()) == .None -> return None
+    if !valid_book(book.copy()) -> return None
 
     dirty := [String:Bool]{}
     loop name in book.order {
-        formula :: book.cells.get(~name) ?? return None
+        formula :: book.cells.get(name.copy()) ?? return None
         seen := [String]{}
-        affected :: name == changed || depends_on_formula(~formula, changed, ~book, seen)
+        affected :: name == changed || depends_on_formula(formula.copy(), changed, book.copy(), seen)
         dirty.add(name, affected).drop("dirty cell set")
     }
 
     values := [String:Int]{}
     loop name in book.order {
-        is_dirty :: dirty.get(~name) ?? false
+        is_dirty :: dirty.get(name.copy()) ?? false
         if !is_dirty {
-            if previous.get(~name) == .Val(old) {
+            if previous.get(name.copy()) == .Val(old) {
                 values.add(name, old).drop("previous formula value")
             }
         }
@@ -222,10 +222,10 @@ new_value: Int,
 
     touched := [String]{}
     loop name in book.order {
-        is_dirty :: dirty.get(~name) ?? false
+        is_dirty :: dirty.get(name.copy()) ?? false
         if is_dirty {
             visiting := [String]{}
-            if eval_cell(~name, ~book, &values, &visiting) == .None -> return None
+            if eval_cell(name.copy(), book.copy(), &values, &visiting) == .None -> return None
             &touched.push(name)
         }
     }

@@ -511,8 +511,8 @@ fn radix_digit(b: U8, base: Int) -> Int Never! {
 }
 
 fn ensure_table_path(entries: [String:DataTree], path: [String], i: Int) -> [String:DataTree] Never! {
-    if i >= path.len() -> return ~entries
-    out := ~entries
+    if i >= path.len() -> return entries.copy()
+    out := entries.copy()
     key :: path[i]
     if i == path.len() - 1 {
         if out.get(key) == .None -> _ :: &out.add(key, DataTree.Object([String:DataTree]{}))
@@ -534,7 +534,7 @@ fn ensure_table_path(entries: [String:DataTree], path: [String], i: Int) -> [Str
                             else -> { _ := 0 }
                         }
                     }
-                    array_items = ~items
+                    array_items = items.copy()
                 }
                 else -> { _ := 0 }
             }
@@ -556,8 +556,8 @@ fn ensure_table_path(entries: [String:DataTree], path: [String], i: Int) -> [Str
 }
 
 fn ensure_array_path(entries: [String:DataTree], path: [String], i: Int) -> [String:DataTree] Never! {
-    if i >= path.len() -> return ~entries
-    out := ~entries
+    if i >= path.len() -> return entries.copy()
+    out := entries.copy()
     key :: path[i]
     if i == path.len() - 1 {
         item := DataTree.Object([String:DataTree]{})
@@ -565,7 +565,7 @@ fn ensure_array_path(entries: [String:DataTree], path: [String], i: Int) -> [Str
             .Val(existing) -> {
                 if existing == {
                     .Array(items) -> {
-                        mutable := ~items
+                        mutable := items.copy()
                         &mutable.push(item)
                         _ :: &out.add(key, DataTree.Array(mutable))
                     }
@@ -595,7 +595,7 @@ fn ensure_array_path(entries: [String:DataTree], path: [String], i: Int) -> [Str
                             else -> { _ := 0 }
                         }
                     }
-                    array_items = ~items
+                    array_items = items.copy()
                 }
                 else -> { _ := 0 }
             }
@@ -636,7 +636,7 @@ fn has_path(entries: [String:DataTree], path: [String], i: Int) -> Bool Never! {
 }
 
 fn put_path(entries: [String:DataTree], path: [String], i: Int, value: DataTree) -> [String:DataTree] Never! {
-    out := ~entries
+    out := entries.copy()
     key :: path[i]
     if i == path.len() - 1 {
         _ :: &out.add(key, value)
@@ -649,7 +649,7 @@ fn put_path(entries: [String:DataTree], path: [String], i: Int, value: DataTree)
                 .Object(obj) -> child = obj
                 .Array(items) -> {
                     if items.len() > 0 {
-                        mutable := ~items
+                        mutable := items.copy()
                         last_index := mutable.len() - 1
                         if mutable[last_index] == {
                             .Object(obj) -> {
@@ -740,7 +740,7 @@ fn toml_key(key: String) -> String {
                 valid = false
             }
         }
-        if valid -> return ~key
+        if valid -> return key.copy()
     }
     toml_quote(key)
 }

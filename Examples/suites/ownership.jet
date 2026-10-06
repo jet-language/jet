@@ -3,7 +3,7 @@
 //
 // Anti-pattern from the dogfood port: treat every derived slice as a new owner,
 // or hide repeated view materialization inside a hot loop. Rule D-MEM1:
-// derived reads reuse their owner; write `~` at an intentional owning boundary.
+// derived reads reuse their owner; write `.copy()` at an intentional owning boundary.
 // The loop below is also the cost-view proof site:
 // `jet explain --cost Examples/suites/ownership.jet` reports its view
 // materialization with the shared-TIR tier label.
@@ -15,12 +15,12 @@ fn run() {
     print("domain:{domain}")
     print("source:{source}")
 
-    // `~` makes the view-to-owned boundary explicit once.
-    owned_domain :: ~domain
+    // `.copy()` makes the view-to-owned boundary explicit once.
+    owned_domain :: domain.copy()
     print("owned:{owned_domain}")
 
     // Anti-pattern: this repeated owning push is intentionally visible to the
-    // cost view. Keep the `~` boundary outside the loop when ownership is needed.
+    // cost view. Keep the `.copy()` boundary outside the loop when ownership is needed.
     copies := [String]{}
     loop _ in 0..<2 -> &copies.push(domain)
     print("reused:{copies.len()}")

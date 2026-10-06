@@ -335,7 +335,7 @@ module complete<T>(count: Int, label: String) {
     #Target(OS.Linux)
     impl Wrapped { fn linux_value(self) -> T { return self.value } }
     module plain { pub fn value() -> Int { return count } }
-    module nested<U> { pub fn keep(value: U) -> U { return ~value } }
+    module nested<U> { pub fn keep(value: U) -> U { return value.copy() } }
     module nested_use :: nested<T>
     #Meta(category: label)
     pub fn marked(value: ^#Marked T) -> #Marked T {

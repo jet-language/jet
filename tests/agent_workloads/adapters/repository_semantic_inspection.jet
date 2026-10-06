@@ -10,7 +10,7 @@ fn run(args: WorkloadArgs) {
     root :: args.root
     jet :: env.get("JET_CORPUS_JET") ?? panic("missing Jet CLI")
     source := "{root}/project/examples/main.jet"
-    result :: process.cmd([String]{~jet, "inspect", "semindex", source})
+    result :: process.cmd([String]{jet.copy(), "inspect", "semindex", source})
         .stdout(.Capture)
         .stderr(.Capture)
         .timeout(Duration.seconds(30) ?? panic("bad timeout"))

@@ -2057,7 +2057,7 @@ fn load(id: U64) -> Record StoreError! {
     #Unsafe("store_load receives a live non-null slot; bytes are read only after status zero") {
         p :: mem.Ptr<Record>.from_addr(mem.address_of(slot))
         status = store.store_load(id, p)
-        if Int.from_i32(status) == 0 { slot = ~p.* }
+        if Int.from_i32(status) == 0 { slot = p.copy().* }
     }
     if Int.from_i32(status) != 0 { return Err(StoreError.Status) }
     return Ok(slot)

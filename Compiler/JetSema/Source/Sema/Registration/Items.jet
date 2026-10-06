@@ -626,7 +626,7 @@ fn sema_registration_function_identity_key(module_identity: String, owner_key: S
 }
 
 fn sema_registration_generic_identity(owner_key: String, params: [SemaRegistrationGenericParam]) -> String Never! {
-    if params.len() == 0 -> return ~owner_key
+    if params.len() == 0 -> return owner_key.copy()
     parts :: loop parameter in params -> {
         bound :: parameter.bounds.join("+")
         "{parameter.index}:{parameter.name}[{bound}]"
@@ -948,7 +948,7 @@ pub fn sema_registration_callable_declaration(graph: SemaRegistrationGraph, targ
 // buckets. Rows only append, so a key already present keeps its earlier row.
 pub fn sema_registration_index_nominal_rows(graph: &SemaRegistrationGraph, module_index: Int, first_row: Int) Never! {
     loop row in first_row..<graph.modules[module_index].nominals.len() {
-        key :: ~graph.modules[module_index].nominals[row].symbol.id.key
+        key :: graph.modules[module_index].nominals[row].symbol.id.key.copy()
         if graph.nominal_symbol_rows.get(key) == None -> &graph.nominal_symbol_rows.add(key, SemaRegistrationRowRef{module_index: module_index, row: row}).drop("checked absent above")
     }
     sema_registration_index_nominal_names(&graph, module_index, first_row)
@@ -1013,7 +1013,7 @@ fn sema_registration_index_callables(graph: &SemaRegistrationGraph) Never! {
     loop module_index in 0..<graph.modules.len() {
         sema_registration_index_nominal_names(&graph, module_index, 0)
         loop row in 0..<graph.modules[module_index].impls.len() {
-            name :: ~graph.modules[module_index].impls[row].target_type_name
+            name :: graph.modules[module_index].impls[row].target_type_name.copy()
             reference :: SemaRegistrationRowRef{module_index: module_index, row: row}
             if graph.impl_row_slots.get(name) == .Val(slot) {
                 &graph.impl_row_buckets[slot].push(reference)
@@ -1932,11 +1932,11 @@ fn sema_registration_prepare_module_row(input: SemaRegistrationModuleInput, temp
     // derive templates into compiler-generated trait blocks before any
     // declaration, impl, or known-time value is registered.
     sema_derive_expand_builtin_items(&module_row.program.items, &diagnostics)
-    row_source_file :: ~module_row.source_file
-    row_source_origin :: ~module_row.source_origin
-    row_source_segments :: ~module_row.source_segments
+    row_source_file :: module_row.source_file.copy()
+    row_source_origin :: module_row.source_origin.copy()
+    row_source_segments :: module_row.source_segments.copy()
     loop index in 0..<module_row.program.items.len() {
-        item :: ~module_row.program.items[index]
+        item :: module_row.program.items[index].copy()
         if !sema_registration_add_root(&module_row, item, row_source_file, row_source_origin, row_source_segments, &diagnostics) {
             // The first declaration remains the lookup winner after a collision.
         }
@@ -1945,7 +1945,7 @@ fn sema_registration_prepare_module_row(input: SemaRegistrationModuleInput, temp
     // copied row would carry its whole source declaration).
     loop nominal_index in 0..<module_row.nominals.len() {
         if module_row.nominals[nominal_index].kind != SemaRegistrationNominalKind.ForeignHandle -> next
-        source :: ~module_row.nominals[nominal_index].source
+        source :: module_row.nominals[nominal_index].source.copy()
         if source == .ForeignHandle(facts) {
             updated_facts := facts
             updated_facts.close_function_key = sema_registration_foreign_handle_close_key(module_row, updated_facts)
@@ -1953,13 +1953,13 @@ fn sema_registration_prepare_module_row(input: SemaRegistrationModuleInput, temp
         }
     }
     loop index in 0..<module_row.program.items.len() {
-        item :: ~module_row.program.items[index]
+        item :: module_row.program.items[index].copy()
         sema_registration_add_impl(&module_row, item, &diagnostics)
     }
     // Root exports are retained separately so private declarations never become
     // cross-module candidates merely because their name is known.
     loop symbol_index in 0..<module_row.symbols.len() {
-        symbol :: ~module_row.symbols[symbol_index]
+        symbol :: module_row.symbols[symbol_index].copy()
         if symbol.visibility > 0 {
             declaration :: sema_registration_declaration_for_symbol(module_row, symbol)
             &module_row.exports.push(SemaRegistrationExport{name: symbol.name, symbol: symbol, declaration: declaration, source_module_identity: module_row.module_identity, visibility: symbol.visibility})
@@ -2000,7 +2000,7 @@ fn sema_registration_module_name(graph: SemaRegistrationGraph, identity: String)
 fn sema_registration_push_graph_diagnostic(graph: &SemaRegistrationGraph, module_index: Int, diagnostic: Diagnostic) Never! {
     if {
         module_index >= 0 && module_index < graph.modules.len() -> {
-            &graph.diagnostics.push(sema_diagnostic_with_source_location(~diagnostic, graph.modules[module_index].source_segments))
+            &graph.diagnostics.push(sema_diagnostic_with_source_location(diagnostic.copy(), graph.modules[module_index].source_segments))
         }
         else -> {
             &graph.diagnostics.push(diagnostic)
@@ -2112,7 +2112,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
             sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0003", declaration.span, "the import target is not in the declaration graph", "qualified imports resolve through the exact loaded module identity", "retain the loader's source and module identity for this import"))
             next
         }
-        target :: ~graph.modules[target_index]
+        target :: graph.modules[target_index].copy()
         if declaration.kind == {
             .Unqualified(_, _, items, _, _) -> loop item in items {
                 local :: sema_registration_import_local(item)
@@ -2252,7 +2252,7 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     canonical_effect_index :: sema_registration_module_index(graph, canonical_effect_module_identity)
     if canonical_effect_index == {
         .Val(effect_module_index) -> {
-            effect_module :: ~graph.modules[effect_module_index]
+            effect_module :: graph.modules[effect_module_index].copy()
             if effect_module.package_identity != JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || effect_module.module_path != JET_CANONICAL_EFFECT_MODULE_PATH {
                 graph.internal_problem = Val("the canonical Prelude effect module identity does not match its pinned source owner")
                 graph.complete = false

@@ -73,7 +73,7 @@ pub fn load<T>(key: &KeyRef<T>) -[Secret]> T VaultError! {
 }
 
 pub fn current<T>(name: String) -[Secret]> KeyRef<T>? VaultError! {
-    validate_name(~name) ?? return Err(VaultError.Unauthorized)
+    validate_name(name.copy()) ?? return Err(VaultError.Unauthorized)
     #Unsafe("vault typed current provider boundary") {
         return vault.current<T>(name)
     }
@@ -87,28 +87,28 @@ pub fn status<T>(key: &KeyRef<T>) -[Secret]> KeyStatus VaultError! {
 }
 
 pub fn versions<T>(name: String) -[Secret]> [KeyRef<T>] VaultError! {
-    validate_name(~name) ?? return Err(VaultError.Unauthorized)
+    validate_name(name.copy()) ?? return Err(VaultError.Unauthorized)
     #Unsafe("vault typed versions provider boundary") {
         return vault.versions<T>(name)
     }
 }
 
 pub fn prepare_generate<T>(name: String) -[Secret]> MutationPlan<T> VaultError! {
-    validate_name(~name) ?? return Err(VaultError.Unauthorized)
+    validate_name(name.copy()) ?? return Err(VaultError.Unauthorized)
     #Unsafe("vault typed generation provider boundary") {
         return vault.prepare_generate<T>(name)
     }
 }
 
 pub fn prepare_store<T>(name: String, key: ^T) -[Secret]> MutationPlan<T> VaultError! {
-    validate_name(~name) ?? return Err(VaultError.Unauthorized)
+    validate_name(name.copy()) ?? return Err(VaultError.Unauthorized)
     #Unsafe("vault typed store provider boundary") {
         return vault.prepare_store<T>(name, ^key)
     }
 }
 
 pub fn prepare_import_signing(name: String, bytes: ^[U8]) -[Secret]> MutationPlan<SigningKey> VaultError! {
-    validate_name(~name) ?? return Err(VaultError.Unauthorized)
+    validate_name(name.copy()) ?? return Err(VaultError.Unauthorized)
     if bytes.len() != 32 -> return Err(VaultError.Corrupt)
     #Unsafe("vault key import: signing key material") {
         return vault.prepare_import_signing(name, ^bytes)
@@ -116,7 +116,7 @@ pub fn prepare_import_signing(name: String, bytes: ^[U8]) -[Secret]> MutationPla
 }
 
 pub fn prepare_import_x25519(name: String, bytes: ^[U8]) -[Secret]> MutationPlan<X25519SecretKey> VaultError! {
-    validate_name(~name) ?? return Err(VaultError.Unauthorized)
+    validate_name(name.copy()) ?? return Err(VaultError.Unauthorized)
     if bytes.len() != 32 -> return Err(VaultError.Corrupt)
     #Unsafe("vault key import: X25519 secret material") {
         return vault.prepare_import_x25519(name, ^bytes)
@@ -124,7 +124,7 @@ pub fn prepare_import_x25519(name: String, bytes: ^[U8]) -[Secret]> MutationPlan
 }
 
 pub fn prepare_import_wrapped<T>(name: String, wrapped: WrappedVaultKey, unlock: KeyUnlock) -[Secret]> WrappedImportPlan<T> KeyWrapError! {
-    validate_name(~name) ?? return Err(KeyWrapError{reason: "invalid vault key name"})
+    validate_name(name.copy()) ?? return Err(KeyWrapError{reason: "invalid vault key name"})
     if wrapped.bytes.len() < 16 || wrapped.bytes.len() > 8192 -> return Err(KeyWrapError{reason: "invalid wrapped key length"})
     #Unsafe("vault wrapped import provider boundary") {
         return vault.prepare_import_wrapped<T>(name, wrapped, unlock)
@@ -132,7 +132,7 @@ pub fn prepare_import_wrapped<T>(name: String, wrapped: WrappedVaultKey, unlock:
 }
 
 pub fn prepare_rotate<T>(name: String) -[Secret]> MutationPlan<T> VaultError! {
-    validate_name(~name) ?? return Err(VaultError.Unauthorized)
+    validate_name(name.copy()) ?? return Err(VaultError.Unauthorized)
     #Unsafe("vault typed rotation provider boundary") {
         return vault.prepare_rotate<T>(name)
     }
@@ -140,7 +140,7 @@ pub fn prepare_rotate<T>(name: String) -[Secret]> MutationPlan<T> VaultError! {
 
 pub fn prepare_retire<T>(key: &KeyRef<T>, reason: String) -[Secret]> MutationPlan<T> VaultError! {
     validate_key<T>(key) ?? return Err(VaultError.Unauthorized)
-    validate_reason(~reason) ?? return Err(VaultError.Unauthorized)
+    validate_reason(reason.copy()) ?? return Err(VaultError.Unauthorized)
     #Unsafe("vault typed retirement provider boundary") {
         return vault.prepare_retire<T>(key, reason)
     }
@@ -148,7 +148,7 @@ pub fn prepare_retire<T>(key: &KeyRef<T>, reason: String) -[Secret]> MutationPla
 
 pub fn prepare_revoke<T>(key: &KeyRef<T>, reason: String) -[Secret]> MutationPlan<T> VaultError! {
     validate_key<T>(key) ?? return Err(VaultError.Unauthorized)
-    validate_reason(~reason) ?? return Err(VaultError.Unauthorized)
+    validate_reason(reason.copy()) ?? return Err(VaultError.Unauthorized)
     #Unsafe("vault typed revocation provider boundary") {
         return vault.prepare_revoke<T>(key, reason)
     }
@@ -156,7 +156,7 @@ pub fn prepare_revoke<T>(key: &KeyRef<T>, reason: String) -[Secret]> MutationPla
 
 pub fn authorize_write<T>(plan: &MutationPlan<T>, reason: String) -[Secret]> VaultWrite<T> VaultError! {
     validate_plan<T>(plan) ?? return Err(VaultError.Unauthorized)
-    validate_reason(~reason) ?? return Err(VaultError.Unauthorized)
+    validate_reason(reason.copy()) ?? return Err(VaultError.Unauthorized)
     #Unsafe("vault write authorization provider boundary") {
         return vault.authorize_write<T>(&plan, reason)
     }
@@ -164,7 +164,7 @@ pub fn authorize_write<T>(plan: &MutationPlan<T>, reason: String) -[Secret]> Vau
 
 pub fn authorize_wrapped_import<T>(plan: &WrappedImportPlan<T>, reason: String) -[Secret]> VaultWrite<T> KeyWrapError! {
     validate_wrapped_plan<T>(plan) ?? return Err(KeyWrapError{reason: "invalid wrapped import plan"})
-    validate_reason(~reason) ?? return Err(KeyWrapError{reason: "invalid authorization reason"})
+    validate_reason(reason.copy()) ?? return Err(KeyWrapError{reason: "invalid authorization reason"})
     #Unsafe("vault wrapped authorization provider boundary") {
         return vault.authorize_wrapped_import<T>(plan, reason)
     }
@@ -276,13 +276,13 @@ fn same_text(left: String, right: String) -> Bool Never! {
 fn validate_name(name: String) -> Bool? {
     if name.len() == 0 || name.len() > 128 -> return None
     trimmed :: name.trim()
-    trim_ok :: same_text(~name, trimmed)
-    dot :: same_text(~name, ".")
-    dotdot :: same_text(~name, "..")
+    trim_ok :: same_text(name.copy(), trimmed)
+    dot :: same_text(name.copy(), ".")
+    dotdot :: same_text(name.copy(), "..")
     if trim_ok == false || dot || dotdot -> return None
-    name_copy :: ~name
+    name_copy :: name.copy()
     nfc :: unicode.nfc(name_copy) ?? return None
-    if same_text(~name, nfc) == false -> return None
+    if same_text(name.copy(), nfc) == false -> return None
     loop b in name.bytes() {
         n :: Int.from_u8(b)
         if n < 32 || n == 47 || n == 92 || n == 127 -> return None
@@ -292,7 +292,7 @@ fn validate_name(name: String) -> Bool? {
 fn validate_reason(reason: String) -> Bool? {
     if reason.len() == 0 || reason.len() > 256 -> return None
     trimmed :: reason.trim()
-    if same_text(~reason, trimmed) == false -> return None
+    if same_text(reason.copy(), trimmed) == false -> return None
     raw := reason.bytes()
     loop i in 0..<raw.len() {
         n :: Int.from_u8(raw[i])
@@ -307,15 +307,15 @@ fn validate_reason(reason: String) -> Bool? {
 
 fn validate_key<T>(key: KeyRef<T>) -> Bool? {
     if key.version < 1 || key.version > 18446744073709551615 -> return None
-    validate_name(~key.name)
+    validate_name(key.name.copy())
 }
 
 fn validate_plan<T>(plan: MutationPlan<T>) -> Bool? {
-    validate_carrier(~plan.json)
+    validate_carrier(plan.json.copy())
 }
 
 fn validate_wrapped_plan<T>(plan: WrappedImportPlan<T>) -> Bool? {
-    validate_carrier(~plan.json)
+    validate_carrier(plan.json.copy())
 }
 
 fn validate_write<T>(write: VaultWrite<T>) -> Bool? {

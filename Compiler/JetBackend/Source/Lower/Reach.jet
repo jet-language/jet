@@ -46,7 +46,7 @@ fn lower_reach_constant(q: &LowerPrepared, value: MIRConstant, parent: Int) Neve
 
 fn lower_reach_id(q: &LowerPrepared, id: U64, parent: Int) Never! {
     row :: q.checked_types.rows.get(id) ?? return
-    ty :: ~q.checked_types.types[row]
+    ty :: q.checked_types.types[row].copy()
     lower_mono_intern_type(&q, ty, parent)
 }
 

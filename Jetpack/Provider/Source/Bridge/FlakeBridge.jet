@@ -321,7 +321,7 @@ fn provider_bridge_commit_graph(theme: Theme, dir: String, flake_path: String, g
             theme.error("couldn't identify a package system", "{output.name} has no supported system-qualified package output", "write the package under `packages.<system>.<name>`, then run `jet os bridge flake` again.")
             return Val(1)
         }
-        if nix_evaluate_derivation_output_with_import_authority(source, output.system, output.attribute, ^Val(~authority)) == {
+        if nix_evaluate_derivation_output_with_import_authority(source, output.system, output.attribute, ^Val(authority.copy())) == {
             .Ok(derivation) -> &derivations.push((name: output.name, system: output.system, derivation: derivation))
             .Err(error) -> {
                 if output.system != system {

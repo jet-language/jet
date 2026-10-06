@@ -49,7 +49,7 @@ pub struct Auth {
 }
 
 pub fn verify_jwt(token: String, key: [U8], audience: String, issuer: String, clock_skew: Duration) -[Time]> Claims AuthError! {
-    token_raw :: (~token).bytes()
+    token_raw :: (token.copy()).bytes()
     if token_raw.len() == 0 || token_raw.len() > 1048576 -> return Err(AuthError.Malformed)
     if key.len() < 32 -> return Err(AuthError.Rejected)
     if clock_skew.ns < 0 -> return Err(AuthError.Malformed)
@@ -103,7 +103,7 @@ pub fn verify_jwt(token: String, key: [U8], audience: String, issuer: String, cl
 }
 
 pub fn verify_paseto(token: String, key: [U8], audience: String) -[Time]> Claims AuthError! {
-    token_raw :: (~token).bytes()
+    token_raw :: (token.copy()).bytes()
     if token_raw.len() == 0 || token_raw.len() > 1048576 -> return Err(AuthError.Malformed)
     if key.len() != 32 || audience.len() == 0 || has_control(audience) || audience != trim_ascii(audience) {
         return Err(AuthError.Rejected)
@@ -154,10 +154,10 @@ pub fn verify_paseto(token: String, key: [U8], audience: String) -[Time]> Claims
 
 pub fn register_user(name: String, password: String) -[Rand, DB, Time]> Session AuthError! {
     if !valid_identity(name) || !valid_password_hash(password) -> return Err(AuthError.Rejected)
-    core.auth.register_user(~name, ~password) ?? return Err(AuthError.Rejected)
+    core.auth.register_user(name.copy(), password.copy()) ?? return Err(AuthError.Rejected)
     ttl := 86400
     now :: host_unix_s()
-    native :: core.auth.password_login(~name, ~password, now * 1000, ttl * 1000) ?? return Err(AuthError.Unavailable)
+    native :: core.auth.password_login(name.copy(), password.copy(), now * 1000, ttl * 1000) ?? return Err(AuthError.Unavailable)
     Ok(Session{
         id: core.auth.session_id(native),
         user_id: core.auth.session_user(native),
@@ -171,7 +171,7 @@ pub fn password_login(name: String, password: String, ttl_s: Int, flags: Int) -[
     if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
     if flags != 0 -> return Err(AuthError.Malformed)
     now :: host_unix_s()
-    native :: core.auth.password_login(~name, ~password, now * 1000, ttl_s * 1000) ?? return Err(AuthError.Rejected)
+    native :: core.auth.password_login(name.copy(), password.copy(), now * 1000, ttl_s * 1000) ?? return Err(AuthError.Rejected)
     user :: core.auth.session_user(native)
     cookie :: core.auth.session_cookie(native)
     id :: core.auth.session_id(native)
@@ -241,8 +241,8 @@ pub fn session_validate(cookie: String, ttl_s: Int) -[DB, Time]> Session AuthErr
 }
 fn session_id_from_cookie(cookie: String) -> String? {
     prefix := "jet_session="
-    if !starts(~cookie, prefix) -> return None
-    cookie_raw :: (~cookie).bytes()
+    if !starts(cookie.copy(), prefix) -> return None
+    cookie_raw :: (cookie.copy()).bytes()
     raw :: slice_u8(cookie_raw, prefix.bytes().len(), cookie_raw.len())
     semi := index_byte(raw, (U8{59}))
     if semi < 1 -> return None
@@ -267,7 +267,7 @@ pub fn session_show(session: Session) -> String Never! {
 
 
 fn b64url(text: String) -> [U8]? {
-    raw :: (~text).bytes()
+    raw :: (text.copy()).bytes()
     if raw.len() == 0 || raw.len() %% 4 == 1 -> return None
     decode_url_local(text)
 }
@@ -442,7 +442,7 @@ fn slice_u8(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     i := start
     loop {
-        if i >= end || i >= bytes.len() -> return ~out
+        if i >= end || i >= bytes.len() -> return out.copy()
         &out.push(bytes[i])
         i = i + 1
     }

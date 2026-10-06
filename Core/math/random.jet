@@ -130,12 +130,12 @@ pub fn bool() -[Rand]> Bool Never! { (next_bits63() % 2) == 1 }
 /// Seeded pseudo-random bytes. Negative lengths are an empty request.
 pub fn bytes(n: Int) -[Rand]> [U8] Never! {
     out := [U8]{}
-    if n <= 0 -> return ~out
+    if n <= 0 -> return out.copy()
     loop {
-        if out.len() >= n -> return ~out
+        if out.len() >= n -> return out.copy()
         word :: full_word64()
         loop k in 0..<8 {
-            if out.len() >= n -> return ~out
+            if out.len() >= n -> return out.copy()
             &out.push(to_u8(word >> (k * 8)))
         }
     }
