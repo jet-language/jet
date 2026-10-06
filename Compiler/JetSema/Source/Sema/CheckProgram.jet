@@ -1800,21 +1800,26 @@ fn sema_check_view_summaries(graph: SemaRegistrationGraph, source_module: SemaRe
     }
 }
 
-// SP15: a module's top-level function bodies checked on compiler threads.
-// The parallel pass (sema_check_bodies_parallel) checks every body
-// sema_check_parallel_jobs selects against the module scope as it stands
-// after the view summaries, each thread on its own copy of that scope and
-// all of them on the one shared environment. The module's serial body loop
-// then takes each prepared result in item order instead of checking the
-// function again (sema_check_module_function). It checks a function itself
-// when the prepared result no longer applies: an earlier body published a
-// return view that changed the module scope, or the check wanted a host
-// callback, which never runs on a compiler thread. Reports, facts and
-// functions are appended in item order either way, so the module result is
-// the same for any thread count.
-// `checked` is optional only so the body loop can move it out
-// (sema_check_module_function); every prepared body has one.
+// SP15: top-level function bodies checked on compiler threads. The pass
+// walks its modules in waves (sema_check_wave_plan): consecutive modules whose
+// bodies together are enough work for the admitted threads, so a program of
+// many small modules runs on threads too, and one large module is a wave of
+// its own. The wave's parallel pass (sema_check_bodies_parallel) checks every
+// body sema_check_parallel_jobs selects against its module's scope as it
+// stands after the view summaries, each thread on its own copy of that scope
+// and on the module's environment, all of them on the one shared graph. Each
+// module's serial body loop then takes each prepared result in item order
+// instead of checking the function again (sema_check_module_function). It
+// checks a function itself when the prepared result no longer applies: an
+// earlier body published a return view that changed the module scope, or the
+// check wanted a host callback, which never runs on a compiler thread.
+// Reports, facts and functions are appended in item order either way, so the
+// module result is the same for any thread count.
+// `position` is the body's module row in its wave. `checked` is optional
+// only so the body loop can move it out (sema_check_module_function); every
+// prepared body has one.
 struct SemaParallelBody {
+    position: Int
     item_index: Int
     checked: SemaFunctionResult?
     diagnostics: [Diagnostic]
@@ -1856,25 +1861,58 @@ fn sema_check_module_function(ready: &[SemaParallelBody], item_index: Int, scope
 }
 
 // A compiler thread is admitted for at least this many bytes of function
-// source, so a small module checks its bodies on the calling thread.
+// source, so a small program checks its bodies on the calling thread.
 SEMA_BODY_MIN_BYTES_PER_THREAD :: 32768
 // Estimated bytes of one thread's copy of the module scope, per module item.
 SEMA_BODY_SCOPE_BYTES_PER_ITEM :: 4096
+// A wave gathers modules until its function source covers this many minimum
+// shares of every thread the pass may use, so each thread gets several jobs
+// to balance; and at most SEMA_BODY_WAVE_MODULES modules, whose post-summary
+// scopes it holds at once.
+SEMA_BODY_WAVE_SHARES :: 4
+SEMA_BODY_WAVE_MODULES :: 256
 
-// What every body-check thread of a module reads: the pass environment,
-// program tables and memory plan, each moved in as the one row of its list
-// for the pass and moved out between modules, so none is copied.
+// What every body-check thread reads: the pass environment, program tables
+// and memory plan, each moved in as the one row of its list for the pass and
+// moved out between modules, so none is copied.
 struct SemaCheckShared {
     environments: [SemaScopeEnvironment]
     programs: [SemaProgramTables]
     memory_plans: [SemaFunctionMemoryPlan]
 }
 
-// One thread's part of a module's bodies: its own copy of the post-summary
-// module scope, the item indexes it checks in order, and their bodies.
-struct SemaBodyPart {
+// One parallel job: the top-level function at `item_index` of the wave's
+// module row `position`.
+struct SemaBodyJob {
+    position: Int
+    item_index: Int
+}
+
+// The wave of modules `selected[start..<end]` (sema_check_wave_plan): its
+// jobs in module and item order, each job's source bytes, and the admitted
+// threads (1: the wave's modules check serially).
+struct SemaBodyWavePlan {
+    end: Int
+    jobs: [SemaBodyJob]
+    weights: [Int]
+    workers: Int
+}
+
+// One module of a wave as its threads read it: the environment entered in
+// the module and its post-summary module scope.
+struct SemaBodyWaveModule {
+    module_index: Int
+    environment: SemaScopeEnvironment
     scopes: SemaScopeTable
-    items: [Int]
+}
+
+struct SemaBodyWave {
+    modules: [SemaBodyWaveModule]
+}
+
+// One thread's part of a wave: its jobs in order and their bodies.
+struct SemaBodyPart {
+    jobs: [SemaBodyJob]
     bodies: [SemaParallelBody]
 }
 
@@ -1916,77 +1954,181 @@ fn sema_check_module_summary_scopes(environment: &SemaScopeEnvironment, program:
     scopes
 }
 
-// The parallel body pass of module `module_index` on `workers` threads:
-// `jobs` (sema_check_parallel_jobs) cut into consecutive parts by `weights`,
-// one part per thread, each part checked in item order on its own copy of
-// `scopes` against the environment and memory plan in `shared`.
-fn sema_check_bodies_parallel(shared: Shared<SemaCheckShared>, module_index: Int, scopes: ^SemaScopeTable, jobs: [Int], weights: [Int], workers: Int) -> SemaPreparedBodies {
+// The wave of the pass's modules that starts at `selected[start]`: following
+// modules join while the wave's function source is below
+// SEMA_BODY_WAVE_SHARES minimum shares of every thread the pass may use and
+// it holds fewer than SEMA_BODY_WAVE_MODULES modules. With per-function
+// tracing every module is a serial wave of its own, so each check is timed
+// where it runs.
+fn sema_check_wave_plan(program: SemaProgramTables, selected: [Int], start: Int, comptime_rows: [String:Int], trace_functions: Bool, threads: CompilerThreads) -> SemaBodyWavePlan {
+    plan := SemaBodyWavePlan{end: start + 1, jobs: [SemaBodyJob]{}, weights: [Int]{}, workers: 1}
+    if trace_functions -> return plan
+    graph :: program.registration_graph ?? panic("the body-check pass lost its registration graph")
+    most :: compiler_threads_admit(threads, threads.cores, threads.cores * SEMA_BODY_MIN_BYTES_PER_THREAD, SEMA_BODY_MIN_BYTES_PER_THREAD, 0, 0)
+    target :: most * SEMA_BODY_MIN_BYTES_PER_THREAD * SEMA_BODY_WAVE_SHARES
+    plan.end = start
+    work := 0
+    scope_items := 0
+    largest := 0
+    loop plan.end < selected.len() && (plan.end == start || (work < target && plan.end - start < SEMA_BODY_WAVE_MODULES)) {
+        module_index :: selected[plan.end]
+        weights := [Int]{}
+        items :: sema_check_parallel_jobs(graph, module_index, comptime_rows, &weights)
+        loop (index, item_index) in items {
+            &plan.jobs.push(SemaBodyJob{position: plan.end - start, item_index: item_index})
+            &plan.weights.push(weights[index])
+            work += weights[index]
+        }
+        module_items :: graph.modules[module_index].program.items.len()
+        scope_items += module_items
+        if module_items > largest -> largest = module_items
+        plan.end += 1
+    }
+    // Each thread holds one module scope copy at a time; the wave holds every
+    // module's post-summary scope.
+    plan.workers = compiler_threads_admit(threads, plan.jobs.len(), work, SEMA_BODY_MIN_BYTES_PER_THREAD, largest * SEMA_BODY_SCOPE_BYTES_PER_ITEM, scope_items * SEMA_BODY_SCOPE_BYTES_PER_ITEM)
+    plan
+}
+
+fn sema_check_shared_wave_plan(shared_state: Shared<SemaCheckShared>, selected: [Int], start: Int, comptime_rows: [String:Int], trace_functions: Bool, threads: CompilerThreads) -> SemaBodyWavePlan {
+    inputs :: shared_state.guard_read()
+    // Passed straight through: a local binding of a guarded row would copy it.
+    sema_check_wave_plan(inputs.value.programs[0], selected, start, comptime_rows, trace_functions, threads)
+}
+
+// The prepared bodies of the wave `plan` over `selected[start..<plan.end]`,
+// last module first, so the pass pops them in module order. A serial wave
+// prepares nothing. Otherwise every module's post-summary scope is built here,
+// on the calling thread with the host callbacks, in module order, and the
+// wave's jobs are checked on `plan.workers` threads.
+fn sema_check_prepare_wave(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, selected: [Int], start: Int, plan: ^SemaBodyWavePlan, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int]) -> [SemaPreparedBodies] {
+    prepared := [SemaPreparedBodies]{}
+    if plan.workers <= 1 {
+        loop _ in start..<plan.end -> &prepared.push(sema_check_prepared_none())
+        return prepared
+    }
+    environment := sema_check_shared_take_environment(shared_state)
+    program := sema_check_shared_take_program(shared_state)
+    memory_plan := sema_check_shared_take_memory_plan(shared_state)
+    wave := SemaBodyWave{modules: [SemaBodyWaveModule]{}}
+    loop selected_index in start..<plan.end {
+        module_index :: selected[selected_index]
+        scopes := sema_check_module_summary_scopes(&environment, program, host_hooks, memory_plan, module_index, values, comptime_functions, comptime_rows)
+        &wave.modules.push(SemaBodyWaveModule{module_index: module_index, environment: ~environment, scopes: ^scopes})
+    }
+    sema_check_shared_fill(shared_state, ^environment, ^program, ^memory_plan)
+    sema_check_bodies_parallel(shared_state, ^wave, plan.jobs, plan.weights, plan.workers)
+}
+
+// The parallel body pass of `wave` on `workers` threads: `jobs` cut into
+// consecutive parts by `weights`, one part per thread, each part checked in
+// order on its own copy of each module's scope against the module's
+// environment and the program tables and memory plan in `shared`. Returns
+// each module's prepared bodies, last module first.
+fn sema_check_bodies_parallel(shared: Shared<SemaCheckShared>, wave: ^SemaBodyWave, jobs: [SemaBodyJob], weights: [Int], workers: Int) -> [SemaPreparedBodies] {
     bounds :: compiler_threads_partition(weights, workers)
     slots := [Shared<SemaBodyPart>]{}
     loop part in 0..<workers {
-        items := [Int]{}
-        loop position in bounds[part]..<bounds[part + 1] -> &items.push(jobs[position])
-        slot :: shared SemaBodyPart{scopes: sema_scope_init(""), items: [Int]{}, bodies: [SemaParallelBody]{}}
-        sema_check_body_part_fill(slot, ~scopes, ^items)
+        part_jobs := [SemaBodyJob]{}
+        loop position in bounds[part]..<bounds[part + 1] -> &part_jobs.push(jobs[position])
+        slot :: shared SemaBodyPart{jobs: [SemaBodyJob]{}, bodies: [SemaParallelBody]{}}
+        sema_check_body_part_fill(slot, ^part_jobs)
         &slots.push(slot)
     }
-    _ := sema_check_body_parts(shared, slots, 0, module_index)
-    prepared := SemaPreparedBodies{scopes: [SemaScopeTable]{}, bodies: [SemaParallelBody]{}}
-    &prepared.scopes.push(^scopes)
+    wave_state :: shared SemaBodyWave{modules: [SemaBodyWaveModule]{}}
+    sema_check_body_wave_fill(wave_state, ^wave)
+    _ := sema_check_body_parts(shared, wave_state, slots, 0)
+    modules := sema_check_body_wave_take(wave_state)
+    module_bodies := [[SemaParallelBody]]{}
+    loop _ in modules -> &module_bodies.push([SemaParallelBody]{})
     part := workers
     loop part > 0 {
         part -= 1
-        sema_check_body_part_drain(slots[part], &prepared.bodies)
+        sema_check_body_part_drain(slots[part], &module_bodies)
+    }
+    // Popped last module first, as the result lists them.
+    prepared := [SemaPreparedBodies]{}
+    loop modules.len() > 0 {
+        module := &modules.pop() ?? break
+        bodies := &module_bodies.pop() ?? break
+        ready := SemaPreparedBodies{scopes: [SemaScopeTable]{}, bodies: ^bodies}
+        &ready.scopes.push(^module.scopes)
+        &prepared.push(^ready)
     }
     prepared
 }
 
-// Moves a thread's scope copy and item indexes into its slot.
-fn sema_check_body_part_fill(slot: Shared<SemaBodyPart>, scopes: ^SemaScopeTable, items: ^[Int]) {
+// Moves a thread's jobs into its slot.
+fn sema_check_body_part_fill(slot: Shared<SemaBodyPart>, jobs: ^[SemaBodyJob]) {
     permit :: slot.guard_edit()
-    permit.value.scopes = ^scopes
-    permit.value.items = ^items
+    permit.value.jobs = ^jobs
 }
 
-// Moves a part's bodies onto `bodies`, last item first.
-fn sema_check_body_part_drain(slot: Shared<SemaBodyPart>, bodies: &[SemaParallelBody]) {
+fn sema_check_body_wave_fill(wave_state: Shared<SemaBodyWave>, wave: ^SemaBodyWave) {
+    permit :: wave_state.guard_edit()
+    permit.value.modules = ^wave.modules
+}
+
+// Moves the wave's modules back out, in module order.
+fn sema_check_body_wave_take(wave_state: Shared<SemaBodyWave>) -> [SemaBodyWaveModule] {
+    permit :: wave_state.guard_edit()
+    modules := [SemaBodyWaveModule]{}
+    loop permit.value.modules.len() > 0 {
+        module :: &permit.value.modules.pop() ?? break
+        &modules.push(module)
+    }
+    &modules.reverse()
+    modules
+}
+
+// Moves a part's bodies onto their modules' rows, last item first.
+fn sema_check_body_part_drain(slot: Shared<SemaBodyPart>, module_bodies: &[[SemaParallelBody]]) {
     permit :: slot.guard_edit()
     loop permit.value.bodies.len() > 0 {
         body :: &permit.value.bodies.pop() ?? break
-        &bodies.push(body)
+        &module_bodies[body.position].push(body)
     }
 }
 
 // Checks `slots[from..]`, one task per slot and the last slot on this
 // thread; returns how many bodies they checked.
-fn sema_check_body_parts(shared: Shared<SemaCheckShared>, slots: [Shared<SemaBodyPart>], from: Int, module_index: Int) -> Int {
-    if from >= slots.len() - 1 -> return sema_check_body_part(shared, slots[from], module_index)
+fn sema_check_body_parts(shared: Shared<SemaCheckShared>, wave_state: Shared<SemaBodyWave>, slots: [Shared<SemaBodyPart>], from: Int) -> Int {
+    if from >= slots.len() - 1 -> return sema_check_body_part(shared, wave_state, slots[from])
     checked := 0
     task.group sema_threads {
-        head :: task sema_check_body_part(shared, slots[from], module_index)
-        checked = sema_check_body_parts(shared, slots, from + 1, module_index)
+        head :: task sema_check_body_part(shared, wave_state, slots[from])
+        checked = sema_check_body_parts(shared, wave_state, slots, from + 1)
         checked += head.join() ?? panic(compiler_threads_failure_text(err))
     }
     checked
 }
 
-// One thread: checks its part's functions in item order on its own scope
-// copy. Host callbacks are withheld; a check that wanted one is marked, and
-// the body loop checks that function again on the calling thread.
-fn sema_check_body_part(shared: Shared<SemaCheckShared>, slot: Shared<SemaBodyPart>, module_index: Int) -> Int {
+// One thread: checks its part's functions in order, on its own copy of each
+// module's scope. Host callbacks are withheld; a check that wanted one is
+// marked, and the body loop checks that function again on the calling thread.
+fn sema_check_body_part(shared: Shared<SemaCheckShared>, wave_state: Shared<SemaBodyWave>, slot: Shared<SemaBodyPart>) -> Int {
     inputs :: shared.guard_read()
+    wave :: wave_state.guard_read()
     permit := slot.guard_edit()
     // Passed straight through: a local binding of a guarded row would copy it.
-    sema_check_body_part_in(inputs.value.environments[0], inputs.value.programs[0], inputs.value.memory_plans[0], &permit.value, module_index)
+    sema_check_body_part_in(wave.value.modules, inputs.value.programs[0], inputs.value.memory_plans[0], &permit.value)
 }
 
-fn sema_check_body_part_in(environment: SemaScopeEnvironment, program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, part: &SemaBodyPart, module_index: Int) -> Int {
+fn sema_check_body_part_in(modules: [SemaBodyWaveModule], program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, part: &SemaBodyPart) -> Int {
     graph :: program.registration_graph ?? return 0
-    source_module :: graph.modules[module_index]
     wanted :: shared SemaHostHookWanted{wanted: false}
-    loop index in 0..<part.items.len() {
-        item_index :: part.items[index]
-        if source_module.program.items[item_index] == .Func(func) {
+    // Each function check rolls the scope back to where it started, so one
+    // copy per module serves the part's functions of that module in order.
+    position := -1
+    scopes := sema_scope_init("")
+    loop index in 0..<part.jobs.len() {
+        job :: part.jobs[index]
+        if job.position != position {
+            position = job.position
+            scopes = ~modules[position].scopes
+        }
+        source_module :: graph.modules[modules[position].module_index]
+        if source_module.program.items[job.item_index] == .Func(func) {
             memory_func := func
             memory_row := sema_function_memory_find(memory_plan, source_module.module_identity, "", func.span)
             if memory_row == .Val(row) {
@@ -1997,8 +2139,8 @@ fn sema_check_body_part_in(environment: SemaScopeEnvironment, program: SemaProgr
             call_facts := [SemaCallSiteFact]{}
             comptime_requests := [SemaComptimeRequest]{}
             name_references := [SemaNameReferenceFact]{}
-            checked := sema_function_check_shared(memory_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), environment, program, &part.scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted}), &diagnostics, &call_facts, &comptime_requests, &name_references)
-            &part.bodies.push(SemaParallelBody{item_index: item_index, checked: Val(checked), diagnostics: diagnostics, call_facts: call_facts, comptime_requests: comptime_requests, name_references: name_references, wanted_hooks: sema_host_hook_was_wanted(wanted)})
+            checked := sema_function_check_shared(memory_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), modules[position].environment, program, &scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted}), &diagnostics, &call_facts, &comptime_requests, &name_references)
+            &part.bodies.push(SemaParallelBody{position: position, item_index: job.item_index, checked: Val(checked), diagnostics: diagnostics, call_facts: call_facts, comptime_requests: comptime_requests, name_references: name_references, wanted_hooks: sema_host_hook_was_wanted(wanted)})
         }
     }
     part.bodies.len()
@@ -3790,10 +3932,11 @@ struct SemaFinalizeChecked {
 // not run yet, so a failure obligation does not decide a keep-going trap.
 // `graph` moves into the pass's program tables (never copied) and back out
 // with the result.
-// SP15: a module with enough top-level function source for more than one of
-// `threads` checks those bodies on compiler threads first
-// (sema_check_bodies_parallel); the environment, program tables and memory
-// plan live in the threads' shared state for the pass.
+// SP15: the modules are checked in waves (sema_check_wave_plan); a wave with
+// enough top-level function source for more than one of `threads` checks
+// those bodies on compiler threads first (sema_check_prepare_wave); the
+// environment, program tables and memory plan live in the threads' shared
+// state for the pass.
 fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], selected: [Int], pending_obligations: Bool, host_hooks: SemaHostHookAccess?, threads: CompilerThreads, phase: String, trace_sink: CompilerTraceSink?) -> SemaFinalizeChecked {
     if trace_sink == .Val(sink) -> sink.begin(phase, "", -1, -1)
     environment := sema_check_pass_environment(graph)
@@ -3806,48 +3949,39 @@ fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaCompt
     if trace_sink == .Val(sink) -> trace_functions = sink.functions()
     modules := [SemaGraphModuleResult]{}
     checked_functions := 0
-    loop module_index in selected {
-        weights := [Int]{}
-        workers := 1
-        jobs := sema_check_shared_module_jobs(shared_state, module_index, comptime_rows, trace_functions, threads, &weights, &workers, trace_sink)
-        prepared := sema_check_prepare_module(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, jobs, weights, workers)
-        checked := sema_check_module_in_shared(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, pending_obligations, ^prepared, trace_sink)
-        if trace_sink == .Val(sink) -> sink.end("sema.module", checked.functions.len())
-        checked_functions += checked.functions.len()
-        &modules.push(checked)
+    wave_start := 0
+    loop wave_start < selected.len() {
+        plan := sema_check_shared_wave_plan(shared_state, selected, wave_start, comptime_rows, trace_functions, threads)
+        wave_end :: plan.end
+        prepared := sema_check_prepare_wave(shared_state, host_hooks, selected, wave_start, ^plan, values, comptime_functions, comptime_rows)
+        loop selected_index in wave_start..<wave_end {
+            module_index :: selected[selected_index]
+            ready := &prepared.pop() ?? sema_check_prepared_none()
+            sema_check_shared_module_begin(shared_state, module_index, trace_sink)
+            checked := sema_check_module_in_shared(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, pending_obligations, ^ready, trace_sink)
+            if trace_sink == .Val(sink) -> sink.end("sema.module", checked.functions.len())
+            checked_functions += checked.functions.len()
+            &modules.push(checked)
+        }
+        wave_start = wave_end
     }
     if trace_sink == .Val(sink) -> sink.end(phase, checked_functions)
     program := sema_check_shared_take_program(shared_state)
     SemaFinalizeChecked{modules: ^modules, graph: ^program.registration_graph}
 }
 
-// Opens module `module_index`'s trace span and returns its parallel jobs
-// (sema_check_parallel_jobs) with their `weights` and the admitted body-check
-// `workers`, read from the pass graph in the threads' shared state.
-fn sema_check_shared_module_jobs(shared_state: Shared<SemaCheckShared>, module_index: Int, comptime_rows: [String:Int], trace_functions: Bool, threads: CompilerThreads, weights: &[Int], workers: &Int, trace_sink: CompilerTraceSink?) -> [Int] {
+// Opens module `module_index`'s trace span, read from the pass graph in the
+// threads' shared state.
+fn sema_check_shared_module_begin(shared_state: Shared<SemaCheckShared>, module_index: Int, trace_sink: CompilerTraceSink?) {
+    if trace_sink == None -> return
     inputs :: shared_state.guard_read()
     // Passed straight through: a local binding of a guarded row would copy it.
-    sema_check_pass_module_jobs(inputs.value.programs[0], module_index, comptime_rows, trace_functions, threads, &weights, &workers, trace_sink)
+    sema_check_pass_module_begin(inputs.value.programs[0], module_index, trace_sink)
 }
 
-fn sema_check_pass_module_jobs(program: SemaProgramTables, module_index: Int, comptime_rows: [String:Int], trace_functions: Bool, threads: CompilerThreads, weights: &[Int], workers: &Int, trace_sink: CompilerTraceSink?) -> [Int] {
+fn sema_check_pass_module_begin(program: SemaProgramTables, module_index: Int, trace_sink: CompilerTraceSink?) {
     graph :: program.registration_graph ?? panic("the body-check pass lost its registration graph")
     if trace_sink == .Val(sink) -> sink.begin("sema.module", graph.modules[module_index].module_path, module_index, graph.modules.len())
-    jobs := sema_check_parallel_jobs(graph, module_index, comptime_rows, &weights)
-    work := 0
-    loop weight in weights -> work += weight
-    if !trace_functions -> workers = compiler_threads_admit(threads, jobs.len(), work, SEMA_BODY_MIN_BYTES_PER_THREAD, graph.modules[module_index].program.items.len() * SEMA_BODY_SCOPE_BYTES_PER_ITEM, 0)
-    jobs
-}
-
-fn sema_check_prepare_module(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], jobs: [Int], weights: [Int], workers: Int) -> SemaPreparedBodies {
-    if workers <= 1 -> return sema_check_prepared_none()
-    environment := sema_check_shared_take_environment(shared_state)
-    program := sema_check_shared_take_program(shared_state)
-    memory_plan := sema_check_shared_take_memory_plan(shared_state)
-    scopes := sema_check_module_summary_scopes(&environment, program, host_hooks, memory_plan, module_index, values, comptime_functions, comptime_rows)
-    sema_check_shared_fill(shared_state, ^environment, ^program, ^memory_plan)
-    sema_check_bodies_parallel(shared_state, module_index, ^scopes, jobs, weights, workers)
 }
 
 fn sema_check_module_in_shared(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, prepared: ^SemaPreparedBodies, trace_sink: CompilerTraceSink?) -> SemaGraphModuleResult {
