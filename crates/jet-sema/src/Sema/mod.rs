@@ -3677,3 +3677,18 @@ pub fn block_free_reads_and_calls(
     read.extend(mut_cap);
     (read, called)
 }
+
+/// [`block_free_var_reads`], with the subset of those names the block
+/// writes: assigns, passes as a write argument, lends as a write place, or
+/// captures for writing.
+pub fn block_free_reads_and_writes(
+    stmts: &[crate::AST::Stmt],
+) -> (HashSet<String>, HashSet<String>) {
+    let mut bound = HashSet::new();
+    let mut read = HashSet::new();
+    let mut mut_cap = HashSet::new();
+    let mut called = HashSet::new();
+    Captures::block_collect_captures(stmts, &mut bound, &mut read, &mut mut_cap, &mut called);
+    read.extend(mut_cap.iter().cloned());
+    (read, mut_cap)
+}
