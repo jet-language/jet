@@ -1785,16 +1785,6 @@ fn jet_jit_math_checked_add(a: i64, b: i64) -> i64 {
 fn jet_jit_math_saturating_add(a: i64, b: i64) -> i64 {
     a.saturating_add(b)
 }
-/// Mirrors `jet_std_math_int_pow` (D-EXPNEG1=A: a negative exponent stops).
-fn jet_jit_math_int_pow(base: i64, exp: i64) -> i64 {
-    if exp < 0 {
-        let message = contract_kernel::jet_arithmetic_message("pow_negative");
-        Concurrency::with_runtime_mut(|rt| rt.set_arithmetic_stop(0, message));
-        return 0;
-    }
-    base.saturating_pow(exp as u32)
-}
-
 /// Mirrors `jet_std_math_gcd`.
 fn jet_jit_math_gcd(mut a: i64, mut b: i64) -> i64 {
     a = a.abs();
@@ -2251,7 +2241,6 @@ host_fns! {
     math_sign: "jet_jit_math_sign" => jet_jit_math_sign: sig_f64_i64;
     math_checked_add: "jet_jit_math_checked_add" => jet_jit_math_checked_add: sig_i64_i64_i64;
     math_saturating_add: "jet_jit_math_saturating_add" => jet_jit_math_saturating_add: sig_i64_i64_i64;
-    math_int_pow: "jet_jit_math_int_pow" => jet_jit_math_int_pow: sig_i64_i64_i64;
     math_gcd: "jet_jit_math_gcd" => jet_jit_math_gcd: sig_i64_i64_i64;
     math_lcm: "jet_jit_math_lcm" => jet_jit_math_lcm: sig_i64_i64_i64;
     math_sqrt: "jet_jit_math_sqrt" => jet_jit_math_sqrt: sig_f64_f64;
