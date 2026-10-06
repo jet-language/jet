@@ -1134,6 +1134,51 @@ fn run() {
 }
 
 #[test]
+fn prep_rows_built_through_own_module_calls_match_runtime() {
+    // The stage-zero `CORE_CALLS` shape: a `prep` list of records whose
+    // builder takes a record from a same-module call, then writes its fields.
+    // The call's return and the parameter types must name the module's own
+    // record rows, or MIR lowering misses the owner type (E0956).
+    let src = r#"
+struct Cov { bits: Int }
+
+enum Route {
+    NoRoute
+    Typed
+}
+
+struct Rec {
+    member: String
+    coverage: Cov
+    route: Route
+}
+
+fn rec_new(member: String) -> Rec Never! {
+    Rec{member: member, coverage: Cov{bits: 1}, route: Route.Typed}
+}
+
+fn rec_with_coverage(member: String, coverage: Cov) -> Rec Never! {
+    row := rec_new(member)
+    row.coverage = coverage
+    row.route = Route.NoRoute
+    row
+}
+
+ROWS :: prep { [Rec]{ rec_new("a"), rec_with_coverage("b", Cov{bits: 2}) } }
+
+fn run() {
+    rows :: [Rec]{ rec_new("a"), rec_with_coverage("b", Cov{bits: 2}) }
+    print("{ROWS[1].member} {ROWS[1].coverage.bits} {ROWS[1].route == Route.NoRoute}")
+    print("{rows[1].member} {rows[1].coverage.bits} {rows[1].route == Route.NoRoute}")
+}
+"#;
+    jet::compile(src).expect("prep rows built through same-module calls must fold");
+    if have_rustc() {
+        assert_eq!(compile_and_run(src), "b 2 true\nb 2 true\n");
+    }
+}
+
+#[test]
 fn if_expr_comptime_matches_runtime() {
     let stdout = compile_and_run(
         r#"
