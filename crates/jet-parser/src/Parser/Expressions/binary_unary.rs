@@ -692,6 +692,19 @@ impl<'a> Parser<'a> {
                 _ => break,
             };
             let op_span = self.bump().span;
+            // `**` is the power operator in Python, JavaScript and others; in
+            // Jet it would read as `*` then a raw-pointer `*`. Teach `^`.
+            if op == BinOp::Mul
+                && matches!(self.peek().kind, TokKind::Star)
+                && self.peek().span.start == op_span.end
+            {
+                let second = self.peek().span;
+                return Err(Diagnostic::from_row(
+                    "E0394",
+                    &[],
+                    Some(Span::new(op_span.start, second.end)),
+                ));
+            }
             let rhs = self.expr_unary(allow_struct_lit)?;
             let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
             lhs = Expr::Binary(op, Box::new(lhs), Box::new(rhs), span);

@@ -676,6 +676,27 @@ fn run() {
     }
 
     #[test]
+    fn double_star_teaches_caret_power() {
+        let source = "fn run() { x :: 2 ** 3 }\n";
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        let diagnostics = Parser::parse(&tokens).expect_err("`**` is not a Jet operator");
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "E0394"
+                    && diagnostic.what.contains("`^`")
+                    && diagnostic.span.is_some_and(|span| &source[span.start..span.end] == "**")
+            }),
+            "{diagnostics:?}"
+        );
+        // `a * *p` (spaced) keeps its raw-pointer meaning for sema to gate.
+        let (tokens, _) = Lexer::lex("fn run() { x :: a * *p }\n");
+        if let Err(diagnostics) = Parser::parse(&tokens) {
+            assert!(diagnostics.iter().all(|diagnostic| diagnostic.code != "E0394"), "{diagnostics:?}");
+        }
+    }
+
+    #[test]
     fn in_is_reserved_for_source_loops() {
         let source = "fn in() {}\n";
         let (tokens, lexer_diagnostics) = Lexer::lex(source);

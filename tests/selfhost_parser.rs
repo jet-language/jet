@@ -282,6 +282,8 @@ const CASES: &[(&str, &str)] = &[
     ("bracket-range-access-marks", "f(values[0..1], &values[0..1], ~values[0..1])"),
     // E0393 (#3743): the retired `name: Type :: value` binding.
     ("retired-typed-binding", "fn run() {\n    limit: U8 :: 250\n    print(limit)\n}\n"),
+    // E0394: `**` (another language's power operator) teaches `^`.
+    ("double-star-power", "f(2 ** 3)"),
 ];
 
 fn jet_byte_array_literal(source: &str) -> String {

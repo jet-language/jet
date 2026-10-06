@@ -255,6 +255,12 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
         if precedence == 0 || precedence < minimum -> break
         if stop_before_comparison && parser_expression_comparison_boundary(operator) -> break
         operator_token :: parser_bump(&state)
+        // Rust `expr_mul`: `**` (another language's power operator) would
+        // read as `*` then a raw-pointer `*`; teach `^` (E0394), fatal.
+        if operator == TOKEN_STAR && parser_current_kind(&state) == TOKEN_STAR && parser_current(&state).span.start == operator_token.span.end {
+            parser_add_fatal_code(&state, "E0394", parser_cover(operator_token.span, parser_current(&state).span), "Jet writes a power as `^`, not `**`.", "`**` is the power operator in some other languages; in Jet it would read as multiplication followed by a raw-pointer `*`.", "Write `base ^ exponent`, for example `2 ^ 3`.")
+            break
+        }
 
         if operator == TOKEN_QUESTION_QUESTION {
             fallback :: parser_parse_or_fallback(&state, depth + 1, allow_struct_lit, stop_before_comparison)
