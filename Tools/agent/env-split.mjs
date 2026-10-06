@@ -45,9 +45,12 @@ for (const file of files) {
         names.add(param);
         return `${p}, program: ${WRITERS.includes(name) ? '&' : ''}SemaProgramTables`;
       }));
-    for (const bound of chunk.matchAll(/\b(environment|pass_environment) := (?:sema_[a-z_]*environment|sema_[a-z_]*take_environment|sema_scope_environment_init)\(/g)) names.add(bound[1]);
+    // Locals bound to an environment (pass drivers' constructors, re-targeted or copied environments)
+    // pass the same program tables beside them.
+    for (const bound of chunk.matchAll(/\b([a-z_]*environment) :?= /g)) names.add(bound[1]);
     for (const env of names) {
-      const call = new RegExp(`([(,]\\s*)([&~^]?)(${env})(\\s*)(?=[,)])(?!\\s*,\\s*&?program\\b)`, 'g');
+      // A moved environment (`^environment`) goes into a pass driver's shared state, not to a check.
+      const call = new RegExp(`([(,]\\s*)(&?)(${env})(\\s*)(?=[,)])(?!\\s*,\\s*[&~^]?program\\b)`, 'g');
       text = text.replace(call, (_c, lead, mark, n, space) => {
         counts.calls++;
         return `${lead}${mark}${n}${space}, program`;

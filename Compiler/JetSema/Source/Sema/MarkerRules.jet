@@ -1428,7 +1428,7 @@ fn sema_marker_rules_validate_repeatability(registry: SemaScopeMembersMarkerRegi
     }
 }
 
-fn sema_marker_rules_validate_arguments(registry: SemaScopeMembersMarkerRegistry, program: Program, markers: [Marker], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, values: [SemaComptimeItemValue], result: &SemaMarkerRulesCheckResult) {
+fn sema_marker_rules_validate_arguments(registry: SemaScopeMembersMarkerRegistry, source_program: Program, markers: [Marker], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, values: [SemaComptimeItemValue], result: &SemaMarkerRulesCheckResult) {
     seen := [Span]{}
     loop marker in markers {
         duplicate := false
@@ -1459,18 +1459,18 @@ fn sema_marker_rules_validate_arguments(registry: SemaScopeMembersMarkerRegistry
     }
 }
 
-pub fn sema_marker_rules_check(registry: SemaScopeMembersMarkerRegistry, program: Program, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, values: [SemaComptimeItemValue]) -> SemaMarkerRulesCheckResult {
+pub fn sema_marker_rules_check(registry: SemaScopeMembersMarkerRegistry, source_program: Program, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, values: [SemaComptimeItemValue]) -> SemaMarkerRulesCheckResult {
     result := SemaMarkerRulesCheckResult{
         diagnostics: [Diagnostic]{},
         argument_facts: [SemaMarkerRuleArgumentFact]{},
         comptime_sources: [SemaComptimeItemSource]{},
         comptime_requests: [SemaComptimeRequest]{},
     }
-    markers := sema_marker_rules_collect_program(program)
-    sema_marker_rules_validate_vocabulary(registry, program, markers, &result.diagnostics)
-    sema_marker_rules_validate_sites(registry, program, &result.diagnostics)
-    sema_marker_rules_validate_repeatability(registry, program, &result.diagnostics)
-    sema_marker_rules_validate_arguments(registry, program, markers, environment, program, &scopes, &state, &tail_store, &context, values, &result)
+    markers := sema_marker_rules_collect_program(source_program)
+    sema_marker_rules_validate_vocabulary(registry, source_program, markers, &result.diagnostics)
+    sema_marker_rules_validate_sites(registry, source_program, &result.diagnostics)
+    sema_marker_rules_validate_repeatability(registry, source_program, &result.diagnostics)
+    sema_marker_rules_validate_arguments(registry, source_program, markers, environment, program, &scopes, &state, &tail_store, &context, values, &result)
     result
 }
 

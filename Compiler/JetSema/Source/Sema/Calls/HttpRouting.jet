@@ -384,7 +384,7 @@ fn sema_http_route_schema_type(ty: Type, environment: SemaScopeEnvironment, prog
             required := [String]{}
             loop field in nominal.fields {
                 if field.symbol.visibility != 2 -> next
-                field_schema :: sema_http_route_schema_type(field.ty, field_environment, next_active) ?? return None
+                field_schema :: sema_http_route_schema_type(field.ty, field_environment, program, next_active) ?? return None
                 &properties.push("{sema_http_route_json_quote(field.symbol.name)}:{field_schema}")
                 if field.ty == {
                     .Option(_) -> {}
@@ -499,7 +499,7 @@ fn sema_http_route_response_constructor(name: String, args: [CallArg], environme
     if name == "empty_response" && args.len() == 1 -> return Val(SemaHTTPRouteResponse{status: status, schema: None, content_type: None})
     if (name == "response" || name == "json") && args.len() == 2 {
         schema_environment := sema_http_route_environment_for_module(environment, program, module_identity)
-        schema :: sema_http_route_schema_expr(args[1].expr, schema_environment, locals) ?? return None
+        schema :: sema_http_route_schema_expr(args[1].expr, schema_environment, program, locals) ?? return None
         return Val(SemaHTTPRouteResponse{status: status, schema: Val(schema), content_type: if name == "json" -> Val("application/json") else -> None})
     }
     None
@@ -552,7 +552,7 @@ fn sema_http_route_response_adapter_returns_response(method: String, args: [Call
     response_nominal :: graph.modules[response_row.module_index].nominals[response_row.row]
     handler_environment := sema_http_route_environment_for_module(environment, program, module_identity)
     probe_diagnostics := [Diagnostic]{}
-    candidates := sema_expr_registration_method_candidates(graph, response_nominal.ty, method, [Type]{}, type_args, span, handler_environment, &updated_scopes, &probe_diagnostics)
+    candidates := sema_expr_registration_method_candidates(graph, response_nominal.ty, method, [Type]{}, type_args, span, handler_environment, program, &updated_scopes, &probe_diagnostics)
     if candidates.len() == 0 -> return false
     matched := false
     all_return_response := true
@@ -828,7 +828,7 @@ fn sema_http_route_contract(method: String, pattern: String, path_fields: [SemaH
     path_names := [String]{}
     loop field in path_fields {
         parameter :: loop candidate in shape.params { if candidate.name == field.name && sema_call_http_nominal_leaf(candidate.ty) != "HTTPRequest" -> break candidate } ?? return None
-        schema_result := if is_mux -> Val("{{\"type\":\"string\"}}") else -> sema_http_route_schema_type(parameter.ty, handler_environment, [String]{})
+        schema_result := if is_mux -> Val("{{\"type\":\"string\"}}") else -> sema_http_route_schema_type(parameter.ty, handler_environment, program, [String]{})
         schema :: schema_result ?? return None
         &path_params.push("{{\"name\":{sema_http_route_json_quote(field.name)},\"in\":\"path\",\"required\":true,\"catch_all\":{field.catch_all},\"schema\":{schema}}}")
         &path_names.push(field.name)
@@ -840,7 +840,7 @@ fn sema_http_route_contract(method: String, pattern: String, path_fields: [SemaH
             found_path := false
             loop path_name in path_names { if path_name == parameter.name -> found_path = true }
             if found_path -> next
-            schema :: sema_http_route_schema_type(parameter.ty, handler_environment, [String]{}) ?? return None
+            schema :: sema_http_route_schema_type(parameter.ty, handler_environment, program, [String]{}) ?? return None
             required := if parameter.ty == {
                 .Option(_) -> false
                 else -> true
@@ -852,7 +852,7 @@ fn sema_http_route_contract(method: String, pattern: String, path_fields: [SemaH
     loop query in query_params -> &params.push(query)
     request_body := "null"
     if body_type == .Val(ty) {
-        schema :: sema_http_route_schema_type(ty, handler_environment, [String]{}) ?? return None
+        schema :: sema_http_route_schema_type(ty, handler_environment, program, [String]{}) ?? return None
         request_body = "{{\"required\":true,\"content_type\":\"application/json\",\"schema\":{schema}}}"
     }
     response_json := [String]{}
