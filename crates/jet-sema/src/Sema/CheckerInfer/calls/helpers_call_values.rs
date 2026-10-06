@@ -69,6 +69,41 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// D-OP-CALL1=A: `name(...)` where `name` is a value that is not a
+    /// function. Name the value's type and the methods it does have; the
+    /// Jet half builds the same text in `sema_call_not_callable_value`.
+    pub(crate) fn not_callable_value_diagnostic(&self, name: &str, ty: &Type, span: Span) -> Diagnostic {
+        let type_name = match ty {
+            Type::Named(n) => Some(n.as_str()),
+            Type::Apply { name, .. } => Some(name.as_str()),
+            _ => None,
+        };
+        let methods = type_name.map(|n| self.registry.method_names(n)).unwrap_or_default();
+        let shown = ty.show();
+        let (why, fix) = match methods.first() {
+            Some(first) => (
+                format!(
+                    "parentheses call functions and lambdas only; `{shown}` has the methods {}",
+                    methods.join(", ")
+                ),
+                format!(
+                    "call one of its methods, such as `{name}.{first}(…)`, or write a method that returns a lambda"
+                ),
+            ),
+            None => (
+                "parentheses call functions and lambdas only".to_string(),
+                format!("remove the parentheses after `{name}`, or bind a function or lambda to call"),
+            ),
+        };
+        Diagnostic::error(
+            "E0803",
+            format!("`{name}` is {shown}, not a function"),
+            why,
+            fix,
+            Some(span),
+        )
+    }
+
     pub(crate) fn infer_call_value(
         &mut self,
         callee: &mut Box<Expr>,

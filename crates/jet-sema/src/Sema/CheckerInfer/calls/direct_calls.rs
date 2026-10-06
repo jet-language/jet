@@ -1953,6 +1953,23 @@ impl<'a> Checker<'a> {
             return Some(None);
         }
 
+        // D-OP-CALL1=A: parentheses call functions and lambdas only. A value
+        // binding of another type is not "nothing named"; name its type and
+        // the methods it does have.
+        if self.funcs.get(&call.name).is_none() {
+            if let Some(info) = self.lookup(&call.name) {
+                let ty = info.ty.clone();
+                if !matches!(ty, Type::Fn { .. }) {
+                    let diagnostic = self.not_callable_value_diagnostic(&call.name, &ty, call.name_span);
+                    self.diags.push(diagnostic);
+                    for arg in call.args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return None;
+                }
+            }
+        }
+
         let Some(mut sig) = self.funcs.get(&call.name).cloned() else {
             let mut fix = format!(
                 "define it first ({} {}() {{ ... }}), or call one that exists",

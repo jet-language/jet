@@ -2014,6 +2014,13 @@ printing and interpolation `{}` borrow the value and leave it available;
 `Iterable`+`Iterator` for `loop x in mytype` and `Index`/`IndexMut` for
 bracket syntax. Built-in `[T]`/`Map` keep native paths.
 
+**D-OP-CALL1=A — No call hook** *(ratified 2026-10-06)*: parentheses call
+functions, lambdas, function values, and enum cases only; no trait makes a
+value of another type callable. Calling a value binding whose type is not a
+function is E0803, which names the value, its type, and the methods that
+type has, and suggests a method call. A struct that should act as a
+function hands out a lambda through a method it writes (`triple.as_fn()`).
+
 **D-ROLLBACK-TRAIT**: `trait Rollback { type Snapshot; fn snapshot(self) Snapshot;
 fn restore(&self, snap: Snapshot) }`; restore total; the
 compiler-generated field-wise Rollback implementation is the canonical

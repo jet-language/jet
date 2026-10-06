@@ -1,0 +1,16 @@
+// D-OP-CALL1=A: parentheses call functions and lambdas only.
+struct Scale {
+    factor: Int
+
+    fn apply(self, n: Int) -> Int { n * self.factor }
+
+    fn as_fn(self) -> fn(Int) -> Int {
+        factor :: self.factor
+        (n: Int) -> n * factor
+    }
+}
+
+fn run() {
+    triple :: Scale{factor: 3}
+    print(triple(4))
+}
