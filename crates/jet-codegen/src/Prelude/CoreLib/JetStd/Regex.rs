@@ -2190,7 +2190,9 @@ unsafe fn regex_find_byte_avx2(
     };
     let mut pos = start;
     let target = _mm256_set1_epi8(needle as i8);
-    while pos <= haystack.len().saturating_sub(32) {
+    // #4574: a full 32-byte block must remain; `len.saturating_sub(32)` let a
+    // haystack shorter than one block load past its end.
+    while haystack.len().saturating_sub(pos) >= 32 {
         let chunk = _mm256_loadu_si256(haystack.as_ptr().add(pos).cast());
         let mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, target)) as u32;
         if mask != 0 {
@@ -2217,7 +2219,7 @@ unsafe fn regex_find_byte_avx2(
     };
     let mut pos = start;
     let target = _mm256_set1_epi8(needle as i8);
-    while pos <= haystack.len().saturating_sub(32) {
+    while haystack.len().saturating_sub(pos) >= 32 {
         let chunk = _mm256_loadu_si256(haystack.as_ptr().add(pos).cast());
         let mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, target)) as u32;
         if mask != 0 {
@@ -2244,7 +2246,8 @@ unsafe fn regex_find_byte_sse2(
     };
     let mut pos = start;
     let target = _mm_set1_epi8(needle as i8);
-    while pos <= haystack.len().saturating_sub(16) {
+    // #4574: a full 16-byte block must remain before the unaligned load.
+    while haystack.len().saturating_sub(pos) >= 16 {
         let chunk = _mm_loadu_si128(haystack.as_ptr().add(pos).cast());
         let mask = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, target)) as u32;
         if mask != 0 {
@@ -2271,7 +2274,7 @@ unsafe fn regex_find_byte_sse2(
     };
     let mut pos = start;
     let target = _mm_set1_epi8(needle as i8);
-    while pos <= haystack.len().saturating_sub(16) {
+    while haystack.len().saturating_sub(pos) >= 16 {
         let chunk = _mm_loadu_si128(haystack.as_ptr().add(pos).cast());
         let mask = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, target)) as u32;
         if mask != 0 {
@@ -2392,5 +2395,36 @@ mod tests {
 
         let alphabetic = JetRegex::parse(r"\p{Alphabetic}+").unwrap();
         assert_eq!(alphabetic.find("123λ!").ok().as_deref(), Some("λ"));
+    }
+
+    /// #4574: the byte search stays inside the haystack slice. Every byte past
+    /// the slice end is the needle, so a block load crossing the end would
+    /// report a position outside the slice. `regex_find_byte` runs the
+    /// backend this CPU selects (AVX2 or SSE2 on x86-64).
+    #[test]
+    fn byte_search_never_reads_past_a_short_haystack() {
+        for len in 0..=96 {
+            let mut owned = [b'z'; 160];
+            for (index, byte) in owned[..len].iter_mut().enumerate() {
+                *byte = if index % 37 == 36 { b'z' } else { b'a' };
+            }
+            let haystack = &owned[..len];
+            for start in 0..=len + 1 {
+                let expected = haystack
+                    .get(start..)
+                    .and_then(|tail| tail.iter().position(|byte| *byte == b'z'))
+                    .map(|offset| start + offset);
+                assert_eq!(
+                    regex_find_byte_scalar(haystack, b'z', start),
+                    expected,
+                    "scalar len={len} start={start}"
+                );
+                assert_eq!(
+                    regex_find_byte(haystack, b'z', start),
+                    expected,
+                    "selected backend len={len} start={start}"
+                );
+            }
+        }
     }
 }
