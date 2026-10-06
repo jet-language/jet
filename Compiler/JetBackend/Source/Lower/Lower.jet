@@ -381,6 +381,8 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if args.len() == 0 && name.name == "RangeCursor" -> return LowerRepr.Handle{drop: "jet_loop_cursor_drop", clone: ""}
             if lower_lazy_element(ty) == .Val(elem) -> return lower_lazy_repr(p, ty, elem)
             if lower_task_handle_repr(ty) == .Val(handle) -> return handle
+            // Ptr<T>: a raw word address (Pointers.jet).
+            if lower_ptr_element(ty) != None -> return LowerRepr.Word
             if lower_is_iter_cursor(ty) -> return LowerRepr.Boxed{ty: ty}
             if lower_string_view(ty) -> return LowerRepr.Handle{drop: "jet_rt_string_drop", clone: "jet_rt_string_clone"}
             if lower_view_element(ty) == .Val(elem) -> return lower_list_repr(p, ty, elem)
@@ -906,18 +908,22 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         }
         _ := &place_slots.add(place.id.value, slot)
     }
-    // A place a closure captures by reference makes its root a cell.
+    // A place a closure captures by reference, or whose raw address is taken
+    // (Pointers.jet), makes its root a cell.
     loop block in function.blocks {
         loop instruction in block.instructions {
+            addressed := [MIRPlaceID]{}
             if instruction.operation == .Closure(_, captures, _) {
                 loop capture in captures {
-                    if capture == .Place(place) {
-                        if place_slots.get(place.value) == .Val(slot) {
-                            if lower_repr_layout(lower_repr(p, slots[slot].ty)) != None {
-                                row :: ~slots[slot]
-                                slots[slot] = LowerSlot{base: row.base, ty: row.ty, ownership: row.ownership, carried: false, write_param: row.write_param, cell: true}
-                            }
-                        }
+                    if capture == .Place(place) -> &addressed.push(place)
+                }
+            }
+            if instruction.operation == .RawAddressOf(place) -> &addressed.push(place)
+            loop place in addressed {
+                if place_slots.get(place.value) == .Val(slot) {
+                    if lower_repr_layout(lower_repr(p, slots[slot].ty)) != None {
+                        row :: ~slots[slot]
+                        slots[slot] = LowerSlot{base: row.base, ty: row.ty, ownership: row.ownership, carried: false, write_param: row.write_param, cell: true}
                     }
                 }
             }
@@ -1572,6 +1578,9 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         }
         .ScopeExit(scope) -> lower_scope(c, &m, &f, scope)
         .Drop(value, _) -> lower_drop_value(p, c, &m, &f, value)
+        .RawAddressOf(place) -> lower_raw_address_of(p, c, &m, &f, instruction, place)
+        .PtrFromAddr(address, _) -> lower_ptr_from_addr(p, c, &m, &f, instruction, address)
+        .Deref(value) -> lower_ptr_deref(p, c, &m, &f, instruction, value)
         else -> lower_fail(&m, &f, "MIR operation {lower_operation_name(instruction.operation)} is not lowered at O0 yet")
     }
 }

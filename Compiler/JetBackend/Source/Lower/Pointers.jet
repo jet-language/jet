@@ -1,0 +1,62 @@
+// Raw pointers (D-CAP9 `*T`, `Ptr<T>`): a pointer is the word address of
+// native storage. `*x` takes the address of x's memory cell (Lower.jet makes
+// every raw-addressed root a cell) and registers it with the memory sentries;
+// `p.*` checks the read with the same sentry kernel before it loads, as the
+// generated Rust's jet_sentry_address_of / jet_sentry_read do (Mem.rs).
+use jet_foundation.[MIRInstruction, MIRPlaceID, MIRProgram, MIRType, MIRValueID, mir_type_display_name]
+
+fn lower_ptr_element(ty: MIRType) -> MIRType? {
+    if ty.kind == .Apply(name, args) {
+        if name.name == "Ptr" && args.len() == 1 -> return Val(args[0])
+    }
+    None
+}
+
+// `*place`: the registered address of the place's storage, as a Ptr word or
+// an exact Int.
+fn lower_raw_address_of(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, place: MIRPlaceID) Never! {
+    row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
+    slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
+    if !c.slots[slot].cell -> return lower_fail(&m, &f, "raw address of a place without storage is not lowered at O0 yet")
+    walk :: lower_cell_walk(p, c, &m, &f, slot, row) ?? return
+    address :: lower_address(&f, walk.base, walk.offset)
+    bytes :: lower_const(&f, lower_size(p, row.ty).size)
+    raw :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_sentry_address_of", [LIRValueID]{address, bytes}, Val(raw))
+    result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "raw address has no checked type")
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    if lower_is_exact_int(result_ty) -> return lower_convert_exact(&m, &f, dst, raw, "jet_int_owned_from_i64", false)
+    lower_emit(&f, LIRInst.Move{dst: dst, src: raw})
+}
+
+// `Ptr<T>.from_addr(address)`: the address word itself.
+fn lower_ptr_from_addr(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, address: MIRValueID) Never! {
+    ty :: lower_value_type(c, address) ?? return lower_fail(&m, &f, "pointer address has no checked type")
+    value :: lower_use(&m, &f, address) ?? return
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    if lower_is_exact_int(ty) -> return lower_convert_exact(&m, &f, dst, value, "jet_int_owned_to_i64", false)
+    lower_emit(&f, LIRInst.Move{dst: dst, src: value})
+}
+
+// `p.*`: a sentry-checked bitwise read of the pointee. The Ptr word becomes
+// a typed LIR pointer only through the runtime check, which returns the
+// address it validated. A pointee that owns runtime storage would duplicate
+// its owner, so only trivially copied values are read natively.
+fn lower_ptr_deref(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID) Never! {
+    ty :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "dereferenced value has no checked type")
+    elem :: lower_ptr_element(ty) ?? return lower_fail(&m, &f, "dereferencing {mir_type_display_name(ty)} is not lowered at O0 yet")
+    if lower_needs_drop(p, elem) -> return lower_fail(&m, &f, "dereferencing a pointer to {mir_type_display_name(elem)} is not lowered at O0 yet")
+    address :: lower_use(&m, &f, value) ?? return
+    size :: lower_size(p, elem)
+    bytes :: lower_const(&f, size.size)
+    align :: lower_const(&f, size.align)
+    pointer :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_sentry_read", [LIRValueID]{address, bytes, align}, Val(pointer))
+    if lower_repr(p, elem) == .Absent -> return lower_alias_absent(&f, instruction)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    if lower_is_inline(p, elem) {
+        lower_storage_into(p, &f, dst, elem)
+        return lower_copy_bytes(&f, dst, 0, pointer, 0, size.size)
+    }
+    lower_emit(&f, LIRInst.Load{dst: dst, base: pointer, offset: 0})
+}
