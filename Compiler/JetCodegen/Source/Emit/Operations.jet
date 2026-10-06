@@ -293,9 +293,10 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MIRFun
                 .Val(place) -> jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Read)
                 else -> {
                     // MIRRust call_arg_for_function: a borrowed value with no
-                    // argument place borrows the place its definition reads.
+                    // argument place borrows the place its definition reads;
+                    // a String literal lends its static String.
                     partial :: if jet_rust_emit_partial_projection_only(&ctx, function, arg.value) -> jet_rust_emit_partial_value_reference(&ctx, function, arg.value) else -> String?{None}
-                    if partial == .Val(reference) -> reference else -> jet_rust_emit_borrowed_value_reference(&ctx, function, arg.value, MIRAccess.Read)
+                    if partial == .Val(reference) -> reference else -> jet_rust_emit_static_string_literal_reference(&ctx, function, arg.value) ?? jet_rust_emit_borrowed_value_reference(&ctx, function, arg.value, MIRAccess.Read)
                 }
             }
         }
