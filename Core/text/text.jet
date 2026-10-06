@@ -14,9 +14,10 @@ package {
 // Jet `String` is UTF-8. Counting, trimming, and case mapping are defined on
 // scalars, not raw bytes, except where a function is named `byte_*`. UTF-8
 // decode, Hangul NFD/NFC, UAX #29 grapheme/word segmentation (extended
-// grapheme clusters, WB simple alphanumerics), East-Asian width, and Latin-1
-// case mapping are Jet. Full Unicode case-fold tables beyond Latin-1 map
-// identity (C+F for ASCII/Latin-1 still applied).
+// grapheme clusters, WB simple alphanumerics), and East-Asian width are Jet.
+// `lower` / `upper` are the full locale-free mappings of `String.to_lower` /
+// `String.to_upper` (pinned Unicode release). Case folding beyond Latin-1
+// maps identity (C+F for ASCII/Latin-1 still applied).
 //
 // Predicates on the empty string are false (`is_alphabetic("")` is false).
 // `splitn` / `rsplitn` take a maximum part count, matching Rust `splitn`.
@@ -71,12 +72,14 @@ pub fn scalars(text: String) -> [String] Never! {
     out
 }
 
-pub fn lower(text: String) -> String Never! { map_case(text, false) }
+/// Full locale-free lowercase mapping (pinned Unicode release), as `String.to_lower`.
+pub fn lower(text: String) -> String Never! { text.to_lower() }
 
-pub fn upper(text: String) -> String Never! { map_case(text, true) }
+/// Full locale-free uppercase mapping (pinned Unicode release), as `String.to_upper`.
+pub fn upper(text: String) -> String Never! { text.to_upper() }
 
-/// Unicode C+F case folding. Latin-1 folds through `lower`; other scalars identity.
-pub fn casefold(text: String) -> String Never! { lower(text) }
+/// Unicode C+F case folding. ASCII/Latin-1 fold through the Latin-1 lowercase map; other scalars identity.
+pub fn casefold(text: String) -> String Never! { latin1_lower(text) }
 
 pub fn caseless_eq(left: String, right: String) -> Bool Never! { casefold(left) == casefold(right) }
 
@@ -477,9 +480,9 @@ fn encode_cps(cps: [Int]) -> String {
     out
 }
 
-fn map_case(text: String, to_upper: Bool) -> String {
+fn latin1_lower(text: String) -> String {
     out := ""
-    loop cp in decode_scalars(text) -> out = "{out}{case_string(cp, to_upper)}"
+    loop cp in decode_scalars(text) -> out = "{out}{case_string(cp, false)}"
     out
 }
 
