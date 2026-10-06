@@ -389,8 +389,10 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if lower_string_view(ty) -> return LowerRepr.Handle{drop: "jet_rt_string_drop", clone: "jet_rt_string_clone"}
             if lower_view_element(ty) == .Val(elem) -> return lower_list_repr(p, ty, elem)
             // The canonical runtime name table excludes source-owned Core
-            // shapes. Only exact Core paths may override their MIR definition.
-            if args.len() == 0 && name.name.starts_with("<corelib>/") {
+            // shapes. Only exact Core paths may override their MIR definition,
+            // and a record schema keeps its MIR layout (Records.jet): its
+            // fields read natively and it converts only at a route boundary.
+            if args.len() == 0 && name.name.starts_with("<corelib>/") && lower_record_schema(p, ty) == None {
                 if lower_runtime_handle(name.name) == .Val(runtime) {
                     clone :: if runtime.clone -> "jet_rt_handle_clone_{runtime.runtime}" else -> ""
                     return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime.runtime}", clone: clone}
