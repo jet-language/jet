@@ -27,6 +27,7 @@
 //
 // usage: [JET_RUNTIME_PACK=<jet_runtime.pack.o> | JET_RUNTIME_C_LIB=<libjet_runtime_c.a>] [JET=<jet binary>]
 //        [JET_LOWER_RUN=1 | JET_LOWER_RELEASE=1] [JET_LOWER_SHARDS=<n>] [JET_LOWER_MEM=<cap>] [JET_LOWER_BATCH=<n>]
+//        [JET_LOWER_SANITIZE=1] also writes each AddressSanitizer-instrumented object, <case>.asan.o (LIR/Sanitize.jet; run-sanitized.mjs runs it).
 //        [JET_MIR_EMIT=1] dumps freshly checked MIR with `jet emit --rust`, without compiling/running the Rust output.
 //        node Compiler/JetBackend/Tests/run-goldens.mjs <outdir> [--stage mir|convert|lower|run] [--until mir|convert|lower|run] [--case-list FILE | filter...]
 // A later stage reuses the files of the earlier ones in <outdir>.
@@ -311,6 +312,7 @@ const BACKEND = [
   "Compiler/JetBackend/Source/LIR/LIR.jet",
   "Compiler/JetBackend/Source/LIR/Lint.jet",
   "Compiler/JetBackend/Source/LIR/Print.jet",
+  "Compiler/JetBackend/Source/LIR/Sanitize.jet",
   ...sortedJet("Compiler/JetBackend/Source/Lower"),
   "Compiler/JetBackend/Source/X64/Encoder.jet",
   "Compiler/JetBackend/Source/X64/RegAlloc.jet",
@@ -394,6 +396,8 @@ function runShard(command, index, shard) {
   mkdirSync(dir, { recursive: true });
   if (runtimePack) writeFileSync(join(dir, "runtime-pack.txt"), `${resolve(runtimePack)}\n`);
   else rmSync(join(dir, "runtime-pack.txt"), { force: true });
+  if (process.env.JET_LOWER_SANITIZE === "1") writeFileSync(join(dir, "sanitize.txt"), "1\n");
+  else rmSync(join(dir, "sanitize.txt"), { force: true });
   const size = Math.max(1, Number(process.env.JET_LOWER_BATCH ?? "25"));
   return new Promise((done) => {
     let pending = shard;
@@ -445,7 +449,7 @@ if (from <= 2 && until >= 2) {
     return !existsSync(join(dirs.lower, `${c.slug}.o`)) && !(existsSync(issues) && readFileSync(issues, "utf8").trim());
   });
   if (!resume) for (const c of pending) {
-    for (const suffix of [".o", ".exe", ".elf", ".issues", ".pack-issues", ".static-issues"]) rmSync(join(dirs.lower, `${c.slug}${suffix}`), { force: true });
+    for (const suffix of [".o", ".asan.o", ".exe", ".elf", ".issues", ".asan-issues", ".pack-issues", ".static-issues"]) rmSync(join(dirs.lower, `${c.slug}${suffix}`), { force: true });
   }
   const command = driverCommand();
   const count = Math.max(1, Number(process.env.JET_LOWER_SHARDS ?? "4"));
