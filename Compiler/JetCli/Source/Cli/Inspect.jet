@@ -17,6 +17,8 @@ use jet_driver.[
     JET_DRIVER_EXIT_OK,
     JET_DRIVER_EXIT_USER_ERROR,
     JET_DRIVER_EXIT_USAGE,
+    jet_driver_inline_package,
+    jet_driver_mask_inline_package,
     jet_driver_present_diagnostics,
     jet_driver_report_problems,
 ]
@@ -703,14 +705,14 @@ fn jet_cli_inspect_reads_bytes(file: String) -[FS]> Bool Never! {
 }
 
 // CmdCompile.rs `run_compiler_api`: an unknown operation and an unreadable
-// input are versioned error documents (Rust `io::Error` wording), and lex
-// and parse project the Jet lexer and parser; source-map and check are not
-// ported yet.
+// input are versioned error documents (Rust `io::Error` wording); lex and
+// parse project the Jet lexer and parser over the inline-package-masked
+// source, and source-map reads the `// jet:` markers of generated Rust. The
+// checked-file projection (Compiler.rs `checked_value`) is not ported yet.
 fn jet_cli_inspect_compiler(args: [String], color: Bool) -[FS]> JetCLIPlan Never! {
     operation :: if args.len() > 1 -> args[1] else -> ""
     file :: if args.len() > 2 -> args[2] else -> ""
-    if operation == "check" -> return jet_cli_not_ported("inspect compiler check", color)
-    reads :: operation == "lex" || operation == "parse" || operation == "source-map" || operation == "source_map"
+    reads :: operation == "lex" || operation == "parse" || operation == "check" || operation == "source-map" || operation == "source_map"
     if !reads -> return jet_cli_inspect_compiler_error(operation, file, "unsupported compiler operation; choose lex, parse, check, or source-map")
     if cli_files.is_dir(file) -> return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: Is a directory (os error 21)")
     if !cli_files.exists(file) -> return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: No such file or directory (os error 2)")
@@ -718,18 +720,77 @@ fn jet_cli_inspect_compiler(args: [String], color: Bool) -[FS]> JetCLIPlan Never
         if !jet_cli_inspect_reads_bytes(file) -> return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: Permission denied (os error 13)")
         return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: stream did not contain valid UTF-8")
     }
+    if operation == "check" -> return jet_cli_not_ported("inspect compiler check", color)
     source :: cli_files.read(file) ?? ""
-    // Rust masks an inline `package { }` carrier before lexing; that mask
-    // lives in the driver and is not shared yet.
-    if source.contains("package") || operation == "source-map" || operation == "source_map" -> return jet_cli_not_ported("inspect compiler {operation}", color)
-    value :: if operation == "lex" -> jet_cli_compiler_lexed(source) else -> jet_cli_compiler_syntax_tree(source)
+    // Compiler.rs `compiler_json` names source-map `source_map` in both the
+    // action and the payload.
+    name :: if operation == "source-map" -> "source_map" else -> operation
+    value := JetCLIStatusValue.Null
+    if operation == "lex" {
+        value = jet_cli_compiler_lexed(source)
+    } else if operation == "parse" {
+        value = jet_cli_compiler_syntax_tree(source)
+    } else {
+        value = jet_cli_compiler_source_map(source)
+    }
     payload :: jet_cli_status_object([JetCLIStatusField]{
         jet_cli_status_field("schema_version", jet_cli_status_int(1)),
         jet_cli_status_field("api_version", jet_cli_status_int(1)),
-        jet_cli_status_field("operation", jet_cli_status_text(operation)),
+        jet_cli_status_field("operation", jet_cli_status_text(name)),
         jet_cli_status_field("value", value),
     })
-    jet_cli_done("{jet_cli_status_render("inspect.compiler.{operation}", true, [JetCLIStatusField]{jet_cli_status_field("compiler", payload)})}\n", "", JET_DRIVER_EXIT_OK)
+    jet_cli_done("{jet_cli_status_render("inspect.compiler.{name}", true, [JetCLIStatusField]{jet_cli_status_field("compiler", payload)})}\n", "", JET_DRIVER_EXIT_OK)
+}
+
+// Rust `str::trim_start` over ASCII whitespace.
+fn jet_cli_compiler_trim_start(line: String) -> String Never! {
+    bytes :: line.bytes()
+    start := 0
+    loop start < bytes.len() {
+        code :: Int.from_u8(bytes[start])
+        if code != 32 && code != 9 && code != 10 && code != 11 && code != 12 && code != 13 -> break
+        start += 1
+    }
+    line.slice(start..<line.len())
+}
+
+// Compiler.rs `source_map_from_generated_rust` + `status_source_map`: each
+// `// jet:source-map source=<path>` line opens a source (listed once), and
+// each `// jet:line <n>` line maps its generated line to the open source.
+fn jet_cli_compiler_source_map(rust_source: String) -> JetCLIStatusValue Never! {
+    sources := [String]{}
+    current := String?{None}
+    lines := [JetCLIStatusValue]{}
+    raw_lines := rust_source.split("\n").to_list()
+    if rust_source.ends_with("\n") -> _ := &raw_lines.pop()
+    loop (index, raw) in raw_lines {
+        raw_bytes :: raw.bytes()
+        carriage :: raw_bytes.len() > 0 && Int.from_u8(raw_bytes[raw_bytes.len() - 1]) == 13
+        line :: if carriage -> raw.slice(0..<(raw.len() - 1)) else -> raw
+        trimmed :: jet_cli_compiler_trim_start(line)
+        source_marker :: "// jet:source-map source="
+        if trimmed.starts_with(source_marker) {
+            source :: trimmed.slice(source_marker.len()..<trimmed.len())
+            current = Val(source)
+            if !sources.contains(source) -> &sources.push(source)
+            next
+        }
+        line_marker :: "// jet:line "
+        if trimmed.starts_with(line_marker) {
+            number :: jet_cli_inspect_count(trimmed.slice(line_marker.len()..<trimmed.len()).trim()) ?? next
+            &lines.push(jet_cli_status_object([JetCLIStatusField]{
+                jet_cli_status_field("generated_line", jet_cli_status_int(index + 1)),
+                jet_cli_status_field("source", jet_cli_status_optional_text(current)),
+                jet_cli_status_field("source_line", jet_cli_status_int(number)),
+            }))
+        }
+    }
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("schema_version", jet_cli_status_int(1)),
+        jet_cli_status_field("api_version", jet_cli_status_int(1)),
+        jet_cli_status_field("sources", jet_cli_status_texts(sources)),
+        jet_cli_status_field("generated_lines", jet_cli_status_array(lines)),
+    })
 }
 
 // Compiler.rs `token_kind_name`, indexed by the jet_lexer `TOKEN_*` tag.
@@ -825,15 +886,21 @@ fn jet_cli_compiler_position(positions: JetCLIPositions, offset: Int) -> JetCLIS
     jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("line", jet_cli_status_int(positions.lines[index])), jet_cli_status_field("column", jet_cli_status_int(positions.columns[index]))})
 }
 
-// Compiler.rs `lex_source` + `status_lexed`: every token with its kind,
-// exact source text, byte span, and line/column ends, then the lexer
-// diagnostics.
+// Compiler.rs `lex_source` + `status_lexed`: every token of the source with
+// its inline `package { }` carrier masked (Package
+// `mask_inline_package_source`; a malformed carrier is the only
+// diagnostic), with its kind, exact source text, byte span, and line/column
+// ends, then the lexer diagnostics.
 fn jet_cli_compiler_lexed(source: String) -> JetCLIStatusValue Never! {
     bytes :: source.bytes()
-    lexed :: lex(bytes)
+    carrier :: jet_driver_inline_package(source)
+    lexed :: lex(jet_driver_mask_inline_package(source, carrier).bytes())
+    diagnostics := lexed.diagnostics
+    if carrier.error == .Val(error) -> diagnostics = [Diagnostic]{error}
     positions :: jet_cli_compiler_positions(bytes)
     tokens := [JetCLIStatusValue]{}
     loop token in lexed.tokens {
+        if carrier.error != None -> break
         start :: token.span.start
         end :: token.span.end
         text := ""
@@ -853,7 +920,7 @@ fn jet_cli_compiler_lexed(source: String) -> JetCLIStatusValue Never! {
         jet_cli_status_field("api_version", jet_cli_status_int(1)),
         jet_cli_status_field("source", jet_cli_status_text(source)),
         jet_cli_status_field("tokens", jet_cli_status_array(tokens)),
-        jet_cli_status_field("diagnostics", jet_cli_compiler_diagnostics(lexed.diagnostics)),
+        jet_cli_status_field("diagnostics", jet_cli_compiler_diagnostics(diagnostics)),
     })
 }
 
@@ -897,16 +964,19 @@ fn jet_cli_compiler_item(item: Item) -> JetCLIStatusValue Never! {
     })
 }
 
-// Compiler.rs `parse_source` + `status_syntax_tree`: lexer diagnostics stop
-// before the parse; a parse with errors keeps only its error diagnostics and
-// no items; a clean parse lists every top-level item and its advisories.
+// Compiler.rs `parse_source` + `status_syntax_tree`: lexer diagnostics (or a
+// malformed inline carrier) stop before the parse of the masked source; a
+// parse with errors keeps only its error diagnostics and no items; a clean
+// parse lists every top-level item and its advisories.
 fn jet_cli_compiler_syntax_tree(source: String) -> JetCLIStatusValue Never! {
-    bytes :: source.bytes()
-    lexed :: lex(bytes)
+    carrier :: jet_driver_inline_package(source)
+    masked :: jet_driver_mask_inline_package(source, carrier).bytes()
+    lexed :: lex(masked)
     items := [JetCLIStatusValue]{}
     diagnostics := lexed.diagnostics
+    if carrier.error == .Val(error) -> diagnostics = [Diagnostic]{error}
     if diagnostics.len() == 0 {
-        parsed :: parse_source(bytes)
+        parsed :: parse_source(masked)
         errors := [Diagnostic]{}
         loop diagnostic in parsed.diagnostics {
             if diagnostic.severity == DIAGNOSTIC_ERROR -> &errors.push(diagnostic)
