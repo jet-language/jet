@@ -75,9 +75,9 @@ fn sema_ownership_crossing_strict_callable(crossing: SemaSendCrossing) -> Bool N
     crossing == SemaSendCrossing.ParallelWorker || crossing == SemaSendCrossing.Kernel || crossing == SemaSendCrossing.HTTPHandler
 }
 
-fn sema_ownership_crossing_stored_types(types: [Type], crossing: SemaSendCrossing, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, context: SemaCheckContext, walk: &SemaCrossingWalk) -> SemaSendabilityProblem? {
+fn sema_ownership_crossing_stored_types(types: [Type], crossing: SemaSendCrossing, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, walk: &SemaCrossingWalk) -> SemaSendabilityProblem? {
     loop ty in types {
-        problem :: sema_ownership_crossing_type_inner(ty, crossing, true, strict_callable, cell_only, environment, context, &walk)
+        problem :: sema_ownership_crossing_type_inner(ty, crossing, true, strict_callable, cell_only, environment, program, context, &walk)
         if problem != None -> return problem
     }
     None
@@ -91,21 +91,21 @@ fn sema_ownership_crossing_type_leaf(name: String) -> String Never! {
     ~name
 }
 
-fn sema_ownership_crossing_core_builtin(ty: Type, name: String, environment: SemaScopeEnvironment) -> Bool Never! {
+fn sema_ownership_crossing_core_builtin(ty: Type, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     actual_name := if ty == {
         .Named(actual) | .Apply(actual, _) -> actual
         else -> ""
     }
     if actual_name != name -> return false
-    graph_option :: environment.registration_graph
+    graph_option :: program.registration_graph
     graph :: graph_option ?? return false
     if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None -> return false
     owner :: sema_registration_core_builtin_owner(graph, name) ?? return false
     owner.ownership == TDeclarationOwnership.Owned
 }
 
-fn sema_ownership_crossing_intrinsic_apply(ty: Type, name: String, environment: SemaScopeEnvironment, allow_without_nominal: Bool) -> Bool Never! {
-    graph_option :: environment.registration_graph
+fn sema_ownership_crossing_intrinsic_apply(ty: Type, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, allow_without_nominal: Bool) -> Bool Never! {
+    graph_option :: program.registration_graph
     graph :: graph_option ?? return false
     nominal_row := sema_type_resolve_nominal_row(graph, ty, environment.module_identity)
     if nominal_row == .Val(row) {
@@ -131,7 +131,7 @@ fn sema_ownership_crossing_named_builtin_problem(nominal: SemaRegistrationNomina
     None
 }
 
-fn sema_ownership_crossing_named(ty: Type, nominal: SemaRegistrationNominal, crossing: SemaSendCrossing, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, context: SemaCheckContext, walk: &SemaCrossingWalk) -> SemaSendabilityProblem? {
+fn sema_ownership_crossing_named(ty: Type, nominal: SemaRegistrationNominal, crossing: SemaSendCrossing, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, walk: &SemaCrossingWalk) -> SemaSendabilityProblem? {
     if nominal.kind == SemaRegistrationNominalKind.Trait {
         return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.TraitValue{name: nominal.symbol.name}))
     }
@@ -150,14 +150,14 @@ fn sema_ownership_crossing_named(ty: Type, nominal: SemaRegistrationNominal, cro
     key :: sema_ownership_crossing_walk_key(nominal.identity_key, type_args)
     if walk.active.contains(nominal.identity_key) || walk.finished.get(key) != None -> return None
     &walk.active.push(nominal.identity_key)
-    found :: sema_ownership_crossing_members(nominal, type_args, crossing, strict_callable, cell_only, environment, context, &walk)
+    found :: sema_ownership_crossing_members(nominal, type_args, crossing, strict_callable, cell_only, environment, program, context, &walk)
     _ := &walk.active.pop()
     walk.finished[key] = true
     found
 }
 
 // The fields, payloads, or underlying type of one nominal instantiation.
-fn sema_ownership_crossing_members(nominal: SemaRegistrationNominal, type_args: [Type], crossing: SemaSendCrossing, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, context: SemaCheckContext, walk: &SemaCrossingWalk) -> SemaSendabilityProblem? {
+fn sema_ownership_crossing_members(nominal: SemaRegistrationNominal, type_args: [Type], crossing: SemaSendCrossing, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, walk: &SemaCrossingWalk) -> SemaSendabilityProblem? {
     params :: sema_inference_registration_params(nominal.generic_params)
     if nominal.generic_params.len() != type_args.len() -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: nominal.symbol.name}))
     bindings :: sema_inference_bindings_for_type_args(params, type_args)
@@ -175,26 +175,26 @@ fn sema_ownership_crossing_members(nominal: SemaRegistrationNominal, type_args: 
         }
         if underlying == .Val(declared) {
             instantiated := sema_inference_substitute_type_bindings(declared, bindings)
-            return sema_ownership_crossing_type_inner(instantiated, crossing, true, strict_callable, cell_only, environment, context, &walk)
+            return sema_ownership_crossing_type_inner(instantiated, crossing, true, strict_callable, cell_only, environment, program, context, &walk)
         }
         return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: nominal.symbol.name}))
     }
     loop field in nominal.fields {
         instantiated := sema_inference_substitute_type_bindings(field.ty, bindings)
-        problem :: sema_ownership_crossing_type_inner(instantiated, crossing, true, strict_callable, cell_only, environment, context, &walk) ?? next
+        problem :: sema_ownership_crossing_type_inner(instantiated, crossing, true, strict_callable, cell_only, environment, program, context, &walk) ?? next
         return Val(sema_ownership_crossing_prepend(nominal.symbol.name, field.symbol.name, problem))
     }
     loop variant in nominal.variants {
         if variant.payload == {
             .Single(payload, _) -> {
                 instantiated := sema_inference_substitute_type_bindings(payload, bindings)
-                problem :: sema_ownership_crossing_type_inner(instantiated, crossing, true, strict_callable, cell_only, environment, context, &walk)
+                problem :: sema_ownership_crossing_type_inner(instantiated, crossing, true, strict_callable, cell_only, environment, program, context, &walk)
                 if problem != None -> return problem
             }
             .Named(fields) -> {
                 loop field in fields {
                     instantiated := sema_inference_substitute_type_bindings(field.ty, bindings)
-                    problem :: sema_ownership_crossing_type_inner(instantiated, crossing, true, strict_callable, cell_only, environment, context, &walk) ?? next
+                    problem :: sema_ownership_crossing_type_inner(instantiated, crossing, true, strict_callable, cell_only, environment, program, context, &walk) ?? next
                     return Val(sema_ownership_crossing_prepend(nominal.symbol.name, field.name, problem))
                 }
             }
@@ -204,12 +204,12 @@ fn sema_ownership_crossing_members(nominal: SemaRegistrationNominal, type_args: 
     None
 }
 
-fn sema_ownership_crossing_named_type(ty: Type, name: String, crossing: SemaSendCrossing, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, context: SemaCheckContext, walk: &SemaCrossingWalk) -> SemaSendabilityProblem? {
+fn sema_ownership_crossing_named_type(ty: Type, name: String, crossing: SemaSendCrossing, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, walk: &SemaCrossingWalk) -> SemaSendabilityProblem? {
     if sema_type_name_is_generic(context.generic_params, name) -> return None
-    graph_option :: environment.registration_graph
+    graph_option :: program.registration_graph
     graph :: graph_option ?? return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: name}))
     nominal_row := sema_type_resolve_nominal_row(graph, ty, environment.module_identity)
-    if nominal_row == .Val(row) -> return sema_ownership_crossing_named(ty, graph.modules[row.module_index].nominals[row.row], crossing, strict_callable, cell_only, environment, context, &walk)
+    if nominal_row == .Val(row) -> return sema_ownership_crossing_named(ty, graph.modules[row.module_index].nominals[row.row], crossing, strict_callable, cell_only, environment, program, context, &walk)
     resolved := sema_type_graph_resolve_named(graph, name, environment.module_identity)
     if resolved == {
         .TraitObject(bounds) -> {
@@ -221,28 +221,28 @@ fn sema_ownership_crossing_named_type(ty: Type, name: String, crossing: SemaSend
     Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: name}))
 }
 
-fn sema_ownership_crossing_type_inner(ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, context: SemaCheckContext, walk: &SemaCrossingWalk) -> SemaSendabilityProblem? {
+fn sema_ownership_crossing_type_inner(ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, walk: &SemaCrossingWalk) -> SemaSendabilityProblem? {
     return if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> None
         .InlineRange(base, _, _) -> {
-            return if cell_only -> sema_ownership_crossing_type_inner(base, crossing, true, strict_callable, cell_only, environment, context, &walk) else -> None
+            return if cell_only -> sema_ownership_crossing_type_inner(base, crossing, true, strict_callable, cell_only, environment, program, context, &walk) else -> None
         }
-        .List(inner) | .Shared(inner) | .Option(inner) -> sema_ownership_crossing_type_inner(inner, crossing, true, strict_callable, cell_only, environment, context, &walk)
+        .List(inner) | .Shared(inner) | .Option(inner) -> sema_ownership_crossing_type_inner(inner, crossing, true, strict_callable, cell_only, environment, program, context, &walk)
         .Map(key, _, value) -> {
-            key_problem :: sema_ownership_crossing_type_inner(key, crossing, true, strict_callable, cell_only, environment, context, &walk)
+            key_problem :: sema_ownership_crossing_type_inner(key, crossing, true, strict_callable, cell_only, environment, program, context, &walk)
             if key_problem != None -> return key_problem
-            sema_ownership_crossing_type_inner(value, crossing, true, strict_callable, cell_only, environment, context, &walk)
+            sema_ownership_crossing_type_inner(value, crossing, true, strict_callable, cell_only, environment, program, context, &walk)
         }
         .Result(ok, err) -> {
-            ok_problem :: sema_ownership_crossing_type_inner(ok, crossing, true, strict_callable, cell_only, environment, context, &walk)
+            ok_problem :: sema_ownership_crossing_type_inner(ok, crossing, true, strict_callable, cell_only, environment, program, context, &walk)
             if ok_problem != None -> return ok_problem
-            sema_ownership_crossing_type_inner(err, crossing, true, strict_callable, cell_only, environment, context, &walk)
+            sema_ownership_crossing_type_inner(err, crossing, true, strict_callable, cell_only, environment, program, context, &walk)
         }
         .Fn(params, ret, _, _, _, _) -> if {
             cell_only -> {
-                problem :: sema_ownership_crossing_stored_types(params, crossing, strict_callable, cell_only, environment, context, &walk)
+                problem :: sema_ownership_crossing_stored_types(params, crossing, strict_callable, cell_only, environment, program, context, &walk)
                 if problem != None -> return problem
-                if ret == {.Val(return_ty) -> sema_ownership_crossing_type_inner(return_ty, crossing, true, strict_callable, cell_only, environment, context, &walk) else -> None}
+                if ret == {.Val(return_ty) -> sema_ownership_crossing_type_inner(return_ty, crossing, true, strict_callable, cell_only, environment, program, context, &walk) else -> None}
             }
             else -> {
                 return if {
@@ -252,62 +252,62 @@ fn sema_ownership_crossing_type_inner(ty: Type, crossing: SemaSendCrossing, clos
                 }
             }
         }
-        .Named(name) -> sema_ownership_crossing_named_type(ty, name, crossing, strict_callable, cell_only, environment, context, &walk)
+        .Named(name) -> sema_ownership_crossing_named_type(ty, name, crossing, strict_callable, cell_only, environment, program, context, &walk)
         .Apply(name, args) -> {
-            if sema_ownership_crossing_core_builtin(ty, "Task", environment) || sema_ownership_crossing_core_builtin(ty, "Receiver", environment) || sema_ownership_crossing_core_builtin(ty, "Sender", environment) {
+            if sema_ownership_crossing_core_builtin(ty, "Task", environment, program) || sema_ownership_crossing_core_builtin(ty, "Receiver", environment, program) || sema_ownership_crossing_core_builtin(ty, "Sender", environment, program) {
                 if cell_only -> return None
-                return sema_ownership_crossing_stored_types(args, crossing, strict_callable, cell_only, environment, context, &walk)
+                return sema_ownership_crossing_stored_types(args, crossing, strict_callable, cell_only, environment, program, context, &walk)
             }
             leaf := sema_ownership_crossing_type_leaf(name)
-            view_apply := sema_ownership_crossing_intrinsic_apply(ty, leaf, environment, true) && (leaf == "View" || leaf == "ViewMut" || leaf == "Pin" || leaf == "ViewIter")
+            view_apply := sema_ownership_crossing_intrinsic_apply(ty, leaf, environment, program, true) && (leaf == "View" || leaf == "ViewMut" || leaf == "Pin" || leaf == "ViewIter")
             if view_apply && cell_only -> return None
             if view_apply -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ViewBorrow))
-            if sema_ownership_crossing_intrinsic_apply(ty, leaf, environment, true) && (leaf == "Cell" || leaf == "CellReadGuard" || leaf == "CellEditGuard") {
+            if sema_ownership_crossing_intrinsic_apply(ty, leaf, environment, program, true) && (leaf == "Cell" || leaf == "CellReadGuard" || leaf == "CellEditGuard") {
                 return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ThreadConfined{name: leaf}))
             }
-            shared_guard := sema_ownership_crossing_intrinsic_apply(ty, leaf, environment, true) && leaf == "SharedGuard"
+            shared_guard := sema_ownership_crossing_intrinsic_apply(ty, leaf, environment, program, true) && leaf == "SharedGuard"
             if shared_guard && cell_only -> return None
             if shared_guard -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ThreadConfined{name: leaf}))
-            graph_option :: environment.registration_graph
+            graph_option :: program.registration_graph
             graph :: graph_option ?? return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: name}))
             nominal_row :: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? {
                 return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: name}))
             }
-            sema_ownership_crossing_named(ty, graph.modules[nominal_row.module_index].nominals[nominal_row.row], crossing, strict_callable, cell_only, environment, context, &walk)
+            sema_ownership_crossing_named(ty, graph.modules[nominal_row.module_index].nominals[nominal_row.row], crossing, strict_callable, cell_only, environment, program, context, &walk)
         }
         .TraitObject(bounds) -> {
             return if !cell_only -> Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.TraitValue{name: bounds.join(" + ")})) else -> None
         }
         .Tuple(fields) -> {
             loop field in fields {
-                problem :: sema_ownership_crossing_type_inner(field.ty, crossing, true, strict_callable, cell_only, environment, context, &walk)
+                problem :: sema_ownership_crossing_type_inner(field.ty, crossing, true, strict_callable, cell_only, environment, program, context, &walk)
                 if problem != None -> return problem
             }
             None
         }
-        .FixedList(inner, _) -> sema_ownership_crossing_type_inner(inner, crossing, true, strict_callable, cell_only, environment, context, &walk)
-        .Tagged(_, inner) -> sema_ownership_crossing_type_inner(inner, crossing, closure_taken, strict_callable, cell_only, environment, context, &walk)
+        .FixedList(inner, _) -> sema_ownership_crossing_type_inner(inner, crossing, true, strict_callable, cell_only, environment, program, context, &walk)
+        .Tagged(_, inner) -> sema_ownership_crossing_type_inner(inner, crossing, closure_taken, strict_callable, cell_only, environment, program, context, &walk)
         .Union(members) -> {
             loop member in members {
-                problem :: sema_ownership_crossing_type_inner(member, crossing, closure_taken, strict_callable, cell_only, environment, context, &walk)
+                problem :: sema_ownership_crossing_type_inner(member, crossing, closure_taken, strict_callable, cell_only, environment, program, context, &walk)
                 if problem != None -> return problem
             }
             None
         }
         .Quantity(base, _) -> {
-            return if !cell_only -> sema_ownership_crossing_type_inner(base, crossing, closure_taken, strict_callable, cell_only, environment, context, &walk) else -> None
+            return if !cell_only -> sema_ownership_crossing_type_inner(base, crossing, closure_taken, strict_callable, cell_only, environment, program, context, &walk) else -> None
         }
     }
 }
 
-pub fn sema_ownership_crossing_problem(ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: SemaCheckContext) -> SemaSendabilityProblem? {
+pub fn sema_ownership_crossing_problem(ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext) -> SemaSendabilityProblem? {
     strict_callable :: sema_ownership_crossing_strict_callable(crossing)
     cell_only := crossing == SemaSendCrossing.SharedStorage
     walk := SemaCrossingWalk{active: [String]{}, finished: [String:Bool]{}}
-    sema_ownership_crossing_type_inner(ty, crossing, closure_taken, strict_callable, cell_only, environment, context, &walk)
+    sema_ownership_crossing_type_inner(ty, crossing, closure_taken, strict_callable, cell_only, environment, program, context, &walk)
 }
 
-pub fn sema_ownership_crossing_problem_for_name(name: String, ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext) -> SemaSendabilityProblem? {
+pub fn sema_ownership_crossing_problem_for_name(name: String, ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext) -> SemaSendabilityProblem? {
     index :: sema_scope_resolve_index(scopes, name)
     if index == .Val(binding_index) {
         binding :: scopes.bindings[binding_index]
@@ -320,24 +320,24 @@ pub fn sema_ownership_crossing_problem_for_name(name: String, ty: Type, crossing
             return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.LocalReactive{name: type_name(ty)}))
         }
     }
-    sema_ownership_crossing_problem(ty, crossing, closure_taken, environment, scopes, context)
+    sema_ownership_crossing_problem(ty, crossing, closure_taken, environment, program, scopes, context)
 }
  
-pub fn sema_ownership_crossing_problem_for_expr(expr: Expr, ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext) -> SemaSendabilityProblem? {
+pub fn sema_ownership_crossing_problem_for_expr(expr: Expr, ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext) -> SemaSendabilityProblem? {
     if expr == {
         .Ident(name, span) -> {
-            if sema_scope_resolve_index_at(scopes, name, span) != None -> return sema_ownership_crossing_problem_for_name(name, ty, crossing, closure_taken, environment, scopes, state, context)
+            if sema_scope_resolve_index_at(scopes, name, span) != None -> return sema_ownership_crossing_problem_for_name(name, ty, crossing, closure_taken, environment, program, scopes, state, context)
         }
         else -> {}
     }
-    sema_ownership_crossing_problem(ty, crossing, closure_taken, environment, scopes, context)
+    sema_ownership_crossing_problem(ty, crossing, closure_taken, environment, program, scopes, context)
 }
 
  
 
-pub fn sema_ownership_crossing_capture_taken(lambda: TLambda, capture: TCapture, environment: SemaScopeEnvironment, generic_params: [TGenericParam]) -> Bool Never! {
+pub fn sema_ownership_crossing_capture_taken(lambda: TLambda, capture: TCapture, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam]) -> Bool Never! {
     loop name in lambda.capture_facts.moved { if name == capture.source -> return true }
-    facts :: sema_copy_classify(capture.ty, SemaCopyIntent.Clone, environment, generic_params, false)
+    facts :: sema_copy_classify(capture.ty, SemaCopyIntent.Clone, environment, program, generic_params, false)
     !facts.cloneable
 }
 pub fn sema_ownership_crossing_concurrent_write_diagnostic(value: String, boundary: String, span: Span) -> Diagnostic {

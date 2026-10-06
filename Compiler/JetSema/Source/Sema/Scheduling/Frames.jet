@@ -189,11 +189,11 @@ pub struct SemaFrameHardwareCall {
 }
 
 // Only selected target-machine register facts can create an MMIO resource.
-pub fn sema_frame_hardware_register_operation(receiver: Expr, method: String, source_index: Int, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> FrameOperation? {
+pub fn sema_frame_hardware_register_operation(receiver: Expr, method: String, source_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> FrameOperation? {
     if method != "read" && method != "write" && method != "set" && method != "clear" -> return None
-    path :: sema_hardware_board_path(receiver, environment, scopes) ?? return None
+    path :: sema_hardware_board_path(receiver, environment, program, scopes) ?? return None
     if path.segments.len() < 3 -> return None
-    machine :: sema_hardware_target_machine(environment) ?? return None
+    machine :: sema_hardware_target_machine(environment, program) ?? return None
     block :: sema_hardware_register_block_fact(machine, path.segments[1]) ?? return None
     register :: sema_hardware_register_fact(block, path.segments[2]) ?? return None
     mode := if method == "read" -> ResourceAccessMode.Read else -> ResourceAccessMode.Write
@@ -215,15 +215,15 @@ pub fn sema_frame_hardware_dma_bind_start(start: SemaFrameDMABinding, transfer_n
     result
 }
 
-pub fn sema_frame_hardware_dma_start(receiver: Expr, args: [CallArg], source_index: Int, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> SemaFrameHardwareCall Never! {
+pub fn sema_frame_hardware_dma_start(receiver: Expr, args: [CallArg], source_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFrameHardwareCall Never! {
     is_dma_receiver := if receiver == {
         .Ident(name, _) -> name == "dma"
         else -> false
     }
     if !is_dma_receiver || args.len() != 2 -> return SemaFrameHardwareCall{operation: None, dma_start: None}
-    path :: sema_hardware_board_path(args[0].expr, environment, scopes) ?? return SemaFrameHardwareCall{operation: None, dma_start: None}
+    path :: sema_hardware_board_path(args[0].expr, environment, program, scopes) ?? return SemaFrameHardwareCall{operation: None, dma_start: None}
     if path.segments.len() < 3 -> return SemaFrameHardwareCall{operation: None, dma_start: None}
-    machine :: sema_hardware_target_machine(environment) ?? return SemaFrameHardwareCall{operation: None, dma_start: None}
+    machine :: sema_hardware_target_machine(environment, program) ?? return SemaFrameHardwareCall{operation: None, dma_start: None}
     channel :: sema_hardware_dma_channel_fact(machine, path.segments[1], path.segments[2]) ?? return SemaFrameHardwareCall{operation: None, dma_start: None}
     buffer :: sema_hardware_expr_name(args[1].expr) ?? return SemaFrameHardwareCall{operation: None, dma_start: None}
     token := "jet_dma_transfer@{source_index}"
@@ -315,11 +315,11 @@ pub fn sema_frame_schedule_build(operations: [FrameOperation]) -> SemaFrameSched
     }
 }
 
-pub fn sema_frame_schedule_produce(operations: [FrameOperation], environment: SemaScopeEnvironment, source_bytes: String, lambda_start: Int) -> SemaFrameScheduleFacts {
+pub fn sema_frame_schedule_produce(operations: [FrameOperation], environment: SemaScopeEnvironment, program: SemaProgramTables, source_bytes: String, lambda_start: Int) -> SemaFrameScheduleFacts {
     if operations.len() == 0 -> return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, mir_derivation: None, error: None}
     built := sema_frame_schedule_build(operations)
     if built.schedule == None -> return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, mir_derivation: None, error: built.error}
-    graph_option :: environment.registration_graph
+    graph_option :: program.registration_graph
     graph :: graph_option ?? return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, mir_derivation: None, error: Val("frame schedule derivation requires registered module identity")}
     module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, mir_derivation: None, error: Val("frame schedule derivation requires registered module identity")}
     module_path := graph.modules[module_index].module_path
