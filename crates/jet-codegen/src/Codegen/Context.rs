@@ -1761,6 +1761,18 @@ impl Cx {
         facts.functions.get(owner)?.get(name)
     }
 
+    /// A package-namespace function declared by a sibling module. The current
+    /// module's own top-level functions also live in the package namespace,
+    /// but they are local items, never a cross-module binding.
+    fn namespace_sibling_function(&self, name: &str) -> Option<&BundleFunctionFacts> {
+        let facts = self.bundle_facts.as_ref()?;
+        let owner = facts.names.namespace_owner(self.bundle_module, name)?;
+        if owner == self.bundle_module {
+            return None;
+        }
+        facts.functions.get(owner)?.get(name)
+    }
+
     fn namespace_constant(&self, name: &str) -> Option<&BundleConstantFacts> {
         let facts = self.bundle_facts.as_ref()?;
         let owner = facts.names.namespace_owner(self.bundle_module, name)?;
@@ -1794,7 +1806,17 @@ impl Cx {
     }
 
     pub(crate) fn fact_unqualified_file(&self, name: &str) -> Option<&(String, String)> {
-        self.unqualified_file.get(name).or_else(|| self.namespace_function(name).map(|fact| &fact.binding))
+        self.unqualified_file
+            .get(name)
+            .or_else(|| self.namespace_sibling_function(name).map(|fact| &fact.binding))
+    }
+
+    /// Checked facts of an unqualified package function, local or bound.
+    fn unqualified_function(&self, name: &str) -> Option<&BundleFunctionFacts> {
+        match self.unqualified_file.get(name) {
+            Some(binding) => self.bound_function(binding),
+            None => self.namespace_function(name),
+        }
     }
 
     pub(crate) fn fact_variant_owner(&self, variant: &str) -> Option<&String> {
@@ -1811,8 +1833,7 @@ impl Cx {
             if let Some((owner, method)) = name.rsplit_once("::") {
                 facts.metadata.method_contracts.get(self.shared_nominal_key(owner))?.get(method)
             } else {
-                self.fact_unqualified_file(name).and_then(|binding| self.bound_function(binding))
-                    .map(|function| &function.contracts)
+                self.unqualified_function(name).map(|function| &function.contracts)
             }
         })
     }
@@ -1823,8 +1844,7 @@ impl Cx {
             if let Some((owner, method)) = name.rsplit_once("::") {
                 facts.metadata.method_param_names.get(self.shared_nominal_key(owner))?.get(method)
             } else {
-                let function = self.fact_unqualified_file(name)
-                    .and_then(|binding| self.bound_function(binding))?;
+                let function = self.unqualified_function(name)?;
                 let Type::Fn { call_metadata: Some(metadata), .. } = &function.value_type else { return None };
                 Some(&metadata.names)
             }
@@ -1874,7 +1894,7 @@ impl Cx {
             if let Some((module, function)) = self.unqualified_file.get(name) {
                 return format!("{module}::{}", mangle(function));
             }
-            if let Some(fact) = self.namespace_function(name) {
+            if let Some(fact) = self.namespace_sibling_function(name) {
                 return format!("{}::{}", fact.binding.0, mangle(&fact.binding.1));
             }
         }
