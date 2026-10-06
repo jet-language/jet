@@ -135,6 +135,8 @@ fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
         "memory/string_view",
         // #4392: returned views name their proven owners' lifetime on AOT.
         "memory/view_return_lifetimes",
+        // D-MEMPROVENANCE2: view subranges reborrow their owner on every tier.
+        "memory/view_subranges",
         "streams/generators",
     ];
     run_child_stem_battery(
