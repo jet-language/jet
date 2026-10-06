@@ -625,18 +625,33 @@ function parseSignature(sig) {
 function resultShape(ty, path, nativeInt) {
   ty = (ty ?? "()").replace(/\s+/g, "");
   if (ty === "!") ty = "()";
-  const generic = /^(Option|Result)<(.*)>$/.exec(ty);
+  // `JetOutcome<T, JetAbsent>` (= `Result<T, JetAbsent>`) is generated Rust's
+  // `T?`: it crosses as an Option.
+  const outcome = /^(?:(?:[a-z_][a-z0-9_]*::)*JetOutcome|Result)<(.*),JetAbsent>$/.exec(ty);
+  const generic = outcome ? [ty, "Option", outcome[1]] : /^(Option|Result)<(.*)>$/.exec(ty);
+  const [somePattern, nonePattern] = outcome ? ["Ok", "Err(_)"] : ["Some", "None"];
+  // A List result element: a plain slot word, or a new owned handle of a
+  // runtime value (the lowering's List keeps the handles as its elements).
+  const resultElement = (t) => {
+    const plain = elementCarrier(t);
+    if (plain) return plain;
+    if (!opaqueName.test(t) || tagCarrier(t, path)) return null;
+    const name = opaqueName.exec(t)[1];
+    if (name === "String" || name === "Self") return null;
+    const full = qualify(t, path);
+    return { jet: `Handle{name: "${name}"}`, write: "Box::into_raw(Box::new(e)) as u64", handle: { name, full } };
+  };
   const listOf = (t) => {
     const list = /^Vec<(.+)>$/.exec(t);
-    return list ? elementCarrier(list[1]) : null;
+    return list ? resultElement(list[1]) : null;
   };
   const list = /^Vec<(.+)>$/.exec(ty);
   if (list) {
     // A List result: its length, with its slot buffer written to `data`.
-    const element = elementCarrier(list[1]);
+    const element = resultElement(list[1]);
     if (!element) return null;
     return {
-      jet: `Plain{carrier: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "data", cty: "*mut u64" }], handles: [],
+      jet: `Plain{carrier: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "data", cty: "*mut u64" }], handles: element.handle ? [element.handle] : [],
       body: (call) => `list_out(${call}.into_iter().map(|e| ${element.write}).collect(), data)`,
     };
   }
@@ -665,15 +680,15 @@ function resultShape(ty, path, nativeInt) {
     const element = listOf(args[0]);
     if (element) {
       return {
-        jet: `Option{some: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "some", cty: "*mut u64" }, { name: "some_len", cty: "i64" }], handles: [],
-        body: (call) => `match ${call} {\n            ${listArm("some", element, "Some", 1)}\n            None => 0,\n        }`,
+        jet: `Option{some: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "some", cty: "*mut u64" }, { name: "some_len", cty: "i64" }], handles: element.handle ? [element.handle] : [],
+        body: (call) => `match ${call} {\n            ${listArm("some", element, somePattern, 1)}\n            ${nonePattern} => 0,\n        }`,
       };
     }
     const v = valueCarrier(args[0], path, nativeInt);
     if (!v || !v.cty) return null;
     return {
       jet: `Option{some: LowerRouteCarrier.${v.jet}}`, ret: "i64", outs: [{ name: "some", cty: v.cty }], handles: v.handle ? [v.handle] : [],
-      body: (call) => `match ${call} {\n            Some(value) => { unsafe { some.write(${v.wrap("value")}) }; 1 }\n            None => 0,\n        }`,
+      body: (call) => `match ${call} {\n            ${somePattern}(value) => { unsafe { some.write(${v.wrap("value")}) }; 1 }\n            ${nonePattern} => 0,\n        }`,
     };
   }
   if (args.length !== 2) return null;
@@ -690,7 +705,7 @@ function resultShape(ty, path, nativeInt) {
     : ok.cty ? `Ok(value) => { unsafe { ok.write(${ok.wrap("value")}) }; 1 }` : "Ok(()) => 1,";
   const okJet = okList ? `List{elem: LowerRouteCarrier.${okList.jet}}` : ok.jet;
   return {
-    jet: `Result{ok: LowerRouteCarrier.${okJet}, err: LowerRouteCarrier.${err.jet}}`, ret: "i64", outs, handles: [ok?.handle, err.handle].filter(Boolean),
+    jet: `Result{ok: LowerRouteCarrier.${okJet}, err: LowerRouteCarrier.${err.jet}}`, ret: "i64", outs, handles: [ok?.handle, okList?.handle, err.handle].filter(Boolean),
     body: (call) => `match ${call} {\n            ${okArm}\n            Err(error) => { unsafe { err.write(${err.wrap("error")}) }; 0 }\n        }`,
   };
 }

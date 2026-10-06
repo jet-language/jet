@@ -181,8 +181,7 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
                 return lower_alias_absent(&f, instruction)
             }
             if result_ty == .Val(ty) {
-                // Handle buffers cross only as arguments (Records.jet).
-                if lower_record_list_element(p, ty, carrier) != None || !lower_route_carrier_matches(p, ty, carrier) -> return lower_fail(&m, &f, "{what} {name} result type {mir_type_display_name(ty)} does not match its runtime route")
+                if !lower_route_result_matches(p, ty, carrier) -> return lower_fail(&m, &f, "{what} {name} result type {mir_type_display_name(ty)} does not match its runtime route")
             }
             dst :: lower_result(p, c, &m, &f, instruction)
             if f.failed -> return
@@ -305,26 +304,32 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
 // Whether a checked result type `ty` is what the adapter's result shape builds.
 fn lower_route_shape_matches(p: MIRProgram, ty: MIRType, result: LowerRouteResult) -> Bool Never! {
     if result == {
-        .Plain(carrier) -> lower_route_carrier_matches(p, ty, carrier)
+        .Plain(carrier) -> lower_route_result_matches(p, ty, carrier)
         .Option(some) -> if ty.kind == {
-            .Option(inner) -> lower_route_carrier_matches(p, inner, some)
+            .Option(inner) -> lower_route_result_matches(p, inner, some)
             else -> false
         }
         .Result(ok, err) -> if ty.kind == {
-            .Result(ok_ty, err_ty) -> lower_route_carrier_matches(p, ok_ty, ok) && lower_route_carrier_matches(p, err_ty, err)
+            .Result(ok_ty, err_ty) -> lower_route_result_matches(p, ok_ty, ok) && lower_route_result_matches(p, err_ty, err)
             else -> false
         }
         .Tuple(items) -> if ty.kind == {
             .Tuple(elems) -> {
                 if elems.len() != items.len() -> return false
                 loop (index, item) in items {
-                    if !lower_route_carrier_matches(p, elems[index].ty, item) -> return false
+                    if !lower_route_result_matches(p, elems[index].ty, item) -> return false
                 }
                 true
             }
             else -> false
         }
     }
+}
+
+// A result side: handle buffers cross only as arguments (Records.jet), so a
+// List of records never comes back as one.
+fn lower_route_result_matches(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarrier) -> Bool Never! {
+    lower_record_list_element(p, ty, carrier) == None && lower_route_carrier_matches(p, ty, carrier)
 }
 
 // An adapter's tag word and the stack slot its payload was written to.
