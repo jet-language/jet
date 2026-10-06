@@ -1,4 +1,4 @@
-use super::alloc_ptrs::{db_error_ty, db_row_ty, io_error_ty, result_ty};
+use super::alloc_ptrs::{db_error_ty, io_error_ty, result_ty};
 use super::core_types::{encoding_error_ty, json_ty, u8_ty, unit_ty};
 use crate::Syntax;
 use crate::AST::{AccessConvention, FunctionCallMetadata, Type};
