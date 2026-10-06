@@ -11,11 +11,11 @@ use core.files as files
 
 fn kind(error: IOError) -> String {
     if error == {
-        .AlreadyExists(_) -> return "AlreadyExists"
-        .Unsupported(_) -> return "Unsupported"
-        .InvalidInput(_) -> return "InvalidInput"
-        .NotFound(_) -> return "NotFound"
-        else -> return "Other"
+        .AlreadyExists(_) -> "AlreadyExists"
+        .Unsupported(_) -> "Unsupported"
+        .InvalidInput(_) -> "InvalidInput"
+        .NotFound(_) -> "NotFound"
+        else -> "Other"
     }
 }
 
@@ -79,7 +79,7 @@ fn run() {
 
     // D-CORE-FILERENAME1: refuse, swap, and swap with a missing name.
     store.rename("stage", "pkg", if_exists: .Refuse)
-    other :: store.create_directory("other")
+    _other :: store.create_directory("other")
     if store.rename("other", "pkg", if_exists: .Refuse) == {
         .Ok(_) -> print("refusing rename: replaced")
         .Err(error) -> print("refusing rename: {kind(error)}")
