@@ -447,7 +447,10 @@ impl FunctionRegistry {
             .get(&id)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        if generic_params.len() != type_args.len() {
+        // A demanded generic instance (`Pattern::encode_hole__Int`) is already
+        // specialized: it has no binders left, and the call keeps its
+        // instance arguments only as the instance identity.
+        if !generic_params.is_empty() && generic_params.len() != type_args.len() {
             return Err("checked generic method has incomplete return-type arguments");
         }
         let mut substitutions = generic_params

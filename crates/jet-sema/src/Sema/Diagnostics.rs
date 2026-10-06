@@ -1653,6 +1653,7 @@ pub fn is_core_error_family_type(name: &str) -> bool {
             | "RangeError"
             | "TextError"
             | "TimeError"
+            | "UIHostError"
             | "URLError"
             | "UTF8Error"
             | "UUIDError"
