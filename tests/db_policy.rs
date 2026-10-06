@@ -330,3 +330,39 @@ fn sqlite_blob_round_trip_preserves_bytes_across_tiers() {
         "direct:[0, 1, 2, 127, 128, 255]\nexplicit:[0, 1, 2, 127, 128, 255]\nequal:true\n",
     );
 }
+
+#[test]
+fn typed_row_reads_preserve_missing_and_conversion_errors_across_tiers() {
+    assert_tiers_agree(
+        "db_typed_row_source",
+        r#"
+use core.db as db
+
+fn run() {
+    row :: [String: DBValue]{
+        "integer": DBValue.Int(42),
+        "float": DBValue.Float(1.5),
+        "text": DBValue.Text("jet"),
+        "true": DBValue.Bool(true),
+        "zero": DBValue.Int(0),
+        "one": DBValue.Int(1),
+        "two": DBValue.Int(2),
+        "null": DBValue.Null,
+    }
+    print(db.row_int(row, "integer") ?? -1)
+    print(db.row_float(row, "integer") ?? -1.0)
+    print(db.row_float(row, "float") ?? -1.0)
+    print(db.row_text(row, "text") ?? "missing")
+    print(db.row_bool(row, "true") ?? false)
+    print(db.row_bool(row, "zero") ?? true)
+    print(db.row_bool(row, "one") ?? false)
+    db.row_value(row, "missing") ? _ -> print("unexpected") ! error -> print(error.message)
+    db.row_int(row, "text") ? _ -> print("unexpected") ! error -> print(error.message)
+    db.row_float(row, "null") ? _ -> print("unexpected") ! error -> print(error.message)
+    db.row_text(row, "integer") ? _ -> print("unexpected") ! error -> print(error.message)
+    db.row_bool(row, "two") ? _ -> print("unexpected") ! error -> print(error.message)
+}
+"#,
+        "42\n42\n1.5\njet\ntrue\nfalse\ntrue\nmissing column `missing`\nexpected an int, got jet\nexpected a float, got null\nexpected text, got 42\nexpected a bool, got 2\n",
+    );
+}

@@ -11,10 +11,22 @@ package {
 
 use core as core
 
-// core.db keeps the checked SQL and policy model in Jet's core call layer. The
-// provider owns connection state and executes only the typed operations exposed
-// here; this source module is the stable facade used by applications. Every
-// fallible operation reports on the module's one failure domain, `DBError`.
+// core.db owns typed row selection and conversion. The connection provider
+// owns host state; every fallible row operation reports the same DBError.
+
+#Error
+pub struct DBError {
+    pub message: String
+}
+
+pub enum DBValue {
+    Null
+    Int(value: Int)
+    Float(value: Float)
+    Text(value: String)
+    Bool(value: Bool)
+    Blob(value: [U8])
+}
 
 pub fn open(url: String) -[DB]> DBConnection Never! {
     core.db.open(url)
@@ -40,23 +52,57 @@ pub fn policy_audit(scope: DBScope) -[DB]> String Never! {
 }
 
 pub fn row_value(row: [String: DBValue], column: String) -[DB]> DBValue DBError! {
-    core.db.row_value(row, column)
+    value :: row.get(column) ?? return Err(DBError{message: "missing column `{column}`"})
+    Ok(value)
 }
 
 pub fn row_int(row: [String: DBValue], column: String) -[DB]> Int DBError! {
-    core.db.row_int(row, column)
+    value :: row_value(row, column)
+    if value == {
+        .Int(number) -> Ok(number)
+        else -> Err(DBError{message: "expected an int, got {render_value(value)}"})
+    }
 }
 
 pub fn row_float(row: [String: DBValue], column: String) -[DB]> Float DBError! {
-    core.db.row_float(row, column)
+    value :: row_value(row, column)
+    if value == {
+        .Float(number) -> Ok(number)
+        .Int(number) -> Ok(Float{number})
+        else -> Err(DBError{message: "expected a float, got {render_value(value)}"})
+    }
 }
 
 pub fn row_text(row: [String: DBValue], column: String) -[DB]> String DBError! {
-    core.db.row_text(row, column)
+    value :: row_value(row, column)
+    if value == {
+        .Text(text) -> Ok(text)
+        else -> Err(DBError{message: "expected text, got {render_value(value)}"})
+    }
 }
 
 pub fn row_bool(row: [String: DBValue], column: String) -[DB]> Bool DBError! {
-    core.db.row_bool(row, column)
+    value :: row_value(row, column)
+    if value == {
+        .Bool(boolean) -> Ok(boolean)
+        .Int(number) -> {
+            if number == 0 -> return Ok(false)
+            if number == 1 -> return Ok(true)
+            Err(DBError{message: "expected a bool, got {number}"})
+        }
+        else -> Err(DBError{message: "expected a bool, got {render_value(value)}"})
+    }
+}
+
+fn render_value(value: DBValue) -> String Never! {
+    if value == {
+        .Null -> "null"
+        .Int(number) -> "{number}"
+        .Float(number) -> "{number}"
+        .Text(text) -> text
+        .Bool(boolean) -> "{boolean}"
+        .Blob(bytes) -> "{bytes}"
+    }
 }
 
 // Typed row projection is a compiler lowering. Keeping the call routed through

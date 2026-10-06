@@ -52,7 +52,9 @@ pub struct GlyphRun {
 }
 
 pub fn system(style: FontStyle) -> FontFace Never! {
-    core.font.system(style)
+    if style == FontStyle.Monospace -> return FontFace{family: "monospace", size: 14.0, style: style}
+    if style == FontStyle.Title -> return FontFace{family: "system-ui", size: 24.0, style: style}
+    FontFace{family: "system-ui", size: 14.0, style: style}
 }
 
 pub fn shape(text: String, face: FontFace) -> GlyphRun Never! {
