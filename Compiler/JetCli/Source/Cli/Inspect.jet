@@ -210,7 +210,7 @@ fn jet_cli_inspect_run(request: JetCLIInspectRequest, color: Bool, json: Bool, t
     if request.scope == .Target(target) -> project = cli_files.is_dir(target)
     if plane == {
         "types" | "shapes" | "rights" -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: plane, file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
-        "claims" -> return jet_cli_with_notices([String]{notice}, jet_cli_inspect_claims(file, json, color))
+        "claims" -> return jet_cli_with_notices([String]{notice}, jet_cli_inspect_claims_manifest(file, json, color))
         "build" -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "graph", file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
         else -> {}
     }
@@ -603,55 +603,6 @@ JET_CLI_RELEASE_POLICY_ACTIVE :: false
 // CmdInspect.rs `CAPABILITY_RELATION_SCHEMA` and `RELEASE_CLAIM_SOURCE`.
 JET_CLI_CAPABILITY_RELATION_SCHEMA :: "jet.capability.relation.v1"
 JET_CLI_RELEASE_CLAIM_SOURCE :: "manifest.capability_relation.rows"
-
-// CmdInspect.rs `run_claims` over `capability_relation_projection`: the
-// release status and the claims the package's canonical hardening manifest
-// records. An absent manifest is an unavailable relation with no claims, so
-// the release is not ready; reading and validating a present manifest is
-// not ported yet.
-fn jet_cli_inspect_claims(file: String, json: Bool, color: Bool) -[FS, Env]> JetCLIPlan Never! {
-    base := jet_cli_parent(file) ?? "."
-    if base == "" -> base = "."
-    root :: jet_cli_inspect_package_root(base) ?? base
-    path :: "{root}/.jet/hardening-manifest.json"
-    if cli_files.exists(path) -> return jet_cli_not_ported("inspect claims <hardening manifest>", color)
-    reason :: "capability relation source `{path}` is absent"
-    relation_status :: "unavailable"
-    release_ready :: false
-    if json {
-        release :: jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("version", jet_cli_status_text(JET_CLI_VERSION)),
-            jet_cli_status_field("status", jet_cli_status_text(JET_CLI_RELEASE_CHANNEL)),
-            jet_cli_status_field("disposition", jet_cli_status_text(JET_CLI_RELEASE_DISPOSITION)),
-            jet_cli_status_field("readiness", jet_cli_status_text(JET_CLI_RELEASE_READINESS)),
-            jet_cli_status_field("compatibility_policy", jet_cli_status_text(JET_CLI_RELEASE_POLICY)),
-            jet_cli_status_field("compatibility_policy_disposition", jet_cli_status_text(JET_CLI_RELEASE_POLICY_DISPOSITION)),
-            jet_cli_status_field("compatibility_policy_active", jet_cli_status_bool(JET_CLI_RELEASE_POLICY_ACTIVE)),
-        })
-        relation :: jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("schema", jet_cli_status_text(JET_CLI_CAPABILITY_RELATION_SCHEMA)),
-            jet_cli_status_field("status", jet_cli_status_text(relation_status)),
-            jet_cli_status_field("relation", jet_cli_status_text(JET_CLI_RELEASE_CLAIM_SOURCE)),
-            jet_cli_status_field("path", jet_cli_status_text(path)),
-            jet_cli_status_field("reason", jet_cli_status_text(reason)),
-            jet_cli_status_field("rows", jet_cli_status_array([JetCLIStatusValue]{})),
-        })
-        fields :: [JetCLIStatusField]{
-            jet_cli_status_field("file", jet_cli_status_text(file)),
-            jet_cli_status_field("source", jet_cli_status_text(JET_CLI_RELEASE_CLAIM_SOURCE)),
-            jet_cli_status_field("release", release),
-            jet_cli_status_field("release_ready", jet_cli_status_bool(release_ready)),
-            jet_cli_status_field("capability_relation", relation),
-            jet_cli_status_field("claims", jet_cli_status_array([JetCLIStatusValue]{})),
-        }
-        return jet_cli_done("{jet_cli_status_render("inspect.claims", release_ready, fields)}\n", "", JET_DRIVER_EXIT_OK)
-    }
-    active :: if JET_CLI_RELEASE_POLICY_ACTIVE -> "active" else -> "not active"
-    ready :: if release_ready -> "yes" else -> "no"
-    out := "claims\nrelease: {JET_CLI_RELEASE_CHANNEL} (disposition: {JET_CLI_RELEASE_DISPOSITION}; readiness: {JET_CLI_RELEASE_READINESS}; 1.0 compatibility policy: {JET_CLI_RELEASE_POLICY} [{JET_CLI_RELEASE_POLICY_DISPOSITION}; {active}])\n"
-    out = "{out}claim source: {JET_CLI_RELEASE_CLAIM_SOURCE}\nrelease ready: {ready}\ncapability relation: {relation_status}\nnone\n"
-    jet_cli_done(out, "", JET_DRIVER_EXIT_OK)
-}
 
 // CmdCompile.rs `run_build_query` up to the compile: the file (and the
 // explain-build subject) the query names, or the usage line. The

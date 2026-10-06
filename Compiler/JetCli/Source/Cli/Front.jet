@@ -1131,6 +1131,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
         name :: args[1]
         return jet_cli_fail("E2101", "`jet jobs {name}` no longer runs a job", jet_cli_why("E2101"), "run `jet {name}`; `jet jobs` lists jobs", color, JET_DRIVER_EXIT_USAGE)
     }
+    if jet_cli_engine_commands(command, argv) == .Val(plan) -> return plan
     if command == {
         "help" -> {
             order :: jet_cli_help_order(jet_argv)
@@ -1152,6 +1153,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
         "lint" -> return jet_cli_lint(jet_argv, args, color, quiet)
         "fmt" -> return jet_cli_fmt(argv, jet_argv, args, color, quiet)
         "find" -> return jet_cli_find(jet_cli_tail(argv, 1), color, json)
+        "parts" -> return jet_cli_project_parts(jet_cli_tail(argv, 1), color, json)
         else -> {}
     }
     if jet_cli_inspect_word(command) -> return jet_cli_inspect(argv, jet_argv, args, color, quiet, json, threads)

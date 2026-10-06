@@ -957,13 +957,14 @@ fn jet_cli_codemod(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPl
 }
 
 // `jet inspect audit [copies|memory|<entry.jet>] [--advisory-db <path>]`
-// (main.rs `"audit"`): the copy ledger and the memory witnesses are not
-// ported. The lockfile/advisory-feed audit (CmdSupply.rs `run_audit`) starts
-// with `package_input`, which needs the no-follow package resolver (Core
-// directory handles, #3593), so it refuses right after `require_manifest_root`
-// until D-FSDIR1 (#4697); the host port is in commit bf658e410 (InspectB.jet).
+// (main.rs `"audit"`): `memory` runs the memory witnesses (AuditMemory.jet);
+// the copy ledger is not ported. The lockfile/advisory-feed audit
+// (CmdSupply.rs `run_audit`) starts with `package_input`, which needs the
+// no-follow package resolver (Core directory handles, #3593), so it refuses
+// right after `require_manifest_root` until D-FSDIR1 (#4697); the host port is
+// in commit bf658e410 (InspectB.jet).
 fn jet_cli_audit(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    if args.len() > 0 && args[0] == "memory" -> return jet_cli_not_ported("inspect audit memory", color)
+    if args.len() > 0 && args[0] == "memory" -> return jet_cli_audit_memory(jet_cli_tail(args, 1), color, json)
     if args.len() > 0 && (args[0] == "copies" || args[0].ends_with(".jet")) -> return jet_cli_not_ported("inspect audit copies", color)
     if jet_cli_inspect_project_root("inspect audit", "error: no package.jet found — run `jet inspect audit` inside a project", color) == .Refused(plan) -> return plan
     jet_cli_not_ported("inspect audit", color)

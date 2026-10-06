@@ -1,0 +1,68 @@
+// Adapted from origin/port/compiler Jetpack/Foundation/Source/Report.jet
+// `report_status_value_parse`: use the Core JSON reader, not another parser.
+use core.encoding.json as cli_json
+use core.encoding.DataTree as DataTree
+
+pub fn report_status_value_parse(text: String) -> DataTree String! {
+    if cli_json.parse(text) == {
+        .Ok(tree) -> Ok(tree)
+        .Err(error) -> Err(error.reason)
+    }
+}
+
+fn jet_cli_status_from_tree(tree: DataTree) -> JetCLIStatusValue Never! {
+    if tree == {
+        .Null -> JetCLIStatusValue.Null
+        .Bool(value) -> jet_cli_status_bool(value)
+        .Int(value) -> jet_cli_status_int(value)
+        .Float(value) -> JetCLIStatusValue.Float{text: "{value}"}
+        .Text(value) -> jet_cli_status_text(value)
+        .Array(values) -> jet_cli_status_array(loop value in values -> jet_cli_status_from_tree(value))
+        .Object(values) -> {
+            fields := [JetCLIStatusField]{}
+            loop entry in values {
+                &fields.push(jet_cli_status_field(entry.key, jet_cli_status_from_tree(entry.value)))
+            }
+            jet_cli_status_object(fields)
+        }
+    }
+}
+
+fn jet_cli_status_get(value: JetCLIStatusValue, name: String) -> JetCLIStatusValue? Never! {
+    if value == .Object(fields) {
+        loop field in fields {
+            if field.name == name -> return Val(field.value)
+        }
+    }
+    None
+}
+
+fn jet_cli_status_string(value: JetCLIStatusValue?) -> String? Never! {
+    if value == .Val(.Text(text)) -> return Val(text)
+    None
+}
+
+fn jet_cli_status_integer(value: JetCLIStatusValue?) -> Int? Never! {
+    if value == .Val(.Integer(number)) -> return Val(number)
+    None
+}
+
+fn jet_cli_status_boolean(value: JetCLIStatusValue?) -> Bool? Never! {
+    if value == .Val(.Bool(flag)) -> return Val(flag)
+    None
+}
+
+fn jet_cli_status_list(value: JetCLIStatusValue?) -> [JetCLIStatusValue]? Never! {
+    if value == .Val(.Array(items)) -> return Val(items)
+    None
+}
+
+fn jet_cli_status_is_object(value: JetCLIStatusValue?) -> Bool Never! {
+    if value == .Val(.Object(_)) -> return true
+    false
+}
+
+fn jet_cli_status_nested(value: JetCLIStatusValue, field: String, name: String) -> JetCLIStatusValue? Never! {
+    child :: jet_cli_status_get(value, field) ?? return None
+    jet_cli_status_get(child, name)
+}
