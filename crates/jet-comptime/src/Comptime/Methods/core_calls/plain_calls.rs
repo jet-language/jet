@@ -285,27 +285,11 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
             variant: loadable_variant(state).to_string(),
             args: vec![(None, one(0)?.clone())],
         }),
-        // D-FIDELITY-API1=A: explicit runtime-global signal. Interpreter owns
-        // same f32-backed range and validation contract as AOT/JIT.
-        ("core.perf", "fidelity") => Ok(CtValue::Float(CtFloat::f64(f32::from_bits(
-            PERF_FIDELITY.with(Cell::get),
-        ) as f64))),
-        ("core.perf", "default_fidelity") => Ok(CtValue::Float(CtFloat::f64(f32::from_bits(
-            PERF_DEFAULT_FIDELITY_BITS,
-        ) as f64))),
-        ("core.perf", "override_fidelity") => {
-            let value = as_float(one(0)?, span)?;
-            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
-                return Ok(CtValue::failed(Box::new(CtValue::Str(format!(
-                    "core.perf.Perf.override_fidelity needs 0.0 through 1.0, got {}",
-                    value
-                )))));
-            }
-            PERF_FIDELITY.with(|c| c.set((value as f32).to_bits()));
-            Ok(CtValue::Present(Box::new(CtValue::Unit)))
-        }
-        ("core.perf", "reset_fidelity") => {
-            PERF_FIDELITY.with(|c| c.set(PERF_DEFAULT_FIDELITY_BITS));
+        // A raw per-session word; Core/perf owns its interpretation.
+        ("core.perf", "__read_bits") => Ok(CtValue::Int(PERF_FIDELITY.with(Cell::get))),
+        ("core.perf", "__write_bits") => {
+            let bits = as_int(one(0)?, span)?;
+            PERF_FIDELITY.with(|cell| cell.set(bits));
             Ok(CtValue::Unit)
         }
         // --- core.math implementation surface ---
