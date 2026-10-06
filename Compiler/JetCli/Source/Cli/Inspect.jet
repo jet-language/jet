@@ -1,0 +1,177 @@
+// The `jet inspect` group (Source/CmdInspect.rs, the Source/main.rs arms its
+// dispatch words reach, and crates/jet-cli CLI.rs `parse_inspect_args`): the
+// nine planes (`jet inspect <plane> [TARGET] [--live PID | --replay
+// ARTIFACT]`) and the `graph`, `query`, `explain-build`, `compiler`,
+// `impact`, and `provenance` actions. The other inspect actions belong to
+// InspectB.jet. A plane or action whose Jet port has not landed is refused
+// with E2104, never guessed.
+use core.files as cli_files
+use jet_driver.[
+    JET_DRIVER_EXIT_USAGE,
+]
+use jet_foundation.[
+    JET_CLI_COMMANDS,
+    JET_CLI_HANDLERS,
+]
+
+// CLI.rs `InspectPlane::ALL`, in order.
+JET_CLI_INSPECT_PLANES :: [String]{"types", "rights", "claims", "shapes", "accel", "decisions", "structure", "build", "gates"}
+
+// The dispatch words of the inspect actions this file owns.
+JET_CLI_INSPECT_ACTION_WORDS :: [String]{"graph", "query", "explain-build", "compiler", "impact", "provenance"}
+
+// CLI.rs `InspectScope`: `Target` is a source file or a package directory.
+pub enum JetCLIInspectScope {
+    Package
+    Target(target: String)
+    Live(pid: Int)
+    Replay(artifact: String)
+}
+
+// CLI.rs `InspectRequest`: the plane, its scope, and the plane flags kept
+// for the projection.
+pub struct JetCLIInspectRequest {
+    pub plane: String
+    pub scope: JetCLIInspectScope
+    pub options: [String]
+}
+
+enum JetCLIInspectParse {
+    Parsed(request: JetCLIInspectRequest)
+    Failed(message: String)
+}
+
+// CLI.rs `parse_inspect_pid`: a positive `u32`.
+fn jet_cli_inspect_pid(value: String) -> Int? Never! {
+    bytes :: value.bytes()
+    start := 0
+    if bytes.len() > 0 && bytes[0] == (U8{43}) -> start = 1
+    if start >= bytes.len() -> return None
+    pid := 0
+    loop index in start..<bytes.len() {
+        digit :: Int.from_u8(bytes[index]) - 48
+        if digit < 0 || digit > 9 -> return None
+        pid = pid * 10 + digit
+        if pid > 4294967295 -> return None
+    }
+    Val(pid)
+}
+
+// CLI.rs `inspect_flag_takes_value`.
+fn jet_cli_inspect_flag_takes_value(argument: String) -> Bool Never! {
+    name :: argument.split("=").to_list()[0]
+    [String]{"--before", "--color", "--facts", "--gate", "--kind", "--output", "--profile", "--scope", "--set", "--target", "--topic"}.contains(name)
+}
+
+// CLI.rs `parse_inspect_args` over the normalized argv (`inspect <plane> ...`).
+fn jet_cli_inspect_parse(argv: [String]) -> JetCLIInspectParse Never! {
+    if argv.len() < 2 -> return JetCLIInspectParse.Failed{message: "missing inspect plane; choose types, rights, claims, shapes, accel, decisions, structure, build, or gates"}
+    plane :: argv[1]
+    if !JET_CLI_INSPECT_PLANES.contains(plane) -> return JetCLIInspectParse.Failed{message: "unknown inspect plane `{plane}`; choose types, rights, claims, shapes, accel, decisions, structure, build, or gates"}
+    target := String?{None}
+    live := Int?{None}
+    replay := String?{None}
+    options := [String]{}
+    index := 2
+    loop index < argv.len() {
+        argument :: argv[index]
+        if argument == "--live" {
+            if index + 1 >= argv.len() -> return JetCLIInspectParse.Failed{message: "`--live` needs a process id"}
+            value :: argv[index + 1]
+            pid :: jet_cli_inspect_pid(value) ?? return JetCLIInspectParse.Failed{message: "`--live` expects a positive process id, got `{value}`"}
+            if pid == 0 -> return JetCLIInspectParse.Failed{message: "`--live` expects a positive process id"}
+            live = Val(pid)
+            &options.push("--live")
+            &options.push(value)
+            index += 2
+            next
+        }
+        if argument.starts_with("--live=") {
+            value :: argument.slice(7..<argument.len())
+            pid :: jet_cli_inspect_pid(value) ?? return JetCLIInspectParse.Failed{message: "`--live` expects a positive process id, got `{value}`"}
+            if pid == 0 -> return JetCLIInspectParse.Failed{message: "`--live` expects a positive process id"}
+            live = Val(pid)
+            &options.push(argument)
+            index += 1
+            next
+        }
+        if argument == "--replay" {
+            if index + 1 >= argv.len() || argv[index + 1].starts_with("-") -> return JetCLIInspectParse.Failed{message: "`--replay` needs a replay artifact path"}
+            value :: argv[index + 1]
+            replay = Val(value)
+            &options.push("--replay")
+            &options.push(value)
+            index += 2
+            next
+        }
+        if argument.starts_with("--replay=") {
+            value :: argument.slice(9..<argument.len())
+            if value == "" -> return JetCLIInspectParse.Failed{message: "`--replay` needs a replay artifact path"}
+            replay = Val(value)
+            &options.push(argument)
+            index += 1
+            next
+        }
+        if argument == "--" -> return JetCLIInspectParse.Failed{message: "inspect planes do not accept a `--` command tail"}
+        if argument.starts_with("-") {
+            &options.push(argument)
+            if jet_cli_inspect_flag_takes_value(argument) && index + 1 < argv.len() && !argv[index + 1].starts_with("-") {
+                &options.push(argv[index + 1])
+                index += 2
+                next
+            }
+            index += 1
+            next
+        }
+        if target != None -> return JetCLIInspectParse.Failed{message: "inspect accepts at most one file or package target"}
+        target = Val(argument)
+        index += 1
+    }
+    if live != None && replay != None -> return JetCLIInspectParse.Failed{message: "inspect accepts at most one of `--live PID` or `--replay ARTIFACT`"}
+    if target != None && (live != None || replay != None) -> return JetCLIInspectParse.Failed{message: "inspect accepts a target, `--live PID`, or `--replay ARTIFACT` as one scope"}
+    scope := JetCLIInspectScope.Package
+    if target == .Val(path) -> scope = JetCLIInspectScope.Target{target: path}
+    if live == .Val(pid) -> scope = JetCLIInspectScope.Live{pid: pid}
+    if replay == .Val(artifact) -> scope = JetCLIInspectScope.Replay{artifact: artifact}
+    JetCLIInspectParse.Parsed{request: JetCLIInspectRequest{plane: plane, scope: scope, options: options}}
+}
+
+// Source/main.rs `"inspect"`: parse the plane request, then run its
+// projection (CmdInspect.rs `run_inspect`).
+fn jet_cli_inspect_plane(argv: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+    if jet_cli_inspect_parse(argv) == {
+        .Failed(message) -> return jet_cli_fail("E2104", message, jet_cli_why("E2104"), "run `jet inspect <types|rights|claims|shapes|accel|decisions|structure|build|gates> [TARGET] [--live PID | --replay ARTIFACT]`", color, JET_DRIVER_EXIT_USAGE)
+        .Parsed(request) -> return jet_cli_inspect_run(request, color, json, threads)
+    }
+}
+
+// CmdInspect.rs `run_inspect`: one parsed plane request.
+fn jet_cli_inspect_run(request: JetCLIInspectRequest, color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+    jet_cli_not_ported("inspect {request.plane}", color)
+}
+
+// Does the normalized command word belong to the inspect group? `inspect`
+// itself (the planes and the actions that keep the group word), or the
+// dispatch word an inspect action is normalized to.
+pub fn jet_cli_inspect_word(command: String) -> Bool Never! {
+    if command == "inspect" -> return true
+    group :: jet_cli_group_index("inspect") ?? return false
+    loop action in JET_CLI_COMMANDS[group].actions {
+        handler :: jet_cli_handler_index(action.handler) ?? next
+        spec :: JET_CLI_HANDLERS[handler]
+        if !spec.keeps_group && spec.dispatch_word == command -> return true
+    }
+    false
+}
+
+// Route one inspect-group command: `argv` is the normalized argv (the
+// `--` tail included), `jet_argv` the words before `--`, and `args` their
+// positional words; `args[0]` is the command word.
+pub fn jet_cli_inspect(argv: [String], jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+    command :: args[0]
+    inspect_env :: command == "inspect" && args.len() > 1 && args[1] == "env"
+    if command == "inspect" && !inspect_env -> return jet_cli_inspect_plane(argv, color, json, threads)
+    if JET_CLI_INSPECT_ACTION_WORDS.contains(command) -> return jet_cli_not_ported("inspect {command}", color)
+    if jet_cli_inspect_b(command, jet_argv, args, color, quiet, json, threads) == .Val(plan) -> return plan
+    jet_cli_not_ported(command, color)
+}

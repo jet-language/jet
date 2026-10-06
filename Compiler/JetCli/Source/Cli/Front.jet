@@ -1,7 +1,7 @@
 // The `jet` front door (Source/main.rs `main` up to verb dispatch): output
 // flags, retired, moved, and grouped routes, help and the greeting, unknown
 // commands (E2101) and flags (E2102), then the verbs the Jet driver owns
-// (`explain <CODE>`, `check`, `build`, `run <file>`, `test <file>`, and `new <name>`). Every report is the
+// (`explain <CODE>`, `check`, `build`, `run <file>`, `test <file>`, and `new <name>`), and the inspect group (Inspect.jet). Every report is the
 // Rust host's exact bytes and exit status for the same argv. A command whose
 // Jet port has not landed yet is refused with E2104 instead of guessing its
 // behavior.
@@ -780,7 +780,8 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
     }
     if raw.len() == 0 -> return jet_cli_not_ported("repl", color)
     if raw[0] == "?" -> return jet_cli_not_ported("?", color)
-    if json -> return jet_cli_not_ported("{raw[0]} --json", color)
+    // The inspect group renders its own `--json` envelopes (Inspect.jet).
+    if json && raw[0] != "inspect" -> return jet_cli_not_ported("{raw[0]} --json", color)
 
     // Retired, moved, and grouped spellings (Source/main.rs `normalize_frequency_ring_argv`).
     if jet_cli_retired_report(raw, color) == .Val(report) -> return jet_cli_done("", report, JET_DRIVER_EXIT_USAGE)
@@ -937,5 +938,6 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
         "new" -> return jet_cli_new(jet_argv, args, color, quiet)
         else -> {}
     }
+    if jet_cli_inspect_word(command) -> return jet_cli_inspect(argv, jet_argv, args, color, quiet, json, threads)
     jet_cli_not_ported(command, color)
 }
