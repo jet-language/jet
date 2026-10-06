@@ -5,9 +5,8 @@
 // language catalog (built-in types, typed compiler facts, keywords, built-in
 // methods, and numeric conversions). Consumers choose presentation only;
 // they never rebuild signatures or identity. The REPL/LSP visibility and
-// completion lookups have no Jet consumer and are not part of this port; a
-// type is displayed under the spelling the walk recorded (the Rust name
-// ledger's short display paths are not ported).
+// completion lookups have no Jet consumer and are not part of this port.
+// Source names and canonical identities project the checked name ledger.
 use jet_driver.[
     JetDriverDocModule,
 ]
@@ -22,6 +21,9 @@ use jet_foundation.[
     failure_contract_effective_type,
     failure_contract_source,
     type_name,
+    name_ledger_display_path,
+    name_ledger_display_path_at,
+    name_ledger_canonical_path,
 ]
 use jet_sema.[
     sema_registration_unit_family_type_names,
@@ -848,6 +850,33 @@ fn jet_cli_symbol_collect_inline_imports(index: JetCLISemIndex, symbols: &[JetCL
     }
 }
 
+fn jet_cli_symbol_display(modules: [JetDriverDocModule], module_path: String, name: String) -> String Never! {
+    loop doc_module in modules {
+        if doc_module.path != module_path && doc_module.alias != module_path -> next
+        storage :: doc_module.name_ledger ?? return name
+        permit :: storage.guard_read()
+        return name_ledger_display_path(permit.value, doc_module.name_module_index, name, Val(doc_module.name_module_index)) ?? name
+    }
+    name
+}
+
+fn jet_cli_symbol_canonical_name(modules: [JetDriverDocModule], module_path: String, name: String, owner: String?, span: Span) -> String Never! {
+    fallback :: if owner == .Val(value) -> "{value}.{name}" else -> name
+    loop doc_module in modules {
+        if doc_module.path != module_path && doc_module.alias != module_path -> next
+        storage :: doc_module.name_ledger ?? return fallback
+        permit :: storage.guard_read()
+        module :: doc_module.name_module_index
+        if name_ledger_display_path_at(permit.value, module, span, name, owner, Val(module)) == .Val(path) -> return path
+        if owner == .Val(value) {
+            path :: name_ledger_display_path(permit.value, module, value, Val(module)) ?? (name_ledger_canonical_path(permit.value, module, value) ?? value)
+            return "{path}.{name}"
+        }
+        return name_ledger_display_path(permit.value, module, name, Val(module)) ?? (name_ledger_canonical_path(permit.value, module, name) ?? name)
+    }
+    fallback
+}
+
 // Symbols.rs `build_semantic_symbol_index`: the language catalog plus every
 // definition of the checked index and every import binding, sorted.
 pub fn jet_cli_build_symbols(index: JetCLISemIndex, modules: [JetDriverDocModule]) -> [JetCLISymbol] Never! {
@@ -877,10 +906,14 @@ pub fn jet_cli_build_symbols(index: JetCLISemIndex, modules: [JetDriverDocModule
                 else -> {}
             }
         }
-        shape :: jet_cli_symbol_shape(def.name, def.kind, owner)
+        display_name :: jet_cli_symbol_display(modules, def.module_path, def.name)
+        display_owner := owner
+        if owner == .Val(value) -> display_owner = Val(jet_cli_symbol_display(modules, def.module_path, value))
+        qualified_name :: jet_cli_symbol_canonical_name(modules, def.module_path, def.name, owner, def.def_span)
+        shape :: jet_cli_symbol_shape(display_name, def.kind, display_owner)
         signature := shape.signature
         if jet_cli_symbol_marker_signature(modules, def) == .Val(marker) -> signature = marker
-        if definition.nominal_base == .Val(base) -> signature = "type {def.name} :: distinct {base}"
+        if definition.nominal_base == .Val(base) -> signature = "type {display_name} :: distinct {jet_cli_symbol_display(modules, def.module_path, base)}"
         if definition.trait_contracts.len() > 0 {
             signature = "{signature}\n{jet_cli_symbol_trait_contracts(definition.trait_contracts, def.kind == .Trait)}"
         }
@@ -900,8 +933,8 @@ pub fn jet_cli_build_symbols(index: JetCLISemIndex, modules: [JetDriverDocModule
         &symbols.push(JetCLISymbol{
             identity: identity,
             name: def.name,
-            qualified_name: def.qualified_name,
-            owner: owner,
+            qualified_name: qualified_name,
+            owner: display_owner,
             module_path: def.module_path,
             kind: shape.kind,
             signature: signature,

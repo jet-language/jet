@@ -13,6 +13,7 @@ use jet_foundation.[
     MIRProgram,
     MIRRuntimeLayer,
     MIRSourceFile,
+    NameLedger,
     PackageKeyDependency,
     PackageKeySourceFile,
     PackageKeyTargetFact,
@@ -124,6 +125,9 @@ pub struct JetDriverDocModule {
     pub functions: [TFunc]{[TFunc]{}}
     pub name_references: [SemaNameReferenceFact]{[SemaNameReferenceFact]{}}
     pub call_facts: [SemaCallSiteFact]{[SemaCallSiteFact]{}}
+    // Shared once per checked bundle; module positions retain Sema's ordering.
+    pub name_ledger: Shared<NameLedger>?{None}
+    pub name_module_index: Int{-1}
 }
 
 // One Core library source module the host embeds, mirroring a Rust

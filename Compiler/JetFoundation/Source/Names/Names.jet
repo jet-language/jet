@@ -1,0 +1,131 @@
+// Checked-name presentation, ported from Rust Names.rs and origin/port/compiler.
+// The indexed ledger owns the existing checked MIR rows, not a second resolver.
+use jet_foundation.[MIRNameFacts, MIRNameDeclaration, MIRNameAlias, MIRNameVisibility, Span]
+
+pub struct NameLedger {
+    pub facts: MIRNameFacts
+    declarations: [(module: Int, name: String):Int]
+    aliases: [(module: Int, name: String):Int]
+    declaration_names: [String:[Int]]
+    alias_names: [String:[Int]]
+    display_paths: [(module: Int, path: String):String]
+}
+fn name_facts_leaf(name: String) -> String Never! {
+    bytes :: name.bytes()
+    start := bytes.len()
+    loop start > 0 && bytes[start - 1] != U8{46} -> start -= 1
+    name.slice(start, name.len())
+}
+pub fn name_ledger_from_facts(facts: ^MIRNameFacts) -> NameLedger Never! {
+    ledger := NameLedger{facts: ^facts, declarations: [:], aliases: [:], declaration_names: [:], alias_names: [:], display_paths: [:]}
+    loop (index, row) in ledger.facts.declarations {
+        ledger.declarations[(module: row.module_index, name: row.name)] = index
+        leaf :: name_facts_leaf(row.name)
+        positions := ledger.declaration_names.get(leaf) ?? [Int]{}
+        &positions.push(index)
+        ledger.declaration_names[leaf] = positions
+    }
+    loop (index, row) in ledger.facts.aliases {
+        ledger.aliases[(module: row.module_index, name: row.name)] = index
+        leaf :: name_facts_leaf(row.name)
+        positions := ledger.alias_names.get(leaf) ?? [Int]{}
+        &positions.push(index)
+        ledger.alias_names[leaf] = positions
+    }
+    loop row in ledger.facts.display_paths -> ledger.display_paths[(module: row.module_index, path: row.internal_path)] = row.display_path
+    ledger
+}
+pub fn name_ledger_declaration(ledger: NameLedger, module: Int, name: String) -> MIRNameDeclaration? Never! {
+    index :: ledger.declarations.get((module: module, name: name)) ?? return None
+    Val(ledger.facts.declarations[index])
+}
+pub fn name_ledger_alias(ledger: NameLedger, module: Int, name: String) -> MIRNameAlias? Never! {
+    index :: ledger.aliases.get((module: module, name: name)) ?? return None
+    Val(ledger.facts.aliases[index])
+}
+pub fn name_ledger_canonical_path(ledger: NameLedger, module: Int, name: String) -> String? Never! {
+    if name_ledger_declaration(ledger, module, name) == .Val(row) -> return Val(row.path)
+    alias :: name_ledger_alias(ledger, module, name) ?? return None
+    if alias.target_module == .Val(target) {
+        if name_ledger_declaration(ledger, target, name_facts_leaf(alias.target)) == .Val(row) -> return Val(row.path)
+    }
+    if alias.target.contains(".") -> Val(alias.target) else -> None
+}
+pub fn name_ledger_semantic_identity(ledger: NameLedger, module: Int, name: String) -> String? Never! {
+    if module < 0 || module >= ledger.facts.modules.len() -> return None
+    row :: ledger.facts.modules[module]
+    Val("{row.package}::{row.path}::{name}")
+}
+fn name_ledger_visible(ledger: NameLedger, from: Int, module: Int, name: String) -> Bool Never! {
+    if from == module -> return true
+    if from < 0 || module < 0 || from >= ledger.facts.modules.len() || module >= ledger.facts.modules.len() -> return false
+    source :: ledger.facts.modules[from]
+    target :: ledger.facts.modules[module]
+    if source.namespace != None && source.namespace == target.namespace -> return true
+    visibility := MIRNameVisibility?{None}
+    if name_ledger_declaration(ledger, module, name) == .Val(row) -> visibility = Val(row.visibility)
+    if visibility == None && name_ledger_alias(ledger, module, name) == .Val(row) -> visibility = Val(row.visibility)
+    if visibility == .Val(MIRNameVisibility.Public) -> return true
+    visibility == .Val(MIRNameVisibility.Package) && source.package == target.package
+}
+fn name_ledger_display_declaration_path(ledger: NameLedger, module: Int, name: String) -> String? Never! {
+    row :: name_ledger_declaration(ledger, module, name) ?? return None
+    Val(ledger.display_paths.get((module: module, path: row.path)) ?? row.path)
+}
+pub fn name_ledger_display_path(ledger: NameLedger, from: Int, name: String, resolved_module: Int?) -> String? Never! {
+    leaf :: name_facts_leaf(name)
+    least := String?{None}
+    ambiguous := false
+    projected := false
+    loop index in ledger.declaration_names.get(leaf) ?? [Int]{} {
+        row :: ledger.facts.declarations[index]
+        if !name_ledger_visible(ledger, from, row.module_index, leaf) -> next
+        path :: name_ledger_display_declaration_path(ledger, row.module_index, row.name) ?? next
+        if least == .Val(previous) {
+            if path != previous -> ambiguous = true
+            if path < previous -> least = Val(path)
+        } else { least = Val(path) }
+        if ledger.display_paths.get((module: row.module_index, path: row.path)) != None -> projected = true
+    }
+    loop index in ledger.alias_names.get(leaf) ?? [Int]{} {
+        alias :: ledger.facts.aliases[index]
+        if !name_ledger_visible(ledger, from, alias.module_index, leaf) -> next
+        path := String?{None}
+        if alias.target_module == .Val(target) -> path = name_ledger_display_declaration_path(ledger, target, name_facts_leaf(alias.target))
+        if path == None && alias.target.contains(".") -> path = Val(alias.target)
+        candidate :: path ?? next
+        if least == .Val(previous) {
+            if previous != candidate -> ambiguous = true
+            if candidate < previous -> least = Val(candidate)
+        } else { least = Val(candidate) }
+    }
+    resolved := String?{None}
+    if resolved_module == .Val(target) -> resolved = name_ledger_display_declaration_path(ledger, target, leaf)
+    if resolved == None -> resolved = name_ledger_display_declaration_path(ledger, from, leaf)
+    if resolved == None -> resolved = name_ledger_canonical_path(ledger, from, name)
+    path :: resolved ?? (least ?? return None)
+    if !ambiguous && !name.contains(".") && !name.starts_with("__jet_") && !projected -> return Val(leaf)
+    Val(path)
+}
+pub fn name_ledger_display_path_at(ledger: NameLedger, module: Int, span: Span, name: String, owner: String?, resolved_module: Int?) -> String? Never! {
+    key :: if owner == .Val(value) -> "{value}.{name}" else -> name
+    declaration := name_ledger_declaration(ledger, module, key)
+    if declaration == .Val(row) && row.span != span -> declaration = None
+    if declaration == None {
+        loop row in ledger.facts.declarations {
+            if row.module_index == module && row.span == span {
+                if declaration != None -> return None
+                declaration = Val(row)
+            }
+        }
+    }
+    canonical := String?{None}
+    if declaration == .Val(row) -> canonical = name_ledger_display_declaration_path(ledger, module, row.name)
+    if owner == .Val(value) {
+        if name_ledger_display_path(ledger, module, value, resolved_module) == .Val(path) -> return Val("{path}.{name}")
+        return canonical
+    }
+    if declaration == .Val(row) && row.name.starts_with("__jet_") -> return canonical
+    if name_ledger_display_path(ledger, module, name, resolved_module) == .Val(path) -> return Val(path)
+    canonical
+}

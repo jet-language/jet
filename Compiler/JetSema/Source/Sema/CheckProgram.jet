@@ -2376,7 +2376,10 @@ fn sema_name_add_alias(facts: &MIRNameFacts, module_index: Int, name: String, ta
 
 pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> MIRNameFacts Never! {
     facts := MIRNameFacts{modules: [MIRNameModule]{}, declarations: [MIRNameDeclaration]{}, aliases: [MIRNameAlias]{}, references: [MIRNameReference]{}, structure_facts: [MIRStructureFact]{}}
-    loop graph_module in graph.modules -> &facts.modules.push(MIRNameModule{alias: graph_module.module_name, path: graph_module.module_path, package: graph_module.package_identity})
+    loop graph_module in graph.modules {
+        namespace :: if sema_registration_package_is_namespace(graph_module.package_identity) -> Val(graph_module.package_identity) else -> None
+        &facts.modules.push(MIRNameModule{alias: graph_module.module_name, path: graph_module.module_path, package: graph_module.package_identity, namespace: namespace})
+    }
     owner_names :: sema_name_owner_index(graph)
     symbol_index :: sema_name_symbol_index(graph)
     module_index := 0
@@ -2385,6 +2388,7 @@ pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphMo
         checked :: modules[module_index]
         sema_name_add_tir_declarations(&facts, module_index, source.module_path, checked.declarations)
         loop item in source.program.items -> sema_name_add_item(&facts, module_index, source.module_path, "", item)
+        sema_name_add_display_paths(&facts, module_index, source.module_path, source.program.items)
         loop import in source.imports {
             target_index := sema_registration_module_index(graph, import.target_module_identity)
             target_name := import.target_module_identity
@@ -2432,6 +2436,7 @@ pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphMo
         aliases: sema_name_first_aliases(facts.aliases),
         references: sema_name_first_references(facts.references),
         structure_facts: facts.structure_facts,
+        display_paths: facts.display_paths,
     }
 }
 

@@ -51,6 +51,7 @@ use jet_foundation.[
     MIRModule,
     MIRModuleID,
     MIRNameFacts,
+    name_ledger_from_facts,
     MIROwnership,
     MIRPackageFacts,
     MIRParam,
@@ -958,6 +959,7 @@ fn jet_driver_compile_result(
 // another package keeps its module name as its alias.
 fn jet_driver_doc_modules(request: JetDriverCompileRequest, load: JetDriverLoadResult, graph: SemaGraphResult, registration: SemaRegistrationGraph, values: [SemaComptimeItemValue], effect_identity: String) -> [JetDriverDocModule] Never! {
     modules := [JetDriverDocModule]{}
+    ledger :: shared name_ledger_from_facts(~graph.names)
     loop (index, graph_module) in graph.modules {
         if graph_module.module_identity == effect_identity || index >= graph.programs.len() -> next
         unit_index :: loop loaded in load.modules {
@@ -982,6 +984,8 @@ fn jet_driver_doc_modules(request: JetDriverCompileRequest, load: JetDriverLoadR
             functions: graph_module.functions,
             name_references: graph_module.name_references,
             call_facts: graph_module.call_facts,
+            name_ledger: Val(ledger),
+            name_module_index: index,
         })
     }
     modules
