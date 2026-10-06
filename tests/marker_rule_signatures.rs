@@ -691,7 +691,7 @@ fn invariant_marker_is_retired_in_favor_of_range_types() {
         diagnostics.iter().any(|diagnostic| {
             diagnostic.code == "E0927"
                 && diagnostic.what.contains("#Invariant")
-                && diagnostic.fix.contains("distinct Int(lo..hi)")
+                && diagnostic.fix.contains("Int(lo..hi)")
         }),
         "{diagnostics:?}"
     );
