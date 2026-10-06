@@ -1,0 +1,480 @@
+use core.web.runtime.top_web_forms.*
+use core.web.forms.[WebFormFieldState,WebFormControl]
+use std.sync.Arc
+use std.sync.atomic.Ordering
+use std.thread.sleep
+use std.time.Duration
+use core.math.runtime.std_math_task_mem.JetTask
+use core.reactive.runtime.std_reactive_event_watch.JetDerived
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1806
+impl JetWebFormTyped {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1806
+    pub fn set_validator(self: &Self,name: String,validator: fn(String) -> () Err! + Send + Sync) -> () Err! { self.form.set_validator(^name,^validator) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1812
+    pub fn set_action(self: &Self,handler: fn(JetWebFormDecodedInput) -> String JetWebFormActionError! + Send + Sync) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("retain owned static Send/Sync typed action in shared allocation") { self.set_action_handle(Arc.new(^handler)) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1822
+    pub fn set_action_handle(self: &Self,handler: JetWebFormTypedAction) -> { self.install_action(^handler) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1826
+    fn install_action(self: &Self,handler: JetWebFormTypedAction) -> {
+        input :: self.input.clone()
+        action_errors :: self.action_errors.clone()
+        self.form.set_action(fn(body) {
+            // GATE #4565: kernel primitive
+            #Unsafe("clear previous typed action error under the shared slot mutex") { if Ok(slot) :: action_errors.lock() { *slot = None } }
+            decoded :: input.decode_post(&body)?
+            match handler(^decoded) {
+                Ok(result) -> Ok(^result),
+                Err(error) -> {
+                    error :: error.normalized()
+                    // GATE #4565: kernel primitive
+                    #Unsafe("retain normalized typed field/form errors without leaking the mutex loan") { if Ok(slot) :: action_errors.lock() { *slot = Val(error.clone()) } }
+                    Err(error.summary())
+                }
+            }
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1848
+    pub fn set_async_validator(self: &Self,name: String,timing: JetWebFormValidationTiming,debounce_ms: U64,validator: fn(String) -> () Err! + Send + Sync) -> () Err! {
+        self.form.field_state(&name)?
+        // GATE #4565: kernel primitive
+        #Unsafe("record checked field validation timing under shared mutex") { if Ok(timings) :: self.async_timings.lock() { timings.insert(name.clone(),timing) } }
+        delay :: debounce_ms.min(10_000)
+        self.form.set_async_validator(^name,fn(value) {
+            if delay > 0 {
+                // GATE #4565: kernel primitive
+                #Unsafe("bounded native validator debounce before invoking owned callback") { sleep(Duration.from_millis(delay)) }
+            }
+            validator(^value)
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1871
+    pub fn validate(self: &Self) -> () Err! {
+        // GATE #4565: kernel primitive
+        #Unsafe("release prior cancellation flag before starting typed validation") { self.cancelled.store(false,Ordering.Release) }
+        self.set_lifecycle(JetWebFormLifecycleStatus.Pending,"","")
+        result :: self.form.validate()
+        match &result {
+            Ok(()) -> self.set_lifecycle(JetWebFormLifecycleStatus.Idle,"",""),
+            Err(error) -> self.set_lifecycle(JetWebFormLifecycleStatus.Failure,"",error.clone())
+        }
+        ^result
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1890
+    pub fn validate_async(self: &Self) -> JetWebFormTypedValidation {
+        // GATE #4565: kernel primitive
+        #Unsafe("release prior cancellation flag before retaining typed validation task") { self.cancelled.store(false,Ordering.Release) }
+        self.set_lifecycle(JetWebFormLifecycleStatus.Pending,"","")
+        JetWebFormTypedValidation{validation: Val(self.form.validate_async()),form: self.clone()}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1899
+    pub fn submit(self: &Self) -> String Err! {
+        // GATE #4565: kernel primitive
+        was_cancelled :: #Unsafe("consume cancellation atomically before typed submission") { self.cancelled.swap(false,Ordering.AcqRel) }
+        if was_cancelled {
+            error :: "form submission was cancelled"
+            self.set_lifecycle(JetWebFormLifecycleStatus.Cancelled,"",error.clone())
+            return Err(^error)
+        }
+        self.set_lifecycle(JetWebFormLifecycleStatus.Pending,"","")
+        state :: self.form.state()
+        values: [String:String] := [:]
+        loop field in self.input.fields() {
+            value :: state.fields.get(&field.name).map(fn(field) { field.value.clone() }).unwrap_or_default()
+            values.insert(^field.name,^value)
+        }
+        decoded :: JetWebFormDecodedInput{type_name: self.input.type_name.clone(),values,wire_values: [:]}
+        body :: match self.input.encode_post(&decoded) {
+            Ok(body) -> ^body,
+            Err(error) -> {
+                self.set_lifecycle(JetWebFormLifecycleStatus.Failure,"",error.clone())
+                return Err(^error)
+            }
+        }
+        // GATE #4565: kernel primitive
+        cancelled :: #Unsafe("acquire cancellation after encoding and before invoking action") { self.cancelled.load(Ordering.Acquire) }
+        if cancelled {
+            error :: "form submission was cancelled"
+            self.form.cancel_validation()
+            self.set_lifecycle(JetWebFormLifecycleStatus.Cancelled,"",error.clone())
+            return Err(^error)
+        }
+        self.set_lifecycle(JetWebFormLifecycleStatus.Submitting,"","")
+        result :: self.form.submit_body(^body)
+        self.apply_action_errors()
+        // GATE #4565: kernel primitive
+        cancelled :: #Unsafe("acquire cancellation after action and error publication") { self.cancelled.load(Ordering.Acquire) }
+        if cancelled {
+            error :: "form submission was cancelled"
+            self.set_lifecycle(JetWebFormLifecycleStatus.Cancelled,"",error.clone())
+            return Err(^error)
+        }
+        match &result {
+            Ok(value) -> self.set_lifecycle(JetWebFormLifecycleStatus.Success,value.clone(),""),
+            Err(error) -> self.set_lifecycle(JetWebFormLifecycleStatus.Failure,"",error.clone())
+        }
+        ^result
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1977
+    pub fn submit_async(self: &Self) -> JetWebFormTypedSubmission {
+        // GATE #4565: kernel primitive
+        #Unsafe("clear cancellation then spawn a retained owned submission task") {
+            self.cancelled.store(false,Ordering.Release)
+            form :: self.clone()
+            JetWebFormTypedSubmission{join: Val(JetTask.spawn(fn() { form.submit() })),form: self.clone()}
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1988
+    pub fn no_script_submission(self: &Self) -> String Err! {
+        self.validate()?
+        state :: self.form.state()
+        values :: self.input.fields().into_iter().map(fn(field) {
+            value :: state.fields.get(&field.name).map(fn(field) { field.value.clone() }).unwrap_or_default()
+            (^field.name,^value)
+        }).collect()
+        self.input.encode_post(&JetWebFormDecodedInput{type_name: self.input.type_name.clone(),values,wire_values: [:]})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2011
+    pub fn post(self: &Self,body: String) -> String Err! {
+        decoded :: self.input.decode_post(&body)?
+        loop field in self.input.fields() { if decoded.values.get(&field.name) == .Val(value) { self.form.set(field.name.clone(),value.clone())? } }
+        self.submit()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2021
+    pub fn decode_post(self: &Self,body: &String) -> JetWebFormDecodedInput Err! { self.input.decode_post(body) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2025
+    pub fn cancel(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("publish cancellation before invalidating validation generation") { self.cancelled.store(true,Ordering.Release) }
+        self.form.cancel_validation()
+        self.set_lifecycle(JetWebFormLifecycleStatus.Cancelled,"","form operation was cancelled")
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2035
+    pub fn focus_field(self: &Self,name: String) -> () Err! {
+        field :: self.input.fields().into_iter().find(fn(field) { field.name == name }).ok_or_else(fn() { "unknown form field `{name}`" })?
+        self.focus.set(Val(^field.name))
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2046
+    pub fn field_state(self: &Self,name: String) -> WebFormFieldState Err! { self.form.field_state(&name) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2050
+    pub fn select_field(self: &Self,name: String) -> JetDerived<WebFormFieldState> Err! {
+        fallback :: self.form.field_state(&name)?
+        source :: self.form.state_signal()
+        Ok(JetDerived.new_distinct(fn() { source.get().fields.get(&name).cloned().unwrap_or_else(fn() { fallback.clone() }) }))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2066
+    pub fn errors(self: &Self) -> JetWebFormErrorState {
+        state :: self.form.state()
+        fields :: state.fields.iter().filter(fn((_,field)) { !field.errors.is_empty() }).map(fn((name,field)) { (name.clone(),field.errors.clone()) }).collect()
+        form :: if state.error.is_empty() { [] } else { [^state.error] }
+        JetWebFormErrorState{fields,form}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2082
+    pub fn render(self: &Self) -> String {
+        state :: self.form.state()
+        lifecycle :: self.lifecycle()
+        busy :: matches!(lifecycle.status,JetWebFormLifecycleStatus.Pending | JetWebFormLifecycleStatus.Submitting)
+        html := String.new()
+        html.push_str("<form method=\"post\" action=\"")
+        html.push_str(&jet_web_form_escape(&state.action))
+        html.push_str("\" aria-busy=\"")
+        html.push_str(if busy { "true" } else { "false" })
+        html.push_str("\">")
+        open_group: String? := None
+        loop spec in self.input.fields() {
+            if spec.group != open_group {
+                if open_group.is_some() { html.push_str("</fieldset>") }
+                if spec.group.as_ref() == .Val(group) {
+                    html.push_str("<fieldset><legend>")
+                    html.push_str(&jet_web_form_escape(group))
+                    html.push_str("</legend>")
+                }
+                open_group = spec.group.clone()
+            }
+            field :: match state.fields.get(&spec.name) { .Val(field) -> field, None -> { next } }
+            id :: jet_web_form_field_id(&self.input.type_name,&spec.wire_name)
+            error_id :: "{id}-error"
+            invalid :: !field.errors.is_empty()
+            html.push_str("<div class=\"field\" data-field=\"")
+            html.push_str(&jet_web_form_escape(&spec.name))
+            html.push_str("\">")
+            if spec.control != WebFormControl.Hidden {
+                html.push_str("<label for=\"")
+                html.push_str(&jet_web_form_escape(&id))
+                html.push_str("\">")
+                html.push_str(&jet_web_form_escape(&spec.label))
+                html.push_str("</label>")
+            }
+            html.push_str("<input name=\"")
+            html.push_str(&jet_web_form_escape(&spec.wire_name))
+            html.push_str("\" id=\"")
+            html.push_str(&jet_web_form_escape(&id))
+            html.push_str("\" type=\"")
+            html.push_str(spec.control.input_type())
+            html.push_str("\" aria-label=\"")
+            html.push_str(&jet_web_form_escape(&spec.label))
+            html.push_str("\" aria-invalid=\"")
+            html.push_str(if invalid { "true" } else { "false" })
+            if invalid {
+                html.push_str("\" aria-describedby=\"")
+                html.push_str(&jet_web_form_escape(&error_id))
+            }
+            html.push('"')
+            if spec.required { html.push_str(" required") }
+            if self.focus.get().as_deref() == Some(spec.name.as_str()) { html.push_str(" autofocus") }
+            if spec.control == WebFormControl.Checkbox {
+                html.push_str(" value=\"true\"")
+                if matches!(field.value.as_str(),"true" | "1") { html.push_str(" checked") }
+            } else {
+                html.push_str(" value=\"")
+                html.push_str(&jet_web_form_escape(&field.value))
+                html.push('"')
+            }
+            html.push('>')
+            if invalid {
+                html.push_str("<span id=\"")
+                html.push_str(&jet_web_form_escape(&error_id))
+                html.push_str("\" role=\"alert\" class=\"error\">")
+                html.push_str(&jet_web_form_escape(&field.errors.join("; ")))
+                html.push_str("</span>")
+            }
+            html.push_str("</div>")
+        }
+        if open_group.is_some() { html.push_str("</fieldset>") }
+        if !state.error.is_empty() {
+            html.push_str("<div role=\"alert\" class=\"form-error\" aria-live=\"assertive\">")
+            html.push_str(&jet_web_form_escape(&state.error))
+            html.push_str("</div>")
+        }
+        html.push_str("<button type=\"submit\"")
+        if busy { html.push_str(" disabled") }
+        html.push_str(">Submit</button><output aria-live=\"polite\">")
+        html.push_str(&jet_web_form_escape(lifecycle.status.name()))
+        html.push_str("</output></form>")
+        ^html
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2184
+    pub fn show(self: &Self) -> String {
+        state :: self.form.state()
+        invalid :: state.fields.values().filter(fn(field) { !field.errors.is_empty() }).count()
+        lifecycle :: self.lifecycle()
+        "TypedForm(type={self.input.type_name},status={state.status.name()},lifecycle={lifecycle.status.name()},fields={state.fields.len()},invalid={invalid},submissions={state.submission_count},error={state.error})"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2200
+    fn apply_action_errors(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        error :: #Unsafe("consume normalized server error slot under shared mutex before reactive publication") { self.action_errors.lock().ok().and_then(fn(slot) { slot.take() }) }
+        if error == .Val(error) { self.form.set_server_errors(^error.field_errors,^error.form_errors) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2211
+    fn set_lifecycle(self: &Self,status: JetWebFormLifecycleStatus,result: String,error: String) -> {
+        generation :: self.lifecycle.get().generation.saturating_add(1)
+        lifecycle :: JetWebFormLifecycle{status,result,error,generation}
+        self.lifecycle.set(lifecycle.clone())
+        jet_web_form_publish_lifecycle(&self.input.type_name,&lifecycle,&self.form.state())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2229
+#Derive(Clone)
+pub struct JetWebFormValidationChain { form: JetWebFormTyped }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2234
+impl JetWebFormValidationChain {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2235
+    fn new(form: JetWebFormTyped) -> Self { Self{form} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2239
+    fn validate(self: &Self,name: String,timing: JetWebFormValidationTiming,validator: fn(String) -> () Err! + Send + Sync) -> Self {
+        self.form.set_async_validator(name.clone(),timing,0,^validator).unwrap_or_else(fn(error) { panic!("checked form validator field `{name}` is unavailable: {error}") })
+        Self.new(self.form.clone())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2256
+    fn render(self: &Self) -> String { self.form.render() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2261
+pub struct JetWebFormTypedValidation { validation: JetWebFormValidation?,form: JetWebFormTyped }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2266
+impl JetWebFormTypedValidation {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2267
+    pub fn wait(self: Self) -> () Err! {
+        validation :: self.validation.take().ok_or_else(fn() { "form validation worker is unavailable" })?
+        result :: validation.wait()
+        // GATE #4565: kernel primitive
+        cancelled :: #Unsafe("acquire typed cancellation after consuming joined validation handle") { self.form.cancelled.load(Ordering.Acquire) }
+        if cancelled {
+            error :: "form validation was cancelled"
+            self.form.set_lifecycle(JetWebFormLifecycleStatus.Cancelled,"",error.clone())
+            return Err(^error)
+        }
+        match &result {
+            Ok(()) -> self.form.set_lifecycle(JetWebFormLifecycleStatus.Idle,"",""),
+            Err(error) -> self.form.set_lifecycle(JetWebFormLifecycleStatus.Failure,"",error.clone())
+        }
+        ^result
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2297
+    pub fn cancel(self: &Self) -> {
+        if (&self.validation) == .Val(validation) { validation.cancel() }
+        self.form.cancel()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2304
+pub struct JetWebFormTypedSubmission { join: JetTask<String Err!>?,form: JetWebFormTyped }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2310
+impl JetWebFormTypedSubmission {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2311
+    pub fn wait(self: Self) -> String Err! {
+        join :: self.join.take().ok_or_else(fn() { "form submission worker is unavailable" })?
+        // GATE #4565: kernel primitive
+        result :: #Unsafe("consume retained submission task through actual native join") { join.join() }
+        // GATE #4565: kernel primitive
+        cancelled :: #Unsafe("acquire cancellation after join, giving cancellation precedence over action/task result") { self.form.cancelled.load(Ordering.Acquire) }
+        if cancelled {
+            error :: "form submission was cancelled"
+            self.form.set_lifecycle(JetWebFormLifecycleStatus.Cancelled,"",error.clone())
+            return Err(^error)
+        }
+        match result { Ok(result) -> ^result, Err(error) -> Err("form submission task failed: {error:?}") }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2332
+    pub fn cancel(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("request cancellation of retained submission task without detaching it") { if (&self.join) == .Val(join) { join.cancel() } }
+        self.form.cancel()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2341
+fn jet_web_form_validate_text(value: &String,kind: &String) -> () Err! {
+    if value.is_empty() { return Err("{kind} must not be empty") }
+    if value.len() > JET_WEB_FORM_MAX_NAME { return Err("{kind} exceeds {JET_WEB_FORM_MAX_NAME} bytes") }
+    if value.chars().any(fn(c) { c.is_control() }) { return Err("{kind} contains a control character") }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2354
+fn jet_web_form_human_label(name: &String) -> String {
+    label := String.new()
+    for (index,word) in name.split(['_','-']).enumerate() {
+        if word.is_empty() { next }
+        if index > 0 { label.push(' ') }
+        chars := word.chars()
+        if chars.next() == .Val(first) {
+            label.extend(first.to_uppercase())
+            label.extend(chars)
+        }
+    }
+    ^label
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2372
+fn jet_web_form_valid_type_name(name: &String) -> Bool { !name.is_empty() && name.split("::").all(jet_web_form_valid_name) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2379
+fn jet_web_form_field_id(type_name: &String,wire_name: &String) -> String {
+    id := String.with_capacity(type_name.len()+wire_name.len()+1)
+    for character in type_name.chars().chain(['-']).chain(wire_name.chars()) {
+        if character.is_ascii_alphanumeric() || character == '_' || character == '-' { id.push(character) } else { id.push('-') }
+    }
+    ^id
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2391
+fn jet_web_form_decode_component(value: &String) -> String Err! {
+    bytes :: value.as_bytes()
+    decoded := [U8].with_capacity(bytes.len())
+    index := 0
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' -> decoded.push(b' '),
+            b'%' -> {
+                if index+2 >= bytes.len() { return Err("form body contains an incomplete percent escape") }
+                high :: jet_web_form_hex(bytes[index+1]).ok_or_else(fn() { "form body contains an invalid percent escape" })?
+                low :: jet_web_form_hex(bytes[index+2]).ok_or_else(fn() { "form body contains an invalid percent escape" })?
+                decoded.push((high << 4) | low)
+                index += 2
+            },
+            byte -> decoded.push(byte)
+        }
+        index += 1
+        if decoded.len() > JET_WEB_FORM_MAX_VALUE { return Err("decoded form value exceeds {JET_WEB_FORM_MAX_VALUE} bytes") }
+    }
+    value :: String.from_utf8(^decoded).map_err(fn(_) { "form body contains invalid UTF-8" })?
+    if value.chars().any(fn(c) { c.is_control() }) { return Err("form value contains a control character") }
+    Ok(^value)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2427
+fn jet_web_form_hex(value: U8) -> U8? {
+    match value { b'0'..b'9' -> Val(value-b'0'), b'a'..b'f' -> Val(value-b'a'+10), b'A'..b'F' -> Val(value-b'A'+10), _ -> None }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2435
+pub fn jet_web_forms_input(type_name: String,fields: [JetWebFormFieldSpec]) -> JetWebFormInput Err! { JetWebFormInput.dedicated(^type_name,^fields) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2442
+pub fn jet_web_forms_typed(input: &JetWebFormInput,action: String) -> JetWebFormTyped Err! {
+    endpoint :: if action.starts_with('/') || action.contains("://") { ^action } else { "/actions/{action}" }
+    input.form(^endpoint)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2456
+// Model-derived descriptors have already passed forms.input validation.
+pub fn jet_web_form(input: &JetWebFormInput,action: String) -> JetWebFormTyped { jet_web_forms_typed(input,^action) ?? panic("validated web.form input") }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2460
+pub fn jet_web_forms_typed_submit(form: &JetWebFormTyped) -> String Err! { form.submit() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2464
+pub fn jet_web_forms_typed_no_script(form: &JetWebFormTyped) -> String Err! { form.no_script_submission() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2470
+pub fn jet_web_forms_typed_html(form: &JetWebFormTyped) -> String { form.render() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2474
+pub fn jet_web_forms_typed_show(form: &JetWebFormTyped) -> String { form.show() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2478
+pub fn jet_web_forms_typed_state(form: &JetWebFormTyped) -> JetWebFormState { form.state() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2482
+pub fn jet_web_forms_typed_lifecycle(form: &JetWebFormTyped) -> JetWebFormLifecycle { form.lifecycle() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2488
+pub fn jet_web_forms_typed_errors(form: &JetWebFormTyped) -> JetWebFormErrorState { form.errors() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2492
+pub fn jet_web_forms_typed_focus(form: &JetWebFormTyped,name: String) -> () Err! { form.focus_field(^name) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2499
+pub fn jet_web_forms_typed_cancel(form: &JetWebFormTyped) -> { form.cancel() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2502
+pub fn jet_web_forms_input_rename(input: JetWebFormInput,name: String,wire_name: String) -> JetWebFormInput Err! { input.rename(^name,^wire_name) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2510
+pub fn jet_web_forms_input_exclude(input: JetWebFormInput,name: String) -> JetWebFormInput Err! { input.exclude(^name) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2517
+pub fn jet_web_forms_input_group(input: JetWebFormInput,name: String,group: String) -> JetWebFormInput Err! { input.group(^name,^group) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2525
+pub fn jet_web_forms_input_replace(input: JetWebFormInput,name: String,replacement: JetWebFormFieldSpec) -> JetWebFormInput Err! { input.replace(^name,^replacement) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2533
+pub fn jet_web_forms_typed_set(form: &JetWebFormTyped,name: String,value: String) -> () Err! { form.set(^name,^value) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2541
+pub fn jet_web_forms_typed_set_async_validator(form: &JetWebFormTyped,name: String,timing: JetWebFormValidationTiming,debounce_ms: U64,validator: fn(String) -> () Err! + Send + Sync) -> () Err! { form.set_async_validator(^name,timing,debounce_ms,^validator) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2554
+pub fn jet_web_forms_typed_blur(form: &JetWebFormTyped,name: String) -> () Err! { form.blur(^name) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2561
+pub fn jet_web_forms_typed_validate(form: &JetWebFormTyped) -> () Err! { form.validate() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2565
+pub fn jet_web_forms_typed_validate_field(form: &JetWebFormTyped,name: String,timing: JetWebFormValidationTiming,validator: fn(String) -> () Err! + Send + Sync) -> JetWebFormValidationChain { JetWebFormValidationChain.new(form.clone()).validate(^name,timing,^validator) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2577
+pub fn jet_web_forms_typed_validation_render(chain: &JetWebFormValidationChain) -> String { chain.render() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2583
+pub fn jet_web_forms_typed_validate_async(form: &JetWebFormTyped) -> JetWebFormTypedValidation { form.validate_async() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2589
+pub fn jet_web_forms_typed_submit_async(form: &JetWebFormTyped) -> JetWebFormTypedSubmission { form.submit_async() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2595
+pub fn jet_web_forms_typed_post(form: &JetWebFormTyped,body: String) -> String Err! { form.post(^body) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2602
+pub fn jet_web_forms_typed_decode_post(form: &JetWebFormTyped,body: String) -> JetWebFormDecodedInput Err! { form.decode_post(&body) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2609
+pub fn jet_web_forms_typed_select_field(form: &JetWebFormTyped,name: String) -> JetDerived<WebFormFieldState> Err! { form.select_field(^name) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2616
+pub fn jet_web_forms_typed_set_action(form: &JetWebFormTyped,handler: fn(JetWebFormDecodedInput) -> String JetWebFormActionError! + Send + Sync) -> { form.set_action(^handler) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2628
+pub fn jet_web_forms_typed_validation_wait(validation: JetWebFormTypedValidation) -> () Err! { validation.wait() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2634
+pub fn jet_web_forms_typed_validation_cancel(validation: &JetWebFormTypedValidation) -> { validation.cancel() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2640
+pub fn jet_web_forms_typed_submission_wait(submission: JetWebFormTypedSubmission) -> String Err! { submission.wait() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2646
+pub fn jet_web_forms_typed_submission_cancel(submission: &JetWebFormTypedSubmission) -> { submission.cancel() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2651
+pub fn jet_web_forms_action_error() -> JetWebFormActionError { JetWebFormActionError.default() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2655
+pub fn jet_web_forms_action_field_error(error: JetWebFormActionError,name: String,message: String) -> JetWebFormActionError { error.field(^name,^message) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2663
+pub fn jet_web_forms_action_form_error(error: JetWebFormActionError,message: String) -> JetWebFormActionError { error.form(^message) }

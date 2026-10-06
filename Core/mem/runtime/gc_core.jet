@@ -1,0 +1,122 @@
+// crates/jet-rt/src/__gc_core.rs:19–70,117–124.
+// Private collector facts. These are not handles or an alternate payload arena.
+// Native providers retain the generated static provenance asset through every
+// borrowed callback; String fields must not be copied at the ABI boundary.
+
+GC_MAX_OBJECTS :: prep { 1000000 }
+GC_MAX_EDGES_PER_OBJECT :: prep { 65536 }
+
+pub struct GCObjectID {
+    pub value: U64
+}
+
+impl GCObjectID {
+    // Rust ObjectId::get (:26).
+    pub fn get(self) -> U64 Never! { self.value }
+}
+
+#Error
+pub enum GCFault {
+    HeapPoisoned
+    IDExhausted
+    ObjectLimit
+    TooManyEdges(count: Int, limit: Int)
+    UnknownObject(GCObjectID)
+    DanglingEdge(from: GCObjectID, to: GCObjectID)
+    RootCountOverflow(GCObjectID)
+    PinCountOverflow(GCObjectID)
+    MutationConflict(GCObjectID)
+    VersionOverflow(GCObjectID)
+    PayloadPoisoned(GCObjectID)
+    BorrowConflict(GCObjectID)
+    TypeMismatch(GCObjectID)
+    HeapGone
+    TracePoisoned
+    TraceIO(String)
+}
+
+// Rust PromotionSite (:61). All text is compiler-authored, static provenance;
+// allocating an ordinary object must not synthesize a promotion event.
+pub struct GCPromotionSite {
+    pub source: String
+    pub span_start: U64
+    pub span_end: U64
+    pub scope: String
+    pub policy_provenance: String
+    pub reason: String
+    pub type_name: String
+    pub bytes: U64
+}
+
+// Rust Collection (:117). Identity order is observable for reclamation,
+// deferral and finalization reports, not an implementation-specific map order.
+pub struct GCCollection {
+    pub reachable: Int
+    pub reclaimed: [GCObjectID]
+    pub deferred: [GCObjectID]
+    pub finalizer_panics: [GCObjectID]
+    pub poisoned_payloads: [GCObjectID]
+    pub drop_panics: [GCObjectID]
+}
+
+// Rust Collection::default (:116).
+pub fn gc_empty_collection() -> GCCollection Never! {
+    GCCollection{
+        reachable: 0,
+        reclaimed: [GCObjectID]{},
+        deferred: [GCObjectID]{},
+        finalizer_panics: [GCObjectID]{},
+        poisoned_payloads: [GCObjectID]{},
+        drop_panics: [GCObjectID]{},
+    }
+}
+
+// Rust Fault's Debug spelling as consumed by Display (:32–54). Explicit text
+// avoids exposing the private Jet carrier's name in the E2110 diagnostic.
+pub fn gc_fault_debug(fault: GCFault) -> String Never! {
+    if fault == {
+        .HeapPoisoned -> "HeapPoisoned"
+        .IDExhausted -> "IdExhausted"
+        .ObjectLimit -> "ObjectLimit"
+        .TooManyEdges(count, limit) -> "TooManyEdges {{ count: {count}, limit: {limit} }}"
+        .UnknownObject(id) -> "UnknownObject(ObjectId({id.value}))"
+        .DanglingEdge(from, to) -> "DanglingEdge {{ from: ObjectId({from.value}), to: ObjectId({to.value}) }}"
+        .RootCountOverflow(id) -> "RootCountOverflow(ObjectId({id.value}))"
+        .PinCountOverflow(id) -> "PinCountOverflow(ObjectId({id.value}))"
+        .MutationConflict(id) -> "MutationConflict(ObjectId({id.value}))"
+        .VersionOverflow(id) -> "VersionOverflow(ObjectId({id.value}))"
+        .PayloadPoisoned(id) -> "PayloadPoisoned(ObjectId({id.value}))"
+        .BorrowConflict(id) -> "BorrowConflict(ObjectId({id.value}))"
+        .TypeMismatch(id) -> "TypeMismatch(ObjectId({id.value}))"
+        .HeapGone -> "HeapGone"
+        .TracePoisoned -> "TracePoisoned"
+        .TraceIO(message) -> "TraceIo({message:Debug})"
+    }
+}
+
+// Rust Fault::fmt (:52).
+pub fn gc_fault_text(fault: GCFault) -> String Never! {
+    "collector invariant failed: {gc_fault_debug(fault)}"
+}
+
+// Rust AutomaticRoot::edit_replacing_all_edges (:469–472). Invoke only after
+// root.edit_with_edges succeeds, while retaining the exclusive edge-slot lock.
+// A failed payload edit or graph commit must leave the old slot map untouched.
+// Unlike gc_core_02.gc_edge_slot_replace, this replaces EVERY slot, not just
+// "value". It copies the borrowed edge extent once, without cloning old slots;
+// duplicates/group order remain intact until flatten_edge_slots deduplicates.
+pub fn gc_edge_slots_reset(slots: &[String:[[GCObjectID]]], edges: [GCObjectID]) Never! {
+    slots = [String:[[GCObjectID]]]{}
+    if edges.len() != 0 -> slots["value"] = [[GCObjectID]]{~edges}
+}
+
+// Native cutover gate #4494 (__gc_core.rs:74,126–165,175–262,345–355,
+// 583–710,750–757,817–905): no canonical Arc/Weak retained heap/object owner,
+// poison-aware inline mutex + nonblocking loan guard, static Once, Any/Send
+// type/layout/drop dictionary, or consuming FnOnce/panic owner exists here.
+// The graph and finalization policies already belong to gc_core_02; its
+// Native traits are contracts, not implemented allocation/lock/unwind leaves.
+// Do not substitute a copied payload arena, Rust bridge, or new native seam.
+// #4483 additionally supplies exact target usize bounds for roots/pins.
+// #4499 does not block this graph: ObjectId keys use their exact U64 payload;
+// edge slots use String keys. #4409 is not used by this core's Fault domain.

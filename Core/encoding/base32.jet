@@ -4,9 +4,10 @@
 // Decoding follows D-ENCBASE-STRICT1: edition 2027+ decoders are strict
 // RFC 4648 (uppercase symbols, complete padding, zero unused bits, no
 // whitespace) and report `invalid base32 at byte <N>: <reason>`; edition 2026
-// keeps the compatibility parser. The codec kernels are the host rows, so
-// every execution tier runs the same decoder; these members forward to them.
+// keeps the compatibility parser. Decoders retain the same host rows;
+// encoders use the private borrowed-byte owner.
 use core as core
+use core.encoding.runtime.kernel_base_encode as base32_encode_kernel
 
 #Error
 pub struct Base32Error {
@@ -17,7 +18,11 @@ impl Base32Error {
     pub fn new(reason: String) -> Base32Error Never! { Base32Error{reason: reason} }
 }
 
-pub fn encode(data: [U8]) -> String Never! { core.encoding.base32.b32encode(data) }
+// Rust jet_std_base32_encode:231–233; no owning input or alphabet copy.
+pub fn encode(data: [U8]) -> String Never! {
+    view :: data[0..<data.len()]
+    base32_encode_kernel.encode32(view)
+}
 
 /// Decode the canonical padded RFC 4648 alphabet.
 pub fn decode(text: String) -> [U8] Base32Error! {
@@ -34,7 +39,10 @@ pub fn is_base32(text: String) -> Bool Never! {
 pub fn b32encode(data: [U8]) -> String Never! { encode(data) }
 pub fn b32decode(text: String) -> [U8] Base32Error! { decode(text) }
 
-pub fn b32hexencode(data: [U8]) -> String Never! { core.encoding.base32.b32hexencode(data) }
+pub fn b32hexencode(data: [U8]) -> String Never! {
+    view :: data[0..<data.len()]
+    base32_encode_kernel.encode32_hex(view)
+}
 
 pub fn b32hexdecode(text: String) -> [U8] Base32Error! {
     if core.encoding.base32.b32hexdecode(text) == {

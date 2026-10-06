@@ -1,0 +1,337 @@
+use core.data.[DataError, DataErrorKind, DataSummary, DataStatus]
+use core.prelude.runtime.std_common_types.GroupValue
+use core.mem.runtime.portable_core.[JetOutcome, JetAbsent]
+use core.prelude.JetShow
+use std.cmp.[Ordering, Ord]
+use std.convert.[From, TryInto]
+use std.fmt.Display
+use std.env
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:1
+// One shared checked statistics kernel; adapters must not duplicate its math.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:9
+fn jet_data_error(kind: DataErrorKind, operation: String, reason: String) -> DataError {
+    DataError{kind: kind, operation: operation, row: None, column: None, index: None, reason: reason, cause: None}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:25
+fn jet_data_error_at(kind: DataErrorKind, operation: String, index: JetOutcome<I64, JetAbsent>, reason: String) -> DataError {
+    error := jet_data_error(kind, operation, reason)
+    error.index = index.ok().map(fn(value) { Int{value} })
+    ^error
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:36
+fn jet_data_normalize_zero(value: F64) -> F64 { if value == 0.0 { 0.0 } else { value } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:46
+#Clone
+#Copy
+#Debug
+#Equatable
+struct JetDataKernelLimits { max_groups: I64, max_sort_rows: I64, max_join_rows: I64, max_output_rows: I64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:54
+fn jet_data_kernel_limits(max_groups: I64, max_sort_rows: I64, max_join_rows: I64, max_output_rows: I64) -> JetDataKernelLimits {
+    JetDataKernelLimits{max_groups: max_groups, max_sort_rows: max_sort_rows, max_join_rows: max_join_rows, max_output_rows: max_output_rows}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:68
+fn jet_data_kernel_validate_limits(limits: &JetDataKernelLimits) -> Result<(), DataError> {
+    for (name, value) in [("max_groups", limits.max_groups), ("max_sort_rows", limits.max_sort_rows),
+        ("max_join_rows", limits.max_join_rows), ("max_output_rows", limits.max_output_rows)] {
+        if value < 1 { return Err(jet_data_error(DataErrorKind.InvalidArgument, "DataLimits", "{name} must be positive")) }
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:91
+#Clone
+#Debug
+#Equatable
+struct JetDataJoinIndex { left: USize, right: USize? }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:96
+fn jet_data_join_indices(left_keys: &[String], right_keys: &[String], left_join: Bool, limits: &JetDataKernelLimits) -> Result<[JetDataJoinIndex], DataError> {
+    jet_data_kernel_validate_limits(limits)?
+    operation :: if left_join { "left_join" } else { "inner_join" }
+    right_rows := [String:[USize]]{}
+    for (index, key) in right_keys.iter().enumerate() { right_rows.entry(key).or_default().push(index) }
+    joined := [JetDataJoinIndex]{}
+    for (left, key) in left_keys.iter().enumerate() {
+        match right_rows.get(key) {
+            Val(matches) -> {
+                loop right in matches {
+                    if (joined.len() as I64) >= limits.max_join_rows { return Err(jet_data_error(DataErrorKind.Limit, operation, "max_join_rows {limits.max_join_rows} exceeded")) }
+                    joined.push(JetDataJoinIndex{left: left, right: Val(*right)})
+                }
+            }
+            None -> {
+                if left_join {
+                    if (joined.len() as I64) >= limits.max_join_rows { return Err(jet_data_error(DataErrorKind.Limit, operation, "max_join_rows {limits.max_join_rows} exceeded")) }
+                    joined.push(JetDataJoinIndex{left: left, right: None})
+                }
+            }
+        }
+    }
+    if (joined.len() as I64) > limits.max_output_rows { return Err(jet_data_error(DataErrorKind.Limit, operation, "max_output_rows {limits.max_output_rows} exceeded")) }
+    Ok(^joined)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:153
+#Clone
+#Debug
+#Equatable
+struct JetDataPivotCell { row_key: String, column_key: String, count: I64, sum: F64, mean: F64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:161
+fn jet_data_pivot_sum_values(values: &[(String, String, F64)], limits: &JetDataKernelLimits) -> Result<[JetDataPivotCell], DataError> {
+    jet_data_kernel_validate_limits(limits)?
+    groups := [(String, String):(I64, F64)]{}
+    for (row_key, column_key, value) in values {
+        if !value.is_finite() { return Err(jet_data_error(DataErrorKind.NonFinite, "pivot_sum", "pivot values must be finite")) }
+        key :: (row_key.clone(), column_key.clone())
+        if !groups.contains_key(&key) && (groups.len() as I64) >= limits.max_groups { return Err(jet_data_error(DataErrorKind.Limit, "pivot_sum", "max_groups {limits.max_groups} exceeded")) }
+        entry :: groups.entry(^key).or_insert((0, 0.0))
+        entry.0 += 1
+        entry.1 += *value
+        if !entry.1.is_finite() { return Err(jet_data_error(DataErrorKind.Overflow, "pivot_sum", "finite overflow while pivoting")) }
+    }
+    if (groups.len() as I64) > limits.max_output_rows { return Err(jet_data_error(DataErrorKind.Limit, "pivot_sum", "max_output_rows {limits.max_output_rows} exceeded")) }
+    // Preserve BTreeMap pair-key order without encoding composite keys as strings.
+    keys := groups.keys().cloned().collect()
+    keys.sort()
+    output := [JetDataPivotCell].with_capacity(groups.len())
+    for (row_key, column_key) in keys {
+        (count, sum) :: groups.remove(&(row_key, column_key)) ?? panic("unwrap failed")
+        output.push(JetDataPivotCell{row_key: ^row_key, column_key: ^column_key, count: count,
+            sum: jet_data_normalize_zero(sum), mean: jet_data_normalize_zero(if count == 0 { 0.0 } else { sum / (count as F64) })})
+    }
+    Ok(^output)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:221
+fn jet_data_reject_nonfinite(operation: String, values: &[F64]) -> Result<(), DataError> {
+    for (index, value) in values.iter().copied().enumerate() {
+        if !value.is_finite() { return Err(jet_data_error_at(DataErrorKind.NonFinite, operation, Ok(index as I64), "numeric input must be finite")) }
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:235
+fn jet_data_neumaier_sum(values: &[F64]) -> Result<F64, DataError> {
+    jet_data_reject_nonfinite("sum", values)?
+    sum := 0.0
+    compensation := 0.0
+    for value in values.iter().copied() {
+        t :: sum + value
+        if sum.abs() >= value.abs() { compensation += (sum - t) + value }
+        else { compensation += (value - t) + sum }
+        sum = t
+        if !sum.is_finite() || !compensation.is_finite() { return Err(jet_data_error(DataErrorKind.Overflow, "sum", "finite overflow while summing")) }
+    }
+    out :: sum + compensation
+    if !out.is_finite() { return Err(jet_data_error(DataErrorKind.Overflow, "sum", "finite overflow while summing")) }
+    Ok(jet_data_normalize_zero(out))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:266
+fn jet_data_sum_checked(values: &[F64]) -> Result<F64, DataError> { if values.is_empty() { Ok(0.0) } else { jet_data_neumaier_sum(values) } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:273
+fn jet_data_mean_checked(values: &[F64]) -> Result<F64, DataError> {
+    if values.is_empty() { return Err(jet_data_error(DataErrorKind.Empty, "mean", "mean of empty data is undefined")) }
+    sum :: jet_data_neumaier_sum(values)?
+    Ok(jet_data_normalize_zero(sum / (values.len() as F64)))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:285
+fn jet_data_min_checked(values: &[F64]) -> Result<F64, DataError> {
+    if values.is_empty() { return Err(jet_data_error(DataErrorKind.Empty, "min", "min of empty data is undefined")) }
+    jet_data_reject_nonfinite("min", values)?
+    Ok(jet_data_normalize_zero(values.iter().copied().fold(F64.INFINITY, F64.min)))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:299
+fn jet_data_max_checked(values: &[F64]) -> Result<F64, DataError> {
+    if values.is_empty() { return Err(jet_data_error(DataErrorKind.Empty, "max", "max of empty data is undefined")) }
+    jet_data_reject_nonfinite("max", values)?
+    Ok(jet_data_normalize_zero(values.iter().copied().fold(F64.NEG_INFINITY, F64.max)))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:313
+fn jet_data_quantile_checked(values: &[F64], q: F64) -> Result<F64, DataError> {
+    if !q.is_finite() || q < 0.0 || q > 1.0 { return Err(jet_data_error(DataErrorKind.InvalidArgument, "quantile", "quantile q must be a finite value in 0.0 through 1.0")) }
+    if values.is_empty() { return Err(jet_data_error(DataErrorKind.Empty, "quantile", "quantile of empty data is undefined")) }
+    jet_data_reject_nonfinite("quantile", values)?
+    sorted := values.to_vec()
+    sorted.sort_by(fn(a, b) { a.partial_cmp(b).unwrap_or(Ordering.Equal) })
+    pos :: q * (sorted.len().saturating_sub(1) as F64)
+    lo :: pos.floor() as USize
+    hi :: pos.ceil() as USize
+    value :: if lo == hi { sorted[lo] } else {
+        t :: pos - (lo as F64)
+        sorted[lo] * (1.0 - t) + sorted[hi] * t
+    }
+    Ok(jet_data_normalize_zero(value))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:343
+fn jet_data_median_checked(values: &[F64]) -> Result<F64, DataError> {
+    jet_data_quantile_checked(values, 0.5).map_err(fn(error) {
+        error.operation = "median"
+        ^error
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:350
+fn jet_data_variance_checked(values: &[F64]) -> Result<F64, DataError> {
+    if values.is_empty() { return Err(jet_data_error(DataErrorKind.Empty, "variance", "variance of empty data is undefined")) }
+    jet_data_reject_nonfinite("variance", values)?
+    count := 0.0
+    mean := 0.0
+    m2 := 0.0
+    for value in values.iter().copied() {
+        count += 1.0
+        delta :: value - mean
+        mean += delta / count
+        delta2 :: value - mean
+        m2 += delta * delta2
+        if !mean.is_finite() || !m2.is_finite() { return Err(jet_data_error(DataErrorKind.Overflow, "variance", "finite overflow while computing variance")) }
+    }
+    Ok(jet_data_normalize_zero(m2 / count))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:380
+fn jet_data_stddev_checked(values: &[F64]) -> Result<F64, DataError> { Ok(jet_data_normalize_zero(jet_data_variance_checked(values)?.sqrt())) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:384
+fn jet_data_describe_checked(values: &[F64]) -> Result<DataSummary, DataError> {
+    if values.is_empty() { return Err(jet_data_error(DataErrorKind.Empty, "describe", "describe of empty data is undefined")) }
+    Ok(DataSummary{count: Int{values.len()}, sum: Float{jet_data_sum_checked(values)?}, mean: Float{jet_data_mean_checked(values)?},
+        min: Float{jet_data_min_checked(values)?}, max: Float{jet_data_max_checked(values)?}, median: Float{jet_data_median_checked(values)?},
+        variance: Float{jet_data_variance_checked(values)?}, stddev: Float{jet_data_stddev_checked(values)?}})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:404
+fn jet_data_rolling_mean_checked(values: &[F64], width: I64) -> Result<[F64], DataError> {
+    if width < 1 { return Err(jet_data_error(DataErrorKind.InvalidArgument, "rolling_mean", "rolling width must be positive")) }
+    jet_data_reject_nonfinite("rolling_mean", values)?
+    width :: width as USize
+    out := [F64].with_capacity(values.len())
+    loop i in 0..<values.len() {
+        start :: i.saturating_add(1).saturating_sub(width)
+        window :: &values[start..i]
+        mean :: jet_data_neumaier_sum(window)? / (window.len() as F64)
+        out.push(jet_data_normalize_zero(mean))
+    }
+    Ok(^out)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:427
+fn jet_data_bar_text_checked<K: JetShow, V: Clone + Ord + From<I64> + TryInto<I64> + Display>(groups: &[GroupValue<K, V>]) -> Result<String, DataError> {
+    for (index, group) in groups.iter().enumerate() {
+        if group.value < V.from(0) { return Err(jet_data_error_at(DataErrorKind.InvalidArgument, "bar_text", Ok(index as I64), "plot counts must be non-negative")) }
+    }
+    Ok(jet_data_bar_text(groups))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:447
+fn jet_data_bar_svg_checked<K: JetShow>(groups: &[GroupValue<K, I64>]) -> Result<String, DataError> {
+    for (index, group) in groups.iter().enumerate() {
+        if group.value < 0 { return Err(jet_data_error_at(DataErrorKind.InvalidArgument, "bar_svg", Ok(index as I64), "plot counts must be non-negative")) }
+    }
+    Ok(jet_data_bar_svg(groups))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:463
+// Pre-2027 adapters keep the original weaker report while sharing checked math.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:467
+fn jet_data_sum(values: &[F64]) -> F64 { jet_data_sum_checked(values).unwrap_or(0.0) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:471
+fn jet_data_mean(values: &[F64]) -> F64 { jet_data_mean_checked(values).unwrap_or(0.0) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:475
+fn jet_data_min(values: &[F64]) -> F64 { jet_data_min_checked(values).unwrap_or(0.0) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:479
+fn jet_data_max(values: &[F64]) -> F64 { jet_data_max_checked(values).unwrap_or(0.0) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:483
+fn jet_data_median(values: &[F64]) -> F64 { jet_data_median_checked(values).unwrap_or(0.0) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:487
+fn jet_data_quantile(values: &[F64], q: F64) -> F64 { jet_data_quantile_checked(values, q.clamp(0.0, 1.0)).unwrap_or(0.0) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:491
+fn jet_data_variance(values: &[F64]) -> F64 { jet_data_variance_checked(values).unwrap_or(0.0) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:495
+fn jet_data_stddev(values: &[F64]) -> F64 { jet_data_stddev_checked(values).unwrap_or(0.0) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:499
+fn jet_data_rolling_mean(values: &[F64], width: I64) -> [F64] { jet_data_rolling_mean_checked(values, width.max(1)).unwrap_or_default() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:503
+fn jet_data_describe(values: &[F64]) -> DataSummary {
+    jet_data_describe_checked(values).unwrap_or(DataSummary{count: Int{values.len()}, sum: 0.0, mean: 0.0, min: 0.0, max: 0.0, median: 0.0, variance: 0.0, stddev: 0.0})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:516
+fn jet_data_status_native(step: String) -> DataStatus {
+    DataStatus{step: step, path: "native", clone_value: "none", ownership: "jet", trust: "native", fallback: "none", replacement: "native"}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:528
+fn jet_data_bridge_tool_on_path(tool: String) -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("read OS PATH and inspect candidate tool file metadata; no provider is executed") {
+        path :: match env.var_os("PATH") {
+            Val(path) -> path
+            None -> return false
+        }
+        env.split_paths(&path).any(fn(dir) { dir.join(tool).is_file() })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:539
+fn jet_data_bridge_path(step: String) -> String {
+    if step == "r.*" && jet_data_bridge_tool_on_path("Rscript") {
+        // GATE #4565: kernel primitive
+        opt_in :: #Unsafe("R bridge availability requires explicit expert environment opt-in, not only a tool") { env.var("JET_DATA_R_BRIDGE").as_deref() == Ok("1") }
+        if opt_in { return "available" }
+    }
+    "unavailable"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:553
+fn jet_data_bridge_status(step: String) -> DataStatus {
+    path :: jet_data_bridge_path(step)
+    match step {
+        "py.*" -> DataStatus{step: "py.*", path: path, clone_value: "owned-copy", ownership: "python-sidecar", trust: "untrusted-foreign", fallback: "none", replacement: "core.data native lists/query/stats"}
+        "r.*" -> DataStatus{step: "r.*", path: path, clone_value: "owned-copy", ownership: "r-sidecar", trust: "untrusted-foreign", fallback: "none", replacement: "core.data Query<T> typed round-trip"}
+        "gpu.*" -> DataStatus{step: "gpu.*", path: path, clone_value: "device-transfer", ownership: "device-buffer", trust: "untrusted-accelerator", fallback: "none", replacement: "core.data / Tensor native CPU path"}
+        _ -> DataStatus{step: step, path: "unavailable", clone_value: "unknown", ownership: "unknown", trust: "untrusted-foreign", fallback: "none", replacement: "core.data native"}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:595
+fn jet_data_status() -> [DataStatus] {
+    [jet_data_status_native("core.data.csv"), jet_data_status_native("core.data.stats"), jet_data_status_native("core.data.query"),
+        jet_data_status_native("core.data.stream"), jet_data_status_native("core.data.schema"), jet_data_status_native("core.data.json"),
+        jet_data_bridge_status("py.*"), jet_data_bridge_status("r.*"), jet_data_bridge_status("gpu.*")]
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:609
+fn jet_data_normalize_bridge_provider(provider: String) -> String? {
+    lower := provider.trim().trim_end_matches('.').to_ascii_lowercase() // #4303
+    p := lower.strip_suffix(".*").unwrap_or(lower.as_str()) // #4303
+    match p {
+        "py" | "python" -> Val("py.*")
+        "r" -> Val("r.*")
+        "gpu" | "cuda" | "metal" | "vulkan" | "webgpu" -> Val("gpu.*")
+        _ -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:621
+fn jet_data_require_bridge(provider: &String) -> Result<(), DataError> {
+    step :: match jet_data_normalize_bridge_provider(provider) {
+        Val(step) -> step
+        None -> return Err(jet_data_error(DataErrorKind.InvalidArgument, "require_bridge", "unknown data bridge provider `{provider}`; expected py, r, or gpu"))
+    }
+    status :: jet_data_bridge_status(step)
+    if status.path == "available" { return Ok(()) }
+    Err(jet_data_error(DataErrorKind.Bridge, "require_bridge", "{step} unavailable (clone_value={status.clone_value}, ownership={status.ownership}, trust={status.trust}, fallback={status.fallback}, replacement={status.replacement})"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:643
+fn jet_data_bar_text<K: JetShow, V: Clone + Ord + From<I64> + TryInto<I64> + Display>(groups: &[GroupValue<K, V>]) -> String {
+    lines := [String]{}
+    loop group in groups {
+        n :: (group.value.clone().clamp(V.from(0), V.from(40)).try_into().ok() ?? panic("plot width is clamped to 0..40")) as I64
+        bars :: "#".repeat(n as USize)
+        lines.push("{group.key.jet_show()} | {bars} {group.value}")
+    }
+    lines.join("\n")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:665
+fn jet_data_bar_svg<K: JetShow>(groups: &[GroupValue<K, I64>]) -> String {
+    width :: 320.0
+    row_h :: 24.0
+    height :: 24.0 + row_h * (groups.len() as F64)
+    max :: groups.iter().map(fn(group) { group.value }).max().unwrap_or(1).max(1) as F64
+    out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"320\" height=\"{height as I64}\" viewBox=\"0 0 320 {height as I64}\">"
+    out.push_str("<rect width=\"320\" height=\"100%\" fill=\"white\"/>")
+    for (index, group) in groups.iter().enumerate() {
+        y :: 18.0 + (index as F64) * row_h
+        bar_w :: (((group.value.max(0) as F64) / max) * (width - 120.0)).round()
+        out.push_str("<text x=\"8\" y=\"{y as I64}\" font-family=\"monospace\" font-size=\"12\">{jet_data_svg_escape(group.key.jet_show())}</text>")
+        out.push_str("<rect x=\"96\" y=\"{(y - 12.0) as I64}\" width=\"{bar_w as I64}\" height=\"14\" fill=\"#2f6f73\"/>")
+        out.push_str("<text x=\"{(104.0 + bar_w) as I64}\" y=\"{y as I64}\" font-family=\"monospace\" font-size=\"12\">{group.value}</text>")
+    }
+    out.push_str("</svg>")
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:707
+fn jet_data_svg_escape(s: String) -> String { s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;") }

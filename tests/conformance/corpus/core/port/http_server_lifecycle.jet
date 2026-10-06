@@ -1,0 +1,393 @@
+// Rust: tests/http_server_lifecycle.rs:1
+// Native test harness; std thread, socket, atomic, TLS and unwind leaves: GATE #4494.
+use tests.common as common
+use std.net.[TcpListener, TcpStream, SocketAddr, Shutdown]
+use std.io.[Read, Write, Cursor]
+use std.sync.[Arc, Mutex, Barrier, OnceLock]
+use std.sync.atomic.[AtomicUsize, AtomicBool, Ordering]
+use std.thread as thread
+use std.time.[Duration, Instant]
+use std.cell.[Cell, RefCell]
+use std.panic as native_panic
+use jet_foundation.Outcome.*
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.Shape.[ShapeProjection]
+use jet_foundation.EncodingJson as jet_encoding_json
+use jet_foundation.JSONNumber as jet_json_number
+// Rust: tests/http_server_lifecycle.rs:62
+use core.runtime.live_lifecycle.*
+// Rust: tests/http_server_lifecycle.rs:70
+use core.task.runtime.task_group.*
+// Rust: tests/http_server_lifecycle.rs:173
+use core.net.runtime.url_mime.*
+// Rust: tests/http_server_lifecycle.rs:174
+use core.encoding.runtime.json_codec.*
+// Rust: tests/http_server_lifecycle.rs:175
+use core.encoding.runtime.wire_order.*
+// Rust: tests/http_server_lifecycle.rs:176
+use core.encoding.runtime.data_tree_kind.*
+// Rust: tests/http_server_lifecycle.rs:177
+use core.encoding.runtime.field_error.*
+// Rust: tests/http_server_lifecycle.rs:178
+use core.encoding.runtime.encoding_types.*
+// Rust: tests/http_server_lifecycle.rs:179
+use core.encoding.runtime.data_tree.*
+// Rust: tests/http_server_lifecycle.rs:180
+use jet_foundation.EncodingJson.[quote_json]
+// Rust: tests/http_server_lifecycle.rs:181
+use core.encoding.runtime.json_data_tree.*
+// Rust: tests/http_server_lifecycle.rs:353
+use jet_foundation.Devtools.*
+// Rust: tests/http_server_lifecycle.rs:355
+use core.devtools.runtime.kernel_devtools_request_panel.*
+// Rust: tests/http_server_lifecycle.rs:357
+use core.time.runtime.kernel_time_monotonic.*
+// Rust: tests/http_server_lifecycle.rs:358
+use core.time.runtime.deadline.*
+// Rust: tests/http_server_lifecycle.rs:389
+use core.http.runtime.kernel_http_request_target.*
+// Rust: tests/http_server_lifecycle.rs:392
+use core.http.runtime.top_http_message.*
+// Rust: tests/http_server_lifecycle.rs:395
+use core.http.runtime.top_http_route.*
+// Rust: tests/http_server_lifecycle.rs:398
+use core.http.runtime.top_http_client.*
+// Rust: tests/http_server_lifecycle.rs:401
+use core.http.runtime.top_http_server.*
+// Rust: tests/http_server_lifecycle.rs:404
+use core.live.runtime.top_live_query.*
+// Rust: tests/http_server_lifecycle.rs:407
+use core.ws.runtime.top_ws_client.*
+// Rust: tests/http_server_lifecycle.rs:410
+use core.ws.runtime.top_ws.*
+// Rust: tests/http_server_lifecycle.rs:417
+use core.task.runtime.scheduler.*
+// Rust: tests/http_server_lifecycle.rs:421
+use jet_pkg_model.[JetHTTPTlsMessageState, JetHTTPTlsMessageStatus]
+use jet_std as jet_std
+
+// Rust: tests/http_server_lifecycle.rs:5
+struct JetTCPListener { inner: TcpListener }
+// Rust: tests/http_server_lifecycle.rs:9
+trait JetShow { fn jet_show(self: &Self) -> String }
+// Rust: tests/http_server_lifecycle.rs:13
+trait JetDebug { fn jet_debug(self: &Self) -> String }
+// Rust: tests/http_server_lifecycle.rs:17
+// D-FAIL-CONV2=A: failure text seam for included fragments.
+trait JetDisplay { fn jet_display(self: &Self) -> String }
+// Rust: tests/http_server_lifecycle.rs:22
+trait __jet_Encode {}
+// Rust: tests/http_server_lifecycle.rs:23
+impl<T> T.__jet_Encode {}
+// Rust: tests/http_server_lifecycle.rs:25
+trait __jet_Decode {
+    fn jet_decode(tree: &DataTree) -> Self [FieldError]!
+}
+// Rust: tests/http_server_lifecycle.rs:29
+// This constant fixture encoder is the original test seam, not a production codec.
+fn jet_enc_json_to_string<T: __jet_Encode>(_value: &T) -> String { `{"ok":true}` }
+// Rust: tests/http_server_lifecycle.rs:33
+impl String.__jet_Decode {
+    fn jet_decode(tree: &DataTree) -> String [FieldError]! { render_datatree_json(tree, false, 0) }
+}
+// Rust: tests/http_server_lifecycle.rs:39
+fn jet_enc_json_decode<T: __jet_Decode>(text: String) -> T [FieldError]! {
+    tree :: parse_json_typed_datatree(text) catch error -> { throw FieldError.one(error.reason) }
+    T.jet_decode(&tree)
+}
+// Rust: tests/http_server_lifecycle.rs:47
+struct JetFileReader { inner: Read }
+// Rust: tests/http_server_lifecycle.rs:51
+struct JetFileWriter { inner: Write }
+// Rust: tests/http_server_lifecycle.rs:72
+struct FixtureDuration { ms: I64 }
+// Rust: tests/http_server_lifecycle.rs:77
+impl FixtureDuration {
+    // Rust: tests/http_server_lifecycle.rs:80
+    fn as_millis(self: Self) -> I64 { self.ms }
+}
+// Rust: tests/http_server_lifecycle.rs:85
+ enum IOOperation { Read Write Flush Connect Accept Close Resolve Codec }
+// Rust: tests/http_server_lifecycle.rs:97
+struct IOContext {
+    operation: IOOperation
+    resource: JetOutcome<String, JetAbsent>
+    os_code: JetOutcome<I64, JetAbsent>
+    cause: JetOutcome<String, JetAbsent>
+}
+// Rust: tests/http_server_lifecycle.rs:105
+impl IOContext {
+    // Rust: tests/http_server_lifecycle.rs:106
+    fn new(operation: IOOperation, resource: String?, os_code: I64?, cause: String?) -> Self {
+        Self{operation: operation, resource: jet_outcome_of(resource), os_code: jet_outcome_of(os_code), cause: jet_outcome_of(cause)}
+    }
+}
+// Rust: tests/http_server_lifecycle.rs:121
+#Error
+enum IOError {
+    InvalidInput(IOContext) NotFound(IOContext) PermissionDenied(IOContext)
+    TimedOut(IOContext) Cancelled(IOContext) Closed(IOContext) Protocol(IOContext) Other(IOContext)
+}
+// Rust: tests/http_server_lifecycle.rs:136
+fn jet_int_from_i64(value: I64) -> I64 { value }
+// Rust: tests/http_server_lifecycle.rs:139
+fn jet_int_from_str(value: String) -> I64 Err! { value.parse<I64>() catch error -> { throw error.to_string() } }
+// Rust: tests/http_server_lifecycle.rs:142
+fn jet_int_to_i64(value: I64) -> I64? { value }
+// Rust: tests/http_server_lifecycle.rs:145
+fn jet_int_to_string(value: I64) -> String { value.to_string() }
+// Rust: tests/http_server_lifecycle.rs:148
+fn jet_int_to_f64(value: I64) -> F64 { value as F64 }
+// Rust: tests/http_server_lifecycle.rs:152
+struct JetURLParts {
+    scheme: String
+    username: String?
+    password: String?
+    host: String?
+    port: I64?
+    path: String
+    query: [(String, String)]
+    fragment: String?
+    typed_host: [(String, Bool)]?
+    typed_path: [(String, Bool)]?
+}
+// Rust: tests/http_server_lifecycle.rs:166
+struct JetMIME { top: String, sub: String, params: [(String, String)] }
+// Rust: tests/http_server_lifecycle.rs:186
+enum JetParaRuntimeFailure { SchedulerFatal(msg: String) }
+// Rust: tests/http_server_lifecycle.rs:190
+// GATE #4494: each cell is thread-local, not a process-wide substitute.
+JET_PARA_DEFER_FAILURE :: thread.local(() -> { Cell<Bool>.new(false) })
+JET_IN_SCHEDULER_TASK :: thread.local(() -> { Cell<Bool>.new(false) })
+JET_OBSERVE_TASK_ID :: thread.local(() -> { Cell<Int>.new(1) })
+TEST_DEADLINE_EXCEEDED :: thread.local(() -> { Cell<Bool>.new(false) })
+// Rust: tests/http_server_lifecycle.rs:197
+fn jet_runtime_diagnostic(rendered: String) -> Never {
+    std.io.stderr().write_all(rendered.bytes())
+    std.io.stderr().write_all("\n".bytes())
+    std.process.exit(70) // GATE #4494
+}
+// Rust: tests/http_server_lifecycle.rs:202
+fn jet_scheduler_runtime_stop(msg: String) -> Never {
+    report :: jet_render_runtime_stop("E3001", "", 0, "", "", 1, 1, msg, "")
+    if jet_scheduler_panic_should_unwind() { panic(report.rendered) }
+    jet_runtime_diagnostic(report.rendered)
+}
+// Rust: tests/http_server_lifecycle.rs:216
+fn jet_runtime_stop(code: String, file: String, line: U32, msg: String) -> Never {
+    report :: jet_render_runtime_stop(code, file, line, "", "", 1, 1, msg, "")
+    jet_runtime_diagnostic(report.rendered)
+}
+// Rust: tests/http_server_lifecycle.rs:222
+fn jet_runtime_caught_stop(message: String) -> {
+    if message.starts_with("Stop [E") {
+        std.io.stderr().write_all(message.bytes())
+        if !message.ends_with("\n") { std.io.stderr().write_all("\n".bytes()) }
+        return
+    }
+    report :: jet_render_runtime_stop("E3001", "", 0, "", "", 1, 1, message, "")
+    std.io.stderr().write_all(report.rendered.bytes())
+}
+// Rust: tests/http_server_lifecycle.rs:235
+fn jet_scheduler_task_panic_enter() -> { JET_IN_SCHEDULER_TASK.with(task -> { task.set(true) }) }
+// Rust: tests/http_server_lifecycle.rs:238
+fn jet_scheduler_task_panic_leave() -> { JET_IN_SCHEDULER_TASK.with(task -> { task.set(false) }) }
+// Rust: tests/http_server_lifecycle.rs:241
+fn jet_scheduler_panic_should_unwind() -> Bool { JET_IN_SCHEDULER_TASK.with(task -> { task.get() }) }
+// Rust: tests/http_server_lifecycle.rs:244
+fn jet_deadline_remaining_ms() -> I64? { TEST_DEADLINE_EXCEEDED.with(deadline -> { if deadline.get() { 0 } else { None } }) }
+// Rust: tests/http_server_lifecycle.rs:247
+fn jet_deadline_exceeded(wait_kind: String) -> Never {
+    native_panic.resume_unwind(JetDeadlineUnwind{rendered: "deadline exceeded: {wait_kind}"}) // GATE #4494
+}
+// Rust: tests/http_server_lifecycle.rs:253
+fn jet_panic(file: String, line: U32, msg: String) -> Never { panic("{msg} (at {file}:{line})") }
+// Rust: tests/http_server_lifecycle.rs:260
+fn jet_task_control_trace(paused: Bool, cancel: Bool) -> String { "paused={paused},cancel={cancel}" }
+// Rust: tests/http_server_lifecycle.rs:264
+struct JetObserveTask { parent: Int, state: String, wait: String, deadline_ms: I64?, cancelled: Bool }
+// Rust: tests/http_server_lifecycle.rs:273
+struct JetObserveChannel { depth: Int, capacity: Int?, send_waiters: Int, recv_waiters: Int, closed: Bool }
+// Rust: tests/http_server_lifecycle.rs:282
+struct JetObserveRegistry {
+    next_task: AtomicUsize
+    next_channel: AtomicUsize
+    tasks: Mutex<[Int:JetObserveTask]>
+    channels: Mutex<[Int:JetObserveChannel]>
+}
+// Rust: tests/http_server_lifecycle.rs:289
+JET_OBSERVE_WORKERS :: AtomicUsize.new(0)
+// Rust: tests/http_server_lifecycle.rs:290
+JET_OBSERVE_QUEUED :: AtomicUsize.new(0)
+// These inert Observe hooks reproduce the original isolated test harness only.
+// Rust: tests/http_server_lifecycle.rs:292
+fn jet_observe_registry() -> Arc<JetObserveRegistry>? { None }
+// Rust: tests/http_server_lifecycle.rs:295
+fn jet_observe_task_update(_state: String, _wait: String, _deadline_ms: I64?) -> {}
+// Rust: tests/http_server_lifecycle.rs:299
+fn jet_observe_task_register(_observe_id: &AtomicUsize) -> Int { 0 }
+// Rust: tests/http_server_lifecycle.rs:302
+fn jet_observe_task_register_at(_observe_id: &AtomicUsize, _spawn_site: Int) -> Int { 0 }
+// Rust: tests/http_server_lifecycle.rs:311
+trait JetObserveControl { fn cancel(self: &Self) -> }
+// Rust: tests/http_server_lifecycle.rs:314
+fn jet_observe_task_register_at_with_control(_observe_id: &AtomicUsize, _spawn_site: Int, _control: Arc<JetTaskControl>?) -> Int { 0 }
+// Rust: tests/http_server_lifecycle.rs:321
+fn jet_observe_register_exit_drain(_drain: fn() ->) -> {}
+// Rust: tests/http_server_lifecycle.rs:322
+fn jet_observe_task_failure_message(_id: Int, reason: String) -> String { reason }
+// Rust: tests/http_server_lifecycle.rs:325
+fn jet_observe_task_set_label(_id: Int, _label: String) -> {}
+// Rust: tests/http_server_lifecycle.rs:326
+fn jet_observe_task_identity(id: Int) -> String { "task #{id}" }
+// Rust: tests/http_server_lifecycle.rs:329
+fn jet_observe_task_failure_message_for_identity(identity: String, reason: String) -> String { "{identity}: {reason}" }
+// Rust: tests/http_server_lifecycle.rs:332
+fn jet_observe_has_parked_tasks() -> Bool { false }
+// Rust: tests/http_server_lifecycle.rs:335
+fn jet_observe_task_enter(_id: Int) -> {}
+// Rust: tests/http_server_lifecycle.rs:336
+fn jet_observe_task_finish(_id: Int) -> {}
+// Rust: tests/http_server_lifecycle.rs:338
+struct LogField { key: String, value: String }
+// Rust: tests/http_server_lifecycle.rs:343
+HTTP_ACCESS_LOG_LINES :: OnceLock<Mutex<[String]>>.new()
+// Rust: tests/http_server_lifecycle.rs:346
+fn jet_log_emit(_level: String, msg: String, _fields: [LogField]) -> {
+    HTTP_ACCESS_LOG_LINES.get_or_init(() -> { Mutex.new([]) }).lock().unwrap().push(msg.to_string())
+}
+// Rust: tests/http_server_lifecycle.rs:360
+JET_DB_REQUEST_ID :: thread.local(() -> { RefCell<String?>.new(None) })
+// Rust: tests/http_server_lifecycle.rs:365
+fn jet_db_current_request_id() -> String? { JET_DB_REQUEST_ID.with(request_id -> { request_id.borrow().clone() }) }
+// Rust: tests/http_server_lifecycle.rs:369
+struct JetDbRequestScope { previous: String? }
+// Rust: tests/http_server_lifecycle.rs:373
+impl JetDbRequestScope {
+    // Rust: tests/http_server_lifecycle.rs:374
+    fn enter(request_id: String?) -> Self {
+        previous :: JET_DB_REQUEST_ID.with(current -> { current.replace(request_id) })
+        Self{previous: previous}
+    }
+}
+// Rust: tests/http_server_lifecycle.rs:380
+impl JetDbRequestScope.Close {
+    // Rust: tests/http_server_lifecycle.rs:381
+    fn close(^self) -> { JET_DB_REQUEST_ID.with(current -> { _ :: current.replace(^self.previous) }) }
+}
+// Rust: tests/http_server_lifecycle.rs:413
+fn jet_std_time_duration_to_millis(ns: I64) -> I64 { ns }
+// Rust: tests/http_server_lifecycle.rs:422
+fn framing_probe(raw: [U8]) -> (U8, Int, Int) {
+    state := JetHTTPTlsMessageState.new()
+    loop end in 0..=raw.len() {
+        match state.advance(raw[..end], 32 * 1024, 1024 * 1024) {
+            JetHTTPTlsMessageStatus.Pending -> {}
+            JetHTTPTlsMessageStatus.Complete(message_end) -> { return (1, message_end, state.inspected()) }
+            JetHTTPTlsMessageStatus.Reject -> { return (2, end, state.inspected()) }
+        }
+    }
+    (0, raw.len(), state.inspected())
+}
+// Rust: tests/http_server_lifecycle.rs:439
+HTTP_BODY_CLOSES :: AtomicUsize.new(0)
+// Rust: tests/http_server_lifecycle.rs:440
+HTTP_BODY_READS :: AtomicUsize.new(0)
+// Rust: tests/http_server_lifecycle.rs:441
+HTTP_H2_BRIDGE_CLOSES :: AtomicUsize.new(0)
+// Rust: tests/http_server_lifecycle.rs:444
+HELLO_GZIP :: [31,139,8,0,0,0,0,0,2,3,203,72,205,201,201,87,72,175,202,44,0,0,25,106,210,223,10,0,0,0]
+// Rust: tests/http_server_lifecycle.rs:448
+GZIP_EXPANSION :: [31,139,8,0,0,0,0,0,2,3,75,76,28,5,163,96,20,12,119,0,0,3,218,56,154,232,3,0,0]
+// Rust: tests/http_server_lifecycle.rs:452
+GZIP_DYNAMIC :: [31,139,8,0,0,0,0,0,2,3,29,143,65,106,196,48,20,67,247,57,133,160,219,105,46,208,213,144,14,133,82,74,161,211,253,24,91,73,76,156,255,131,253,211,144,93,15,209,19,246,36,117,102,43,36,61,233,1,231,151,203,251,245,179,157,3,254,126,126,241,74,131,27,40,6,93,152,157,69,25,48,59,89,93,106,154,206,137,74,244,46,97,209,20,253,142,94,51,248,205,188,195,107,56,156,247,100,139,91,247,118,254,122,190,212,206,27,98,129,67,217,231,20,101,194,200,204,39,4,133,168,29,233,9,21,242,104,170,169,54,44,145,165,109,62,86,195,146,213,51,172,153,5,81,80,166,152,82,57,33,176,196,65,238,202,66,95,133,237,40,40,230,140,135,120,213,141,249,4,39,161,58,141,121,142,18,139,69,15,74,37,121,206,199,169,234,51,22,43,168,203,71,213,169,2,59,13,236,147,110,199,82,27,89,225,236,153,51,3,116,19,102,104,95,231,23,227,236,254,1,249,28,70,20,44,1,0,0]
+// Rust: tests/http_server_lifecycle.rs:467
+fn unread_bridge_body(_handle: I64, _max_chunk: Int) -> [U8]? JetHTTPError! {
+    _ :: HTTP_BODY_READS.fetch_add(1, Ordering.SeqCst)
+    [1]
+}
+// Rust: tests/http_server_lifecycle.rs:472
+fn close_unread_bridge_body(_handle: I64) -> { _ :: HTTP_BODY_CLOSES.fetch_add(1, Ordering.SeqCst) }
+// Rust: tests/http_server_lifecycle.rs:476
+fn close_h2_bridge_body(_handle: I64) -> { _ :: HTTP_H2_BRIDGE_CLOSES.fetch_add(1, Ordering.SeqCst) }
+// Rust: tests/http_server_lifecycle.rs:517
+fn read_response(stream: &TcpStream) -> String {
+    response := [] as [U8]
+    chunk := [0 as U8; 1024]
+    loop {
+        read :: stream.read(&chunk).expect("response read")
+        if read == 0 { break }
+        response.extend_from_slice(chunk[..read])
+        header_end :: jet_http_header_end(response)
+        if header_end == None { next }
+        header :: String.from_utf8(response[..header_end!]).expect("response header UTF-8")
+        content_length := None as Int?
+        loop line in header.split("\r\n") {
+            pair :: line.split_once(":")
+            if pair == None { next }
+            (name, value) :: pair!
+            if name.eq_ignore_ascii_case("content-length") {
+                trimmed := value.trim() // #4303
+                content_length = trimmed.parse<Int>().expect("response Content-Length")
+                break
+            }
+        }
+        length :: content_length.expect("response Content-Length")
+        if response.len() >= header_end! + 4 + length {
+            response.truncate(header_end! + 4 + length)
+            break
+        }
+    }
+    String.from_utf8(response).expect("response UTF-8")
+}
+// Rust: tests/http_server_lifecycle.rs:552
+fn request(addr: SocketAddr, text: [U8]) -> String {
+    stream := TcpStream.connect(addr).expect("connect")
+    stream.write_all(text).expect("request write")
+    read_response(&stream)
+}
+// Rust: tests/http_server_lifecycle.rs:559
+fn h2_frame(kind: U8, flags: U8, stream: U32, payload: [U8]) -> [U8] {
+    len :: payload.len()
+    out := [(len >> 16) as U8, (len >> 8) as U8, len as U8, kind, flags]
+    out.extend_from_slice((stream & 0x7fffffff).to_be_bytes())
+    out.extend_from_slice(payload)
+    out
+}
+// Rust: tests/http_server_lifecycle.rs:567
+fn h2_request_headers(method: U8, path: String) -> [U8] {
+    headers := [method, 0x86, 0x04, path.len() as U8]
+    headers.extend_from_slice(path.bytes())
+    headers.extend_from_slice([0x41, 0x05])
+    headers.extend_from_slice("local".bytes())
+    headers
+}
+// Rust: tests/http_server_lifecycle.rs:575
+fn h2_literal_header(name_index: U8, value: String) -> [U8] {
+    headers := [name_index, value.len() as U8]
+    headers.extend_from_slice(value.bytes())
+    headers
+}
+// Rust: tests/http_server_lifecycle.rs:581
+fn h2_literal_named_header(name: String, value: String) -> [U8] {
+    headers := [0 as U8, name.len() as U8]
+    headers.extend_from_slice(name.bytes())
+    headers.push(value.len() as U8)
+    headers.extend_from_slice(value.bytes())
+    headers
+}
+// Rust: tests/http_server_lifecycle.rs:589
+fn h2_connect_headers(authority: String) -> [U8] {
+    headers := h2_literal_header(0x02, "CONNECT")
+    headers.extend_from_slice(h2_literal_header(0x01, authority))
+    headers
+}
+// Rust: tests/http_server_lifecycle.rs:595
+fn h2_read_frame(stream: &TcpStream) -> (U8, U8, U32, [U8]) {
+    header := [0 as U8; 9]
+    stream.read_exact(&header).unwrap()
+    length :: ((header[0] as Int) << 16) | ((header[1] as Int) << 8) | (header[2] as Int)
+    payload := [0 as U8; length]
+    stream.read_exact(&payload).unwrap()
+    (header[3], header[4], U32.from_be_bytes(header[5..9]) & 0x7fffffff, payload)
+}

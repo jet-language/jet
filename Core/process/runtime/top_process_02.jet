@@ -1,0 +1,893 @@
+use core.process.runtime.top_process.*
+use core.process.host.process_pty as jet_process_pty
+use core.sys.target
+use core.prelude.runtime.std_common_types.[ProcessSpec, ProcessChild, ProcessHandle, ProcessReader, ProcessStdin, TerminalSession, TerminalSize]
+use core.prelude.runtime.std_open.[IOError, IOOperation, IOContext, ProcessReceipt, ProcessResourceLimit]
+use core.tasks.runtime.scheduler.[jet_scheduler_current_task_control, jet_scheduler_park_ms, jet_scheduler_shielded, jet_task_deliver_cancel, JetSchedulerWait, jet_scheduler_wait_without_unwind]
+use core.tasks.runtime.scheduler_02.[jet_scheduler_raw_io_set_nonblocking, jet_scheduler_raw_io_handle, jet_scheduler_raw_io_write_wait]
+use core.mem.runtime.portable_core.[JetAbsent, JetOutcome]
+use core.mem.runtime.portable_alloc.jet_outcome_of
+use std.rc.Rc
+use std.cell.RefCell
+use std.process.[Child, ChildStdout, ChildStdin, ExitStatus, Stdio]
+use std.sync.[Arc, Mutex]
+use std.sync.atomic.[AtomicUsize, AtomicBool, Ordering]
+use std.thread.JoinHandle
+use std.time.[Instant, Duration]
+use std.io as io
+use std.io.[Read, Write, BufRead, BufReader]
+use std.fs.File
+use core.devtools.runtime.kernel_devtools_topology_panel.JetDevtoolsTopologyProcessState
+use jet_foundation.Numeric.JetInt
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1819
+struct JetProcessPipelineChild { child: Child, job: File? }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1825
+// GATE #4565: kernel primitive
+#Unsafe("Windows job attachment owns child handle and kills/reaps the child if attachment fails")
+fn jet_process_pipeline_child(child: Child, spec: &ProcessSpec) -> JetProcessPipelineChild IOError! {
+    child := ^child
+    if target.selected_os() == .Windows {
+        job :: if spec.detached { None } else {
+            match jet_process_pty.attach_job(child.as_raw_handle(), jet_process_native_limits(spec)) {
+                Ok(job) -> Val(^job)
+                Err(error) -> {
+                    _ :: child.kill()
+                    _ :: child.wait()
+                    return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), ^error))
+                }
+            }
+        }
+        return Ok(JetProcessPipelineChild{child:^child, job:^job})
+    }
+    Ok(JetProcessPipelineChild{child:^child, job:None})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1861
+// GATE #4565: kernel primitive
+#Unsafe("stop the selected process tree before killing its direct child")
+fn jet_process_pipeline_child_stop(child: &JetProcessPipelineChild) -> () {
+    if target.selected_family() == "unix" { _ :: jet_process_pty.signal_group(child.child.id(), jet_process_signal_kill()) }
+    if target.selected_os() == .Windows {
+        if child.job.take() == .Val(job) { _ :: jet_process_pty.terminate(&job) }
+    }
+    _ :: child.child.kill()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1870
+// GATE #4565: kernel primitive
+#Unsafe("stop descendants after the direct child was already reaped")
+fn jet_process_pipeline_child_stop_after_wait(child: &JetProcessPipelineChild) -> () {
+    if target.selected_family() == "unix" { _ :: jet_process_pty.signal_group(child.child.id(), jet_process_signal_kill()) }
+    if target.selected_os() == .Windows {
+        if child.job.take() == .Val(job) { _ :: jet_process_pty.terminate(&job) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1881
+// GATE #4565: kernel primitive
+#Unsafe("stop every pipeline child before waiting to avoid sequential tree shutdown deadlocks")
+fn jet_process_pipeline_cleanup(children: &[JetProcessPipelineChild]) -> () {
+    for child in children.iter_mut() { jet_process_pipeline_child_stop(child) }
+    for child in children.iter_mut() { _ :: child.child.wait() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1890
+// GATE #4565: kernel primitive
+#Unsafe("snapshot registered Unix group IDs under poison-recovering mutex before signaling them")
+fn jet_process_pipeline_stop_groups(groups: &Arc<Mutex<[U32]>>) -> () {
+    if target.selected_family() == "unix" {
+        groups :: groups.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+        for pid in groups.iter() { _ :: jet_process_pty.signal_group(*pid, jet_process_signal_kill()) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1905
+// GATE #4565: kernel primitive
+#Unsafe("signal a real Unix process group; non-Unix pipeline stop uses its child handles")
+fn jet_process_pipeline_stop_group(pid: U32) -> () {
+    if target.selected_family() == "unix" { _ :: jet_process_pty.signal_group(pid, jet_process_signal_kill()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1912
+fn jet_process_stop_output(groups: &Arc<Mutex<[U32]>>?, group_pid: U32?) -> () {
+    if groups == .Val(groups) { jet_process_pipeline_stop_groups(groups) }
+    else if group_pid == .Val(pid) { jet_process_pipeline_stop_group(pid) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1923
+// GATE #4565: kernel primitive
+#Unsafe("bounded pipe relay publishes prefix before release-signaling limit and stopping the process tree")
+fn jet_process_forward_pipeline_output(reader: ChildStdout, writer: ChildStdin, limit: USize, budget: Arc<AtomicUsize>, limit_hit: Arc<AtomicBool>, cancel: Arc<AtomicBool>, groups: Arc<Mutex<[U32]>>) -> () io.Error! {
+    reader := ^reader
+    writer := ^writer
+    result :: fn() {
+        chunk := [0u8; JET_PROCESS_IO_CHUNK_BYTES]
+        loop {
+            count :: reader.read(&chunk)?
+            if count == 0 { return Ok(()) }
+            kept :: jet_process_output_reserve(limit, &budget, count)
+            if kept != 0 {
+                match writer.write_all(&chunk[0..<kept]) {
+                    Ok(()) -> {}
+                    Err(error) if error.kind() == io.ErrorKind.BrokenPipe -> return Err(^error)
+                    Err(error) -> return Err(^error)
+                }
+            }
+            if kept < count {
+                limit_hit.store(true, Ordering.Release)
+                jet_process_pipeline_stop_groups(&groups)
+                return Ok(())
+            }
+        }
+    }()
+    if result.is_err() {
+        cancel.store(true, Ordering.Release)
+        jet_process_pipeline_stop_groups(&groups)
+    }
+    ^result
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1966
+// GATE #4565: kernel primitive
+#Unsafe("join every pipe relay even when one fails, returning the first observed typed IO error")
+fn jet_process_join_pipeline_forwarders(forwarders: &[JoinHandle<() io.Error!>]) -> () IOError! {
+    first_error := None
+    loop while Val(forwarder) :: forwarders.pop() {
+        result :: forwarder.join().map_err(fn(_) {
+            IOError.other(IOOperation.Read, Val("pipeline stdout"), "pipeline output forwarder panicked")
+        })
+        match result {
+            Ok(Ok(())) -> {}
+            Ok(Err(error)) -> {
+                if first_error.is_none() { first_error = Val(IOError.other(IOOperation.Read, Val("pipeline stdout"), ^error)) }
+            }
+            Err(error) -> { if first_error.is_none() { first_error = Val(^error) } }
+        }
+    }
+    first_error.map_or(Ok(()), Err)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1999
+// GATE #4565: kernel primitive
+#Unsafe("pipeline transaction owns native children, bounded relays, cancellation guard and all joined drains until receipt publication")
+fn jet_process_spec_pipeline(specs: &[ProcessSpec]) -> ProcessReceipt IOError! {
+    if specs.is_empty() {
+        return Err(IOError.InvalidInput(IOContext.new(IOOperation.Resolve, None, None, Val("process.pipeline needs at least one command"))))
+    }
+    loop spec in specs { jet_process_pipeline_resource_limits_check(spec)? }
+    if specs.iter().any(fn(spec) { spec.policy_wire.is_some() }) {
+        return Err(IOError.other(IOOperation.Resolve, Val("process.pipeline"),
+            "authority-bound pipelines need one auditable launch transaction; refusing before spawn"))
+    }
+    direct_wait :: target.selected_family() == "unix" && specs.iter().all(fn(spec) {
+        spec.timeout_ms.is_none() && spec.memory_limit_bytes.is_none() && spec.open_file_limit.is_none()
+    })
+    children := [JetProcessPipelineChild].with_capacity(specs.len())
+    stage_started := if direct_wait { [Instant]{} } else { [Instant].with_capacity(specs.len()) }
+    prev_stdout: ChildStdout? := None
+    stage_budgets :: specs.iter().map(fn(spec) { spec.output_limit.map(fn(_) { Arc.new(AtomicUsize.new(0)) }) }).collect::<[Arc<AtomicUsize>?]>()
+    pipeline_limit_hit :: Arc.new(AtomicBool.new(false))
+    pipeline_cancel :: Arc.new(AtomicBool.new(false))
+    pipeline_groups :: Arc.new(Mutex.new([U32].with_capacity(specs.len())))
+    cancel_control :: jet_scheduler_current_task_control()
+    cancel_groups :: pipeline_groups.clone()
+    cancel_state :: pipeline_cancel.clone()
+    cancel_guard :: cancel_control.as_ref().map(fn(control) {
+        control.register_cancel_callback(Arc.new(fn() {
+            cancel_state.store(true, Ordering.Release)
+            jet_process_pipeline_stop_groups(&cancel_groups)
+        }))
+    })
+    forwarders := [JoinHandle<() io.Error!>].with_capacity(specs.len().saturating_sub(1))
+    for (index, spec) in specs.iter().enumerate() {
+        is_last :: index + 1 == specs.len()
+        input :: prev_stdout.take()
+        limited_input :: index.checked_sub(1).is_some_and(fn(previous) { jet_process_pipeline_needs_relay(&specs[previous]) })
+        (input, forward_input) :: if limited_input { (None, ^input) } else { (^input, None) }
+        child :: (fn() -> Child IOError! {
+            os :: target.selected_os()
+            if (os == .Linux || os == .MacOS) && spec.policy_wire.is_some() {
+                plan :: jet_process_spec_plan(spec)?
+                return jet_process_sandbox_pipeline_spawn(spec, &plan, ^input)
+            }
+            if spec.terminal.is_some() {
+                return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(),
+                    "terminal sessions cannot be used as pipeline stages; spawn the session directly"))
+            }
+            command := jet_process_command_builder_with_identity(spec, None)?
+            if input == .Val(stdout) { command.stdin(Stdio.from(^stdout)) }
+            else if forward_input.is_some() { command.stdin(Stdio.piped()) }
+            else {
+                command.stdin(match &spec.stdin { Val(mode) -> jet_process_stdio(mode), None -> Stdio.null() })
+            }
+            if is_last { command.stdout(jet_process_stdio(&spec.stdout)) } else { command.stdout(Stdio.piped()) }
+            command.stderr(jet_process_stdio(&spec.stderr))
+            if target.selected_family() == "unix" {
+                jet_process_attach_process_group(&command, spec)
+                    .map_err(fn(error) { IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), ^error) })?
+            }
+            command.spawn().map_err(fn(error) { IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), ^error) })
+        })()
+        child := match child {
+            Ok(child) -> match jet_process_pipeline_child(^child, spec) {
+                Ok(child) -> ^child
+                Err(error) -> {
+                    jet_process_pipeline_cleanup(&children)
+                    _ :: jet_process_join_pipeline_forwarders(&forwarders)
+                    return Err(^error)
+                }
+            }
+            Err(error) -> {
+                jet_process_pipeline_cleanup(&children)
+                _ :: jet_process_join_pipeline_forwarders(&forwarders)
+                return Err(^error)
+            }
+        }
+        child_pid :: child.child.id()
+        pipeline_groups.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }).push(child_pid)
+        if pipeline_cancel.load(Ordering.Acquire) { jet_process_pipeline_stop_groups(&pipeline_groups) }
+        if forward_input == .Val(stdout) {
+            previous :: match index.checked_sub(1) {
+                Val(previous) -> previous
+                None -> {
+                    jet_process_pipeline_cleanup(std.slice.from_mut(&child))
+                    jet_process_pipeline_cleanup(&children)
+                    _ :: jet_process_join_pipeline_forwarders(&forwarders)
+                    return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), "limited pipeline input has no preceding stage"))
+                }
+            }
+            stdin :: match child.child.stdin.take() {
+                Val(stdin) -> ^stdin
+                None -> {
+                    jet_process_pipeline_cleanup(std.slice.from_mut(&child))
+                    jet_process_pipeline_cleanup(&children)
+                    _ :: jet_process_join_pipeline_forwarders(&forwarders)
+                    return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), "limited pipeline stage did not provide stdin"))
+                }
+            }
+            limit :: match specs[previous].output_limit.map(fn(value) { value.max(0) as USize }) {
+                Val(limit) -> limit
+                None -> {
+                    jet_process_pipeline_cleanup(std.slice.from_mut(&child))
+                    jet_process_pipeline_cleanup(&children)
+                    _ :: jet_process_join_pipeline_forwarders(&forwarders)
+                    return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), "limited pipeline input has no output limit"))
+                }
+            }
+            budget :: match stage_budgets[previous].clone() {
+                Val(budget) -> ^budget
+                None -> {
+                    jet_process_pipeline_cleanup(std.slice.from_mut(&child))
+                    jet_process_pipeline_cleanup(&children)
+                    _ :: jet_process_join_pipeline_forwarders(&forwarders)
+                    return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), "limited pipeline input has no shared budget"))
+                }
+            }
+            groups :: pipeline_groups.clone()
+            limit_hit :: pipeline_limit_hit.clone()
+            cancel :: pipeline_cancel.clone()
+            forwarders.push(std.thread.spawn(fn() {
+                result :: std.panic.catch_unwind(std.panic.AssertUnwindSafe(fn() {
+                    jet_process_forward_pipeline_output(^stdout, ^stdin, limit, ^budget, ^limit_hit, cancel.clone(), groups.clone())
+                }))
+                match result {
+                    Ok(result) -> ^result
+                    Err(payload) -> {
+                        cancel.store(true, Ordering.Release)
+                        jet_process_pipeline_stop_groups(&groups)
+                        std.panic.resume_unwind(^payload)
+                    }
+                }
+            }))
+        }
+        prev_stdout = child.child.stdout.take()
+        children.push(^child)
+        if !direct_wait { stage_started.push(Instant.now()) }
+    }
+    final_limit :: specs.last().and_then(fn(spec) { spec.output_limit }).map(fn(limit) { limit.max(0) as USize })
+    output_drain :: prev_stdout.take().and_then(fn(stdout) {
+        jet_process_drain_reader(Val(^stdout), final_limit, stage_budgets.last().cloned().flatten(),
+            pipeline_limit_hit.clone(), Val(pipeline_cancel.clone()), Val(pipeline_groups.clone()), None)
+    })
+    stderr_drains :: children.iter_mut().enumerate().map(fn((index, child)) {
+        jet_process_drain_reader(child.child.stderr.take(), specs[index].output_limit.map(fn(limit) { limit.max(0) as USize }),
+            stage_budgets[index].clone(), pipeline_limit_hit.clone(), Val(pipeline_cancel.clone()), Val(pipeline_groups.clone()), None)
+    }).collect()
+    code := 0i64
+    success := true
+    timed_out := false
+    output_limit_exceeded := false
+    resource_limit := None
+    wait_error := None
+    stage_finished := [Bool].repeat(false, children.len())
+    if direct_wait {
+        loop index in 0..<children.len() {
+            status :: match children[index].child.wait() {
+                Ok(status) -> ^status
+                Err(error) -> {
+                    jet_process_pipeline_cleanup(&children)
+                    wait_error = Val(IOError.other(IOOperation.Close, Val("pipeline process"), ^error))
+                    break
+                }
+            }
+            stage_finished[index] = true
+            if jet_process_status_resource_limit(&status, &specs[index]) == .Val(limit) {
+                jet_process_pipeline_cleanup(&children)
+                resource_limit = Val(limit)
+                break
+            }
+            jet_process_pipeline_child_stop_after_wait(&children[index])
+            if !status.success() {
+                success = false
+                code = status.code().unwrap_or(-1) as I64
+            }
+        }
+    } else {
+        loop index in 0..<children.len() {
+            if stage_finished[index] { next }
+            status :: loop {
+                if pipeline_limit_hit.load(Ordering.Acquire) {
+                    jet_process_pipeline_cleanup(&children)
+                    output_limit_exceeded = true
+                    break None
+                }
+                if pipeline_cancel.load(Ordering.Acquire) {
+                    jet_process_pipeline_cleanup(&children)
+                    break None
+                }
+                current_status := None
+                loop stage in 0..<children.len() {
+                    if stage_finished[stage] { next }
+                    if jet_process_live_resource_limit(children[stage].child.id(), &specs[stage]) == .Val(limit) {
+                        jet_process_pipeline_cleanup(&children)
+                        resource_limit = Val(limit)
+                        break
+                    }
+                    status :: match children[stage].child.try_wait() {
+                        Ok(status) -> ^status
+                        Err(error) -> {
+                            jet_process_pipeline_cleanup(&children)
+                            wait_error = Val(IOError.other(IOOperation.Close, Val("pipeline process"), ^error))
+                            break
+                        }
+                    }
+                    if status == .Val(status) {
+                        if jet_process_status_resource_limit(&status, &specs[stage]) == .Val(limit) {
+                            jet_process_pipeline_cleanup(&children)
+                            resource_limit = Val(limit)
+                            break
+                        }
+                        stage_finished[stage] = true
+                        jet_process_pipeline_child_stop_after_wait(&children[stage])
+                        if !status.success() {
+                            success = false
+                            code = status.code().unwrap_or(-1) as I64
+                        }
+                        if stage == index { current_status = Val(^status) }
+                    }
+                }
+                // Equivalent to Rust's labeled break from the inner stage scan.
+                if resource_limit.is_some() || wait_error.is_some() { break None }
+                if current_status.is_some() { break ^current_status }
+                if specs.iter().enumerate().any(fn((stage, spec)) {
+                    !stage_finished[stage] && spec.timeout_ms.is_some_and(fn(timeout) {
+                        stage_started[stage].elapsed() >= Duration.from_millis(timeout.max(0) as U64)
+                    })
+                }) {
+                    jet_process_pipeline_cleanup(&children)
+                    timed_out = true
+                    success = false
+                    break None
+                }
+                jet_scheduler_park_ms("process wait", 10)
+            }
+            if status.is_none() { break }
+        }
+    }
+    if pipeline_cancel.load(Ordering.Acquire) { jet_process_pipeline_cleanup(&children) }
+    forwarder_result :: jet_process_join_pipeline_forwarders(&forwarders)
+    pipeline_output_exceeded :: pipeline_limit_hit.load(Ordering.Acquire)
+    drains :: jet_process_collect_pipeline_drains(^output_drain, ^stderr_drains)
+    drop(^cancel_guard)
+    cancellation_pending :: cancel_control.as_ref().is_some_and(fn(control) { control.cancelled.load(Ordering.Acquire) })
+    if cancellation_pending && !jet_scheduler_shielded() { jet_task_deliver_cancel() }
+    forwarder_result?
+    (output, errors) :: drains?
+    output_exceeded :: output.exceeded
+    if wait_error == .Val(error) { return Err(^error) }
+    if resource_limit == .Val(limit) { return Err(IOError.ResourceLimit(limit)) }
+    output_limit_exceeded = output_limit_exceeded || pipeline_output_exceeded
+    if output_exceeded || output_limit_exceeded { return Err(IOError.ResourceLimit(ProcessResourceLimit.Output)) }
+    output_text :: ^output.text
+    secret_values := specs.iter().flat_map(jet_process_policy_secret_values).collect::<[String]>()
+    secret_values.sort_by_key(fn(value) { std.cmp.Reverse(value.len()) })
+    secret_values.dedup()
+    Ok(jet_process_receipt(specs.last() ?? panic("nonempty pipeline"), None, true, 0, code, success,
+        Err(JetAbsent{}), timed_out, ^output_text, ^errors, Val(&secret_values)))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2403
+// GATE #4565: kernel primitive
+#Unsafe("read PID from the retained selected child handle")
+fn jet_process_inner_id(inner: &ProcessHandle) -> U32 {
+    match inner {
+        .Std{child, ..} -> child.id()
+        .Native{pid, ..} -> *pid
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2411
+// GATE #4565: kernel primitive
+#Unsafe("poll retained child handle and convert exact Windows raw exit code")
+fn jet_process_inner_try_wait(inner: &ProcessHandle) -> ExitStatus? io.Error! {
+    match inner {
+        .Std{child, ..} -> child.try_wait()
+        .Native{process, ..} -> jet_process_pty.try_wait(process).map(fn(code) { code.map(ExitStatus.from_raw) })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2425
+// GATE #4565: kernel primitive
+#Unsafe("wait on owned native child handle and preserve its raw Windows exit code")
+fn jet_process_inner_wait(inner: &ProcessHandle) -> ExitStatus io.Error! {
+    match inner {
+        .Std{child, ..} -> child.wait()
+        .Native{process, ..} -> jet_process_pty.wait(process).map(ExitStatus.from_raw)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2438
+// GATE #4565: kernel primitive
+#Unsafe("kill the retained child or complete Windows job, never a detached lookup by name")
+fn jet_process_inner_kill(inner: &ProcessHandle) -> () io.Error! {
+    match inner {
+        ProcessHandle.Std{child, job} -> {
+            if target.selected_os() == .Windows {
+                if job == .Val(job) { return jet_process_pty.terminate(job) }
+            }
+            child.kill()
+        }
+        .Native{job, ..} -> jet_process_pty.terminate(job)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2455
+// GATE #4565: kernel primitive
+#Unsafe("read Linux proc status without inventing a resource classification on a raced read")
+fn jet_process_linux_vm_size(pid: U32) -> U64? {
+    path :: OSPath.new("/proc/{pid}/status")
+    status :: std.fs.read_to_string(path).ok()?
+    status.lines().find_map(fn(line) {
+        value := line.strip_prefix("VmSize:")?.trim() // #4303
+        kilobytes :: value.strip_suffix("kB")?.trim().parse::<U64>().ok()?
+        Val(kilobytes.saturating_mul(1024))
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2466
+// GATE #4565: kernel primitive
+#Unsafe("count entries in the actual Linux process descriptor directory")
+fn jet_process_linux_open_files(pid: U32) -> U64? {
+    path :: OSPath.new("/proc/{pid}/fd")
+    Val(std.fs.read_dir(path).ok()?.count() as U64)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2476
+// Linux rlimits enforce ceilings; observation classifies ENOMEM/EMFILE before
+// untyped child failure. A raced proc read leaves classification to the kernel.
+fn jet_process_live_resource_limit(pid: U32, spec: &ProcessSpec) -> ProcessResourceLimit? {
+    if target.selected_os() == .Linux {
+        if spec.memory_limit_bytes == .Val(limit) {
+            // RLIMIT_AS may reject the next allocation just below its ceiling.
+            const MEMORY_OBSERVATION_WINDOW: U64 = 1024 * 1024
+            threshold :: (limit.max(0) as U64).saturating_sub(MEMORY_OBSERVATION_WINDOW)
+            if jet_process_linux_vm_size(pid).is_some_and(fn(used) { used >= threshold }) { return Val(ProcessResourceLimit.Memory) }
+        }
+        if spec.open_file_limit == .Val(limit) {
+            if jet_process_linux_open_files(pid).is_some_and(fn(used) { used >= limit.max(0) as U64 }) {
+                return Val(ProcessResourceLimit.OpenFiles)
+            }
+        }
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2506
+// GATE #4565: kernel primitive
+#Unsafe("query retained Windows job accounting for the checked process limits")
+fn jet_process_inner_resource_limit(inner: &ProcessHandle, spec: &ProcessSpec) -> ProcessResourceLimit? io.Error! {
+    job := match inner {
+        .Std{job, ..} -> job.as_ref()
+        .Native{job, ..} -> Val(job.as_ref())
+    }
+    job := job ?? return Ok(None)
+    jet_process_pty.resource_limit_hit(job, jet_process_native_limits(spec)).map(fn(hit) {
+        hit.map(fn(hit) { match hit {
+            jet_process_pty.ResourceLimitKind.CpuTime -> ProcessResourceLimit.CpuTime
+            jet_process_pty.ResourceLimitKind.Memory -> ProcessResourceLimit.Memory
+        } })
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2527
+// GATE #4565: kernel primitive
+#Unsafe("selected Unix exit-status signal reports POSIX SIGXCPU without host target assumptions")
+fn jet_process_status_resource_limit(status: &ExitStatus, spec: &ProcessSpec) -> ProcessResourceLimit? {
+    if target.selected_family() == "unix" && spec.cpu_time_limit_ms.is_some() && status.signal() == 24 {
+        return Val(ProcessResourceLimit.CpuTime)
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2542
+// GATE #4565: kernel primitive
+#Unsafe("signal retained Unix group, treating an already vanished group as cleaned, otherwise kill the native child")
+fn jet_process_tree_signal(inner: &ProcessHandle, process_group: Bool, signal: I32) -> () io.Error! {
+    if target.selected_family() == "unix" && process_group {
+        return match jet_process_pty.signal_group(jet_process_inner_id(inner), signal) {
+            Ok(()) -> Ok(())
+            Err(error) if error.kind() == io.ErrorKind.NotFound -> Ok(())
+            Err(error) -> Err(^error)
+        }
+    }
+    jet_process_inner_kill(inner)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2559
+fn jet_process_cleanup_io_error(error: io.Error) -> IOError { IOError.other(IOOperation.Close, Val("process"), ^error) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2567
+// GATE #4565: kernel primitive
+#Unsafe("record only the first cleanup error through the retained child's borrow-checked slot")
+fn jet_process_record_cleanup_error(child: &ProcessChild, error: IOError) -> () {
+    if Ok(slot) :: child.cleanup_error.try_borrow_mut() {
+        if slot.is_none() { *slot = Val(^error) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2575
+// GATE #4565: kernel primitive
+#Unsafe("borrow the retained child handle for PID projection without extending its lifetime")
+fn jet_process_child_id(child: &ProcessChild) -> I64 {
+    child.inner.borrow().as_ref().map(fn(inner) { jet_process_inner_id(inner) as I64 }).unwrap_or(0)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2583
+// GATE #4565: kernel primitive
+#Unsafe("wait owns retained child borrows, cancellation callback and native handles until pipe workers drain and cached receipt publishes")
+fn jet_process_child_wait(child: &ProcessChild) -> ProcessReceipt IOError! {
+    if child.cleanup_error.borrow().clone() == .Val(error) { return Err(^error) }
+    if child.wait_result.borrow().clone() == .Val(result) { return Ok(^result) }
+    topology_pid :: jet_process_child_id(child)
+    _cleanup :: JetProcessWaitCleanup{child:child}
+    // Independent stdout/stderr workers keep full pipes from deadlocking wait.
+    output_limit_hit :: child.output_limit_hit.clone()
+    output_read_error :: child.output_read_error.clone()
+    timed_out := false
+    resource_limit := None
+    direct_wait :: target.selected_family() == "unix" && child.timeout_ms.is_none()
+        && child.audit_spec.memory_limit_bytes.is_none() && child.audit_spec.open_file_limit.is_none()
+        && (child.process_group || child.output_limit.is_none())
+    cancel_control :: if direct_wait && child.process_group { jet_scheduler_current_task_control() } else { None }
+    cancel_guard :: cancel_control.as_ref().map(fn(control) {
+        pid :: topology_pid as U32
+        control.register_cancel_callback(Arc.new(fn() { jet_process_pipeline_stop_group(pid) }))
+    })
+    status :: if direct_wait {
+        slot := child.inner.borrow_mut()
+        inner := slot.as_mut() ?? return Err(IOError.Closed(IOContext.new(
+            IOOperation.Close, Val("process"), None, Val("process child wait result is unavailable"))))
+        jet_process_inner_wait(inner).map_err(jet_process_cleanup_io_error)?
+    } else {
+        loop {
+            slot := child.inner.borrow_mut()
+            inner := slot.as_mut() ?? return Err(IOError.Closed(IOContext.new(
+                IOOperation.Close, Val("process"), None, Val("process child wait result is unavailable"))))
+            if target.selected_os() == .Windows {
+                if jet_process_inner_resource_limit(inner, &child.audit_spec).map_err(jet_process_cleanup_io_error)? == .Val(limit) {
+                    jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill()).map_err(jet_process_cleanup_io_error)?
+                    resource_limit = Val(limit)
+                    break jet_process_inner_wait(inner).map_err(jet_process_cleanup_io_error)?
+                }
+            }
+            if jet_process_live_resource_limit(jet_process_inner_id(inner), &child.audit_spec) == .Val(limit) {
+                jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill()).map_err(jet_process_cleanup_io_error)?
+                resource_limit = Val(limit)
+                break jet_process_inner_wait(inner).map_err(jet_process_cleanup_io_error)?
+            }
+            if jet_process_inner_try_wait(inner).map_err(jet_process_cleanup_io_error)? == .Val(status) { break ^status }
+            if output_limit_hit.load(Ordering.Acquire) || output_read_error.load(Ordering.Acquire) {
+                jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill()).map_err(jet_process_cleanup_io_error)?
+                break jet_process_inner_wait(inner).map_err(jet_process_cleanup_io_error)?
+            }
+            if child.timeout_ms == .Val(timeout) {
+                if child.started.elapsed() >= Duration.from_millis(timeout as U64) {
+                    jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill()).map_err(jet_process_cleanup_io_error)?
+                    timed_out = true
+                    break jet_process_inner_wait(inner).map_err(jet_process_cleanup_io_error)?
+                }
+            }
+            drop(^slot)
+            // D-TASKRUNTIME1=A: release child borrow before inherited wait points.
+            jet_scheduler_park_ms("process wait", 10)
+        }
+    }
+    drop(^cancel_guard)
+    cancellation_pending :: cancel_control.as_ref().is_some_and(fn(control) { control.cancelled.load(Ordering.Acquire) })
+    // Unix groups need a final sweep. Windows jobs kill on close: another
+    // TerminateJobObject after leader exit races a signaled/empty job.
+    cleanup_error :: if target.selected_family() == "unix" && child.process_group {
+        slot := child.inner.borrow_mut()
+        if slot.as_mut() == .Val(inner) {
+            jet_process_tree_signal(inner, true, jet_process_signal_kill()).err().map(jet_process_cleanup_io_error)
+        } else { None }
+    } else { None }
+    if cleanup_error.as_ref() == .Val(error) { jet_process_record_cleanup_error(child, error.clone()) }
+    pid :: child.inner.borrow().as_ref().map(fn(inner) { jet_process_inner_id(inner) as I64 }).unwrap_or(0)
+    child.inner.borrow_mut().take()
+    *child.stdin.borrow_mut() = None
+    // Release ConPTY before joining its output worker; otherwise pipe stays live.
+    if target.selected_os() == .Windows {
+        if child.terminal.as_ref().ok() == .Val(session) { session.control.close() }
+    }
+    (output, errors) :: jet_process_collect_child_output(child)?
+    if cancellation_pending && !jet_scheduler_shielded() {
+        jet_process_publish_topology_id(topology_pid, JetDevtoolsTopologyProcessState.Failed)
+        jet_task_deliver_cancel()
+    }
+    if cleanup_error == .Val(error) {
+        jet_process_publish_topology_id(topology_pid, JetDevtoolsTopologyProcessState.Failed)
+        return Err(^error)
+    }
+    if output_limit_hit.load(Ordering.Acquire) {
+        jet_process_publish_topology_id(topology_pid, JetDevtoolsTopologyProcessState.Failed)
+        return Err(IOError.ResourceLimit(ProcessResourceLimit.Output))
+    }
+    if resource_limit == .Val(limit) {
+        jet_process_publish_topology_id(topology_pid, JetDevtoolsTopologyProcessState.Failed)
+        return Err(IOError.ResourceLimit(limit))
+    }
+    if jet_process_status_resource_limit(&status, &child.audit_spec) == .Val(limit) {
+        jet_process_publish_topology_id(topology_pid, JetDevtoolsTopologyProcessState.Failed)
+        return Err(IOError.ResourceLimit(limit))
+    }
+    code :: status.code().unwrap_or(-1) as I64
+    signal :: if target.selected_family() == "unix" {
+        jet_outcome_of(status.signal().map(fn(signal) { JetInt.from_i64(signal as I64) }))
+    } else { Err(JetAbsent{}) }
+    result :: jet_process_receipt(&child.audit_spec, child.audit_plan.as_ref(), child.process_group,
+        pid, code, status.success(), ^signal, timed_out, ^output, ^errors, None)
+    jet_process_publish_topology_id(topology_pid,
+        if timed_out || !status.success() { JetDevtoolsTopologyProcessState.Failed } else { JetDevtoolsTopologyProcessState.Exited })
+    *child.wait_result.borrow_mut() = Val(result.clone())
+    Ok(^result)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2863
+// #1481: nonblocking peek does not drain output pipes.
+// GATE #4565: kernel primitive
+#Unsafe("peek retained child status through borrow-checked slot without waiting or consuming pipes")
+fn jet_process_child_exited(child: &ProcessChild) -> Bool IOError! {
+    slot := child.inner.borrow_mut()
+    inner := slot.as_mut() ?? return Ok(true)
+    jet_process_inner_try_wait(inner).map(fn(status) { status.is_some() }).map_err(jet_process_cleanup_io_error)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2879
+fn jet_process_child_kill(child: &ProcessChild) -> () IOError! { jet_process_child_signal(child, jet_process_signal_kill()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2882
+fn jet_process_child_terminate(child: &ProcessChild) -> () IOError! { jet_process_child_signal(child, jet_process_signal_terminate()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2885
+fn jet_process_child_interrupt(child: &ProcessChild) -> () IOError! { jet_process_child_signal(child, jet_process_signal_interrupt()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2888
+// GATE #4565: kernel primitive
+#Unsafe("resize selected PTY or ConPTY using its retained master/control handle")
+fn jet_terminal_session_resize(session: &TerminalSession, size: &TerminalSize) -> () IOError! {
+    result :: if target.selected_family() == "unix" {
+        jet_process_pty.resize(session.master.as_ref(), jet_process_pty.PtyConfig{cols:size.cols, rows:size.rows, raw:false})
+    } else if target.selected_os() == .Windows {
+        jet_process_pty.resize_console(session.control.raw(), jet_process_pty.PtyConfig{cols:size.cols, rows:size.rows, raw:false})
+    } else { Err(io.Error.new(io.ErrorKind.Unsupported, "terminal resize is unavailable on this target")) }
+    result.map_err(fn(error) { IOError.other(IOOperation.Resolve, Val("process terminal"), ^error) })
+}
+impl Read for ProcessReader {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2933
+    // GATE #4565: kernel primitive
+    #Unsafe("read the retained native pipe/terminal or shared output state; only terminal-native EOF errors become zero")
+    fn read(self, bytes: &[U8]) -> USize io.Error! {
+        result :: match self {
+            .Stdout(reader) -> reader.read(bytes)
+            .Stderr(reader) -> reader.read(bytes)
+            .Terminal(reader) -> reader.read(bytes)
+            .Shared(state) -> jet_process_output_state_read(state, bytes)
+        }
+        match result {
+            Err(error) if matches!(self, Self.Terminal(_)) && jet_process_pty.is_terminal_eof(&error) -> Ok(0)
+            other -> ^other
+        }
+    }
+}
+impl Write for ProcessStdin {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2953
+    // GATE #4565: kernel primitive
+    #Unsafe("write bytes to retained pipe or terminal input handle")
+    fn write(self, bytes: &[U8]) -> USize io.Error! {
+        match self { .Pipe(writer) -> writer.write(bytes), Self.Terminal(writer) -> writer.write(bytes) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2960
+    // GATE #4565: kernel primitive
+    #Unsafe("flush retained pipe or terminal writer")
+    fn flush(self) -> () io.Error! {
+        match self { .Pipe(writer) -> writer.flush(), Self.Terminal(writer) -> writer.flush() }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2969
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2974
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2979
+fn jet_process_signal_interrupt() -> I32 {
+    if target.selected_family() == "unix" { jet_process_pty.SIGINT }
+    else if target.selected_os() == .Windows { 2 } else { 0 }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2984
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2989
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2994
+fn jet_process_signal_terminate() -> I32 {
+    if target.selected_family() == "unix" { jet_process_pty.SIGTERM }
+    else if target.selected_os() == .Windows { 15 } else { 0 }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2999
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3004
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3009
+fn jet_process_signal_kill() -> I32 {
+    if target.selected_family() == "unix" { jet_process_pty.SIGKILL }
+    else if target.selected_os() == .Windows { 9 } else { 0 }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3013
+// GATE #4565: kernel primitive
+#Unsafe("interrupt ConPTY through retained terminal input; otherwise signal the owned tree and publish stopping after success")
+fn jet_process_child_signal(child: &ProcessChild, signal: I32) -> () IOError! {
+    pid :: jet_process_child_id(child)
+    slot := child.inner.borrow_mut()
+    if slot.as_mut() == .Val(inner) {
+        if target.selected_os() == .Windows && signal == jet_process_signal_interrupt() {
+            if ProcessHandle.Native{pid:native_pid, job, ..} :: inner {
+                input :: child.stdin.borrow()
+                input := input.as_ref().and_then(fn(input) {
+                    match input { .Terminal(input) -> Val(input), ProcessStdin.Pipe(_) -> None }
+                })
+                result :: jet_process_pty.interrupt(*native_pid, job, input).map_err(jet_process_cleanup_io_error)
+                if result.is_ok() { jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState.Stopping) }
+                return ^result
+            }
+        }
+        jet_process_tree_signal(inner, child.terminal.is_ok() || child.process_group, signal).map_err(jet_process_cleanup_io_error)?
+    }
+    jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState.Stopping)
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3061
+// GATE #4565: kernel primitive
+#Unsafe("unfinished shared child cleanup signals then waits, releases borrow before joining output, and returns first error")
+fn jet_process_reap_unfinished(child: &ProcessChild) -> () IOError! {
+    if child.detached || child.wait_result.try_borrow().map_or(false, fn(result) { result.is_some() }) { return Ok(()) }
+    slot := child.inner.try_borrow_mut().map_err(fn(_) {
+        IOError.other(IOOperation.Close, Val("process"), "process child cleanup is already in progress")
+    })?
+    inner := match slot.as_mut() {
+        Val(inner) -> inner
+        None -> {
+            drop(^slot)
+            return jet_process_join_child_output_workers(child)
+        }
+    }
+    signal_error :: jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill()).err().map(jet_process_cleanup_io_error)
+    if target.selected_os() == .Windows {
+        if child.terminal.as_ref().ok() == .Val(session) { session.control.close() }
+    }
+    wait_error :: jet_process_inner_wait(inner).err().map(jet_process_cleanup_io_error)
+    drop(^slot)
+    output_error :: jet_process_join_child_output_workers(child).err()
+    if signal_error == .Val(error) { Err(^error) }
+    else if wait_error == .Val(error) { Err(^error) }
+    else if output_error == .Val(error) { Err(^error) }
+    else { Ok(()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3110
+// Shared close terminates/reaps unfinished child and makes all clones inert.
+// GATE #4565: kernel primitive
+#Unsafe("clear the sole shared native slots after reap so every retained clone observes closed state")
+fn jet_process_child_close(child: &ProcessChild) -> () {
+    if Err(error) :: jet_process_reap_unfinished(child) { jet_process_record_cleanup_error(child, ^error) }
+    child.inner.borrow_mut().take()
+    *child.stdin.borrow_mut() = None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3120
+struct JetProcessWaitCleanup { child: &ProcessChild }
+impl Drop for JetProcessWaitCleanup {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3124
+    fn drop(self) -> () {
+        if Err(error) :: jet_process_reap_unfinished(self.child) { jet_process_record_cleanup_error(self.child, ^error) }
+    }
+}
+impl Drop for ProcessChild {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3132
+    // GATE #4565: kernel primitive
+    #Unsafe("last shared native child owner reaps unfinished child and records first cleanup error")
+    fn drop(self) -> () {
+        if Rc.strong_count(&self.inner) == 1 {
+            if Err(error) :: jet_process_reap_unfinished(self) { jet_process_record_cleanup_error(self, ^error) }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3141
+fn jet_process_stdin_closed() -> IOError {
+    IOError.Closed(IOContext.new(IOOperation.Write, Val("process stdin"), None, Val("process stdin closed")))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3150
+fn jet_process_stdin_error(error: io.Error) -> IOError {
+    if error.kind() == io.ErrorKind.BrokenPipe || error.kind() == io.ErrorKind.NotConnected || error.kind() == io.ErrorKind.UnexpectedEof {
+        jet_process_stdin_closed()
+    } else { IOError.other(IOOperation.Write, Val("process stdin"), ^error) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3170
+// Sole option owns native descriptor; take sends EOF exactly once.
+// GATE #4565: kernel primitive
+#Unsafe("take shared stdin slot so repeated close is harmless and owned writer closes once")
+fn jet_process_stdin_close(handle: &Rc<RefCell<ProcessStdin?>>) -> () { _ :: handle.borrow_mut().take() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3181
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3276
+// GATE #4565: kernel primitive
+#Unsafe("scheduler-aware Unix pipe writes release borrow before waits; PTY master stays blocking because its clones share flags")
+fn jet_process_stdin_write(handle: &Rc<RefCell<ProcessStdin?>>, text: &String) -> () IOError! {
+    if target.selected_family() != "unix" {
+        handle := handle.borrow_mut()
+        stdin := handle.as_mut() ?? return Err(jet_process_stdin_closed())
+        return stdin.write_all(text.as_bytes()).map_err(jet_process_stdin_error)
+    }
+    bytes := text.as_bytes()
+    {
+        stdin := handle.borrow_mut()
+        if stdin.as_mut() == ProcessStdin.Terminal(writer) {
+            // PTY clones share one open-file description: nonblocking input
+            // would make the independent output worker see EAGAIN.
+            writer.write_all(bytes).map_err(jet_process_stdin_error)?
+            return Ok(())
+        }
+    }
+    offset := 0usize
+    loop while offset < bytes.len() {
+        wait_fd :: {
+            stdin := handle.borrow_mut()
+            stdin := stdin.as_mut() ?? return Err(jet_process_stdin_closed())
+            (fd, nonblocking) :: match stdin {
+                .Pipe(writer) -> (writer.as_raw_fd(), true)
+                .Terminal(writer) -> (writer.as_raw_fd(), false)
+            }
+            if nonblocking {
+                jet_scheduler_raw_io_set_nonblocking(fd).map_err(fn(error) { IOError.other(IOOperation.Write, Val("process stdin"), ^error) })?
+            }
+            match stdin.write(&bytes[offset..]) {
+                Ok(0) -> return Err(jet_process_stdin_closed())
+                Ok(written) -> {
+                    offset += written
+                    None
+                }
+                Err(error) if error.kind() == io.ErrorKind.Interrupted -> next
+                Err(error) if error.kind() == io.ErrorKind.WouldBlock -> Val(fd)
+                Err(error) -> return Err(jet_process_stdin_error(^error))
+            }
+        }
+        fd :: wait_fd ?? next
+        scheduler :: jet_scheduler_raw_io_handle(fd)
+        match jet_scheduler_wait_without_unwind(fn() { jet_scheduler_raw_io_write_wait(&scheduler, "process stdin") }) {
+            JetSchedulerWait.Ready(()) -> {}
+            JetSchedulerWait.Cancelled -> return Err(IOError.Cancelled(IOContext.new(
+                IOOperation.Write, Val("process stdin"), None, Val("process stdin cancelled"))))
+            JetSchedulerWait.Deadline(_) -> return Err(IOError.TimedOut(IOContext.new(
+                IOOperation.Write, Val("process stdin"), None, Val("deadline exceeded while waiting in process stdin"))))
+            JetSchedulerWait.Panicked(message) -> return Err(IOError.other(
+                IOOperation.Write, Val("process stdin"), "process stdin scheduler wait failed: {message}"))
+        }
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3286
+// GATE #4565: kernel primitive
+#Unsafe("read a native buffered line preserving IO kind and removing only final LF and its optional preceding CR")
+fn jet_process_child_read_line<R: Read>(reader: &BufReader<R>?) -> String? IOError! {
+    reader := reader.as_mut() ?? return Ok(None)
+    line := String.new()
+    n :: reader.read_line(&line).map_err(fn(error) { IOError.other(IOOperation.Read, Val("process output"), ^error) })?
+    if n == 0 { Ok(None) } else {
+        if line.ends_with('\n') {
+            line.pop()
+            if line.ends_with('\r') { line.pop() }
+        }
+        Ok(Val(^line))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3312
+// GATE #4565: kernel primitive
+#Unsafe("borrow shared stream slot for a complete buffered line read")
+fn jet_process_stream_next_line<R: Read>(handle: &Rc<RefCell<BufReader<R>?>>) -> String? IOError! {
+    jet_process_child_read_line(&handle.borrow_mut())
+}
+

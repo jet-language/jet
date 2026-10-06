@@ -1,0 +1,105 @@
+// core-conformance: core.game.runtime.kernel_game_frame_profiler
+// Original GameFrameProfiler.rs2242,2283,2348, with the same facts/assertions.
+// Main must activate the private owner and #4499 composite-key gate before run.
+use core.game.runtime.kernel_game_frame_profiler as api
+use core.files.runtime.kernel_path_components as paths
+
+fn trace() -> api.JetGameTraceIdentity Never! {
+    api.JetGameTraceIdentity.new("build-1", "revision-1", "trace-1")
+}
+fn frame(index: U64) -> api.JetGameFrameIdentity Never! {
+    api.JetGameFrameIdentity.new("scene", index, "build-1", "revision-1", "trace-1")
+}
+fn function() -> api.JetGameFunctionIdentity Never! {
+    api.JetGameFunctionIdentity.new("fn/player/update", "player.update", api.JetGameSourceSpan.new("src/player.jet:4", "src/player.jet", U32{4}, U32{1}, U32{8}, U32{1}))
+}
+fn identities_are_stable_and_hot_paths_use_integer_ns() {
+    first :: frame(U64{7})
+    second :: frame(U64{7})
+    assert(first.frame_id == second.frame_id)
+    assert(first.scene == second.scene && first.frame_index == second.frame_index)
+    assert(first.build == second.build && first.revision == second.revision && first.trace_id == second.trace_id)
+    history := api.JetGameFrameHistory.with_capacity(trace(), 8)
+    _ :: &history.append(api.JetGameSampleFact.Function(api.JetGameFunctionSample.new(~first, function(), api.JetGameFramePhase.Update, api.JetGameTimeDomain.Cpu, U64{10}, U64{40}))) ?? panic("function sample")
+    _ :: &history.append(api.JetGameSampleFact.Function(api.JetGameFunctionSample.new(~first, function(), api.JetGameFramePhase.Update, api.JetGameTimeDomain.Cpu, U64{50}, U64{60}))) ?? panic("function sample")
+    hot :: history.hot_paths()
+    assert(hot.len() == 1)
+    assert(hot[0].total_ns == U64{100})
+    assert(hot[0].sample_count == U64{2})
+    assert(history.bottleneck(1).total_function_ns == U64{100})
+    assert(hot[0].frame_count == U64{1} && hot[0].max_ns == U64{60})
+}
+fn history_reports_drops_and_cursor_refuses_other_revision() {
+    first :: frame(U64{0})
+    fun :: function()
+    history := api.JetGameFrameHistory.with_capacity(trace(), 2)
+    _ :: &history.append(api.JetGameSampleFact.Frame(api.JetGameFrameSample.new(~first, U64{0}, U64{100}, Val(U64{80})))) ?? panic("frame sample")
+    _ :: &history.append(api.JetGameSampleFact.Draw(api.JetGameDrawEvent.new(~first, U64{0}, ~fun, api.JetGameFramePhase.Draw, api.JetGameTimeDomain.Gpu, U64{100}, U64{10}))) ?? panic("draw event")
+    _ :: &history.append(api.JetGameSampleFact.Phase(api.JetGamePhaseSample.new(~first, api.JetGameFramePhase.Present, api.JetGameTimeDomain.Cpu, U64{110}, U64{5}))) ?? panic("phase sample")
+    assert(history.len() == 2)
+    assert(history.dropped_samples == U64{1})
+    events :: history.draw_events_for(~first) ?? panic("draw events")
+    cursor := api.JetGameDrawCursor.new(~first)
+    event :: (&cursor.step_forward(events) ?? panic("cursor forward")) ?? panic("missing draw event")
+    assert(event.event_index == U64{0})
+    assert((&cursor.step_forward(events) ?? panic("cursor EOF")) == None)
+    assert((&cursor.step_backward(events) ?? panic("cursor backward")) != None)
+    other_revision :: api.JetGameFrameIdentity.new("scene", U64{0}, "build-1", "revision-2", "trace-1")
+    other_event :: api.JetGameDrawEvent.new(other_revision, U64{0}, ~fun, api.JetGameFramePhase.Draw, api.JetGameTimeDomain.Gpu, U64{100}, U64{10})
+    result :: &cursor.step_forward([api.JetGameDrawEvent]{other_event})
+    if result == {
+        .Err(error) -> {
+            if error == .RevisionMismatch(expected, actual) {
+                assert(expected == "revision-1" && actual == "revision-2")
+            } else -> panic("expected RevisionMismatch")
+        }
+        .Ok(_) -> panic("cursor accepted another revision")
+    }
+}
+fn profiler_receipts_preserve_pause_and_error_identity() {
+    profiler := api.JetGameFrameProfiler.with_capacity(trace(), 4)
+    _ :: &profiler.record_frame(api.JetGameFrameSample.new(frame(U64{0}), U64{0}, U64{10}, None)) ?? panic("frame sample")
+    paused :: &profiler.pause()
+    assert(paused.before == api.JetGameFrameProfilerState.Running)
+    assert(paused.after == api.JetGameFrameProfilerState.Paused)
+    result :: &profiler.record_frame(api.JetGameFrameSample.new(frame(U64{1}), U64{20}, U64{10}, None))
+    if result == {
+        .Err(error) -> assert(error == api.JetGameFrameProfilerError.ProfilerPaused)
+        .Ok(_) -> panic("paused profiler accepted a sample")
+    }
+    source :: api.JetGameSourceSpan.new("src/player.jet:4", "src/player.jet", U32{4}, U32{1}, U32{4}, U32{8})
+    receipt :: &profiler.pause_on_error(source, "E3001", "player update failed") ?? panic("error pause")
+    assert(receipt.after == api.JetGameFrameProfilerState.ErrorPaused)
+    assert(receipt.trace_identity.build == profiler.trace_identity.build)
+    assert(receipt.trace_identity.revision == profiler.trace_identity.revision)
+    assert(receipt.trace_identity.trace_id == profiler.trace_identity.trace_id)
+    assert(profiler.active_error_pause() != None)
+    resumed :: &profiler.resume()
+    assert(resumed.after == api.JetGameFrameProfilerState.Running)
+    assert(profiler.active_error_pause() == None)
+}
+fn pure_crash_policy_and_manifest_laws() {
+    assert(api.json_string("é\n\"\\") == "\"é\\n\\\"\\\\\"")
+    assert(api.crash_reporter_truncate("é😀ab", 2) == "é😀")
+    assert(api.crash_manifest_string("\"x\": \"a\\q\\n\"", "x") == Val("aq\n"))
+    assert(api.crash_manifest_string("\"x\": \"unterminated", "x") == None)
+    assert(api.crash_manifest_bool("\"x\": trueish", "x") == Val(true))
+    assert(api.crash_manifest_integer("\"x\": 4294967296", "x", U64{0xffffffff}) == None)
+    assert(api.crash_manifest_integer("\"x\": 4294967296", "x", U64{0xffffffffffffffff}) == Val(U64{4294967296}))
+    api.validate_relative_path("crashes/local", paths.PathPlatform.Unix) ?? panic("safe relative path")
+    if api.validate_relative_path("../crashes", paths.PathPlatform.Unix) == {
+        .Err(error) -> assert(error.to_string() == "game crash retention path `../crashes` is not a safe relative path")
+        .Ok(_) -> panic("parent traversal accepted")
+    }
+    assert(api.crash_manifest_string("é😀 \"x\": \"value\"", "x") == Val("value"))
+    config :: api.JetGameCrashReporterConfig.new("on", "granted", "target", "build", "revision", false, api.JetGameCrashUploadPolicy.Never, "bounded-persisted", "crashes", U64{1})
+    assert(config.active())
+    config.validate(paths.PathPlatform.Unix) ?? panic("active local policy")
+}
+fn run() {
+    identities_are_stable_and_hot_paths_use_integer_ns()
+    history_reports_drops_and_cursor_refuses_other_revision()
+    profiler_receipts_preserve_pause_and_error_identity()
+    pure_crash_policy_and_manifest_laws()
+    print("game frame profiler source parity")
+}

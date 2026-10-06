@@ -1,0 +1,103 @@
+use core.compute.runtime.top_compute_06.[jet_compute_f32_value, jet_compute_validate_profile_value, jet_compute_validate_serialized_profile_values, jet_compute_wire_checksum]
+use core.compute.runtime.top_compute.[CPU_ORACLE_F32_PROFILE, CPU_ORACLE_F64_PROFILE]
+use core.compute.runtime.top_compute_03.JetComputeError
+use core.compute.runtime.top_compute_06.[jet_compute_serialize, jet_compute_deserialize, JetSparseCsr, jet_compute_to_sparse, jet_compute_sparse_nnz, jet_compute_sparse_mv, jet_compute_validate_sparse, jet_compute_sparse_show, JetComputeSimdBackend, jet_compute_simd_backend_for_features, jet_compute_simd_backend_available, jet_compute_f32_dot, jet_compute_matmul_f32_tile, jet_compute_profile_f32_strict, jet_compute_profile_show]
+use core.compute.runtime.top_compute.JetComputeDevice
+use core.compute.runtime.top_compute_04.[jet_compute_tensor_from_shape, jet_compute_tensor_values, jet_compute_set]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9241-9282
+#Test("compute_f32_profile_requires_finite_canonical_values") {
+    assert(jet_compute_f32_value(F64{1.5}, "sample").unwrap() == F32{1.5})
+    assert(jet_compute_validate_profile_value(CPU_ORACLE_F32_PROFILE, F64{1.5}, "sample").is_ok())
+    assert(matches(jet_compute_validate_profile_value(CPU_ORACLE_F32_PROFILE, F64{0.1}, "sample"), Err(JetComputeError.Arithmetic("sample is not canonical for the F32 precision profile"))))
+    assert(jet_compute_validate_profile_value(CPU_ORACLE_F64_PROFILE, F64{0.1}, "sample").is_ok())
+    assert(matches(jet_compute_f32_value(F64{1.0e300}, "sample"), Err(JetComputeError.Arithmetic("sample is outside the finite F32 range"))))
+    assert(matches(jet_compute_validate_serialized_profile_values(CPU_ORACLE_F32_PROFILE, [F64{0.1}]), Err(JetComputeError.Serialization("serialized Tensor value is not canonical for its F32 profile"))))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9284
+#Test("compute_wire_checksum_preserves_fixed_lowercase_hex_width") {
+    assert(jet_compute_wire_checksum("") == "cbf29ce484222325")
+    checksum :: jet_compute_wire_checksum("tensor")
+    assert(checksum.len() == 16)
+    assert(checksum.chars().all(c -> c.is_ascii_digit() || ('a'..='f').contains(c)))
+    assert(checksum == jet_compute_wire_checksum("tensor"))
+    assert(checksum != jet_compute_wire_checksum("Tensor"))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9772-9933
+#Test("compute_tensor_wire_roundtrip_and_validation_precedence") {
+    tensor :: jet_compute_tensor_from_shape([2], F64{1.5}, JetComputeDevice.Cpu).unwrap()
+    wire :: jet_compute_serialize(&tensor).unwrap()
+    restored :: jet_compute_deserialize(&wire).unwrap()
+    assert(restored.shape == tensor.shape)
+    assert(jet_compute_tensor_values(&restored) == [F64{1.5}, F64{1.5}])
+    assert(restored.last_placement.profile == tensor.last_placement.profile)
+    assert(restored.last_placement.reason == "deserialized canonical Tensor")
+    assert(jet_compute_serialize(&restored).unwrap() == wire)
+    missing :: "shape=2;data=1.5,1.5"
+    assert(matches(jet_compute_deserialize(&missing), Err(JetComputeError.InvalidShape("deserialize expects shape=…;data=…;profile=…;checksum=…"))))
+    bad_axis :: "shape=+1;data=0.0;profile={CPU_ORACLE_F64_PROFILE};checksum=0000000000000000"
+    assert(matches(jet_compute_deserialize(&bad_axis), Err(JetComputeError.Serialization("non-canonical shape axis `+1`"))))
+    bad_data :: "shape=1;data=0;profile={CPU_ORACLE_F64_PROFILE};checksum=0000000000000000"
+    assert(matches(jet_compute_deserialize(&bad_data), Err(JetComputeError.Serialization("non-canonical data value `0`"))))
+    body :: "shape=2;data=1.5,1.5;profile={CPU_ORACLE_F64_PROFILE}"
+    bad_checksum :: "{body};checksum=0000000000000000"
+    assert(matches(jet_compute_deserialize(&bad_checksum), Err(JetComputeError.Serialization("serialized Tensor checksum does not match its contents"))))
+    short_body :: "shape=2;data=1.5;profile={CPU_ORACLE_F64_PROFILE}"
+    short_wire :: "{short_body};checksum={jet_compute_wire_checksum(&short_body)}"
+    assert(matches(jet_compute_deserialize(&short_wire), Err(JetComputeError.Serialization("deserialize storage length mismatch: shape wants 2, got 1"))))
+    duplicate :: "{wire};data=1.5,1.5"
+    assert(matches(jet_compute_deserialize(&duplicate), Err(JetComputeError.Serialization("deserialize contains duplicate or unknown fields"))))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9956-10094
+#Test("compute_sparse_csr_conversion_and_matrix_vector_product") {
+    dense := jet_compute_tensor_from_shape([2, 3], F64{0.0}, JetComputeDevice.Cpu).unwrap()
+    jet_compute_set(&dense, &[0, 2], F64{2.0}).unwrap()
+    jet_compute_set(&dense, &[1, 1], F64{3.0}).unwrap()
+    sparse :: jet_compute_to_sparse(&dense).unwrap()
+    assert(sparse.row_ptr == [0, 1, 2])
+    assert(sparse.col_idx == [2, 1])
+    assert(sparse.values == [F64{2.0}, F64{3.0}])
+    assert(jet_compute_sparse_nnz(&sparse) == 2)
+    assert(jet_compute_sparse_show(&sparse) == "SparseCsr(2x3, nnz=2)")
+    vector :: jet_compute_tensor_from_shape([3], F64{4.0}, JetComputeDevice.Cpu).unwrap()
+    product :: jet_compute_sparse_mv(&sparse, &vector).unwrap()
+    assert(product.shape == [2])
+    assert(jet_compute_tensor_values(&product) == [F64{8.0}, F64{12.0}])
+    malformed :: JetSparseCsr{rows: 1, cols: 2, row_ptr: [0, 1], col_idx: [2], values: [F64{1.0}]}
+    assert(matches(jet_compute_validate_sparse(&malformed), Err(JetComputeError.InvalidShape("sparse CSR invariants are invalid"))))
+    bad_lengths :: JetSparseCsr{rows: 1, cols: 2, row_ptr: [0], col_idx: [], values: []}
+    assert(matches(jet_compute_validate_sparse(&bad_lengths), Err(JetComputeError.InvalidShape("sparse CSR arrays have inconsistent lengths"))))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10135-10310
+#Test("compute_simd_dispatch_and_ordered_tail") {
+    assert(jet_compute_simd_backend_for_features(true, true) == JetComputeSimdBackend.Avx2)
+    assert(jet_compute_simd_backend_for_features(false, true) == JetComputeSimdBackend.Sse2)
+    assert(jet_compute_simd_backend_for_features(false, false) == JetComputeSimdBackend.Scalar)
+    assert(JetComputeSimdBackend.Avx2.width() == 8)
+    assert(JetComputeSimdBackend.Sse2.width() == 4)
+    assert(JetComputeSimdBackend.Scalar.width() == 1)
+    a :: [F32{1.0}, F32{2.0}, F32{3.0}, F32{4.0}, F32{5.0}, F32{6.0}, F32{7.0}, F32{8.0}, F32{9.0}]
+    b :: [F32].filled(9, F32{1.0})
+    for backend in [JetComputeSimdBackend.Scalar, JetComputeSimdBackend.Sse2, JetComputeSimdBackend.Avx2] {
+        if jet_compute_simd_backend_available(backend) {
+            assert(jet_compute_f32_dot(backend, a.slice(0, 9), b.slice(0, 9)).unwrap() == F32{45.0})
+            assert(jet_compute_f32_dot(backend, a.slice(0, 0), b.slice(0, 0)).unwrap() == F32{0.0})
+        }
+    }
+    assert(matches(jet_compute_f32_dot(JetComputeSimdBackend.Scalar, a.slice(0, 9), b.slice(0, 8)), Err(JetComputeError.InvalidShape("SIMD dot-product inputs have different lengths"))))
+    huge :: [F32{3.0e38}]
+    assert(matches(jet_compute_f32_dot(JetComputeSimdBackend.Scalar, huge.slice(0, 1), huge.slice(0, 1)), Err(JetComputeError.Arithmetic("f32 SIMD dot product overflowed"))))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10316-10497
+#Test("compute_blocked_f32_matmul_preserves_precision_receipt") {
+    a :: jet_compute_tensor_from_shape([2, 3], F64{2.0}, JetComputeDevice.Cpu).unwrap()
+    b :: jet_compute_tensor_from_shape([3, 2], F64{3.0}, JetComputeDevice.Cpu).unwrap()
+    product :: jet_compute_matmul_f32_tile(&a, &b).unwrap()
+    assert(product.shape == [2, 2])
+    assert(jet_compute_tensor_values(&product) == [F64{18.0}, F64{18.0}, F64{18.0}, F64{18.0}])
+    assert(product.last_placement.profile == CPU_ORACLE_F32_PROFILE)
+    assert(product.last_placement.reason.starts_with("algorithm=blocked-matmul; tile=8; arithmetic=f32; reduction=ordered; dispatch="))
+    assert(product.last_placement.reason.ends_with("; tail=scalar"))
+    assert(jet_compute_profile_show() == jet_compute_profile_f32_strict())
+}

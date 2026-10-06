@@ -1,0 +1,600 @@
+use core.mem.[AllocError, Ptr]
+use core.mem as memory
+use core.alloc.[Layout]
+use alloc.alloc as backing
+use core.cell.[RefCell, Cell]
+use core.ptr.[NonNull]
+use core.mem.runtime.kernel_fixed_allocator.[FixedState]
+use core.testing.runtime.fault_injection.[jet_fault_should_fail_allocation]
+use jet_foundation.Sentry as sentry_kernel
+use jet_codegen.[JetUninit, JetUninitFixed, jet_alloc_error, jet_try_alloc_value, jet_observe_arena_open, jet_observe_arena_alloc, jet_observe_arena_retain, jet_observe_arena_release, jet_observe_arena_reset, jet_observe_arena_close]
+use core.prelude.runtime.core as runtime_control
+use core.mem.[MaybeUninit]
+use core.marker.[PhantomData]
+use alloc.rc.[Rc]
+use core.thread.[ThreadLocal]
+
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:1
+// Retained bump storage and scope-bound views. Reset/close require the exclusive
+// allocator loan, while allocation returns a view tied to its shared owner.
+// Native layout, raw pointer, RefCell and TLS operations are audited kernel
+// primitives; no user-visible raw lifetime extension escapes this owner.
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:27
+const DEFAULT_ARENA_BYTES: USize = 4096
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:28
+const DEFAULT_BUMP_BYTES: USize = 64 * 1024
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:29
+const DEFAULT_POOL_SLOTS: USize = 64
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:30
+const BASE_ALIGNMENT: USize = 4096
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:37
+// Sentry frame/policy/ledger declarations stay at jet_foundation.Sentry; import
+// those canonical owners directly instead of retaining a runtime re-export.
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:43
+pub fn jet_sentry_register_allocation(ptr: Ptr<U8>, bytes: USize) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("marshal a raw address to the shared allocation sentry") {
+        sentry_kernel.jet_sentry_register_allocation(ptr.addr(), bytes)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:47
+pub fn jet_sentry_register_stack_allocation(ptr: Ptr<U8>, bytes: USize) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("marshal a stack address to the shared allocation sentry") {
+        sentry_kernel.jet_sentry_register_stack_allocation(ptr.addr(), bytes)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:51
+pub fn jet_sentry_register_owned_allocation(owner: USize, ptr: Ptr<U8>, bytes: USize) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("associate this allocation address with the canonical owner id") {
+        sentry_kernel.jet_sentry_register_owned_allocation(owner, ptr.addr(), bytes)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:55
+fn jet_sentry_quarantine(ptr: Ptr<U8>, bytes: USize) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("quarantine the exact initialized allocation span after drop") {
+        sentry_kernel.jet_sentry_quarantine(ptr.addr(), bytes)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:59
+fn jet_sentry_quarantine_owner(owner: USize) -> { sentry_kernel.jet_sentry_quarantine_owner(owner) }
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:63
+fn jet_sentry_runtime_stop(fault: sentry_kernel.JetSentryFault) -> Never {
+    runtime_control.jet_sentry_runtime_stop(fault.code, &fault.file, fault.line, &fault.gate,
+        &fault.operation, &fault.obligation, fault.obligation_status.as_str(),
+        fault.foreign_component.as_deref(), fault.foreign_fenced, &fault.detail)
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:78
+fn jet_sentry_check<T>(ptr: Ptr<T>, operation: String, obligation: String) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("observe selected typed layout and provenance before raw access") {
+        if sentry_kernel.jet_sentry_check(ptr.addr(), memory.size_of<T>(), memory.align_of<T>(), operation, obligation) == .Val(fault) {
+            jet_sentry_runtime_stop(^fault)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:91
+fn jet_sentry_check_foreign<T>(ptr: Ptr<T>, operation: String, obligation: String, component: String) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("foreign storage is admitted by the shared sentry's component policy") {
+        if sentry_kernel.jet_sentry_check_foreign_with_component(ptr.addr(), memory.size_of<T>(), memory.align_of<T>(), operation, obligation, component) == .Val(fault) {
+            jet_sentry_runtime_stop(^fault)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:110
+fn jet_sentry_check_foreign_strict<T>(ptr: Ptr<T>, operation: String, obligation: String, component: String) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("apply strict shared provenance policy to the foreign component") {
+        if sentry_kernel.jet_sentry_check_foreign_strict(ptr.addr(), memory.size_of<T>(), memory.align_of<T>(), operation, obligation, component) == .Val(fault) {
+            jet_sentry_runtime_stop(^fault)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:133
+pub fn jet_sentry_foreign_ref<T>(ptr: &T, component: String) -> &T from ptr {
+    // GATE #4565: kernel primitive
+    #Unsafe("validate an exclusive Jet borrow before lending it to foreign code") {
+        jet_sentry_check_foreign(Ptr.from_ref(ptr), "ffi_write", "ffi_contract", component)
+    }
+    ptr
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:138
+pub fn jet_sentry_address_of<T>(ptr: Ptr<T>) -> I64 {
+    // GATE #4565: kernel primitive
+    #Unsafe("register typed pointer provenance and expose selected-width address bits") {
+        jet_sentry_register_allocation(ptr.cast<U8>(), memory.size_of<T>())
+        I64{ptr.addr()}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:143
+pub fn jet_sentry_stack_address_of<T>(ptr: Ptr<T>) -> I64 {
+    // GATE #4565: kernel primitive
+    #Unsafe("register stack pointer provenance and expose selected-width address bits") {
+        jet_sentry_register_stack_allocation(ptr.cast<U8>(), memory.size_of<T>())
+        I64{ptr.addr()}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:148
+pub fn jet_sentry_read<T>(ptr: Ptr<T>, obligation: String) -> T {
+    jet_sentry_check(ptr, "read", obligation)
+    // GATE #4565: kernel primitive
+    #Unsafe("source gate owns the raw read; shared sentry observed its live allocation") { ptr.read() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:155
+pub fn jet_sentry_volatile_read<T>(ptr: Ptr<T>, obligation: String) -> T {
+    jet_sentry_check(ptr, "volatile_read", obligation)
+    // GATE #4565: kernel primitive
+    #Unsafe("source gate owns volatile read after shared provenance observation") { ptr.read_volatile() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:162
+pub fn jet_sentry_volatile_write<T>(ptr: Ptr<T>, value: ^T, obligation: String) -> {
+    jet_sentry_check(ptr, "volatile_write", obligation)
+    // GATE #4565: kernel primitive
+    #Unsafe("source gate owns volatile write after shared provenance observation") { ptr.write_volatile(^value) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:170
+pub struct AllocatorFacts {
+    pub live_allocations: USize, pub live_bytes: USize,
+    pub retained_bytes: USize, pub high_water_bytes: USize,
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:177
+struct DropEntry { ptr: Ptr<U8>, drop_fn: (fn(Ptr<U8>))?, bytes: USize }
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:183
+// GATE #4565: kernel primitive
+#Unsafe("matching entry registered exactly one initialized T at this pointer")
+fn drop_at<T>(ptr: Ptr<U8>) -> { ptr.cast<T>().drop_in_place() }
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:188
+struct RawBlock { ptr: NonNull<U8>, layout: Layout, used: USize }
+impl RawBlock {
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:195
+    fn try_new(bytes: USize, alignment: USize, allocator: String) -> RawBlock AllocError! {
+        size :: bytes.max(1)
+        align :: alignment.max(1).next_power_of_two()
+        layout :: Layout.from_size_align(size, align) ?? return Err(jet_alloc_error(size, allocator))
+        // GATE #4565: kernel primitive
+        raw :: #Unsafe("allocate a nonzero valid selected-target layout; null is a value error") { backing.alloc(layout) }
+        ptr :: NonNull.new(raw) ?? return Err(jet_alloc_error(size, allocator))
+        jet_observe_arena_retain(layout.size())
+        Ok(RawBlock{ptr: ptr, layout: layout, used: 0})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:211
+    fn new(bytes: USize, alignment: USize) -> RawBlock {
+        size :: bytes.max(1)
+        align :: alignment.max(1).next_power_of_two()
+        layout :: Layout.from_size_align(size, align) ?? panic("allocator capacity/alignment overflow")
+        // GATE #4565: kernel primitive
+        raw :: #Unsafe("allocate a nonzero valid layout; null follows the allocator failure rail") { backing.alloc(layout) }
+        ptr :: NonNull.new(raw).unwrap_or_else(fn() { backing.handle_alloc_error(layout) })
+        jet_observe_arena_retain(layout.size())
+        RawBlock{ptr: ptr, layout: layout, used: 0}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:223
+    fn capacity(self: &Self) -> USize { self.layout.size() }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:227
+    fn aligned_offset(self: &Self, align: USize, bytes: USize) -> USize? {
+        if align > self.layout.align() -> return None
+        // GATE #4565: kernel primitive
+        address :: #Unsafe("alignment arithmetic uses the retained block's actual base address") { self.ptr.as_ptr().addr() + self.used }
+        padding :: (align - address % align) % align
+        start :: self.used.checked_add(padding)?
+        end :: start.checked_add(bytes.max(1))?
+        if end <= self.capacity() { Val(start) } else { None }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:238
+    // GATE #4565: kernel primitive
+    #Unsafe("caller owns this live block; checked aligned_offset proves the typed write fits")
+    fn write<T>(self: &Self, val: ^T) -> Ptr<T>? {
+        offset :: self.aligned_offset(memory.align_of<T>(), memory.size_of<T>())?
+        ptr :: self.ptr.as_ptr().add(offset).cast<T>()
+        ptr.write(^val)
+        self.used = offset + memory.size_of<T>().max(1)
+        Val(ptr)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:247
+    // GATE #4565: kernel primitive
+    #Unsafe("aligned_offset and canonical capacity check prove this initialized typed write fits")
+    fn try_write<T>(self: &Self, val: ^T, allocator: String) -> Ptr<T> AllocError! {
+        size :: memory.size_of<T>().max(1)
+        offset :: self.aligned_offset(memory.align_of<T>(), size) ?? return Err(jet_alloc_error(size, allocator))
+        padding :: offset.saturating_sub(self.used)
+        (val, next_used) :: jet_try_alloc_value(^val, self.used, self.capacity(), size, allocator, padding)?
+        ptr :: self.ptr.as_ptr().add(offset).cast<T>()
+        ptr.write(^val)
+        self.used = next_used
+        Ok(ptr)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:272
+    fn rewind(self: &Self) -> { self.used = 0 }
+}
+impl Drop for RawBlock {
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:278
+    fn drop(self: &Self) -> {
+        jet_observe_arena_release(self.layout.size())
+        // GATE #4565: kernel primitive
+        #Unsafe("values were dropped first; deallocate with this block's exact acquisition layout") { backing.dealloc(self.ptr.as_ptr(), self.layout) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:285
+fn drop_entries(entries: &[DropEntry]) -> {
+    loop entry in entries.drain(..).rev() {
+        if entry.drop_fn == .Val(drop_fn) {
+            // GATE #4565: kernel primitive
+            #Unsafe("each drained entry owns one initialized still-live value; reverse creation order") { drop_fn(entry.ptr) }
+        }
+        jet_sentry_quarantine(entry.ptr, entry.bytes)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:295
+fn observe_alloc<T>() -> USize {
+    bytes :: memory.size_of<T>()
+    jet_observe_arena_alloc(bytes)
+    bytes
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:301
+fn record_drop<T>(drops: &[DropEntry], ptr: Ptr<T>) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("retain the typed drop dictionary and span for this just-initialized allocation") {
+        raw :: ptr.cast<U8>()
+        bytes :: memory.size_of<T>()
+        jet_sentry_register_allocation(raw, bytes)
+        drops.push(DropEntry{ptr: raw, drop_fn: memory.needs_drop<T>().then_some(drop_at<T>), bytes: bytes})
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:312
+struct ArenaState {
+    blocks: [RawBlock], current_block: USize, drops: [DropEntry],
+    live_allocations: USize, live_bytes: USize, high_water_bytes: USize, next_block_bytes: USize,
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:323
+pub struct JetArena { state: RefCell<ArenaState> }
+impl JetArena {
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:328
+    pub fn new() -> JetArena { JetArena.with_capacity(DEFAULT_ARENA_BYTES) }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:332
+    pub fn with_capacity(cap: USize) -> JetArena {
+        jet_observe_arena_open()
+        first :: cap.max(1)
+        JetArena{state: RefCell.new(ArenaState{
+            blocks: [RawBlock.new(first, BASE_ALIGNMENT)], current_block: 0, drops: [],
+            live_allocations: 0, live_bytes: 0, high_water_bytes: 0, next_block_bytes: first.saturating_mul(2),
+        })}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:348
+    pub fn alloc<T>(self: &Self, val: ^T) -> &T from self {
+        state := self.state.borrow_mut()
+        required :: memory.size_of<T>().max(1).saturating_add(memory.align_of<T>())
+        selected :: (state.current_block..<state.blocks.len()).find(index -> state.blocks[index].aligned_offset(memory.align_of<T>(), memory.size_of<T>()).is_some())
+        selected :: match selected {
+            Val(index) -> index
+            None -> {
+                bytes :: state.next_block_bytes.max(required)
+                state.blocks.push(RawBlock.new(bytes, BASE_ALIGNMENT.max(memory.align_of<T>())))
+                state.next_block_bytes = bytes.saturating_mul(2)
+                state.blocks.len() - 1
+            }
+        }
+        state.current_block = selected
+        // GATE #4565: kernel primitive
+        ptr :: #Unsafe("selected retained chunk fits this unique typed write until reset") { state.blocks[selected].write(^val) ?? panic("unwrap failed") }
+        record_drop(&state.drops, ptr)
+        bytes :: observe_alloc<T>()
+        state.live_allocations += 1
+        state.live_bytes = state.live_bytes.saturating_add(bytes)
+        state.high_water_bytes = state.high_water_bytes.max(state.live_bytes)
+        // GATE #4565: kernel primitive
+        #Unsafe("raw view points into retained storage and is tied to the arena borrow") { ptr.as_mut() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:377
+    pub fn try_alloc<T>(self: &Self, val: ^T) -> &T from self AllocError! {
+        if jet_fault_should_fail_allocation() -> return Err(jet_alloc_error(memory.size_of<T>().max(1), "Arena"))
+        state := self.state.borrow_mut()
+        required :: memory.size_of<T>().max(1).saturating_add(memory.align_of<T>())
+        selected :: (state.current_block..<state.blocks.len()).find(index -> state.blocks[index].aligned_offset(memory.align_of<T>(), memory.size_of<T>()).is_some())
+        selected :: match selected {
+            Val(index) -> index
+            None -> {
+                bytes :: state.next_block_bytes.max(required)
+                state.blocks.push(RawBlock.try_new(bytes, BASE_ALIGNMENT.max(memory.align_of<T>()), "Arena")?)
+                state.next_block_bytes = bytes.saturating_mul(2)
+                state.blocks.len() - 1
+            }
+        }
+        state.current_block = selected
+        // GATE #4565: kernel primitive
+        ptr :: #Unsafe("selected retained chunk and canonical allocation rail prove this typed write") { state.blocks[selected].try_write(^val, "Arena")? }
+        record_drop(&state.drops, ptr)
+        bytes :: observe_alloc<T>()
+        state.live_allocations += 1
+        state.live_bytes = state.live_bytes.saturating_add(bytes)
+        state.high_water_bytes = state.high_water_bytes.max(state.live_bytes)
+        // GATE #4565: kernel primitive
+        Ok(#Unsafe("the view remains valid in the retained chunk until exclusive reset") { ptr.as_mut() })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:416
+    pub fn facts(self: &Self) -> AllocatorFacts {
+        state :: self.state.borrow()
+        AllocatorFacts{live_allocations: state.live_allocations, live_bytes: state.live_bytes,
+            retained_bytes: state.blocks.iter().map(block -> block.capacity()).sum(), high_water_bytes: state.high_water_bytes}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:426
+    pub fn reset(self: &Self) -> {
+        state := self.state.get_mut()
+        drop_entries(&state.drops)
+        jet_observe_arena_reset(state.live_allocations, state.live_bytes)
+        state.live_allocations = 0
+        state.live_bytes = 0
+        loop block in &state.blocks -> block.rewind()
+        state.current_block = 0
+    }
+}
+impl Drop for JetArena {
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:441
+    fn drop(self: &Self) -> {
+        self.reset()
+        jet_observe_arena_close()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:447
+struct BumpState { block: RawBlock, drops: [DropEntry], live_allocations: USize, live_bytes: USize, high_water_bytes: USize }
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:456
+pub struct JetBump { state: RefCell<BumpState> }
+impl JetBump {
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:461
+    pub fn new() -> JetBump { JetBump.with_capacity(DEFAULT_BUMP_BYTES) }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:465
+    pub fn with_capacity(cap: USize) -> JetBump {
+        jet_observe_arena_open()
+        JetBump{state: RefCell.new(BumpState{block: RawBlock.new(cap.max(1), BASE_ALIGNMENT),
+            drops: [], live_allocations: 0, live_bytes: 0, high_water_bytes: 0})}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:478
+    pub fn alloc<T>(self: &Self, val: ^T) -> &T from self {
+        state := self.state.borrow_mut()
+        // GATE #4565: kernel primitive
+        ptr :: #Unsafe("RawBlock validates capacity and alignment before initializing this value") {
+            state.block.write(^val).unwrap_or_else(fn() { panic("Bump allocator exhausted its contiguous buffer") })
+        }
+        record_drop(&state.drops, ptr)
+        bytes :: observe_alloc<T>()
+        state.live_allocations += 1
+        state.live_bytes = state.live_bytes.saturating_add(bytes)
+        state.high_water_bytes = state.high_water_bytes.max(state.live_bytes)
+        // GATE #4565: kernel primitive
+        #Unsafe("view stays in the single retained block until exclusive reset/close") { ptr.as_mut() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:492
+    pub fn try_alloc<T>(self: &Self, val: ^T) -> &T from self AllocError! {
+        if jet_fault_should_fail_allocation() -> return Err(jet_alloc_error(memory.size_of<T>().max(1), "Bump"))
+        state := self.state.borrow_mut()
+        // GATE #4565: kernel primitive
+        ptr :: #Unsafe("write after canonical fallible bump capacity validation") { state.block.try_write(^val, "Bump")? }
+        record_drop(&state.drops, ptr)
+        bytes :: observe_alloc<T>()
+        state.live_allocations += 1
+        state.live_bytes = state.live_bytes.saturating_add(bytes)
+        state.high_water_bytes = state.high_water_bytes.max(state.live_bytes)
+        // GATE #4565: kernel primitive
+        Ok(#Unsafe("view remains in the single retained block until exclusive reset/close") { ptr.as_mut() })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:509
+    pub fn facts(self: &Self) -> AllocatorFacts {
+        state :: self.state.borrow()
+        AllocatorFacts{live_allocations: state.live_allocations, live_bytes: state.live_bytes,
+            retained_bytes: state.block.capacity(), high_water_bytes: state.high_water_bytes}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:519
+    pub fn reset(self: &Self) -> {
+        state := self.state.get_mut()
+        drop_entries(&state.drops)
+        jet_observe_arena_reset(state.live_allocations, state.live_bytes)
+        state.live_allocations = 0
+        state.live_bytes = 0
+        state.block.rewind()
+    }
+}
+impl Drop for JetBump {
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:531
+    fn drop(self: &Self) -> {
+        self.reset()
+        jet_observe_arena_close()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:537
+struct PoolSlot { block: RawBlock?, occupied: Bool }
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:542
+struct PoolState { slots: [PoolSlot], generation: U64, drops: [DropEntry], live_bytes: USize, high_water_bytes: USize }
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:551
+pub struct JetPool { state: RefCell<PoolState> }
+impl JetPool {
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:556
+    pub fn new() -> JetPool { JetPool.with_slots(DEFAULT_POOL_SLOTS) }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:560
+    pub fn with_slots(slots: USize) -> JetPool {
+        jet_observe_arena_open()
+        JetPool{state: RefCell.new(PoolState{
+            slots: (0..<slots).map(_ -> PoolSlot{block: None, occupied: false}).collect(),
+            generation: 1, drops: [], live_bytes: 0, high_water_bytes: 0,
+        })}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:575
+    pub fn alloc<T>(self: &Self, val: ^T) -> &T from self {
+        state := self.state.borrow_mut()
+        bytes :: memory.size_of<T>().max(1)
+        align :: memory.align_of<T>()
+        compatible :: state.slots.iter().position(slot -> !slot.occupied && slot.block.as_ref().is_some_and(block -> block.capacity() >= bytes && block.layout.align() >= align))
+        selected :: compatible.or_else(fn() { state.slots.iter().position(slot -> !slot.occupied && slot.block.is_none()) })
+            .or_else(fn() { state.slots.iter().position(slot -> !slot.occupied) })
+            .unwrap_or_else(fn() { panic("Pool allocator exhausted its slab slots") })
+        slot := &state.slots[selected]
+        replace :: slot.block.as_ref().map_or(true, block -> block.capacity() < bytes || block.layout.align() < align)
+        if replace -> slot.block = Val(RawBlock.new(bytes, align))
+        block := slot.block.as_mut() ?? panic("unwrap failed")
+        block.rewind()
+        // GATE #4565: kernel primitive
+        ptr :: #Unsafe("unique retained slot class fits this typed value") { block.write(^val) ?? panic("unwrap failed") }
+        slot.occupied = true
+        record_drop(&state.drops, ptr)
+        live_bytes :: observe_alloc<T>()
+        state.live_bytes = state.live_bytes.saturating_add(live_bytes)
+        state.high_water_bytes = state.high_water_bytes.max(state.live_bytes)
+        // GATE #4565: kernel primitive
+        #Unsafe("view stays in the retained slab until exclusive reset/close") { ptr.as_mut() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:609
+    pub fn try_alloc<T>(self: &Self, val: ^T) -> &T from self AllocError! {
+        if jet_fault_should_fail_allocation() -> return Err(jet_alloc_error(memory.size_of<T>().max(1), "Pool"))
+        state := self.state.borrow_mut()
+        bytes :: memory.size_of<T>().max(1)
+        align :: memory.align_of<T>()
+        compatible :: state.slots.iter().position(slot -> !slot.occupied && slot.block.as_ref().is_some_and(block -> block.capacity() >= bytes && block.layout.align() >= align))
+        selected :: compatible.or_else(fn() { state.slots.iter().position(slot -> !slot.occupied && slot.block.is_none()) })
+            .or_else(fn() { state.slots.iter().position(slot -> !slot.occupied) })
+            ?? return Err(jet_alloc_error(bytes, "Pool"))
+        slot := &state.slots[selected]
+        replace :: slot.block.as_ref().map_or(true, block -> block.capacity() < bytes || block.layout.align() < align)
+        if replace -> slot.block = Val(RawBlock.try_new(bytes, align, "Pool")?)
+        block := slot.block.as_mut() ?? panic("pool slot has a block")
+        block.rewind()
+        // GATE #4565: kernel primitive
+        ptr :: #Unsafe("unique retained slot and canonical allocation rail prove the typed write") { block.try_write(^val, "Pool")? }
+        slot.occupied = true
+        record_drop(&state.drops, ptr)
+        live_bytes :: observe_alloc<T>()
+        state.live_bytes = state.live_bytes.saturating_add(live_bytes)
+        state.high_water_bytes = state.high_water_bytes.max(state.live_bytes)
+        // GATE #4565: kernel primitive
+        Ok(#Unsafe("view stays in the retained slab until exclusive reset/close") { ptr.as_mut() })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:648
+    pub fn facts(self: &Self) -> AllocatorFacts {
+        state :: self.state.borrow()
+        AllocatorFacts{live_allocations: state.slots.iter().filter(slot -> slot.occupied).count(), live_bytes: state.live_bytes,
+            retained_bytes: state.slots.iter().filter_map(slot -> slot.block.as_ref()).map(block -> block.capacity()).sum(),
+            high_water_bytes: state.high_water_bytes}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:663
+    pub fn generation(self: &Self) -> U64 { self.state.borrow().generation }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:667
+    pub fn reset(self: &Self) -> {
+        state := self.state.get_mut()
+        drop_entries(&state.drops)
+        allocations :: state.slots.iter().filter(slot -> slot.occupied).count()
+        jet_observe_arena_reset(allocations, state.live_bytes)
+        loop slot in &state.slots {
+            slot.occupied = false
+            if slot.block == .Val(block) -> block.rewind()
+        }
+        state.live_bytes = 0
+        state.generation = state.generation.wrapping_add(1).max(1)
+    }
+}
+impl Drop for JetPool {
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:685
+    fn drop(self: &Self) -> {
+        self.reset()
+        jet_observe_arena_close()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:695
+// FixedState remains the canonical header/state/reverse-drop mechanism.
+pub struct JetFixed { state: RefCell<FixedState>, _thread_confined: PhantomData<Rc<()>> }
+impl JetFixed {
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:701
+    pub fn over(bytes: ViewMut<U8>) -> JetFixed {
+        // GATE #4565: kernel primitive
+        #Unsafe("initialized bytes are valid backing bytes; sema keeps their loan live") { JetFixed.over_raw(bytes.as_mut_ptr(), bytes.len()) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:706
+    pub fn over_uninit(bytes: ViewMut<MaybeUninit<U8>>) -> JetFixed {
+        // GATE #4565: kernel primitive
+        #Unsafe("uninitialized byte backing is lent without reading its contents") { JetFixed.over_raw(bytes.as_mut_ptr().cast<U8>(), bytes.len()) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:710
+    pub fn over_uninit_fixed<N>(bytes: &JetUninitFixed<U8, N>) -> JetFixed { JetFixed.over_uninit(bytes.uninit_bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:716
+    fn over_raw(ptr: Ptr<U8>, capacity: USize) -> JetFixed {
+        assert(capacity > 0, "Fixed allocator needs a non-empty backing buffer")
+        jet_observe_arena_open()
+        jet_observe_arena_retain(capacity)
+        // GATE #4565: kernel primitive
+        state :: #Unsafe("constructor proves nonempty backing; sema keeps it live for this allocator") { FixedState.from_raw(ptr, U64{capacity}) }
+        JetFixed{state: RefCell.new(^state), _thread_confined: PhantomData}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:731
+    fn finish_alloc<T>(self: &Self, ptr: Ptr<T>) -> &T from self {
+        bytes :: memory.size_of<T>()
+        // GATE #4565: kernel primitive
+        #Unsafe("shared Fixed kernel initialized T in this live backing span; view is tied to allocator") {
+            jet_sentry_register_allocation(ptr.cast<U8>(), bytes)
+            jet_observe_arena_alloc(bytes)
+            ptr.as_mut()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:740
+    pub fn alloc<T>(self: &Self, value: ^T) -> &T from self {
+        ptr :: {
+            state := self.state.borrow_mut()
+            // GATE #4565: kernel primitive
+            #Unsafe("shared Fixed kernel owns the checked typed placement and drop header") {
+                state.try_alloc(^value).unwrap_or_else(_ -> panic("Fixed allocator exhausted its inline backing buffer"))
+            }
+        }
+        self.finish_alloc(ptr)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:750
+    pub fn try_alloc<T>(self: &Self, value: ^T) -> &T from self AllocError! {
+        if jet_fault_should_fail_allocation() -> return Err(jet_alloc_error(memory.size_of<T>().max(1), "Fixed"))
+        size :: memory.size_of<T>().max(1)
+        ptr :: {
+            state := self.state.borrow_mut()
+            // GATE #4565: kernel primitive
+            #Unsafe("shared Fixed kernel validates metadata and payload capacity before initialization") {
+                state.try_alloc(^value).map_err(_ -> jet_alloc_error(size, "Fixed"))?
+            }
+        }
+        Ok(self.finish_alloc(ptr))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:767
+    pub fn facts(self: &Self) -> AllocatorFacts {
+        state :: self.state.borrow()
+        AllocatorFacts{live_allocations: USize{state.live_allocations()}, live_bytes: USize{state.live_bytes()},
+            retained_bytes: USize{state.capacity()}, high_water_bytes: USize{state.high_water_bytes()}}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:777
+    pub fn capacity(self: &Self) -> USize { USize{self.state.borrow().capacity()} }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:781
+    pub fn used(self: &Self) -> USize { USize{self.state.borrow().used()} }
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:785
+    pub fn reset(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        stats :: #Unsafe("exclusive reset invalidates all views then reversely drops initialized values") {
+            self.state.get_mut().reset((ptr, bytes) -> jet_sentry_quarantine(ptr, USize{bytes}))
+        }
+        jet_observe_arena_reset(USize{stats.live_allocations}, USize{stats.live_bytes})
+    }
+}
+impl Drop for JetFixed {
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:796
+    fn drop(self: &Self) -> {
+        self.reset()
+        jet_observe_arena_release(USize{self.state.get_mut().capacity()})
+        jet_observe_arena_close()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:819
+// GATE #4565: kernel primitive
+static JET_CTX_ALLOC: ThreadLocal<Cell<Ptr<U8>?>> = ThreadLocal.new(fn() { Cell.new(None) })
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:827
+pub struct JetContextGuard { saved: Ptr<U8>? }
+impl Drop for JetContextGuard {
+    // Rust: crates/jet-codegen/src/Prelude/Mem.rs:832
+    fn drop(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("restore the prior ambient allocator on every normal and unwind exit") {
+            JET_CTX_ALLOC.with(c -> c.set(self.saved))
+        }
+    }
+}

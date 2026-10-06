@@ -1,0 +1,36 @@
+use core.files.runtime.kernel_fs_walk as walk
+use std.fs as fs
+use std.env as env
+use std.process as process
+use std.time.[SystemTime, UNIX_EPOCH]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/FSWalk.rs:5,36,59,261 (behavioral controls; no inline tests)
+#Test("parallel walk filters files and propagates directory depth") {
+    // GATE #4565: kernel primitive — controls create and traverse actual native files.
+    #Unsafe("test exclusively owns a unique native directory and removes it after traversal") {
+        stamp :: SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        root :: env.temp_dir().join("jet-0141-walk-{process.id()}-{stamp}")
+        fs.create_dir(root).unwrap()
+        defer { _ :: fs.remove_dir_all(root) }
+        fs.create_dir(root.join("nested")).unwrap()
+        fs.write(root.join("top.txt"), [U8{1}]).unwrap()
+        fs.write(root.join("nested").join("child.txt"), [U8{2}]).unwrap()
+        assert(walk.jet_fs_validate_walk_root(root) == Ok(()))
+        assert(walk.jet_fs_validate_walk_root(root.join("top.txt")) is Err(_))
+        make_entry :: fn(_, relative, is_dir, depth) { (relative, is_dir, depth) }
+        make_error :: fn(_, error) { error }
+        shown :: root.to_string_lossy().to_string()
+        entries :: walk.jet_fs_walk_parallel_with_ignore(shown, shown, None, make_entry, make_error).unwrap()
+        assert(entries.len() == 3)
+        files :: walk.jet_fs_walk_files_parallel_with_ignore(shown, shown, None, make_entry, make_error).unwrap()
+        assert(files.len() == 2)
+        loop (_, is_dir, _) in files -> assert(not is_dir)
+        depths := [I64]{}
+        loop (_, _, depth) in files -> &depths.push(depth)
+        &depths.sort()
+        assert(depths == [I64{0}, I64{1}])
+        fs.write(root.join(".gitignore"), "top.txt\n".bytes()).unwrap()
+        ignored :: walk.jet_fs_walk_files_parallel_with_ignore(shown, shown, Val(".gitignore"), make_entry, make_error).unwrap()
+        assert(ignored.len() == 1)
+    }
+}

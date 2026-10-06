@@ -1,0 +1,38 @@
+use core.collections.runtime.memo.[JetMemo, jet_memo_call]
+use std.sync.[Mutex]
+
+// Rust: crates/jet-codegen/src/Prelude/Memo.rs:134
+#Test("memo_lru_promotion_bound_zero_and_statistics") {
+    memo :: JetMemo<I64, String>.with_bound(Val(2))
+    memo.put(1, "one")
+    memo.put(2, "two")
+    assert(memo.get(&1) == Val("one"))
+    memo.put(3, "three")
+    assert(memo.get(&2) == None && memo.get(&1) == Val("one"))
+    stats :: memo.stats()
+    assert(stats.hits == 2 && stats.misses == 1 && stats.size == 2 && stats.bound == "2")
+    disabled :: JetMemo<I64, I64>.with_bound(Val(0))
+    disabled.put(1, 8)
+    assert(disabled.get(&1) == None && disabled.stats().size == 0)
+}
+// Rust: crates/jet-codegen/src/Prelude/Memo.rs:102
+#Test("memo_reserved_field_invalidation_keeps_function_entries_and_clone_is_independent") {
+    memo :: JetMemo<I64, I64>.new()
+    memo.put(1, 10)
+    builds := 0
+    assert(memo.get_or_insert_with(fn() { builds += 1; 20 }) == 20)
+    assert(memo.get_or_insert_with(fn() { builds += 1; 30 }) == 20 && builds == 1)
+    copy :: memo.clone()
+    memo.invalidate()
+    assert(memo.get(&1) == Val(10))
+    assert(memo.get_or_insert_with(fn() { builds += 1; 40 }) == 40 && builds == 2)
+    assert(copy.get_or_insert_with(fn() { 50 }) == 20)
+}
+// Rust: crates/jet-codegen/src/Prelude/Memo.rs:224
+#Test("memo_call_runs_computation_only_on_miss") {
+    // GATE #4565: kernel primitive
+    store :: #Unsafe("construct a real retained mutex-backed memo store") { Mutex.new(JetMemo<I64, I64>.with_bound(Val(1))) }
+    calls := 0
+    assert(jet_memo_call(&store, 1, fn() { calls += 1; 7 }) == 7)
+    assert(jet_memo_call(&store, 1, fn() { calls += 1; 9 }) == 7 && calls == 1)
+}

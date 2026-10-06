@@ -1,0 +1,12 @@
+// Shared core.log trace context; adapters never own a second trace carrier.
+use core.cell.[RefCell, ThreadLocal]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/LogState.rs:6
+// GATE #4565: kernel primitive — retained per-thread log context.
+pub const JET_LOG_TRACE_ID: ThreadLocal<RefCell<String>> = ThreadLocal.new(fn() { RefCell.new(String.new()) })
+// Rust: crates/jet-codegen/src/Prelude/Core/LogState.rs:11
+pub fn jet_ring_log_set_trace_id(id: String) Never! {
+    #Unsafe("replace only the owning thread's retained trace context") {
+        JET_LOG_TRACE_ID.with(fn(trace) { &trace.replace(id.to_string()) })
+    }
+}

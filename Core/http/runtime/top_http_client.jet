@@ -1,0 +1,308 @@
+use core.http.runtime.top_http_message.[JetHTTPRequest, JetHTTPResponse, JetHTTPBody, JetHTTPBodyChunks, JetHTTPHeaders, HTTPOperation]
+use core.http.runtime.kernel_http_request_target.jet_http_request_target_path
+use core.http.http_02 as native_http
+use core.http.JetHTTPBridgeError
+use core.http.HTTPError
+use core.http.http_02.JetHTTPResponseParts
+use core.mem.runtime.portable_core.[JetOutcome, JetAbsent]
+use core.mem.runtime.portable_alloc.jet_outcome_of
+use core.encoding.runtime.top_encoding_traits.__jet_Encode
+use jet_foundation.Numeric.JetInt
+use std.sync.[Arc, Mutex]
+use std.collections.BTreeMap
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:7
+#Derive(Clone)
+enum JetHTTPProxy { FromEnvironment, None, Url(String) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:15
+#Derive(Clone)
+enum JetHTTPRedirectPolicy { Follow{max: I64, same_origin_credentials: Bool} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:24
+// Safe retries only stale pooled connections for GET/HEAD/OPTIONS/TRACE once;
+// Idempotent opts in PUT/DELETE. Never retry on status.
+#Derive(Clone)
+enum JetHTTPRetryPolicy { None, Safe, Idempotent }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:33
+#Derive(Clone)
+enum JetHTTPCookieJar { Memory }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:39
+struct JetHTTPClientOwner { handle: I64, drop_handle: fn(I64) -> }
+impl Drop for JetHTTPClientOwner {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:45
+    fn drop(self: &Self) -> { (self.drop_handle)(self.handle) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:50
+#Derive(Clone)
+struct JetHTTPClient { owner: Arc<JetHTTPClientOwner>, policy_error: HTTPError? }
+impl JetHTTPClient {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:57
+    fn new(handle: I64, drop_handle: fn(I64) ->) -> Self {
+        // GATE #4565: kernel primitive
+        #Unsafe("retain one native client handle with final-owner destruction") {
+            Self{owner: Arc.new(JetHTTPClientOwner{handle, drop_handle}), policy_error: None}
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:64
+    fn policy(self: Self, next: I64 HTTPError!, drop_handle: fn(I64) ->) -> Self {
+        match next {
+            Ok(handle) -> Self.new(handle, drop_handle)
+            Err(error) -> {
+                self.policy_error = Val(^error)
+                ^self
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:75
+fn jet_http_client_request_new(method: &String, url: &String) -> JetHTTPRequest {
+    jet_http_client_request_new_owned(method.clone(), url.clone())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:79
+fn jet_http_client_request_new_owned(method: String, url: String) -> JetHTTPRequest {
+    path :: jet_http_request_target_path(url)
+    // GATE #4565: kernel primitive
+    trailers :: #Unsafe("retain request trailers in the canonical shared mutex carrier") { Arc.new(Mutex.new(JetHTTPHeaders.new())) }
+    JetHTTPRequest{method: ^method, url: ^url, path: ^path, version: "HTTP/1.1",
+        headers: JetHTTPHeaders.new(), trailers: ^trailers, header_error: None, body: JetHTTPBody.empty(), body_set: false,
+        params: BTreeMap.new(), route_template: None, timeout_ms: None, connect_timeout_ms: None,
+        read_timeout_ms: None, total_timeout_ms: None, dns_timeout_ms: None, tls_timeout_ms: None,
+        write_timeout_ms: None, first_byte_timeout_ms: None, redirects: None, proxy: None, cookies: [], form: [], multipart: []}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:109
+fn jet_http_client_request_header_owned(req: JetHTTPRequest, name: String, value: String) -> JetHTTPRequest {
+    if !JetHTTPHeaders.valid_name(&name) || !JetHTTPHeaders.valid_value(&value) { req.header_error = Val(.InvalidHeader) }
+    else { &req.headers.entries.push((^name, ^value)) }
+    ^req
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:122
+fn jet_http_client_request_body_owned(req: JetHTTPRequest, body: String) -> JetHTTPRequest {
+    req.body = JetHTTPBody.from_text(^body)
+    req.body_set = true
+    ^req
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:128
+fn jet_http_client_request_json_text_owned(req: JetHTTPRequest, body: String) -> JetHTTPRequest {
+    jet_http_client_request_json_body(^req, JetHTTPBody.from_bytes_with_content_type(body.into_bytes(), Val("application/json")))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:142
+fn jet_http_client_request_header(req: JetHTTPRequest, name: &String, value: &String) -> JetHTTPRequest {
+    jet_http_client_request_header_owned(^req, name.clone(), value.clone())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:150
+fn jet_http_client_request_body(req: JetHTTPRequest, body: &String) -> JetHTTPRequest { jet_http_client_request_body_owned(^req, body.clone()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:154
+fn jet_http_client_request_json_body(req: JetHTTPRequest, body: JetHTTPBody) -> JetHTTPRequest {
+    req.body = ^body
+    req.body_set = true
+    if req.headers.set("content-type", "application/json").is_err() -> req.header_error = Val(.InvalidHeader)
+    ^req
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:166
+fn jet_http_client_request_json<T: __jet_Encode>(req: JetHTTPRequest, value: T) -> JetHTTPRequest {
+    jet_http_client_request_json_body(^req, JetHTTPBody.from_json(^value))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:173
+fn jet_http_client_request_json_text(req: JetHTTPRequest, body: &String) -> JetHTTPRequest { jet_http_client_request_json_text_owned(^req, body.clone()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:181
+fn jet_http_client_request_body_stream(req: JetHTTPRequest, body: JetHTTPBody) -> JetHTTPRequest {
+    req.body = ^body
+    req.body_set = true
+    ^req
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:187
+fn jet_http_client_body_upload(req: &JetHTTPRequest) -> (I64?, Bool, JetHTTPBodyChunks?) HTTPError! {
+    if !req.body_set -> return Ok((None, false, None))
+    length :: req.body.length().map(fn(length) { length as I64 })
+    chunks :: req.body.chunks(64 * 1024)?
+    Ok((length, true, Val(^chunks)))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:198
+fn jet_http_client_request_timeout(req: JetHTTPRequest, ms: I64) -> JetHTTPRequest {
+    req.timeout_ms = Val(ms)
+    ^req
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:203
+fn jet_http_client_request_connect_timeout(req: JetHTTPRequest, ms: I64) -> JetHTTPRequest {
+    req.connect_timeout_ms = Val(ms)
+    ^req
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:211
+fn jet_http_client_request_read_timeout(req: JetHTTPRequest, ms: I64) -> JetHTTPRequest {
+    req.read_timeout_ms = Val(ms)
+    ^req
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:216
+fn jet_http_client_request_total_timeout(req: JetHTTPRequest, ms: I64) -> JetHTTPRequest {
+    req.total_timeout_ms = Val(ms)
+    ^req
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:221
+fn jet_http_client_request_dns_timeout(req: JetHTTPRequest, ms: I64) -> JetHTTPRequest {
+    req.dns_timeout_ms = Val(ms)
+    ^req
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:226
+fn jet_http_client_request_tls_timeout(req: JetHTTPRequest, ms: I64) -> JetHTTPRequest {
+    req.tls_timeout_ms = Val(ms)
+    ^req
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:231
+fn jet_http_client_request_write_timeout(req: JetHTTPRequest, ms: I64) -> JetHTTPRequest {
+    req.write_timeout_ms = Val(ms)
+    ^req
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:236
+fn jet_http_client_request_first_byte_timeout(req: JetHTTPRequest, ms: I64) -> JetHTTPRequest {
+    req.first_byte_timeout_ms = Val(ms)
+    ^req
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:244
+fn jet_http_client_request_redirects(req: JetHTTPRequest, limit: I64) -> JetHTTPRequest {
+    req.redirects = Val(limit)
+    ^req
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:249
+fn jet_http_client_request_proxy_owned(req: JetHTTPRequest, proxy: String) -> JetHTTPRequest {
+    req.proxy = Val(^proxy)
+    ^req
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:257
+fn jet_http_client_request_proxy(req: JetHTTPRequest, proxy: &String) -> JetHTTPRequest { jet_http_client_request_proxy_owned(^req, proxy.clone()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:261
+fn jet_http_client_request_cookie_owned(req: JetHTTPRequest, name: String, value: String) -> JetHTTPRequest {
+    &req.cookies.push(^name)
+    &req.cookies.push(^value)
+    ^req
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:271
+fn jet_http_client_request_cookie(req: JetHTTPRequest, name: &String, value: &String) -> JetHTTPRequest { jet_http_client_request_cookie_owned(^req, name.clone(), value.clone()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:279
+fn jet_http_client_request_form_owned(req: JetHTTPRequest, name: String, value: String) -> JetHTTPRequest {
+    &req.form.push(^name)
+    &req.form.push(^value)
+    ^req
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:289
+fn jet_http_client_request_form(req: JetHTTPRequest, name: &String, value: &String) -> JetHTTPRequest { jet_http_client_request_form_owned(^req, name.clone(), value.clone()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:297
+fn jet_http_client_request_multipart_text_owned(req: JetHTTPRequest, name: String, value: String) -> JetHTTPRequest {
+    &req.multipart.push(^name)
+    &req.multipart.push(^value)
+    ^req
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:307
+fn jet_http_client_request_multipart_text(req: JetHTTPRequest, name: &String, value: &String) -> JetHTTPRequest { jet_http_client_request_multipart_text_owned(^req, name.clone(), value.clone()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:315
+fn jet_http_client_response_status(resp: &JetHTTPResponse) -> I64 { resp.status }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:318
+fn jet_http_client_response_status_value(resp: &JetHTTPResponse) -> JetInt { JetInt.from_i64(jet_http_client_response_status(resp)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:325
+fn jet_http_client_response_new(status: I64, body_handle: I64, body_length: I64?, headers: [(String, String)],
+    body_read: fn(I64, USize) -> [U8]? HTTPError!, body_close: fn(I64) ->,
+    protocol: String, remote_address: String, redirect_history: [String], timings_ms: [I64],
+    reused_connection: Bool, raw_content_encoding: String?) -> JetHTTPResponse HTTPError! {
+    body_length :: match body_length.map(fn(length) { USize.try_from(length) }).transpose() {
+        Ok(length) -> length
+        Err(_) -> {
+            body_close(body_handle)
+            return Err(.InvalidFraming)
+        }
+    }
+    if headers.iter().any(fn((name, value)) { !JetHTTPHeaders.valid_name(name) || !JetHTTPHeaders.valid_value(value) }) {
+        body_close(body_handle)
+        return Err(.InvalidHeader)
+    }
+    Ok(JetHTTPResponse{status, version: "HTTP/1.1",
+        body: JetHTTPBody.bridge(body_handle, body_length, body_read, body_close), headers: JetHTTPHeaders{entries: ^headers},
+        trailers: JetHTTPHeaders.new(), head_content_length: None, suppress_body: false,
+        protocol: ^protocol, remote_address: ^remote_address, redirect_history: ^redirect_history,
+        timings_ms: ^timings_ms, reused_connection, raw_content_encoding: ^raw_content_encoding})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:369
+fn jet_http_client_response_body(resp: &JetHTTPResponse) -> JetHTTPBody { resp.body.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:372
+fn jet_http_client_response_header(resp: &JetHTTPResponse, name: &String) -> JetOutcome<String, JetAbsent> { jet_outcome_of(resp.headers.get(name).cloned()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:376
+fn jet_http_response_cookies(resp: &JetHTTPResponse) -> [String] { resp.headers.all("set-cookie").into_iter().map(fn(s) { s.to_string() }).collect() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:384
+fn jet_http_client_response_protocol(resp: &JetHTTPResponse) -> String { resp.protocol.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:387
+fn jet_http_client_response_remote_address(resp: &JetHTTPResponse) -> String { resp.remote_address.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:390
+fn jet_http_client_response_redirect_history(resp: &JetHTTPResponse) -> [String] { resp.redirect_history.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:393
+fn jet_http_client_response_timings(resp: &JetHTTPResponse) -> [I64] { resp.timings_ms.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:396
+fn jet_http_client_response_reused(resp: &JetHTTPResponse) -> Bool { resp.reused_connection }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:399
+fn jet_http_client_response_raw_encoding(resp: &JetHTTPResponse) -> String? { resp.raw_content_encoding.clone() }
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:405
+// Both former macro namespaces use the one canonical Jet transport owner.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:407
+fn native_http_error(error: JetHTTPBridgeError) -> HTTPError {
+    match error {
+        .InvalidURL -> .InvalidURL
+        .InvalidHeader -> .InvalidHeader
+        .InvalidFraming -> .InvalidFraming
+        .UnsupportedEncoding -> .UnsupportedEncoding
+        .Resolve -> HTTPError.Resolve(host: "<redacted>")
+        .Connect -> HTTPError.Connect(address: "<redacted>")
+        .TLS -> HTTPError.TLS(stage: "handshake")
+        .Timeout -> HTTPError.Timeout(phase: "transport")
+        .Proxy -> HTTPError.Proxy(stage: "transport")
+        .Redirect -> HTTPError.Redirect(reason: "limit")
+        .Protocol -> HTTPError.Protocol(version: "unsupported")
+        .IO -> HTTPError.IO(operation: "transport")
+        .ResourceUnavailable -> HTTPError.ResourceUnavailable(resource: "transport")
+        .Cancelled -> .Cancelled
+        .UnsupportedTarget -> HTTPError.UnsupportedTarget(operation: HTTPOperation.ClientConnect)
+        .Internal -> HTTPError.Internal(incident_id: "http-transport")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:428
+fn native_http_body_read(handle: I64, max_chunk: USize) -> [U8]? HTTPError! {
+    // GATE #4565: kernel primitive
+    #Unsafe("read the retained canonical HTTP transport body handle") { native_http.jet_http_client_body_read_impl(handle, max_chunk) }.map_err(native_http_error)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:435
+fn native_http_body_close(handle: I64) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("release the canonical HTTP transport body handle") { native_http.jet_http_client_body_close_impl(handle) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:439
+fn native_http_response(result: JetHTTPResponseParts JetHTTPBridgeError!) -> JetHTTPResponse HTTPError! {
+    parts :: result.map_err(native_http_error)?
+    context :: ^parts.context
+    jet_http_client_response_new(parts.status, parts.body_handle, parts.body_length, ^parts.headers,
+        native_http_body_read, native_http_body_close, ^context.protocol, ^context.remote_address,
+        ^context.redirect_history, context.timings_ms.to_vec(), context.reused_connection, ^context.raw_content_encoding)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:459
+fn native_http_request(req: JetHTTPRequest) -> JetHTTPResponse HTTPError! {
+    if req.header_error.as_ref() == .Val(error) -> return Err(error.clone())
+    JetHTTPRequest{method, url, headers, body, body_set, timeout_ms, connect_timeout_ms,
+        read_timeout_ms, total_timeout_ms, dns_timeout_ms, tls_timeout_ms, write_timeout_ms,
+        first_byte_timeout_ms, redirects, proxy, cookies, form, multipart, ..} :: ^req
+    body :: if body_set -> Val(body.bytes(8 * 1024 * 1024)?) else -> None
+    // GATE #4565: kernel primitive
+    result :: #Unsafe("send owned request metadata through the canonical audited native HTTP transport") {
+        native_http.jet_http_client_send_owned_impl(&method, &url, ^headers.entries, ^body,
+            timeout_ms, connect_timeout_ms, read_timeout_ms, total_timeout_ms, dns_timeout_ms, tls_timeout_ms,
+            write_timeout_ms, first_byte_timeout_ms, redirects, proxy.as_deref(), &cookies, &form, &multipart)
+    }
+    native_http_response(^result)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:510
+fn jet_http_client_get(url: &String) -> JetHTTPResponse HTTPError! {
+    // GATE #4565: kernel primitive
+    native_http_response(#Unsafe("perform a GET through the canonical audited HTTP transport") { native_http.jet_http_client_get_parts_impl(url) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:514
+fn jet_http_client_post(url: &String, body: &String) -> JetHTTPResponse HTTPError! {
+    // GATE #4565: kernel primitive
+    native_http_response(#Unsafe("perform a POST through the canonical audited HTTP transport") { native_http.jet_http_client_post_parts_impl(url, body) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:518
+fn jet_http_client_request_send(req: JetHTTPRequest) -> JetHTTPResponse HTTPError! { native_http_request(^req) }
+

@@ -1,0 +1,14 @@
+// ProcessArgs.rs:1–7. Process argument projection shared by every tier. The
+// first argv element identifies the launched program; the public args view is
+// the remaining values. The native argv capture (std::env::args, or the
+// installed interpreter/JIT argv) stays native and hands over its owned list.
+
+// Rust jet_process_args_view (:5–7): consumes argv and drops argv[0]. Like
+// Rust's in-place `into_iter().skip(1).collect()`, the remaining Strings move
+// within the same list; no element is copied.
+pub fn jet_process_args_view(argv: ^[String]) -> [String] Never! {
+    args := ^argv
+    // #4460: frozen host remove emits exact Int against an old i64 native slot.
+    if args.len() > 0 -> _ :: &args.remove(0, .Slot)
+    args
+}

@@ -1,0 +1,170 @@
+// ProcessArgs.rs:1–7 and Top/ProcessSpec.rs:1–103 portable policy.
+// Public opaque-handle/native argv capture, launch and tier integration are
+// exact stage-2 gates; these tests exercise the approved private record only.
+use core.process.runtime.kernel_process_args as process_args_kernel
+use core.process.runtime.top_process_spec as process_spec_kernel
+
+fn process_no_stdin(mode: ProcessStreamMode?) -> Bool Never! {
+    _ :: mode ?? return true
+    false
+}
+
+fn process_no_terminal(policy: TerminalPolicy?) -> Bool Never! {
+    _ :: policy ?? return true
+    false
+}
+
+// #4460: exact remove semantics retained, not a fixed-I64 substitute.
+#Test("#4460 args drops only the executable and moves the remaining values") {
+    empty :: process_args_kernel.jet_process_args_view([String]{})
+    assert_eq(empty.len(), 0)
+    single :: process_args_kernel.jet_process_args_view([String]{"/bin/jet"})
+    assert_eq(single.len(), 0)
+    argv :: [String]{"/bin/jet", "", "--flag", "two words", "λ"}
+    args :: process_args_kernel.jet_process_args_view(^argv)
+    assert_eq(args, [String]{"", "--flag", "two words", "λ"})
+}
+
+#Test("owned command initializes all observable private record defaults") {
+    argv :: [String]{"tool", "--arg"}
+    spec :: process_spec_kernel.jet_std_process_cmd_owned(^argv)
+    assert_eq(spec.cmd, [String]{"tool", "--arg"})
+    assert_eq(spec.cwd, None)
+    assert_eq(spec.env_clear, false)
+    assert_eq(spec.env_set.len(), 0)
+    assert_eq(spec.env_remove.len(), 0)
+    assert(process_no_stdin(spec.stdin))
+    assert_eq(spec.timeout_ms, None)
+    assert_eq(spec.output_limit, Val(I64{67108864}))
+    assert_eq(spec.cpu_time_limit_ms, None)
+    assert_eq(spec.memory_limit_bytes, None)
+    assert_eq(spec.open_file_limit, None)
+    assert_eq(spec.detached, false)
+    assert(process_no_terminal(spec.terminal))
+    assert_eq(spec.policy_wire, None)
+}
+
+#Test("borrowed command copies argv once before the same defaults") {
+    argv := [String]{"tool", "first"}
+    spec :: process_spec_kernel.jet_std_process_cmd(argv)
+    &argv.push("later")
+    assert_eq(spec.cmd, [String]{"tool", "first"})
+    assert_eq(argv, [String]{"tool", "first", "later"})
+    assert_eq(spec.output_limit, Val(process_spec_kernel.JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES))
+    empty :: process_spec_kernel.jet_std_process_cmd([String]{})
+    assert_eq(empty.cmd.len(), 0)
+}
+
+#Test("builders preserve source order and last-write cwd and streams") {
+    spec := process_spec_kernel.jet_std_process_cmd_owned([String]{"tool"})
+    spec = process_spec_kernel.jet_process_spec_arg(^spec, "one")
+    spec = process_spec_kernel.jet_process_spec_args_extend(^spec, [String]{"two", "", "three"})
+    spec = process_spec_kernel.jet_process_spec_args_extend(^spec, [String]{})
+    spec = process_spec_kernel.jet_process_spec_cwd(^spec, "first")
+    spec = process_spec_kernel.jet_process_spec_cwd(^spec, "last")
+    spec = process_spec_kernel.jet_process_spec_env(^spec, "A", "1")
+    spec = process_spec_kernel.jet_process_spec_env(^spec, "B", "2")
+    spec = process_spec_kernel.jet_process_spec_env(^spec, "A", "3")
+    spec = process_spec_kernel.jet_process_spec_env_remove(^spec, "B")
+    spec = process_spec_kernel.jet_process_spec_env_remove(^spec, "A")
+    spec = process_spec_kernel.jet_process_spec_env_remove(^spec, "B")
+    spec = process_spec_kernel.jet_process_spec_env_clear(^spec)
+    spec = process_spec_kernel.jet_process_spec_stdin(^spec, ProcessStreamMode.Inherit)
+    spec = process_spec_kernel.jet_process_spec_stdin(^spec, ProcessStreamMode.Stream)
+    spec = process_spec_kernel.jet_process_spec_stdout(^spec, ProcessStreamMode.Inherit)
+    spec = process_spec_kernel.jet_process_spec_stderr(^spec, ProcessStreamMode.Stream)
+    assert_eq(spec.cmd, [String]{"tool", "one", "two", "", "three"})
+    assert_eq(spec.cwd, Val("last"))
+    assert(spec.env_clear)
+    assert_eq(spec.env_set.len(), 3)
+    assert_eq(spec.env_set[0].name, "A")
+    assert_eq(spec.env_set[0].value, "1")
+    assert_eq(spec.env_set[1].name, "B")
+    assert_eq(spec.env_set[1].value, "2")
+    assert_eq(spec.env_set[2].name, "A")
+    assert_eq(spec.env_set[2].value, "3")
+    assert_eq(spec.env_remove, [String]{"B", "A", "B"})
+    assert_eq(spec.timeout_ms, None)
+    assert_eq(spec.output_limit, Val(I64{67108864}))
+    assert_eq(spec.cpu_time_limit_ms, None)
+    assert_eq(spec.memory_limit_bytes, None)
+    assert_eq(spec.open_file_limit, None)
+    assert_eq(spec.detached, false)
+    assert(process_no_terminal(spec.terminal))
+    assert_eq(spec.policy_wire, None)
+}
+
+#Test("authority closes inherited env without inferring cwd and later builders cannot reopen it") {
+    spec := process_spec_kernel.jet_std_process_cmd_owned([String]{"tool"})
+    spec = process_spec_kernel.jet_process_spec_env(^spec, "BEFORE", "1")
+    spec = process_spec_kernel.jet_process_spec_under_wire(^spec, "first authority")
+    assert(spec.env_clear)
+    assert_eq(spec.cwd, None)
+    spec = process_spec_kernel.jet_process_spec_env(^spec, "AFTER", "2")
+    spec = process_spec_kernel.jet_process_spec_arg(^spec, "arg")
+    spec = process_spec_kernel.jet_process_spec_cwd(^spec, "explicit")
+    spec = process_spec_kernel.jet_process_spec_under_wire(^spec, "last authority")
+    assert(spec.env_clear)
+    assert_eq(spec.cwd, Val("explicit"))
+    assert_eq(spec.policy_wire, Val("last authority"))
+    assert_eq(spec.env_set.len(), 2)
+    assert_eq(spec.env_set[0].name, "BEFORE")
+    assert_eq(spec.env_set[1].name, "AFTER")
+    assert_eq(spec.cmd, [String]{"tool", "arg"})
+    assert_eq(spec.output_limit, Val(I64{67108864}))
+}
+
+// #4476: the native Core enum/optional variant owner is missing at TIR→MIR.
+// Retain the exact assertions; source-isolated proofs exclude only these gates.
+#Test("#4476 native stream defaults and optional pattern owners") {
+    spec :: process_spec_kernel.jet_std_process_cmd_owned([String]{"tool"})
+    assert(if spec.stdin == {
+        .None -> true
+        else -> false
+    })
+    assert(if spec.stdout == {
+        .Capture -> true
+        else -> false
+    })
+    assert(if spec.stderr == {
+        .Capture -> true
+        else -> false
+    })
+    assert(if spec.terminal == {
+        .None -> true
+        else -> false
+    })
+}
+
+#Test("#4476 stream builder writes the last supplied mode") {
+    spec := process_spec_kernel.jet_std_process_cmd_owned([String]{"tool"})
+    spec = process_spec_kernel.jet_process_spec_stdin(^spec, ProcessStreamMode.Inherit)
+    spec = process_spec_kernel.jet_process_spec_stdin(^spec, ProcessStreamMode.Stream)
+    spec = process_spec_kernel.jet_process_spec_stdout(^spec, ProcessStreamMode.Inherit)
+    spec = process_spec_kernel.jet_process_spec_stderr(^spec, ProcessStreamMode.Stream)
+    assert(if spec.stdin == {
+        .Val(mode) -> if mode == {
+            .Stream -> true
+            else -> false
+        }
+        else -> false
+    })
+    assert(if spec.stdout == {
+        .Inherit -> true
+        else -> false
+    })
+    assert(if spec.stderr == {
+        .Stream -> true
+        else -> false
+    })
+}
+
+// #4477: Rust's PartialEq/Eq derives on the real Core carriers are not exposed
+// by the frozen host. No local enum or equality implementation substitutes.
+#Test("#4477 native stream and terminal equality") {
+    spec :: process_spec_kernel.jet_std_process_cmd_owned([String]{"tool"})
+    assert_eq(spec.stdin, None)
+    assert_eq(spec.stdout, ProcessStreamMode.Capture)
+    assert_eq(spec.stderr, ProcessStreamMode.Capture)
+    assert_eq(spec.terminal, None)
+}

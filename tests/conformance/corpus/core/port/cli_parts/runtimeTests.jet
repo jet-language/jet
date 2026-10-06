@@ -1,0 +1,743 @@
+use tests.cli.*
+use tests.cli_parts.runtime.*
+use std.fs as fs
+use std.env as env
+use std.process.[Command, Output]
+use jet_foundation.DataTree.DataTree
+use jet_foundation.JSON.[json_get, json_str, json_int]
+use jet.[CLI, Syntax]
+use jet.Diagnostics.Diagnostic
+// GATE #4494: all commands below execute the real CLI with native process IO.
+
+// Rust: tests/cli_parts/runtime.rs:12
+#Test("jet_fix_edition_2027_rewrites_json_canonical_and_is_idempotent") {
+    dir :: isolated_cwd("jsoncanon_fix")
+    file :: dir.join("run.jet")
+    fs.write(file, """use core.encoding.json as json
+
+pub fn show() Never! {
+    data :: json.parse(`{"a":1}`) ?? panic("json")
+    r :: json.canonical(data)
+    print(r)
+}
+
+pub fn sign() -> String {
+    data :: json.parse(`{"a":1}`)
+    r :: json.canonical(data)
+    r
+}
+
+pub fn already_migrated() Never! {
+    data :: json.parse(`{"a":1}`) ?? panic("json")
+    r :: json.canonical(data) ?? panic("value is not canonical JSON")
+    print(r)
+}
+""").unwrap()
+    run_fix :: (file: OSPath) -> {
+        out :: Command.new(jet()).args(["fix", file.to_str().unwrap(), "--edition=2027"]).output().unwrap()
+        assert(out.status.success(), "jet fix failed:\nstdout: {String.from_utf8_lossy(out.stdout)}\nstderr: {String.from_utf8_lossy(out.stderr)}")
+        fs.read_to_string(file).unwrap()
+    }
+    after_first :: run_fix(file)
+    assert(after_first.contains("json.canonical(data) ?? panic(\"value is not canonical JSON\")\n    print(r)\n}\n\npub fn sign"), "infallible fn `show` must get the panic fallback:\n{after_first}")
+    assert(after_first.contains("r :: json.canonical(data)\n    r\n}"), "fallible fn `sign` must use automatic propagation, not a panic fallback:\n{after_first}")
+    assert(!after_first.contains("value is not canonical JSON\") ?? panic"), "an already-migrated call must not be rewritten twice:\n{after_first}")
+    after_second :: run_fix(file)
+    assert_eq(after_first, after_second, "`jet fix --edition=2027` must be idempotent on a re-run")
+}
+
+// Rust: tests/cli_parts/runtime.rs:78
+#Test("jet_fix_reports_one_print_family_migration_per_retired_spelling") {
+    dir :: isolated_cwd("print_family_fix")
+    file :: dir.join("run.jet")
+    source :: "use core.term as io\n\nfn run() {{\n    io.println(\"line\")\n    value :: \"value\"\n    io.sprint(value)\n    io.repr(value)\n}}\n"
+    fs.write(file, source).unwrap()
+    preview :: Command.new(jet()).args(["fix", file.to_str().unwrap(), "--dry-run"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(preview.status.success(), "jet fix --dry-run failed: {String.from_utf8_lossy(preview.stderr)}")
+    report :: String.from_utf8_lossy(preview.stderr)
+    assert(report.contains("would apply 3 fixes"), report)
+    assert(report.contains("rewrote 3 retired print-family spellings (D-ONCE-PRINT1=A)"), report)
+    assert_eq(fs.read_to_string(file).unwrap(), source)
+    applied :: Command.new(jet()).args(["fix", file.to_str().unwrap()]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(applied.status.success(), "jet fix failed: {String.from_utf8_lossy(applied.stderr)}")
+    assert_eq(fs.read_to_string(file).unwrap(), "use core.term as io\n\nfn run() {{\n    io.print(\"line\")\n    value :: \"value\"\n    print(\"{{value}}\")\n    print(\"{{value:Debug}}\")\n}}\n")
+}
+
+// Rust: tests/cli_parts/runtime.rs:122
+#Test("jet_fix_apply_writes_replay_log_and_undo_restores_source") {
+    dir :: isolated_cwd("fix_replay")
+    file :: dir.join("run.jet")
+    original :: "use core.term as io\n\nfn run() {{\n    io.println(\"line\")\n    value :: \"value\"\n    io.sprint(value)\n    io.repr(value)\n}}\n"
+    fs.write(file, original).unwrap()
+    applied :: Command.new(jet()).args(["fix", file.to_str().unwrap()]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(applied.status.success(), "jet fix failed: {String.from_utf8_lossy(applied.stderr)}")
+    log :: String.from_utf8_lossy(applied.stderr).lines()
+        .find_map(line -> line.trim().strip_prefix("log: ")).map(OSPath.from).expect("jet fix must print replay log path")
+    assert(log.is_file(), "replay log missing: {log.display()}")
+    log_bytes :: fs.read(log).unwrap()
+    log_text :: String.from_utf8_lossy(log_bytes)
+    assert(log_text.contains("\"operation\": \"fix\""))
+    assert(log_text.contains("\"kind\":\"rewrite\""), log_text)
+    assert(log_text.contains("\"rule_id\":\"jet-fix\""), log_text)
+    assert(fs.read_to_string(file).unwrap().contains("io.print(\"line\")"))
+    undone :: Command.new(jet()).args(["inspect", "codemod", "undo", log.to_str().unwrap()]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(undone.status.success(), "fix undo failed: {String.from_utf8_lossy(undone.stderr)}")
+    assert_eq(fs.read_to_string(file).unwrap(), original)
+}
+
+// Rust: tests/cli_parts/runtime.rs:169
+#Test("check_fix_and_format_are_deterministic_for_safe_edits_and_profile_precedence") {
+    dir :: isolated_cwd("check_fix_fmt_determinism")
+    file :: dir.join("run.jet")
+    control :: dir.join("control.jet")
+    package :: dir.join("package.jet")
+    source :: "fn run(){{println(\"safe\")}}\n"
+    fs.write(file, source).unwrap()
+    fs.write(control, "fn run(){{print(\"safe\")}}\n").unwrap()
+    machine_payload :: (output: Output) -> {
+        stdout :: String.from_utf8_lossy(output.stdout)
+        stderr :: String.from_utf8_lossy(output.stderr)
+        if stdout.trim_start().starts_with('{') { stdout.trim().to_owned() } else { stderr.trim().to_owned() }
+    }
+    check :: (extra: [String]) -> {
+        command := Command.new(jet())
+        command.args(["check", file.to_str().unwrap(), "--json"]).args(extra).current_dir(dir).env("NO_COLOR", "1")
+        command.output().unwrap()
+    }
+    parse_status :: (output: Output) -> {
+        payload :: machine_payload(output)
+        assert(!payload.is_empty(), "check emitted no machine report")
+        parse_json(payload).unwrap_or_else(_ -> panic("invalid machine report:\n{payload}"))
+    }
+    diagnostic_report :: (status: DataTree) -> {
+        match json_get(status, "reports").unwrap() {
+            .Array(reports) -> reports.first().cloned().expect("diagnostic status must contain one report")
+            _ -> panic("diagnostic status reports is not an array")
+        }
+    }
+    report :: (output: Output) -> parse_status(output)
+    first_report :: (status: DataTree) -> diagnostic_report(status)
+    assert_safe_edit :: (value: DataTree) -> {
+        assert_eq(json_str(json_get(value, "applicability").unwrap()).unwrap(), "safe")
+        edits :: match json_get(value, "fix_edits").unwrap() {
+            .Array(edits) -> edits
+            _ -> panic("fix_edits is not an array")
+        }
+        assert_eq(edits.len(), 1)
+        edit :: &edits[0]
+        assert_eq(json_str(json_get(edit, "file").unwrap()).unwrap(), file.to_str().unwrap())
+        assert_eq(json_str(json_get(edit, "safety").unwrap()).unwrap(), "behavior-preserving")
+        span :: json_get(edit, "span").unwrap()
+        start :: json_int(json_get(span, "start").unwrap()).unwrap() as USize
+        end :: json_int(json_get(span, "end").unwrap()).unwrap() as USize
+        new_text :: json_str(json_get(edit, "new_text").unwrap()).unwrap()
+        assert_eq(source[start..end], "println")
+        assert_eq(new_text, "print")
+    }
+    absent_first :: check([])
+    absent_second :: check([])
+    assert_eq(absent_first.status.code(), Val(1))
+    assert_eq(absent_first.status.code(), absent_second.status.code())
+    assert_eq(machine_payload(absent_first), machine_payload(absent_second))
+    absent_report :: report(absent_first)
+    absent_diagnostic :: first_report(absent_report)
+    assert_safe_edit(absent_diagnostic)
+    package_source :: `name: "check-fix-format-determinism"
+version: "0.1.0"
+authority: {
+    holds: { allow: [IO] }
+}
+settings: { marker: String = "package" }
+
+build: {
+    staging: Build{ optimize: basic, settings: { marker: "profile" } },
+}
+`
+    fs.write(package, package_source).unwrap()
+    package_bytes :: fs.read(package).unwrap()
+    configured :: check(["--profile=staging", "--set", "marker=cli"])
+    assert_eq(configured.status.code(), Val(1))
+    configured_report :: report(configured)
+    configured_diagnostic :: first_report(configured_report)
+    assert_safe_edit(configured_diagnostic)
+    assert_eq(json_get(absent_diagnostic, "code"), json_get(configured_diagnostic, "code"))
+    assert_eq(json_get(absent_diagnostic, "applicability"), json_get(configured_diagnostic, "applicability"))
+    assert_eq(json_get(absent_diagnostic, "fix_edits"), json_get(configured_diagnostic, "fix_edits"))
+    preview :: () -> Command.new(jet()).args(["fix", file.to_str().unwrap(), "--dry-run"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    preview_first :: preview()
+    preview_second :: preview()
+    assert(preview_first.status.success(), "fix preview failed: {machine_payload(preview_first)}")
+    assert_eq(preview_first.status.code(), preview_second.status.code())
+    assert_eq(preview_first.stdout, preview_second.stdout)
+    assert_eq(preview_first.stderr, preview_second.stderr)
+    assert_eq(fs.read_to_string(file).unwrap(), source)
+    applied :: Command.new(jet()).args(["fix", file.to_str().unwrap()]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(applied.status.success(), "jet fix failed: {machine_payload(applied)}")
+    fixed :: fs.read_to_string(file).unwrap()
+    assert(fixed.contains("print(\"safe\")"), fixed)
+    assert(!fixed.contains("println"), fixed)
+    assert_eq(fs.read(package).unwrap(), package_bytes)
+    fmt_preview :: () -> Command.new(jet()).args(["fmt", file.to_str().unwrap(), "--check", "--json"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    fmt_first :: fmt_preview()
+    fmt_second :: fmt_preview()
+    assert_eq(fmt_first.status.code(), fmt_second.status.code())
+    assert_eq(fmt_first.stdout, fmt_second.stdout)
+    assert_eq(fmt_first.stderr, fmt_second.stderr)
+    assert_eq(fs.read_to_string(file).unwrap(), fixed)
+    formatted :: Command.new(jet()).args(["fmt", file.to_str().unwrap()]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(formatted.status.success(), "jet fmt failed: {String.from_utf8_lossy(formatted.stderr)}")
+    run :: (path: OSPath) -> Command.new(jet()).args(["run", "--profile=debug", path.to_str().unwrap()])
+        .current_dir(dir).env("JET_STORE_DIR", dir.join("store")).env("JET_RUN_CACHE_DIR", dir.join("run-cache"))
+        .env("NO_COLOR", "1").output().unwrap()
+    expected :: run(control)
+    assert(expected.status.success(), "control run failed: {String.from_utf8_lossy(expected.stderr)}")
+    assert_eq(expected.stdout, b"safe\n")
+    actual :: run(file)
+    assert(actual.status.success(), "fixed run failed: {String.from_utf8_lossy(actual.stderr)}")
+    assert_eq(actual.stdout, expected.stdout)
+    configured_clean :: check(["--profile=staging", "--set", "marker=cli"])
+    assert(configured_clean.status.success(), "configured check failed: {machine_payload(configured_clean)}")
+    configured_clean_report :: report(configured_clean)
+    provenance :: json_get(configured_clean_report, "provenance").unwrap()
+    assert_eq(json_str(json_get(provenance, "profile").unwrap()).unwrap(), "staging")
+    assert_eq(fs.read(package).unwrap(), package_bytes)
+}
+
+// Rust: tests/cli_parts/runtime.rs:440
+#Test("clean_check_prints_one_line") {
+    dir :: isolated_cwd("clean_check_one_line")
+    fs.write(dir.join("package.jet"), "name: \"hello\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(dir.join("run.jet"), "fn run() {{\n    print(\"hello, world\")\n}}\n").unwrap()
+    for output in check_twice(dir, ["check", "run.jet"]) { check_snapshot("check_clean_one_line.txt", output) }
+    entry :: dir.canonicalize().unwrap().join("run.jet")
+    for output in check_twice(dir, ["check"]) {
+        assert_eq(output, "ok: `{entry.display()}` has no problems\n", "clean project check must print one line")
+    }
+    verbose :: Command.new(jet()).args(["check", "--verbose", "run.jet"]).current_dir(dir)
+        .env("JET_RECEIPT_BYPASS", "1").env("NO_COLOR", "1").output().unwrap()
+    stdout :: String.from_utf8_lossy(verbose.stdout)
+    assert(verbose.status.success(), stdout)
+    assert(stdout.starts_with("check: passed ("), stdout)
+    assert_eq(stdout.lines().filter(line -> line.starts_with("proof: ")).count(), 4, stdout)
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/cli_parts/runtime.rs:474
+#Test("check_warning_prints_warnings_and_summary") {
+    dir :: isolated_cwd("check_warning_summary")
+    fs.write(dir.join("package.jet"), "name: \"hello\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(dir.join("run.jet"), "fn helper() {{}}\n\nfn run() {{\n    print(\"hello, world\")\n}}\n").unwrap()
+    output :: Command.new(jet()).args(["check", "run.jet"]).current_dir(dir)
+        .env("JET_RECEIPT_BYPASS", "1").env("NO_COLOR", "1").env("TERM", "dumb").output().unwrap()
+    assert(output.status.success(), String.from_utf8_lossy(output.stderr))
+    assert(output.stdout.is_empty(), String.from_utf8_lossy(output.stdout))
+    check_snapshot("check_warning_summary.txt", String.from_utf8_lossy(output.stderr))
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/cli_parts/runtime.rs:504
+#Test("perf_and_structural_merge_never_raw_exit") {
+    root :: OSPath.new(env.manifest_dir())
+    for relative in ["Source/CmdPerf.rs", "Source/CmdStructuralMerge.rs"] {
+        path :: root.join(relative)
+        source :: fs.read_to_string(path).unwrap_or_else(e -> panic("read {relative}: {e}"))
+        for (line_no, line) in source.lines().enumerate() {
+            trimmed := line.trim() // #4303
+            all_digits :: (s: String) -> !s.is_empty() && s.chars().all(c -> c.is_ascii_digit())
+            is_raw_exit_call :: trimmed.starts_with("exit(") && all_digits(trimmed[5..].trim_end_matches(';').trim_end_matches(')'))
+            is_raw_outcome_exit :: trimmed.starts_with("Outcome::Exit(") && all_digits(trimmed[14..].trim_end_matches(';').trim_end_matches(')'))
+            is_raw_return :: trimmed.strip_prefix("return ").is_some_and(rest -> all_digits(rest.trim_end_matches(';')))
+            assert(!is_raw_exit_call && !is_raw_outcome_exit && !is_raw_return,
+                "{relative}:{line_no + 1}: raw exit-code literal `{trimmed}` — use jet_foundation::ExitCodes")
+        }
+    }
+}
+
+// Rust: tests/cli_parts/runtime.rs:534
+#Test("uncoded_errors") {
+    root :: OSPath.new(env.manifest_dir()).join("Source")
+    for entry in fs.read_dir(root).unwrap() {
+        path :: entry.unwrap().path()
+        if path.extension().and_then(value -> value.to_str()) != Val("rs") { continue }
+        source :: fs.read_to_string(path).unwrap()
+        compact: String :: source.chars().filter(ch -> !ch.is_whitespace()).collect()
+        rest := compact.as_str()
+        loop {
+            at :: rest.find("eprintln!(")
+            if at.is_none() { break }
+            after_macro :: rest[at.unwrap() + "eprintln!(".len()..]
+            after_raw :: after_macro.strip_prefix('r').unwrap_or(after_macro)
+            after_hashes :: after_raw.trim_start_matches('#')
+            assert(!after_hashes.starts_with("\"error:") && !after_hashes.starts_with("\"Error:"),
+                "{path.display()} contains a bare eprintln error; use the shared Diagnostic renderer with a registered code")
+            rest = after_macro
+        }
+    }
+}
+
+// Rust: tests/cli_parts/runtime.rs:563
+#Test("generic_cli_diagnostics_match_registered_snapshots") {
+    cases :: [
+        ("E2104", "`jet inspect example` needs an entry file", include_str("../fixtures/cli-diagnostics/E2104.stderr")),
+        ("E2105", "couldn't read `package.jet`: permission denied", include_str("../fixtures/cli-diagnostics/E2105.stderr"))
+    ]
+    for (code, what, expected) in cases {
+        (why, fix) :: if code == "E2104" {
+            ("Jet needs valid command input before it can run this command", "correct the named argument or input, then run the command again")
+        } else {
+            ("Jet could not complete the named file, tool, or operating-system operation", "correct the named problem, then run the command again")
+        }
+        diagnostic :: Diagnostic.error(code, what.to_string(), why.to_string(), fix.to_string(), None)
+        assert_eq(diagnostic.render_colored("", "", false), expected)
+    }
+}
+
+// Rust: tests/cli_parts/runtime.rs:603
+#Test("inspect_reserved_lists_keywords_teaching_words_and_sigils") {
+    out :: Command.new(jet()).args(["inspect", "reserved"]).env("NO_COLOR", "1").output().unwrap()
+    assert(out.status.success(), "{out:Debug}")
+    text :: String.from_utf8_lossy(out.stdout)
+    for word in ["copy", "mut", "take", "const", "unsafe"] {
+        assert(text.contains(word), "reserved report missing teaching-reserved word `{word}`: {text}")
+    }
+    for sigil in ["::", ":=", "&", "^", "~", "@"] {
+        assert(text.contains(sigil), "reserved report missing sigil `{sigil}`: {text}")
+    }
+    assert(text.contains("fn"), "reserved report missing a real keyword: {text}")
+    out_json :: Command.new(jet()).args(["inspect", "reserved", "--json"]).env("NO_COLOR", "1").output().unwrap()
+    assert(out_json.status.success(), "{out_json:Debug}")
+    json :: String.from_utf8_lossy(out_json.stdout)
+    assert(json.contains("\"keywords\":["), json)
+    assert(json.contains("\"teaching_reserved\":["), json)
+    assert(json.contains("\"sigils\":["), json)
+    _ :: parse_json(json).unwrap_or_else(_ -> panic("reserved --json must parse: {json}"))
+}
+
+// Rust: tests/cli_parts/runtime.rs:646
+#Test("quiet_suppresses_status_output_without_changing_behavior") {
+    loud :: env.temp_dir().join("jet_cli_quiet_init_loud")
+    quiet :: env.temp_dir().join("jet_cli_quiet_init_quiet")
+    _ :: fs.remove_dir_all(loud)
+    _ :: fs.remove_dir_all(quiet)
+    fs.create_dir_all(loud).unwrap()
+    fs.create_dir_all(quiet).unwrap()
+    loud_out :: Command.new(jet()).arg("init").current_dir(loud).env("NO_COLOR", "1").output().unwrap()
+    assert(loud_out.status.success(), "{loud_out:Debug}")
+    assert(!String.from_utf8_lossy(loud_out.stderr).trim().is_empty(), "jet init without --quiet should print a confirmation")
+    quiet_out :: Command.new(jet()).args(["init", "--quiet"]).current_dir(quiet).env("NO_COLOR", "1").output().unwrap()
+    assert(quiet_out.status.success(), "{quiet_out:Debug}")
+    assert(String.from_utf8_lossy(quiet_out.stdout).trim().is_empty() && String.from_utf8_lossy(quiet_out.stderr).trim().is_empty(),
+        "jet init --quiet must suppress its non-error status line, got: {quiet_out:Debug}")
+    assert(quiet.join(Syntax.PACKAGE_FILE).is_file(), "--quiet must not change what init creates")
+    _ :: fs.remove_dir_all(loud)
+    _ :: fs.remove_dir_all(quiet)
+}
+
+// Rust: tests/cli_parts/runtime.rs:692
+#Test("quiet_flag_declared_once_in_the_shared_table") {
+    count :: CLI.FLAGS.iter().filter(f -> f.long == "--quiet").count()
+    assert_eq(count, 1, "--quiet must have exactly one spelling in jet::CLI::FLAGS")
+}
+
+// Rust: tests/cli_parts/runtime.rs:704
+#Test("dry_run_flag_declared_once_for_rewriters") {
+    count :: CLI.FLAGS.iter().filter(flag -> flag.long == CLI.DRY_RUN_FLAG).count()
+    assert_eq(count, 1, "--dry-run must have exactly one FlagSpec row")
+    usage :: CLI.command_group_usage("inspect")
+    assert(usage.contains("codemod <plan.json> --dry-run"), usage)
+    assert(!usage.contains("codemod dry-run"), usage)
+}
+
+// Rust: tests/cli_parts/runtime.rs:722
+#Test("formerly_prose_only_flags_are_real_flag_rows") {
+    flags :: ["--ar", "--clang", "--facts", "--no-sign", "--pkg", "--registry"]
+    man :: CLI.man_page("0.0.0")
+    bash :: CLI.completions_bash()
+    zsh :: CLI.completions_zsh()
+    fish :: CLI.completions_fish()
+    powershell :: CLI.completions_powershell()
+    for flag in flags {
+        assert(CLI.is_known_flag(flag), "`{flag}` must be a known flag")
+        assert(man.contains(flag), "man page missing `{flag}`")
+        assert(bash.contains(flag), "bash completions missing `{flag}`")
+        assert(zsh.contains(flag), "zsh completions missing `{flag}`")
+        assert(powershell.contains(flag), "powershell completions missing `{flag}`")
+        assert(fish.contains(flag.trim_start_matches("--")), "fish completions missing `{flag}`")
+    }
+    assert_eq(CLI.closest_flag("--pk"), Val("--pkg"))
+    assert_eq(CLI.closest_flag("--regsitry"), Val("--registry"))
+}
+
+// Rust: tests/cli_parts/runtime.rs:763
+#Test("top_level_help_flag_prints_full_usage") {
+    for flag in ["--help", "-h"] {
+        out :: Command.new(jet()).arg(flag).env("NO_COLOR", "1").output().unwrap()
+        assert(out.status.success(), "{flag}: {out:Debug}")
+        stdout :: String.from_utf8_lossy(out.stdout)
+        assert(stdout.contains("Usage:"), "{flag} did not print full usage: {stdout}")
+        assert(stdout.contains("build"), "{flag} usage missing a real command: {stdout}")
+        assert(stdout.contains("Inspect Commands:"), "{flag} usage missing the inspect group: {stdout}")
+        assert(stdout.contains("shared-store"), "{flag} usage missing the live shared-store command: {stdout}")
+    }
+}
+
+// Rust: tests/cli_parts/runtime.rs:792
+#Test("env_help_lists_shipped_actions") {
+    out :: Command.new(jet()).args(["env", "--help"]).env("NO_COLOR", "1").output().unwrap()
+    assert(out.status.success(), "env help failed: {out:Debug}")
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("env test [-- command]"), "env help omitted `env test`: {stdout}")
+    assert(stdout.contains("env hook <bash|zsh|fish>"), "env help omitted `env hook`: {stdout}")
+    assert(stdout.contains("env sync"), "env help omitted `env sync`: {stdout}")
+    assert(stdout.contains("env info"), "env help omitted `env info`: {stdout}")
+}
+
+// Rust: tests/cli_parts/runtime.rs:819
+#Test("top_level_help_lists_job_vocabulary_only") {
+    out :: Command.new(jet()).arg("help").env("NO_COLOR", "1").output().unwrap()
+    assert(out.status.success(), "help failed: {out:Debug}")
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("jet jobs"), "help must list `jet jobs`: {stdout}")
+    assert(stdout.contains("jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name> [<job args>...]]"), "help must show that job arguments follow the job name: {stdout}")
+    assert(stdout.contains("List, inspect, watch, or run named project jobs"), "help must describe the jobs command: {stdout}")
+    assert(!stdout.contains("tasks"), "retired task CLI vocabulary leaked: {stdout}")
+    retired_flag :: "--" + "task"
+    assert(!stdout.contains(retired_flag), "retired job flag leaked: {stdout}")
+    for golden in ["tests/cli/completions_fish.txt", "tests/cli/completions_zsh.txt", "tests/cli/man.txt"] {
+        snapshot :: fs.read_to_string(OSPath.from(env.manifest_dir()).join(golden)).unwrap_or_else(error -> panic("read {golden}: {error}"))
+        assert(snapshot.contains("jobs") && snapshot.contains("List, inspect, watch, or run named project jobs"), "{golden} must use the canonical jobs vocabulary")
+        assert(!snapshot.contains("tasks") && !snapshot.contains(retired_flag), "{golden} leaked retired task CLI vocabulary")
+    }
+}
+
+// Rust: tests/cli_parts/runtime.rs:894
+#Test("help_lists_commands_by_frequency_rank") {
+    help :: help_stdout(["help"])
+    listed :: listed_commands(help, "\nUsage:\n")
+    position :: (name: String) -> listed.iter().position(word -> word == name).unwrap_or_else(() -> panic("`jet help` omits `{name}`:\n{help}"))
+    for common in ["run", "check", "new", "test"] {
+        for rare in ["registry", "db", "bind"] {
+            assert(position(common) < position(rare), "`{common}` must precede `{rare}` in `jet help`:\n{help}")
+        }
+    }
+    registry_order :: CLI.commands_in(CLI.HelpOrder.Frequency).into_iter()
+        .filter(command -> CLI.is_canonical_top_level(command.name)).map(command -> command.name.to_string()).collect()
+    assert_eq(listed, registry_order, "`jet help` must follow frequency_rank")
+    assert_eq(help, help_stdout(["help", "--sort", "frequency"]), "`--sort frequency` is the default order")
+    greeting :: help_stdout(["--color=never"])
+    headline :: listed_commands(greeting, "\nGet started:\n")
+    assert(headline.len() >= 3 && headline.iter().any(name -> name == "run"), "the greeting must show the headline commands:\n{greeting}")
+    in_help_order :: headline.iter().map(name -> position(name)).collect()
+    assert(in_help_order.windows(2).all(pair -> pair[0] < pair[1]), "the greeting must list its commands in `jet help` order:\n{greeting}")
+    check_snapshot("help_frequency.txt", help)
+}
+
+// Rust: tests/cli_parts/runtime.rs:940
+#Test("help_sort_az_lists_a_to_z") {
+    az :: help_stdout(["help", "--sort", "az"])
+    listed :: listed_commands(az, "\nUsage:\n")
+    every := CLI.COMMANDS.iter().filter(command -> CLI.is_canonical_top_level(command.name)).map(command -> command.name.to_string()).collect()
+    every.sort_by_key(name -> name.to_ascii_lowercase())
+    assert_eq(listed, every, "`--sort az` must list every command A to Z")
+    assert_eq(listed_commands(help_stdout(["help", "--sort=az"]), "\nUsage:\n"), every)
+    za :: help_stdout(["help", "--sort", "za"])
+    every.reverse()
+    assert_eq(listed_commands(za, "\nUsage:\n"), every, "`--sort za` must list every command Z to A")
+    unknown :: Command.new(jet()).args(["help", "--sort", "alpha"]).env("NO_COLOR", "1").output().unwrap()
+    stderr :: String.from_utf8_lossy(unknown.stderr)
+    assert(!unknown.status.success() && stderr.contains("E2104") && stderr.contains("frequency, az, za"), "an unknown order must name the valid ones: {unknown:Debug}")
+    check_snapshot("help_az.txt", az)
+}
+
+// Rust: tests/cli_parts/runtime.rs:974
+#Test("command_overrides_report_themselves_and_default_bypasses_them") {
+    if !common.have_rustc() { return }
+    dir :: isolated_cwd("command_override_precedence")
+    file :: dir.join("override.jet")
+    fs.write(file, `use core.testing as testing
+
+fn test(suite: TestSuite) {
+    print("override")
+    suite.run()
+}
+
+#Test("stock") {
+    print("stock")
+}
+
+fn run() {}
+`).unwrap()
+    override_run :: Command.new(jet()).args(["test", "override.jet", "--serial", "--capture=all"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(override_run.status.success(), "override failed: {override_run:Debug}")
+    override_stdout :: String.from_utf8_lossy(override_run.stdout)
+    override_stderr :: String.from_utf8_lossy(override_run.stderr)
+    assert(override_stderr.contains("jet test: using fn test override"), override_stderr)
+    assert(override_stdout.contains("override"), override_stdout)
+    assert(override_stdout.contains("stock: pass"), override_stdout)
+    stock_run :: Command.new(jet()).args(["test", "override.jet", "--show-default", "--serial", "--capture=all"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(stock_run.status.success(), "stock failed: {stock_run:Debug}")
+    stock_stdout :: String.from_utf8_lossy(stock_run.stdout)
+    stock_stderr :: String.from_utf8_lossy(stock_run.stderr)
+    assert(!stock_stderr.contains("using fn test override"), stock_stderr)
+    assert(!stock_stdout.contains("override\n"), stock_stdout)
+    assert(stock_stdout.contains("stock"), stock_stdout)
+    assert(stock_stdout.contains("stock: pass"), stock_stdout)
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/cli_parts/runtime.rs:1044
+#Test("command_role_home_overrides_stock_and_show_default_reports_stock") {
+    dir :: isolated_cwd("command_role_home")
+    fs.write(dir.join("package.jet"), "name: \"command-role-home\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(dir.join("run.jet"), "fn helper() {{}}\n").unwrap()
+    fs.write(dir.join("@run.jet"), "fn run() {{ print(\"role\") }}\n").unwrap()
+    role :: Command.new(jet()).arg("run").current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(role.status.success(), "role command failed: {role:Debug}")
+    assert(String.from_utf8_lossy(role.stdout).contains("role"))
+    fs.write(dir.join("explicit.jet"), "fn run() {{ print(\"file scope\") }}\n").unwrap()
+    file_scope :: Command.new(jet()).args(["run", "explicit.jet"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(file_scope.status.success(), "file-scope command failed: {file_scope:Debug}")
+    file_scope_stdout :: String.from_utf8_lossy(file_scope.stdout)
+    assert(file_scope_stdout.contains("file scope"), file_scope_stdout)
+    assert(!file_scope_stdout.contains("role\n"), file_scope_stdout)
+    stock_dir :: dir.join("stock")
+    fs.create_dir_all(stock_dir).unwrap()
+    fs.write(stock_dir.join("package.jet"), "name: \"command-role-stock\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(stock_dir.join("run.jet"), "fn run() {{ print(\"stock\") }}\n").unwrap()
+    fs.write(stock_dir.join("@run.jet"), "fn run() {{ print(\"role\") }}\n").unwrap()
+    stock :: Command.new(jet()).args(["run", "--show-default"]).current_dir(stock_dir).env("NO_COLOR", "1").output().unwrap()
+    assert(stock.status.success(), "stock command failed: {stock:Debug}")
+    stock_stdout :: String.from_utf8_lossy(stock.stdout)
+    assert(String.from_utf8_lossy(stock.stderr).contains("jet run: using stock default"), "{stock:Debug}")
+    assert(stock_stdout.contains("stock"), stock_stdout)
+    assert(!stock_stdout.contains("role\n"), stock_stdout)
+    scaffold :: Command.new(jet()).args(["new", "scaffold", "--template", "overrides"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(scaffold.status.success(), "scaffold failed: {scaffold:Debug}")
+    for file in Syntax.COMMAND_ROLE_FILES {
+        source :: fs.read_to_string(dir.join("scaffold").join(file)).unwrap()
+        assert(source.contains("jet ") && source.contains("--show-default"), "{file}: {source}")
+    }
+    duplicate_dir :: isolated_cwd("command_role_duplicate")
+    fs.write(duplicate_dir.join("package.jet"), "name: \"command-role-duplicate\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(duplicate_dir.join("run.jet"), "fn run() {{}}\n").unwrap()
+    fs.write(duplicate_dir.join("@run.jet"), "fn run() {{}}\n").unwrap()
+    fs.write(duplicate_dir.join("a.jet"), "fn run() {{}}\n").unwrap()
+    fs.write(duplicate_dir.join("b.jet"), "fn run() {{}}\n").unwrap()
+    duplicate :: Command.new(jet()).arg("run").current_dir(duplicate_dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(duplicate.status.code(), Val(1), "{duplicate:Debug}")
+    duplicate_stderr :: String.from_utf8_lossy(duplicate.stderr)
+    assert(duplicate_stderr.contains("Error [E3540]"), duplicate_stderr)
+    assert(duplicate_stderr.contains("Why:") && duplicate_stderr.contains("Fix:"), duplicate_stderr)
+}
+
+// Rust: tests/cli_parts/runtime.rs:1160
+#Test("per_command_help_flag_works_without_running_the_command") {
+    dir :: isolated_cwd("help_flag_build")
+    for (cmd, flag) in [("build", "--help"), ("check", "-h"), ("new", "--help")] {
+        out :: Command.new(jet()).args([cmd, flag]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+        assert(out.status.success(), "`{cmd} {flag}`: {out:Debug}")
+        stdout :: String.from_utf8_lossy(out.stdout)
+        assert(stdout.contains(cmd), "`{cmd} {flag}` help text missing the command name: {stdout}")
+        assert(!stdout.contains("Error ["), "`{cmd} {flag}` ran the command instead of printing help: {stdout}")
+    }
+    assert(!dir.join("new").exists(), "`jet new --help` must not create a project")
+}
+
+// Rust: tests/cli_parts/runtime.rs:1195
+#Test("owns_flag_vocabulary_help_flag_prints_help_not_execute") {
+    dir :: isolated_cwd("help_flag_owns_vocab")
+    for (cmd, flag) in [("prove", "--help"), ("budget", "-h"), ("clean", "--help"), ("update", "-h"), ("image", "--help"), ("trust", "--help")] {
+        assert(CLI.owns_flag_vocabulary(cmd), "test assumption: `{cmd}` should own a flag vocabulary")
+        out :: Command.new(jet()).args([cmd, flag]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+        assert(out.status.success(), "`{cmd} {flag}` must print help and exit 0: {out:Debug}")
+        stdout :: String.from_utf8_lossy(out.stdout)
+        assert(stdout.contains(cmd), "`{cmd} {flag}` help text missing the command name: {stdout}")
+        assert(out.stderr.is_empty(), "`{cmd} {flag}` must not print to stderr: {String.from_utf8_lossy(out.stderr)}")
+    }
+    assert(!dir.join(".jet").exists(), "`--help` on an owns_flag_vocabulary command must not do real work")
+}
+
+// Rust: tests/cli_parts/runtime.rs:1243
+#Test("devtools_help_flag_prints_help_not_execute") {
+    dir :: isolated_cwd("help_flag_devtools")
+    for args in [["self", "devtools", "--help"], ["self", "devtools", "grammars", "--help"]] {
+        out :: Command.new(jet()).args(args).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+        assert(out.status.success(), "`jet {args.join(" ")}`: {out:Debug}")
+        stderr :: String.from_utf8_lossy(out.stderr)
+        assert(!stderr.contains("unknown"), "`jet {args.join(" ")}` hit the unknown-subcommand path: {stderr}")
+    }
+    assert(!dir.join("editors").exists(), "`devtools grammars --help` must not write any files")
+}
+
+// Rust: tests/cli_parts/runtime.rs:1272
+#Test("exhaustive_group_help_flag_lists_actions_instead_of_e2101") {
+    for (group, flag) in [("registry", "-h"), ("inspect", "--help")] {
+        out :: Command.new(jet()).args([group, flag]).env("NO_COLOR", "1").output().unwrap()
+        assert(out.status.success(), "`{group} {flag}`: {out:Debug}")
+        stdout :: String.from_utf8_lossy(out.stdout)
+        stderr :: String.from_utf8_lossy(out.stderr)
+        assert(!stderr.contains("E2101"), "`{group} {flag}` still hit E2101: {stderr}")
+        expected_action :: CLI.command_group(group).unwrap().actions[0].name
+        assert(stdout.contains(expected_action), "`{group} {flag}` missing action `{expected_action}`: {stdout}")
+    }
+}
+
+// Rust: tests/cli_parts/runtime.rs:1300
+#Test("perf_bare_and_help_flag_list_actions_instead_of_e2101_e2102") {
+    for args in [["perf"], ["perf", "--help"], ["perf", "-h"], ["perf", "help"]] {
+        out :: Command.new(jet()).args(args).env("NO_COLOR", "1").output().unwrap()
+        assert(out.status.success(), "`jet {args.join(" ")}`: {out:Debug}")
+        stdout :: String.from_utf8_lossy(out.stdout)
+        stderr :: String.from_utf8_lossy(out.stderr)
+        assert(!stderr.contains("E2101") && !stderr.contains("E2102"), "`jet {args.join(" ")}`: {stderr}")
+        assert(stdout.contains("view") && stdout.contains("compare"), "`jet {args.join(" ")}` missing perf actions: {stdout}")
+    }
+}
+
+// Rust: tests/cli_parts/runtime.rs:1331
+#Test("quiet_suppresses_new_confirmation") {
+    dir :: isolated_cwd("quiet_new")
+    out :: Command.new(jet()).args(["new", "quiet_project", "--quiet"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(out.status.success(), "{out:Debug}")
+    assert(String.from_utf8_lossy(out.stdout).trim().is_empty(), "jet new --quiet must suppress its confirmation, got: {String.from_utf8_lossy(out.stdout)}")
+    assert(dir.join("quiet_project").join(Syntax.PACKAGE_FILE).is_file(), "--quiet must not change what new creates")
+}
+
+// Rust: tests/cli_parts/runtime.rs:1356
+#Test("quiet_suppresses_sbom_write_confirmation") {
+    dir :: isolated_cwd("quiet_sbom")
+    file :: dir.join("main.jet")
+    fs.write(file, "fn run() {{\n    print(\"hi\")\n}}\n").unwrap()
+    out :: Command.new(jet()).args(["build", "main.jet", "--sbom", "--quiet"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(out.status.success(), "{out:Debug}")
+    assert(!String.from_utf8_lossy(out.stdout).contains("sbom:"), "jet build --sbom --quiet must suppress the sbom confirmation, got: {String.from_utf8_lossy(out.stdout)}")
+    assert(dir.join(".jet/build/main.spdx").is_file(), "--quiet must not change what --sbom writes")
+}
+
+// Rust: tests/cli_parts/runtime.rs:1385
+#Test("quiet_suppresses_devtools_grammars_confirmation") {
+    dir :: isolated_cwd("quiet_devtools_grammars")
+    stub :: "before\n// BEGIN GENERATED JET SYNTAX HIGHLIGHTS\nstale\n// END GENERATED JET SYNTAX HIGHLIGHTS\nafter\n"
+    files :: ["Tools/editors/vscode/syntaxes/jet.tmLanguage.json", "Tools/editors/jet.tmGrammar", "Tools/editors/tree-sitter/grammar.js", "Tools/editors/zed/languages/jet/highlights.scm"]
+    for rel in files {
+        path :: dir.join(rel)
+        fs.create_dir_all(path.parent().unwrap()).unwrap()
+        fs.write(path, stub).unwrap()
+    }
+    out :: Command.new(jet()).args(["self", "devtools", "grammars", "--quiet"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(out.status.success(), "{out:Debug}")
+    assert(String.from_utf8_lossy(out.stdout).trim().is_empty(), "jet self devtools grammars --quiet must suppress its status lines, got: {String.from_utf8_lossy(out.stdout)}")
+    for rel in files {
+        content :: fs.read_to_string(dir.join(rel)).unwrap()
+        assert(!content.contains("stale"), "--quiet must not change what devtools grammars writes ({rel}): {content}")
+    }
+}
+
+// Rust: tests/cli_parts/runtime.rs:1431
+#Test("quiet_suppresses_registry_publish_status_lines") {
+    // Rust: tests/cli_parts/runtime.rs:1432
+    fn publish_project(tag: String) -> OSPath {
+        dir :: isolated_cwd(tag)
+        init :: Command.new(jet()).arg("init").current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+        assert(init.status.success(), "{init:Debug}")
+        keys :: dir.join("keys")
+        fs.create_dir_all(keys).unwrap()
+        fs.write(keys.join("jet.ed25519"), "test-fixture-seed-not-a-real-key").unwrap()
+        fs.write(keys.join("jet.ed25519.pub"), "ab".repeat(32)).unwrap()
+        dir
+    }
+    loud_dir :: publish_project("quiet_publish_loud")
+    loud :: Command.new(jet()).args(["registry", "publish"]).current_dir(loud_dir).env("NO_COLOR", "1").env("JET_KEYS_DIR", loud_dir.join("keys")).output().unwrap()
+    assert_eq(loud.status.code(), Val(1), "{loud:Debug}")
+    loud_stdout :: String.from_utf8_lossy(loud.stdout)
+    assert(loud_stdout.contains("publishing"), "expected loud status narration, got: {loud_stdout}")
+    assert(loud_stdout.contains("[1/3]"), "expected loud gate narration, got: {loud_stdout}")
+    quiet_dir :: publish_project("quiet_publish_quiet")
+    quiet :: Command.new(jet()).args(["registry", "publish", "--quiet"]).current_dir(quiet_dir).env("NO_COLOR", "1").env("JET_KEYS_DIR", quiet_dir.join("keys")).output().unwrap()
+    assert_eq(quiet.status.code(), Val(1), "--quiet must not change the exit code: {quiet:Debug}")
+    assert(String.from_utf8_lossy(quiet.stdout).trim().is_empty(), "jet registry publish --quiet must suppress its status narration, got: {String.from_utf8_lossy(quiet.stdout)}")
+    quiet_stderr :: String.from_utf8_lossy(quiet.stderr)
+    assert(quiet_stderr.contains("build: failed"), "--quiet must not suppress the real gate error: {quiet_stderr}")
+}
+
+// Rust: tests/cli_parts/runtime.rs:1500
+#Test("quiet_accepted_and_suppresses_budget_check_recap") {
+    // Rust: tests/cli_parts/runtime.rs:1501
+    fn budget_dir(tag: String) -> OSPath {
+        dir :: isolated_cwd(tag)
+        init :: Command.new(jet()).arg("init").current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+        assert(init.status.success(), "{init:Debug}")
+        fs.write(dir.join("run.jet"), "fn run() {{\n    print(\"hi\")\n}}\n").unwrap()
+        dir
+    }
+    loud_dir :: budget_dir("quiet_budget_loud")
+    loud :: Command.new(jet()).args(["budget", "check"]).current_dir(loud_dir).env("NO_COLOR", "1").output().unwrap()
+    assert(loud.status.success(), "{loud:Debug}")
+    assert(!String.from_utf8_lossy(loud.stderr).trim().is_empty(), "expected the loud recap line on stderr")
+    quiet_dir :: budget_dir("quiet_budget_quiet")
+    quiet :: Command.new(jet()).args(["budget", "check", "--quiet"]).current_dir(quiet_dir).env("NO_COLOR", "1").output().unwrap()
+    assert(quiet.status.success(), "`jet budget check --quiet` must be accepted, not E2102: {quiet:Debug}")
+    assert_eq(quiet.status.code(), loud.status.code(), "--quiet must not change the exit code")
+    assert(String.from_utf8_lossy(quiet.stderr).trim().is_empty(), "jet budget check --quiet must suppress its recap line, got: {String.from_utf8_lossy(quiet.stderr)}")
+}
+
+// Rust: tests/cli_parts/runtime.rs:1552
+#Test("measured_test_targets_filter_and_json_match_test_runner_contract") {
+    if !common.have_rustc() { return }
+    dir :: isolated_cwd("bench_runner_contract")
+    fs.create_dir_all(dir.join("nested")).unwrap()
+    source :: `fn run() {}
+
+#Test("needle") {
+    assert_eq(1, 1)
+}
+
+#Test("other") {
+    assert_eq(2, 2)
+}
+
+#Test("measured-needle") { .measure {
+    assert_eq(1, 1)
+} }
+
+#Test("measured-other") { .measure {
+    assert_eq(2, 2)
+} }
+`
+    fs.write(dir.join("root.jet"), source).unwrap()
+    fs.write(dir.join("nested/child.jet"), source).unwrap()
+    tests :: Command.new(jet()).args(["test", "--show-default", ".", "--filter=needle", "--capture=all"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(tests.status.success(), "test target failed: {String.from_utf8_lossy(tests.stderr)}")
+    test_stdout :: String.from_utf8_lossy(tests.stdout)
+    assert(test_stdout.contains("needle"), "filtered test missing needle: {test_stdout}")
+    assert(!test_stdout.contains("other: pass"), "filtered test ran other: {test_stdout}")
+    measured :: Command.new(jet()).args(["test", "--show-default", ".", "--measure", "--filter=measured-needle", "--capture=all"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(measured.status.success(), "measured test target failed:\nstdout:\n{String.from_utf8_lossy(measured.stdout)}\nstderr:\n{String.from_utf8_lossy(measured.stderr)}")
+    measured_stdout :: String.from_utf8_lossy(measured.stdout)
+    assert_eq(measured_stdout.matches("measured-needle").count(), 2, "directory measurement must run one selected claim per file: {measured_stdout}")
+    assert(!measured_stdout.contains("measured-other"), "filtered measurement ran other: {measured_stdout}")
+    json :: Command.new(jet()).args(["test", "--show-default", ".", "--measure", "--filter=measured-needle", "--json"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    assert(json.status.success(), "measured test JSON target failed: {String.from_utf8_lossy(json.stderr)}")
+    json_stdout :: String.from_utf8_lossy(json.stdout)
+    records :: json_stdout.lines().map(line -> parse_json(line).unwrap_or_else(_ -> panic("measurement JSON line does not parse: {line}"))).collect()
+    assert_eq(records.len(), 2, "JSON must contain one record per selected claim: {json_stdout}")
+    for record in records {
+        match record {
+            .Object(_) -> {}
+            _ -> panic("measurement JSON record is not an object")
+        }
+        name_matches :: match record.get("name").ok() {
+            Val(.Text(name)) -> name == "measured-needle"
+            Val(.TypedText(name)) -> name == "measured-needle"
+            _ -> false
+        }
+        assert(name_matches, "JSON claim name is wrong: {record:Debug}")
+        assert(record.get("mean_ns").is_ok(), "JSON measurement has no mean: {record:Debug}")
+    }
+}
+
+// Rust: tests/cli_parts/scene_memory.rs:14
+#Test("scene_probe_memory_produces_600_samples") {
+    (_dir, report) :: scene_probe_once("scene_probe_memory", MEMORY_BUDGET)
+    assert_scene_probe_measurement(report, "MemoryHighWater")
+}

@@ -1,0 +1,221 @@
+use core.sys.target
+use std.sync.[Arc, LazyLock, Mutex]
+use std.sync.atomic.[AtomicUsize, Ordering]
+use std.time.Duration
+use std.thread
+use std.fmt.Display
+use std.os.windows.SetConsoleCtrlHandler
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:1
+// The single process-wide signal carrier and install path. Execution tiers
+// supply only Ctrl-C storage/invocation adapters; typed signal callbacks resolve
+// the current root control, never a retained prior run. #Shield is cooperative
+// scheduler cancellation deferral and cannot change platform signal handling.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:35
+pub fn jet_interrupt_poll_interval() -> Duration { Duration.from_millis(10) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:39
+pub fn jet_interrupt_core_error(message: String) -> String { "core.sys.on_interrupt: {message}" }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:43
+pub fn jet_process_signal_error(message: String) -> String { "core.process.on_signal: {message}" }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:47
+pub fn jet_interrupt_dispatcher_start_error<E: Display>(error: E) -> String { "could not start interrupt dispatcher: {error}" }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:51
+pub fn jet_interrupt_dispatcher_stopped_error() -> String { "interrupt dispatcher stopped" }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:55
+pub fn jet_interrupt_unavailable_error() -> String { "interrupt handling is unavailable on this target" }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:62
+JET_SIGNAL_INT :: USize{1} << 0
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:63
+JET_SIGNAL_HUP :: USize{1} << 1
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:64
+JET_SIGNAL_TERM :: USize{1} << 2
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:65
+JET_SIGNAL_ALL :: JET_SIGNAL_INT | JET_SIGNAL_HUP | JET_SIGNAL_TERM
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:68
+pub type JetProcessSignalCallback = Arc<fn() -> () + Send + Sync>
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:70
+struct JetInterruptState {
+    pending_interrupts: AtomicUsize
+    pending_process_signals: AtomicUsize
+    installed: AtomicUsize
+    install_lock: Mutex<()>
+    process_dispatch_lock: Mutex<()>
+    process_handlers: Mutex<[JetProcessSignalCallback?#3]>
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:79
+// GATE #4565: kernel primitive
+#Static JET_INTERRUPT_STATE :: LazyLock<JetInterruptState>.new(fn() {
+    #Unsafe("initialize one process-wide native signal carrier before any platform handler is installed") {
+        JetInterruptState{pending_interrupts: AtomicUsize.new(0), pending_process_signals: AtomicUsize.new(0),
+            installed: AtomicUsize.new(0), install_lock: Mutex.new(()), process_dispatch_lock: Mutex.new(()),
+            process_handlers: Mutex.new([JetProcessSignalCallback?#3]{None, None, None})}
+    }
+})
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:89
+fn jet_process_signal_index(mask: USize) -> USize? {
+    match mask { JET_SIGNAL_INT -> Val(0), JET_SIGNAL_HUP -> Val(1), JET_SIGNAL_TERM -> Val(2), _ -> None }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:99
+fn jet_interrupt_signal_bit(signal: I32) -> USize {
+    match signal { 2 -> JET_SIGNAL_INT, 1 -> JET_SIGNAL_HUP, 15 -> JET_SIGNAL_TERM, _ -> 0 }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:114
+// This audited module exposes only checked arming to callers, not raw handlers.
+module jet_os_interrupt_ffi {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:117
+    #FFI(c)
+    fn jet_interrupt_mark_unix(signal: I32) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("signal callback performs only relaxed native atomic marks in the already-initialized carrier") {
+            state :: &JET_INTERRUPT_STATE
+            if signal == 2 -> _ :: state.pending_interrupts.fetch_add(1, Ordering.Relaxed)
+            bit :: jet_interrupt_signal_bit(signal)
+            if bit != 0 -> _ :: state.pending_process_signals.fetch_or(bit, Ordering.Relaxed)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:133
+    fn jet_interrupt_mark_windows(kind: U32) -> I32 {
+        const CTRL_C_EVENT: U32 = 0
+        if kind != CTRL_C_EVENT -> return 0
+        // GATE #4565: kernel primitive
+        #Unsafe("Windows system-ABI callback performs only relaxed atomic marks and returns handled for CTRL_C_EVENT") {
+            state :: &JET_INTERRUPT_STATE
+            _ :: state.pending_interrupts.fetch_add(1, Ordering.Relaxed)
+            _ :: state.pending_process_signals.fetch_or(JET_SIGNAL_INT, Ordering.Relaxed)
+        }
+        1
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:155
+    // GATE #4565: kernel primitive — selected Unix libc symbol and C callback ABI.
+    #FFI(c)
+    fn signal(sig: I32, handler: fn(I32) ->) -> USize
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:150
+    fn arm_mask_unix(mask: USize) -> () Err! {
+        if mask & (JET_SIGNAL_ALL ~| USize.MAX) != 0 -> return Err("invalid process signal")
+        // GATE #4565: kernel primitive
+        #Unsafe("serialize libc signal installation and publish each successful disposition immediately") {
+            state :: &JET_INTERRUPT_STATE
+            lock :: state.install_lock.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            installed := state.installed.load(Ordering.Acquire)
+            loop (bit, number, name) in [(JET_SIGNAL_INT, 2, "SIGINT"), (JET_SIGNAL_HUP, 1, "SIGHUP"), (JET_SIGNAL_TERM, 15, "SIGTERM")] {
+                if mask & bit == 0 || installed & bit != 0 -> next
+                previous :: signal(number, jet_interrupt_mark_unix)
+                if previous == USize.MAX -> return Err("could not install the {name} handler")
+                installed |= bit
+                state.installed.store(installed, Ordering.Release)
+            }
+            Ok(())
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:186
+    fn arm_mask_windows(mask: USize) -> () Err! {
+        if mask & (JET_SIGNAL_INT ~| USize.MAX) != 0 -> return Err(jet_interrupt_unavailable_error())
+        // GATE #4565: kernel primitive
+        #Unsafe("serialize console handler installation, clear inherited ignore-Ctrl-C, and retain the system-ABI callback") {
+            state :: &JET_INTERRUPT_STATE
+            lock :: state.install_lock.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            if state.installed.load(Ordering.Acquire) & JET_SIGNAL_INT != 0 -> return Ok(())
+            // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:191
+            _ :: SetConsoleCtrlHandler(None, 0)
+            installed :: SetConsoleCtrlHandler(Val(jet_interrupt_mark_windows), 1)
+            if installed == 0 -> return Err("could not install the Windows console Ctrl-C handler")
+            state.installed.store(JET_SIGNAL_INT, Ordering.Release)
+            Ok(())
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:225,230,235
+fn jet_interrupt_arm_mask(mask: USize) -> () Err! {
+    if target.selected_family() == .Unix -> return jet_os_interrupt_ffi.arm_mask_unix(mask)
+    if target.selected_os() == "windows" -> return jet_os_interrupt_ffi.arm_mask_windows(mask)
+    Err(jet_interrupt_unavailable_error())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:241
+pub fn jet_interrupt_arm() -> () Err! { jet_interrupt_arm_mask(JET_SIGNAL_INT) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:245
+// GATE #4565: kernel primitive
+#Static JET_PROCESS_SIGNAL_DISPATCHER :: LazyLock<() Err!>.new(fn() {
+    #Unsafe("start the one process-signal dispatcher thread and retain its exact first initialization result") {
+        thread.Builder.new().name("jet-process-signal").spawn(fn() {
+            loop {
+                thread.sleep(jet_interrupt_poll_interval())
+                jet_process_signal_dispatch()
+            }
+        }).map(fn(_) { () }).map_err(jet_interrupt_dispatcher_start_error)
+    }
+})
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:257
+fn jet_process_signal_dispatcher_start() -> () Err! {
+    // GATE #4565: kernel primitive
+    #Unsafe("read the single cached native dispatcher-start result") {
+        match &JET_PROCESS_SIGNAL_DISPATCHER { Ok(_) -> Ok(()), Err(message) -> Err(message.clone()) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:267
+// Replace the callback slot so a resident run never retains a previous root.
+pub fn jet_process_signal_register(mask: USize, callback: JetProcessSignalCallback) -> () Err! {
+    index :: jet_process_signal_index(mask).ok_or("invalid process signal")?
+    jet_interrupt_arm_mask(mask)?
+    jet_process_signal_dispatcher_start()?
+    // GATE #4565: kernel primitive
+    #Unsafe("replace the checked signal's shared cancellation callback under its native mutex") {
+        handlers := JET_INTERRUPT_STATE.process_handlers.lock().unwrap_or_else(fn(error) { error.into_inner() })
+        handlers[index] = Val(^callback)
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:283
+fn jet_process_signal_dispatch() -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("serialize typed signal delivery; atomically consume only registered bits before invoking shared callbacks") {
+        state :: &JET_INTERRUPT_STATE
+        dispatch_lock :: state.process_dispatch_lock.lock().unwrap_or_else(fn(error) { error.into_inner() })
+        callbacks :: loop {
+            pending :: state.pending_process_signals.load(Ordering.Acquire)
+            if pending == 0 -> return
+            (registered, callbacks) :: {
+                handlers :: state.process_handlers.lock().unwrap_or_else(fn(error) { error.into_inner() })
+                registered := USize{0}
+                callbacks := [JetProcessSignalCallback]{}
+                loop (bit, handler) in [(JET_SIGNAL_TERM, handlers[2].as_ref()), (JET_SIGNAL_HUP, handlers[1].as_ref()), (JET_SIGNAL_INT, handlers[0].as_ref())] {
+                    if pending & bit != 0 {
+                        if handler == .Val(handler) {
+                            registered |= bit
+                            &callbacks.push(handler.clone())
+                        }
+                    }
+                }
+                (registered, ^callbacks)
+            }
+            deliverable :: pending & registered
+            // Leave undeliverable bits for a later registration.
+            if deliverable == 0 -> return
+            if state.pending_process_signals.compare_exchange(pending, pending & (deliverable ~| USize.MAX), Ordering.AcqRel, Ordering.Acquire).is_ok() -> break ^callbacks
+        }
+        loop callback in callbacks -> callback()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:343
+// Run boundaries drop both kinds of pending events under the delivery lock.
+pub fn jet_interrupt_clear() -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("clear the one process signal queue under the delivery mutex at the run boundary") {
+        state :: &JET_INTERRUPT_STATE
+        dispatch_lock :: state.process_dispatch_lock.lock().unwrap_or_else(fn(error) { error.into_inner() })
+        state.pending_interrupts.store(0, Ordering.Release)
+        state.pending_process_signals.store(0, Ordering.Release)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:363
+// Count first, then registration order. Empty handlers must not steal events.
+pub fn jet_interrupt_dispatch<T>(handlers: [T], invoke: fn(&T) ->) -> {
+    if handlers.is_empty() -> return
+    // GATE #4565: kernel primitive
+    count :: #Unsafe("consume the entire one process-wide counted Ctrl-C queue only when handlers exist") {
+        JET_INTERRUPT_STATE.pending_interrupts.swap(0, Ordering.Acquire)
+    }
+    loop _ in 0..<count -> loop handler in handlers -> invoke(handler)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:377-433
+// Original test helpers and all three queue-consumption tests are in the paired corpus.
+

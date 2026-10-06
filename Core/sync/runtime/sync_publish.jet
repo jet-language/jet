@@ -1,0 +1,265 @@
+use core.sync.runtime.top_sync.[MAX_SYNC_TEXT, MAX_SYNC_REPLICAS, MAX_SYNC_ENTRIES, MAX_SYNC_SESSION, MAX_SYNC_DOCUMENT, jet_sync_token_is_valid, jet_sync_counter_total]
+use core.web.runtime.top_live_query.jet_live_publish_transport
+use std.sync.[OnceLock, Mutex]
+use std.collections.BTreeSet
+use std.mem
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:1
+#Equatable
+struct JetSyncDocument { representation: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:6
+fn jet_sync_escape_display(value: String) -> String {
+    escaped := String.with_capacity(value.len())
+    loop ch in value.chars() {
+        if ch == ('\\' | ',' | '=' | '|' | ':' | '/') -> escaped.push('\\')
+        escaped.push(ch)
+    }
+    ^escaped
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:17
+fn jet_sync_unescape_display(value: String) -> String? {
+    unescaped := String.with_capacity(value.len())
+    escaped := false
+    loop ch in value.chars() {
+        if escaped {
+            if !(ch == ('\\' | ',' | '=' | '|' | ':' | '/')) -> return None
+            unescaped.push(ch)
+            escaped = false
+        } else if ch == '\\' { escaped = true }
+        else if ch == (',' | '=' | '|' | ':' | '/') { return None }
+        else { unescaped.push(ch) }
+    }
+    if !escaped { Val(^unescaped) } else { None }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:38
+fn jet_sync_split_display(value: String, separator: Char) -> [String]? {
+    parts := [String]{}
+    current := String.new()
+    escaped := false
+    loop ch in value.chars() {
+        if escaped {
+            current.push('\\')
+            current.push(ch)
+            escaped = false
+        } else if ch == '\\' {
+            current.push(ch)
+            escaped = true
+        } else if ch == separator { parts.push(mem.take(&current)) }
+        else { current.push(ch) }
+    }
+    if escaped -> return None
+    parts.push(^current)
+    Val(^parts)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:63
+fn jet_sync_split_display_once(value: String, separator: Char) -> (String, String)? {
+    escaped := false
+    loop (index, ch) in value.char_indices() {
+        if escaped { escaped = false }
+        else if ch == '\\' { escaped = true }
+        else if ch == separator {
+            left := value[0..<index] // #4303 borrowed UTF-8 view
+            right := value[index + ch.len_utf8()..<value.len()] // #4303
+            return Val((left.to_string(), right.to_string()))
+        }
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:80
+fn jet_sync_document_body(representation: String, prefix: String) -> String? from representation {
+    representation.strip_prefix(prefix).and_then(value -> value.strip_suffix(')'))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:86
+fn jet_sync_document_key_valid(value: String, forbidden: View<Char>) -> Bool {
+    jet_sync_token_is_valid(value) && !value.chars().any(ch -> forbidden.contains(ch))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:90
+fn jet_sync_document_map_entries(representation: String) -> [String:String]? {
+    body := jet_sync_document_body(representation, "SyncMap(")? // #4303 borrowed body
+    entries := [String:String]{}
+    if body.is_empty() -> return Val(^entries)
+    loop entry in jet_sync_split_display(body, ',')? {
+        (raw_key, raw_value) :: jet_sync_split_display_once(entry, '=')?
+        key :: jet_sync_unescape_display(raw_key)?
+        value :: jet_sync_unescape_display(raw_value)?
+        if !jet_sync_document_key_valid(key, []) || value.len() > MAX_SYNC_TEXT -> return None
+        if entries.insert(^key, ^value).is_some() -> return None
+    }
+    Val(^entries)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:112
+fn jet_sync_document_list_items(representation: String) -> BTreeSet<(String, String)>? {
+    body := jet_sync_document_body(representation, "SyncList(")? // #4303
+    items := BTreeSet<(String, String)>.new()
+    if body.is_empty() -> return Val(^items)
+    loop item in jet_sync_split_display(body, '|')? {
+        (raw_replica, raw_value) :: jet_sync_split_display_once(item, ':')?
+        replica :: jet_sync_unescape_display(raw_replica)?
+        value :: jet_sync_unescape_display(raw_value)?
+        if !jet_sync_document_key_valid(replica, []) || value.len() > MAX_SYNC_TEXT -> return None
+        if !items.insert((^replica, ^value)) -> return None
+    }
+    if items.len() <= MAX_SYNC_ENTRIES { Val(^items) } else { None }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:134
+fn jet_sync_document_counter_entries(representation: String) -> [String:(U64, U64)]? {
+    body := jet_sync_document_body(representation, "PNCounter(")? // #4303
+    counts := [String:(U64, U64)]{}
+    if body.is_empty() -> return Val(^counts)
+    loop entry in jet_sync_split_display(body, ',')? {
+        (raw_replica, raw_value) :: jet_sync_split_display_once(entry, '=')?
+        replica :: jet_sync_unescape_display(raw_replica)?
+        (raw_positive, raw_negative) :: jet_sync_split_display_once(raw_value, '/')?
+        positive_text :: jet_sync_unescape_display(raw_positive)?
+        positive := positive_text.strip_prefix('+')? // #4303
+        positive_value :: positive.parse<U64>().ok()?
+        negative_text :: jet_sync_unescape_display(raw_negative)?
+        negative := negative_text.strip_prefix('-')? // #4303
+        negative_value :: negative.parse<U64>().ok()?
+        if !jet_sync_document_key_valid(replica, []) || counts.insert(^replica, (positive_value, negative_value)).is_some() {
+            return None
+        }
+    }
+    if counts.len() > MAX_SYNC_REPLICAS -> return None
+    total :: counts.iter().map((replica, (positive, negative)) -> (replica.clone(), positive, negative)).collect<[(String, U64, U64)]>()
+    _ :: jet_sync_counter_total(total)?
+    Val(^counts)
+}
+impl JetSyncDocument {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:172
+    fn parse(value: String) -> JetSyncDocument? {
+        trimmed := value.trim() // #4303
+        representation :: trimmed.to_string()
+        if representation.is_empty() || representation != value || representation.len() > MAX_SYNC_DOCUMENT
+            || representation.chars().any(Char.is_control)
+            || !["SyncText(", "SyncMap(", "SyncList(", "PNCounter("].iter().any(prefix -> representation.starts_with(prefix)) {
+            return None
+        }
+        if !representation.ends_with(')') -> return None
+        canonical :: if representation.starts_with("SyncMap(") {
+            entries :: jet_sync_document_map_entries(representation)?
+            keys := entries.keys().cloned().collect<[String]>()
+            keys.sort()
+            parts :: keys.into_iter().map(key -> "{jet_sync_escape_display(key)}={jet_sync_escape_display(entries[key])}").collect<[String]>()
+            "SyncMap({parts.join(",")})"
+        } else if representation.starts_with("SyncList(") {
+            items :: jet_sync_document_list_items(representation)?
+            parts :: items.into_iter().map((replica, value) -> "{jet_sync_escape_display(replica)}:{jet_sync_escape_display(value)}").collect<[String]>()
+            "SyncList({parts.join("|")})"
+        } else if representation.starts_with("PNCounter(") {
+            counts :: jet_sync_document_counter_entries(representation)?
+            keys := counts.keys().cloned().collect<[String]>()
+            keys.sort()
+            parts :: keys.into_iter().map(replica -> {
+                (positive, negative) :: counts[replica]
+                "{jet_sync_escape_display(replica)}=+{positive}/-{negative}"
+            }).collect<[String]>()
+            "PNCounter({parts.join(",")})"
+        } else { representation.clone() }
+        if canonical != representation -> return None
+        Val(JetSyncDocument{representation: ^representation})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:243
+    // The String boundary may merge only facts surviving serialization. Conflicts
+    // and opaque text are denied rather than selecting a lexical replacement.
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:249
+    fn merge(self, other: JetSyncDocument) -> JetSyncDocument? {
+        if self.representation == other.representation -> return Val(self.clone())
+        merged :: if self.representation.starts_with("SyncMap(") && other.representation.starts_with("SyncMap(") {
+            entries := jet_sync_document_map_entries(self.representation)?
+            loop (key, value) in jet_sync_document_map_entries(other.representation)? {
+                match entries.get(key) {
+                    Val(existing) if existing != value -> return None
+                    Val(_) -> {}
+                    None -> { _ :: entries.insert(^key, ^value) }
+                }
+            }
+            if entries.len() > MAX_SYNC_ENTRIES -> return None
+            keys := entries.keys().cloned().collect<[String]>()
+            keys.sort()
+            parts :: keys.into_iter().map(key -> "{jet_sync_escape_display(key)}={jet_sync_escape_display(entries[key])}").collect<[String]>()
+            "SyncMap({parts.join(",")})"
+        } else if self.representation.starts_with("SyncList(") && other.representation.starts_with("SyncList(") {
+            items := jet_sync_document_list_items(self.representation)?
+            items.extend(jet_sync_document_list_items(other.representation)?)
+            if items.len() > MAX_SYNC_ENTRIES -> return None
+            parts :: items.into_iter().map((replica, value) -> "{jet_sync_escape_display(replica)}:{jet_sync_escape_display(value)}").collect<[String]>()
+            "SyncList({parts.join("|")})"
+        } else if self.representation.starts_with("PNCounter(") && other.representation.starts_with("PNCounter(") {
+            counts := jet_sync_document_counter_entries(self.representation)?
+            loop (replica, (positive, negative)) in jet_sync_document_counter_entries(other.representation)? {
+                slot := counts.entry(^replica).or_default()
+                slot.0 = slot.0.max(positive)
+                slot.1 = slot.1.max(negative)
+            }
+            if counts.len() > MAX_SYNC_REPLICAS -> return None
+            keys := counts.keys().cloned().collect<[String]>()
+            keys.sort()
+            parts :: keys.into_iter().map(replica -> {
+                (positive, negative) :: counts[replica]
+                "{jet_sync_escape_display(replica)}=+{positive}/-{negative}"
+            }).collect<[String]>()
+            "PNCounter({parts.join(",")})"
+        } else { return None }
+        JetSyncDocument.parse(^merged)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:339
+struct JetSyncReceipt { session_id: String, generation: U64, document: JetSyncDocument }
+impl JetSyncReceipt {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:347
+    fn show(self) -> String { "SyncOver(session={self.session_id}, generation={self.generation}, doc={self.document.representation})" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:355
+struct JetSyncSessionState { generation: U64, document: JetSyncDocument }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:361
+static JET_SYNC_SESSIONS: OnceLock<Mutex<[String:JetSyncSessionState]>> = OnceLock.new()
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:365
+// GATE #4565: kernel primitive
+#Unsafe("initialize one process-lifetime mutex registry with OnceLock; lend its retained storage")
+fn jet_sync_sessions() -> @Mutex<[String:JetSyncSessionState]> {
+    JET_SYNC_SESSIONS.get_or_init(fn() { Mutex.new([String:JetSyncSessionState]{}) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:370
+// A canonical display is merged into typed session state. Duplicate delivery is
+// idempotent, and transport publication occurs only after releasing the lock.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:375
+fn jet_sync_publish(session_id: String, doc_show: String) -> String {
+    trimmed := session_id.trim() // #4303
+    if trimmed.is_empty() || session_id.len() > MAX_SYNC_SESSION || session_id.chars().any(Char.is_control) {
+        return "SyncError(invalid session)"
+    }
+    document :: JetSyncDocument.parse(doc_show) ?? return "SyncError(document is not a canonical CRDT value)"
+    // GATE #4565: kernel primitive
+    sessions := match #Unsafe("hold the session mutex for the complete state transition; reject poison") { jet_sync_sessions().lock() } {
+        Ok(sessions) -> sessions
+        Err(_) -> return "SyncError(session registry is unavailable)"
+    }
+    if !sessions.contains_key(session_id) && sessions.len() >= MAX_SYNC_ENTRIES -> return "SyncError(session limit exceeded)"
+    state := sessions.entry(session_id.clone()).or_insert_with(fn() { JetSyncSessionState{generation: U64{0}, document: document.clone()} })
+    changed := false
+    if state.document != document {
+        merged :: state.document.merge(document) ?? return "SyncError(document merge denied)"
+        if state.document != merged {
+            generation :: state.generation.checked_add(U64{1}) ?? return "SyncError(session generation exhausted)"
+            state.generation = generation
+            state.document = ^merged
+            changed = true
+        }
+    } else if state.generation == U64{0} {
+        state.generation = U64{1}
+        changed = true
+    }
+    receipt :: JetSyncReceipt{session_id: ^session_id, generation: state.generation, document: state.document.clone()}
+    shown :: receipt.show()
+    transport :: if changed { Val("sync:{receipt.session_id}:{receipt.generation}:{receipt.document.representation}") } else { None }
+    // GATE #4565: kernel primitive
+    #Unsafe("release the mutex guard before invoking the external transport publisher") { drop(^sessions) }
+    if transport == .Val(transport) -> jet_live_publish_transport("sync:{receipt.session_id}", ^transport)
+    ^shown
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:436
+// D-SYNC1: document first, session named by `over:` at the Core boundary.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:439
+pub fn jet_app_sync(doc_show: String, session_id: String) -> String { jet_sync_publish(^session_id, ^doc_show) }
+

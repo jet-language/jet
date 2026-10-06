@@ -1,0 +1,586 @@
+// Rust: tests/arena.rs:1
+// D-ALLOC2 / D-REGION1: real bump arenas, scope-bound views and tier agreement.
+use std.fs as fs
+use std.process.[Command]
+use std.env as env
+use tests.common as common
+use tests.tir_support as tir_support
+use jet.[compile_with_path, compile]
+use jet_foundation.XmlPull.base_encoding_2026
+
+// Rust: tests/arena.rs:16
+fn unique_tmp() -> OSPath { common.unique_tmp("arena") }
+// Rust: tests/arena.rs:22
+fn error_codes(src: String) -> [String] {
+    dir :: unique_tmp()
+    fs.create_dir_all(dir).unwrap()
+    tir_support.write_test_package(dir, tir_support.TIR_TEST_PACKAGE)
+    path :: dir.join("fixture.jet")
+    fs.write(path, src).unwrap()
+    shown :: path.to_string_lossy()
+    match compile_with_path(src, shown) { Ok(_) -> [], Err(diags) -> diags.into_iter().map(|d| -> d.code.to_string()).collect() }
+}
+// Rust: tests/arena.rs:38
+// GATE #4494: fixture filesystem and subprocess execution; source-only translation.
+fn build_and_run(name: String, src: String) -> String? {
+    dir0 :: unique_tmp()
+    fs.create_dir_all(dir0).unwrap()
+    tir_support.write_test_package(dir0, tir_support.TIR_TEST_PACKAGE)
+    fpath :: dir0.join("fixture.jet")
+    fs.write(fpath, src).unwrap()
+    out :: compile_with_path(src, fpath.to_string_lossy()).unwrap_or_else(|d| -> panic("front end rejected a should-compile fixture: {d.iter().map(|x| -> x.code).collect().debug()}"))
+    user :: common.strip_vetted_prelude_modules(out.rust)
+    leaked_unsafe := [String]{}
+    loop (index, line) in user.lines().enumerate() {
+        if not common.unsafe_keyword_columns(line).is_empty() { &leaked_unsafe.push("line {index + 1}: {line.trim()}") }
+    }
+    assert(leaked_unsafe.is_empty(), "`unsafe` leaked outside the vetted prelude helpers:\n{leaked_unsafe.join("\n")}")
+    if not common.have_rustc() { eprintln("note: rustc not found; compiled front end only"); return None }
+    dir :: env.temp_dir()
+    rs :: dir.join("jet_arena_{name}.rs")
+    bin :: dir.join("jet_arena_{name}")
+    fs.write(rs, out.rust).unwrap()
+    c :: Command.new("rustc").args(["--edition", "2021"]).arg(rs).arg("-o").arg(bin).output().unwrap()
+    assert(c.status.success(), "I2 violated: rustc rejected generated code:\n{String.from_utf8_lossy(c.stderr)}")
+    r :: Command.new(bin).output().unwrap()
+    Val(String.from_utf8_lossy(r.stdout).to_string())
+}
+// Rust: tests/arena.rs:93
+#Test("alloc_and_use_compiles_and_runs") {
+    src :: """
+use core.mem
+fn run() -> {
+    arena :: mem.Arena.new()
+    x :: arena.alloc(42)
+    x = 43
+    y :: arena.alloc(100)
+    print(x)
+    print(y)
+    &arena.reset()
+    z :: arena.alloc(7)
+    print(z)
+}
+"""
+    assert_eq(error_codes(src), [String]{}, "alloc-and-use should compile clean")
+    if build_and_run("ok", src) is Val(out) { assert_eq(out, "43\n100\n7\n") }
+    tir_support.assert_tiers_agree("arena_view_write", src, "43\n100\n7\n")
+    tir_support.assert_example_cli_tiers_agree("memory/arena", read("Examples/features/expected/memory/arena.out"))
+    tir_support.assert_example_cli_tiers_agree("memory/try_allocation", read("Examples/features/expected/memory/try_allocation.out"))
+}
+// Rust: tests/arena.rs:129
+#Test("erased_close_does_not_consume_arena_owner") {
+    src :: """
+use core.mem
+fn run() -> {
+    arena :: mem.Arena.new()
+    #Off { close(^arena) }
+    value :: arena.alloc(42)
+    print(value)
+    close(^arena)
+}
+"""
+    assert_eq(error_codes(src), [String]{}, "an erased close must not consume the arena owner")
+    if build_and_run("erased_close", src) is Val(out) { assert_eq(out, "42\n") }
+    tir_support.assert_tiers_agree("arena_erased_close", src, "42\n")
+}
+// Rust: tests/arena.rs:155
+#Test("erased_initialization_does_not_leak_past_scope") {
+    src :: """
+use core.mem
+fn erased_off() -> {
+    value := Int{ uninit }
+    #Off { value = 7 }
+    print(value)
+}
+fn erased_debug() -> {
+    value := Int{ uninit }
+    #DebugOnly { value = 8 }
+    print(value)
+}
+fn active_initialization() -> {
+    value := Int{ uninit }
+    value = 9
+    print(value)
+}
+fn run() -> {
+    erased_off()
+    erased_debug()
+    active_initialization()
+}
+"""
+    codes :: error_codes(src)
+    assert_eq(codes.iter().filter(|code| -> code == "E0420").count(), 2, "removed initialization facts must not escape erased scopes: {codes.debug()}")
+    assert_eq(codes.len(), 2, "unexpected diagnostics: {codes.debug()}")
+}
+// Rust: tests/arena.rs:198
+#Test("use_after_close_is_e0121_before_backend") {
+    src :: """
+use core.mem
+fn run() -> {
+    arena :: mem.Arena.new()
+    close(^arena)
+    value :: arena.alloc(42)
+    print(value)
+}
+"""
+    assert_eq(error_codes(src), ["E0121"], "allocation after an active close must be rejected by sema")
+}
+// Rust: tests/arena.rs:217
+#Test("view_escape_is_e0631") {
+    src :: """
+use core.mem
+fn make() -> Int {
+    arena :: mem.Arena.new()
+    x :: arena.alloc(42)
+    return x
+}
+fn run() -> { print(make()) }
+"""
+    assert_eq(error_codes(src), ["E0631"], "returning an arena view must report exactly E0631")
+}
+// Rust: tests/arena.rs:237
+#Test("view_stored_in_binding_is_e0631") {
+    src :: """
+use core.mem
+fn run() -> {
+    arena :: mem.Arena.new()
+    x :: arena.alloc(42)
+    stash :: x
+    print(stash)
+}
+"""
+    assert_eq(error_codes(src), ["E0212"], "moving an owner-backed view while it remains live must report exactly E0212")
+}
+// Rust: tests/arena.rs:256
+#Test("use_after_reset_is_e0632") {
+    assert_eq(error_codes(read("tests/ui/arena_view_after_reset.jet")), ["E0632"], "the arena reset fixture must report exactly E0632")
+}
+// Rust: tests/arena.rs:265
+#Test("close_while_a_view_is_live_is_e0212") {
+    src :: """
+use core.mem
+fn run() -> {
+    arena :: mem.Arena.new()
+    x :: arena.alloc(42)
+    close(^arena)
+    print(x)
+}
+"""
+    assert_eq(error_codes(src), ["E0220", "E0212"], "closing an allocator while its view is live must report exactly E0220, E0212")
+}
+// Rust: tests/arena.rs:284
+#Test("reset_on_branch_invalidates_view_at_join") {
+    src :: """
+use core.mem
+fn run() -> {
+    arena :: mem.Arena.new()
+    x :: arena.alloc(42)
+    if true { &arena.reset() }
+    print(x)
+}
+"""
+    assert_eq(error_codes(src), ["E0632"], "a reset on a reachable branch must report exactly E0632")
+}
+// Rust: tests/arena.rs:305
+#Test("reset_in_loop_invalidates_view_after_loop") {
+    src :: """
+use core.mem
+fn run() -> {
+    arena :: mem.Arena.new()
+    x :: arena.alloc(42)
+    loop { &arena.reset(); break }
+    print(x)
+}
+"""
+    assert_eq(error_codes(src), ["E0632"], "a reset in a loop must report exactly E0632")
+}
+// Rust: tests/arena.rs:327
+#Test("explicit_region_spans_two_arenas") {
+    src :: """
+use core.mem
+fn run() -> {
+    #Region(work) {
+        a :: mem.Arena.new()
+        b :: mem.Bump.new()
+        first :: a.alloc(1)
+        second :: b.alloc(2)
+        print(first)
+        print(second)
+    }
+    print(99)
+}
+"""
+    assert_eq(error_codes(src), [String]{}, "a region spanning two arenas should compile clean")
+    if build_and_run("region", src) is Val(out) { assert_eq(out, "1\n2\n99\n") }
+}
+// Rust: tests/arena.rs:354
+#Test("region_confines_view_escape") {
+    src :: """
+use core.mem
+fn run() -> {
+    #Region(r) {
+        a :: mem.Arena.new()
+        v :: a.alloc(5)
+        leak :: v
+        print(leak)
+    }
+}
+"""
+    assert_eq(error_codes(src), ["E0212"], "moving a region view while its owner remains live must report exactly E0212")
+}
+
+// Rust: tests/base_encoding_2026.rs:5
+BASE64 :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".as_bytes()
+// Rust: tests/base_encoding_2026.rs:7
+fn digit(byte: U8) -> U8? { BASE64.iter().position(|item| -> item == byte).map(|n| -> U8{n}) }
+// Rust: tests/base_encoding_2026.rs:14
+fn frozen_aot_base64(text: String) -> [U8]? {
+    input :: text.bytes().filter(|b| -> not b.is_ascii_whitespace()).collect()
+    if input.len() % 4 != 0 -> return None
+    out := [U8]{}.with_capacity(input.len() / 4 * 3)
+    loop chunk in input.chunks(4) {
+        a :: digit(chunk[0])?
+        b :: digit(chunk[1])?
+        &out.push((a << 2) | (b >> 4))
+        if chunk[2] != U8{61} {
+            c :: digit(chunk[2])?
+            &out.push((b << 4) | (c >> 2))
+            if chunk[3] != U8{61} { d :: digit(chunk[3])?; &out.push((c << 6) | d) }
+        }
+    }
+    Val(^out)
+}
+// Rust: tests/base_encoding_2026.rs:36
+fn frozen_comptime_base64(text: String) -> [U8]? {
+    input :: text.trim_end_matches('=').as_bytes()
+    if input.len() % 4 == 1 -> return None
+    out := [U8]{}.with_capacity(input.len() / 4 * 3)
+    loop chunk in input.chunks(4) {
+        values := [U8]{}.with_capacity(chunk.len())
+        loop byte in chunk { &values.push(digit(byte)?) }
+        &out.push((values[0] << 2) | (values.get(1).copied().unwrap_or(U8{0}) >> 4))
+        if values.len() > 2 { &out.push((values[1] << 4) | (values[2] >> 2)) }
+        if values.len() > 3 { &out.push((values[2] << 6) | values[3]) }
+    }
+    Val(^out)
+}
+// Rust: tests/base_encoding_2026.rs:58
+fn url_input(text: String) -> String {
+    trimmed := text.trim() // #4303
+    input := trimmed.replace('-', "+").replace('_', "/")
+    loop input.len() % 4 != 0 { &input.push('=') }
+    input
+}
+// Rust: tests/base_encoding_2026.rs:66
+fn frozen_base32(text: String) -> [U8]? {
+    out := [U8]{}
+    buffer := U32{0}
+    bits := U8{0}
+    loop byte in text.bytes().filter(|b| -> not b.is_ascii_whitespace() and b != U8{61}) {
+        value :: match byte {
+            b if b >= U8{65} and b <= U8{90} -> b - U8{65}
+            b if b >= U8{97} and b <= U8{122} -> b - U8{97}
+            b if b >= U8{50} and b <= U8{55} -> b - U8{50} + U8{26}
+            _ -> return None
+        }
+        buffer = (buffer << 5) | U32{value}
+        bits += U8{5}
+        if bits >= U8{8} { &out.push(U8{(buffer >> (bits - U8{8})) & U32{255}}); bits -= U8{8} }
+    }
+    Val(^out)
+}
+// Rust: tests/base_encoding_2026.rs:90
+fn strings(alphabet: [U8], max_len: Int, check: &(fn(String) -> ())) -> {
+    input := [U8]{}.with_capacity(max_len)
+    visit(alphabet, max_len, &input, &check)
+}
+// Rust: tests/base_encoding_2026.rs:91
+fn visit(alphabet: [U8], remaining: Int, input: &[U8], check: &(fn(String) -> ())) -> {
+    check(String.from_utf8(input).unwrap())
+    if remaining == 0 -> return
+    loop byte in alphabet {
+        &input.push(byte)
+        visit(alphabet, remaining - 1, &input, &check)
+        _ :: &input.pop()
+    }
+}
+// Rust: tests/base_encoding_2026.rs:110
+fn check_base64_case(text: String) -> {
+    aot :: frozen_aot_base64(text)
+    comptime :: frozen_comptime_base64(text)
+    if (aot, comptime) is (Val(a), Val(c)) { assert_eq(a, c, "historical base64 disagreement for {text.debug()}") }
+    assert_eq(base_encoding_2026.decode_base64(text).ok(), aot.or(comptime), "base64 union mismatch for {text.debug()}")
+    prepared :: url_input(text)
+    aot :: frozen_aot_base64(prepared)
+    comptime :: frozen_comptime_base64(prepared)
+    if (aot, comptime) is (Val(a), Val(c)) { assert_eq(a, c, "historical base64url disagreement for {text.debug()}") }
+    assert_eq(base_encoding_2026.decode_base64url(text).ok(), aot.or(comptime), "base64url union mismatch for {text.debug()}")
+}
+// Rust: tests/base_encoding_2026.rs:139
+#Test("exhaustive_short_inputs_match_frozen_2026_engines_without_disagreement") {
+    full := BASE64.to_vec()
+    &full.extend_from_slice("= \n-_*.".as_bytes())
+    strings(full, 3, &check_base64_case)
+    strings("ABPQfgvw09+/= \n-_*.".as_bytes(), 4, &check_base64_case)
+    base32 := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz234567".as_bytes().to_vec()
+    &base32.extend_from_slice("= \n01*.".as_bytes())
+    check_historical := |text| -> assert_eq(base_encoding_2026.decode_base32(text).ok(), frozen_base32(text), "base32 historical mismatch for {text.debug()}")
+    strings(base32, 3, &check_historical)
+    check_structural := |text| -> assert_eq(base_encoding_2026.decode_base32(text).ok(), frozen_base32(text), "base32 structural mismatch for {text.debug()}")
+    strings("ABPZabpz237= \n01*.".as_bytes(), 4, &check_structural)
+}
+// Rust: tests/base_encoding_2026.rs:164
+#Test("rfc4648_base64_base64url_and_base32_vectors_decode") {
+    loop (plain, base64, base32) in [("", "", ""), ("f", "Zg==", "MY======"), ("fo", "Zm8=", "MZXQ===="),
+        ("foo", "Zm9v", "MZXW6==="), ("foob", "Zm9vYg==", "MZXW6YQ="), ("fooba", "Zm9vYmE=", "MZXW6YTB"),
+        ("foobar", "Zm9vYmFy", "MZXW6YTBOI======")] {
+        assert_eq(base_encoding_2026.decode_base64(base64).unwrap(), plain.as_bytes())
+        assert_eq(base_encoding_2026.decode_base64url(base64.trim_end_matches('=')).unwrap(), plain.as_bytes())
+        assert_eq(base_encoding_2026.decode_base32(base32).unwrap(), plain.as_bytes())
+    }
+    assert_eq(base_encoding_2026.decode_base64("+/8=").unwrap(), [U8{251}, U8{255}])
+    assert_eq(base_encoding_2026.decode_base64url("-_8").unwrap(), [U8{251}, U8{255}])
+}
+
+// Rust: tests/checked_text_crossings.rs:5
+DECLS :: """
+enum TextError { Bad }
+Pattern :: distinct String
+impl Pattern.CheckedText {
+    type Error = TextError
+    fn check(text: String) -[]> TextError! {
+        if text == "" { return Err(TextError.Bad) }
+        return Ok(())
+    }
+    fn encode_hole<T: Printable>(value: T) -[]> String { return "{value}" }
+}
+"""
+// Rust: tests/checked_text_crossings.rs:24
+fn assert_plain_string_rejected(label: String, body: String) -> {
+    source :: "{DECLS}\n{body}"
+    diagnostics :: compile(source).expect_err(label)
+    assert(diagnostics.iter().any(|d| -> ["E0112", "E0108", "E0113", "E0905", "E0702", "E3203"].contains(d.code)), "{label} produced no checked-text type-boundary diagnostic: {diagnostics.debug()}")
+}
+// Rust: tests/checked_text_crossings.rs:39
+#Test("plain_string_cannot_cross_checked_text_boundaries") {
+    assert_plain_string_rejected("checked text parameter", """
+fn accept(value: Pattern) -> {}
+fn run() -> { plain :: "plain"; accept(plain) }
+""")
+    assert_plain_string_rejected("checked text field", """
+struct Envelope { value: Pattern }
+fn run() -> { plain :: "plain"; envelope :: Envelope{ value: plain } }
+""")
+    assert_plain_string_rejected("checked text collection", """
+fn accept(values: [Pattern]) -> {}
+fn run() -> { plain :: "plain"; accept([plain]) }
+""")
+    assert_plain_string_rejected("checked text generic", """
+struct Envelope<T> { value: T }
+fn run() -> { plain :: "plain"; envelope :: Envelope<Pattern>{ value: plain } }
+""")
+    assert_plain_string_rejected("checked text return", """
+fn make() -> Pattern { plain :: "plain"; return plain }
+fn run() -> {}
+""")
+    assert_plain_string_rejected("checked text trait method", """
+trait Sink { fn put(self, value: Pattern) -> }
+struct Worker {}
+impl Worker.Sink { fn put(self, value: Pattern) -> {} }
+fn run() -> { worker :: Worker{}; plain :: "plain"; worker.put(plain) }
+""")
+    assert_plain_string_rejected("checked text foreign boundary", """
+use c.checked as c
+#Import module c.checked { fn put(value: Pattern) -> = "put" }
+fn run() -> { plain :: "plain"; c.put(plain) }
+""")
+}
+// Rust: tests/checked_text_crossings.rs:137
+#Test("email_html_body_rejects_plain_string") {
+    diagnostics :: compile("""
+use core.email as email
+fn run() -> {
+    sender :: email.address("sender@example.com") ?? panic("sender")
+    email.message(sender, [sender], [Address]{}, "subject", "body", "<b>unsafe</b>", [Attachment]{})
+}
+""").expect_err("email HTML body accepted a plain String")
+    assert(diagnostics.iter().any(|d| -> d.code == "E0149"), "email HTML body produced no checked-text diagnostic: {diagnostics.debug()}")
+}
+
+// Rust: tests/cli_runtime.rs:1
+use Compiler.JetFoundation.Tests.Integration.CliParts.Inspect.*
+// Rust: tests/cli_runtime.rs:3
+use tests.conformance.corpus.core.port.cli_parts.runtime as cli_runtime
+// Rust: tests/cli_scene_memory.rs:1
+// Shared common and cli_parts.support imports above replace the Rust includes.
+// Rust: tests/cli_scene_memory.rs:3
+use tests.conformance.corpus.core.port.cli_parts.runtime as cli_scene_memory
+
+// Rust: tests/comptime_core_one_home.rs:9
+fn read(path: String) -> String {
+    fs.read_to_string(OSPath.new(env.var("CARGO_MANIFEST_DIR").unwrap()).join(path)).unwrap_or_else(|error| -> panic("read {path}: {error}"))
+}
+// Rust: tests/comptime_core_one_home.rs:14
+fn dispatched_namespaces(source: String) -> [String:Bool] {
+    namespaces := [String:Bool]{}
+    loop (start, _) in source.match_indices("(\"core.") {
+        namespace :: source[start + 2..]
+        if namespace.find('"') is Val(end) { namespaces[namespace[..end].trim_end_matches('.').to_string()] = true }
+    }
+    namespaces
+}
+// Rust: tests/comptime_core_one_home.rs:26
+#Test("architecture_classifies_every_comptime_core_namespace") {
+    namespaces := dispatched_namespaces(read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs"))
+    loop path in ["crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs", "crates/jet-comptime/src/Comptime/CorePureParity.rs"] {
+        loop namespace in dispatched_namespaces(read(path)).keys() { namespaces[namespace] = true }
+    }
+    namespaces["core.compute.solve"] = true
+    architecture :: read("Docs/spec/architecture.md")
+    keys := namespaces.keys().collect()
+    &keys.sort()
+    loop namespace in keys { assert(architecture.contains("| `{namespace}` |"), "architecture classification is missing {namespace}") }
+}
+// Rust: tests/comptime_core_one_home.rs:50
+#Test("mime_and_email_have_one_semantic_home") {
+    codegen :: read("crates/jet-codegen/src/Codegen/mod.rs")
+    core_calls :: read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs")
+    pure :: read("crates/jet-comptime/src/Comptime/CorePureParity.rs")
+    url_mime :: read("crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs")
+    kernel :: "JetStd/Mime.rs"
+    assert(codegen.contains(kernel), "AOT must embed {kernel}")
+    assert(core_calls.contains(kernel), "comptime/interpreter must include {kernel}")
+    assert(codegen.contains("CoreLib/Email.rs"), "AOT must embed email kernel")
+    jit :: read("crates/jet-jit/src/Net.rs")
+    assert(read("crates/jet-comptime/src/Comptime/EmailAdapter.rs").contains("CoreLib/Email.rs"))
+    assert(jit.contains("CoreLib/Email.rs"))
+    assert(jit.contains("CoreLib/JetStd/UrlMime.rs"))
+    assert(not pure.contains("fn email_"), "comptime must not regain an email implementation")
+    assert(not pure.contains("\"html\" | \"htm\" => Some(\"text/html\")"))
+    assert(url_mime.starts_with("    include!(\"Mime.rs\");"))
+    assert(not url_mime.contains("fn jet_mime_token"))
+}
+// Rust: tests/comptime_core_one_home.rs:81
+#Test("sketches_have_one_semantic_home") {
+    kernel :: "Core/Sketch.rs"
+    loop (path, tier) in [("crates/jet-codegen/src/Codegen/mod.rs", "AOT"), ("crates/jet-jit/src/Sketch.rs", "JIT"), ("crates/jet-comptime/src/Comptime/Methods/core_calls.rs", "comptime/interpreter")] {
+        assert(read(path).contains(kernel), "{tier} must include {kernel}")
+    }
+    pure :: read("crates/jet-comptime/src/Comptime/CorePureParity.rs")
+    core :: read("crates/jet-codegen/src/Prelude/Core.rs")
+    build :: read("crates/jet-jit/build.rs")
+    jit :: read("crates/jet-jit/src/Sketch.rs")
+    loop fingerprint in ["wrapping_mul(1099511628211)", "TDIGEST_DELTA", "x ^= x << 13"] {
+        assert(not pure.contains(fingerprint), "comptime copied `{fingerprint}`")
+        assert(not core.contains(fingerprint), "Core.rs copied `{fingerprint}`")
+        assert(not jit.contains(fingerprint), "JIT copied `{fingerprint}`")
+    }
+    assert(not build.contains("write_sketch_rt"))
+}
+// Rust: tests/comptime_core_one_home.rs:117
+#Test("solver_has_one_semantic_home") {
+    kernel :: "CoreLib/Top/Solver.rs"
+    loop (path, tier) in [("crates/jet-codegen/src/Codegen/mod.rs", "AOT"), ("crates/jet-jit/src/Solver.rs", "JIT"), ("crates/jet-comptime/src/Comptime/Methods/core_calls.rs", "comptime/interpreter")] {
+        assert(read(path).contains(kernel), "{tier} must include {kernel}")
+    }
+    pure :: read("crates/jet-comptime/src/Comptime/CorePureParity.rs")
+    math_time :: read("crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs")
+    jit :: read("crates/jet-jit/src/Solver.rs")
+    assert(not pure.contains("failures + 1"))
+    assert(not math_time.contains("fn jet_solver_"))
+    assert(not jit.contains("solver.failures += 1"))
+}
+// Rust: tests/comptime_core_one_home.rs:139
+#Test("civil_time_and_duration_have_one_semantic_home") {
+    loop (kernel, users) in [
+        ("Core/Time.rs", ["crates/jet-codegen/src/Codegen/mod.rs", "crates/jet-jit/src/Time.rs", "crates/jet-comptime/src/Comptime/Methods/core_calls.rs"]),
+        ("Core/Duration.rs", ["crates/jet-codegen/src/Codegen/mod.rs", "crates/jet-jit/src/jit/runtime_host.rs", "crates/jet-comptime/src/Comptime/Methods/core_calls.rs"])] {
+        loop path in users { assert(read(path).contains(kernel), "{path} must include {kernel}") }
+    }
+    loop path in ["crates/jet-comptime/src/Comptime/Builtins.rs", "crates/jet-codegen/src/Codegen/TIR/eval/handles.rs"] {
+        assert(read(path).contains("Core/Duration.rs"), "{path} must include the duration kernel")
+    }
+    pure :: read("crates/jet-comptime/src/Comptime/CorePureParity.rs")
+    old_core :: read("crates/jet-codegen/src/Prelude/Core.rs")
+    jit_time :: read("crates/jet-jit/src/Time.rs")
+    jit_build :: read("crates/jet-jit/build.rs")
+    loop fingerprint in ["365 * y + y / 4 - y / 100", "RFC3339 datetime needs Z or an offset", "value.checked_mul(scale)"] {
+        assert(not pure.contains(fingerprint), "comptime copied `{fingerprint}`")
+        assert(not old_core.contains(fingerprint), "Core.rs copied `{fingerprint}`")
+        assert(not jit_time.contains(fingerprint), "JIT copied `{fingerprint}`")
+    }
+    assert(not jit_build.contains("write_time_rt"))
+}
+// Rust: tests/comptime_core_one_home.rs:198
+#Test("xml_has_one_semantic_home") {
+    kernel :: "XmlKernel.rs"
+    assert(read("crates/jet-codegen/src/Codegen/mod.rs").contains(kernel), "AOT must embed {kernel}")
+    assert(read("crates/jet-foundation/src/lib.rs").contains("pub mod XmlKernel"), "JIT and comptime must import the foundation XML kernel")
+    comptime :: read("crates/jet-comptime/src/Comptime/EncodingLite.rs")
+    comptime_production :: comptime.split("#[cfg(test)]").next().unwrap()
+    pure :: read("crates/jet-comptime/src/Comptime/CorePureParity.rs")
+    jit :: read("crates/jet-jit/src/Encoding.rs")
+    aot :: read("crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs")
+    loop (tier, source, call) in [("AOT", aot, "jet_xml_kernel::parse_document(text)"), ("comptime/interpreter", comptime_production, "XmlKernel::parse_document(text)"), ("JIT", jit, "XmlKernel::parse_document(&clone_string(text))")] {
+        assert(source.contains(call), "{tier} must pass XML source unchanged to the shared kernel")
+    }
+    loop operation in ["parse_document(", "parse_document_with(", "parse_document_bytes_with(", "render_document(", "render_document_bytes(", "canonical_document(", "document_root(", "expanded_name_parts(", "lookup_attribute(", "element_content(", "project_document_for_decode("] {
+        assert(aot.contains("jet_xml_kernel::{operation}"))
+        assert(not comptime_production.contains("XmlPull::{operation}"), "comptime bypassed XML kernel for `{operation}`")
+        assert(not jit.contains("XmlPull::{operation}"), "JIT bypassed XML kernel for `{operation}`")
+    }
+    assert(not pure.contains("XmlPull::canonical_document("))
+}
+// Rust: tests/comptime_core_one_home.rs:259
+#Test("measurement_has_one_semantic_home") {
+    kernel :: "Core/Measurement.rs"
+    loop path in ["crates/jet-codegen/src/Codegen/mod.rs", "crates/jet-jit/src/jit/runtime_host.rs", "crates/jet-comptime/src/Comptime/Methods/core_calls.rs"] { assert(read(path).contains(kernel), "{path} must include {kernel}") }
+    pure :: read("crates/jet-comptime/src/Comptime/CorePureParity.rs")
+    aot :: read("crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs")
+    jit :: read("crates/jet-jit/src/jit/runtime_host.rs")
+    loop fingerprint in ["left_uncertainty * left_uncertainty", "self.uncertainty * self.uncertainty", "jet_codegen::Comptime::Builtins::apply_method"] {
+        assert(not pure.contains(fingerprint), "comptime copied `{fingerprint}`")
+        assert(not aot.contains(fingerprint), "AOT wrapper copied `{fingerprint}`")
+        assert(not jit.contains(fingerprint), "JIT wrapper copied `{fingerprint}`")
+    }
+    docs :: read("Docs/spec/reference/core-library.md").split_whitespace().collect().join(" ")
+    loop statement in ["first-order linear propagation with uncorrelated inputs", "Correlated errors are out of scope"] { assert(docs.contains(statement), "measurement docs omit `{statement}`") }
+}
+// Rust: tests/comptime_core_one_home.rs:307
+#Test("round_three_value_kernels_have_one_semantic_home") {
+    loop (kernel, users) in [
+        ("Core/Fmt.rs", ["crates/jet-codegen/src/Codegen/mod.rs", "crates/jet-jit/src/Fmt.rs", "crates/jet-comptime/src/Comptime/Methods/core_calls.rs"]),
+        ("Core/Path.rs", ["crates/jet-codegen/src/Codegen/mod.rs", "crates/jet-jit/src/CoreHost.rs", "crates/jet-comptime/src/Comptime/Methods/core_calls.rs"]),
+        ("Core/SeededRandom.rs", ["crates/jet-codegen/src/Codegen/mod.rs", "crates/jet-jit/src/Random.rs", "crates/jet-comptime/src/Comptime/Methods/dispatch.rs"]),
+        ("Core/EncodingBase.rs", ["crates/jet-codegen/src/Codegen/mod.rs", "crates/jet-jit/src/Encoding.rs", "crates/jet-comptime/src/Comptime/Methods/core_calls.rs"]),
+        ("Core/NetPure.rs", ["crates/jet-codegen/src/Codegen/mod.rs", "crates/jet-jit/src/net_http_rt.rs", "crates/jet-comptime/src/Comptime/Methods/core_calls.rs"]),
+        ("CoreLib/Top/MathLibPure.rs", ["crates/jet-codegen/src/Codegen/mod.rs", "crates/jet-jit/build.rs", "crates/jet-comptime/src/Comptime/Methods/core_calls.rs"]),
+        ("Core/Loadable.rs", ["crates/jet-codegen/src/Codegen/mod.rs", "crates/jet-jit/src/Reactive.rs", "crates/jet-comptime/src/Comptime/Methods/core_calls.rs"]),
+        ("CoreLib/Top/Text.rs", ["crates/jet-codegen/src/Codegen/mod.rs", "crates/jet-jit/src/Text.rs", "crates/jet-comptime/src/Comptime/TextLite.rs"]),
+        ("CoreLib/JetStd/UrlMime.rs", ["crates/jet-codegen/src/Codegen/mod.rs", "crates/jet-jit/src/Net.rs", "crates/jet-comptime/src/Comptime/UrlLite.rs"])] {
+        loop path in users { assert(read(path).contains(kernel), "{path} must include {kernel}") }
+    }
+    codecs :: read("crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs")
+    assert(not codecs.contains("fn jet_std_hex_encode"))
+    assert(not codecs.contains("fn jet_std_b64_encode"))
+    assert(not codecs.contains("fn jet_std_base32_encode"))
+    core_calls :: read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs")
+    jit_encoding :: read("crates/jet-jit/src/Encoding.rs")
+    loop decoder in ["base_encoding_dispatch::decode_base64", "base_encoding_dispatch::decode_base64url", "base_encoding_dispatch::decode_base32"] {
+        assert(core_calls.contains(decoder), "comptime must use {decoder}")
+        assert(jit_encoding.contains(decoder), "JIT must use {decoder}")
+    }
+    data_fmt :: read("crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs")
+    assert(not data_fmt.contains("fn jet_fmt_number"))
+    assert(read("crates/jet-comptime/src/Comptime/Builtins.rs").contains("Core/Loadable.rs"))
+    text :: read("crates/jet-comptime/src/Comptime/TextLite.rs")
+    assert(not text.contains("fn nfd_inner"))
+    assert(not text.contains("fn ccc("))
+    url :: read("crates/jet-comptime/src/Comptime/UrlLite.rs")
+    assert(not url.contains("fn url_valid_scheme"))
+    pure :: read("crates/jet-comptime/src/Comptime/CorePureParity.rs")
+    assert(not pure.contains("parse::<std::net::IpAddr>"))
+    assert(not pure.contains("parse::<std::net::SocketAddr>"))
+    assert(not core_calls.contains("std::path::Path::new(a)"))
+    assert(not core_calls.contains("fn comma_int_ct"))
+}

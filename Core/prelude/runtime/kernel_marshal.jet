@@ -1,0 +1,67 @@
+// PORT-PENDING 0220 crates-jet-jit-src-layout-module-group: crates/jet-jit/src/Marshal.rs:1-63
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Heap-handle marshalling for the JIT host shims.
+//RS //!
+//RS //! I9: a Cranelift host is an adapter, not a second implementation. It converts
+//RS //! arguments and results and calls the Prelude. These six functions are that
+//RS //! whole conversion vocabulary — every `core.*` host module shares them instead
+//RS //! of re-declaring its own copy.
+//RS 
+//RS use super::Concurrency;
+//RS use crate::runtime_host::alloc_jit_result;
+//RS 
+//RS /// Read a heap string handle. An unknown handle reads as the empty string.
+//RS pub(crate) fn clone_string(id: i64) -> String {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.heap
+//RS             .clone_string(id)
+//RS             .or_else(|| crate::runtime_host::view_string(rt, id))
+//RS             .unwrap_or_default()
+//RS     })
+//RS }
+//RS 
+//RS /// Store a string on the heap and return its handle.
+//RS pub(crate) fn alloc_string(s: String) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
+//RS }
+//RS 
+//RS /// Read a `[Int]` byte list handle as bytes.
+//RS pub(crate) fn clone_bytes(list: i64) -> Vec<u8> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(bytes) = crate::runtime_host::view_bytes(rt, list) {
+//RS             return bytes;
+//RS         }
+//RS         let len = rt.heap.list_len(list).unwrap_or(0);
+//RS         let mut out = Vec::with_capacity(len as usize);
+//RS         for i in 0..len {
+//RS             out.push(rt.heap.list_get_int(list, i).unwrap_or(0) as u8);
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS /// Store bytes as a `[Int]` list and return its handle.
+//RS pub(crate) fn alloc_byte_list(bytes: &[u8]) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for &b in bytes {
+//RS             let _ = rt.heap.list_push_int(list, b as i64);
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS /// Carry an `Ok` payload out of a host call.
+//RS pub(crate) fn result_ok(bits: u64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, true, bits))
+//RS }
+//RS 
+//RS /// Carry an `Err` message out of a host call.
+//RS pub(crate) fn result_err_msg(msg: &str) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let sid = rt.heap.alloc_string(msg.to_string());
+//RS         alloc_jit_result(rt, false, sid as u64)
+//RS     })
+//RS }
+// END-PORT-PENDING 0220 crates/jet-jit/src/Marshal.rs:1-63
+

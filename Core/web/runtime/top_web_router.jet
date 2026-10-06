@@ -1,0 +1,819 @@
+// D-DX-SUITE1=C: first-party Router state uses one shared reactive primitive.
+// This owner matches/decodes/preloads/navigates; hosts render its state.
+use core.web.router.[WebRouterValueType,WebRouterSearchCodec,WebRouterCacheStatus,WebNavigationStatus]
+use core.http.runtime.top_http_route.[JetHTTPRoutePattern,JetHTTPRouteSegment,jet_http_route_name,jet_http_route_parse,jet_http_route_path,jet_http_route_match,jet_http_route_selection_cmp,jet_http_route_encode_segment,jet_http_route_encode_component]
+use core.net.runtime.std_url_mime.jet_url_percent_decode_str
+use core.encoding.runtime.std_data_tree.DataTree
+use core.encoding.runtime.std_json_codec.parse_json_strict
+use jet_encoding_json.render_json
+use core.web.runtime.kernel_web_pending.[JetWebBoundaryId,JetWebIslandIdentity,JetWebHydrationTrigger]
+use core.reactive.runtime.std_reactive_event_watch.JetSignal
+use std.sync.[Arc,Mutex]
+use std.sync.atomic.[AtomicBool,Ordering]
+use jet_codegen.jet_web_stream_register
+use std.cmp.Ordering as CmpOrdering
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:11
+const JET_WEB_ROUTER_MAX_URL: USize = 16*1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:12
+const JET_WEB_ROUTER_MAX_ROUTES: USize = 1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:13
+const JET_WEB_ROUTER_MAX_PARAMS: USize = 128
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:14
+const JET_WEB_ROUTER_MAX_PRELOADED: USize = 256
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:15
+const JET_WEB_ROUTER_MAX_DATA: USize = 4*1024*1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:17
+fn jet_web_router_bound_data(value: String,fallback: &String) -> String { if value.len() <= JET_WEB_ROUTER_MAX_DATA { ^value } else { fallback.to_string() } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:24
+fn jet_web_router_identity(pattern: &String) -> String {
+    hash: U64 := 0xcbf29ce484222325
+    loop byte in pattern.as_bytes() {
+        hash ^= U64.from(*byte)
+        hash = hash.wrapping_mul(0x100000001b3)
+    }
+    "route-{hash:016x}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:32
+fn jet_web_router_cache_key(route: &JetWebRoute,navigation: &JetWebNavigation) -> String {
+    key := route.identity.clone()
+    key.push_str("|p")
+    param_names :: navigation.params.keys().cloned().collect::<[String]>().sorted()
+    for name in &param_names {
+        value :: &navigation.params[name]
+        key.push('|')
+        key.push_str(&name.len().to_string())
+        key.push(':')
+        key.push_str(name)
+        key.push('=')
+        key.push_str(&value.len().to_string())
+        key.push(':')
+        key.push_str(value)
+    }
+    key.push_str("|s")
+    search_names :: navigation.search.keys().cloned().collect::<[String]>().sorted()
+    for name in &search_names {
+        value :: &navigation.search[name]
+        key.push('|')
+        key.push_str(&name.len().to_string())
+        key.push(':')
+        key.push_str(name)
+        key.push('=')
+        key.push_str(&value.len().to_string())
+        key.push(':')
+        key.push_str(value)
+    }
+    ^key
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:58
+fn jet_web_router_json_string(value: &String) -> String { "{value:?}" }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:62
+fn jet_web_router_json_array(values: &[String]) -> String {
+    encoded :: values.iter().map(fn(value) { jet_web_router_json_string(value) }).collect::<[String]>().join(",")
+    "[{encoded}]"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:72
+// Value enum is canonically core.web.router.WebRouterValueType (Json maps JSON).
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:80
+impl WebRouterValueType {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:81
+    fn name(self: Self) -> String {
+        match self { Self.String -> "String", Self.Int -> "Int", Self.Bool -> "Bool", Self.Float -> "Float", Self.JSON -> "JSON" }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:93
+// Canonical WebRouterField has a different value-only shape; retain typed schema.
+#Derive(Clone,Debug,Eq,PartialEq)
+pub struct JetWebRouterField { pub name: String,pub value_type: WebRouterValueType,pub required: Bool,pub default: String? }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:100
+impl JetWebRouterField {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:101
+    pub fn new(name: String,value_type: WebRouterValueType) -> Self { Self{name,value_type,required: true,default: None} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:110
+    pub fn optional(self: Self,default: String?) -> Self {
+        self.required = false
+        self.default = ^default
+        ^self
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:116
+// Search codec is canonically core.web.router.WebRouterSearchCodec.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:122
+impl WebRouterSearchCodec {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:123
+    pub fn name(self: Self) -> String { match self { Self.Query -> "query", Self.JSON -> "json" } }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:131
+// Cache status is canonically core.web.router.WebRouterCacheStatus.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:139
+impl WebRouterCacheStatus {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:140
+    pub fn name(self: Self) -> String { match self { Self.Fresh -> "fresh", Self.Stale -> "stale", Self.Invalidated -> "invalidated", Self.Collected -> "collected" } }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:150
+#Derive(Clone,Debug,Eq,PartialEq)
+pub struct JetWebRouterCacheState { pub identity: String,pub status: WebRouterCacheStatus,pub data: String,pub dependencies: [String],pub generation: U64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:162
+fn jet_web_router_decode(value: &String,plus_as_space: Bool) -> String Err! {
+    normalized := if plus_as_space && value.as_bytes().contains(&b'+') { value.replace('+'," ") } else { value }
+    decoded :: jet_url_percent_decode_str(normalized)?
+    if decoded.chars().any(fn(character) { character.is_control() }) { return Err("URL component contains a control character") }
+    Ok(^decoded)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:176
+fn jet_web_router_parse_pattern(path: &String) -> JetHTTPRoutePattern Err! {
+    if path.len() > JET_WEB_ROUTER_MAX_URL { return Err("E2805: invalid web route `{path}`: route exceeds the {JET_WEB_ROUTER_MAX_URL}-byte limit") }
+    jet_http_route_parse(path)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:187
+fn jet_web_router_split_url(url: &String) -> (&String,&String) Err! {
+    if url.is_empty() || url.len() > JET_WEB_ROUTER_MAX_URL || !url.starts_with('/') { return Err("navigation URL must be an absolute path beginning with `/`") }
+    (path,query) := url.split_once('?').unwrap_or((url,"")) // #4303
+    if path.contains('#') || query.contains('#') { return Err("URL fragments are not accepted by the server navigation contract") }
+    Ok((path,query))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:198
+fn jet_web_router_match(pattern: &JetHTTPRoutePattern,path: &String) -> [String:String]? Err! {
+    values :: jet_http_route_path(path)?
+    Ok(jet_http_route_match(pattern,&values))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:205
+fn jet_web_router_parse_search(query: &String,codec: WebRouterSearchCodec) -> [String:String] Err! {
+    match codec { WebRouterSearchCodec.Query -> jet_web_router_parse_query(query), WebRouterSearchCodec.JSON -> jet_web_router_parse_json_search(query) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:215
+fn jet_web_router_parse_json_search(query: &String) -> [String:String] Err! {
+    if query.is_empty() { return Ok([:]) }
+    encoded: String? := None
+    loop pair in query.split('&') {
+        if pair.is_empty() { next }
+        (raw_key,raw_value) := pair.split_once('=').unwrap_or((pair,"")) // #4303
+        key :: jet_web_router_decode(raw_key,true)?
+        if key != "search" { return Err("JSON search codec accepts only the `search` query parameter, got `{key}`") }
+        if encoded.replace(jet_web_router_decode(raw_value,true)?).is_some() { return Err("JSON search parameter `search` is repeated") }
+    }
+    if encoded.is_none() { return Ok([:]) }
+    value :: parse_json_strict(&encoded.unwrap()).map_err(fn(error) { "invalid JSON search value: {error.reason}" })?
+    match value {
+        .Object(entries) -> {
+            if entries.len() > JET_WEB_ROUTER_MAX_PARAMS { return Err("navigation has too many search parameters") }
+            entries.into_iter().map(fn((key,value)) {
+                if !jet_http_route_name(&key) { return Err("search parameter `{key}` has an invalid name") }
+                Ok((^key,jet_web_router_json_value_text(&value)?))
+            }).collect()
+        },
+        _ -> Err("JSON search value must be an object")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:259
+fn jet_web_router_json_value_text(value: &DataTree) -> String Err! {
+    match value {
+        .Text(text) | .TypedText(text) -> Ok(text.clone()),
+        .Bool(value) -> Ok(value.to_string()),
+        .Int(value) -> Ok(value.to_string()),
+        .Float(value) if value.is_finite() -> Ok(value.to_string()),
+        .Float(_) -> Err("JSON search number must be finite"),
+        .Number(value) -> Ok(value.clone()),
+        DataTree.Null | .Array(_) | .Object(_) | .Bytes(_) -> Ok(render_json(value,false,0))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:275
+fn jet_web_router_parse_query(query: &String) -> [String:String] Err! {
+    values: [String:String] := [:]
+    if query.is_empty() { return Ok(^values) }
+    loop pair in query.split('&') {
+        if pair.is_empty() { next }
+        (raw_key,raw_value) := pair.split_once('=').unwrap_or((pair,"")) // #4303
+        key :: jet_web_router_decode(raw_key,true)?
+        if !jet_http_route_name(&key) { return Err("search parameter `{key}` has an invalid name") }
+        if values.contains_key(&key) { return Err("search parameter `{key}` is repeated") }
+        value :: jet_web_router_decode(raw_value,true)?
+        values.insert(^key,^value)
+        if values.len() > JET_WEB_ROUTER_MAX_PARAMS { return Err("navigation has too many search parameters") }
+    }
+    Ok(^values)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:301
+fn jet_web_router_parse_value(field: &JetWebRouterField,raw: (&String)?) -> String? Err! {
+    raw :: raw.or(field.default.as_ref())
+    if raw.is_none() {
+        if field.required { return Err("missing required parameter `{field.name}`") }
+        return Ok(None)
+    }
+    raw :: raw ?? panic("unwrap failed")
+    normalized :: match field.value_type {
+        WebRouterValueType.String -> raw.clone(),
+        WebRouterValueType.Int -> raw.parse::<I64>().map(fn(value) { value.to_string() }).map_err(fn(_) { "parameter `{field.name}` expects Int, got `{raw}`" })?,
+        WebRouterValueType.Bool -> match raw.as_str() { "true" | "1" -> "true", "false" | "0" -> "false", _ -> { return Err("parameter `{field.name}` expects Bool, got `{raw}`") } },
+        WebRouterValueType.Float -> {
+            value :: raw.parse::<Float>().map_err(fn(_) { "parameter `{field.name}` expects Float, got {raw}" })?
+            if !value.is_finite() { return Err("parameter `{field.name}` expects a finite Float") }
+            value.to_string()
+        },
+        WebRouterValueType.JSON -> {
+            _ :: parse_json_strict(raw).map_err(fn(error) { "parameter `{field.name}` expects JSON: {error.reason}" })?
+            raw.clone()
+        }
+    }
+    Ok(Val(^normalized))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:344
+fn jet_web_router_json_value_for_field(field: &JetWebRouterField,raw: &String) -> DataTree Err! {
+    match field.value_type {
+        WebRouterValueType.String -> Ok(DataTree.Text(raw.to_string())),
+        WebRouterValueType.Int -> raw.parse::<I64>().map(DataTree.Int).map_err(fn(_) { "parameter `{field.name}` expects Int, got {raw}" }),
+        WebRouterValueType.Bool -> match raw { "true" -> Ok(DataTree.Bool(true)), "false" -> Ok(DataTree.Bool(false)), _ -> Err("parameter `{field.name}` expects Bool, got {raw}") },
+        WebRouterValueType.Float -> raw.parse::<Float>().ok().filter(fn(value) { value.is_finite() }).map(DataTree.Float).ok_or_else(fn() { "parameter `{field.name}` expects Float, got {raw}" }),
+        WebRouterValueType.JSON -> parse_json_strict(raw).map_err(fn(error) { "parameter `{field.name}` expects JSON: {error.reason}" })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:370
+fn jet_web_router_typed_values(fields: &[JetWebRouterField],values: &[String:String]) -> [String:String] Err! {
+    typed: [String:String] := [:]
+    loop field in fields {
+        value :: jet_web_router_parse_value(field,values.get(&field.name))?
+        if value == .Val(value) { typed.insert(field.name.clone(),^value) }
+    }
+    Ok(^typed)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:384
+fn jet_web_router_validate_search(fields: &[JetWebRouterField],values: &[String:String]) -> () Err! {
+    keys :: values.keys().cloned().collect::<[String]>().sorted()
+    for key in &keys {
+        if !fields.iter().any(fn(field) { field.name == *key }) { return Err("search parameter `{key}` is not declared for this route") }
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:396
+// Navigation status is canonically core.web.router.WebNavigationStatus.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:407
+fn jet_web_router_validate_fields(pattern: &JetHTTPRoutePattern,params: &[JetWebRouterField],search: &[JetWebRouterField]) -> () Err! {
+    path_names: [String:Bool] := [:]
+    for segment in &pattern.segments {
+        match segment { .Param(name) | .CatchAll(name) -> { path_names.insert(name.clone(),true) }, JetHTTPRouteSegment.Static(_) -> {} }
+    }
+    declared: [String:Bool] := [:]
+    loop field in params {
+        if !jet_http_route_name(&field.name) { return Err("route parameter `{field.name}` has an invalid name") }
+        if !path_names.contains_key(&field.name) { return Err("route parameter `{field.name}` is not present in the route pattern") }
+        if field.required && field.default.is_some() { return Err("required route parameter `{field.name}` cannot have a default") }
+        if field.default.as_ref() == .Val(default) { _ :: jet_web_router_parse_value(field,Val(default))? }
+        if declared.insert(field.name.clone(),true).is_some() { return Err("route parameter `{field.name}` is declared more than once") }
+    }
+    names :: path_names.keys().cloned().collect::<[String]>().sorted()
+    for name in &names {
+        if !declared.contains_key(name) { return Err("route pattern parameter `{name}` has no typed declaration") }
+    }
+    loop field in search {
+        if !jet_http_route_name(&field.name) { return Err("search parameter `{field.name}` has an invalid name") }
+        if field.required && field.default.is_some() { return Err("required search parameter `{field.name}` cannot have a default") }
+        if field.default.as_ref() == .Val(default) { _ :: jet_web_router_parse_value(field,Val(default))? }
+        if declared.insert(field.name.clone(),true).is_some() { return Err("parameter `{field.name}` is declared more than once") }
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:470
+impl WebNavigationStatus {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:471
+    pub fn name(self: Self) -> String {
+        match self { Self.Idle -> "idle", Self.Preloading -> "preloading", Self.Pending -> "pending", Self.Ready -> "ready", Self.Error -> "error", Self.Aborted -> "aborted" }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:483
+#Derive(Clone,Debug,Eq,PartialEq)
+pub struct JetWebRouteBoundaries { pub pending: JetWebBoundaryId?,pub error: JetWebBoundaryId?,pub identity: JetWebIslandIdentity?,pub hydration_trigger: JetWebHydrationTrigger? }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:491
+impl Default for JetWebRouteBoundaries {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:492
+    fn default() -> Self { Self{pending: None,error: None,identity: None,hydration_trigger: None} }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:502
+impl JetWebRouteBoundaries {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:506
+    // Boundary IDs require the same exact source/build island identity as WebPending.
+    pub fn new(pending_boundary_id: String?,error_boundary_id: String?,identity: JetWebIslandIdentity?,hydration_trigger: JetWebHydrationTrigger?) -> Self Err! {
+        pending :: pending_boundary_id.map(JetWebBoundaryId.new).transpose().map_err(fn(error) { error.to_string() })?
+        error :: error_boundary_id.map(JetWebBoundaryId.new).transpose().map_err(fn(error) { error.to_string() })?
+        if (pending.is_some() || error.is_some() || hydration_trigger.is_some()) && identity.is_none() { return Err("web route boundary IDs and hydration require an island identity") }
+        if identity.as_ref() == .Val(identity) { identity.validate().map_err(fn(error) { error.to_string() })? }
+        Ok(Self{pending,error,identity,hydration_trigger})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:536
+    pub fn pending(boundary_id: String,identity: JetWebIslandIdentity,hydration_trigger: JetWebHydrationTrigger) -> Self Err! {
+        Self.new(Val(boundary_id.clone()),Val(^boundary_id),Val(^identity),Val(hydration_trigger))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:549
+struct JetWebRoute {
+    pattern_text: String
+    pattern: JetHTTPRoutePattern
+    identity: String
+    params: [JetWebRouterField]
+    search: [JetWebRouterField]
+    search_codec: WebRouterSearchCodec
+    loader: JetWebRouteLoader
+    pending: JetWebPendingBoundary?
+    error: JetWebErrorBoundary?
+    boundaries: JetWebRouteBoundaries
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:562
+#Derive(Clone,Debug,PartialEq)
+pub struct JetWebNavigation { pub url: String,pub route: String,pub params: [String:String],pub search: [String:String] }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:570
+#Derive(Clone,Debug)
+pub struct JetWebNavigationState {
+    pub status: WebNavigationStatus
+    pub current: JetWebNavigation?
+    pub data: String
+    pub error: String
+    pub pending_boundary_id: JetWebBoundaryId?
+    pub error_boundary_id: JetWebBoundaryId?
+    pub island_identity: JetWebIslandIdentity?
+    pub hydration_trigger: JetWebHydrationTrigger?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:582
+impl Default for JetWebNavigationState {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:583
+    fn default() -> Self { Self{status: WebNavigationStatus.Idle,current: None,data: "",error: "",pending_boundary_id: None,error_boundary_id: None,island_identity: None,hydration_trigger: None} }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:597
+type JetWebRouteLoader = Arc<fn(&JetWebNavigation) -> String Err! + Send + Sync>
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:598
+type JetWebPendingBoundary = Arc<fn(&JetWebNavigation) -> String + Send + Sync>
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:599
+type JetWebErrorBoundary = Arc<fn(&JetWebNavigation,&String) -> String + Send + Sync>
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:600
+type JetWebNotFoundBoundary = Arc<fn(&String) -> String + Send + Sync>
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:602
+fn jet_web_router_navigation_state(status: WebNavigationStatus,current: JetWebNavigation?,data: String,error: String,boundaries: &JetWebRouteBoundaries) -> JetWebNavigationState {
+    JetWebNavigationState{status,current,data,error,pending_boundary_id: boundaries.pending.clone(),error_boundary_id: boundaries.error.clone(),island_identity: boundaries.identity.clone(),hydration_trigger: boundaries.hydration_trigger}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:621
+#Derive(Clone)
+struct JetWebRouterInner {
+    routes: [JetWebRoute]
+    cache: [String:JetWebRouterCacheState]
+    cache_generation: U64
+    not_found: JetWebNotFoundBoundary?
+    state: JetSignal<JetWebNavigationState>
+    next_navigation_id: U64
+    active_navigation: (U64,Arc<AtomicBool>)?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:632
+impl Clone for JetWebRoute {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:633
+    fn clone(self: &Self) -> Self {
+        Self{pattern_text: self.pattern_text.clone(),pattern: self.pattern.clone(),identity: self.identity.clone(),params: self.params.clone(),search: self.search.clone(),search_codec: self.search_codec,loader: self.loader.clone(),pending: self.pending.clone(),error: self.error.clone(),boundaries: self.boundaries.clone()}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:649
+#Derive(Clone)
+pub struct JetWebRouter { inner: Arc<Mutex<JetWebRouterInner>> }
+impl JetWebRouter {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:655
+    pub fn new() -> Self {
+        // GATE #4565: kernel primitive
+        #Unsafe("retain shared router state under mutex") {
+            Self{inner: Arc.new(Mutex.new(JetWebRouterInner{routes: [], cache: [:], cache_generation: 0,
+                not_found: None, state: JetSignal.new(JetWebNavigationState.default()), next_navigation_id: 0, active_navigation: None}))}
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:668
+    fn start_navigation(self: &Self) -> (U64, Arc<AtomicBool>, JetSignal<JetWebNavigationState>, JetWebNavigationState) Err! {
+        // GATE #4565: kernel primitive
+        #Unsafe("supersede prior navigation and allocate checked generation and shared cancellation token under mutex") {
+            state :: self.inner.lock().map_err(fn(_) { "router is unavailable" })?
+            if Val((_, previous)) :: state.active_navigation.take() {
+                previous.store(true, Ordering.Release)
+                superseded := state.state.get()
+                superseded.status = WebNavigationStatus.Aborted
+                superseded.error = "navigation superseded"
+                state.state.set(^superseded)
+            }
+            state.next_navigation_id = state.next_navigation_id.checked_add(1).ok_or("router navigation id space exhausted")?
+            id :: state.next_navigation_id
+            token :: Arc.new(AtomicBool.new(false))
+            signal :: state.state.clone()
+            previous :: state.state.get()
+            state.active_navigation = Val((id, token.clone()))
+            Ok((id, token, signal, previous))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:699
+    fn navigation_active(self: &Self, id: U64, token: &Arc<AtomicBool>) -> Bool {
+        // GATE #4565: kernel primitive
+        #Unsafe("acquire cancellation and compare retained active token identity under mutex") {
+            if token.load(Ordering.Acquire) -> return false
+            self.inner.lock().map(fn(state) {
+                state.active_navigation.as_ref().is_some_and(fn((active_id, active_token)) { *active_id == id && Arc.ptr_eq(active_token, token) })
+            }).unwrap_or(false)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:716
+    fn finish_navigation(self: &Self, id: U64, token: &Arc<AtomicBool>) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("clear only the matching retained navigation under mutex") {
+            if Ok(state) :: self.inner.lock() {
+                if state.active_navigation.as_ref().is_some_and(fn((active_id, active_token)) { *active_id == id && Arc.ptr_eq(active_token, token) }) -> state.active_navigation = None
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:729
+    fn set_resolution_error(self: &Self, error: &String) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("project resolution failure while holding router state mutex") {
+            if Ok(state) :: self.inner.lock() {
+                current := state.state.get()
+                rendered :: state.not_found.as_ref().map(fn(boundary) { boundary(error) }).unwrap_or_else(fn() { error.to_string() })
+                current.status = WebNavigationStatus.Error
+                current.data = jet_web_router_bound_data(rendered, error)
+                current.error = error.to_string()
+                state.state.set(^current)
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:744
+    fn cache_value(self: &Self, key: &String) -> String? {
+        // GATE #4565: kernel primitive
+        #Unsafe("read fresh cached value under router mutex") {
+            self.inner.lock().ok().and_then(fn(state) { state.cache.get(key).cloned() })
+                .filter(fn(entry) { entry.status == WebRouterCacheStatus.Fresh }).map(fn(entry) { entry.data })
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:753
+    fn cache_store(self: &Self, key: String, identity: String, status: WebRouterCacheStatus, data: String, dependencies: [String]) -> () Err! {
+        // GATE #4565: kernel primitive
+        #Unsafe("advance checked cache generation and maintain bounded cache under mutex") {
+            state :: self.inner.lock().map_err(fn(_) { "router is unavailable" })?
+            state.cache_generation = state.cache_generation.checked_add(1).ok_or("router cache generation exhausted")?
+            generation :: state.cache_generation
+            if state.cache.len() >= JET_WEB_ROUTER_MAX_PRELOADED && !state.cache.contains_key(&key) {
+                oldest :: state.cache.keys().min().cloned()
+                if oldest == .Val(oldest) -> state.cache.remove(&oldest)
+            }
+            state.cache.insert(key, JetWebRouterCacheState{identity, status, data, dependencies, generation})
+            Ok(())
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:786
+    // Synchronous/concurrent loaders observe cancellation before publishing.
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:789
+    pub fn abort(self: &Self) -> Bool {
+        aborted :: self.start_navigation_abort()
+        if aborted.is_none() -> return false
+        (_, token, signal, current) := aborted ?? panic("unwrap failed")
+        // GATE #4565: kernel primitive
+        #Unsafe("release navigation cancellation flag") { token.store(true, Ordering.Release) }
+        current.status = WebNavigationStatus.Aborted
+        current.error = "navigation aborted"
+        signal.set(^current)
+        true
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:800
+    fn start_navigation_abort(self: &Self) -> (U64, Arc<AtomicBool>, JetSignal<JetWebNavigationState>, JetWebNavigationState)? {
+        // GATE #4565: kernel primitive
+        #Unsafe("take active navigation while retaining its signal snapshot under mutex") {
+            state :: self.inner.lock().ok()?
+            (id, token) :: state.active_navigation.take()?
+            Val((id, token, state.state.clone(), state.state.get()))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:811
+    pub fn route(self: &Self, pattern: String, params: [JetWebRouterField], search: [JetWebRouterField],
+        loader: fn(&JetWebNavigation) -> String Err!) -> Self Err! {
+        self.route_with_boundaries(^pattern, ^params, ^search, loader, None, None)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:828
+    pub fn route_with_search_codec(self: &Self, pattern: String, params: [JetWebRouterField], search: [JetWebRouterField],
+        search_codec: WebRouterSearchCodec, loader: fn(&JetWebNavigation) -> String Err!) -> Self Err! {
+        self.route_with_facts_codec(^pattern, ^params, ^search, search_codec, loader, None, None, JetWebRouteBoundaries.default())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:851
+    pub fn route_with_boundaries(self: &Self, pattern: String, params: [JetWebRouterField], search: [JetWebRouterField],
+        loader: fn(&JetWebNavigation) -> String Err!, pending: (fn(&JetWebNavigation) -> String)?,
+        error: (fn(&JetWebNavigation, &String) -> String)?) -> Self Err! {
+        self.route_with_facts_codec(^pattern, ^params, ^search, WebRouterSearchCodec.Query, loader, pending, error, JetWebRouteBoundaries.default())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:877
+    pub fn route_with_facts_codec(self: &Self, pattern: String, params: [JetWebRouterField], search: [JetWebRouterField],
+        search_codec: WebRouterSearchCodec, loader: fn(&JetWebNavigation) -> String Err!,
+        pending: (fn(&JetWebNavigation) -> String)?, error: (fn(&JetWebNavigation, &String) -> String)?,
+        boundaries: JetWebRouteBoundaries) -> Self Err! {
+        if params.len() + search.len() > JET_WEB_ROUTER_MAX_PARAMS -> return Err("route declares too many typed parameters")
+        parsed :: jet_web_router_parse_pattern(&pattern)?
+        jet_web_router_validate_fields(&parsed, &params, &search)?
+        // GATE #4565: kernel primitive
+        #Unsafe("register bounded route table entry and retain Send/Sync loader and boundary callbacks under mutex") {
+            state :: self.inner.lock().map_err(fn(_) { "router is unavailable" })?
+            if state.routes.len() >= JET_WEB_ROUTER_MAX_ROUTES -> return Err("router route table is full")
+            if state.routes.iter().any(fn(route) { route.pattern_text == pattern }) -> return Err("duplicate route `{pattern}`")
+            if boundaries.identity.as_ref() == .Val(identity) {
+                if boundaries.pending.as_ref() == .Val(boundary_id) {
+                    jet_web_stream_register(boundary_id.as_str().to_string(), identity.clone()).map_err(fn(error) { error.to_string() })?
+                }
+                if boundaries.error.as_ref() != boundaries.pending.as_ref() {
+                    if boundaries.error.as_ref() == .Val(boundary_id) {
+                        jet_web_stream_register(boundary_id.as_str().to_string(), identity.clone()).map_err(fn(error) { error.to_string() })?
+                    }
+                }
+            }
+            identity :: jet_web_router_identity(&pattern)
+            state.routes.push(JetWebRoute{pattern_text: pattern, pattern: parsed, identity, params, search, search_codec,
+                loader: Arc.new(loader), pending: pending.map(fn(handler) { Arc.new(handler) }),
+                error: error.map(fn(handler) { Arc.new(handler) }), boundaries})
+            Ok(self.clone())
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:933
+    pub fn not_found(self: &Self, handler: fn(&String) -> String) -> Self Err! {
+        // GATE #4565: kernel primitive
+        #Unsafe("retain shared not-found projection under router mutex") {
+            self.inner.lock().map_err(fn(_) { "router is unavailable" })?.not_found = Val(Arc.new(handler))
+        }
+        Ok(self.clone())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:943
+    fn resolve(self: &Self, url: &String) -> (JetWebRoute, JetWebNavigation) Err! {
+        (path, query) :: jet_web_router_split_url(url)?
+        // GATE #4565: kernel primitive
+        #Unsafe("select matching typed route against a stable route table under mutex") {
+            state :: self.inner.lock().map_err(fn(_) { "router is unavailable" })?
+            selected: (USize, JetWebRoute, JetWebNavigation)? := None
+            loop (index, route) in state.routes.iter().enumerate() {
+                raw_params :: match jet_web_router_match(&route.pattern, path)? { .Val(raw_params) -> raw_params, None -> next }
+                raw_search :: jet_web_router_parse_search(query, route.search_codec)?
+                params :: jet_web_router_typed_values(&route.params, &raw_params)?
+                jet_web_router_validate_search(&route.search, &raw_search)?
+                search :: jet_web_router_typed_values(&route.search, &raw_search)?
+                candidate :: (index, route.clone(), JetWebNavigation{url: url.to_string(), route: route.pattern_text.clone(), params, search})
+                if selected.as_ref().map(fn(current) { jet_http_route_selection_cmp(&candidate.1.pattern, candidate.0, &current.1.pattern, current.0) == CmpOrdering.Greater }).unwrap_or(true) -> selected = Val(candidate)
+            }
+            selected.map(fn((_, route, navigation)) { (route, navigation) }).ok_or_else(fn() { "no web route matches `{url}`" })
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:985
+    pub fn preload(self: &Self, url: String) -> JetWebNavigation Err! {
+        (route, navigation) :: match self.resolve(&url) {
+            Ok(value) -> value
+            Err(error) -> {
+                self.set_resolution_error(&error)
+                return Err(error)
+            }
+        }
+        cache_key :: jet_web_router_cache_key(&route, &navigation)
+        if self.cache_value(&cache_key).is_some() -> return Ok(navigation)
+        (id, token, signal, previous) :: self.start_navigation()?
+        signal.set(jet_web_router_navigation_state(WebNavigationStatus.Preloading, previous.current.clone(), previous.data.clone(), "", &route.boundaries))
+        loaded :: (route.loader)(&navigation)
+        if !self.navigation_active(id, &token) {
+            // GATE #4565: kernel primitive
+            aborted :: #Unsafe("acquire navigation cancellation") { token.load(Ordering.Acquire) }
+            return Err(if aborted { "navigation aborted" } else { "navigation superseded" })
+        }
+        loaded :: match loaded {
+            Ok(data) if data.len() <= JET_WEB_ROUTER_MAX_DATA -> Ok(data)
+            Ok(_) -> Err("preloaded route data is too large")
+            Err(error) -> Err(error)
+        }
+        match loaded {
+            Ok(data) -> {
+                _ :: self.cache_store(cache_key, route.identity.clone(), WebRouterCacheStatus.Fresh, data, [route.identity.clone()])
+                signal.set(jet_web_router_navigation_state(if previous.current.is_some() { WebNavigationStatus.Ready } else { WebNavigationStatus.Idle },
+                    previous.current, previous.data, "", &route.boundaries))
+                self.finish_navigation(id, &token)
+                Ok(navigation)
+            }
+            Err(error) -> {
+                _ :: self.cache_store(cache_key, route.identity, WebRouterCacheStatus.Invalidated, "", [])
+                signal.set(jet_web_router_navigation_state(if previous.current.is_some() { WebNavigationStatus.Ready } else { WebNavigationStatus.Idle },
+                    previous.current, previous.data, error.clone(), &route.boundaries))
+                self.finish_navigation(id, &token)
+                Err(error)
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1066
+    pub fn navigate(self: &Self, url: String) -> JetWebNavigation Err! {
+        (route, navigation) :: match self.resolve(&url) {
+            Ok(value) -> value
+            Err(error) -> {
+                self.set_resolution_error(&error)
+                return Err(error)
+            }
+        }
+        cache_key :: jet_web_router_cache_key(&route, &navigation)
+        (id, token, signal, _) :: self.start_navigation()?
+        cached :: self.cache_value(&cache_key)
+        from_cache :: cached.is_some()
+        pending_data :: route.pending.as_ref().map(fn(pending) { pending(&navigation) }).unwrap_or_default()
+        signal.set(jet_web_router_navigation_state(WebNavigationStatus.Pending, Val(navigation.clone()), pending_data, "", &route.boundaries))
+        loaded :: cached.map(Ok).unwrap_or_else(fn() { (route.loader)(&navigation) })
+        if !self.navigation_active(id, &token) {
+            // GATE #4565: kernel primitive
+            aborted :: #Unsafe("acquire navigation cancellation") { token.load(Ordering.Acquire) }
+            return Err(if aborted { "navigation aborted" } else { "navigation superseded" })
+        }
+        loaded :: match loaded {
+            Ok(data) if data.len() <= JET_WEB_ROUTER_MAX_DATA -> Ok(data)
+            Ok(_) -> Err("route loader data is too large")
+            Err(error) -> Err(error)
+        }
+        match loaded {
+            Ok(data) -> {
+                if !from_cache -> _ :: self.cache_store(cache_key, route.identity.clone(), WebRouterCacheStatus.Fresh, data.clone(), [route.identity.clone()])
+                signal.set(jet_web_router_navigation_state(WebNavigationStatus.Ready, Val(navigation.clone()), data, "", &route.boundaries))
+                self.finish_navigation(id, &token)
+                Ok(navigation)
+            }
+            Err(error) -> {
+                rendered :: jet_web_router_bound_data(route.error.as_ref().map(fn(boundary) { boundary(&navigation, &error) }).unwrap_or_else(fn() { error.clone() }), &error)
+                _ :: self.cache_store(cache_key, route.identity, WebRouterCacheStatus.Invalidated, "", [])
+                signal.set(jet_web_router_navigation_state(WebNavigationStatus.Error, Val(navigation.clone()), rendered, error.clone(), &route.boundaries))
+                self.finish_navigation(id, &token)
+                Err(error)
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1152
+    pub fn stale(self: &Self, identity: String) -> I64 { self.update_cache_status(&identity, WebRouterCacheStatus.Stale) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1156
+    pub fn invalidate(self: &Self, identity: String) -> I64 { self.update_cache_status(&identity, WebRouterCacheStatus.Invalidated) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1160
+    fn update_cache_status(self: &Self, identity: &String, status: WebRouterCacheStatus) -> I64 {
+        // GATE #4565: kernel primitive
+        #Unsafe("update matching cached identities under mutex") {
+            state :: match self.inner.lock() { Ok(state) -> state, Err(_) -> return 0 }
+            updated := 0
+            loop entry in state.cache.values_mut() {
+                if entry.identity == identity {
+                    entry.status = status
+                    updated += 1
+                }
+            }
+            updated
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1174
+    pub fn collect(self: &Self, identity: String) -> I64 {
+        // GATE #4565: kernel primitive
+        #Unsafe("collect every matching cache identity under mutex") {
+            state :: match self.inner.lock() { Ok(state) -> state, Err(_) -> return 0 }
+            keys :: state.cache.iter().filter(fn((_, entry)) { entry.identity == identity }).map(fn((key, _)) { key.clone() }).collect<[String]>()
+            count :: keys.len() as I64
+            loop key in keys -> state.cache.remove(&key)
+            count
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1191
+    pub fn cache_state(self: &Self, identity: String) -> JetWebRouterCacheState {
+        // GATE #4565: kernel primitive
+        #Unsafe("snapshot lexicographically first matching cache entry under mutex") {
+            self.inner.lock().ok().and_then(fn(state) {
+                key :: state.cache.iter().filter(fn((_, entry)) { entry.identity == identity }).map(fn((key, _)) { key }).min()
+                key.and_then(fn(key) { state.cache.get(key).cloned() }).or_else(fn() { state.cache.get(&identity).cloned() })
+            }).unwrap_or(JetWebRouterCacheState{identity, status: WebRouterCacheStatus.Collected, data: "", dependencies: [], generation: 0})
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1212
+    pub fn cache_show(self: &Self) -> String {
+        // GATE #4565: kernel primitive
+        #Unsafe("render stable sorted cache snapshot under mutex") {
+            state :: match self.inner.lock() { Ok(state) -> state, Err(_) -> return "RouterCache(unavailable)" }
+            keys: [String] := state.cache.keys().cloned().collect()
+            keys.sort()
+            entries :: keys.iter().map(fn(key) {
+                entry :: &state.cache[key]
+                format!("{{\"key\":{},\"identity\":{},\"status\":{},\"generation\":{},\"dependencies\":{},\"data_bytes\":{}}}",
+                    jet_web_router_json_string(key), jet_web_router_json_string(&entry.identity), jet_web_router_json_string(entry.status.name()),
+                    entry.generation, jet_web_router_json_array(&entry.dependencies), entry.data.len())
+            }).collect<[String]>().join(",")
+            format!("{{\"generation\":{},\"entries\":[{}]}}", state.cache_generation, entries)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1237
+    pub fn current(self: &Self) -> JetWebNavigationState {
+        // GATE #4565: kernel primitive
+        #Unsafe("snapshot router signal under mutex with exact Rust poison fallback") {
+            self.inner.lock().map(fn(state) { state.state.get() }).unwrap_or_else(fn(_) {
+                JetWebNavigationState{status: WebNavigationStatus.Error, current: None, data: "", error: "router is unavailable",
+                    pending_boundary_id: None, error_boundary_id: None, island_identity: None, hydration_trigger: None}
+            })
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1253
+    pub fn state_signal(self: &Self) -> JetSignal<JetWebNavigationState> {
+        // GATE #4565: kernel primitive
+        #Unsafe("retain router signal under mutex with exact Rust poison fallback") {
+            self.inner.lock().map(fn(state) { state.state.clone() }).unwrap_or_else(fn(_) {
+                JetSignal.new(JetWebNavigationState{status: WebNavigationStatus.Error, current: None, data: "", error: "router is unavailable",
+                    pending_boundary_id: None, error_boundary_id: None, island_identity: None, hydration_trigger: None})
+            })
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1269
+    pub fn show(self: &Self) -> String {
+        state :: self.current()
+        route :: state.current.as_ref().map(fn(current) { current.route.as_str() }).unwrap_or("-")
+        pending :: state.pending_boundary_id.as_ref().map(fn(boundary) { boundary.as_str() }).unwrap_or("-")
+        error_boundary :: state.error_boundary_id.as_ref().map(fn(boundary) { boundary.as_str() }).unwrap_or("-")
+        hydration :: state.hydration_trigger.map(JetWebHydrationTrigger.as_str).unwrap_or("-")
+        format!("Router(status={},route={},url={},params={},search={},pending_boundary={},error_boundary={},hydration={},error={})",
+            state.status.name(), route, state.current.as_ref().map(fn(current) { current.url.as_str() }).unwrap_or("-"),
+            state.current.as_ref().map(fn(current) { current.params.len() }).unwrap_or(0),
+            state.current.as_ref().map(fn(current) { current.search.len() }).unwrap_or(0), pending, error_boundary, hydration, state.error)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1304
+    pub fn link(self: &Self, pattern: String, params: [String:String], search: [String:String]) -> String Err! {
+        // GATE #4565: kernel primitive
+        #Unsafe("encode typed route link against stable route metadata under mutex") {
+            state :: self.inner.lock().map_err(fn(_) { "router is unavailable" })?
+            route :: state.routes.iter().find(fn(route) { route.pattern_text == pattern }).ok_or_else(fn() { "no web route named `{pattern}`" })?
+            typed_params :: jet_web_router_typed_values(&route.params, &params)?
+            typed_search :: jet_web_router_typed_values(&route.search, &search)?
+            path := "/"
+            loop (index, segment) in route.pattern.segments.iter().enumerate() {
+                if index > 0 -> path.push('/')
+                match segment {
+                    .Static(value) -> path.push_str(&jet_http_route_encode_segment(value.clone(), false))
+                    .Param(name) -> path.push_str(&jet_http_route_encode_segment(typed_params.get(name).ok_or_else(fn() { "missing `{name}`" })?.clone(), false))
+                    .CatchAll(name) -> path.push_str(&jet_http_route_encode_segment(typed_params.get(name).ok_or_else(fn() { "missing `{name}`" })?.clone(), true))
+                }
+            }
+            if path.is_empty() -> path.push('/')
+            if !typed_search.is_empty() {
+                path.push('?')
+                keys: [String] := typed_search.keys().cloned().collect()
+                keys.sort()
+                match route.search_codec {
+                    WebRouterSearchCodec.Query -> {
+                        loop (index, key) in keys.iter().enumerate() {
+                            if index > 0 -> path.push('&')
+                            path.push_str(&jet_http_route_encode_component(key.clone(), true, false))
+                            path.push('=')
+                            path.push_str(&jet_http_route_encode_component(typed_search[key].clone(), true, false))
+                        }
+                    }
+                    WebRouterSearchCodec.JSON -> {
+                        fields: [String:&JetWebRouterField] := [:]
+                        loop field in &route.search -> fields.insert(field.name.clone(), field)
+                        entries: [(String, DataTree)] := []
+                        loop key in keys {
+                            field :: fields.get(&key).ok_or_else(fn() { "search parameter `{key}` is not declared" })?
+                            entries.push((key.clone(), jet_web_router_json_value_for_field(field, &typed_search[&key])?))
+                        }
+                        encoded :: render_json(&DataTree.Object(entries), false, 0)
+                        path.push_str("search=")
+                        path.push_str(&jet_http_route_encode_component(encoded, true, false))
+                    }
+                }
+            }
+            Ok(path)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1379
+// Compiler supplies typed fields and loader to the canonical registration seam.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1382
+pub fn jet_web_router_route(router: &JetWebRouter, pattern: String, params: [JetWebRouterField], search: [JetWebRouterField],
+    loader: fn(&JetWebNavigation) -> String Err!) -> JetWebRouter Err! { router.route(^pattern, ^params, ^search, loader) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1395
+// Route facts explicitly select JSON-first or query-string typed search.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1397
+pub fn jet_web_router_route_with_search_codec(router: &JetWebRouter, pattern: String, params: [JetWebRouterField],
+    search: [JetWebRouterField], search_codec: WebRouterSearchCodec, loader: fn(&JetWebNavigation) -> String Err!) -> JetWebRouter Err! {
+    router.route_with_search_codec(^pattern, ^params, ^search, search_codec, loader)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1411
+// Shared not-found projection for all visual-router hosts.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1412
+pub fn jet_web_router_not_found(router: &JetWebRouter, handler: fn(&String) -> String) -> JetWebRouter Err! { router.not_found(handler) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1422
+pub fn jet_web_router_stale(router: &JetWebRouter, identity: String) -> I64 { router.stale(^identity) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1426
+pub fn jet_web_router_invalidate(router: &JetWebRouter, identity: String) -> I64 { router.invalidate(^identity) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1430
+pub fn jet_web_router_collect(router: &JetWebRouter, identity: String) -> I64 { router.collect(^identity) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1434
+pub fn jet_web_router_cache_state(router: &JetWebRouter, identity: String) -> JetWebRouterCacheState { router.cache_state(^identity) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1441
+pub fn jet_web_router_cache_show(router: &JetWebRouter) -> String { router.cache_show() }
+impl Default for JetWebRouter {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1446
+    fn default() -> Self { Self.new() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1451
+pub fn jet_web_router_new() -> JetWebRouter { JetWebRouter.new() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1455
+pub fn jet_web_router_navigate(router: &JetWebRouter, url: String) -> JetWebNavigation Err! { router.navigate(^url) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1462
+pub fn jet_web_router_preload(router: &JetWebRouter, url: String) -> JetWebNavigation Err! { router.preload(^url) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1469
+pub fn jet_web_router_current(router: &JetWebRouter) -> JetWebNavigationState { router.current() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1473
+pub fn jet_web_router_show(router: &JetWebRouter) -> String { router.show() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1477
+pub fn jet_web_router_abort(router: &JetWebRouter) -> Bool { router.abort() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1481
+pub fn jet_web_router_link(router: &JetWebRouter, pattern: String, params: [String:String], search: [String:String]) -> String Err! {
+    router.link(^pattern, ^params, ^search)
+}
+

@@ -1,0 +1,1892 @@
+// PORT-PENDING 0196 crates-jet-jit-src-collections-slice-1: crates/jet-jit/src/Collections.rs:1-1888
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! M5: list/map host shims for the Cranelift JIT (`JetArena` handles).
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS use crate::runtime_host::{jit_callable_parts, JitCallableSlot};
+//RS use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
+//RS 
+//RS mod set_semantics {
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/Core/SetAlgebra.rs");
+//RS }
+//RS 
+//RS mod range_semantics {
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     use jet_foundation::StructuralDebug::jet_debug_range;
+//RS     include!("../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
+//RS }
+//RS 
+//RS pub(crate) mod byte_buffer_semantics {
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/Core/Bytes.rs");
+//RS }
+//RS 
+//RS mod disjoint_semantics {
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/Core/Disjoint.rs");
+//RS 
+//RS     pub(super) fn split(len: usize, mid: i64) -> Result<((usize, usize), (usize, usize)), String> {
+//RS         jet_disjoint_split_bounds(len, mid)
+//RS     }
+//RS 
+//RS     pub(super) fn indexes(
+//RS         len: usize,
+//RS         indices: &[i64],
+//RS     ) -> Result<Vec<(usize, usize, usize)>, String> {
+//RS         jet_disjoint_index_bounds(len, indices)
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) mod authority_semantics {
+//RS     include!("../../jet-codegen/src/Prelude/Core/Authority.rs");
+//RS }
+//RS 
+//RS mod float_ordering {
+//RS     include!("../../jet-codegen/src/Prelude/Core/FloatOrdering.rs");
+//RS }
+//RS 
+//RS mod process_args_kernel {
+//RS     include!("../../jet-codegen/src/Prelude/Core/ProcessArgs.rs");
+//RS }
+//RS 
+//RS // The resident collection ABI owns only handle conversion.  The operation
+//RS // itself must stay in the same Prelude source embedded by AOT and evaluated by
+//RS // tier 0 (I9).  This small module supplies the Prelude's sibling types that
+//RS // are normally present in the flat emitted program, then exposes Vec-shaped
+//RS // adapters for JIT handles.
+//RS #[allow(dead_code, non_camel_case_types, unused_imports)]
+//RS pub(crate) mod collection_semantics {
+//RS     use crate::fault_injection::jet_fault_should_fail_allocation;
+//RS     use crate::Encoding::json_rt::jet_int_to_string;
+//RS     use jet_foundation::Numeric::JetInt;
+//RS     pub use jet_foundation::Outcome::*;
+//RS 
+//RS     use jet_foundation::StructuralDebug::jet_debug_map;
+//RS     use jet_foundation::StructuralDebug::jet_debug_optional;
+//RS     use jet_foundation::StructuralDebug::jet_debug_range;
+//RS 
+//RS     // These are emitted beside the Prelude in an AOT program. Keep the same
+//RS     // bridge and text-value fragments here so collection adapters do not grow
+//RS     // a second Display/Debug implementation.
+//RS     trait __jet_Display {
+//RS         fn display(&self) -> String;
+//RS     }
+//RS     trait __jet_Equatable: Sized {
+//RS         fn equal(&self, rhs: &Self) -> bool;
+//RS     }
+//RS 
+//RS     #[derive(Clone)]
+//RS     struct JetByteBuffer {
+//RS         bytes: Vec<u8>,
+//RS     }
+//RS 
+//RS     #[derive(Clone, Debug, PartialEq, Eq)]
+//RS     pub(crate) struct JetMap<K, V>(std::sync::Arc<std::collections::BTreeMap<K, V>>);
+//RS 
+//RS     impl<K, V> JetMap<K, V> {
+//RS         fn new() -> Self {
+//RS             Self(std::sync::Arc::new(std::collections::BTreeMap::new()))
+//RS         }
+//RS     }
+//RS 
+//RS     impl<K: Ord, V> std::iter::FromIterator<(K, V)> for JetMap<K, V> {
+//RS         fn from_iter<I: IntoIterator<Item = (K, V)>>(pairs: I) -> Self {
+//RS             Self(std::sync::Arc::new(pairs.into_iter().collect()))
+//RS         }
+//RS     }
+//RS 
+//RS     impl<K, V> std::ops::Deref for JetMap<K, V> {
+//RS         type Target = std::collections::BTreeMap<K, V>;
+//RS 
+//RS         fn deref(&self) -> &Self::Target {
+//RS             &self.0
+//RS         }
+//RS     }
+//RS 
+//RS     impl<K: Ord + Clone, V: Clone> std::ops::DerefMut for JetMap<K, V> {
+//RS         fn deref_mut(&mut self) -> &mut Self::Target {
+//RS             std::sync::Arc::make_mut(&mut self.0)
+//RS         }
+//RS     }
+//RS 
+//RS     /// By-value take of the map entries (`Prelude/Core.rs` spelling): the
+//RS     /// sole owner moves the storage out, a shared handle clones the entries.
+//RS     fn jet_map_into_entries<K: Ord + Clone, V: Clone>(m: JetMap<K, V>) -> Vec<(K, V)> {
+//RS         match std::sync::Arc::try_unwrap(m.0) {
+//RS             Ok(map) => map.into_iter().collect(),
+//RS             Err(shared) => shared
+//RS                 .iter()
+//RS                 .map(|(key, value)| (key.clone(), value.clone()))
+//RS                 .collect(),
+//RS         }
+//RS     }
+//RS 
+//RS     // BTreeMap has no stable fallible reservation API. Keep this representation
+//RS     // step at the map seam; the shared Prelude owns the AllocError projection.
+//RS     fn jet_map_try_insert_storage<K: Ord + Clone, V: Clone>(
+//RS         map: &mut JetMap<K, V>,
+//RS         key: K,
+//RS         value: V,
+//RS     ) -> Result<Option<V>, ()> {
+//RS         Ok(map.insert(key, value))
+//RS     }
+//RS 
+//RS     fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
+//RS         crate::runtime_host::runtime_stop_unwind_at("E3001", file, line, msg)
+//RS     }
+//RS     // Collections.rs is also embedded in the resident JIT host, which owns
+//RS     // its report boundary in JitRuntime rather than Core.rs.
+//RS     #[allow(dead_code)]
+//RS     fn jet_panic_rich_code(
+//RS         code: &'static str,
+//RS         file: &str,
+//RS         line: u32,
+//RS         fn_name: &str,
+//RS         source_line: &str,
+//RS         col: u32,
+//RS         caret_len: u32,
+//RS         message: &str,
+//RS         _locals: &str,
+//RS     ) -> ! {
+//RS         crate::Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_runtime_stop_with_context(
+//RS                 code,
+//RS                 file,
+//RS                 line,
+//RS                 fn_name,
+//RS                 source_line,
+//RS                 col,
+//RS                 caret_len,
+//RS                 message,
+//RS             );
+//RS         });
+//RS         std::panic::resume_unwind(Box::new(crate::runtime_host::JitRuntimeStop));
+//RS     }
+//RS 
+//RS     #[allow(dead_code)]
+//RS     fn jet_panic_rich(
+//RS         file: &str,
+//RS         line: u32,
+//RS         fn_name: &str,
+//RS         source_line: &str,
+//RS         col: u32,
+//RS         caret_len: u32,
+//RS         message: &str,
+//RS         locals: &str,
+//RS     ) -> ! {
+//RS         jet_panic_rich_code(
+//RS             "E3001",
+//RS             file,
+//RS             line,
+//RS             fn_name,
+//RS             source_line,
+//RS             col,
+//RS             caret_len,
+//RS             message,
+//RS             locals,
+//RS         )
+//RS     }
+//RS 
+//RS     include!("../../jet-codegen/src/Prelude/Core/Loadable.rs");
+//RS     include!("../../jet-codegen/src/Prelude/Core/Values.rs");
+//RS     // D-DATAFRAME1 / card #2447: the JIT uses the shared typed table-plan
+//RS     // kernel; this module only converts resident handles at its ABI boundary.
+//RS     include!("../../jet-codegen/src/Prelude/Core/LazyTablePlan.rs");
+//RS     include!("../../jet-codegen/src/Prelude/Core/TextValues.rs");
+//RS     include!("../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs");
+//RS     include!("../../jet-codegen/src/Prelude/Memo.rs");
+//RS     include!("../../jet-codegen/src/Prelude/Core/CollectionFailure.rs");
+//RS     // The shared acceleration plan carries the D-ACCEL1/D-PARA-GATE1
+//RS     // constants and retained-first-chunk decision. These small host shims
+//RS     // supply the AOT failure/receipt siblings that the flat Prelude expects.
+//RS     #[allow(dead_code)]
+//RS     mod jet_std {
+//RS         pub(crate) use crate::Encoding::json_rt::{render_datatree_json, DataTree};
+//RS     }
+//RS     #[allow(dead_code)]
+//RS     struct JetParaFailure {
+//RS         index: usize,
+//RS         payload: Box<dyn std::any::Any + Send + 'static>,
+//RS     }
+//RS     #[allow(dead_code)]
+//RS     fn jet_para_call<R, F>(index: usize, f: F) -> Result<R, JetParaFailure>
+//RS     where
+//RS         F: FnOnce() -> R,
+//RS     {
+//RS         std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+//RS             .map_err(|payload| JetParaFailure { index, payload })
+//RS     }
+//RS     #[allow(dead_code)]
+//RS     fn jet_para_raise_failure(failure: JetParaFailure) -> ! {
+//RS         std::panic::resume_unwind(failure.payload)
+//RS     }
+//RS     use crate::Receipt::kernel::jet_receipt_attach_encoded;
+//RS     include!("../../jet-codegen/src/Prelude/Core/ParallelPlan.rs");
+//RS     include!("../../jet-codegen/src/Prelude/Core/ParallelKernel.rs");
+//RS     include!("../../jet-codegen/src/Prelude/Core/SimdLanes.rs");
+//RS     include!("../../jet-codegen/src/Prelude/Core/SortKernel.rs");
+//RS     include!("../../jet-codegen/src/Prelude/Core/Collections.rs");
+//RS 
+//RS     pub(super) fn list_sort<T: Ord>(xs: &mut Vec<T>) {
+//RS         jet_list_sort(xs);
+//RS     }
+//RS     pub(super) fn list_sort_desc<T: Ord>(xs: &mut Vec<T>) {
+//RS         jet_list_sort_desc(xs);
+//RS     }
+//RS 
+//RS     pub(super) fn list_sort_by<T, K: Ord, F>(xs: &mut Vec<T>, f: F)
+//RS     where
+//RS         F: FnMut(&T) -> K,
+//RS     {
+//RS         jet_list_sort_by(xs, f);
+//RS     }
+//RS 
+//RS     pub(super) fn list_sort_by_desc<T, K: Ord, F>(xs: &mut Vec<T>, f: F)
+//RS     where
+//RS         F: FnMut(&T) -> K,
+//RS     {
+//RS         jet_list_sort_by_desc(xs, f);
+//RS     }
+//RS     pub(super) fn iter_is_sorted_by_i64<F>(xs: Vec<i64>, f: F) -> bool
+//RS     where
+//RS         F: FnMut(&i64) -> i64,
+//RS     {
+//RS         jet_iter_is_sorted_by(jet_iter_from_vec(xs), f)
+//RS     }
+//RS     pub(super) fn iter_dedup_by_i64<F>(xs: Vec<i64>, f: F) -> Vec<i64>
+//RS     where
+//RS         F: 'static + FnMut(&i64) -> i64,
+//RS     {
+//RS         jet_iter_dedup_by(jet_iter_from_vec(xs), f).to_list()
+//RS     }
+//RS     pub(super) fn iter_chunk_while_i64<F>(xs: Vec<i64>, f: F) -> Vec<Vec<i64>>
+//RS     where
+//RS         F: 'static + FnMut(&i64, &i64) -> bool,
+//RS     {
+//RS         jet_iter_chunk_while(jet_iter_from_vec(xs), f).to_list()
+//RS     }
+//RS 
+//RS 
+//RS     pub(super) fn list_sort_by_compare<T, F>(xs: &mut Vec<T>, f: F)
+//RS     where
+//RS         F: FnMut(&T, &T) -> std::cmp::Ordering,
+//RS     {
+//RS         jet_list_sort_by_compare_kernel(xs, f);
+//RS     }
+//RS     /// Apply the shared Prelude partition kernel and return its named-tuple
+//RS     /// fields in canonical (`false_`, `true_`) order.
+//RS     pub(super) fn list_partition<T, F>(xs: Vec<T>, f: F) -> (Vec<T>, Vec<T>)
+//RS     where
+//RS         F: FnMut(&T) -> bool,
+//RS     {
+//RS         jet_list_partition(xs, f, |yes, no| (no, yes))
+//RS     }
+//RS 
+//RS     // Core.rs owns the public any/all/each spellings. These adapters compose
+//RS     // the same eager Prelude kernels available in this shared collection seam;
+//RS     // they do not inspect handles or define a second traversal policy.
+//RS     pub(super) fn list_closure_any<F>(xs: Vec<i64>, mut f: F) -> bool
+//RS     where
+//RS         F: FnMut(&i64) -> bool,
+//RS     {
+//RS         jet_list_position(xs, |value| f(value)).is_ok()
+//RS     }
+//RS     pub(super) fn list_closure_count_where<F>(xs: Vec<i64>, mut f: F) -> i64
+//RS     where
+//RS         F: FnMut(&i64) -> bool,
+//RS     {
+//RS         jet_list_count_where_kernel(&xs, |value| f(value))
+//RS     }
+//RS 
+//RS     pub(super) fn list_closure_update_first<F>(xs: &mut Vec<i64>, f: F, replacement: i64) -> bool
+//RS     where
+//RS         F: FnMut(&i64) -> bool,
+//RS     {
+//RS         jet_list_update_first_kernel(xs, f, replacement)
+//RS     }
+//RS 
+//RS     pub(super) fn list_closure_all<F>(xs: Vec<i64>, mut f: F) -> bool
+//RS     where
+//RS         F: FnMut(&i64) -> bool,
+//RS     {
+//RS         jet_list_position(xs, |value| !f(value)).is_err()
+//RS     }
+//RS 
+//RS     pub(super) fn list_closure_map<F>(xs: Vec<i64>, f: F) -> Vec<i64>
+//RS     where
+//RS         F: Fn(&i64) -> i64,
+//RS     {
+//RS         jet_list_map(xs, f)
+//RS     }
+//RS 
+//RS     /// The resident callback must stay on its active runtime thread, so this
+//RS     /// adapter uses the shared indexed Prelude scheduler with a one-worker cap.
+//RS     /// `limit` remains part of the canonical call contract and is still an
+//RS     /// upper bound; Cranelift callback re-entry cannot safely cross threads.
+//RS     pub(super) fn list_closure_para_map<T, F>(xs: Vec<i64>, f: F, limit: i64) -> Vec<T>
+//RS     where
+//RS         T: Send,
+//RS         F: Fn(&i64) -> T + Sync,
+//RS     {
+//RS         let worker_limit = usize::try_from(limit).unwrap_or(usize::MAX).max(1);
+//RS         let (indexed, _) = jet_list_para_chunks_measured(
+//RS             xs.len(),
+//RS             worker_limit,
+//RS             1,
+//RS             true,
+//RS             true,
+//RS             true,
+//RS             JetAccelerationTransform::PooledParallelChunks,
+//RS             false,
+//RS             false,
+//RS             None,
+//RS             |range| {
+//RS                 Ok::<Vec<T>, ()>(range.map(|index| f(&xs[index])).collect())
+//RS             },
+//RS         );
+//RS         indexed
+//RS             .into_iter()
+//RS             .filter_map(|(_, result)| result.ok())
+//RS             .flatten()
+//RS             .collect()
+//RS     }
+//RS 
+//RS     pub(super) fn list_closure_map_mut<F>(xs: Vec<i64>, f: F) -> Vec<i64>
+//RS     where
+//RS         F: FnMut(&i64) -> i64,
+//RS     {
+//RS         jet_list_map_mut(xs, f)
+//RS     }
+//RS 
+//RS     pub(super) fn list_closure_map_f64<F>(xs: Vec<i64>, f: F) -> Vec<f64>
+//RS     where
+//RS         F: Fn(&i64) -> f64,
+//RS     {
+//RS         jet_list_map(xs, f)
+//RS     }
+//RS 
+//RS     pub(super) fn list_closure_map_f64_mut<F>(xs: Vec<i64>, f: F) -> Vec<f64>
+//RS     where
+//RS         F: FnMut(&i64) -> f64,
+//RS     {
+//RS         jet_list_map_mut(xs, f)
+//RS     }
+//RS 
+//RS     pub(super) fn list_closure_filter<F>(xs: Vec<i64>, f: F) -> Vec<i64>
+//RS     where
+//RS         F: FnMut(&i64) -> bool,
+//RS     {
+//RS         jet_list_filter(xs, f)
+//RS     }
+//RS 
+//RS     pub(super) fn list_closure_each<F>(xs: Vec<i64>, f: F)
+//RS     where
+//RS         F: Fn(&i64),
+//RS     {
+//RS         let _ = jet_list_fold(xs, (), |_, value| {
+//RS             f(value);
+//RS         });
+//RS     }
+//RS 
+//RS     pub(super) fn list_closure_each_mut<F>(xs: Vec<i64>, mut f: F)
+//RS     where
+//RS         F: FnMut(&i64),
+//RS     {
+//RS         let _ = jet_list_fold(xs, (), |_, value| {
+//RS             f(value);
+//RS         });
+//RS     }
+//RS 
+//RS     pub(super) fn list_each_ref<F, E>(xs: &Vec<i64>, f: F) -> JetOutcome<(), E>
+//RS     where
+//RS         F: FnMut(&i64) -> JetOutcome<(), E>,
+//RS     {
+//RS         jet_list_each_ref(xs, f)
+//RS     }
+//RS     pub(super) fn list_fold<F>(xs: Vec<i64>, init: i64, f: F) -> i64
+//RS     where
+//RS         F: FnMut(&i64, &i64) -> i64,
+//RS     {
+//RS         jet_list_fold(xs, init, f)
+//RS     }
+//RS     pub(super) fn list_sum_fixed_f32(xs: Vec<f64>) -> f64 {
+//RS         jet_list_sum_fixed_f32(xs.into_iter().map(|value| value as f32)) as f64
+//RS     }
+//RS 
+//RS     pub(super) fn list_sum_fixed_f64(xs: Vec<f64>) -> f64 {
+//RS         jet_list_sum_fixed_f64(xs)
+//RS     }
+//RS 
+//RS     pub(super) fn list_fold_add_fixed_f32(xs: Vec<f64>, init: f64) -> f64 {
+//RS         jet_list_fold_add_fixed_f32(xs.into_iter().map(|value| value as f32), init as f32) as f64
+//RS     }
+//RS 
+//RS     pub(super) fn list_fold_add_fixed_f64(xs: Vec<f64>, init: f64) -> f64 {
+//RS         jet_list_fold_add_fixed_f64(xs, init)
+//RS     }
+//RS 
+//RS     pub(super) fn list_fold_add_fixed_f32_iter<I>(xs: I, init: f32) -> f32
+//RS     where
+//RS         I: IntoIterator<Item = f32>,
+//RS     {
+//RS         jet_list_fold_add_fixed_f32(xs, init)
+//RS     }
+//RS 
+//RS     pub(super) fn list_fold_add_fixed_f64_iter<I>(xs: I, init: f64) -> f64
+//RS     where
+//RS         I: IntoIterator<Item = f64>,
+//RS     {
+//RS         jet_list_fold_add_fixed_f64(xs, init)
+//RS     }
+//RS 
+//RS     pub(super) fn list_para_fold_add_fixed_f32(xs: Vec<f64>, seed: f64) -> f64 {
+//RS         let values = xs.into_iter().map(|value| value as f32).collect::<Vec<_>>();
+//RS         jet_list_para_fold_add_fixed_f32(values, seed as f32) as f64
+//RS     }
+//RS 
+//RS     pub(super) fn list_para_fold_add_fixed_f64(xs: Vec<f64>, seed: f64) -> f64 {
+//RS         jet_list_para_fold_add_fixed_f64(xs, seed)
+//RS     }
+//RS 
+//RS     pub(super) fn list_group_by<F>(xs: Vec<i64>, f: F) -> Vec<(String, Vec<i64>)>
+//RS     where
+//RS         F: FnMut(&i64) -> String,
+//RS     {
+//RS         jet_list_group_by(xs, f)
+//RS             .iter()
+//RS             .map(|(key, values)| (key.clone(), values.clone()))
+//RS             .collect()
+//RS     }
+//RS 
+//RS     pub(super) fn list_group_by_int<F>(xs: Vec<i64>, f: F) -> Vec<(i64, Vec<i64>)>
+//RS     where
+//RS         F: FnMut(&i64) -> i64,
+//RS     {
+//RS         jet_list_group_by(xs, f)
+//RS             .iter()
+//RS             .map(|(key, values)| (*key, values.clone()))
+//RS             .collect()
+//RS     }
+//RS 
+//RS     pub(super) fn list_clear<T>(xs: &mut Vec<T>) {
+//RS         jet_list_clear(xs);
+//RS     }
+//RS 
+//RS     pub(super) fn list_extend<T>(xs: &mut Vec<T>, other: Vec<T>) {
+//RS         jet_list_extend(xs, other);
+//RS     }
+//RS 
+//RS     pub(super) fn list_reverse<T>(xs: &mut Vec<T>) {
+//RS         jet_list_reverse(xs);
+//RS     }
+//RS 
+//RS     pub(super) fn zip_fill_at<T: Clone>(
+//RS         fill_mode: u8,
+//RS         common_fills: &[T],
+//RS         column_fills: &[T],
+//RS         default: T,
+//RS         column: usize,
+//RS     ) -> T {
+//RS         jet_zip_fill_at(fill_mode, common_fills, column_fills, default, column)
+//RS     }
+//RS 
+//RS     pub(super) fn zip_rows<T: Clone, Read, Fill>(
+//RS         lengths: &[usize],
+//RS         mode: u8,
+//RS         read: Read,
+//RS         fill: Fill,
+//RS     ) -> Option<Vec<Vec<T>>>
+//RS     where
+//RS         Read: FnMut(usize, usize) -> Option<T>,
+//RS         Fill: FnMut(usize) -> T,
+//RS     {
+//RS         jet_zip_rows(lengths, mode, read, fill)
+//RS     }
+//RS 
+//RS 
+//RS     pub(super) fn try_list_new<T>() -> JetOutcome<Vec<T>, AllocError> {
+//RS         jet_list_try_new()
+//RS     }
+//RS 
+//RS     pub(super) fn try_list_with_capacity<T>(
+//RS         capacity: i64,
+//RS         allocator: &jet_codegen::program_allocator::JetProgramAllocator,
+//RS     ) -> JetOutcome<Vec<T>, AllocError> {
+//RS         jet_list_try_with_capacity_defaulted(
+//RS             capacity,
+//RS             |requested| allocator.try_reserve_hosted(requested),
+//RS             |requested| allocator.cancel_hosted_reservation(requested),
+//RS         )
+//RS     }
+//RS 
+//RS     pub(super) fn try_list_push<T>(values: &mut Vec<T>, value: T) -> JetOutcome<(), AllocError> {
+//RS         jet_list_try_push(values, value)
+//RS     }
+//RS 
+//RS     pub(super) fn try_list_reserve<T>(
+//RS         values: &mut Vec<T>,
+//RS         additional: i64,
+//RS     ) -> JetOutcome<(), AllocError> {
+//RS         jet_list_try_reserve(values, additional)
+//RS     }
+//RS 
+//RS     pub(super) fn try_map_insert_i64(
+//RS         pairs: Vec<(String, i64)>,
+//RS         key: String,
+//RS         value: i64,
+//RS     ) -> (Vec<(String, i64)>, JetOutcome<Option<i64>, AllocError>) {
+//RS         let mut map = JetMap::from_iter(pairs);
+//RS         let result = jet_map_try_insert(&mut map, key, value);
+//RS         let pairs = map
+//RS             .iter()
+//RS             .map(|(key, value)| (key.clone(), *value))
+//RS             .collect();
+//RS         (pairs, result)
+//RS     }
+//RS 
+//RS     pub(super) fn try_string_push(text: &mut String, addition: &str) -> JetOutcome<(), AllocError> {
+//RS         jet_string_try_push(text, addition)
+//RS     }
+//RS 
+//RS     fn display<T: JetDisplay>(value: &T) -> String {
+//RS         value.jet_display()
+//RS     }
+//RS 
+//RS     fn debug<T: JetDebug>(value: &T) -> String {
+//RS         value.jet_debug()
+//RS     }
+//RS     pub(super) fn debug_i64(value: i64) -> String {
+//RS         debug(&value)
+//RS     }
+//RS     pub(super) fn debug_f64(value: f64) -> String {
+//RS         debug(&value)
+//RS     }
+//RS     pub(super) fn debug_f32(value: f32) -> String {
+//RS         debug(&value)
+//RS     }
+//RS     pub(super) fn debug_bool(value: bool) -> String {
+//RS         debug(&value)
+//RS     }
+//RS     pub(super) fn debug_char(value: char) -> String {
+//RS         debug(&value)
+//RS     }
+//RS     pub(super) fn debug_string(value: String) -> String {
+//RS         debug(&value)
+//RS     }
+//RS     pub(super) fn debug_optional(payload: Option<String>) -> String {
+//RS         jet_text_debug_optional(payload)
+//RS     }
+//RS 
+//RS     #[derive(Clone, Copy)]
+//RS     struct NativeI64(i64);
+//RS     pub(super) fn display_i64_list(value: Vec<i64>) -> String {
+//RS         display(&value)
+//RS     }
+//RS 
+//RS     /// Exact `Int` list text: spilled words print their value, not the word.
+//RS     pub(super) fn display_exact_int_list(words: Vec<i64>) -> String {
+//RS         display(&exact_int_words(words))
+//RS     }
+//RS 
+//RS     pub(super) fn debug_exact_int_list(words: Vec<i64>) -> String {
+//RS         debug(&exact_int_words(words))
+//RS     }
+//RS 
+//RS     fn exact_int_words(words: Vec<i64>) -> Vec<JetInt> {
+//RS         words
+//RS             .into_iter()
+//RS             // SAFETY: an exact `Int` list cell owns its word through the arena
+//RS             // roots; cloning retains a spilled node for this rendering only.
+//RS             .map(|word| unsafe { JetInt::clone_from_raw(word) })
+//RS             .collect()
+//RS     }
+//RS 
+//RS     impl JetDisplay for NativeI64 {
+//RS         fn jet_display(&self) -> String {
+//RS             self.0.to_string()
+//RS         }
+//RS     }
+//RS 
+//RS     impl JetDebug for NativeI64 {
+//RS         fn jet_debug(&self) -> String {
+//RS             self.0.to_string()
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn display_i8_list(value: Vec<i8>) -> String {
+//RS         display(&value)
+//RS     }
+//RS     pub(super) fn display_i16_list(value: Vec<i16>) -> String {
+//RS         display(&value)
+//RS     }
+//RS     pub(super) fn display_i32_list(value: Vec<i32>) -> String {
+//RS         display(&value)
+//RS     }
+//RS     pub(super) fn display_native_i64_list(value: Vec<i64>) -> String {
+//RS         display(&value.into_iter().map(NativeI64).collect::<Vec<NativeI64>>())
+//RS     }
+//RS     pub(super) fn display_u8_list(value: Vec<u8>) -> String {
+//RS         display(&value)
+//RS     }
+//RS     pub(super) fn display_u16_list(value: Vec<u16>) -> String {
+//RS         display(&value)
+//RS     }
+//RS     pub(super) fn display_u32_list(value: Vec<u32>) -> String {
+//RS         display(&value)
+//RS     }
+//RS     pub(super) fn display_u64_list(value: Vec<u64>) -> String {
+//RS         display(&value)
+//RS     }
+//RS     pub(super) fn display_f64_list(value: Vec<f64>) -> String {
+//RS         display(&value)
+//RS     }
+//RS     pub(super) fn display_f32_list(value: Vec<f32>) -> String {
+//RS         display(&value)
+//RS     }
+//RS     pub(super) fn display_bool_list(value: Vec<bool>) -> String {
+//RS         display(&value)
+//RS     }
+//RS     pub(super) fn display_char_list(value: Vec<char>) -> String {
+//RS         display(&value)
+//RS     }
+//RS     pub(super) fn display_string_list(value: Vec<String>) -> String {
+//RS         display(&value)
+//RS     }
+//RS 
+//RS     pub(super) fn debug_i8_list(value: Vec<i8>) -> String {
+//RS         debug(&value)
+//RS     }
+//RS     pub(super) fn debug_i16_list(value: Vec<i16>) -> String {
+//RS         debug(&value)
+//RS     }
+//RS     pub(super) fn debug_i32_list(value: Vec<i32>) -> String {
+//RS         debug(&value)
+//RS     }
+//RS     pub(super) fn debug_i64_list(value: Vec<i64>) -> String {
+//RS         debug(&value)
+//RS     }
+//RS 
+//RS     pub(super) fn debug_native_i64_list(value: Vec<i64>) -> String {
+//RS         debug(&value.into_iter().map(NativeI64).collect::<Vec<NativeI64>>())
+//RS     }
+//RS     pub(super) fn debug_u8_list(value: Vec<u8>) -> String {
+//RS         debug(&value)
+//RS     }
+//RS     pub(super) fn debug_u16_list(value: Vec<u16>) -> String {
+//RS         debug(&value)
+//RS     }
+//RS     pub(super) fn debug_u32_list(value: Vec<u32>) -> String {
+//RS         debug(&value)
+//RS     }
+//RS     pub(super) fn debug_u64_list(value: Vec<u64>) -> String {
+//RS         debug(&value)
+//RS     }
+//RS     pub(super) fn debug_f64_list(value: Vec<f64>) -> String {
+//RS         debug(&value)
+//RS     }
+//RS     pub(super) fn debug_f32_list(value: Vec<f32>) -> String {
+//RS         debug(&value)
+//RS     }
+//RS     pub(super) fn debug_bool_list(value: Vec<bool>) -> String {
+//RS         debug(&value)
+//RS     }
+//RS     pub(super) fn debug_char_list(value: Vec<char>) -> String {
+//RS         debug(&value)
+//RS     }
+//RS     pub(super) fn debug_string_list(value: Vec<String>) -> String {
+//RS         debug(&value)
+//RS     }
+//RS 
+//RS     pub(crate) fn sequence_argument_message(method: &str, value: i64) -> Option<&'static str> {
+//RS         jet_sequence_argument_message(method, value)
+//RS     }
+//RS 
+//RS     pub(super) fn list_take<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
+//RS         jet_list_take(xs, n)
+//RS     }
+//RS 
+//RS     pub(super) fn list_skip<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
+//RS         jet_list_skip(xs, n)
+//RS     }
+//RS 
+//RS     pub(super) fn iter_take<T: 'static>(xs: Vec<T>, n: i64) -> Vec<T> {
+//RS         jet_iter_take(jet_iter_from_vec(xs), n).to_list()
+//RS     }
+//RS 
+//RS     pub(super) fn iter_string_split(text: &String, separator: &str) -> Vec<String> {
+//RS         jet_iter_string_split(text, separator).to_list()
+//RS     }
+//RS 
+//RS     pub(super) fn iter_first<T: 'static>(xs: Vec<T>) -> Option<T> {
+//RS         jet_iter_first(jet_iter_from_vec(xs)).ok()
+//RS     }
+//RS 
+//RS     pub(super) fn iter_step_by<T: 'static>(xs: Vec<T>, n: i64) -> Vec<T> {
+//RS         jet_iter_step_by(jet_iter_from_vec(xs), n).to_list()
+//RS     }
+//RS 
+//RS     pub(super) fn iter_dedup<T: 'static + Clone + PartialEq>(xs: Vec<T>) -> Vec<T> {
+//RS         jet_iter_dedup(jet_iter_from_vec(xs)).to_list()
+//RS     }
+//RS 
+//RS     pub(super) fn iter_chunks<T: 'static>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
+//RS         jet_iter_chunks(jet_iter_from_vec(xs), n).to_list()
+//RS     }
+//RS 
+//RS     pub(super) fn iter_windows<T: 'static + Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
+//RS         jet_iter_windows(jet_iter_from_vec(xs), n).to_list()
+//RS     }
+//RS 
+//RS     pub(super) fn list_sum_i64(xs: Vec<i64>) -> i64 {
+//RS         jet_list_sum(xs)
+//RS     }
+//RS 
+//RS     pub(super) fn list_product_i64(xs: Vec<i64>) -> i64 {
+//RS         jet_list_product(xs)
+//RS     }
+//RS 
+//RS     /// One copy kernel for every carrier: the Prelude `.copy()` body AOT emits
+//RS     /// (`jet_list_copy`) over whichever element vector the resident ABI holds.
+//RS     pub(super) fn list_copy<T: Clone>(xs: &[T]) -> Vec<T> {
+//RS         jet_list_copy(xs)
+//RS     }
+//RS 
+//RS     pub(super) fn list_min_i64(xs: Vec<i64>) -> JetOutcome<i64, JetAbsent> {
+//RS         jet_list_min(xs)
+//RS     }
+//RS 
+//RS     pub(super) fn list_max_i64(xs: Vec<i64>) -> JetOutcome<i64, JetAbsent> {
+//RS         jet_list_max(xs)
+//RS     }
+//RS 
+//RS     pub(super) fn list_flatten_i64(xs: Vec<Vec<i64>>) -> Vec<i64> {
+//RS         jet_list_flatten(xs)
+//RS     }
+//RS 
+//RS     pub(super) fn list_intersperse_i64(xs: Vec<i64>, separator: i64) -> Vec<i64> {
+//RS         jet_list_intersperse(xs, separator)
+//RS     }
+//RS 
+//RS     pub(super) fn iter_repeat<T: 'static + Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
+//RS         jet_iter_repeat(jet_iter_from_vec(xs), n).to_list()
+//RS     }
+//RS 
+//RS     pub(super) fn iter_cycle<T: 'static + Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
+//RS         jet_iter_cycle(jet_iter_from_vec(xs), n).to_list()
+//RS     }
+//RS 
+//RS     pub(super) fn iter_drop_last<T: 'static>(xs: Vec<T>, n: i64) -> Vec<T> {
+//RS         jet_iter_drop_last(jet_iter_from_vec(xs), n).to_list()
+//RS     }
+//RS 
+//RS     pub(super) fn iter_shuffle<T: 'static>(xs: Vec<T>) -> Vec<T> {
+//RS         jet_iter_shuffle(jet_iter_from_vec(xs)).to_list()
+//RS     }
+//RS 
+//RS     pub(super) fn iter_is_sorted<T: 'static + Ord>(xs: Vec<T>) -> bool {
+//RS         jet_iter_is_sorted(jet_iter_from_vec(xs))
+//RS     }
+//RS 
+//RS     pub(super) fn iter_last_index_of<T: 'static + PartialEq>(
+//RS         xs: Vec<T>,
+//RS         needle: T,
+//RS     ) -> JetOutcome<i64, JetAbsent> {
+//RS         jet_iter_last_index_of(jet_iter_from_vec(xs), needle)
+//RS     }
+//RS 
+//RS     pub(super) fn average_of_sum(sum: f64, count: usize) -> f64 {
+//RS         jet_average_of_sum(sum, count)
+//RS     }
+//RS 
+//RS     pub(super) fn iter_average_float(xs: Vec<f64>) -> f64 {
+//RS         jet_iter_average_float(jet_iter_from_vec(xs))
+//RS     }
+//RS 
+//RS     pub(super) fn iter_compare<T: 'static + Ord>(xs: Vec<T>, other: Vec<T>) -> i64 {
+//RS         jet_iter_compare(jet_iter_from_vec(xs), other)
+//RS     }
+//RS 
+//RS     pub(super) fn iter_split_i64(xs: Vec<i64>, n: i64) -> (Vec<i64>, Vec<i64>) {
+//RS         jet_iter_split_at(jet_iter_from_vec(xs), n, |left, right| (left, right))
+//RS     }
+//RS 
+//RS     fn map_from_pairs(entries: Vec<(String, i64)>) -> JetMap<String, i64> {
+//RS         entries.into_iter().collect()
+//RS     }
+//RS 
+//RS     fn map_pairs(map: &JetMap<String, i64>) -> Vec<(String, i64)> {
+//RS         jet_map_entries_kernel(map)
+//RS     }
+//RS 
+//RS     pub(super) fn map_copy_i64(entries: Vec<(String, i64)>) -> Vec<(String, i64)> {
+//RS         map_pairs(&jet_map_copy_kernel(&map_from_pairs(entries)))
+//RS     }
+//RS 
+//RS     pub(super) fn map_equal_i64(left: Vec<(String, i64)>, right: Vec<(String, i64)>) -> bool {
+//RS         jet_map_equal_kernel(&map_from_pairs(left), &map_from_pairs(right))
+//RS     }
+//RS 
+//RS     pub(super) fn bit_set_copy(
+//RS         values: &std::collections::BTreeSet<i64>,
+//RS     ) -> std::collections::BTreeSet<i64> {
+//RS         jet_bits_copy(&JetBitSet {
+//RS             bits: values.clone(),
+//RS         })
+//RS         .bits
+//RS     }
+//RS 
+//RS     /// `Bits.has` — the same membership kernel `JetBitSet::contains` calls in
+//RS     /// AOT, read straight off the resident set (no copy on a lookup).
+//RS     pub(super) fn bit_set_has(values: &std::collections::BTreeSet<i64>, bit: i64) -> bool {
+//RS         jet_bits_has_kernel(values, bit)
+//RS     }
+//RS 
+//RS     pub(super) fn map_first_key_i64(entries: Vec<(String, i64)>) -> Option<String> {
+//RS         jet_map_first_key_kernel(&map_from_pairs(entries)).ok()
+//RS     }
+//RS 
+//RS     pub(super) fn map_entries_i64(entries: Vec<(String, i64)>) -> Vec<(String, i64)> {
+//RS         map_pairs(&map_from_pairs(entries))
+//RS     }
+//RS 
+//RS     fn map_from_int_pairs(entries: Vec<(String, i64)>) -> JetMap<String, JetInt> {
+//RS         entries
+//RS             .into_iter()
+//RS             // SAFETY: callers are the exact-Int adapters selected from checked
+//RS             // MIR map-value facts; each word is a live JetInt ABI carrier.
+//RS             .map(|(key, value)| (key, unsafe { JetInt::clone_from_raw(value) }))
+//RS             .collect()
+//RS     }
+//RS 
+//RS     fn int_pairs(entries: Vec<(String, JetInt)>) -> Vec<(String, i64)> {
+//RS         entries
+//RS             .into_iter()
+//RS             .map(|(key, value)| (key, value.into_raw()))
+//RS             .collect()
+//RS     }
+//RS 
+//RS     pub(super) fn map_min_i64(entries: Vec<(String, i64)>) -> Option<i64> {
+//RS         jet_map_min_value_kernel(&map_from_pairs(entries)).ok()
+//RS     }
+//RS 
+//RS     pub(super) fn map_max_i64(entries: Vec<(String, i64)>) -> Option<i64> {
+//RS         jet_map_max_value_kernel(&map_from_pairs(entries)).ok()
+//RS     }
+//RS 
+//RS     pub(super) fn map_min_int(entries: Vec<(String, i64)>) -> Option<i64> {
+//RS         jet_map_min_value_kernel(&map_from_int_pairs(entries))
+//RS             .ok()
+//RS             .map(JetInt::into_raw)
+//RS     }
+//RS 
+//RS     pub(super) fn map_max_int(entries: Vec<(String, i64)>) -> Option<i64> {
+//RS         jet_map_max_value_kernel(&map_from_int_pairs(entries))
+//RS             .ok()
+//RS             .map(JetInt::into_raw)
+//RS     }
+//RS 
+//RS     pub(super) fn map_intersection_i64(
+//RS         left: Vec<(String, i64)>,
+//RS         right: Vec<(String, i64)>,
+//RS     ) -> Vec<(String, i64)> {
+//RS         map_pairs(&jet_map_intersection_kernel(
+//RS             &map_from_pairs(left),
+//RS             &map_from_pairs(right),
+//RS         ))
+//RS     }
+//RS 
+//RS     pub(super) fn map_slice_i64(
+//RS         entries: Vec<(String, i64)>,
+//RS         keys: Vec<String>,
+//RS     ) -> Vec<(String, i64)> {
+//RS         map_pairs(&jet_map_slice_keys_kernel(&map_from_pairs(entries), keys))
+//RS     }
+//RS 
+//RS     pub(super) fn map_from_keys_i64(keys: Vec<String>, default: i64) -> Vec<(String, i64)> {
+//RS         map_pairs(&jet_map_from_keys_kernel(keys, default))
+//RS     }
+//RS 
+//RS     pub(super) fn map_contains_i64(entries: Vec<(String, i64)>, needle: i64) -> bool {
+//RS         jet_map_contains_value_kernel(&map_from_pairs(entries), &needle)
+//RS     }
+//RS 
+//RS     pub(super) fn map_remove_i64(entries: Vec<(String, i64)>, key: String) -> Option<i64> {
+//RS         let mut map = map_from_pairs(entries);
+//RS         jet_map_pop_kernel(&mut map, &key).ok()
+//RS     }
+//RS 
+//RS     pub(super) fn list_pop<T>(values: &mut Vec<T>) -> Option<T> {
+//RS         jet_list_pop_kernel(values).ok()
+//RS     }
+//RS 
+//RS     pub(super) fn list_insert<T>(
+//RS         values: &mut Vec<T>,
+//RS         index: i64,
+//RS         value: T,
+//RS     ) -> Result<(), JetListInsertError> {
+//RS         jet_list_insert_kernel(values, index, value)
+//RS     }
+//RS 
+//RS     pub(super) fn list_remove_value<T: Clone + PartialEq>(
+//RS         values: &mut Vec<T>,
+//RS         value: T,
+//RS     ) -> Option<T> {
+//RS         jet_list_remove_value_kernel(values, value)
+//RS     }
+//RS 
+//RS     pub(super) fn list_remove_slot<T: Clone>(values: &mut Vec<T>, index: i64) -> Result<T, String> {
+//RS         jet_list_remove_slot_kernel(values, index)
+//RS     }
+//RS 
+//RS     pub(super) fn list_count<T: PartialEq>(values: &[T], value: &T) -> i64 {
+//RS         jet_list_count_kernel(values, value)
+//RS     }
+//RS 
+//RS     pub(super) fn list_contains<T: PartialEq>(values: &[T], value: &T) -> bool {
+//RS         jet_list_contains(values, value)
+//RS     }
+//RS 
+//RS     pub(super) fn list_counts_i64(values: Vec<String>) -> Vec<(String, i64)> {
+//RS         let map = jet_list_counts(values);
+//RS         jet_map_entries_kernel(&map)
+//RS     }
+//RS 
+//RS     pub(super) fn map_top_n_i64(entries: Vec<(String, i64)>, n: i64) -> Vec<(String, i64)> {
+//RS         // SAFETY: `n` is the checked Jet Int method argument; retain spilled
+//RS         // values before converting the borrowed ABI word.
+//RS         let n = unsafe { JetInt::clone_from_raw(n) };
+//RS         let n = n.to_i64().unwrap_or_else(|| {
+//RS             if n < JetInt::from_i64(0) {
+//RS                 i64::MIN
+//RS             } else {
+//RS                 i64::MAX
+//RS             }
+//RS         });
+//RS         jet_map_top_n(&map_from_pairs(entries), n)
+//RS     }
+//RS 
+//RS     pub(super) fn map_top_n_int(entries: Vec<(String, i64)>, n: i64) -> Vec<(String, i64)> {
+//RS         // SAFETY: `n` is the checked Jet Int method argument; retain spilled
+//RS         // values before converting the borrowed ABI word.
+//RS         let n = unsafe { JetInt::clone_from_raw(n) };
+//RS         let n = n.to_i64().unwrap_or_else(|| {
+//RS             if n < JetInt::from_i64(0) {
+//RS                 i64::MIN
+//RS             } else {
+//RS                 i64::MAX
+//RS             }
+//RS         });
+//RS         int_pairs(jet_map_top_n(&map_from_int_pairs(entries), n))
+//RS     }
+//RS 
+//RS     pub(super) fn set_pop_i64(
+//RS         values: &mut std::collections::HashSet<i64>,
+//RS         value: &i64,
+//RS     ) -> Option<i64> {
+//RS         jet_set_pop_kernel(values, value).ok()
+//RS     }
+//RS 
+//RS     pub(super) fn deque_pop_front<T>(values: &mut std::collections::VecDeque<T>) -> Option<T> {
+//RS         jet_deque_pop_front_kernel(values).ok()
+//RS     }
+//RS 
+//RS     pub(super) fn deque_pop_back<T>(values: &mut std::collections::VecDeque<T>) -> Option<T> {
+//RS         jet_deque_pop_back_kernel(values).ok()
+//RS     }
+//RS 
+//RS     pub(super) fn deque_push_front<T>(values: &mut std::collections::VecDeque<T>, value: T) {
+//RS         jet_deque_push_front(values, value);
+//RS     }
+//RS 
+//RS     pub(super) fn deque_push_back<T>(values: &mut std::collections::VecDeque<T>, value: T) {
+//RS         jet_deque_push_back(values, value);
+//RS     }
+//RS 
+//RS     pub(super) fn deque_delete<T: PartialEq>(
+//RS         values: &mut std::collections::VecDeque<T>,
+//RS         value: T,
+//RS     ) {
+//RS         jet_deque_delete(values, value);
+//RS     }
+//RS 
+//RS     pub(super) fn deque_reverse<T>(values: &mut std::collections::VecDeque<T>) {
+//RS         jet_deque_reverse(values);
+//RS     }
+//RS 
+//RS     pub(super) fn deque_split<T>(
+//RS         values: &mut std::collections::VecDeque<T>,
+//RS         index: i64,
+//RS     ) -> std::collections::VecDeque<T> {
+//RS         jet_deque_split(values, index)
+//RS     }
+//RS 
+//RS     pub(super) fn priority_queue_pop<T: Ord>(
+//RS         values: &mut std::collections::BinaryHeap<T>,
+//RS     ) -> Option<T> {
+//RS         jet_priority_queue_pop_kernel(values).ok()
+//RS     }
+//RS 
+//RS     pub(super) fn map_pop_first_i64(
+//RS         entries: Vec<(String, i64)>,
+//RS     ) -> (Option<String>, Option<i64>, Vec<(String, i64)>) {
+//RS         let mut map = map_from_pairs(entries);
+//RS         let key = map.keys().next().cloned();
+//RS         let value = jet_map_pop_first_kernel(&mut map).ok();
+//RS         (key, value, map_pairs(&map))
+//RS     }
+//RS 
+//RS     pub(super) fn list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> Vec<T> {
+//RS         jet_list_slice(xs, start, end)
+//RS     }
+//RS 
+//RS     pub(super) fn list_equal<T: PartialEq>(left: &[T], right: &[T]) -> bool {
+//RS         jet_list_equal(left, right)
+//RS     }
+//RS 
+//RS     pub(super) fn list_order<T: PartialOrd>(left: &[T], right: &[T]) -> i8 {
+//RS         jet_list_order(left, right)
+//RS     }
+//RS 
+//RS     pub(super) fn list_binary_search<T: Ord>(xs: &[T], needle: &T) -> JetOutcome<i64, JetAbsent> {
+//RS         jet_list_binary_search(xs, needle)
+//RS     }
+//RS 
+//RS     pub(super) fn list_union<T: Clone + Eq>(left: &[T], right: &[T]) -> Vec<T> {
+//RS         jet_list_union(left, right)
+//RS     }
+//RS 
+//RS     pub(super) fn list_intersection<T: Clone + Eq>(left: &[T], right: &[T]) -> Vec<T> {
+//RS         jet_list_intersection(left, right)
+//RS     }
+//RS 
+//RS     pub(super) fn list_difference<T: Clone + Eq>(left: &[T], right: &[T]) -> Vec<T> {
+//RS         jet_list_difference(left, right)
+//RS     }
+//RS 
+//RS     pub(super) fn list_random<T: Clone>(xs: &[T]) -> JetOutcome<T, JetAbsent> {
+//RS         jet_list_random(xs)
+//RS     }
+//RS 
+//RS     pub(super) fn list_min_max_int(xs: &[i64]) -> JetOutcome<(i64, i64), JetAbsent> {
+//RS         jet_list_min_max_by(
+//RS             xs,
+//RS             |value| unsafe { JetInt::clone_from_raw(*value) },
+//RS             |min, max| (min, max),
+//RS         )
+//RS     }
+//RS     #[derive(Clone, Copy)]
+//RS     struct FloatOrderKey(f64);
+//RS 
+//RS     impl PartialEq for FloatOrderKey {
+//RS         fn eq(&self, other: &Self) -> bool {
+//RS             super::float_ordering::jet_float_sort_cmp(self.0, other.0)
+//RS                 == std::cmp::Ordering::Equal
+//RS         }
+//RS     }
+//RS 
+//RS     impl Eq for FloatOrderKey {}
+//RS 
+//RS     impl PartialOrd for FloatOrderKey {
+//RS         fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+//RS             Some(self.cmp(other))
+//RS         }
+//RS     }
+//RS 
+//RS     impl Ord for FloatOrderKey {
+//RS         fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+//RS             super::float_ordering::jet_float_sort_cmp(self.0, other.0)
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn list_min_max_float(xs: &[f64]) -> JetOutcome<(f64, f64), JetAbsent> {
+//RS         jet_list_min_max_by(
+//RS             xs,
+//RS             |value| FloatOrderKey(*value),
+//RS             |min, max| (min, max),
+//RS         )
+//RS     }
+//RS 
+//RS     pub(super) fn list_min_float(xs: Vec<f64>) -> JetOutcome<f64, JetAbsent> {
+//RS         jet_list_min_float(xs)
+//RS     }
+//RS 
+//RS     pub(super) fn list_max_float(xs: Vec<f64>) -> JetOutcome<f64, JetAbsent> {
+//RS         jet_list_max_float(xs)
+//RS     }
+//RS 
+//RS     pub(super) fn list_min_max_string(xs: &[String]) -> JetOutcome<(String, String), JetAbsent> {
+//RS         jet_list_min_max(xs, |min, max| (min, max))
+//RS     }
+//RS 
+//RS 
+//RS     pub(super) fn list_replace<T: Clone>(xs: &[T], index: i64, new: T) -> Vec<T> {
+//RS         jet_list_replace(xs, index, new)
+//RS     }
+//RS 
+//RS     pub(super) fn list_starts_with<T: PartialEq>(xs: &[T], prefix: &[T]) -> bool {
+//RS         jet_list_starts_with(xs, prefix)
+//RS     }
+//RS 
+//RS     pub(super) fn list_ends_with<T: PartialEq>(xs: &[T], suffix: &[T]) -> bool {
+//RS         jet_list_ends_with(xs, suffix)
+//RS     }
+//RS 
+//RS     /// The split itself stays in the Prelude kernel (I9); only the per-column
+//RS     /// READ and REPUBLISH representation is the engine's business, so the
+//RS     /// wrapper is generic over the column word instead of pinned to `i64`.
+//RS     pub(super) fn list_unzip_pairs<T, U>(xs: Vec<(T, U)>) -> (Vec<T>, Vec<U>) {
+//RS         jet_list_unzip(xs)
+//RS     }
+//RS 
+//RS     pub(super) fn priority_queue_remove_value(
+//RS         pq: &mut std::collections::BinaryHeap<i64>,
+//RS         value: i64,
+//RS     ) -> JetOutcome<i64, JetAbsent> {
+//RS         jet_priority_queue_remove_value_kernel(pq, value)
+//RS     }
+//RS 
+//RS     pub(super) fn priority_queue_remove_slot(
+//RS         pq: &mut std::collections::BinaryHeap<i64>,
+//RS         index: i64,
+//RS         file: &str,
+//RS         line: u32,
+//RS     ) -> Result<JetOutcome<i64, JetAbsent>, String> {
+//RS         jet_priority_queue_remove_slot_kernel(pq, index, file, line)
+//RS     }
+//RS }
+//RS /// One lazy line source remains associated with its cursor until the loop
+//RS /// exhausts or the cursor is dropped. The source is never materialised into a
+//RS /// collection: `next` performs exactly one blocking read and preserves errors.
+//RS pub(crate) enum JetLoopLineReader {
+//RS     File(crate::enc_stream::runtime::JetFileReader),
+//RS     Stdin,
+//RS }
+//RS 
+//RS impl JetLoopLineReader {
+//RS     fn next(&mut self) -> Result<Option<String>, String> {
+//RS         match self {
+//RS             Self::File(reader) => crate::enc_stream::source_file_next_line(reader)
+//RS                 .map_err(|error| format!("{error:?}")),
+//RS             Self::Stdin => {
+//RS                 if crate::fault_injection::jet_fault_should_fail("IO.Read") {
+//RS                     return Err("fault injected: IO.Read".to_string());
+//RS                 }
+//RS                 crate::IO::term_prelude::jet_term_read_stdin_line()
+//RS                     .map_err(|error| format!("read stdin: {error}"))
+//RS                     .map(|line| match line {
+//RS                         crate::IO::term_prelude::JetTermRead::Line(line) => Some(line),
+//RS                         crate::IO::term_prelude::JetTermRead::EndOfInput => None,
+//RS                     })
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Canonical MIR loop cursor state.  The JIT stores one typed state per
+//RS /// one-based cursor handle; it never reparses a source expression or asks the
+//RS /// checker for iteration semantics at runtime.
+//RS pub(crate) enum JetLoopCursorState {
+//RS     Range {
+//RS         cursor: collection_semantics::JetLoopRangeCursor,
+//RS     },
+//RS     ResidentList {
+//RS         collection: i64,
+//RS         index: usize,
+//RS         len: usize,
+//RS         step: usize,
+//RS     },
+//RS     Values {
+//RS         items: Vec<JetLoopItem>,
+//RS         index: usize,
+//RS         step: usize,
+//RS     },
+//RS     Lines {
+//RS         reader: JetLoopLineReader,
+//RS         current: Option<i64>,
+//RS         exhausted: bool,
+//RS         step: usize,
+//RS     },
+//RS     Channel {
+//RS         channel: Option<jet_codegen::scheduler::JetSchedulerChannel<i64>>,
+//RS         stream: Option<jet_codegen::scheduler::JetStream<i64>>,
+//RS         current: Option<i64>,
+//RS         step: usize,
+//RS     },
+//RS     Encoding {
+//RS         reader: i64,
+//RS         reader_type: String,
+//RS         current: Option<i64>,
+//RS         step: usize,
+//RS     },
+//RS     Iterable {
+//RS         iterator: i64,
+//RS         next_slot: Option<i64>,
+//RS         current: Option<i64>,
+//RS         step: usize,
+//RS     },
+//RS }
+//RS 
+//RS pub(crate) enum JetLoopItem {
+//RS     Int(i64),
+//RS     FloatBits(i64),
+//RS }
+//RS 
+//RS fn loop_item_from_value(rt: &mut crate::JitRuntime, value: jet_rt::JetVal) -> JetLoopItem {
+//RS     match value {
+//RS         jet_rt::JetVal::Int(value) | jet_rt::JetVal::Word { value, .. } | jet_rt::JetVal::RecordRef(value) => JetLoopItem::Int(value),
+//RS         jet_rt::JetVal::Float(value) => JetLoopItem::FloatBits(value.to_bits() as i64),
+//RS         jet_rt::JetVal::Bool(value) => JetLoopItem::Int(i64::from(value)),
+//RS         jet_rt::JetVal::Char(value) => JetLoopItem::Int(i64::from(u32::from(value))),
+//RS         value => JetLoopItem::Int(rt.heap.alloc_value(value)),
+//RS     }
+//RS }
+//RS 
+//RS fn loop_source_kind(
+//RS     rt: &crate::JitRuntime,
+//RS     source_handle: i64,
+//RS ) -> Result<jet_foundation::MIR::MirLoopSourceKind, String> {
+//RS     let wire = rt
+//RS         .heap
+//RS         .clone_string(source_handle)
+//RS         .ok_or_else(|| "loop source kind is not a string handle".to_string())?;
+//RS     jet_foundation::MIR::MirLoopSourceKind::from_wire(&wire)
+//RS         .ok_or_else(|| "invalid canonical loop source wire".to_string())
+//RS }
+//RS 
+//RS fn loop_handle_index(handle: i64) -> Result<usize, String> {
+//RS     handle
+//RS         .checked_sub(1)
+//RS         .and_then(|value| usize::try_from(value).ok())
+//RS         .ok_or_else(|| "invalid loop cursor handle".to_string())
+//RS }
+//RS 
+//RS fn loop_step(step_value: i64, has_step: i8) -> Result<usize, String> {
+//RS     let step = if has_step == 0 { 1 } else { step_value };
+//RS     usize::try_from(step)
+//RS         .ok()
+//RS         .filter(|step| *step > 0)
+//RS         .ok_or_else(|| "loop stride must be positive".to_string())
+//RS }
+//RS 
+//RS fn loop_range_cursor_from_value(
+//RS     rt: &crate::JitRuntime,
+//RS     collection: i64,
+//RS     step_value: i64,
+//RS 
+//RS     has_step: bool,
+//RS ) -> Option<collection_semantics::JetLoopRangeCursor> {
+//RS     let start = rt.heap.record_get_int(collection, 0)?;
+//RS     let end = rt.heap.record_get_int(collection, 1)?;
+//RS     let exclusive = rt
+//RS         .heap
+//RS         .record_get_bool(collection, 2)
+//RS         .or_else(|| rt.heap.record_get_int(collection, 2).map(|value| value != 0))
+//RS         .unwrap_or(false);
+//RS     collection_semantics::jet_loop_range_init_checked(start, end, step_value, has_step, exclusive)
+//RS         .ok()
+//RS }
+//RS fn resident_int_list_len(rt: &crate::JitRuntime, collection: i64) -> Option<usize> {
+//RS     match rt.heap.list_value(collection)? {
+//RS         jet_rt::JetVal::IntList(values) => Some(values.len()),
+//RS         jet_rt::JetVal::List(values)
+//RS             if values
+//RS                 .iter()
+//RS                 .all(|value| matches!(value, jet_rt::JetVal::Int(_))) =>
+//RS         {
+//RS             Some(values.len())
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn loop_items_from_list(
+//RS     rt: &mut crate::JitRuntime,
+//RS     collection: i64,
+//RS ) -> Result<Vec<JetLoopItem>, String> {
+//RS     if rt.heap.list_len(collection).is_some() {
+//RS         let values = rt
+//RS             .heap
+//RS             .clone_list_values(collection)
+//RS             .ok_or_else(|| "list integer element is not present".to_string())?;
+//RS         return Ok(values
+//RS             .into_iter()
+//RS             .map(|value| loop_item_from_value(rt, value))
+//RS             .collect());
+//RS     }
+//RS     if let Some(length) = crate::runtime_host::sequence_len(rt, collection) {
+//RS         if length == 0 {
+//RS             return Ok(Vec::new());
+//RS         }
+//RS         if crate::runtime_host::sequence_get_float(rt, collection, 0).is_some() {
+//RS             return (0..length)
+//RS                 .map(|index| {
+//RS                     crate::runtime_host::sequence_get_float(rt, collection, index)
+//RS                         .map(|value| JetLoopItem::FloatBits(value.to_bits() as i64))
+//RS                         .ok_or_else(|| "view float element is not present".to_string())
+//RS                 })
+//RS                 .collect();
+//RS         }
+//RS         return (0..length)
+//RS             .map(|index| {
+//RS                 crate::runtime_host::sequence_get_int(rt, collection, index)
+//RS                     .map(JetLoopItem::Int)
+//RS                     .ok_or_else(|| "view integer element is not present".to_string())
+//RS             })
+//RS             .collect();
+//RS     }
+//RS     Err("loop collection is not an iterable carrier".to_string())
+//RS }
+//RS 
+//RS 
+//RS fn loop_items_from_chars(
+//RS     rt: &mut crate::JitRuntime,
+//RS     collection: i64,
+//RS ) -> Result<Vec<JetLoopItem>, String> {
+//RS     let text = rt
+//RS         .heap
+//RS         .clone_string(collection)
+//RS         .ok_or_else(|| "character loop source is not a string handle".to_string())?;
+//RS     Ok(text
+//RS         .chars()
+//RS         .map(|value| JetLoopItem::Int(i64::from(u32::from(value))))
+//RS         .collect())
+//RS }
+//RS 
+//RS fn loop_line_reader_from_file(handle: i64) -> Result<JetLoopLineReader, String> {
+//RS     let index = loop_handle_index(handle)?;
+//RS     let mut outcome = None;
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = match rt.file_readers.get_mut(index) {
+//RS             Some(slot) => {
+//RS                 let slot = std::mem::replace(slot, crate::enc_stream::FileReaderSlot::Taken);
+//RS                 match slot {
+//RS                     crate::enc_stream::FileReaderSlot::Live(reader) => {
+//RS                         Ok(JetLoopLineReader::File(reader))
+//RS                     }
+//RS                     crate::enc_stream::FileReaderSlot::Taken => {
+//RS                         Err("FileReader already moved".to_string())
+//RS                     }
+//RS                 }
+//RS             }
+//RS             None => Err("bad FileReader handle".to_string()),
+//RS         };
+//RS         outcome = Some(result);
+//RS     });
+//RS     outcome.unwrap_or_else(|| Err("no active JIT runtime".to_string()))
+//RS }
+//RS 
+//RS fn loop_line_reader_from_stdin() -> JetLoopLineReader {
+//RS     JetLoopLineReader::Stdin
+//RS }
+//RS 
+//RS fn loop_line_pull(reader: &mut JetLoopLineReader) -> Result<Option<i64>, String> {
+//RS     reader
+//RS         .next()
+//RS         .map(|line| line.map(|line| Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(line))))
+//RS }
+//RS 
+//RS fn loop_pull(
+//RS     channel: &mut Option<jet_codegen::scheduler::JetSchedulerChannel<i64>>,
+//RS     stream: &mut Option<jet_codegen::scheduler::JetStream<i64>>,
+//RS ) -> Option<i64> {
+//RS     if let Some(channel) = channel {
+//RS         return channel.receive();
+//RS     }
+//RS     stream
+//RS         .as_mut()
+//RS         .and_then(jet_codegen::scheduler::JetStream::pull)
+//RS }
+//RS 
+//RS fn loop_encoding_next(reader_type: &str, reader: i64) -> Result<Option<i64>, String> {
+//RS     let result = match reader_type {
+//RS         "JSONReader" => crate::enc_stream::jet_jit_json_reader_next(reader),
+//RS         "JSONLReader" => crate::enc_stream::jet_jit_jsonl_reader_next(reader),
+//RS         "CSVReader" => crate::enc_stream::jet_jit_csv_reader_next(reader),
+//RS         "XMLReader" => crate::enc_stream::jet_jit_xml_reader_next(reader),
+//RS         "CBORReader" => crate::enc_stream::jet_jit_cbor_reader_next(reader),
+//RS         _ => return Err("unknown checked encoding reader type".to_string()),
+//RS     };
+//RS     Concurrency::with_runtime_string(|rt| {
+//RS         let Some((ok, bits)) = crate::runtime_host::jit_result_parts(rt, result) else {
+//RS             return Err("encoding reader returned an invalid result handle".to_string());
+//RS         };
+//RS         if !ok {
+//RS             return Err("encoding reader returned an error".to_string());
+//RS         }
+//RS         if bits == 0 {
+//RS             Ok(None)
+//RS         } else {
+//RS             Ok(Some((bits as i64).wrapping_sub(1)))
+//RS         }
+//RS     })
+//RS }
+//RS fn invoke_iterable_slot(slot: i64, payload: i64) -> Result<i64, String> {
+//RS     if slot == 0 {
+//RS         return Err("MIR iterable hook has a null function pointer".to_string());
+//RS     }
+//RS     // SAFETY: the Cranelift compiler installs only finalized MIR iterable
+//RS     // functions with the exact `(env, raw) -> raw` ABI and keeps their code
+//RS     // pages live for the resident run.
+//RS     let callback: unsafe extern "C" fn(i64, i64) -> i64 =
+//RS         unsafe { std::mem::transmute(slot as usize) };
+//RS     let result = unsafe { callback(0, payload) };
+//RS     Ok(result)
+//RS }
+//RS fn loop_iterable_next(next_slot: Option<i64>, iterator: i64) -> Result<Option<i64>, String> {
+//RS     let Some(next_slot) = next_slot else {
+//RS         return Ok(Concurrency::with_runtime_mut(|rt| {
+//RS             crate::runtime_host::lazy_iter_next(rt, iterator)
+//RS         }));
+//RS     };
+//RS     let packed = invoke_iterable_slot(next_slot, iterator)?;
+//RS     if packed == 0 {
+//RS         Ok(None)
+//RS     } else {
+//RS         packed
+//RS             .checked_sub(1)
+//RS             .map(Some)
+//RS             .ok_or_else(|| "MIR iterable returned an invalid Option payload".to_string())
+//RS     }
+//RS }
+//RS 
+//RS fn loop_cursor_take(handle: i64) -> Result<JetLoopCursorState, String> {
+//RS     let index = loop_handle_index(handle)?;
+//RS     Concurrency::with_runtime_string(|rt| {
+//RS         rt.loop_cursors
+//RS             .get_mut(index)
+//RS             .and_then(Option::take)
+//RS             .ok_or_else(|| "loop cursor is not live".to_string())
+//RS     })
+//RS }
+//RS 
+//RS fn loop_cursor_put(handle: i64, state: JetLoopCursorState) -> Result<(), String> {
+//RS     let index = loop_handle_index(handle)?;
+//RS     Concurrency::with_runtime_string(|rt| {
+//RS         let slot = rt
+//RS             .loop_cursors
+//RS             .get_mut(index)
+//RS             .ok_or_else(|| "loop cursor is not live".to_string())?;
+//RS         *slot = Some(state);
+//RS         Ok(())
+//RS     })
+//RS }
+//RS fn loop_cursor_alloc(state: JetLoopCursorState) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.loop_cursors.push(Some(state));
+//RS         rt.loop_cursors.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn loop_host_fault(error: String) {
+//RS     Concurrency::with_runtime_mut(|rt| rt.set_host_fault(&error));
+//RS }
+//RS 
+//RS fn loop_cursor_item(state: &JetLoopCursorState) -> Option<i64> {
+//RS     match state {
+//RS         JetLoopCursorState::Range { cursor } => {
+//RS             if collection_semantics::jet_loop_range_has_next(cursor) {
+//RS                 Some(collection_semantics::jet_loop_range_value(cursor))
+//RS             } else {
+//RS                 None
+//RS             }
+//RS         }
+//RS         JetLoopCursorState::ResidentList { .. } => None,
+//RS         JetLoopCursorState::Values { items, index, .. } => {
+//RS             items.get(*index).map(|item| match item {
+//RS                 JetLoopItem::Int(value) | JetLoopItem::FloatBits(value) => *value,
+//RS             })
+//RS         }
+//RS         JetLoopCursorState::Lines { current, .. }
+//RS         | JetLoopCursorState::Channel { current, .. }
+//RS         | JetLoopCursorState::Encoding { current, .. }
+//RS         | JetLoopCursorState::Iterable { current, .. } => *current,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_loop_range_init(
+//RS     start: i64,
+//RS     end: i64,
+//RS     step_value: i64,
+//RS     has_step: i8,
+//RS     exclusive: i8,
+//RS ) -> i64 {
+//RS     let cursor = match collection_semantics::jet_loop_range_init_checked(
+//RS         start,
+//RS         end,
+//RS         step_value,
+//RS         has_step != 0,
+//RS         exclusive != 0,
+//RS     ) {
+//RS         Ok(cursor) => cursor,
+//RS         Err(error) => {
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.set_runtime_stop_at("E3001", "<core.prelude>", 0, error);
+//RS             });
+//RS             return 0;
+//RS         }
+//RS     };
+//RS     loop_cursor_alloc(JetLoopCursorState::Range { cursor })
+//RS }
+//RS 
+//RS fn with_live_range_cursor<T>(
+//RS     handle: i64,
+//RS     f: impl FnOnce(&mut collection_semantics::JetLoopRangeCursor) -> T,
+//RS ) -> Result<T, String> {
+//RS     let index = loop_handle_index(handle)?;
+//RS     Concurrency::with_runtime_string(|rt| {
+//RS         let state = rt
+//RS             .loop_cursors
+//RS             .get_mut(index)
+//RS             .and_then(Option::as_mut)
+//RS             .ok_or_else(|| "loop cursor is not live".to_string())?;
+//RS         match state {
+//RS             JetLoopCursorState::Range { cursor } => Ok(f(cursor)),
+//RS             _ => Err("range operation received a non-range cursor".to_string()),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_loop_range_has_next(handle: i64) -> i8 {
+//RS     match with_live_range_cursor(handle, |cursor| {
+//RS         i8::from(collection_semantics::jet_loop_range_has_next(cursor))
+//RS     }) {
+//RS         Ok(result) => result,
+//RS         Err(error) => {
+//RS             loop_host_fault(error);
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_loop_range_value(handle: i64) -> i64 {
+//RS     match with_live_range_cursor(handle, |cursor| {
+//RS         if collection_semantics::jet_loop_range_has_next(cursor) {
+//RS             Some(collection_semantics::jet_loop_range_value(cursor))
+//RS         } else {
+//RS             None
+//RS         }
+//RS     }) {
+//RS         Ok(Some(value)) => value,
+//RS         Ok(None) => {
+//RS             loop_host_fault("range loop value requested after exhaustion".to_string());
+//RS             0
+//RS         }
+//RS         Err(error) => {
+//RS             loop_host_fault(error);
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_loop_range_advance(handle: i64) {
+//RS     if let Err(error) = with_live_range_cursor(handle, |cursor| {
+//RS         collection_semantics::jet_loop_range_advance(cursor);
+//RS     }) {
+//RS         loop_host_fault(error);
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS pub(crate) fn jet_jit_loop_map_init(
+//RS     collection: i64,
+//RS     step_value: i64,
+//RS     has_step: i64,
+//RS     key_type_id: i64,
+//RS     value_type_id: i64,
+//RS ) -> i64 {
+//RS     let state = Concurrency::with_runtime_string(|rt| {
+//RS         let step = loop_step(step_value, i8::from(has_step != 0))?;
+//RS         let key_type = rt
+//RS             .runtime_type_descriptor(key_type_id as u64)
+//RS             .cloned()
+//RS             .ok_or_else(|| "map loop key type descriptor is missing".to_string())?;
+//RS         let value_type = rt
+//RS             .runtime_type_descriptor(value_type_id as u64)
+//RS             .cloned()
+//RS             .ok_or_else(|| "map loop value type descriptor is missing".to_string())?;
+//RS         let pairs = rt
+//RS             .heap
+//RS             .clone_map_pairs(collection)
+//RS             .ok_or_else(|| "map loop source is not a map carrier".to_string())?;
+//RS         let mut items = Vec::with_capacity(pairs.len());
+//RS         for (key, value) in pairs {
+//RS             let pair = rt.heap.alloc_record(2);
+//RS             crate::runtime_host::write_typed_record_field(rt, pair, 0, key, &key_type)?;
+//RS             crate::runtime_host::write_typed_record_field(rt, pair, 1, value, &value_type)?;
+//RS             items.push(JetLoopItem::Int(pair));
+//RS         }
+//RS         Ok(JetLoopCursorState::Values {
+//RS             items,
+//RS             index: 0,
+//RS             step,
+//RS         })
+//RS     });
+//RS     match state {
+//RS         Ok(state) => loop_cursor_alloc(state),
+//RS         Err(error) => {
+//RS             loop_host_fault(error);
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_loop_iter_init(
+//RS     collection: i64,
+//RS     step_value: i64,
+//RS     has_step: i8,
+//RS     by_value: i8,
+//RS     source_handle: i64,
+//RS ) -> i64 {
+//RS     let (source_kind, step) = match Concurrency::with_runtime_string(|rt| {
+//RS         let source_kind = loop_source_kind(rt, source_handle)?;
+//RS         let step = loop_step(step_value, has_step)?;
+//RS         Ok::<_, String>((source_kind, step))
+//RS     }) {
+//RS         Ok(values) => values,
+//RS         Err(error) => {
+//RS             loop_host_fault(error);
+//RS             return 0;
+//RS         }
+//RS     };
+//RS     if by_value == 0
+//RS         && matches!(
+//RS             source_kind,
+//RS             jet_foundation::MIR::MirLoopSourceKind::LinesFile
+//RS                 | jet_foundation::MIR::MirLoopSourceKind::LinesStdin
+//RS                 | jet_foundation::MIR::MirLoopSourceKind::LinesProcessStream
+//RS                 | jet_foundation::MIR::MirLoopSourceKind::ChannelReceiver
+//RS                 | jet_foundation::MIR::MirLoopSourceKind::EncodingReader { .. }
+//RS                 | jet_foundation::MIR::MirLoopSourceKind::Iterable { .. }
+//RS         )
+//RS     {
+//RS         loop_host_fault("iterator loop source must be moved".to_string());
+//RS         return 0;
+//RS     }
+//RS     let state = match source_kind {
+//RS         jet_foundation::MIR::MirLoopSourceKind::Plain
+//RS         | jet_foundation::MIR::MirLoopSourceKind::LinesProcessStream => {
+//RS             if Concurrency::with_runtime_mut(|rt| {
+//RS                 crate::runtime_host::lazy_iter_index(rt, collection).is_some()
+//RS             }) {
+//RS                 return loop_cursor_alloc(JetLoopCursorState::Iterable {
+//RS                     iterator: collection,
+//RS                     next_slot: None,
+//RS                     current: None,
+//RS                     step,
+//RS                 });
+//RS             }
+//RS             if let Some(cursor) = Concurrency::with_runtime_mut(|rt| {
+//RS                 loop_range_cursor_from_value(rt, collection, step_value, has_step != 0)
+//RS             }) {
+//RS                 return loop_cursor_alloc(JetLoopCursorState::Range { cursor });
+//RS             }
+//RS             // AOT Plain iterates Stream<T> via JetStream::into_iter. JIT must
+//RS             // pull the same consumer: lowering never marks Stream as
+//RS             // ChannelReceiver (that wire is illegal on native JetStream).
+//RS             if let Some(stream) =
+//RS                 Concurrency::with_runtime_mut(|rt| rt.stream_consumers.remove(&collection))
+//RS             {
+//RS                 let mut channel = None;
+//RS                 let mut stream = Some(stream);
+//RS                 let current = loop_pull(&mut channel, &mut stream);
+//RS                 return loop_cursor_alloc(JetLoopCursorState::Channel {
+//RS                     channel,
+//RS                     stream,
+//RS                     current,
+//RS                     step,
+//RS                 });
+//RS             }
+//RS             if by_value == 0
+//RS                 && matches!(
+//RS                     source_kind,
+//RS                     jet_foundation::MIR::MirLoopSourceKind::Plain
+//RS                 )
+//RS             {
+//RS                 if let Some(len) =
+//RS                     Concurrency::with_runtime_mut(|rt| resident_int_list_len(rt, collection))
+//RS                 {
+//RS                     return loop_cursor_alloc(JetLoopCursorState::ResidentList {
+//RS                         collection,
+//RS                         index: 0,
+//RS                         len,
+//RS                         step,
+//RS                     });
+//RS                 }
+//RS             }
+//RS             let items =
+//RS                 match Concurrency::with_runtime_string(|rt| loop_items_from_list(rt, collection)) {
+//RS                     Ok(items) => items,
+//RS                     Err(error) => {
+//RS                         loop_host_fault(error);
+//RS                         return 0;
+//RS                     }
+//RS                 };
+//RS             JetLoopCursorState::Values {
+//RS                 items,
+//RS                 index: 0,
+//RS                 step,
+//RS             }
+//RS         }
+//RS         jet_foundation::MIR::MirLoopSourceKind::Chars => {
+//RS             let items = match Concurrency::with_runtime_string(|rt| {
+//RS                 loop_items_from_chars(rt, collection)
+//RS             }) {
+//RS                 Ok(items) => items,
+//RS                 Err(error) => {
+//RS                     loop_host_fault(error);
+//RS                     return 0;
+//RS                 }
+//RS             };
+//RS             JetLoopCursorState::Values {
+//RS                 items,
+//RS                 index: 0,
+//RS                 step,
+//RS             }
+//RS         }
+//RS         jet_foundation::MIR::MirLoopSourceKind::LinesFile => {
+//RS             let mut reader = match loop_line_reader_from_file(collection) {
+//RS                 Ok(reader) => reader,
+//RS                 Err(error) => {
+//RS                     loop_host_fault(error);
+//RS                     return 0;
+//RS                 }
+//RS             };
+//RS             let current = match loop_line_pull(&mut reader) {
+//RS                 Ok(current) => current,
+//RS                 Err(error) => {
+//RS                     loop_host_fault(error);
+//RS                     return 0;
+//RS                 }
+//RS             };
+//RS             let exhausted = current.is_none();
+//RS             JetLoopCursorState::Lines {
+//RS                 reader,
+//RS                 current,
+//RS                 exhausted,
+//RS                 step,
+//RS             }
+//RS         }
+//RS         jet_foundation::MIR::MirLoopSourceKind::LinesStdin => {
+//RS             let mut reader = loop_line_reader_from_stdin();
+//RS             let current = match loop_line_pull(&mut reader) {
+//RS                 Ok(current) => current,
+//RS                 Err(error) => {
+//RS                     loop_host_fault(error);
+//RS                     return 0;
+//RS                 }
+//RS             };
+//RS             let exhausted = current.is_none();
+//RS             JetLoopCursorState::Lines {
+//RS                 reader,
+//RS                 current,
+//RS                 exhausted,
+//RS                 step,
+//RS             }
+//RS         }
+//RS         jet_foundation::MIR::MirLoopSourceKind::ChannelReceiver => {
+//RS             let (channel, stream) = match Concurrency::with_runtime_string(|rt| {
+//RS                 if let Some(stream) = rt.stream_consumers.remove(&collection) {
+//RS                     Ok((None, Some(stream)))
+//RS                 } else {
+//RS                     let index = usize::try_from(collection)
+//RS                         .map_err(|_| "invalid channel receiver handle".to_string())?;
+//RS                     rt.channels
+//RS                         .get(index)
+//RS                         .cloned()
+//RS                         .map(|channel| (Some(channel), None))
+//RS                         .ok_or_else(|| "invalid channel receiver handle".to_string())
+//RS                 }
+//RS             }) {
+//RS                 Ok(value) => value,
+//RS                 Err(error) => {
+//RS                     loop_host_fault(error);
+//RS                     return 0;
+//RS                 }
+//RS             };
+//RS             let mut channel = channel;
+//RS             let mut stream = stream;
+//RS             let current = loop_pull(&mut channel, &mut stream);
+//RS             JetLoopCursorState::Channel {
+//RS                 channel,
+//RS                 stream,
+//RS                 current,
+//RS                 step,
+//RS             }
+//RS         }
+//RS         jet_foundation::MIR::MirLoopSourceKind::EncodingReader { reader_type } => {
+//RS             let current = match loop_encoding_next(&reader_type, collection) {
+//RS                 Ok(current) => current,
+//RS                 Err(error) => {
+//RS                     loop_host_fault(error);
+//RS                     return 0;
+//RS                 }
+//RS             };
+//RS             JetLoopCursorState::Encoding {
+//RS                 reader: collection,
+//RS                 reader_type,
+//RS                 current,
+//RS                 step,
+//RS             }
+//RS         }
+//RS         jet_foundation::MIR::MirLoopSourceKind::Iterable {
+//RS             coll_type,
+//RS             iter_type,
+//RS             iter_symbol,
+//RS             next_symbol,
+//RS         } => {
+//RS             let wire = jet_foundation::MIR::MirLoopSourceKind::Iterable {
+//RS                 coll_type: coll_type.clone(),
+//RS                 iter_type: iter_type.clone(),
+//RS                 iter_symbol,
+//RS                 next_symbol,
+//RS             }
+//RS             .wire();
+//RS             let hook = Concurrency::with_runtime_mut(|rt| rt.iterable_hook(&wire).cloned());
+//RS             let Some(hook) = hook else {
+//RS                 loop_host_fault("MIR iterable hook is not registered".to_string());
+//RS                 return 0;
+//RS             };
+//RS             if hook.coll_type != coll_type || hook.iter_type != iter_type {
+//RS                 loop_host_fault(
+//RS                     "MIR iterable hook type metadata disagrees with source".to_string(),
+//RS                 );
+//RS                 return 0;
+//RS             }
+//RS             let iterator = match invoke_iterable_slot(hook.iter_slot, collection) {
+//RS                 Ok(iterator) if iterator != 0 => iterator,
+//RS                 Ok(_) => {
+//RS                     loop_host_fault(
+//RS                         "MIR iterable initializer returned a null iterator".to_string(),
+//RS                     );
+//RS                     return 0;
+//RS                 }
+//RS                 Err(error) => {
+//RS                     loop_host_fault(error);
+//RS                     return 0;
+//RS                 }
+//RS             };
+//RS             JetLoopCursorState::Iterable {
+//RS                 iterator,
+//RS                 next_slot: Some(hook.next_slot),
+//RS                 current: None,
+//RS                 step,
+//RS             }
+//RS         }
+//RS     };
+//RS     loop_cursor_alloc(state)
+//RS }
+//RS 
+// END-PORT-PENDING 0196 crates/jet-jit/src/Collections.rs:1-1888
+

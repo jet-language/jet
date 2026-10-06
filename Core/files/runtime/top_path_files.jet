@@ -1,0 +1,234 @@
+use core.prelude.runtime.kernel_values.[JetShow, JetDisplay, JetDebug]
+use core.mem.runtime.portable_core.[JetOutcome, JetAbsent]
+use core.mem.runtime.portable_alloc.jet_outcome_of
+use core.files.runtime.kernel_path.[jet_std_path_home, jet_std_path_join,
+    jet_std_path_parent_opt, jet_std_path_extension_opt, jet_std_path_stem_opt,
+    jet_std_path_normalize, jet_std_path_is_within, jet_std_path_walk]
+use core.text.runtime.typed_text.jet_typed_path_interpolate
+use core.prelude.runtime.std_open.[IOError, IOOperation]
+use core.encoding.runtime.std_data_tree.io_error_at
+use core.files.runtime.std_mapped_file.jet_std_files_writer_refusal
+use core.testing.runtime.fault_injection.jet_fault_should_fail
+use core.sys.target
+use std.fs as fs
+use std.io as io
+use std.io.Write
+use std.sync.atomic.[AtomicU64, Ordering]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:2
+struct JetPath { inner: OSPath }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:6
+impl JetShow for JetPath {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:7
+    fn jet_show(self: &Self) -> String { self.inner.to_string_lossy().to_string() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:11
+impl JetDisplay for JetPath {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:12
+    fn jet_display(self: &Self) -> String { self.inner.to_string_lossy().to_string() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:16
+impl JetDebug for JetPath {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:17
+    fn jet_debug(self: &Self) -> String { self.inner.to_string_lossy().to_string() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:21
+fn jet_path_from(s: &String) -> JetPath { JetPath { inner: OSPath.from(s) } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:27
+fn jet_path_to_string(path: &JetPath) -> String { path.jet_display() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:31
+fn jet_path_home() -> JetPath { jet_path_from(&jet_std_path_home()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:35
+// D-BOUND-HEAD1=A: each Path hole is encoded as one component.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:37
+fn jet_typed_path_literal(literals: [&String], holes: [String]) -> JetPath {
+    text :: jet_typed_path_interpolate(literals, &holes)
+    jet_path_from(&text)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:42
+fn jet_path_join(p: &JetPath, other: &String) -> JetPath {
+    JetPath { inner: OSPath.from(jet_std_path_join(p.inner.to_string_lossy().to_string(), other)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:50
+fn jet_path_parent(p: &JetPath) -> JetOutcome<JetPath, JetAbsent> {
+    jet_outcome_of(jet_std_path_parent_opt(p.inner.to_string_lossy().to_string())
+        .map(fn(par) { JetPath { inner: OSPath.from(par) } }))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:55
+fn jet_path_extension(p: &JetPath) -> JetOutcome<String, JetAbsent> {
+    jet_outcome_of(jet_std_path_extension_opt(p.inner.to_string_lossy().to_string()))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:58
+fn jet_path_stem(p: &JetPath) -> JetOutcome<String, JetAbsent> {
+    jet_outcome_of(jet_std_path_stem_opt(p.inner.to_string_lossy().to_string()))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:61
+fn jet_path_normalize(p: &JetPath) -> JetPath {
+    jet_path_from(&jet_std_path_normalize(p.inner.to_string_lossy().to_string()))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:65
+// Lexical containment only; receiver is candidate, not the containing root.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:67
+fn jet_path_is_within(path: &JetPath, base: &JetPath) -> Bool {
+    path :: path.inner.to_string_lossy().to_string()
+    base :: base.inner.to_string_lossy().to_string()
+    jet_std_path_is_within(path, base)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:73
+// GATE #4565: kernel primitive
+static JET_ATOMIC_TEMP_COUNTER: AtomicU64 = AtomicU64.new(0)
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:76
+struct JetAtomicTemp { path: OSPath, file: fs.File?, committed: Bool }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:82
+impl JetAtomicTemp {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:83
+    fn create(dir: &OSPath) -> Self io.Error! {
+        // GATE #4565: kernel primitive
+        loop _ in 0..<128 {
+            sequence :: #Unsafe("atomic relaxed counter only distinguishes create-new temporary names") {
+                JET_ATOMIC_TEMP_COUNTER.fetch_add(1, Ordering.Relaxed)
+            }
+            process_id :: #Unsafe("read native process identity for exclusive sibling naming") { std.process.id() }
+            path :: dir.join(".jet_tmp_{process_id}_{sequence}")
+            match #Unsafe("reserve an actual atomic sibling exclusively; no overwrite on collision") {
+                fs.OpenOptions.new().create_new(true).write(true).open(&path)
+            } {
+                Ok(file) -> return Ok(Self { path: ^path, file: Val(^file), committed: false })
+                Err(error) -> {
+                    if error.kind() == .AlreadyExists -> next
+                    return Err(^error)
+                }
+            }
+        }
+        Err(io.Error.new(.AlreadyExists, "could not reserve an atomic-write temporary file"))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:114
+    fn file_mut(self: &Self) -> &fs.File { self.file.as_mut() ?? panic("atomic temp file must be open") }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:118
+    fn close(self: &Self) -> { _ :: self.file.take() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:122
+    fn commit(self: &Self) -> { self.committed = true }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:127
+impl Drop for JetAtomicTemp {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:128
+    fn drop(self: &Self) -> {
+        self.close()
+        // GATE #4565: kernel primitive
+        if not self.committed {
+            #Unsafe("best-effort removal only of this owner's uncommitted exclusive temporary") { _ :: fs.remove_file(&self.path) }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:138
+module jet_atomic_windows {
+    use std.io as io
+    use std.ptr as ptr
+    use std.os.windows.ffi.OsStrExt
+    use c.kernel32 as windows_os
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:141
+    const MOVEFILE_REPLACE_EXISTING: U32 = 0x1
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:142
+    const MOVEFILE_WRITE_THROUGH: U32 = 0x8
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:143
+    const ERROR_FILE_NOT_FOUND: I32 = 2
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:144
+    const ERROR_PATH_NOT_FOUND: I32 = 3
+    // GATE #4565: kernel primitive — selected Windows system ABI, never host-assumed linkage.
+    #Import module c.kernel32 {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:146
+        #ABI(system)
+        fn MoveFileExW(existing: *U16, replacement: *U16, flags: U32) -> I32 = "MoveFileExW"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:147
+        #ABI(system)
+        fn ReplaceFileW(replaced: *U16, replacement: *U16, backup: *U16, flags: U32,
+            exclude: *U8, reserved: *U8) -> I32 = "ReplaceFileW"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:157
+    fn wide(path: &OSPath) -> [U16] io.Error! {
+        // GATE #4565: kernel primitive
+        encoded := #Unsafe("encode native Windows path without lossy text conversion") {
+            path.as_os_str().encode_wide().collect<[U16]>()
+        }
+        if encoded.contains(&U16{0}) -> return Err(io.Error.new(.InvalidInput, "Windows path contains an embedded NUL"))
+        encoded.push(0)
+        Ok(^encoded)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:169
+    pub fn replace(temp: &OSPath, target: &OSPath) -> () io.Error! {
+        // GATE #4565: kernel primitive
+        target_exists :: #Unsafe("query actual replacement target existence without changing the path") { target.exists() }
+        temp :: wide(temp)?
+        target :: wide(target)?
+        if target_exists {
+            replaced :: #Unsafe("borrow validated NUL-terminated UTF-16 paths during selected Windows atomic replacement") {
+                windows_os.ReplaceFileW(target.as_ptr(), temp.as_ptr(), ptr.null(), 0, ptr.null_mut(), ptr.null_mut())
+            }
+            if replaced != 0 -> return Ok(())
+            error :: #Unsafe("capture thread-local Windows last-error immediately after replacement failure") { io.Error.last_os_error() }
+            if error.raw_os_error() != ERROR_FILE_NOT_FOUND and error.raw_os_error() != ERROR_PATH_NOT_FOUND ->
+                return Err(^error)
+        }
+        moved :: #Unsafe("atomically move the exclusive sibling with replace-existing and write-through flags") {
+            windows_os.MoveFileExW(temp.as_ptr(), target.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
+        }
+        if moved == 0 {
+            Err(#Unsafe("capture native Windows last-error immediately after failed move") { io.Error.last_os_error() })
+        } else { Ok(()) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:212
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:217
+fn jet_atomic_replace(temp: &OSPath, target_path: &OSPath) -> () io.Error! {
+    if target.selected_os() == .Windows -> return jet_atomic_windows.replace(temp, target_path)
+    // GATE #4565: kernel primitive
+    #Unsafe("selected non-Windows atomic sibling rename retains native error fidelity") { fs.rename(temp, target_path) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:222
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:227
+fn jet_atomic_sync_parent(dir: &OSPath) -> () io.Error! {
+    // GATE #4565: kernel primitive
+    if target.selected_family() == "unix" {
+        return #Unsafe("sync actual containing directory on selected Unix targets after atomic rename") { fs.File.open(dir)?.sync_all() }
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:231
+fn jet_path_write_atomic(p: &JetPath, content: &[U8]) -> () IOError! {
+    path_s :: p.inner.to_string_lossy().to_string()
+    if jet_std_files_writer_refusal(&path_s) == .Val(error) -> return Err(^error)
+    if jet_fault_should_fail("FS.Write") ->
+        return Err(IOError.other(.Write, Val(path_s.clone()), "fault injected: FS.Write"))
+    parent :: p.inner.parent().ok_or_else(fn() {
+        io_error_at(.Write, &path_s, io.Error.new(.InvalidInput, "path has no parent directory"))
+    })?
+    // The lexical empty parent of a relative filename means the current directory.
+    dir :: if parent.as_os_str().is_empty() { OSPath.from(".") } else { parent }
+    // GATE #4565: kernel primitive
+    existing_permissions :: #Unsafe("snapshot existing target permissions if available") {
+        fs.metadata(&p.inner).ok().map(fn(metadata) { metadata.permissions() })
+    }
+    temp := JetAtomicTemp.create(&dir)
+        .map_err(fn(error) { io_error_at(.Write, dir.to_string_lossy().to_string(), ^error) })?
+    #Unsafe("write content into exclusive sibling; owner cleans up every early error") {
+        temp.file_mut().write_all(content)
+    }.map_err(fn(error) { io_error_at(.Write, temp.path.to_string_lossy().to_string(), ^error) })?
+    if existing_permissions == .Val(permissions) {
+        #Unsafe("preserve target permissions on exclusively owned sibling") {
+            temp.file_mut().set_permissions(^permissions)
+        }.map_err(fn(error) { io_error_at(.Write, temp.path.to_string_lossy().to_string(), ^error) })?
+    }
+    #Unsafe("durably sync exclusive replacement content before closing descriptor") {
+        temp.file_mut().sync_all()
+    }.map_err(fn(error) { io_error_at(.Flush, temp.path.to_string_lossy().to_string(), ^error) })?
+    temp.close()
+    jet_atomic_replace(&temp.path, &p.inner).map_err(fn(error) { io_error_at(.Write, &path_s, ^error) })?
+    temp.commit()
+    jet_atomic_sync_parent(&dir).map_err(fn(error) { io_error_at(.Flush, &path_s, ^error) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:284
+fn jet_path_walk(p: &JetPath) -> [JetPath] {
+    jet_std_path_walk(p.inner.to_string_lossy().to_string()).into_iter()
+        .map(fn(path) { JetPath { inner: OSPath.from(^path) } }).collect()
+}
+

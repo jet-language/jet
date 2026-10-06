@@ -1,0 +1,273 @@
+// TraceHardware::current (JetTrace.rs:106–115), OsExtra.rs:4–14.
+// Canonical private sys owner; Main activates the public type/call and source
+// graph. No uname, process-env lookup, host ARCH literal or CPU fixture is a
+// selected-build fact. hardware_facts() is not bound until immutable selected
+// ARCH/OS/JET_BUILD_TARGET facts and the real native parallelism closure land.
+//
+// Oracle: jet-env rustc 1.97.1, commit
+// 8bab26f4f68e0e26f0bb7960be334d5b520ea452, std/src/sys/thread/{unix,windows}.rs.
+// Linux/Android use cgroup floor quota, fixed libc cpu_set_t affinity, then
+// sysconf; Windows uses GetSystemInfo (NOT processor-group/affinity APIs).
+// Darwin uses sysconf. Other Unix branches retain their distinct native laws;
+// they are not silently routed to Darwin or to the unsupported-platform case.
+//
+// Native closure gates: #4494 pointer-return errno, retained initialized
+// storage loans and descriptor IO; #4483 selected native usize; checked build
+// ARCH/OS/optional JET_BUILD_TARGET ABI (FactReads.jet:673–683 exposes only OS).
+// Cgroup path operations belong to kernel_path_components; IO must retain the
+// actual descriptor owner, never the path-only FileReader front-door carrier.
+// These parsers/folds are independent source policy, NOT a live facts provider.
+
+use core.files.runtime.kernel_path_components as hardware_path
+
+pub struct HardwareFacts {
+    pub cpu_arch: String
+    pub logical_cpus: U64
+    pub os: String
+    pub build_target: String
+}
+
+// Raw available_parallelism result, before the owning IOError boundary.
+// Preserve the OS code; do not fabricate text/classification or normalize a
+// missing binding into a genuine OS failure. Scheduler keeps its own fallback4.
+pub enum ParallelismResult {
+    Count(value: U64)
+    OsError(code: I32)
+    UnknownThreadCount
+    Unsupported
+}
+
+// TraceHardware::current/OsExtra cpu_count: fallback1 ONLY on actual failure.
+pub fn trace_logical_cpus(result: ParallelismResult) -> U64 Never! {
+    if result == {
+        .Count(count) -> return count
+        else -> return U64{1}
+    }
+}
+
+// option_env!("JET_BUILD_TARGET").unwrap_or("unknown"): present empty metadata
+// stays empty. This conversion does not supply or query build metadata.
+pub fn trace_build_target(selected: String?) -> String Never! {
+    selected ?? "unknown"
+}
+
+// std/sys/thread/unix.rs:180–196. Zero quota is raised to1 before intersecting
+// affinity. An empty successful mask falls through to sysconf (old MIPS law),
+// not a fabricated success1. Missing/error affinity also falls through.
+pub fn affinity_limit(count: U64, quota: U64) -> U64? Never! {
+    ceiling :: if quota < (U64{1}) -> U64{1} else -> quota
+    limited :: if count < ceiling -> count else -> ceiling
+    if limited == (U64{0}) -> return None
+    Val(limited)
+}
+
+// std/sys/thread/unix.rs:199–208, after the actual sysconf -1 error branch.
+pub fn online_limit(count: U64, quota: U64) -> ParallelismResult Never! {
+    limited :: affinity_limit(count, quota) ?? return ParallelismResult.UnknownThreadCount
+    ParallelismResult.Count(limited)
+}
+
+// CPU_COUNT word kernel. Native bindings select their actual mask word width;
+// no exact Int word, heap copy, per-bit whole-mask clone or fake CPU list.
+pub fn cpu_mask_word_count(word: U64) -> U64 Never! {
+    pairs :: word - ((word >> 1) & U64{0x5555555555555555})
+    quads :: (pairs & U64{0x3333333333333333}) + ((pairs >> 2) & U64{0x3333333333333333})
+    octets :: (quads + (quads >> 4)) & U64{0x0f0f0f0f0f0f0f0f}
+    halves :: octets + (octets >> 8)
+    quarters :: halves + (halves >> 16)
+    (quarters + (quarters >> 32)) & U64{127}
+}
+
+pub fn cpu_mask_count(words: View<U64>) -> U64 Never! {
+    count := U64{0}
+    loop i in 0..<words.len() -> count = count + cpu_mask_word_count(words[i])
+    count
+}
+
+// Rust usize::from_str: optional ASCII '+', decimal digits, no whitespace,
+// selected-target overflow. maximum is the ACTUAL native usize maximum,
+// supplied by checked layout selection, not host pointer width inference.
+// All callers pass validated UTF8 numeric fields; invalid UTF8 file reads are
+// rejected by the canonical IO/text owner before these allocation-free views.
+pub fn parse_usize_decimal(raw: View<U8>, maximum: U64) -> U64? Never! {
+    at := 0
+    if raw.len() > 0 && raw[0] == (U8{43}) -> at = 1
+    if at == raw.len() -> return None
+    value := U64{0}
+    loop at < raw.len() {
+        byte :: raw[at]
+        if byte < (U8{48}) || byte > (U8{57}) -> return None
+        digit :: U64.from_u8(byte) - U64{48}
+        if digit > maximum || value > (maximum - digit) / U64{10} -> return None
+        value = value * U64{10} + digit
+        at = at + 1
+    }
+    Val(value)
+}
+
+// std/sys/thread/unix.rs:938–943. The v1 caller uses canonical Unicode trim
+// before parse_usize_decimal; '-1' is deliberately not an unsigned quota.
+pub fn quota_v1_values(limit: U64?, period: U64?) -> U64? Never! {
+    numerator :: limit ?? return None
+    denominator :: period ?? return None
+    if denominator == (U64{0}) -> return None
+    Val(numerator / denominator)
+}
+
+// std/sys/thread/unix.rs:876–885. Read-to-string already validated the complete
+// file. First line only, split on literal space (NOT split_whitespace); CR is
+// stripped only as CRLF, just as str::lines. Empty file stops hierarchy walking
+// through the outer Option; an invalid/max/zero-period line merely contributes
+// no bound. The rest of the file and fields after the second are ignored.
+pub enum QuotaV2Line {
+    StopHierarchy
+    NoBound
+    Bound(value: U64)
+}
+pub fn quota_v2_line(raw: View<U8>, maximum: U64) -> QuotaV2Line Never! {
+    if raw.len() == 0 -> return QuotaV2Line.StopHierarchy
+    end := 0
+    loop end < raw.len() && raw[end] != (U8{10}) -> end = end + 1
+    if end < raw.len() && end > 0 && raw[end - 1] == (U8{13}) -> end = end - 1
+    first := 0
+    loop first < end && raw[first] != (U8{32}) -> first = first + 1
+    if first == end -> return QuotaV2Line.StopHierarchy
+    second := first + 1
+    loop second < end && raw[second] != (U8{32}) -> second = second + 1
+    numerator :: parse_usize_decimal(raw[0..<first], maximum) ?? return QuotaV2Line.NoBound
+    denominator :: parse_usize_decimal(raw[first + 1..<second], maximum) ?? return QuotaV2Line.NoBound
+    if denominator == (U64{0}) -> return QuotaV2Line.NoBound
+    QuotaV2Line.Bound(numerator / denominator)
+}
+
+// std/sys/thread/unix.rs:883,942: hierarchical min over each successfully read
+// bound; failed/malformed/unlimited ancestor contributes no restriction. Keep
+// zero here, only the affinity/sysconf boundary clamps the final quota to1.
+pub fn quota_min(previous: U64, current: U64?) -> U64 Never! {
+    next_quota :: current ?? return previous
+    if next_quota < previous -> next_quota else -> previous
+}
+
+pub enum CgroupVersion { V1 V2 }
+
+// std/sys/thread/unix.rs:829–832. Already-found v1 wins over a following v2;
+// another v1 replaces it. Discovery/read failure is NOT an unlimited CPU result:
+// only the source quota subroutine contributes selected usize::MAX.
+pub fn replace_cgroup(previous: CgroupVersion?, candidate: CgroupVersion) -> Bool Never! {
+    if previous != None && candidate == CgroupVersion.V2 -> return false
+    true
+}
+
+// std/sys/thread/unix.rs:816–837: splitn(3, ':') field offsets into the
+// retained /proc/self/cgroup read owner. IDs are deliberately not interpreted.
+pub struct CgroupLineFields {
+    pub controllers: hardware_path.PathSpan
+    pub group: hardware_path.PathSpan?
+}
+pub fn cgroup_line_fields(raw: View<U8>) -> CgroupLineFields? Never! {
+    first := 0
+    loop first < raw.len() && raw[first] != (U8{58}) -> first = first + 1
+    if first == raw.len() -> return None
+    second := first + 1
+    loop second < raw.len() && raw[second] != (U8{58}) -> second = second + 1
+    controllers :: hardware_path.PathSpan{start: first + 1, end: second}
+    group :: if second < raw.len() -> Val(hardware_path.PathSpan{start: second + 1, end: raw.len()}) else -> None
+    Val(CgroupLineFields{controllers: controllers, group: group})
+}
+
+// Only the controllers field is UTF8-checked by quota()'s from_utf8, not the
+// raw group pathname. This input is a loan of that validated field. Do not use
+// a whole-file String read here: Linux group path bytes need not be UTF8.
+pub fn controller_version(validated: View<U8>) -> CgroupVersion? Never! {
+    if validated.len() == 0 -> return Val(CgroupVersion.V2)
+    if has_cpu_controller(validated) -> return Val(CgroupVersion.V1)
+    None
+}
+pub fn has_cpu_controller(validated: View<U8>) -> Bool Never! {
+    start := 0
+    loop {
+        end := start
+        loop end < validated.len() && validated[end] != (U8{44}) -> end = end + 1
+        if end - start == 3 && validated[start] == (U8{99}) && validated[start + 1] == (U8{112}) && validated[start + 2] == (U8{117}) -> return true
+        if end == validated.len() -> return false
+        start = end + 1
+    }
+}
+
+// std/sys/thread/unix.rs:973–976. The canonical Unicode trim and UTF8 IO owner
+// supplies this one trimmed line loan. Literal-space fields retain empty
+// entries; mount_options is last and filesystem is third-last, after removing
+// the first five entries. No regex, path scanner or split-list allocation.
+pub struct MountLineFields {
+    pub sub_path: hardware_path.PathSpan
+    pub mount_point: hardware_path.PathSpan
+    pub filesystem: hardware_path.PathSpan
+    pub mount_options: hardware_path.PathSpan
+}
+pub fn mount_line_fields(trimmed: View<U8>) -> MountLineFields? Never! {
+    field := 0
+    start := 0
+    sub_path := hardware_path.PathSpan{start: 0, end: 0}
+    mount_point := hardware_path.PathSpan{start: 0, end: 0}
+    third_last := hardware_path.PathSpan{start: 0, end: 0}
+    second_last := hardware_path.PathSpan{start: 0, end: 0}
+    last := hardware_path.PathSpan{start: 0, end: 0}
+    loop {
+        end := start
+        loop end < trimmed.len() && trimmed[end] != (U8{32}) -> end = end + 1
+        extent :: hardware_path.PathSpan{start: start, end: end}
+        if field == 3 -> sub_path = extent
+        if field == 4 -> mount_point = extent
+        if field >= 5 {
+            third_last = second_last
+            second_last = last
+            last = extent
+        }
+        field = field + 1
+        if end == trimmed.len() -> break
+        start = end + 1
+    }
+    if field < 8 -> return None
+    Val(MountLineFields{sub_path: sub_path, mount_point: mount_point, filesystem: third_last, mount_options: last})
+}
+
+// std/sys/thread/unix.rs:983–991. Use the ONE path component owner to compare
+// bind-mount prefixes ("/slice" is not a prefix of "/slicex"). Both results
+// borrow their original byte owners; no owned strip_prefix/OsString copy.
+pub fn bind_mount_group(group: hardware_path.OSPath, group_extent: hardware_path.PathSpan, line: hardware_path.OSPath, sub_path: hardware_path.PathSpan, slash: hardware_path.OSPath) -> hardware_path.PathSpan? Never! {
+    relative_root :: hardware_path.strip_prefix_spans(line, sub_path, slash, hardware_path.PathSpan{start: 0, end: slash.encoded.len()}) ?? return None
+    hardware_path.strip_prefix_spans(group, group_extent, line, relative_root)
+}
+
+pub struct CgroupSelection {
+    pub version: CgroupVersion
+    pub group: hardware_path.PathSpan
+}
+// quota() fold after the canonical validator has classified controllers.
+// field offsets are line-relative; retain offsets into the whole read owner.
+pub fn select_cgroup(previous: CgroupSelection?, version: CgroupVersion?, fields: CgroupLineFields, line_origin: Int) -> CgroupSelection? Never! {
+    candidate :: version ?? return previous
+    previous_version :: if previous == {
+        .Val(selection) -> Val(selection.version)
+        else -> None
+    }
+    if !replace_cgroup(previous_version, candidate) -> return previous
+    group :: fields.group ?? return None
+    // Original path[1..] skips one byte; an empty kernel pathname traps.
+    assert(group.start < group.end)
+    Val(CgroupSelection{version: candidate, group: hardware_path.PathSpan{start: line_origin + group.start + 1, end: line_origin + group.end}})
+}
+
+
+// std/sys/thread/unsupported.rs:34–35. Only select for targets that the pinned
+// thread/mod.rs genuinely routes here (including non-atomic wasm); never for
+// an unbound Linux/BSD/UEFI native leaf. IOError owns the Unknown kind/text.
+pub fn unsupported_platform_parallelism() -> ParallelismResult Never! {
+    ParallelismResult.UnknownThreadCount
+}
+// std/sys/thread/unix.rs:324–327 is DIFFERENT from thread/unsupported.rs:
+// Unsupported kind, "getting the number of hardware threads is not supported
+// on the target platform". Only the checked Unix cfg fallback selects it.
+pub fn unsupported_unix_parallelism() -> ParallelismResult Never! {
+    ParallelismResult.Unsupported
+}

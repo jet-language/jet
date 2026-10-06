@@ -1,0 +1,45 @@
+// RT055 exact source-policy corpus. Native request/transport carrier is separate.
+use core.http.runtime.kernel_http_request_target as header_kernel
+
+#Test("request target projection is origin-form and tests only the first slash") {
+    assert_eq(header_kernel.jet_http_request_target_path("/"), "/")
+    assert_eq(header_kernel.jet_http_request_target_path("//host/a?x#y"), "//host/a?x#y")
+    assert_eq(header_kernel.jet_http_request_target_path("/é?q=白"), "/é?q=白")
+    assert_eq(header_kernel.jet_http_request_target_path("/\n"), "/\n")
+    inputs :: [String]{"", "a/b", "https://example.test/a", "*", "example.test:443", " /", "／"}
+    loop input in inputs -> assert_eq(header_kernel.jet_http_request_target_path(input), "")
+}
+
+#Test("header name is exactly ASCII alnum and the fifteen tchar punctuation bytes") {
+    assert_eq(header_kernel.jet_http_header_name_valid(""), false)
+    assert_eq(header_kernel.jet_http_header_name_valid("AZaz09!#$%&'*+-.^_`|~"), true)
+    allowed :: "!#$%&'*+-.^_`|~".bytes()
+    loop n in 0..<128 {
+        valid := (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
+        loop byte in allowed {
+            if Int.from_u8(byte) == n -> valid = true
+        }
+        text :: String.from_bytes([U8]{U8{n}}) ?? panic("ASCII UTF8")
+        assert_eq(header_kernel.jet_http_header_name_valid(text), valid)
+    }
+    assert_eq(header_kernel.jet_http_header_name_valid("é"), false)
+    assert_eq(header_kernel.jet_http_header_name_valid("X-白"), false)
+}
+
+#Test("header scalar guard rejects every Cc except TAB and every whitespace except SPACE TAB") {
+    assert_eq(header_kernel.jet_http_header_value_valid(""), true)
+    assert_eq(header_kernel.jet_http_header_value_valid("a b\tcafé白😀"), true)
+    loop n in 0..<128 {
+        text :: String.from_bytes([U8]{U8{n}}) ?? panic("ASCII UTF8")
+        assert_eq(header_kernel.jet_http_header_value_valid(text), (n >= 32 && n != 127) || n == 9)
+    }
+    loop n in 128..<160 {
+        text :: String.from_bytes([U8]{U8{194}, U8{n}}) ?? panic("C1 UTF8")
+        assert_eq(header_kernel.jet_http_header_value_valid(text), false)
+    }
+    spaces :: [String]{" ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "　"}
+    loop text in spaces -> assert_eq(header_kernel.jet_http_header_value_valid(text), false)
+    // Cf and obsolete whitespace are not Cc/White_Space in the pinned owner.
+    allowed :: [String]{"​", "‌", "‍", "﻿", "᠎", "͸"}
+    loop text in allowed -> assert_eq(header_kernel.jet_http_header_value_valid(text), true)
+}

@@ -1,0 +1,1804 @@
+// PORT-PENDING 2025 crates-jet-jit-src-sourceresources-slice-1801: crates/jet-jit/src/SourceResources.rs:1801-3600
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn validate_cleanup_authority(
+//RS         &self,
+//RS         state: &ArenaState,
+//RS         inner: &Arc<SourceResourceLeaseInner>,
+//RS     ) -> Result<(), String> {
+//RS         if !inner.finalization_root || !Arc::ptr_eq(&inner.arena.state, &self.state) {
+//RS             return Err("Source cleanup lease is not the active finalizer authority".to_string());
+//RS         }
+//RS         let phase_is_active = inner
+//RS             .finalization_phase
+//RS             .as_ref()
+//RS             .is_some_and(|phase| phase.load(Ordering::Acquire));
+//RS         let active_lease_matches = ACTIVE_SOURCE_RESOURCE_LEASE.with(|slot| {
+//RS             slot.borrow()
+//RS                 .as_ref()
+//RS                 .is_some_and(|active| Arc::ptr_eq(&active.inner, inner))
+//RS         });
+//RS         if !phase_is_active || !active_lease_matches {
+//RS             return Err("Source finalizer authority is outside its live finalization phase".to_string());
+//RS         }
+//RS         if !state.retirement_requested
+//RS             || !state.finalizing
+//RS             || state.retired
+//RS             || state.retained_roots != 1
+//RS         {
+//RS             return Err("Source cleanup lease is no longer active".to_string());
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn validate_cleanup_lease(&self, lease: &SourceResourceLease) -> Result<(), String> {
+//RS         let state = self.lock()?;
+//RS         self.validate_cleanup_authority(&state, &lease.inner)
+//RS     }
+//RS 
+//RS     fn validate_deferred_execution_authority(
+//RS         &self,
+//RS         state: &ArenaState,
+//RS         lease: Option<&SourceResourceLease>,
+//RS     ) -> Result<bool, String> {
+//RS         if state.retired || state.finalizing {
+//RS             return Err("Source resource arena is finalizing or retired".to_string());
+//RS         }
+//RS         if !state.retirement_requested {
+//RS             return Ok(false);
+//RS         }
+//RS         let lease = lease.ok_or_else(|| {
+//RS             "Source resource arena retirement requires an active normal callback lease".to_string()
+//RS         })?;
+//RS         if lease.inner.finalization_root {
+//RS             return Err("Finalizer lease cannot authorize ordinary resource creation".to_string());
+//RS         }
+//RS         if !Arc::ptr_eq(&lease.inner.arena.state, &self.state) {
+//RS             return Err("Active Source callback lease belongs to a different arena".to_string());
+//RS         }
+//RS         if state.retained_roots == 0 {
+//RS             return Err("Source resource arena has no live callback roots".to_string());
+//RS         }
+//RS         Ok(true)
+//RS     }
+//RS 
+//RS     fn validate_active_execution_authority(&self) -> Result<bool, String> {
+//RS         let lease = active_source_resource_lease_snapshot();
+//RS         let state = self.lock()?;
+//RS         self.validate_deferred_execution_authority(&state, lease.as_ref())
+//RS     }
+//RS 
+//RS     fn retain_callback_lease(&self) -> Result<SourceResourceLease, String> {
+//RS         let lease = active_source_resource_lease_snapshot();
+//RS         let state = self.lock()?;
+//RS         if state.finalizing {
+//RS             let lease = lease.as_ref().ok_or_else(|| {
+//RS                 "Source finalizer operation requires its active counted lease".to_string()
+//RS             })?;
+//RS             self.validate_cleanup_authority(&state, &lease.inner)?;
+//RS             return Ok(lease.clone());
+//RS         }
+//RS         let deferred = self.validate_deferred_execution_authority(&state, lease.as_ref())?;
+//RS         if deferred {
+//RS             return Ok(lease.expect("validated deferred execution lease is present"));
+//RS         }
+//RS         drop(state);
+//RS         self.retain_root()
+//RS     }
+//RS 
+//RS     /// Retain one explicit physical-root lease. Existing arena clones do not
+//RS     /// count as roots and cannot keep a pending retirement alive.
+//RS     fn retain_root(&self) -> Result<SourceResourceLease, String> {
+//RS         let mut state = self.lock()?;
+//RS         if state.retired || state.finalizing || state.retirement_requested {
+//RS             return Err("Source resource arena is retired, finalizing, or retiring".to_string());
+//RS         }
+//RS         if Self::has_channel_receiver(&state)
+//RS             && (state.finalizer.is_none() || state.finalization_handler.is_none())
+//RS         {
+//RS             return Err(
+//RS                 "Source channel receiver requires an origin-owner finalizer and completion handler"
+//RS                     .to_string(),
+//RS             );
+//RS         }
+//RS         state.retained_roots = state
+//RS             .retained_roots
+//RS             .checked_add(1)
+//RS             .ok_or_else(|| "Source resource retained-root count exhausted".to_string())?;
+//RS         Ok(SourceResourceLease {
+//RS             inner: Arc::new(SourceResourceLeaseInner {
+//RS                 arena: self.clone(),
+//RS                 finalization_root: false,
+//RS                 finalization_phase: None,
+//RS             }),
+//RS         })
+//RS     }
+//RS 
+//RS     /// The in-flight finalizer is itself a real retained root. This lease is
+//RS     /// the only new lease admitted after retirement has entered finalization.
+//RS     fn retain_finalization_root(&self) -> Result<SourceResourceLease, String> {
+//RS         let mut state = self.lock()?;
+//RS         if !state.retirement_requested || !state.finalizing || state.retired {
+//RS             return Err("Source resource finalization capability is not active".to_string());
+//RS         }
+//RS         if state.finalizer.is_none() {
+//RS             return Err("Source resource arena has no origin-owner finalizer".to_string());
+//RS         }
+//RS         state.retained_roots = state
+//RS             .retained_roots
+//RS             .checked_add(1)
+//RS             .ok_or_else(|| "Source resource retained-root count exhausted".to_string())?;
+//RS         Ok(SourceResourceLease {
+//RS             inner: Arc::new(SourceResourceLeaseInner {
+//RS                 arena: self.clone(),
+//RS                 finalization_root: true,
+//RS                 finalization_phase: Some(Arc::new(AtomicBool::new(false))),
+//RS             }),
+//RS         })
+//RS     }
+//RS 
+//RS     /// Request logical retirement. Physical owner clearing is deferred while
+//RS     /// explicit callback/task roots remain live.
+//RS     pub fn retire(&self) -> Result<Vec<SourceExecutionCompletion>, SourceResourceRetireError> {
+//RS         route_retire_result(self.retire_inner())
+//RS     }
+//RS 
+//RS     fn retire_inner(&self) -> Result<Vec<SourceExecutionCompletion>, SourceResourceRetireError> {
+//RS         let Some((receivers, finalizer)) = self.begin_retirement(true)? else {
+//RS             return Ok(Vec::new());
+//RS         };
+//RS         if receivers.is_empty() {
+//RS             return self.complete_retirement(Vec::new());
+//RS         }
+//RS         let Some(finalizer) = finalizer else {
+//RS             self.leave_finalizing();
+//RS             return Err(self.retirement_error(
+//RS                 "Source resource arena has no origin-owner finalizer".to_string(),
+//RS                 Vec::new(),
+//RS             ));
+//RS         };
+//RS         let completions = match self.retire_receivers(receivers, |value| {
+//RS             let lease = match self.retain_finalization_root() {
+//RS                 Ok(lease) => lease,
+//RS                 Err(error) => return Err((error, vec![value], Vec::new())),
+//RS             };
+//RS             finalizer(SourceResourceFinalization {
+//RS                 arena: self.clone(),
+//RS                 values: vec![value],
+//RS                 lease,
+//RS             })
+//RS             .map_err(|error| (error.error, error.values, error.completions))
+//RS         }) {
+//RS             Ok(completions) => completions,
+//RS             Err((error, values, completions)) => {
+//RS                 self.leave_finalizing();
+//RS                 return Err(self.retryable_retirement_error_with_completions(error, values, completions));
+//RS             }
+//RS         };
+//RS         self.complete_retirement(completions)
+//RS     }
+//RS 
+//RS     /// Retire while handing queued Source values to the supplied origin
+//RS     /// cleanup. Receivers are finalized one at a time, with every remaining
+//RS     /// capability live while that receiver's values are cleaned.
+//RS     pub fn retire_with_cleanup<F>(
+//RS         &self,
+//RS         cleanup: F,
+//RS     ) -> Result<Vec<SourceExecutionCompletion>, SourceResourceRetireError>
+//RS     where
+//RS         F: FnMut(MirRuntimeValue) -> Result<(), SourceResourceCleanupError>,
+//RS     {
+//RS         route_retire_result(self.retire_with_cleanup_inner(cleanup))
+//RS     }
+//RS 
+//RS     fn retire_with_cleanup_inner<F>(
+//RS         &self,
+//RS         cleanup: F,
+//RS     ) -> Result<Vec<SourceExecutionCompletion>, SourceResourceRetireError>
+//RS     where
+//RS         F: FnMut(MirRuntimeValue) -> Result<(), SourceResourceCleanupError>,
+//RS     {
+//RS         let Some((receivers, _finalizer)) = self.begin_retirement(false)? else {
+//RS             return Ok(Vec::new());
+//RS         };
+//RS         let mut cleanup = cleanup;
+//RS         let completions = match self.retire_receivers(receivers, |value| {
+//RS             cleanup(value)
+//RS                 .map(|()| Vec::new())
+//RS                 .map_err(|error| {
+//RS                     let mut values = Vec::new();
+//RS                     if let Some(value) = error.remaining {
+//RS                         values.push(value);
+//RS                     }
+//RS                     (error.error, values, Vec::new())
+//RS                 })
+//RS         }) {
+//RS             Ok(completions) => completions,
+//RS             Err((error, values, completions)) => {
+//RS                 self.leave_finalizing();
+//RS                 return Err(self.retryable_retirement_error_with_completions(error, values, completions));
+//RS             }
+//RS         };
+//RS         self.complete_retirement(completions)
+//RS     }
+//RS 
+//RS     /// Retry Source cleanup using the exact retryable retirement receipt. This
+//RS     /// preserves its pending carriers and unowned completion receipts.
+//RS     pub fn retry_retire(
+//RS         &self,
+//RS         error: SourceResourceRetireError,
+//RS     ) -> Result<Vec<SourceExecutionCompletion>, SourceResourceRetireError> {
+//RS         route_retire_result(self.retry_retire_inner(error))
+//RS     }
+//RS 
+//RS     fn retry_retire_inner(
+//RS         &self,
+//RS         error: SourceResourceRetireError,
+//RS     ) -> Result<Vec<SourceExecutionCompletion>, SourceResourceRetireError> {
+//RS         let (values, mut completions, receivers, finalizer) = self.begin_retry(error)?;
+//RS         let Some(finalizer) = finalizer else {
+//RS             if values.is_empty() && receivers.is_empty() {
+//RS                 return self.complete_retirement(completions);
+//RS             }
+//RS             self.leave_finalizing();
+//RS             return Err(self.retryable_retirement_error_with_completions(
+//RS                 "Source resource arena has no origin-owner finalizer".to_string(),
+//RS                 values,
+//RS                 completions,
+//RS             ));
+//RS         };
+//RS         let mut process = |value| {
+//RS             let lease = match self.retain_finalization_root() {
+//RS                 Ok(lease) => lease,
+//RS                 Err(error) => return Err((error, vec![value], Vec::new())),
+//RS             };
+//RS             finalizer(SourceResourceFinalization {
+//RS                 arena: self.clone(),
+//RS                 values: vec![value],
+//RS                 lease,
+//RS             })
+//RS             .map_err(|error| (error.error, error.values, error.completions))
+//RS         };
+//RS         let _activation = activate_source_resource_arena(self);
+//RS         match Self::process_values(values, &mut process) {
+//RS             Ok(processed) => completions.extend(processed),
+//RS             Err((error, values, processed)) => {
+//RS                 completions.extend(processed);
+//RS                 self.leave_finalizing();
+//RS                 return Err(self.retryable_retirement_error_with_completions(error, values, completions));
+//RS             }
+//RS         }
+//RS         match self.retire_receivers_with(receivers, &mut process) {
+//RS             Ok(processed) => completions.extend(processed),
+//RS             Err((error, values, processed)) => {
+//RS                 completions.extend(processed);
+//RS                 self.leave_finalizing();
+//RS                 return Err(self.retryable_retirement_error_with_completions(error, values, completions));
+//RS             }
+//RS         }
+//RS         self.complete_retirement(completions)
+//RS     }
+//RS 
+//RS     pub fn retry_retire_with_cleanup<F>(
+//RS         &self,
+//RS         error: SourceResourceRetireError,
+//RS         cleanup: F,
+//RS     ) -> Result<Vec<SourceExecutionCompletion>, SourceResourceRetireError>
+//RS     where
+//RS         F: FnMut(MirRuntimeValue) -> Result<(), SourceResourceCleanupError>,
+//RS     {
+//RS         route_retire_result(self.retry_retire_with_cleanup_inner(error, cleanup))
+//RS     }
+//RS 
+//RS     fn retry_retire_with_cleanup_inner<F>(
+//RS         &self,
+//RS         error: SourceResourceRetireError,
+//RS         cleanup: F,
+//RS     ) -> Result<Vec<SourceExecutionCompletion>, SourceResourceRetireError>
+//RS     where
+//RS         F: FnMut(MirRuntimeValue) -> Result<(), SourceResourceCleanupError>,
+//RS     {
+//RS         let (values, mut completions, receivers, _finalizer) = self.begin_retry(error)?;
+//RS         let mut cleanup = cleanup;
+//RS         let mut process = |value| {
+//RS             cleanup(value)
+//RS                 .map(|()| Vec::new())
+//RS                 .map_err(|error| {
+//RS                     let mut values = Vec::new();
+//RS                     if let Some(value) = error.remaining {
+//RS                         values.push(value);
+//RS                     }
+//RS                     (error.error, values, Vec::new())
+//RS                 })
+//RS         };
+//RS         let _activation = activate_source_resource_arena(self);
+//RS         match Self::process_values(values, &mut process) {
+//RS             Ok(processed) => completions.extend(processed),
+//RS             Err((error, values, processed)) => {
+//RS                 completions.extend(processed);
+//RS                 self.leave_finalizing();
+//RS                 return Err(self.retryable_retirement_error_with_completions(error, values, completions));
+//RS             }
+//RS         }
+//RS         match self.retire_receivers_with(receivers, &mut process) {
+//RS             Ok(processed) => completions.extend(processed),
+//RS             Err((error, values, processed)) => {
+//RS                 completions.extend(processed);
+//RS                 self.leave_finalizing();
+//RS                 return Err(self.retryable_retirement_error_with_completions(error, values, completions));
+//RS             }
+//RS         }
+//RS         self.complete_retirement(completions)
+//RS     }
+//RS 
+//RS     fn collect_channel_receivers(state: &ArenaState) -> Vec<SourceResourceHandle> {
+//RS         let mut receivers = state
+//RS             .slots
+//RS             .iter()
+//RS             .filter_map(|(slot_id, slot)| {
+//RS                 (slot.kind == SourceResourceKind::ChannelReceiver).then(|| {
+//RS                     let raw_bits =
+//RS                         (u64::from(slot.generation) << 32) | u64::from(*slot_id);
+//RS                     SourceResourceHandle {
+//RS                         handle: slot.handle,
+//RS                         raw: i64::from_ne_bytes(raw_bits.to_ne_bytes()),
+//RS                         kind: slot.kind.clone(),
+//RS                         generation: slot.generation,
+//RS                     }
+//RS                 })
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         receivers.sort_by_key(|receiver| receiver.raw as u32);
+//RS         receivers
+//RS     }
+//RS 
+//RS     fn begin_retirement(
+//RS         &self,
+//RS         defer_for_roots: bool,
+//RS     ) -> Result<Option<(Vec<SourceResourceHandle>, Option<SourceResourceFinalizer>)>, SourceResourceRetireError>
+//RS     {
+//RS         let mut state = self
+//RS             .lock()
+//RS             .map_err(|error| self.retirement_error(error, Vec::new()))?;
+//RS         if state.retired {
+//RS             return Ok(None);
+//RS         }
+//RS         if state.finalizing {
+//RS             return Err(self.retirement_error(
+//RS                 "Source resource arena finalization is already in progress".to_string(),
+//RS                 Vec::new(),
+//RS             ));
+//RS         }
+//RS         let receivers = Self::collect_channel_receivers(&state);
+//RS         let finalizer = state.finalizer.clone();
+//RS         if !receivers.is_empty()
+//RS             && (finalizer.is_none() || state.finalization_handler.is_none())
+//RS         {
+//RS             return Err(self.retirement_error(
+//RS                 "Source channel receiver requires an origin-owner finalizer and completion handler"
+//RS                     .to_string(),
+//RS                 Vec::new(),
+//RS             ));
+//RS         }
+//RS         if state.finalization_handler.is_none() && !state.shared_interop_aliases.is_empty() {
+//RS             return Err(self.retirement_error(
+//RS                 "Source Shared aliases must be released before retirement without an origin outcome handler"
+//RS                     .to_string(),
+//RS                 Vec::new(),
+//RS             ));
+//RS         }
+//RS         state.retirement_requested = true;
+//RS         if state.retained_roots != 0 {
+//RS             if defer_for_roots {
+//RS                 return Ok(None);
+//RS             }
+//RS             return Err(self.retirement_error(
+//RS                 "Source resource arena still has retained roots".to_string(),
+//RS                 Vec::new(),
+//RS             ));
+//RS         }
+//RS         state.finalizing = true;
+//RS         Ok(Some((receivers, finalizer)))
+//RS     }
+//RS 
+//RS     fn begin_retry(
+//RS         &self,
+//RS         error: SourceResourceRetireError,
+//RS     ) -> Result<
+//RS         (
+//RS             Vec<MirRuntimeValue>,
+//RS             Vec<SourceExecutionCompletion>,
+//RS             Vec<SourceResourceHandle>,
+//RS             Option<SourceResourceFinalizer>,
+//RS         ),
+//RS         SourceResourceRetireError,
+//RS     > {
+//RS         let SourceResourceRetireError {
+//RS             error: previous_error,
+//RS             arena,
+//RS             values,
+//RS             completions,
+//RS             retryable,
+//RS         } = error;
+//RS         if !retryable || !Arc::ptr_eq(&arena.state, &self.state) {
+//RS             return Err(SourceResourceRetireError {
+//RS                 error: previous_error,
+//RS                 arena,
+//RS                 values,
+//RS                 completions,
+//RS                 retryable,
+//RS             });
+//RS         }
+//RS         drop(arena);
+//RS         let mut state = match self.lock() {
+//RS             Ok(state) => state,
+//RS             Err(error) => {
+//RS                 return Err(self.retryable_retirement_error_with_completions(
+//RS                     error,
+//RS                     values,
+//RS                     completions,
+//RS                 ));
+//RS             }
+//RS         };
+//RS         if state.retired || !state.retirement_requested {
+//RS             return Err(self.retryable_retirement_error_with_completions(
+//RS                 "Source resource arena has no pending retirement to retry".to_string(),
+//RS                 values,
+//RS                 completions,
+//RS             ));
+//RS         }
+//RS         if state.finalizing || state.retained_roots != 0 {
+//RS             return Err(self.retryable_retirement_error_with_completions(
+//RS                 "Source resource arena is still active".to_string(),
+//RS                 values,
+//RS                 completions,
+//RS             ));
+//RS         }
+//RS         let receivers = Self::collect_channel_receivers(&state);
+//RS         let finalizer = state.finalizer.clone();
+//RS         if !receivers.is_empty()
+//RS             && (finalizer.is_none() || state.finalization_handler.is_none())
+//RS         {
+//RS             return Err(self.retryable_retirement_error_with_completions(
+//RS                 "Source channel receiver requires an origin-owner finalizer and completion handler"
+//RS                     .to_string(),
+//RS                 values,
+//RS                 completions,
+//RS             ));
+//RS         }
+//RS         state.finalizing = true;
+//RS         Ok((values, completions, receivers, finalizer))
+//RS     }
+//RS     fn complete_retirement(
+//RS         &self,
+//RS         completions: Vec<SourceExecutionCompletion>,
+//RS     ) -> Result<Vec<SourceExecutionCompletion>, SourceResourceRetireError> {
+//RS         let mut state = match self.lock() {
+//RS             Ok(state) => state,
+//RS             Err(error) => {
+//RS                 return Err(self.retryable_retirement_error_with_completions(
+//RS                     error,
+//RS                     Vec::new(),
+//RS                     completions,
+//RS                 ));
+//RS             }
+//RS         };
+//RS         if state.retired {
+//RS             state.finalizing = false;
+//RS             return Ok(completions);
+//RS         }
+//RS         if state.retained_roots != 0 {
+//RS             state.finalizing = false;
+//RS             return Err(self.retryable_retirement_error_with_completions(
+//RS                 "Source resource finalization returned with retained roots".to_string(),
+//RS                 Vec::new(),
+//RS                 completions,
+//RS             ));
+//RS         }
+//RS         if !state.shared_interop_aliases.is_empty() {
+//RS             state.finalizing = false;
+//RS             return Err(self.retryable_retirement_error_with_completions(
+//RS                 "Source resource finalization returned with pending Shared owner aliases"
+//RS                     .to_string(),
+//RS                 Vec::new(),
+//RS                 completions,
+//RS             ));
+//RS         }
+//RS         let slots = std::mem::take(&mut state.slots);
+//RS         state.retired = true;
+//RS         state.finalizing = false;
+//RS         drop(state);
+//RS         drop(slots);
+//RS         Ok(completions)
+//RS     }
+//RS 
+//RS     fn leave_finalizing(&self) {
+//RS         if let Ok(mut state) = self.lock() {
+//RS             state.finalizing = false;
+//RS         }
+//RS     }
+//RS 
+//RS     fn retirement_error(
+//RS         &self,
+//RS         error: String,
+//RS         values: Vec<MirRuntimeValue>,
+//RS     ) -> SourceResourceRetireError {
+//RS         self.retirement_error_with_completions(error, values, Vec::new())
+//RS     }
+//RS 
+//RS     fn retirement_error_with_completions(
+//RS         &self,
+//RS         error: String,
+//RS         values: Vec<MirRuntimeValue>,
+//RS         completions: Vec<SourceExecutionCompletion>,
+//RS     ) -> SourceResourceRetireError {
+//RS         SourceResourceRetireError {
+//RS             error,
+//RS             arena: self.clone(),
+//RS             values,
+//RS             completions,
+//RS             retryable: false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn retryable_retirement_error_with_completions(
+//RS         &self,
+//RS         error: String,
+//RS         values: Vec<MirRuntimeValue>,
+//RS         completions: Vec<SourceExecutionCompletion>,
+//RS     ) -> SourceResourceRetireError {
+//RS         SourceResourceRetireError {
+//RS             error,
+//RS             arena: self.clone(),
+//RS             values,
+//RS             completions,
+//RS             retryable: true,
+//RS         }
+//RS     }
+//RS 
+//RS     fn retire_receivers<F>(
+//RS         &self,
+//RS         receivers: Vec<SourceResourceHandle>,
+//RS         process: F,
+//RS     ) -> Result<Vec<SourceExecutionCompletion>, (String, Vec<MirRuntimeValue>, Vec<SourceExecutionCompletion>)>
+//RS     where
+//RS         F: FnMut(
+//RS             MirRuntimeValue,
+//RS         ) -> Result<Vec<SourceExecutionCompletion>, (String, Vec<MirRuntimeValue>, Vec<SourceExecutionCompletion>)>,
+//RS     {
+//RS         let mut process = process;
+//RS         self.retire_receivers_with(receivers, &mut process)
+//RS     }
+//RS 
+//RS     fn retire_receivers_with<F>(
+//RS         &self,
+//RS         receivers: Vec<SourceResourceHandle>,
+//RS         process: &mut F,
+//RS     ) -> Result<Vec<SourceExecutionCompletion>, (String, Vec<MirRuntimeValue>, Vec<SourceExecutionCompletion>)>
+//RS     where
+//RS         F: FnMut(
+//RS             MirRuntimeValue,
+//RS         ) -> Result<Vec<SourceExecutionCompletion>, (String, Vec<MirRuntimeValue>, Vec<SourceExecutionCompletion>)>,
+//RS     {
+//RS         let _activation = activate_source_resource_arena(self);
+//RS         let mut completions = Vec::new();
+//RS         for receiver in receivers {
+//RS             loop {
+//RS                 match self.poll_retirement_receiver(&receiver) {
+//RS                     Ok(Some(Some(value))) => match Self::process_values(vec![value], process) {
+//RS                         Ok(done) => completions.extend(done),
+//RS                         Err((error, values, done)) => {
+//RS                             completions.extend(done);
+//RS                             return Err((error, values, completions));
+//RS                         }
+//RS                     },
+//RS                     Ok(Some(None)) | Ok(None) => break,
+//RS                     Err(error) => return Err((error, Vec::new(), completions)),
+//RS                 }
+//RS             }
+//RS             let drained = match self.close_retirement_receiver(&receiver) {
+//RS                 Ok(Some(values)) => values,
+//RS                 Ok(None) => Vec::new(),
+//RS                 Err(error) => return Err((error, Vec::new(), completions)),
+//RS             };
+//RS             match Self::process_values(drained, process) {
+//RS                 Ok(done) => completions.extend(done),
+//RS                 Err((error, values, done)) => {
+//RS                     completions.extend(done);
+//RS                     return Err((error, values, completions));
+//RS                 }
+//RS             }
+//RS             if let Err(error) = self.remove_retirement_receiver(&receiver) {
+//RS                 return Err((error, Vec::new(), completions));
+//RS             }
+//RS         }
+//RS         Ok(completions)
+//RS     }
+//RS 
+//RS     fn process_values<F>(
+//RS         mut values: Vec<MirRuntimeValue>,
+//RS         process: &mut F,
+//RS     ) -> Result<Vec<SourceExecutionCompletion>, (String, Vec<MirRuntimeValue>, Vec<SourceExecutionCompletion>)>
+//RS     where
+//RS         F: FnMut(
+//RS             MirRuntimeValue,
+//RS         ) -> Result<Vec<SourceExecutionCompletion>, (String, Vec<MirRuntimeValue>, Vec<SourceExecutionCompletion>)>,
+//RS     {
+//RS         let mut unprocessed = values.drain(..);
+//RS         let mut completions = Vec::new();
+//RS         while let Some(value) = unprocessed.next() {
+//RS             match process(value) {
+//RS                 Ok(done) => completions.extend(done),
+//RS                 Err((error, mut untouched, done)) => {
+//RS                     completions.extend(done);
+//RS                     untouched.extend(unprocessed);
+//RS                     return Err((error, untouched, completions));
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok(completions)
+//RS     }
+//RS 
+//RS     fn poll_retirement_receiver(
+//RS         &self,
+//RS         capability: &SourceResourceHandle,
+//RS     ) -> Result<Option<Option<MirRuntimeValue>>, String> {
+//RS         let owner = {
+//RS             let state = self.lock()?;
+//RS             let (slot_id, generation) = Self::decode_raw(capability.raw)?;
+//RS             let Some(slot) = state.slots.get(&slot_id) else {
+//RS                 return Ok(None);
+//RS             };
+//RS             if slot.generation != generation
+//RS                 || slot.handle != capability.handle
+//RS                 || slot.kind != SourceResourceKind::ChannelReceiver
+//RS             {
+//RS                 return Err("Source receiver capability changed during retirement".to_string());
+//RS             }
+//RS             match &slot.entry {
+//RS                 SlotEntry::Backend(owner) => Arc::clone(owner),
+//RS                 SlotEntry::Cursor(_) => {
+//RS                     return Err("Source receiver capability payload mismatch".to_string())
+//RS                 }
+//RS             }
+//RS         };
+//RS         let result = {
+//RS             let owner = owner
+//RS                 .lock()
+//RS                 .map_err(|_| "Source resource owner lock is poisoned".to_string())?;
+//RS             let BackendOwner::ChannelReceiver(receiver) = &*owner else {
+//RS                 return Err("Source receiver capability payload mismatch".to_string());
+//RS             };
+//RS             receiver.try_receive()
+//RS         };
+//RS         Ok(Some(result))
+//RS     }
+//RS 
+//RS     fn close_retirement_receiver(
+//RS         &self,
+//RS         capability: &SourceResourceHandle,
+//RS     ) -> Result<Option<Vec<MirRuntimeValue>>, String> {
+//RS         let owner = {
+//RS             let state = self.lock()?;
+//RS             let (slot_id, generation) = Self::decode_raw(capability.raw)?;
+//RS             let Some(slot) = state.slots.get(&slot_id) else {
+//RS                 return Ok(None);
+//RS             };
+//RS             if slot.generation != generation
+//RS                 || slot.handle != capability.handle
+//RS                 || slot.kind != SourceResourceKind::ChannelReceiver
+//RS             {
+//RS                 return Err("Source receiver capability changed during retirement".to_string());
+//RS             }
+//RS             match &slot.entry {
+//RS                 SlotEntry::Backend(owner) => Arc::clone(owner),
+//RS                 SlotEntry::Cursor(_) => {
+//RS                     return Err("Source receiver capability payload mismatch".to_string())
+//RS                 }
+//RS             }
+//RS         };
+//RS         let values = {
+//RS             let owner = owner
+//RS                 .lock()
+//RS                 .map_err(|_| "Source resource owner lock is poisoned".to_string())?;
+//RS             let BackendOwner::ChannelReceiver(receiver) = &*owner else {
+//RS                 return Err("Source receiver capability payload mismatch".to_string());
+//RS             };
+//RS             receiver.close_receiver_and_drain()
+//RS         };
+//RS         Ok(Some(values))
+//RS     }
+//RS 
+//RS     fn remove_retirement_receiver(
+//RS         &self,
+//RS         capability: &SourceResourceHandle,
+//RS     ) -> Result<(), String> {
+//RS         let removed = {
+//RS             let mut state = self.lock()?;
+//RS             let (slot_id, generation) = Self::decode_raw(capability.raw)?;
+//RS             let Some(slot) = state.slots.get(&slot_id) else {
+//RS                 return Ok(());
+//RS             };
+//RS             if slot.generation != generation
+//RS                 || slot.handle != capability.handle
+//RS                 || slot.kind != SourceResourceKind::ChannelReceiver
+//RS             {
+//RS                 return Err("Source receiver capability changed during retirement".to_string());
+//RS             }
+//RS             let removed = state.slots.remove(&slot_id);
+//RS             removed
+//RS         };
+//RS         drop(removed);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn is_retired(&self) -> Result<bool, String> {
+//RS         Ok(self.lock()?.retired)
+//RS     }
+//RS 
+//RS     pub fn is_retirement_requested(&self) -> Result<bool, String> {
+//RS         Ok(self.lock()?.retirement_requested)
+//RS     }
+//RS 
+//RS     pub fn retained_root_count(&self) -> Result<usize, String> {
+//RS         Ok(self.lock()?.retained_roots)
+//RS     }
+//RS 
+//RS     fn release_root(&self) {
+//RS         let (should_retire, finalization_handler) = {
+//RS             let Ok(mut state) = self.lock() else {
+//RS                 return;
+//RS             };
+//RS             if state.retained_roots == 0 {
+//RS                 return;
+//RS             }
+//RS             state.retained_roots -= 1;
+//RS             (
+//RS                 state.retained_roots == 0
+//RS                     && state.retirement_requested
+//RS                     && !state.retired
+//RS                     && !state.finalizing,
+//RS                 state.finalization_handler.clone(),
+//RS             )
+//RS         };
+//RS         if !should_retire {
+//RS             return;
+//RS         }
+//RS         let Some(finalization_handler) = finalization_handler else {
+//RS             self.retire_without_source_work();
+//RS             return;
+//RS         };
+//RS         let outcome = match self.retire() {
+//RS             Ok(completions) if !completions.is_empty() => {
+//RS                 Some(SourceResourceFinalizationOutcome::Retired { completions })
+//RS             }
+//RS             Ok(_) => None,
+//RS             Err(error) => Some(SourceResourceFinalizationOutcome::Failed(error)),
+//RS         };
+//RS         if let Some(outcome) = outcome {
+//RS             finalization_handler(outcome);
+//RS         }
+//RS     }
+//RS 
+//RS     fn retire_without_source_work(&self) {
+//RS         let slots = {
+//RS             let Ok(mut state) = self.lock() else {
+//RS                 return;
+//RS             };
+//RS             if state.retired
+//RS                 || !state.retirement_requested
+//RS                 || state.retained_roots != 0
+//RS                 || state.finalizing
+//RS                 || state.finalization_handler.is_some()
+//RS                 || !state.shared_interop_aliases.is_empty()
+//RS                 || Self::has_channel_receiver(&state)
+//RS             {
+//RS                 return;
+//RS             }
+//RS             state.retired = true;
+//RS             std::mem::take(&mut state.slots)
+//RS         };
+//RS         drop(slots);
+//RS     }
+//RS 
+//RS 
+//RS     fn lock(&self) -> Result<MutexGuard<'_, ArenaState>, String> {
+//RS         self.state
+//RS             .lock()
+//RS             .map_err(|_| "Source resource arena lock is poisoned".to_string())
+//RS     }
+//RS     fn has_channel_receiver(state: &ArenaState) -> bool {
+//RS         state.slots.values().any(|slot| match &slot.entry {
+//RS             SlotEntry::Cursor(_) => false,
+//RS             SlotEntry::Backend(owner) => {
+//RS                 let owner = owner
+//RS                     .lock()
+//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS                 matches!(&*owner, BackendOwner::ChannelReceiver(_))
+//RS             }
+//RS         })
+//RS     }
+//RS 
+//RS 
+//RS     fn reserve_slot_handle(
+//RS         state: &mut ArenaState,
+//RS         handle: MirHandleId,
+//RS         kind: SourceResourceKind,
+//RS         allow_deferred_retirement: bool,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         if state.retired
+//RS             || state.finalizing
+//RS             || (state.retirement_requested && !allow_deferred_retirement)
+//RS         {
+//RS             return Err("Source resource arena is retired, finalizing, or retiring".to_string());
+//RS         }
+//RS         state.next_slot = state
+//RS             .next_slot
+//RS             .checked_add(1)
+//RS             .ok_or_else(|| "Source resource slot space exhausted".to_string())?;
+//RS         let generation = Self::allocate_generation()?;
+//RS         let raw_bits = (u64::from(generation) << 32) | u64::from(state.next_slot);
+//RS         Ok(SourceResourceHandle {
+//RS             handle,
+//RS             raw: i64::from_ne_bytes(raw_bits.to_ne_bytes()),
+//RS             kind,
+//RS             generation,
+//RS         })
+//RS     }
+//RS 
+//RS     fn insert_reserved_slot(
+//RS         state: &mut ArenaState,
+//RS         capability: SourceResourceHandle,
+//RS         entry: SlotEntry,
+//RS     ) {
+//RS         state.slots.insert(
+//RS             capability.raw as u32,
+//RS             Slot {
+//RS                 handle: capability.handle,
+//RS                 kind: capability.kind,
+//RS                 generation: capability.generation,
+//RS                 entry,
+//RS             },
+//RS         );
+//RS     }
+//RS 
+//RS     fn allocate_slot(
+//RS         state: &mut ArenaState,
+//RS         handle: MirHandleId,
+//RS         kind: SourceResourceKind,
+//RS         entry: SlotEntry,
+//RS         allow_deferred_retirement: bool,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         let capability =
+//RS             Self::reserve_slot_handle(state, handle, kind, allow_deferred_retirement)?;
+//RS         Self::insert_reserved_slot(state, capability.clone(), entry);
+//RS         Ok(capability)
+//RS     }
+//RS 
+//RS     fn allocate_cleanup_slot(
+//RS         state: &mut ArenaState,
+//RS         handle: MirHandleId,
+//RS         kind: SourceResourceKind,
+//RS         entry: SlotEntry,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         if state.retired || !state.finalizing || !state.retirement_requested {
+//RS             return Err("Source cleanup lease is no longer active".to_string());
+//RS         }
+//RS         state.next_slot = state
+//RS             .next_slot
+//RS             .checked_add(1)
+//RS             .ok_or_else(|| "Source resource slot space exhausted".to_string())?;
+//RS         let generation = Self::allocate_generation()?;
+//RS         let raw_bits = (u64::from(generation) << 32) | u64::from(state.next_slot);
+//RS         let capability = SourceResourceHandle {
+//RS             handle,
+//RS             raw: i64::from_ne_bytes(raw_bits.to_ne_bytes()),
+//RS             kind,
+//RS             generation,
+//RS         };
+//RS         Self::insert_reserved_slot(state, capability.clone(), entry);
+//RS         Ok(capability)
+//RS     }
+//RS 
+//RS     fn decode_raw(raw: i64) -> Result<(u32, u32), String> {
+//RS         let bits = u64::from_ne_bytes(raw.to_ne_bytes());
+//RS         let slot_id = bits as u32;
+//RS         let generation = (bits >> 32) as u32;
+//RS         if slot_id == 0 || generation == 0 {
+//RS             return Err("invalid or stale Source resource capability".to_string());
+//RS         }
+//RS         Ok((slot_id, generation))
+//RS     }
+//RS     fn allocate_generation() -> Result<u32, String> {
+//RS         let mut current = NEXT_CAPABILITY_GENERATION.load(Ordering::Relaxed);
+//RS         loop {
+//RS             let next = current
+//RS                 .checked_add(1)
+//RS                 .ok_or_else(|| "Source resource generation space exhausted".to_string())?;
+//RS             match NEXT_CAPABILITY_GENERATION.compare_exchange_weak(
+//RS                 current,
+//RS                 next,
+//RS                 Ordering::Relaxed,
+//RS                 Ordering::Relaxed,
+//RS             ) {
+//RS                 Ok(_) => return Ok(next),
+//RS                 Err(observed) => current = observed,
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn register_backend(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         owner: BackendOwner,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         let kind = owner.kind();
+//RS         self.register_backend_arc(handle, kind, Arc::new(Mutex::new(owner)))
+//RS     }
+//RS 
+//RS 
+//RS     fn register_backend_arc(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         kind: SourceResourceKind,
+//RS         owner: Arc<Mutex<BackendOwner>>,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_backend_arc_owned(handle, kind, owner)
+//RS             .map_err(|(error, _owner)| error)
+//RS     }
+//RS 
+//RS     fn register_backend_arc_owned(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         kind: SourceResourceKind,
+//RS         owner: Arc<Mutex<BackendOwner>>,
+//RS     ) -> Result<SourceResourceHandle, (String, Arc<Mutex<BackendOwner>>)> {
+//RS         let active_lease = active_source_resource_lease_snapshot();
+//RS         let result = {
+//RS             let mut state = self
+//RS                 .lock()
+//RS                 .map_err(|error| (error, Arc::clone(&owner)))?;
+//RS             let allow_deferred_retirement = self
+//RS                 .validate_deferred_execution_authority(&state, active_lease.as_ref())
+//RS                 .map_err(|error| (error, Arc::clone(&owner)))?;
+//RS             if matches!(&kind, SourceResourceKind::ChannelReceiver)
+//RS                 && (state.finalizer.is_none() || state.finalization_handler.is_none())
+//RS             {
+//RS                 Err((
+//RS                     "Source channel receiver requires an origin-owner finalizer and completion handler"
+//RS                         .to_string(),
+//RS                     Arc::clone(&owner),
+//RS                 ))
+//RS             } else {
+//RS                 Self::allocate_slot(
+//RS                     &mut state,
+//RS                     handle,
+//RS                     kind,
+//RS                     SlotEntry::Backend(Arc::clone(&owner)),
+//RS                     allow_deferred_retirement,
+//RS                 )
+//RS                 .map_err(|error| (error, Arc::clone(&owner)))
+//RS             }
+//RS         };
+//RS         match result {
+//RS             Ok(capability) => {
+//RS                 drop(owner);
+//RS                 Ok(capability)
+//RS             }
+//RS             Err((error, _)) => Err((error, owner)),
+//RS         }
+//RS     }
+//RS 
+//RS     fn register_cleanup_backend_arc_owned(
+//RS         &self,
+//RS         cleanup: &SourceResourceCleanupLease,
+//RS         handle: MirHandleId,
+//RS         kind: SourceResourceKind,
+//RS         owner: Arc<Mutex<BackendOwner>>,
+//RS     ) -> Result<SourceResourceHandle, (String, Arc<Mutex<BackendOwner>>)> {
+//RS         let result = {
+//RS             let mut state = self
+//RS                 .lock()
+//RS                 .map_err(|error| (error, Arc::clone(&owner)))?;
+//RS             if let Err(error) = self.validate_cleanup_authority(&state, &cleanup.inner) {
+//RS                 Err((error, Arc::clone(&owner)))
+//RS             } else {
+//RS                 Self::allocate_cleanup_slot(
+//RS                     &mut state,
+//RS                     handle,
+//RS                     kind,
+//RS                     SlotEntry::Backend(Arc::clone(&owner)),
+//RS                 )
+//RS                 .map_err(|error| (error, Arc::clone(&owner)))
+//RS             }
+//RS         };
+//RS         match result {
+//RS             Ok(capability) => {
+//RS                 drop(owner);
+//RS                 Ok(capability)
+//RS             }
+//RS             Err((error, _)) => Err((error, owner)),
+//RS         }
+//RS     }
+//RS 
+//RS     fn register_cleanup_native_binding_root(
+//RS         &self,
+//RS         cleanup: &SourceResourceCleanupLease,
+//RS         binding: SourceNativeBinding,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_cleanup_backend_arc_owned(
+//RS             cleanup,
+//RS             native_binding_handle_id(),
+//RS             SourceResourceKind::NativeBinding,
+//RS             Arc::new(Mutex::new(BackendOwner::NativeBinding(binding))),
+//RS         )
+//RS         .map_err(|(error, _owner)| error)
+//RS     }
+//RS 
+//RS     /// Register a canonical file reader owner and receive its scoped
+//RS     /// capability.
+//RS     pub fn register_file(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         reader: SourceFileReader,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_backend(handle, BackendOwner::File(reader))
+//RS     }
+//RS 
+//RS     /// Adopt a typed reader from the legacy JIT table without retaining the
+//RS     /// integer slot as a second owner.
+//RS     pub fn register_file_handle(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         reader_handle: i64,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_file(handle, SourceFileReader::from_handle(reader_handle)?)
+//RS     }
+//RS 
+//RS     /// Open and register a file through the canonical FileStream leaf.
+//RS     pub fn open_file(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         path: &str,
+//RS     ) -> Result<SourceResourceHandle, MirNativeCursorError> {
+//RS         self.register_file(handle, SourceFileReader::open(path)?)
+//RS             .map_err(MirNativeCursorError::internal)
+//RS     }
+//RS 
+//RS     /// Register a canonical file writer owner.  Writers are release-only
+//RS     /// leases and intentionally cannot be projected as loop producers.
+//RS     pub fn register_file_writer(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         writer: SourceFileWriter,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_backend(handle, BackendOwner::FileWriter(writer))
+//RS     }
+//RS 
+//RS     /// Adopt a typed writer from the legacy JIT table.
+//RS     pub fn register_file_writer_handle(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         writer_handle: i64,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_file_writer(handle, SourceFileWriter::from_handle(writer_handle)?)
+//RS     }
+//RS 
+//RS     pub fn open_file_writer(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         path: &str,
+//RS     ) -> Result<SourceResourceHandle, MirNativeCursorError> {
+//RS         self.register_file_writer(handle, SourceFileWriter::create(path)?)
+//RS             .map_err(MirNativeCursorError::internal)
+//RS     }
+//RS 
+//RS     pub fn append_file_writer(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         path: &str,
+//RS     ) -> Result<SourceResourceHandle, MirNativeCursorError> {
+//RS         self.register_file_writer(handle, SourceFileWriter::append(path)?)
+//RS             .map_err(MirNativeCursorError::internal)
+//RS     }
+//RS 
+//RS     /// Register the typed canonical stdin line producer.
+//RS     pub fn register_stdin(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_backend(
+//RS             handle,
+//RS             BackendOwner::Stdin(crate::enc_stream::source_stdin_reader()),
+//RS         )
+//RS     }
+//RS 
+//RS     /// Register an already-adopted process stdout/stderr reader.
+//RS     pub fn register_process_stream(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         reader: SourceProcessStream,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_backend(handle, BackendOwner::Process(reader))
+//RS     }
+//RS     /// Adopt a process child output reader from the canonical Process owner
+//RS     /// table, then issue the Source arena capability for that stream.
+//RS     pub fn register_process_stream_handle(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         child_raw: i64,
+//RS         stdout: bool,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         let stream = if stdout {
+//RS             crate::ProcessPrelude::process_prelude::SourceProcessStreamKind::Stdout
+//RS         } else {
+//RS             crate::ProcessPrelude::process_prelude::SourceProcessStreamKind::Stderr
+//RS         };
+//RS         let reader = crate::Process::source_take_process_stream(child_raw, stream)?;
+//RS         self.register_process_stream(handle, SourceProcessStream(reader))
+//RS     }
+//RS 
+//RS 
+//RS     /// Register a scheduler channel receiver carrying Source runtime values.
+//RS     pub fn register_channel_receiver(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         receiver: &jet_codegen::scheduler::JetSchedulerChannel<MirRuntimeValue>,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_backend(
+//RS             handle,
+//RS             BackendOwner::ChannelReceiver(receiver.clone()),
+//RS         )
+//RS     }
+//RS 
+//RS     /// Register the matching canonical sender endpoint.
+//RS     pub fn register_channel_sender(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         sender: jet_codegen::scheduler::JetSchedulerSender<MirRuntimeValue>,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_backend(handle, BackendOwner::ChannelSender(sender))
+//RS     }
+//RS 
+//RS     /// Register an already-checked native binding root. The arena retains
+//RS     /// only the exact carrier and metadata; NativeAdapter owns dispatch and
+//RS     /// binding-set scope.
+//RS     pub fn register_native_binding(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         binding: SourceNativeBinding,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_backend(handle, BackendOwner::NativeBinding(binding))
+//RS     }
+//RS 
+//RS     /// Build and register an interface value root. Method identity is checked
+//RS     /// later by SourceInterfaces, not encoded as this value's identity.
+//RS     pub fn register_native_interface_binding(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         object: &crate::SourceInterfaces::NativeInterfaceObject,
+//RS         execution: jet_foundation::MIR::MirExecutionIdentity,
+//RS         artifact: jet_foundation::MIR::MirArtifactId,
+//RS         receiver_type: MirType,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         let binding = SourceNativeBinding::interface(object, execution, artifact, receiver_type)?;
+//RS         self.register_native_binding(handle, binding)
+//RS     }
+//RS 
+//RS     /// Build and register a checked native Fn value root.
+//RS     pub fn register_native_callable_binding(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         object: &crate::SourceInterfaces::NativeInterfaceObject,
+//RS         identity: crate::SourceInterfaces::NativeCallableIdentity,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         let binding = SourceNativeBinding::callable(object, identity)?;
+//RS         self.register_native_binding(handle, binding)
+//RS     }
+//RS 
+//RS     pub fn register_native_binding_root(
+//RS         &self,
+//RS         binding: SourceNativeBinding,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_native_binding(native_binding_handle_id(), binding)
+//RS     }
+//RS 
+//RS     pub fn register_native_interface_binding_root(
+//RS         &self,
+//RS         object: &crate::SourceInterfaces::NativeInterfaceObject,
+//RS         execution: jet_foundation::MIR::MirExecutionIdentity,
+//RS         artifact: jet_foundation::MIR::MirArtifactId,
+//RS         receiver_type: MirType,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_native_interface_binding(
+//RS             native_binding_handle_id(),
+//RS             object,
+//RS             execution,
+//RS             artifact,
+//RS             receiver_type,
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn register_native_callable_binding_root(
+//RS         &self,
+//RS         object: &crate::SourceInterfaces::NativeInterfaceObject,
+//RS         identity: crate::SourceInterfaces::NativeCallableIdentity,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_native_callable_binding(native_binding_handle_id(), object, identity)
+//RS     }
+//RS     fn shared_interop_root_type_identity(
+//RS         capability: &SourceResourceHandle,
+//RS     ) -> Result<u64, String> {
+//RS         if capability.handle != shared_interop_root_handle_id() {
+//RS             return Err("Source capability is not a SharedInteropRoot".to_string());
+//RS         }
+//RS         let SourceResourceKind::SharedInteropRoot { type_identity } = &capability.kind else {
+//RS             return Err("Source capability is not a SharedInteropRoot".to_string());
+//RS         };
+//RS         let (_, generation) = Self::decode_raw(capability.raw)?;
+//RS         if generation != capability.generation {
+//RS             return Err("Shared interop root generation mismatch".to_string());
+//RS         }
+//RS         Ok(*type_identity)
+//RS     }
+//RS 
+//RS     fn validate_shared_interop_root_locked(
+//RS         state: &ArenaState,
+//RS         capability: &SourceResourceHandle,
+//RS     ) -> Result<(), String> {
+//RS         let (slot_id, generation) = Self::decode_raw(capability.raw)?;
+//RS         if generation != capability.generation {
+//RS             return Err("Shared interop root generation mismatch".to_string());
+//RS         }
+//RS         let slot = state
+//RS             .slots
+//RS             .get(&slot_id)
+//RS             .ok_or_else(|| "stale or unknown Shared interop root capability".to_string())?;
+//RS         if slot.generation != generation
+//RS             || slot.handle != capability.handle
+//RS             || slot.kind != capability.kind
+//RS         {
+//RS             return Err("Shared interop root capability generation or kind mismatch".to_string());
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn ensure_no_shared_interop_aliases_locked(
+//RS         state: &ArenaState,
+//RS         raw: i64,
+//RS     ) -> Result<(), String> {
+//RS         if state
+//RS             .shared_interop_aliases
+//RS             .keys()
+//RS             .any(|(alias_raw, _)| *alias_raw == raw)
+//RS         {
+//RS             return Err("Shared interop root still has pending owner aliases".to_string());
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Register one checked physical Source Shared root under a fresh arena
+//RS     /// capability, independent of Source alias indexes. A root without an
+//RS     /// attached Source alias is admissible without cleanup; an attached alias
+//RS     /// requires the origin outcome handler before this arena clones the root.
+//RS     pub fn register_shared_interop_root(
+//RS         &self,
+//RS         type_identity: u64,
+//RS         root: &crate::SourceSharedInterop::SourceSharedInterop,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         if root.type_id() != type_identity {
+//RS             return Err("Shared interop root checked type identity mismatch".to_string());
+//RS         }
+//RS         if root.owner_alias_token_id().is_some()
+//RS             && self.lock()?.finalization_handler.is_none()
+//RS         {
+//RS             return Err(
+//RS                 "Source Shared aliases require an origin outcome handler before root registration"
+//RS                     .to_string(),
+//RS             );
+//RS         }
+//RS         self.register_backend(
+//RS             shared_interop_root_handle_id(),
+//RS             BackendOwner::SharedInteropRoot(root.clone()),
+//RS         )
+//RS     }
+//RS 
+//RS     /// Resolve the already-registered physical root for one Source Shared
+//RS     /// carrier. This returns its existing generation-bearing capability and
+//RS     /// never creates a second arena slot.
+//RS     pub fn resolve_shared_interop_root(
+//RS         &self,
+//RS         root: &crate::SourceSharedInterop::SourceSharedInterop,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         let type_identity = root.type_id();
+//RS         let state = self.lock()?;
+//RS         let mut resolved = None;
+//RS         for (slot_id, slot) in &state.slots {
+//RS             if slot.handle != shared_interop_root_handle_id()
+//RS                 || slot.kind != (SourceResourceKind::SharedInteropRoot { type_identity })
+//RS             {
+//RS                 continue;
+//RS             }
+//RS             let SlotEntry::Backend(owner) = &slot.entry else {
+//RS                 return Err("Shared interop root capability payload mismatch".to_string());
+//RS             };
+//RS             let owner = owner
+//RS                 .lock()
+//RS                 .map_err(|_| "Source resource owner lock is poisoned".to_string())?;
+//RS             let BackendOwner::SharedInteropRoot(registered) = &*owner else {
+//RS                 return Err("Shared interop root capability payload mismatch".to_string());
+//RS             };
+//RS             if registered.identity() != root.identity() {
+//RS                 continue;
+//RS             }
+//RS             if resolved.is_some() {
+//RS                 return Err("multiple Source Shared roots have the same physical identity".to_string());
+//RS             }
+//RS             let raw_bits = (u64::from(slot.generation) << 32) | u64::from(*slot_id);
+//RS             resolved = Some(SourceResourceHandle {
+//RS                 handle: slot.handle,
+//RS                 raw: i64::from_ne_bytes(raw_bits.to_ne_bytes()),
+//RS                 kind: slot.kind.clone(),
+//RS                 generation: slot.generation,
+//RS             });
+//RS         }
+//RS         resolved.ok_or_else(|| "Source Shared root is not registered in this arena".to_string())
+//RS     }
+//RS 
+//RS     /// Borrow the exact physical root and a counted lease alias. During a live
+//RS     /// callback this may retain a new root; during deferred retirement or its
+//RS     /// finalizer it reuses only that exact active lease.
+//RS     pub fn borrow_shared_interop_root(
+//RS         &self,
+//RS         capability: &SourceResourceHandle,
+//RS         type_identity: u64,
+//RS     ) -> Result<
+//RS         (
+//RS             crate::SourceSharedInterop::SourceSharedInterop,
+//RS             SourceResourceLease,
+//RS         ),
+//RS         MirNativeCursorError,
+//RS     > {
+//RS         if capability.handle != shared_interop_root_handle_id()
+//RS             || capability.kind != (SourceResourceKind::SharedInteropRoot { type_identity })
+//RS         {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Shared interop root handle or checked type identity mismatch",
+//RS             ));
+//RS         }
+//RS         let (_, generation) =
+//RS             Self::decode_raw(capability.raw).map_err(MirNativeCursorError::internal)?;
+//RS         if generation != capability.generation {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Shared interop root generation mismatch",
+//RS             ));
+//RS         }
+//RS         let lease = self
+//RS             .retain_callback_lease()
+//RS             .map_err(MirNativeCursorError::internal)?;
+//RS         let owner = self.owner_for_raw(
+//RS             capability.handle,
+//RS             capability.raw,
+//RS             &capability.kind,
+//RS         )?;
+//RS         let root = {
+//RS             let owner = owner
+//RS                 .lock()
+//RS                 .map_err(|_| MirNativeCursorError::internal("Shared interop root lock is poisoned"))?;
+//RS             let BackendOwner::SharedInteropRoot(root) = &*owner else {
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "Shared interop root capability payload mismatch",
+//RS                 ));
+//RS             };
+//RS             if root.type_id() != type_identity {
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "Shared interop root checked type identity mismatch",
+//RS                 ));
+//RS             }
+//RS             root.clone()
+//RS         };
+//RS         Ok((root, lease))
+//RS     }
+//RS 
+//RS     /// Release the arena's strong root reference. Borrowed roots remain usable;
+//RS     /// their separate leases keep nested Source owners live until the final
+//RS     /// native alias finishes cleanup and drops.
+//RS     pub fn release_shared_interop_root(
+//RS         &self,
+//RS         capability: &SourceResourceHandle,
+//RS     ) -> Result<SourceResourceRelease, String> {
+//RS         let _ = Self::shared_interop_root_type_identity(capability)?;
+//RS         let removed = {
+//RS             let mut state = self.lock()?;
+//RS             Self::validate_shared_interop_root_locked(&state, capability)?;
+//RS             if state
+//RS                 .shared_interop_aliases
+//RS                 .keys()
+//RS                 .any(|(raw, _)| *raw == capability.raw)
+//RS             {
+//RS                 return Err("Shared interop root still has pending owner aliases".to_string());
+//RS             }
+//RS             let (slot_id, _) = Self::decode_raw(capability.raw)?;
+//RS             state
+//RS                 .slots
+//RS                 .remove(&slot_id)
+//RS                 .ok_or_else(|| "Shared interop root capability disappeared".to_string())?
+//RS         };
+//RS         Ok(Self::finalize_removed_slot(removed))
+//RS     }
+//RS 
+//RS     fn store_shared_interop_alias(
+//RS         &self,
+//RS         capability: &SourceResourceHandle,
+//RS         alias: crate::SourceSharedInterop::SourceSharedInteropOwnerAlias,
+//RS     ) -> Result<(), String> {
+//RS         let _ = Self::shared_interop_root_type_identity(capability)?;
+//RS         let token_id = alias.token_id();
+//RS         let active_lease = active_source_resource_lease_snapshot();
+//RS         let mut state = self.lock()?;
+//RS         Self::validate_shared_interop_root_locked(&state, capability)?;
+//RS         self.validate_deferred_execution_authority(&state, active_lease.as_ref())?;
+//RS         let key = (capability.raw, token_id);
+//RS         if state.shared_interop_aliases.contains_key(&key) {
+//RS             return Err("Shared interop owner alias token is already registered".to_string());
+//RS         }
+//RS         state.shared_interop_aliases.insert(key, Some(alias));
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Reserve one Source-owned logical alias for this exact physical root.
+//RS     /// The returned token ID is owner-issued; arena pins and metadata do not
+//RS     /// participate in its count. An origin outcome handler must be configured
+//RS     /// before reservation because final alias release may produce a receipt.
+//RS     pub fn retain_shared_interop_alias(
+//RS         &self,
+//RS         capability: &SourceResourceHandle,
+//RS     ) -> Result<i64, String> {
+//RS         let type_identity = Self::shared_interop_root_type_identity(capability)?;
+//RS         self.validate_active_execution_authority()?;
+//RS         let (root, lease) = self
+//RS             .borrow_shared_interop_root(capability, type_identity)
+//RS             .map_err(|error| {
+//RS                 error
+//RS                     .internal_message()
+//RS                     .unwrap_or("Shared interop root borrow failed")
+//RS                     .to_string()
+//RS             })?;
+//RS         if self.lock()?.finalization_handler.is_none() {
+//RS             return Err("Source Shared aliases require an origin outcome handler".to_string());
+//RS         }
+//RS         let alias = root.retain_owner_alias()?;
+//RS         let token_id = alias.token_id();
+//RS         self.store_shared_interop_alias(capability, alias)?;
+//RS         drop(lease);
+//RS         Ok(token_id)
+//RS     }
+//RS 
+//RS     /// Consume one pending logical alias into a physical Shared carrier. The
+//RS     /// root clone and arena lease remain alive until the owner token is
+//RS     /// attached, so concurrent retirement cannot invalidate the transfer.
+//RS     pub fn adopt_shared_interop_alias(
+//RS         &self,
+//RS         capability: &SourceResourceHandle,
+//RS         token_id: i64,
+//RS     ) -> Result<crate::SourceSharedInterop::SourceSharedInterop, String> {
+//RS         let type_identity = Self::shared_interop_root_type_identity(capability)?;
+//RS         let (root, lease) = self
+//RS             .borrow_shared_interop_root(capability, type_identity)
+//RS             .map_err(|error| {
+//RS                 error
+//RS                     .internal_message()
+//RS                     .unwrap_or("Shared interop root borrow failed")
+//RS                     .to_string()
+//RS             })?;
+//RS         let key = (capability.raw, token_id);
+//RS         let alias = {
+//RS             let active_lease = active_source_resource_lease_snapshot();
+//RS             let mut state = self.lock()?;
+//RS             Self::validate_shared_interop_root_locked(&state, capability)?;
+//RS             self.validate_deferred_execution_authority(&state, active_lease.as_ref())?;
+//RS             match state.shared_interop_aliases.get(&key) {
+//RS                 Some(Some(_)) => {}
+//RS                 Some(None) => {
+//RS                     return Err("Shared interop owner alias release is in progress".to_string())
+//RS                 }
+//RS                 None => return Err("Unknown Shared interop owner alias token".to_string()),
+//RS             }
+//RS             state
+//RS                 .shared_interop_aliases
+//RS                 .remove(&key)
+//RS                 .and_then(|alias| alias)
+//RS                 .expect("validated Shared interop owner alias remains registered")
+//RS         };
+//RS         let carrier = root.with_owner_alias_lease(alias)?;
+//RS         drop(lease);
+//RS         Ok(carrier)
+//RS     }
+//RS 
+//RS     /// Release a pending Source-owned logical alias. A release-in-progress
+//RS     /// marker keeps retirement and root release from overtaking the owner
+//RS     /// operation, which runs outside the arena mutex. The owner result and any
+//RS     /// one-shot physical completion are returned separately and unchanged.
+//RS     pub fn release_shared_interop_alias(
+//RS         &self,
+//RS         capability: &SourceResourceHandle,
+//RS         token_id: i64,
+//RS     ) -> Result<
+//RS         crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()>,
+//RS         String,
+//RS     > {
+//RS         let _ = Self::shared_interop_root_type_identity(capability)?;
+//RS         let key = (capability.raw, token_id);
+//RS         let alias = {
+//RS             let mut state = self.lock()?;
+//RS             Self::validate_shared_interop_root_locked(&state, capability)?;
+//RS             match state.shared_interop_aliases.get_mut(&key) {
+//RS                 Some(entry) if entry.is_some() => entry.take().expect("alias entry is present"),
+//RS                 Some(_) => {
+//RS                     return Err("Shared interop owner alias release is already in progress".to_string())
+//RS                 }
+//RS                 None => return Err("Unknown Shared interop owner alias token".to_string()),
+//RS             }
+//RS         };
+//RS         let release = SharedInteropAliasReleaseGuard { arena: self, key };
+//RS         let outcome = alias.release();
+//RS         drop(alias);
+//RS         drop(release);
+//RS         Ok(outcome)
+//RS     }
+//RS 
+//RS     /// Create an arena capability containing only the physical weak owner.
+//RS     /// Weak capability aliases retain the arena separately through leases.
+//RS     pub fn register_shared_interop_weak_root(
+//RS         &self,
+//RS         type_identity: u64,
+//RS         root: crate::SourceSharedInterop::SourceSharedInteropWeak,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         if root.type_id() != type_identity {
+//RS             return Err("Shared interop weak root checked type identity mismatch".to_string());
+//RS         }
+//RS         self.register_backend(
+//RS             shared_interop_weak_root_handle_id(),
+//RS             BackendOwner::SharedInteropWeakRoot {
+//RS                 type_identity,
+//RS                 root: Arc::new(root),
+//RS             },
+//RS         )
+//RS     }
+//RS 
+//RS     /// Downgrade an exact registered strong root without retaining it.
+//RS     pub fn downgrade_shared_interop_root(
+//RS         &self,
+//RS         capability: &SourceResourceHandle,
+//RS     ) -> Result<SourceResourceHandle, MirNativeCursorError> {
+//RS         let SourceResourceKind::SharedInteropRoot { type_identity } = &capability.kind else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source capability is not a SharedInteropRoot",
+//RS             ));
+//RS         };
+//RS         let type_identity = *type_identity;
+//RS         if capability.handle != shared_interop_root_handle_id() {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Shared interop root handle identity mismatch",
+//RS             ));
+//RS         }
+//RS         let (_, generation) =
+//RS             Self::decode_raw(capability.raw).map_err(MirNativeCursorError::internal)?;
+//RS         if generation != capability.generation {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Shared interop root generation mismatch",
+//RS             ));
+//RS         }
+//RS         let owner = self.owner_for_raw(capability.handle, capability.raw, &capability.kind)?;
+//RS         let root = {
+//RS             let owner = owner
+//RS                 .lock()
+//RS                 .map_err(|_| MirNativeCursorError::internal("Shared interop root lock is poisoned"))?;
+//RS             let BackendOwner::SharedInteropRoot(root) = &*owner else {
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "Shared interop root capability payload mismatch",
+//RS                 ));
+//RS             };
+//RS             if root.type_id() != type_identity {
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "Shared interop root checked type identity mismatch",
+//RS                 ));
+//RS             }
+//RS             root.clone()
+//RS         };
+//RS         let weak = root.downgrade_owner().ok_or_else(|| {
+//RS             MirNativeCursorError::internal("Shared interop root has no physical weak-owner hook")
+//RS         })?;
+//RS         self.register_shared_interop_weak_root(type_identity, weak)
+//RS             .map_err(MirNativeCursorError::internal)
+//RS     }
+//RS 
+//RS     /// Borrow one weak owner and a counted lease alias. The weak pointer never
+//RS     /// retains the Shared value itself; deferred/finalizer scopes reuse their
+//RS     /// exact active lease instead of creating a new root.
+//RS     pub fn borrow_shared_interop_weak_root(
+//RS         &self,
+//RS         capability: &SourceResourceHandle,
+//RS         type_identity: u64,
+//RS     ) -> Result<
+//RS         (
+//RS             Arc<crate::SourceSharedInterop::SourceSharedInteropWeak>,
+//RS             SourceResourceLease,
+//RS         ),
+//RS         MirNativeCursorError,
+//RS     > {
+//RS         let SourceResourceKind::SharedInteropWeakRoot {
+//RS             type_identity: stored_type_identity,
+//RS         } = &capability.kind
+//RS         else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source capability is not a SharedInteropWeakRoot",
+//RS             ));
+//RS         };
+//RS         if *stored_type_identity != type_identity {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Shared interop weak root checked type identity mismatch",
+//RS             ));
+//RS         }
+//RS         if capability.handle != shared_interop_weak_root_handle_id() {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Shared interop weak root handle identity mismatch",
+//RS             ));
+//RS         }
+//RS         let (_, generation) =
+//RS             Self::decode_raw(capability.raw).map_err(MirNativeCursorError::internal)?;
+//RS         if generation != capability.generation {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Shared interop weak root generation mismatch",
+//RS             ));
+//RS         }
+//RS         let lease = self
+//RS             .retain_callback_lease()
+//RS             .map_err(MirNativeCursorError::internal)?;
+//RS         let owner = self.owner_for_raw(
+//RS             capability.handle,
+//RS             capability.raw,
+//RS             &capability.kind,
+//RS         )?;
+//RS         let weak = {
+//RS             let owner = owner.lock().map_err(|_| {
+//RS                 MirNativeCursorError::internal("Shared interop weak root lock is poisoned")
+//RS             })?;
+//RS             let BackendOwner::SharedInteropWeakRoot {
+//RS                 type_identity: stored_type_identity,
+//RS                 root,
+//RS             } = &*owner
+//RS             else {
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "Shared interop weak root capability payload mismatch",
+//RS                 ));
+//RS             };
+//RS             if *stored_type_identity != type_identity {
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "Shared interop weak root checked type identity mismatch",
+//RS                 ));
+//RS             }
+//RS             Arc::clone(root)
+//RS         };
+//RS         if weak.type_id() != type_identity {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Shared interop weak root checked type identity mismatch",
+//RS             ));
+//RS         }
+//RS         Ok((weak, lease))
+//RS     }
+//RS 
+//RS     /// Upgrade through the physical weak owner and register a fresh strong
+//RS     /// capability with the atomically reserved Source logical alias.
+//RS     pub fn upgrade_shared_interop_weak_root(
+//RS         &self,
+//RS         capability: &SourceResourceHandle,
+//RS     ) -> Result<
+//RS         Option<(
+//RS             crate::SourceSharedInterop::SourceSharedInterop,
+//RS             SourceResourceHandle,
+//RS             SourceResourceLease,
+//RS             i64,
+//RS         )>,
+//RS         MirNativeCursorError,
+//RS     > {
+//RS         let SourceResourceKind::SharedInteropWeakRoot { type_identity } = &capability.kind else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source capability is not a SharedInteropWeakRoot",
+//RS             ));
+//RS         };
+//RS         let type_identity = *type_identity;
+//RS         if self
+//RS             .lock()
+//RS             .map_err(MirNativeCursorError::internal)?
+//RS             .finalization_handler
+//RS             .is_none()
+//RS         {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Shared interop weak upgrades require an origin outcome handler",
+//RS             ));
+//RS         }
+//RS         self.validate_active_execution_authority()
+//RS             .map_err(MirNativeCursorError::internal)?;
+//RS         let (weak, _weak_lease) =
+//RS             self.borrow_shared_interop_weak_root(capability, type_identity)?;
+//RS         let Some(upgrade) = weak
+//RS             .upgrade()
+//RS             .map_err(MirNativeCursorError::internal)?
+//RS         else {
+//RS             return Ok(None);
+//RS         };
+//RS         let (root, alias) = upgrade.into_parts();
+//RS         if root.type_id() != type_identity {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Shared interop weak upgrade checked type identity mismatch",
+//RS             ));
+//RS         }
+//RS         let token_id = alias.token_id();
+//RS         let strong_capability = self
+//RS             .register_shared_interop_root(type_identity, &root)
+//RS             .map_err(MirNativeCursorError::internal)?;
+//RS         let lease = match self.retain_callback_lease() {
+//RS             Ok(lease) => lease,
+//RS             Err(error) => {
+//RS                 let _ = self.release_shared_interop_root(&strong_capability);
+//RS                 return Err(MirNativeCursorError::internal(error));
+//RS             }
+//RS         };
+//RS         if let Err(error) = self.store_shared_interop_alias(&strong_capability, alias) {
+//RS             drop(lease);
+//RS             let _ = self.release_shared_interop_root(&strong_capability);
+//RS             return Err(MirNativeCursorError::internal(error));
+//RS         }
+//RS         Ok(Some((root, strong_capability, lease, token_id)))
+//RS     }
+//RS 
+//RS     /// Release one checked weak-root capability.
+//RS     pub fn release_shared_interop_weak_root(
+//RS         &self,
+//RS         capability: &SourceResourceHandle,
+//RS     ) -> Result<SourceResourceRelease, String> {
+//RS         if capability.handle != shared_interop_weak_root_handle_id()
+//RS             || !matches!(
+//RS                 &capability.kind,
+//RS                 SourceResourceKind::SharedInteropWeakRoot { .. }
+//RS             )
+//RS         {
+//RS             return Err("Source capability is not a SharedInteropWeakRoot".to_string());
+//RS         }
+//RS         self.release_capability(capability)
+//RS     }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS     /// Clone a receiver endpoint into a fresh logical arena capability while
+//RS     /// retaining the scheduler's physical receiver count.
+//RS     pub fn clone_channel_receiver(
+//RS         &self,
+//RS         source_handle: MirHandleId,
+//RS         source_raw: i64,
+//RS         target_handle: MirHandleId,
+//RS     ) -> Result<SourceResourceHandle, MirNativeCursorError> {
+//RS         let owner = self.owner_for_raw(
+//RS             source_handle,
+//RS             source_raw,
+//RS             &SourceResourceKind::ChannelReceiver,
+//RS         )?;
+//RS         let receiver = {
+//RS             let owner = owner.lock().map_err(|_| {
+//RS                 MirNativeCursorError::internal("Source resource owner lock is poisoned")
+//RS             })?;
+//RS             let BackendOwner::ChannelReceiver(receiver) = &*owner else {
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "Source channel receiver capability payload mismatch",
+//RS                 ));
+//RS             };
+//RS             receiver.clone()
+//RS         };
+//RS         self.register_channel_receiver(target_handle, &receiver)
+//RS             .map_err(MirNativeCursorError::internal)
+// END-PORT-PENDING 2025 crates/jet-jit/src/SourceResources.rs:1801-3600
+

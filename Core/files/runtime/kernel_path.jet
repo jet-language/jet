@@ -1,0 +1,156 @@
+use std.ffi.[OsString]
+// Lexical path rules share selected-target native component parsing.
+use core.files.runtime.kernel_fs_walk.[jet_fs_validate_walk_root]
+use core.sys.target as target
+use std.env as env
+use std.fs as fs
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Path.rs:3
+fn jet_std_path_lexical_source(path: String) -> String Never! {
+    // A read return shares the unchanged String owner (Rust Cow::Borrowed).
+    if path.contains('\\') -> path.replace('\\', "/") else -> path
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Path.rs:12
+pub fn jet_std_path_join(base: String, part: String) -> String Never! {
+    base :: jet_std_path_lexical_source(base)
+    part :: jet_std_path_lexical_source(part)
+    // GATE #4565: kernel primitive — selected-target OSPath lexical join.
+    #Unsafe("native lexical join does not access the filesystem") {
+        OSPath.from(base).join(part).to_string_lossy().to_string()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Path.rs:21
+pub fn jet_std_path_parent_opt(path: String) -> String? Never! {
+    source :: jet_std_path_lexical_source(path)
+    // GATE #4565: kernel primitive — selected-target OSPath parent.
+    #Unsafe("native lexical parent retains source lifetime") {
+        parent :: OSPath.from(source).parent() ?? return None
+        Val(parent.to_string_lossy().to_string())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Path.rs:28
+pub fn jet_std_path_extension_opt(path: String) -> String? Never! {
+    source :: jet_std_path_lexical_source(path)
+    // GATE #4565: kernel primitive — selected-target filename extension.
+    #Unsafe("native lexical extension retains source lifetime") {
+        extension :: OSPath.from(source).extension() ?? return None
+        Val(extension.to_string_lossy().to_string())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Path.rs:35
+pub fn jet_std_path_stem_opt(path: String) -> String? Never! {
+    source :: jet_std_path_lexical_source(path)
+    // GATE #4565: kernel primitive — selected-target filename stem.
+    #Unsafe("native lexical stem retains source lifetime") {
+        stem :: OSPath.from(source).file_stem() ?? return None
+        Val(stem.to_string_lossy().to_string())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Path.rs:42
+pub fn jet_std_path_normalize(path: String) -> String Never! {
+    source :: OSPath.from(jet_std_path_lexical_source(path))
+    rooted :: source.has_root()
+    normalized := OSPath.new()
+    normal_depth := 0
+    // GATE #4565: kernel primitive — native component iteration and buffer push/pop.
+    #Unsafe("normalize lexically without resolving or following a filesystem path") {
+        loop component in source.components() {
+            if component == {
+                .Prefix(prefix) -> &normalized.push(prefix.as_os_str())
+                .RootDir -> &normalized.push(component.as_os_str())
+                .CurDir -> {}
+                .ParentDir -> {
+                    if normal_depth > 0 {
+                        _ :: &normalized.pop()
+                        normal_depth -= 1
+                    } else -> if not rooted -> &normalized.push("..")
+                }
+                .Normal(part) -> {
+                    &normalized.push(part)
+                    normal_depth += 1
+                }
+            }
+        }
+        normalized.to_string_lossy().to_string()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Path.rs:71
+pub fn jet_std_path_is_within(path: String, base: String) -> Bool Never! {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Path.rs:72
+    fn components(path: OSPath) -> (OsString?, Bool, [OsString]) Never! {
+        prefix := None
+        rooted := false
+        parts := [OsString]{}
+        // GATE #4565: kernel primitive — selected-target native component words.
+        #Unsafe("compare owned native path components without filesystem identity") {
+            loop component in path.components() {
+                if component == {
+                    .Prefix(value) -> prefix = Val(value.as_os_str().to_os_string())
+                    .RootDir -> rooted = true
+                    .CurDir -> {}
+                    .ParentDir -> {
+                        removable :: if parts.last() == .Val(last) -> last.as_os_str() != OSPath.from("..").as_os_str() else -> false
+                        if removable -> _ :: &parts.pop()
+                        else -> if not rooted -> &parts.push(OsString.from(".."))
+                    }
+                    .Normal(value) -> &parts.push(value.to_os_string())
+                }
+            }
+        }
+        (prefix, rooted, parts)
+    }
+    path_source :: jet_std_path_lexical_source(path)
+    base_source :: jet_std_path_lexical_source(base)
+    (base_prefix, base_rooted, base_parts) :: components(OSPath.from(base_source))
+    (path_prefix, path_rooted, path_parts) :: components(OSPath.from(path_source))
+    base_is_current :: base_prefix == None && not base_rooted && base_parts.is_empty()
+    if base_prefix != path_prefix || base_rooted != path_rooted || path_parts.len() < base_parts.len() -> return false
+    loop index in 0..<base_parts.len() -> if path_parts[index] != base_parts[index] -> return false
+    if base_is_current && not path_parts.is_empty() && path_parts[0].as_os_str() == OSPath.from("..").as_os_str() -> return false
+    true
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Path.rs:122
+pub fn jet_std_path_home() -> String Never! {
+    // GATE #4483: target Windows branch, not host.
+    // GATE #4565: kernel primitive — environment and actual cwd.
+    #Unsafe("query selected-provider home environment with reference fallback order") {
+        if target.selected_family() == "windows" {
+            if env.var("USERPROFILE") == .Ok(profile) -> return profile
+            drive :: env.var("HOMEDRIVE")
+            path :: env.var("HOMEPATH")
+            if drive == .Ok(drive) -> if path == .Ok(path) -> return "{drive}{path}"
+        } else -> if env.var("HOME") == .Ok(home) -> return home
+        if env.current_dir() == {
+            .Ok(path) -> path.to_string_lossy().to_string()
+            .Err(_) -> ""
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Path.rs:145 -> kernel_fs_walk.jet jet_fs_validate_walk_root
+// Identical ancestor/symlink/NotADirectory policy uses that existing owner;
+// callers import it directly, no alternate validator or compatibility wrapper.
+// Rust: crates/jet-codegen/src/Prelude/Core/Path.rs:173
+pub fn jet_std_path_walk(path: String) -> [String] Never! {
+    root :: OSPath.from(path)
+    if jet_fs_validate_walk_root(root) == .Err(_) -> return []
+    result := [String]{}
+    stack := [root]
+    visited := [OSPath:Bool]{} // GATE #4499: native OSPath key identity, never string encoding.
+    // GATE #4565: kernel primitive — native canonicalization and directory stream.
+    #Unsafe("enumerate native directories while suppressing only the reference's best-effort errors") {
+        loop stack.pop() == .Val(directory) {
+            if jet_fs_validate_walk_root(directory) == .Err(_) -> next
+            canonical :: fs.canonicalize(directory) ?? next
+            if visited.contains_key(canonical) -> next
+            visited[^canonical] = true
+            entries :: fs.read_dir(directory) ?? next
+            loop entry_result in entries {
+                entry :: entry_result ?? next
+                path :: entry.path()
+                &result.push(path.to_string_lossy().to_string())
+                if entry.file_type() == .Ok(kind) -> if kind.is_dir() -> &stack.push(^path)
+            }
+        }
+    }
+    result
+}

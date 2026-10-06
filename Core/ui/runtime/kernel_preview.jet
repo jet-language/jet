@@ -1,0 +1,411 @@
+// Preview.rs:1–933, D-DX-PREVIEW1=A. Portable preview metadata kernel.
+// Existing kind/device ownership remains core.ui; no duplicate UI value universe.
+// Activation gates (NOT callable implementations):
+// * Rust476–683/734–891: owned shared Send+Sync callback returning canonical
+//   core.ui.UINode, Arc clone/drop, and catch_unwind require #4494/#4500.
+//   No direct callback invocation substitutes for panic-to-CallbackFailed.
+// * Rust486/583/629/660: ordered JetUiPreviewEffect set requires #4499.
+// * Rust488/696/736–738: the canonical map is ordered (Core.rs2681), but its
+//   retaining borrowed-entry traversal is #4392/#4500. Do not use keys()/values()
+//   adapters (Core.rs3233/3240 clone keys/values) or sorted/copied arrays.
+// * Rust393–395: selected usize -> I64 wrapping cast needs #4483; Int is not
+//   a selected-target usize. No arbitrary-precision Int conversion is exposed.
+// * Rust492–525: clone must share the callback owner; Debug must omit callback
+//   and retain exact Rust field order, canonical debug/ordered-container owners.
+// #4392/#4318: canonical Unicode utf8_bytes still materializes. Its retaining
+// byte-loan cutover is needed for Rust's zero-allocation text validation parity.
+// No native OS/IO bodies occur in this scope (#4409 not applicable).
+use core.ui.[UIPreviewKind, UIPreviewDevice, UIPreviewViewport]
+use jet_foundation.Devtools.EventBody as preview_source
+use core.math as preview_math
+use core.text.runtime.kernel_unicode_string as preview_text
+use core.text.runtime.unicode_assets as preview_assets
+use core.text.runtime.assets.unicode_white_space as preview_space
+
+pub JET_UI_PREVIEW_MAX_PREVIEWS :: 64
+pub JET_UI_PREVIEW_MAX_SELECTED :: 16
+pub JET_UI_PREVIEW_MAX_CONTEXTS :: 16
+pub JET_UI_PREVIEW_MAX_INPUTS :: 32
+pub JET_UI_PREVIEW_MAX_TEXT_BYTES :: 16 * 1024
+
+// Rust11–53. Error payloads and display text remain distinct.
+#Error
+#Equatable
+pub enum JetUiPreviewError {
+    EmptyName
+    TextTooLong(field: String)
+    InvalidSource(reason: String)
+    InvalidViewport(reason: String)
+    InvalidInput(reason: String)
+    TooManyPreviews
+    TooManySelected
+    TooManyContexts
+    TooManyInputs
+    DuplicatePreview(name: String)
+    UnknownPreview(name: String)
+    DuplicateInput(name: String)
+    MissingSource(name: String)
+    MissingContext(id: String)
+    CallbackFailed(name: String)
+    CapabilityDenied(capability: String)
+    pub fn message(self) -> String Never! {
+        if self == {
+            .EmptyName -> "UI preview name must not be empty"
+            .TextTooLong(field) -> "UI preview {field} exceeds its text bound"
+            .InvalidSource(reason) -> "UI preview source is invalid: {reason}"
+            .InvalidViewport(reason) -> "UI preview viewport is invalid: {reason}"
+            .InvalidInput(reason) -> "UI preview input is invalid: {reason}"
+            .TooManyPreviews -> "UI preview registry is full"
+            .TooManySelected -> "UI preview selection is full"
+            .TooManyContexts -> "UI preview context registry is full"
+            .TooManyInputs -> "UI preview inputs exceed the bounded limit"
+            .DuplicatePreview(name) -> "UI preview `{name}` is duplicated"
+            .UnknownPreview(name) -> "unknown UI preview `{name}`"
+            .DuplicateInput(name) -> "UI preview input `{name}` is duplicated"
+            .MissingSource(name) -> "UI preview `{name}` has no source identity"
+            .MissingContext(id) -> "UI preview context `{id}` is not registered"
+            .CallbackFailed(name) -> "UI preview callback `{name}` failed"
+            .CapabilityDenied(capability) -> "UI preview capability `{capability}` is denied"
+        }
+    }
+}
+
+// Rust55–70. One decoder pass, exact UTF8 byte bound, pinned Unicode White_Space
+// and Cc. Empty/whitespace wins over length; length wins over control. No trim
+// view needs materializing or passing to a String-typed call (#4303).
+pub fn jet_ui_preview_text(value: String, field: String, max_bytes: Int) JetUiPreviewError! {
+    raw :: preview_text.utf8_bytes(value)
+    whitespace := true
+    control := false
+    at := 0
+    loop at < raw.len() {
+        cp :: preview_text.scalar_at(raw, at)
+        if !preview_assets.asset_contains(preview_space.UNICODE_WHITE_SPACE, cp) -> whitespace = false
+        if cp < 32 || (cp >= 127 && cp <= 159) -> control = true
+        at += preview_text.utf8_width_at(raw, at)
+    }
+    if whitespace {
+        if field == "preview name" -> return Err(JetUiPreviewError.EmptyName)
+        return Err(JetUiPreviewError.InvalidSource("text must not be empty"))
+    }
+    if raw.len() > max_bytes -> return Err(JetUiPreviewError.TextTooLong(~field))
+    if control -> return Err(JetUiPreviewError.InvalidSource("text contains a control character"))
+    Ok()
+}
+
+// Rust73–85 uses the already canonical UIPreviewKind.
+pub fn kind_as_str(kind: UIPreviewKind) -> String Never! {
+    if kind == { .Preview -> "preview", .Playground -> "playground" }
+}
+// Rust88–104. The payload lives at the existing core.ui owner.
+pub fn device_as_str(device: UIPreviewDevice) -> @String Never! from device {
+    if device == {
+        .Phone -> @"phone"
+        .Tablet -> @"tablet"
+        .Desktop -> @"desktop"
+        .Custom(value) -> @value
+    }
+}
+
+// Rust114–179. Implementation extends the existing core.ui value owner.
+impl UIPreviewViewport {
+    pub fn new(device: ^UIPreviewDevice, width: U32, height: U32, scale: U16) -> UIPreviewViewport JetUiPreviewError! {
+        viewport :: UIPreviewViewport{device: ^device, width: width, height: height, scale: scale}
+        viewport.validate() ?? return Err(err)
+        Ok(^viewport)
+    }
+    pub fn phone() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Phone, width: U32{390}, height: U32{844}, scale: U16{2}} }
+    pub fn tablet() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Tablet, width: U32{834}, height: U32{1119}, scale: U16{2}} }
+    pub fn desktop() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Desktop, width: U32{1280}, height: U32{800}, scale: U16{1}} }
+    pub fn validate(self) JetUiPreviewError! {
+        if self.width == (U32{0}) || self.height == (U32{0}) -> return Err(JetUiPreviewError.InvalidViewport("viewport dimensions must be positive"))
+        if self.width > (U32{16384}) || self.height > (U32{16384}) -> return Err(JetUiPreviewError.InvalidViewport("viewport dimension exceeds the preview bound"))
+        if self.scale == (U16{0}) || self.scale > (U16{8}) -> return Err(JetUiPreviewError.InvalidViewport("viewport scale exceeds the preview bound"))
+        if self.device == .Custom(name) -> jet_ui_preview_text(name, "viewport device", 128) ?? return Err(err)
+        Ok()
+    }
+}
+
+// Rust181–248: preserve custom payloads, not just the built-in labels.
+#Equatable
+pub enum JetUiPreviewTheme {
+    System
+    Light
+    Dark
+    HighContrast
+    Custom(value: String)
+    pub fn as_str(self) -> @String Never! from self {
+        if self == {
+            .System -> @"system"
+            .Light -> @"light"
+            .Dark -> @"dark"
+            .HighContrast -> @"high-contrast"
+            .Custom(value) -> @value
+        }
+    }
+    fn order(self) -> Int Never! { if self == { .System -> 0, .Light -> 1, .Dark -> 2, .HighContrast -> 3, .Custom(_) -> 4 } }
+    pub fn compare(self, other: JetUiPreviewTheme) -> Ordering Never! {
+        rank :: self.order() <=> other.order()
+        if rank != Ordering.Equal -> return rank
+        if self == .Custom(left) && other == .Custom(right) -> return left <=> right
+        Ordering.Equal
+    }
+}
+#Equatable
+pub enum JetUiPreviewAccessibility {
+    Default
+    ReducedMotion
+    LargeText
+    HighContrast
+    ScreenReader
+    Custom(value: String)
+    pub fn as_str(self) -> @String Never! from self {
+        if self == {
+            .Default -> @"default"
+            .ReducedMotion -> @"reduced-motion"
+            .LargeText -> @"large-text"
+            .HighContrast -> @"high-contrast"
+            .ScreenReader -> @"screen-reader"
+            .Custom(value) -> @value
+        }
+    }
+    fn order(self) -> Int Never! { if self == { .Default -> 0, .ReducedMotion -> 1, .LargeText -> 2, .HighContrast -> 3, .ScreenReader -> 4, .Custom(_) -> 5 } }
+    pub fn compare(self, other: JetUiPreviewAccessibility) -> Ordering Never! {
+        rank :: self.order() <=> other.order()
+        if rank != Ordering.Equal -> return rank
+        if self == .Custom(left) && other == .Custom(right) -> return left <=> right
+        Ordering.Equal
+    }
+}
+#Equatable
+pub enum JetUiPreviewLifecycle {
+    Initial
+    Loading
+    Loaded
+    Empty
+    Error
+    Offline
+    Custom(value: String)
+    pub fn as_str(self) -> @String Never! from self {
+        if self == {
+            .Initial -> @"initial"
+            .Loading -> @"loading"
+            .Loaded -> @"loaded"
+            .Empty -> @"empty"
+            .Error -> @"error"
+            .Offline -> @"offline"
+            .Custom(value) -> @value
+        }
+    }
+    fn order(self) -> Int Never! { if self == { .Initial -> 0, .Loading -> 1, .Loaded -> 2, .Empty -> 3, .Error -> 4, .Offline -> 5, .Custom(_) -> 6 } }
+    pub fn compare(self, other: JetUiPreviewLifecycle) -> Ordering Never! {
+        rank :: self.order() <=> other.order()
+        if rank != Ordering.Equal -> return rank
+        if self == .Custom(left) && other == .Custom(right) -> return left <=> right
+        Ordering.Equal
+    }
+}
+// Rust250–281. Validation order is locale, theme, accessibility, lifecycle.
+#Equatable
+pub struct JetUiPreviewTraits {
+    pub theme: JetUiPreviewTheme
+    pub locale: String
+    pub accessibility: JetUiPreviewAccessibility
+    pub lifecycle: JetUiPreviewLifecycle
+    pub fn default() -> JetUiPreviewTraits Never! {
+        JetUiPreviewTraits{theme: .System, locale: "en-US", accessibility: .Default, lifecycle: .Initial}
+    }
+    pub fn validate(self) JetUiPreviewError! {
+        jet_ui_preview_text(self.locale, "locale", 128) ?? return Err(err)
+        jet_ui_preview_text(self.theme.as_str(), "preview trait", 128) ?? return Err(err)
+        jet_ui_preview_text(self.accessibility.as_str(), "preview trait", 128) ?? return Err(err)
+        jet_ui_preview_text(self.lifecycle.as_str(), "preview trait", 128) ?? return Err(err)
+        Ok()
+    }
+}
+// Rust283–303. The value itself is portable; using it as an ordered key is #4499.
+#Equatable
+pub enum JetUiPreviewEffect {
+    Read(value: String)
+    Write(value: String)
+    Network(value: String)
+    Clock
+    Custom(value: String)
+    pub fn capability(self) -> @String Never! from self {
+        if self == {
+            .Read(value) -> @value
+            .Write(value) -> @value
+            .Network(value) -> @value
+            .Clock -> @"Clock.Read"
+            .Custom(value) -> @value
+        }
+    }
+    pub fn validate(self) JetUiPreviewError! {
+        jet_ui_preview_text(self.capability(), "preview effect", 256) ?? return Err(err)
+    }
+    fn order(self) -> Int Never! { if self == { .Read(_) -> 0, .Write(_) -> 1, .Network(_) -> 2, .Clock -> 3, .Custom(_) -> 4 } }
+    pub fn compare(self, other: JetUiPreviewEffect) -> Ordering Never! {
+        rank :: self.order() <=> other.order()
+        if rank != Ordering.Equal -> return rank
+        self.capability() <=> other.capability()
+    }
+}
+
+// Rust305–346: private String membership uses the canonical map. No public
+// ordered iteration escapes from Authority, so map order cannot affect allows.
+// Mutation consumes self/capability exactly like the Rust builder (no copies).
+pub struct JetUiPreviewAuthority {
+    loopback_only_value: Bool
+    capabilities: [String: Bool]
+    pub fn development() -> JetUiPreviewAuthority Never! { JetUiPreviewAuthority.new(true) }
+    pub fn new(loopback_only: Bool) -> JetUiPreviewAuthority Never! {
+        JetUiPreviewAuthority{loopback_only_value: loopback_only, capabilities: [String: Bool]{}}
+    }
+    pub fn with_capability(^self, capability: ^String) -> JetUiPreviewAuthority JetUiPreviewError! {
+        jet_ui_preview_text(capability, "authority capability", 256) ?? return Err(err)
+        authority := ^self
+        authority.capabilities[^capability] = true
+        Ok(^authority)
+    }
+    pub fn loopback_only(self) -> Bool Never! { self.loopback_only_value }
+    pub fn allows(self, capability: String, loopback: Bool) -> Bool Never! {
+        if self.loopback_only_value && !loopback -> return false
+        loop (held, _) in self.capabilities { // #4392/#4500: original borrowed entries, not keys() clones.
+            if held == capability -> return true
+            if capability.starts_with(held) {
+                // Slice indexes are scalar extents. Examine only the first
+                // tail scalar, not a copied suffix. Retaining slice is #4392.
+                tail := capability.slice(held.len(), held.len() + 1) // #4303
+                if tail == "." || tail == ":" || tail == "/" -> return true
+            }
+        }
+        false
+    }
+    pub fn equals(self, other: JetUiPreviewAuthority) -> Bool Never! {
+        if self.loopback_only_value != other.loopback_only_value || self.capabilities.len() != other.capabilities.len() -> return false
+        loop (held, _) in self.capabilities -> if !other.capabilities.has_key(held) -> return false // #4392/#4500
+        true
+    }
+}
+
+// Rust348–366: I64 and Float preserve the original fixed-width value domains.
+#Equatable
+pub enum JetUiPreviewInputValue {
+    Text(value: String)
+    Bool(value: Bool)
+    Integer(value: I64)
+    Float(value: Float)
+    pub fn validate(self) JetUiPreviewError! {
+        if self == {
+            .Text(value) -> jet_ui_preview_text(value, "preview input", JET_UI_PREVIEW_MAX_TEXT_BYTES) ?? return Err(err)
+            .Float(value) -> {
+                if !preview_math.is_finite(value) -> return Err(JetUiPreviewError.InvalidInput("preview float input must be finite"))
+            }
+            else -> {}
+        }
+        Ok()
+    }
+}
+// Rust368–411. The usize conversion remains selected-width-gated above.
+pub trait JetUiPreviewInputValueLike {
+    fn into_jet_ui_preview_input(^self) -> JetUiPreviewInputValue Never!
+}
+impl JetUiPreviewInputValue.JetUiPreviewInputValueLike {
+    fn into_jet_ui_preview_input(^self) -> JetUiPreviewInputValue Never! { ^self }
+}
+impl Bool.JetUiPreviewInputValueLike {
+    fn into_jet_ui_preview_input(^self) -> JetUiPreviewInputValue Never! { JetUiPreviewInputValue.Bool(self) }
+}
+impl I64.JetUiPreviewInputValueLike {
+    fn into_jet_ui_preview_input(^self) -> JetUiPreviewInputValue Never! { JetUiPreviewInputValue.Integer(self) }
+}
+impl I32.JetUiPreviewInputValueLike {
+    fn into_jet_ui_preview_input(^self) -> JetUiPreviewInputValue Never! { JetUiPreviewInputValue.Integer(I64{self}) }
+}
+impl Float.JetUiPreviewInputValueLike {
+    fn into_jet_ui_preview_input(^self) -> JetUiPreviewInputValue Never! { JetUiPreviewInputValue.Float(self) }
+}
+impl String.JetUiPreviewInputValueLike {
+    fn into_jet_ui_preview_input(^self) -> JetUiPreviewInputValue Never! { JetUiPreviewInputValue.Text(^self) }
+}
+// Rust407–410 &str impl: the resulting Text owns a copy, as in Rust to_string.
+pub fn input_from_text(value: String) -> JetUiPreviewInputValue Never! { JetUiPreviewInputValue.Text(~value) }
+
+// Rust413–432/685–690. Construct, validate name, then value; no copies on success.
+#Equatable
+pub struct JetUiPreviewInputOverride {
+    pub name: String
+    pub value: JetUiPreviewInputValue
+    pub fn new<Value: JetUiPreviewInputValueLike>(name: ^String, value: ^Value) -> JetUiPreviewInputOverride JetUiPreviewError! {
+        input :: JetUiPreviewInputOverride{name: ^name, value: ^value.into_jet_ui_preview_input()}
+        input.validate() ?? return Err(err)
+        Ok(^input)
+    }
+    pub fn validate(self) JetUiPreviewError! {
+        jet_ui_preview_text(self.name, "preview input name", 256) ?? return Err(err)
+        self.value.validate() ?? return Err(err)
+    }
+}
+
+// Rust434–474. Span constructor/validation come from Foundation, not a local
+// source-span lookalike. Main publishes this existing dependency from port-compiler.
+pub struct JetUiPreviewSource {
+    pub source_id: String
+    pub build_id: String
+    pub revision: String
+    pub span: preview_source.JetDevtoolsSourceSpan
+    pub fn new(source_id: ^String, build_id: ^String, revision: ^String, span: ^preview_source.JetDevtoolsSourceSpan) -> JetUiPreviewSource Never! {
+        JetUiPreviewSource{source_id: ^source_id, build_id: ^build_id, revision: ^revision, span: ^span}
+    }
+    pub fn validate(self) JetUiPreviewError! {
+        jet_ui_preview_text(self.source_id, "source id", JET_UI_PREVIEW_MAX_TEXT_BYTES) ?? return Err(JetUiPreviewError.InvalidSource("source id is invalid"))
+        jet_ui_preview_text(self.build_id, "build id", JET_UI_PREVIEW_MAX_TEXT_BYTES) ?? return Err(JetUiPreviewError.InvalidSource("build id is invalid"))
+        jet_ui_preview_text(self.revision, "revision", JET_UI_PREVIEW_MAX_TEXT_BYTES) ?? return Err(JetUiPreviewError.InvalidSource("revision is invalid"))
+        preview_source.jet_devtools_source_span_validate(self.span) ?? return Err(JetUiPreviewError.InvalidSource("source span is invalid"))
+        if self.span.source_id != self.source_id -> return Err(JetUiPreviewError.InvalidSource("source span identity does not match source"))
+        Ok()
+    }
+    // Rust derived Eq/PartialEq; the canonical span has no #Equatable marker.
+    // Compare the original fields, not a formatted identity or hash.
+    pub fn equals(self, other: JetUiPreviewSource) -> Bool Never! {
+        self.source_id == other.source_id && self.build_id == other.build_id && self.revision == other.revision &&
+        self.span.source_id == other.span.source_id && self.span.file == other.span.file &&
+        self.span.start_line == other.span.start_line && self.span.start_column == other.span.start_column &&
+        self.span.end_line == other.span.end_line && self.span.end_column == other.span.end_column
+    }
+}
+
+// Rust88 derived Ord/PartialOrd, declaration order before custom payload order.
+pub fn device_compare(left: UIPreviewDevice, right: UIPreviewDevice) -> Ordering Never! {
+    a :: if left == { .Phone -> 0, .Tablet -> 1, .Desktop -> 2, .Custom(_) -> 3 }
+    b :: if right == { .Phone -> 0, .Tablet -> 1, .Desktop -> 2, .Custom(_) -> 3 }
+    rank :: a <=> b
+    if rank != Ordering.Equal -> return rank
+    if left == .Custom(x) && right == .Custom(y) -> return x <=> y
+    Ordering.Equal
+}
+
+// Rust693–732. Original owned inputs transfer into the canonical ordered map;
+// #4500 must allow these input field moves, not silently clone the values.
+pub struct JetUiPreviewContext {
+    pub id: String
+    pub source: JetUiPreviewSource
+    input_values: [String: JetUiPreviewInputValue]
+    pub fn new(id: ^String, source: ^JetUiPreviewSource, values: ^[JetUiPreviewInputOverride]) -> JetUiPreviewContext JetUiPreviewError! {
+        jet_ui_preview_text(id, "context id", 256) ?? return Err(err)
+        source.validate() ?? return Err(err)
+        context := JetUiPreviewContext{id: ^id, source: ^source, input_values: [String: JetUiPreviewInputValue]{}}
+        loop value in values {
+            value.validate() ?? return Err(err)
+            // Rust checks capacity before duplicate even for the 33rd value.
+            if context.input_values.len() >= JET_UI_PREVIEW_MAX_INPUTS -> return Err(JetUiPreviewError.TooManyInputs)
+            if context.input_values.has_key(value.name) -> return Err(JetUiPreviewError.DuplicateInput(^value.name))
+            context.input_values[^value.name] = ^value.value // #4500
+        }
+        Ok(^context)
+    }
+    pub fn values(self) -> @[String: JetUiPreviewInputValue] Never! from self { @self.input_values } // #4392/#4500
+    pub fn equals(self, other: JetUiPreviewContext) -> Bool Never! {
+        self.id == other.id && self.source.equals(other.source) && self.input_values == other.input_values
+    }
+}

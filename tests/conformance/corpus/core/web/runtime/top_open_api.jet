@@ -1,0 +1,50 @@
+use core.web.runtime.top_open_api.*
+use core.http.runtime.top_http_route.jet_http_route_pattern
+use core.encoding.runtime.std_data_tree.DataTree
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/OpenAPI.rs:606
+#Test("openapi_checked_document_and_request_validator") {
+    pattern :: jet_http_route_pattern("/items/{id}").unwrap()
+    parameter :: JetOpenApiParameter.new(JetOpenApiParameterLocation.Path, "id", JetOpenApiSchema.Integer)
+    input :: JetOpenApiRouteInput.new(JetOpenApiHttpMethod.Get, ^pattern, "get_item", [^parameter], None, [JetOpenApiResponse.ok(JetOpenApiSchema.String)], [], "test")
+    document :: jet_web_openapi_document_from_routes([^input], "Items", "1", []).unwrap()
+    json :: document.json()
+    assert(json.contains("\"openapi\":\"3.1.0\""))
+    assert(json.contains("\"/items/{id}\""))
+    assert(json.contains("\"operationId\":\"get_item\""))
+    validator :: document.validator()
+    assert(validator.validate(&JetOpenApiRequest.new(JetOpenApiHttpMethod.Get, "/items/42")).is_ok())
+    assert(validator.validate(&JetOpenApiRequest.new(JetOpenApiHttpMethod.Get, "/items/not-an-integer")).is_err())
+    assert(validator.validate(&JetOpenApiRequest.new(JetOpenApiHttpMethod.Post, "/items/42")).is_err())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/OpenAPI.rs:196
+#Test("openapi_object_required_duplicate_and_unknown_fields") {
+    schema :: JetOpenApiSchema.Object{properties: [JetOpenApiProperty.required("id", JetOpenApiSchema.Integer)], additional_properties: false}
+    assert(schema.validate_tree(&DataTree.Object([("id", DataTree.Int(7))]), "body").is_empty())
+    assert(schema.validate_tree(&DataTree.Object([]), "body").len() == 1)
+    assert(schema.validate_tree(&DataTree.Object([("id", DataTree.Int(7)), ("id", DataTree.Int(8))]), "body").len() == 1)
+    assert(schema.validate_tree(&DataTree.Object([("id", DataTree.Int(7)), ("other", DataTree.Null)]), "body").len() == 1)
+    assert(jet_openapi_validate_parameter_value(&JetOpenApiSchema.Number, "NaN").is_err())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/OpenAPI.rs:529
+#Test("openapi_operation_identity_and_json_escaping") {
+    first :: jet_openapi_operation_id_for_path(JetOpenApiHttpMethod.Get, "/items/{id}")
+    assert(first == jet_openapi_operation_id_for_path(JetOpenApiHttpMethod.Get, "/items/{id}"))
+    assert(first != jet_openapi_operation_id_for_path(JetOpenApiHttpMethod.Post, "/items/{id}"))
+    assert(first.starts_with("jet_get_"))
+    assert(jet_openapi_json_string("a\"b\nc") == "\"a\\\"b\\nc\"")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/OpenAPI.rs:1552
+#Test("openapi_contract_boundary_rejects_missing_and_mismatched_facts") {
+    match jet_web_openapi_from_contracts(&[("GET", "/", "")]) {
+        Err(error) -> assert(error == "E2805: route `GET /` has no checked OpenAPI contract")
+        Ok(_) -> assert(false)
+    }
+    assert(jet_openapi_contract_input("not json").is_err())
+    schema :: jet_openapi_contract_schema(&DataTree.Object([("type", DataTree.Text("integer"))])).unwrap()
+    assert(schema == JetOpenApiSchema.Integer)
+    assert(jet_openapi_contract_schema(&DataTree.Object([("type", DataTree.Text("unknown"))])).is_err())
+}

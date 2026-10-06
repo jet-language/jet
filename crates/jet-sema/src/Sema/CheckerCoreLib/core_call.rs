@@ -5026,7 +5026,7 @@ impl<'a> Checker<'a> {
                 }
                 return Some(Type::Option(Box::new(Type::Int)));
             }
-            ("core.math", "leading_ones" | "trailing_ones" | "digits" | "radix") => {
+            ("core.math", "leading_ones" | "trailing_ones" | "radix") => {
                 if args.len() != 1 {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }

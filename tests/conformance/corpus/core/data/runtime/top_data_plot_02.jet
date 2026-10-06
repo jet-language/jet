@@ -1,0 +1,63 @@
+use core.data.runtime.top_data_plot.*
+use core.data.runtime.top_data_plot_02.*
+use core.prelude.runtime.std_common_types.DataLimits
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3141-3192
+#Test("plot_type_checks_preserve_optional_numeric_and_null_rules") {
+    assert(jet_data_plot_numeric_type(" Option<Float> "))
+    assert(!jet_data_plot_numeric_type("String"))
+    assert(jet_data_plot_value_matches_type(&JetDataPlotValue.Null, "String"))
+    assert(!jet_data_plot_value_matches_type(&JetDataPlotValue.Number(2.0), "String"))
+    assert(jet_data_plot_filter_value_matches_type(&JetDataPlotValue.Integer(2), "F64"))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3245-3327
+#Test("plot_sort_reverses_ordinal_ties_and_bins_normalized_zero") {
+    field :: JetDataPlotField.with_id("value-id", "value", "F64")
+    rows := [
+        JetDataPlotDatum{ordinal: 0, values: [("value-id", JetDataPlotValue.Number(1.25))]},
+        JetDataPlotDatum{ordinal: 1, values: [("value-id", JetDataPlotValue.Number(1.25))]},
+        JetDataPlotDatum{ordinal: 2, values: [("value-id", JetDataPlotValue.Number(0.0))]},
+    ]
+    jet_data_plot_apply_transforms(&rows, [JetDataPlotTransform.Sort{field: field.clone(), descending: true}], &DataLimits.safe()).unwrap()
+    assert(rows[0].ordinal == 1)
+    assert(rows[1].ordinal == 0)
+    jet_data_plot_apply_transforms(&rows, [JetDataPlotTransform.Bin{field: field.clone(), step: 1.0}], &DataLimits.safe()).unwrap()
+    assert(jet_data_plot_datum_value(&rows[0], &field).unwrap().number().unwrap() == 1.0)
+    assert(jet_data_plot_datum_value(&rows[2], &field).unwrap().number().unwrap() == 0.0)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3329-3431
+#Test("plot_mean_counts_null_rows_and_preserves_first_ordinal") {
+    field :: JetDataPlotField.with_id("value-id", "value", "F64")
+    rows := [
+        JetDataPlotDatum{ordinal: 7, values: [("value-id", JetDataPlotValue.Number(8.0))]},
+        JetDataPlotDatum{ordinal: 8, values: [("value-id", JetDataPlotValue.Null)]},
+    ]
+    jet_data_plot_aggregate_rows(&rows, [], &field, .Mean, &DataLimits.safe()).unwrap()
+    assert(rows.len() == 1)
+    assert(rows[0].ordinal == 7)
+    assert(jet_data_plot_datum_value(&rows[0], &field).unwrap().number().unwrap() == 4.0)
+    limits := DataLimits.safe()
+    limits.max_output_rows = 0
+    result :: jet_data_plot_check_output_limit(&rows, &limits, "plot.data")
+    assert(result.is_err())
+    assert(result.unwrap_err().kind == JetDataPlotErrorKind.Limit)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3500-3544
+#Test("plot_facet_buckets_are_lexical_and_source_backed") {
+    field :: JetDataPlotField.with_id("group-id", "group", "String")
+    facets :: [JetDataPlotFacet.new(field.clone(), .Column)]
+    rows :: [
+        JetDataPlotDatum{ordinal: 0, values: [("group-id", JetDataPlotValue.Text("z"))]},
+        JetDataPlotDatum{ordinal: 1, values: [("group-id", JetDataPlotValue.Text("a"))]},
+        JetDataPlotDatum{ordinal: 2, values: [("group-id", JetDataPlotValue.Text("z"))]},
+    ]
+    buckets :: jet_data_plot_facet_buckets(&rows, &facets)
+    assert(buckets.len() == 2)
+    assert(buckets[0].0 == "" && buckets[0].1 == "a")
+    assert(buckets[0].2[0].ordinal == 1)
+    assert(buckets[1].1 == "z" && buckets[1].2.len() == 2)
+    assert(buckets[1].2[0].ordinal == 0 && buckets[1].2[1].ordinal == 2)
+}

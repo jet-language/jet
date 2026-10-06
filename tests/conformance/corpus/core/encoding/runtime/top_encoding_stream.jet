@@ -1,0 +1,40 @@
+use core.encoding.[EncodingLimits, EncodingErrorKind]
+use core.encoding.runtime.top_encoding_stream.[jet_encoding_validate_limits, jet_json_jcs_number, jet_json_jcs_key_cmp, jet_encoding_error, jet_jsonl_project_error]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:219
+#Test("stream_jcs_number_boundaries") {
+    assert(jet_json_jcs_number(-0.0) == "0")
+    assert(jet_json_jcs_number(1.0) == "1")
+    assert(jet_json_jcs_number(1e21) == "1e+21")
+    assert(jet_json_jcs_number(1e-6) == "0.000001")
+    assert(jet_json_jcs_number(1e-7) == "1e-7")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:271
+#Test("stream_jcs_utf16_order") {
+    assert(jet_json_jcs_key_cmp("\u{10000}", "\u{e000}") == .Less)
+    assert(jet_json_jcs_key_cmp("a", "a") == .Equal)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:316
+#Test("stream_limits_exact_error") {
+    limits := EncodingLimits.safe()
+    limits.buffer_bytes = 4095
+    match jet_encoding_validate_limits(&limits) {
+        Err(error) -> {
+            assert(error.kind == EncodingErrorKind.Limit)
+            assert(error.reason == "buffer_bytes 4095 is outside 4096..16777216")
+            assert(error.line == Val(1))
+            assert(error.column == Val(1))
+        },
+        Ok(()) -> panic("invalid buffer limit accepted"),
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:1606
+#Test("stream_jsonl_error_projection") {
+    error := jet_encoding_error(.Syntax, 12, 2, 3, "invalid JSON number")
+    error.path = "$[4]"
+    projected :: jet_jsonl_project_error(error, Val(7))
+    assert(projected.format == .JSONL)
+    assert(projected.path == "$[7][4]")
+    assert(projected.byte_offset == 12)
+    assert(projected.reason == "invalid JSON number")
+}

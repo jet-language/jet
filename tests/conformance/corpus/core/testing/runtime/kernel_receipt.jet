@@ -1,0 +1,9 @@
+use core.testing.runtime.kernel_receipt.[jet_receipt_attach_encoded]
+use core.sys.target as target
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:50
+// Behavioral control for the original wasm32 cfg arm; run this corpus on wasm32.
+#Test("receipt_wasm_does_not_parse_or_publish_attachments") {
+    if target.selected_arch() != "wasm32" -> return
+    jet_receipt_attach_encoded("not JSON", "invalid/name", "invalid\\type", "not a digest")
+}

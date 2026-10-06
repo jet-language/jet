@@ -1,0 +1,519 @@
+use tests.conformance.corpus.core.port.task_state.*
+use jet as jet
+use std.fs as fs
+use std.process.[Command]
+use std.thread
+use tests.common as common
+use tests.tir_support as tir_support
+use tests.tir_support.[build_and_run, build_and_run_full, have_rustc, run_default_multi]
+// GATE #4494: native process/threads/filesystem, real Web compiler and Node.
+
+// Rust: tests/task_state.rs:19
+#Test("task_join_duty_uses_the_dlin1_obligation_pass") {
+    unjoined :: `
+fn run() -> {
+    handle :: task 42
+    print(0)
+}
+`
+    diagnostics :: diagnostic_codes(unjoined)
+    assert(diagnostics.iter().any(code -> code == "L1101"), "missing shared join-duty error: {diagnostics:?}")
+    joined :: `
+fn run() -> {
+    handle :: task 42
+    print(handle.join() ?? 0)
+}
+`
+    codes :: diagnostic_codes(joined)
+    assert(codes.iter().all(code -> code != "L1101"), "joining must discharge the D-LIN1 duty: {codes:?}")
+}
+// Rust: tests/task_state.rs:46
+#Test("a_task_handle_list_is_consumed_by_pop_and_join") {
+    source :: `
+fn run() -> {
+    workers := [Task<()>].{}
+    &workers.push(task { })
+    loop workers.len() > 0 {
+        worker :: &workers.pop() ?? panic("missing worker")
+        worker.join() ?? panic("worker failed")
+    }
+}
+`
+    _ :: jet.compile(source).expect("a [Task<T>] list is not #SingleUse; popping and joining each handle must compile")
+}
+// Rust: tests/task_state.rs:62
+#Test("task_lifecycle_joins_through_the_shared_flow_fact_walker") {
+    source :: `
+fn run() -> {
+    handle :: task 42
+    if {
+        true -> handle.join() ?? 0
+        else -> handle.detach()
+    }
+}
+`
+    output :: jet.compile(source).expect("both branches must discharge the task duty")
+    assert(output.lints.iter().any(diagnostic -> diagnostic.code == "L0152"), "joined task states must report the shared typestate divergence: {output.lints:?}")
+    assert(output.lints.iter().all(diagnostic -> diagnostic.code != "L1101"), "the shared D-LIN1 pass must not report a task consumed on both branches: {output.lints:?}")
+}
+// Rust: tests/task_state.rs:114
+// A task body's return is conditional in its enclosing function: declarations
+// after it stay reachable, even when the body itself contains a real mistake.
+#Test("a_return_inside_a_task_body_keeps_later_declarations") {
+    valueless :: `
+fn run() -> {
+    child :: task { return }
+    later :: 7
+    print(later)
+    child.detach()
+}
+`
+    codes :: all_codes(valueless)
+    assert(codes.iter().all(code -> code != "E0107" && code != "E0102"), "a task-body return must not erase later declarations: {codes:?}")
+    mistaken :: `
+fn run() -> {
+    child :: task { return "child" }
+    later :: 7
+    print(later)
+    child.detach()
+}
+`
+    mistaken_codes :: all_codes(mistaken)
+    assert(mistaken_codes.iter().all(code -> code != "E0107" && code != "E0102"), "the real error must not drag a phantom name cascade behind it: {mistaken_codes:?}")
+    assert(!mistaken_codes.is_empty(), "the return handing a value back from a Unit run is still an error")
+}
+
+// Rust: tests/task_state_tiers.rs:27
+#Test("parser_reads_the_canonical_task_surface") {
+    (tokens, diagnostics) :: jet.Lexer.lex(TASK_STATE_SOURCE)
+    assert(diagnostics.is_empty(), "lexer diagnostics: {diagnostics:?}")
+    assert(jet.Parser.parse(tokens).is_ok(), "task fixture must parse")
+}
+// Rust: tests/task_state_tiers.rs:37
+#Test("sema_tracks_task_state_and_duty_without_a_new_surface") {
+    output :: jet.compile(TASK_STATE_SOURCE).expect("task fixture must pass sema")
+    assert(output.lints.iter().all(diagnostic -> diagnostic.code != "L1101"), "join and detach must discharge the shared duty: {output.lints:?}")
+}
+// Rust: tests/task_state_tiers.rs:50
+#Test("tir_erases_task_state_facts_before_codegen") {
+    output :: jet.compile(TASK_STATE_SOURCE).expect("task fixture must compile")
+    assert(!output.rust.contains("Task.State"), "compiler-owned task state must not reach generated Rust")
+}
+// Rust: tests/task_state_tiers.rs:59
+#Test("aot_jit_and_interpreter_agree") {
+    tir_support.assert_tiers_agree("task_state_tiers", TASK_STATE_SOURCE, TASK_STATE_EXPECTED)
+}
+// Rust: tests/task_state_tiers.rs:64
+#Test("comptime_keeps_task_facts_in_the_front_end") {
+    source :: TASK_STATE_SOURCE + `
+FOLDED :: prep { 40 + 2 }
+fn show() -> { print(FOLDED) }
+`
+    _ :: jet.compile(source).expect("comptime and runtime task code must share the front end")
+}
+// Rust: tests/task_state_tiers.rs:70
+#Test("repl_matches_canonical_task_output") {
+    transcript :: jet.REPL.run_transcript([TASK_STATE_SOURCE, "run()"], none)
+    assert_eq(transcript, "ok\n{TASK_STATE_EXPECTED}", "REPL task output must match the canonical source")
+}
+// Rust: tests/task_state_tiers.rs:80
+#Test("web_matches_expected_task_output") {
+    scratch :: common.Scratch.new("task-state-web")
+    entry :: scratch.join("app.jet")
+    fs.write(entry, TASK_STATE_SOURCE).unwrap()
+    shown :: entry.to_string_lossy()
+    output :: jet.compile_web_with_path(TASK_STATE_SOURCE, shown).unwrap_or_else(diagnostics -> {
+        panic("front end rejected web fixture:\n{jet.render_diagnostics(shown, TASK_STATE_SOURCE, diagnostics)}")
+    })
+    web :: output.web.expect("web target must produce web artifacts")
+    fs.write(scratch.join("app.js"), web.js_app).unwrap()
+    fs.write(scratch.join("app_wasm.rs"), web.wasm_rust).unwrap()
+    fs.write(scratch.join("jet_dom_runtime.js"), web.dom_runtime).unwrap()
+    fs.write(scratch.join("package.json"), `{"type":"module"}`).unwrap()
+    rustc :: Command.new("rustc").current_dir(scratch.path).args(["--edition", "2021", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib", "-O", "app_wasm.rs", "-o", "app.wasm"]).output().expect("spawn rustc")
+    assert(rustc.status.success(), "rustc rejected web task fixture:\n{String.from_utf8_lossy(rustc.stderr)}")
+    node :: Command.new("node").current_dir(scratch.path).arg("app.js").output().expect("spawn node")
+    assert(node.status.success(), "web task fixture failed:\nstdout: {String.from_utf8_lossy(node.stdout)}\nstderr: {String.from_utf8_lossy(node.stderr)}")
+    assert_eq(String.from_utf8_lossy(node.stdout), TASK_STATE_EXPECTED)
+}
+
+// Rust: tests/taskgroup_parameter_tiers.rs:21
+#Test("parser_accepts_group_parameters_in_the_canonical_example") {
+    (tokens, diagnostics) :: jet.Lexer.lex(TASKGROUP_PARAMETER_SOURCE)
+    assert(diagnostics.is_empty(), "lexer diagnostics: {diagnostics:?}")
+    assert(jet.Parser.parse(tokens).is_ok(), "group parameter source must parse")
+}
+// Rust: tests/taskgroup_parameter_tiers.rs:31
+#Test("sema_accepts_group_parameters_in_the_canonical_example") {
+    _ :: jet.compile(TASKGROUP_PARAMETER_SOURCE).expect("group parameter source must pass sema")
+}
+// Rust: tests/taskgroup_parameter_tiers.rs:37
+#Test("aot_runs_group_parameter_example") {
+    if tir_support.have_rustc() {
+        assert_runtime_output("AOT", tir_support.build_and_run_full("jet_taskgroup_parameter", "aot", TASKGROUP_PARAMETER_SOURCE))
+    }
+}
+// Rust: tests/taskgroup_parameter_tiers.rs:47
+#Test("jit_runs_group_parameter_example") {
+    assert_runtime_output("default jet run", tir_support.jit_run("jit", TASKGROUP_PARAMETER_SOURCE))
+}
+// Rust: tests/taskgroup_parameter_tiers.rs:52
+#Test("interpreter_runs_group_parameter_example") {
+    assert_runtime_output("interpreter", tir_support.interpreter_run("interpreter", TASKGROUP_PARAMETER_SOURCE))
+}
+// Rust: tests/taskgroup_parameter_tiers.rs:60
+#Test("comptime_accepts_group_parameter_example") {
+    source :: TASKGROUP_PARAMETER_SOURCE + `
+FOLDED :: prep { 40 + 2 }
+fn show() -> { print(FOLDED) }
+`
+    _ :: jet.compile(source).expect("comptime and Group-parameter code must share the front end")
+}
+// Rust: tests/taskgroup_parameter_tiers.rs:66
+#Test("repl_runs_group_parameter_example") {
+    transcript :: thread.Builder.new().name("taskgroup-parameter-repl").stack_size(8 * 1024 * 1024).spawn(() -> jet.REPL.run_transcript([TASKGROUP_PARAMETER_SOURCE, "run()"], none)).expect("spawn Group-parameter REPL test").join().expect("Group-parameter REPL test panicked")
+    assert_eq(transcript, "ok\n{TASKGROUP_PARAMETER_EXPECTED}")
+}
+// Rust: tests/taskgroup_parameter_tiers.rs:81
+#Test("web_keeps_group_parameter_at_the_existing_checked_boundary") {
+    diagnostics :: jet.compile_web_with_path(TASKGROUP_PARAMETER_SOURCE, "task_group_parameter_web.jet").expect_err("web must reject the structured task.group boundary honestly")
+    assert(diagnostics.iter().any(diagnostic -> diagnostic.code == "E-WEB-TIR-UNSUPPORTED"), "web Group behavior must use the registered TIR boundary diagnostic: {diagnostics:?}")
+}
+
+// Rust: tests/taskgroup_params.rs:98
+#Test("named_function_parameters_spawn_copy_and_owned_captures") {
+    if !have_rustc() { return }
+    // Bare task targets the innermost active group, not a qualified parameter.
+    source :: `
+fn spawn_one(group: Group, value: Int) -> {
+    handle :: task value + 1
+    print(handle.join() ?? 0)
+}
+fn spawn_owned(group: Group, values: ^[Int]) -> {
+    handle :: task values[0]
+    print(handle.join() ?? 0)
+}
+fn spawn_both(group: Group) -> {
+    left :: task 20
+    right :: task 22
+    print((left.join() ?? 0) + (right.join() ?? 0))
+}
+fn run() -> {
+    task.group group {
+        spawn_one(group, 41)
+        values :: [7, 8, 9]
+        spawn_owned(group, ^values)
+        task.group inner { spawn_both(inner) }
+    }
+}
+`
+    (code, stdout) :: build_and_run("taskgroup_parameter", source)
+    assert_eq(code, 0)
+    assert_eq(stdout, "42\n7\n42\n")
+}
+// Rust: tests/taskgroup_params.rs:143
+#Test("lexical_group_joins_anonymous_helper_spawn") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("taskgroup_parameter_join", OUTER_GROUP_HELPER)
+    assert_eq(code, 0)
+    assert_eq(stdout, "inside\ntask\nafter\n")
+}
+// Rust: tests/taskgroup_params.rs:153
+#Test("nested_anonymous_spawn_is_group_owned") {
+    source :: `
+fn run() -> {
+    task.group group {
+        if true { task { print("child") } }
+    }
+    print("after")
+}
+`
+    assert_group_close_success("nested_taskgroup_spawn", source, "child\nafter\n")
+}
+// Rust: tests/taskgroup_params.rs:169
+#Test("default_run_joins_helper_spawn_before_outer_exit") {
+    match interpreter_outcome("parameter_join", OUTER_GROUP_HELPER) {
+        .Ran{stdout, stderr, exit_code} -> {
+            assert_eq(exit_code, 0, "{stderr}")
+            assert_eq(stderr, "", "{stderr}")
+            assert_eq(stdout, "inside\ntask\nafter\n")
+        }
+        .Problems(diags) -> panic("interpreter rejected helper spawn: {diags:?}")
+    }
+    assert_native_compiles("parameter_join", OUTER_GROUP_HELPER)
+    (code, stdout, stderr) :: run_default_multi("taskgroup_parameter_join", "main.jet", [("main.jet", OUTER_GROUP_HELPER), ("package.jet", TASKGROUP_TEST_PACKAGE)])
+    assert_eq(code, 0, "{stderr}")
+    assert_eq(stdout, "inside\ntask\nafter\n", "{stderr}")
+    assert_eq(stderr, "")
+}
+// Rust: tests/taskgroup_params.rs:204
+#Test("parameter_spawn_rejects_view_capture") {
+    source :: `
+fn spawn_view(group: Group, values: View<Int>) -> {
+    handle :: task values[0]
+    print(handle.join() ?? 0)
+}
+fn run() -> {}
+`
+    assert_eq(error_codes(source), ["E1102"])
+}
+// Rust: tests/taskgroup_params.rs:217
+#Test("taskgroup_type_is_second_class") {
+    loop (source, expected) in [
+        (`struct Bad { group: Group }
+fn run() -> {}
+`, ["E1110"]),
+        (`fn bad() -> Group { return 0 }
+fn run() -> {}
+`, ["E1110", "E0113"]),
+        (`struct Bad { step: Int
+    fn bad(self) -> Group { return 0 }
+}
+fn run() -> {}
+`, ["E1110", "E0113"]),
+        (`fn run() -> { group: Group :: 0 }
+`, ["E0003"]),
+        (`fn run() -> { f :: (group: Group) -> 0 }
+`, ["E0119"]),
+        (`fn bad(group: Group) -> { alias :: group }
+fn run() -> {}
+`, ["E0120"]),
+        (`fn bad(group: Group) -> { groups :: [group] }
+fn run() -> {}
+`, ["E1110"]),
+        (`fn bad(group: Group) -> { pair :: (group: group, n: 1) }
+fn run() -> {}
+`, ["E1110"]),
+        (`fn bad(group: Group) -> { maybe :: Val(group) }
+fn run() -> {}
+`, ["E1110"])
+    ] {
+        assert_eq(error_codes(source), expected, "{source}")
+    }
+}
+// Rust: tests/taskgroup_params.rs:255
+#Test("taskgroup_cannot_escape_in_a_closure") {
+    source :: `
+fn use_group(group: Group) -> Int { 1 }
+fn escape(group: Group) -> fn() -> Int { return () -> use_group(group) }
+fn run() -> {}
+`
+    assert_eq(error_codes(source), ["E1110", "E0403"])
+    method_escape :: `
+fn use_group(group: Group) -> Int { 1 }
+struct Crawler {
+    step: Int
+    fn escape(self, group: Group) -> fn() -> Int { return () -> use_group(group) }
+}
+fn run() -> {}
+`
+    assert_eq(error_codes(method_escape), ["E1110", "E0403"])
+}
+// Rust: tests/taskgroup_params.rs:291
+#Test("method_parameters_spawn_owned_captures") {
+    source :: `
+struct Crawler {
+    step: Int
+    fn drain(self, _group: Group, values: ^[Int]) -> {
+        step :: self.step
+        handle :: task values[0] + step
+        print(handle.join() ?? 0)
+    }
+}
+fn run() -> {
+    task.group group {
+        crawler :: Crawler{step: 2}
+        values :: [40]
+        crawler.drain(group, ^values)
+    }
+}
+`
+    assert_group_close_success("method_parameter_group", source, "42\n")
+    view_capture :: `
+struct Crawler {
+    step: Int
+    fn drain(self, group: Group, values: View<Int>) -> {
+        handle :: task values[0]
+        print(handle.join() ?? 0)
+    }
+}
+fn run() -> {}
+`
+    assert_eq(error_codes(view_capture), ["E1102"])
+}
+// Rust: tests/taskgroup_params.rs:332
+#Test("evaluator_supports_taskgroup_combinators") {
+    source :: `
+use core.time as time
+fn slow_seven() -> Int { time.sleep(30ms)
+    return 7 }
+fn slow_eleven() -> Int { time.sleep(30ms)
+    return 11 }
+fn run() -> {
+    task.group all_group {
+        values :: (task.all { 1, 2 }) ?? panic("all failed")
+        print(values[0] + values[1])
+    }
+    task.group race_group { print((task.race { slow_seven(), 8 }) ?? panic("race failed")) }
+    task.group any_group { print((task.any { slow_eleven(), 12 }) ?? panic("any failed")) }
+}
+`
+    interpreted :: match interpreter_outcome("combinators", source) {
+        .Ran{stdout, stderr, exit_code} -> {
+            assert_eq(exit_code, 0, "{stderr}")
+            ^stdout
+        }
+        .Problems(diags) -> panic("interpreter rejected task groups: {diags:?}")
+    }
+    assert_eq(interpreted, "3\n8\n12\n")
+    (code, stdout, stderr) :: run_default_multi("taskgroup_combinators", "main.jet", [("main.jet", source)])
+    assert_eq(code, 0, "{stderr}")
+    assert_eq(stdout, interpreted, "{stderr}")
+    if have_rustc() {
+        (code, stdout) :: build_and_run("taskgroup_combinators", source)
+        assert_eq(code, 0)
+        assert_eq(stdout, interpreted)
+    }
+}
+// Rust: tests/taskgroup_params.rs:476
+#Test("native_cancellation_closes_group_before_caller_continues") {
+    source :: `
+use core.time as time
+fn wait_in_group(sender: Sender<Int>) -> {
+    task.group group {
+        child :: task {
+            sender.send(1)
+            time.sleep(10ms)
+            print("settled")
+        }
+        time.sleep(10000ms)
+        child.join() ?? panic("child failed")
+    }
+}
+fn run() -> {
+    (sender, ready) :: channel<Int>()
+    outer :: task wait_in_group(sender)
+    ready.receive() ?? panic("child did not start")
+    outer.cancel()
+    if outer.join() == {
+        .Err(_) -> { print("cancelled") }
+        .Ok(_) -> { print("ok") }
+    }
+    print("caller")
+}
+`
+    assert_group_close_success("taskgroup_cancel", source, "settled\ncancelled\ncaller\n")
+}
+// Rust: tests/taskgroup_params.rs:508
+#Test("native_deadline_closes_group_before_caller_continues") {
+    source :: `
+use core.time as time
+fn leave_on_deadline() -> {
+    task.group group {
+        child :: task {
+            total := 0
+            loop n in 0..<2000000 { total += n }
+            print("settled")
+        }
+        #Context(deadline: time.now() - 1) { time.sleep(10000ms) }
+        child.join() ?? panic("child failed")
+    }
+}
+fn run() -> {
+    leave_on_deadline()
+    print("caller")
+}
+`
+    assert_native_wait_exit("taskgroup_deadline_exit", source, "E3003", "settled\n")
+}
+// Rust: tests/taskgroup_params.rs:535
+#Test("native_panicked_wait_closes_group_before_caller_continues") {
+    source :: `
+struct Gate { step: Int }
+fn slow_value(gate: Shared<Gate>) -> Int {
+    gate.step = 1
+    total := 0
+    loop n in 0..<2000000 { total += n }
+    print("settled")
+    return 1
+}
+fn fail_after_start(gate: Shared<Gate>) -> Int {
+    loop gate.step == 0 {}
+    panic("wait failed")
+    return 0
+}
+fn leave_on_wait_panic() -> {
+    gate :: shared Gate{ step: 0 }
+    task.group group {
+        slow :: task slow_value(gate)
+        _ignored :: (task.any { fail_after_start(gate) }) ?? 0
+        slow.join() ?? panic("slow child failed")
+    }
+}
+fn run() -> {
+    leave_on_wait_panic()
+    print("caller")
+}
+`
+    assert_group_close_success("taskgroup_wait_panic", source, "settled\ncaller\n")
+}
+// Rust: tests/taskgroup_params.rs:578
+#Test("local_task_binding_is_not_parsed_as_spawn_syntax") {
+    reserved :: `
+fn run() -> {
+    task :: [7]
+    print(task[0])
+}
+`
+    diagnostics :: jet.compile(reserved).expect_err("task is a reserved word")
+    refusal :: diagnostics.iter().find(diagnostic -> diagnostic.code == "E0003").expect("the reserved word must be refused at the name that spells it")
+    assert(refusal.what.contains("`task`") && refusal.what.contains("reserved"), "the refusal must name the reservation, not a generic parse confusion: {refusal:?}")
+    free_selectors :: `
+fn run() -> {
+    all :: 1
+    race :: 2
+    any :: 4
+    group :: 8
+    print(all + race + any + group)
+}
+`
+    _ :: jet.compile(free_selectors).expect("all, race, any, and group are free identifiers")
+}
+// Rust: tests/taskgroup_params.rs:612
+#Test("early_return_closes_group_before_caller_continues") {
+    source :: `
+fn spawn_bad(_group: Group) -> { _bad :: task panic("child") }
+fn leave() -> Int {
+    task.group group {
+        spawn_bad(group)
+        total := 0
+        loop n in 0..<2000000 { total += n }
+        return 1
+    }
+    return 0
+}
+fn run() -> {
+    leave()
+    print("after")
+}
+`
+    (interpreted_stdout, interpreted_stderr) :: match interpreter_outcome("early_return", source) {
+        .Ran{stdout, stderr, exit_code} -> {
+            assert_eq(exit_code, 0, "{stderr}")
+            (^stdout, ^stderr)
+        }
+        .Problems(diags) -> panic("interpreter rejected child panic: {diags:?}")
+    }
+    assert_eq(interpreted_stdout, "after\n")
+    assert_eq(interpreted_stderr, "")
+    (code, stdout, stderr) :: run_default_multi("taskgroup_early_return", "main.jet", [("main.jet", source)])
+    assert_eq(code, 0, "{stderr}")
+    assert_eq(stdout, "after\n", "{stderr}")
+    assert_eq(stderr, "", "runtime diagnostics: {stderr}")
+    if have_rustc() {
+        (code, stdout, stderr) :: build_and_run_full("jet_taskgroup", "taskgroup_early_return", source)
+        assert_eq(code, 0, "{stderr}")
+        assert_eq(stdout, "after\n", "{stderr}")
+        assert_eq(stderr, "", "{stderr}")
+    }
+}

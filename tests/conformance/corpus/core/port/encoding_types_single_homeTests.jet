@@ -1,0 +1,175 @@
+use std.fs as fs
+use tests.common as common
+use tests.tir_support as tir_support
+use tests.conformance.corpus.core.port.encoding_types_single_home.[HOME, TYPES, root, declaration_sites, host_facts, write_evidence, Scratch, RunResult, EVERY_SPLIT_MAX, LARGE_INPUT_LEN, CLEAN_REPS, CHUNK_PLAN_COUNT, VARIANCE_SEED, compile_aot, run_bin, run_hostile, assert_same, prove_every_byte_split, recorded_chunk_plans, prove_chunk_plans, padded_json_object, padded_jsonl, padded_csv, padded_cbor_text, json_reader_src, jsonl_reader_src, csv_reader_src, cbor_reader_src, json_limit_reader_src]
+
+// Rust: tests/encoding_types_single_home.rs:71
+#Test("encoding_types_have_one_definition_home_and_jit_include") {
+    repo := root()
+    home := repo.join(HOME)
+    home_source := fs.read_to_string(&home).expect("native encoding type home is readable")
+    // Retired JIT include identity becomes one canonical Core owner for all
+    // execution tiers. Structural scanning checks native declarations, not Rust.
+    loop name in TYPES {
+        assert(home_source.contains("struct {name}") || home_source.contains("enum {name}"),
+            "Core encoding type home is missing {name}")
+        sites := declaration_sites(&repo, name)
+        assert(sites.len() == 1 && sites[0].starts_with("{HOME}:"),
+            "{name} must have exactly one definition site, {HOME}: {sites:?}")
+    }
+    tir_support.assert_tiers_agree("encoding_types_single_home", """
+use core.encoding as encoding
+fn run() -> {
+    limits :: encoding.EncodingLimits.safe()
+    print(limits.max_depth > 0)
+    print(encoding.EncodingFormat.JSON == encoding.EncodingFormat.JSON)
+    print(encoding.EncodingErrorKind.Limit == encoding.EncodingErrorKind.Limit)
+}
+""", "true\ntrue\ntrue\n")
+}
+
+// Rust: tests/encoding_variance.rs:469
+#Test("encoding_variance_every_split_chunk_plans_limits_and_reps") {
+    if !common.have_rustc() {
+        eprintln("note: skipping encoding variance (need rustc)")
+        return
+    }
+    evidence := host_facts()
+    evidence.push_str("criterion=C6\nagent=e3-enc-715-fix\n")
+    write_evidence("715-c6-host.txt", evidence)
+    scratch := Scratch.new("main")
+    dir := scratch.path()
+    cases: [(String, [U8], fn(String) -> String)] := [
+        ("json", padded_json_object(EVERY_SPLIT_MAX), json_reader_src),
+        ("jsonl", padded_jsonl(2048), jsonl_reader_src),
+        ("csv", padded_csv(1024), csv_reader_src),
+        ("cbor", padded_cbor_text(EVERY_SPLIT_MAX), cbor_reader_src),
+    ]
+    log := ""
+    loop (name, bytes, src_fn) in &cases {
+        input := dir.join("{name}_small.in")
+        fs.write(&input, bytes).unwrap()
+        input_rel := input.file_name().unwrap().to_string_lossy().to_string()
+        bin := compile_aot(dir, "{name}_small", src_fn(input_rel))
+        baseline := run_bin(&bin, dir, [])
+        assert(baseline.exit == 0, "{name} baseline failed: {baseline.stderr}")
+        assert(!baseline.stdout.trim().is_empty(), "{name} baseline produced empty stdout")
+        loop rep in 0..CLEAN_REPS {
+            again := run_bin(&bin, dir, [])
+            assert_same("{name} clean-rep-{rep}", &baseline, &again)
+        }
+        log.push_str("{name}: {CLEAN_REPS} clean AOT reps ok; baseline_stdout={baseline.stdout.trim():?}\n")
+        prove_every_byte_split(name, &bin, dir, bytes.len(), &baseline, &log)
+    }
+    large := padded_json_object(LARGE_INPUT_LEN)
+    assert(large.len() > EVERY_SPLIT_MAX)
+    large_path := dir.join("json_large.in")
+    fs.write(&large_path, &large).unwrap()
+    large_bin := compile_aot(dir, "json_large", json_reader_src("json_large.in"))
+    large_base := run_bin(&large_bin, dir, [])
+    assert(large_base.exit == 0, "large baseline: {large_base.stderr}")
+    loop rep in 0..CLEAN_REPS {
+        assert_same("json-large clean-rep-{rep}", &large_base, &run_bin(&large_bin, dir, []))
+    }
+    plans := recorded_chunk_plans(VARIANCE_SEED, large.len())
+    assert(plans.len() == CHUNK_PLAN_COUNT)
+    plans_record := plans.iter().enumerate().map((pair) -> {
+        (i, p) := pair
+        plan_s := p.iter().map((n) -> n.to_string()).collect().join(",")
+        "{i}\t{plan_s}"
+    }).collect().join("\n")
+    write_evidence("715-c6-chunk-plans.tsv", "# seed={VARIANCE_SEED:#x} len={large.len()}\n{plans_record}\n")
+    prove_chunk_plans("json-large", &large_bin, dir, &plans, &large_base, &log)
+    limit_bytes := "{\"a\":\"abcdefghij\"}".as_bytes()
+    limit_path := dir.join("limit.in")
+    fs.write(&limit_path, limit_bytes).unwrap()
+    wire_len := U64{limit_bytes.len()}
+    limit_cases := [(wire_len.saturating_sub(1), "Limit"), (wire_len, "ok-or-limit"), (wire_len + 1, "ok"), (U64{1000000}, "ok")]
+    loop (max_total, expect_kind) in limit_cases {
+        src := json_limit_reader_src("limit.in", max_total)
+        bin := compile_aot(dir, "limit_{max_total}", src)
+        last: RunResult? := None
+        loop rep in 0..CLEAN_REPS {
+            got := run_bin(&bin, dir, [])
+            assert(got.exit == 0, "limit {max_total} rep {rep}: {got.stderr}")
+            if last == Val(prev) { assert_same("limit-{max_total}-rep-{rep}", &prev, &got) }
+            last = Val(got)
+        }
+        got := last.unwrap()
+        if expect_kind == {
+            "Limit" -> {
+                assert(got.stdout.contains("true"), "limit−1 must surface Limit latch, got {got.stdout:?}")
+                lines := got.stdout.lines().collect()
+                assert(lines.first() == Val("true"), "limit−1 first line must be Limit match true, got {got.stdout:?}")
+            }
+            "ok" -> assert(got.stdout.contains("ok") || got.stdout.contains("eof"), "limit+ / overflow must accept, got {got.stdout:?}")
+            "ok-or-limit" -> assert(got.stdout.contains("ok") || got.stdout.contains("eof") || got.stdout.lines().next() == Val("true"),
+                "exact limit must be deterministic accept or Limit, got {got.stdout:?}")
+            else -> panic("unreachable limit expectation")
+        }
+        host := run_hostile(&bin, dir, [("JET_ENC_HOSTILE_READ_ONE", "1")])
+        assert_same("limit-{max_total}-hostile", &got, &host)
+        log.push_str("limit max_total={max_total} expect={expect_kind} stdout={got.stdout.trim():?}\n")
+    }
+    overflow_src := """
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+fn run() -> {
+    limits := encoding.EncodingLimits.safe()
+    limits.max_total_bytes = Val(0)
+    out :: files.create("overflow.json") ?? panic("create")
+    writer :: json.writer(^out, limits, false) ?? panic("writer")
+    result :: writer.write(encoding.DataEvent.Text("x"))
+    if result == {
+        Err(first) -> {
+            print(first.kind == encoding.EncodingErrorKind.Limit)
+            again :: writer.finish()
+            if again == { Err(second) -> print(first.reason == second.reason); Ok(_) -> print("finish-missed") }
+        }
+        Ok(_) -> print("missed")
+    }
+}
+"""
+    overflow_bin := compile_aot(dir, "overflow_write", overflow_src)
+    overflow_base: RunResult? := None
+    loop rep in 0..CLEAN_REPS {
+        got := run_bin(&overflow_bin, dir, [])
+        assert(got.exit == 0, "overflow write: {got.stderr}")
+        assert(got.stdout.lines().next() == Val("true"), "zero budget must Limit, got {got.stdout:?}")
+        if overflow_base == Val(prev) { assert_same("overflow-rep-{rep}", &prev, &got) }
+        overflow_base = Val(got)
+    }
+    overflow_host := run_hostile(&overflow_bin, dir, [("JET_ENC_HOSTILE_WRITE_PLAN", "1,1,1,1")])
+    assert_same("overflow-write-plan", &overflow_base.unwrap(), &overflow_host)
+    log.push_str("overflow write max_total=0 + WRITE_PLAN ok\n")
+    evidence.push_str(log)
+    evidence.push_str("C6_RESULT=met on linux-x86_64 AOT; other native platforms not present in this env\n")
+    write_evidence("715-c6-evidence.txt", evidence)
+    eprintln(evidence)
+}
+
+// Rust: tests/exact_division.rs:5
+#Test("exact_integer_division_is_fraction_and_multiplies_back") {
+    tir_support.assert_tiers_agree("exact_integer_division", """
+fn run() -> {
+    third :: 1 / 3
+    print(third)
+    print("interpolated {third}")
+    print(third * 3 == 1)
+}
+""", "1/3\ninterpolated 1/3\ntrue\n")
+}
+// Rust: tests/exact_division.rs:21
+#Test("comptime_division_keeps_the_same_exact_value_as_runtime") {
+    tir_support.assert_tiers_agree("comptime_exact_division", """
+TEN :: prep { 10 }
+THIRD :: prep { TEN / 3 }
+fn run() -> {
+    runtime :: 10 / 3
+    print(THIRD)
+    print(THIRD == runtime)
+    print(THIRD * 3 == 10)
+}
+""", "10/3\ntrue\ntrue\n")
+}

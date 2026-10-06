@@ -1,0 +1,544 @@
+// Args.rs:14–223,237–549,852–886,927–958,1017–1195.
+// Private extraction workspace for the ONE Core/args declarative owner. The
+// public ArgsSpec/ArgDef + DataTree decode_argv front doors in args.jet have a
+// different contract (dynamic decoding, aliases/default overlay); they are not
+// this parser and are intentionally unchanged. No argv parser or CLI registry.
+//
+// Native cutover facts: spec():224–236 supplies the real captured argv[0] to
+// this whole carrier. program() overwrites that fact explicitly; it never reads
+// env. parse/parse_guided/parse_mode:550–837, parse_or_exit:838–850,
+// store_option:887–925, parsed projections/Standard policy:959–1015, and guided
+// append/callback loop:1232–1313 remain at their original native owner.
+// Their maps/sets marshal field-for-field; no Rust container crosses a C ABI.
+// find_subcommand:877–885 and guided_target_spec:1155–1166 return retained
+// struct references, not owned copies; their original bodies stay held until
+// the checked recursive-carrier/read-reference route (#4390/#4392) is usable.
+// Observed optional-View constructor/slice-context E0108: Val of the slice
+// infers List, not the declared optional retained View. The exact cause is
+// pending Main; this does NOT establish the separate #4392 loan/ABI defect.
+// find_flag/find_option below keep the true borrowed contract and originals.
+// guided_validate:1197–1230 depends on retained store_option (i64/f64 parsing,
+// exact errors and repeated storage). Its full original remains authoritative;
+// do not substitute Core text.parse's different numeric grammar or a fake leaf.
+// Storage-reuse gate: subcommand child filtering preserves value/drop order
+// but allocates a kept list. Rust Args.rs:496–500 retains in-place. No
+// canonical List.retain/truncate consuming-compaction surface exists in
+// Foundation Collections.jet's List rows. Keep the original Rust retain until
+// that storage operation lands; this is NOT allocation parity.
+use core.text.runtime.kernel_unicode_string as args_unicode
+
+// Rust JetArgValueKind:45–51.
+pub enum JetArgValueKind {
+    String
+    Int
+    Float
+    Choice([String])
+}
+
+// Rust JetArgKind:14–43. The nested spec remains an actual whole spec, never
+// flattened into names, indices or a second command registry. List storage is
+// the recursive indirection; ABI adapters retain the native Box lifetime.
+pub enum JetArgKind {
+    Flag(name: String, short: String?, help: String)
+    Option(
+        name: String, short: String?, help: String, meta: String,
+        default: String?, env: String?, required: Bool, repeat: Bool,
+        value: JetArgValueKind
+    )
+    Positional(name: String, help: String)
+    Subcommand(name: String, help: String, spec: JetArgsSpec)
+}
+
+// Rust JetArgsSpec:53–65, all fields including the native-owned prog fact.
+pub struct JetArgsSpec {
+    pub entries: [JetArgKind]
+    pub inherited_entries: [JetArgKind]
+    pub prog: String
+    pub description: String?
+    pub version: String?
+    pub inherited_version: Bool
+}
+
+// Rust JetParsedArgs:67–76. True map/set carriers; not array-emulated maps.
+pub struct JetParsedArgs {
+    pub flags: [String: Bool]
+    pub options: [String: [String]]
+    pub positionals: [String]
+    pub subcommand: String?
+    pub explicit_flags: Set<String>
+    pub explicit_options: Set<String>
+}
+
+// Rust jet_args_program:78–81.
+pub fn jet_args_program(spec: ^JetArgsSpec, prog: String) -> JetArgsSpec Never! {
+    out := ^spec
+    out.prog = ~prog
+    out
+}
+
+// Job.rs:1332–1337, portable tail after the actual target-native filename
+// fact. Job.rs:1317–1331 Path::file_name/empty fallback stays original/held.
+// Callers supply the actual filename and split-on-first-space suffix; no
+// lexical pathname scanner or guessed target/native provider lives here.
+pub fn jet_args_normalize_source_name(filename: String, suffix: String) -> String Never! {
+    name := ~filename
+    if name.ends_with(".jet") -> name = name.slice(0, name.len() - 4) // #4303
+    if suffix == "" -> return name
+    "{name} {suffix}"
+}
+
+// Rust jet_args_inherited_entries:186–188 / local_entries:190–192.
+// Actual retained list views. Do not materialize Vec-like copies for reads.
+pub fn jet_args_inherited_entries(spec: JetArgsSpec) -> View<JetArgKind> from spec {
+    spec.inherited_entries[0..<spec.inherited_entries.len()]
+}
+pub fn jet_args_local_entries(spec: JetArgsSpec) -> View<JetArgKind> from spec {
+    spec.entries[0..<spec.entries.len()]
+}
+
+// Rust all_entries:194–197: chained retained extents, inherited first. Each
+// consumer filters Subcommand ONLY from the local extent, as the original
+// chain does. This tuple holds views, not cloned entries or a public plan.
+pub fn jet_args_all_entries(spec: JetArgsSpec) -> (inherited: View<JetArgKind>, local: View<JetArgKind>) from spec {
+    (inherited: jet_args_inherited_entries(spec), local: jet_args_local_entries(spec))
+}
+
+// Rust jet_args_same_input:199–206: equality is kind AND name, not short alias.
+pub fn jet_args_same_input(left: JetArgKind, right: JetArgKind) -> Bool Never! {
+    if left == {
+        .Flag { name: a, .. } -> if right == .Flag { name: b, .. } -> return a == b
+        .Option { name: a, .. } -> if right == .Option { name: b, .. } -> return a == b
+        .Positional { name: a, .. } -> if right == .Positional { name: b, .. } -> return a == b
+        .Subcommand { .. } -> return false
+    }
+    false
+}
+
+// Rust jet_args_label:208–222.
+pub fn jet_args_label(name: String, short: String?, meta: String?) -> String Never! {
+    out := ""
+    if short == .Val(s) -> out = "-{s}, "
+    out = "{out}--{name}"
+    if meta == .Val(m) -> out = "{out} {m}"
+    out
+}
+
+fn append_text(out: &[U8], text: String) Never! {
+    loop byte in args_unicode.utf8_bytes(text) -> &out.push(byte)
+}
+fn append_row(out: &[U8], label: String, width: Int, note: String) Never! {
+    append_text(&out, "  ")
+    append_text(&out, label)
+    loop _ in label.len()..<width -> &out.push(U8{32})
+    append_text(&out, " ")
+    append_text(&out, note)
+    &out.push(U8{10})
+}
+
+// Rust JetArgsSpec::help:85–183. Width is scalar count, exactly Rust formatting,
+// not UTF8 bytes or terminal cells; positional width 22, option width 24.
+pub fn jet_args_help(spec: JetArgsSpec, source_program_name: String) -> String Never! {
+    out := [U8]{}
+    append_text(&out, "Usage: ")
+    // Exact private extraction: native caller supplies Job.rs's real result.
+    append_text(&out, source_program_name)
+    positional_count := 0
+    option_count := 0
+    loop entry in spec.entries {
+        if entry == {
+            .Positional { name, .. } -> {
+                append_text(&out, " {name}")
+                positional_count += 1
+            }
+            else -> option_count += 1
+        }
+    }
+    append_text(&out, " [options]\n")
+    if spec.description == .Val(description) -> append_text(&out, "\n{description}\n")
+    if positional_count > 0 {
+        append_text(&out, "\nArguments:\n")
+        loop entry in spec.entries {
+            if entry == .Positional { name, help } -> append_row(&out, name, 22, help)
+        }
+    }
+    // The original does NOT emit Options/--help/--version if there are only
+    // positionals or zero declarations, although usage still has [options].
+    if option_count > 0 {
+        append_text(&out, "\nOptions:\n")
+        loop entry in spec.entries {
+            if entry == {
+                .Flag { name, short, help } -> append_row(&out, jet_args_label(name, short, None), 24, help)
+                .Option { name, short, help, meta, default, env, required, repeat, value } -> {
+                    note := [U8]{}
+                    append_text(&note, help)
+                    if required -> append_text(&note, " (required)")
+                    if repeat -> append_text(&note, " (repeatable)")
+                    if default == .Val(d) {
+                        append_text(&note, " [default: {d}]")
+                        if env != None -> append_text(&note, " [precedence: flag > env > default]")
+                    }
+                    if env == .Val(e) -> append_text(&note, " [env: {e}]")
+                    if value == .Choice(choices) -> append_text(&note, " [choices: {choices.join(", ")}]")
+                    append_row(&out, jet_args_label(name, short, Val(~meta)), 24, String.from_bytes(^note) ?? panic("invalid help UTF8"))
+                }
+                .Subcommand { name, help, .. } -> append_row(&out, name, 24, help)
+                .Positional { .. } -> next
+            }
+        }
+        append_row(&out, "--help", 24, "show this help")
+        if spec.version != None -> append_row(&out, "--version", 24, "show version")
+    }
+    String.from_bytes(^out) ?? panic("invalid help UTF8")
+}
+
+// Rust builders:237–309. Consume/mutate the owned spec; only borrowed input
+// strings are copied, exactly where the Rust builder clones them.
+pub fn jet_args_description(spec: ^JetArgsSpec, description: String) -> JetArgsSpec Never! {
+    out := ^spec
+    out.description = Val(~description)
+    out
+}
+pub fn jet_args_flag(spec: ^JetArgsSpec, name: String, help: String) -> JetArgsSpec Never! {
+    jet_args_flag_short_base(^spec, name, None, help)
+}
+fn jet_args_flag_short_base(spec: ^JetArgsSpec, name: String, short: ^String?, help: String) -> JetArgsSpec Never! {
+    out := ^spec
+    &out.entries.push(JetArgKind.Flag{name: ~name, short: short, help: ~help})
+    out
+}
+pub fn jet_args_flag_short(spec: ^JetArgsSpec, name: String, short: String, help: String) -> JetArgsSpec Never! {
+    jet_args_flag_short_base(^spec, name, Val(~short), help)
+}
+pub fn jet_args_option_base(spec: ^JetArgsSpec, name: String, short: ^String?, help: String, meta: String, default: ^String?, env: ^String?, required: Bool, repeat: Bool, value: ^JetArgValueKind) -> JetArgsSpec Never! {
+    out := ^spec
+    &out.entries.push(JetArgKind.Option{
+        name: ~name, short: short, help: ~help, meta: ~meta,
+        default: default, env: env, required: required, repeat: repeat, value: value
+    })
+    out
+}
+pub fn jet_args_option(spec: ^JetArgsSpec, name: String, help: String, meta: String) -> JetArgsSpec Never! {
+    jet_args_option_base(^spec, name, None, help, meta, None, None, false, false, JetArgValueKind.String)
+}
+// Rust option_short:311–330 / default:332–351 / env:353–372.
+pub fn jet_args_option_short(spec: ^JetArgsSpec, name: String, short: String, help: String, meta: String) -> JetArgsSpec Never! {
+    jet_args_option_base(^spec, name, Val(~short), help, meta, None, None, false, false, JetArgValueKind.String)
+}
+pub fn jet_args_option_default(spec: ^JetArgsSpec, name: String, help: String, meta: String, default: String) -> JetArgsSpec Never! {
+    jet_args_option_base(^spec, name, None, help, meta, Val(~default), None, false, false, JetArgValueKind.String)
+}
+pub fn jet_args_option_env(spec: ^JetArgsSpec, name: String, help: String, meta: String, env: String) -> JetArgsSpec Never! {
+    jet_args_option_base(^spec, name, None, help, meta, None, Val(~env), false, false, JetArgValueKind.String)
+}
+// Rust option_int:374–392 / float:394–412 / choice:414–438.
+pub fn jet_args_option_int(spec: ^JetArgsSpec, name: String, help: String, meta: String) -> JetArgsSpec Never! {
+    jet_args_option_base(^spec, name, None, help, meta, None, None, false, false, JetArgValueKind.Int)
+}
+pub fn jet_args_option_float(spec: ^JetArgsSpec, name: String, help: String, meta: String) -> JetArgsSpec Never! {
+    jet_args_option_base(^spec, name, None, help, meta, None, None, false, false, JetArgValueKind.Float)
+}
+pub fn jet_args_option_choice(spec: ^JetArgsSpec, name: String, help: String, meta: String, choices: String) -> JetArgsSpec Never! {
+    values := [String]{}
+    loop part in choices.split(",") {
+        trimmed := part.trim() // #4303: trim view into String list.
+        if trimmed != "" -> &values.push(~trimmed)
+    }
+    jet_args_option_base(^spec, name, None, help, meta, None, None, false, false, JetArgValueKind.Choice(^values))
+}
+// Rust repeat:440–453 / required_option:455–473 / positional:475–481.
+pub fn jet_args_repeat(spec: ^JetArgsSpec, name: String, help: String, meta: String) -> JetArgsSpec Never! {
+    jet_args_option_base(^spec, name, None, help, meta, None, None, false, true, JetArgValueKind.String)
+}
+pub fn jet_args_required_option(spec: ^JetArgsSpec, name: String, help: String, meta: String) -> JetArgsSpec Never! {
+    jet_args_option_base(^spec, name, None, help, meta, None, None, true, false, JetArgValueKind.String)
+}
+pub fn jet_args_positional(spec: ^JetArgsSpec, name: String, help: String) -> JetArgsSpec Never! {
+    out := ^spec
+    &out.entries.push(JetArgKind.Positional{name: ~name, help: ~help})
+    out
+}
+
+// Rust subcommand:483–520. The parent wins same-kind/name shadows; only
+// non-command entries inherit. Prior inherited declarations win duplicate
+// inheritance, and any inherited version removes the nested visible version.
+// The kept output below is explicitly storage-gated (see header), not a
+// replacement for native Vec::retain's in-place capacity/lifetime contract.
+pub fn jet_args_subcommand(spec: ^JetArgsSpec, name: String, help: String, sub: ^JetArgsSpec) -> JetArgsSpec Never! {
+    out := ^spec
+    nested := ^sub
+    inherited := ~out.inherited_entries
+    loop entry in out.entries {
+        if entry == .Subcommand { .. } -> next
+        &inherited.push(~entry)
+    }
+    kept := [JetArgKind]{}
+    loop entry in ^nested.entries {
+        shadowed := false
+        loop parent in inherited {
+            if jet_args_same_input(parent, entry) {
+                shadowed = true
+                break
+            }
+        }
+        if !shadowed -> &kept.push(^entry)
+    }
+    nested.entries = ^kept
+    loop entry in ^inherited {
+        seen := false
+        loop parent in nested.inherited_entries {
+            if jet_args_same_input(parent, entry) {
+                seen = true
+                break
+            }
+        }
+        if !seen -> &nested.inherited_entries.push(^entry)
+    }
+    nested.inherited_version = nested.inherited_version || out.inherited_version || out.version != None
+    if nested.inherited_version -> nested.version = None
+    &out.entries.push(JetArgKind.Subcommand{name: ~name, help: ~help, spec: ^nested})
+    out
+}
+// Rust version:522–525 / completion:527–546.
+pub fn jet_args_version(spec: ^JetArgsSpec, version: String) -> JetArgsSpec Never! {
+    out := ^spec
+    out.version = Val(~version)
+    out
+}
+pub fn jet_args_completion(spec: JetArgsSpec, shell: String) -> String Never! {
+    out := [U8]{}
+    append_text(&out, "{shell} completion: --help")
+    if spec.version != None -> append_text(&out, " --version")
+    loop entry in spec.entries {
+        if entry == {
+            .Flag { name, short, .. } -> {
+                append_text(&out, " --{name}")
+                if short == .Val(s) -> append_text(&out, " -{s}")
+            }
+            .Option { name, short, .. } -> {
+                append_text(&out, " --{name}")
+                if short == .Val(s) -> append_text(&out, " -{s}")
+            }
+            .Positional { name, .. } -> append_text(&out, " {name}")
+            .Subcommand { name, .. } -> append_text(&out, " {name}")
+        }
+    }
+    String.from_bytes(^out) ?? panic("invalid completion UTF8")
+}
+
+// Rust find_flag:852–855 / find_option:857–860. A one-entry retained view,
+// rather than a cloned entry, carries the read result and its original owner.
+fn jet_args_find_value(spec: JetArgsSpec, name: String, option: Bool) -> View<JetArgKind>? from spec {
+    loop phase in 0..<2 {
+        entries :: if phase == 0 -> jet_args_inherited_entries(spec) else -> jet_args_local_entries(spec)
+        loop i in 0..<entries.len() {
+            if entries[i] == {
+                .Flag { name: n, .. } -> if !option && n == name -> return Val(entries[i..<i + 1])
+                .Option { name: n, .. } -> if option && n == name -> return Val(entries[i..<i + 1])
+                .Positional { .. } -> next
+                .Subcommand { .. } -> next
+            }
+        }
+    }
+    None
+}
+pub fn jet_args_find_flag(spec: JetArgsSpec, name: String) -> View<JetArgKind>? from spec { jet_args_find_value(spec, name, false) }
+pub fn jet_args_find_option(spec: JetArgsSpec, name: String) -> View<JetArgKind>? from spec { jet_args_find_value(spec, name, true) }
+// Rust find_short:862–875 intentionally clones the returned name.
+pub fn jet_args_find_short(spec: JetArgsSpec, short: String) -> (name: String, option: Bool)? Never! {
+    loop phase in 0..<2 {
+        entries :: if phase == 0 -> jet_args_inherited_entries(spec) else -> jet_args_local_entries(spec)
+        loop entry in entries {
+            if entry == {
+                .Flag { name, short: alias, .. } -> if alias == .Val(s) && s == short -> return Val((name: ~name, option: false))
+                .Option { name, short: alias, .. } -> if alias == .Val(s) && s == short -> return Val((name: ~name, option: true))
+                .Positional { .. } -> next
+                .Subcommand { .. } -> next
+            }
+        }
+    }
+    None
+}
+
+// Rust edit_distance:942–958, corrected per Main's explicit ruling: columns
+// and terminal index count scalars, not Rust's mismatched b.len() bytes. No
+// inward Core/Foundation suggestion owner exists (CLI's helper is private).
+// Stream the ONE canonical UTF8 decoder; do not allocate scalar lists.
+// One-row Levenshtein recurrence: keep the old diagonal in a scalar before
+// overwriting a column. No cloned row, swapping/move-reinit loop or extra
+// buffer is needed; the result/order/cost recurrence is unchanged.
+pub fn jet_args_edit_distance(a: String, b: String) -> Int Never! {
+    left :: args_unicode.utf8_bytes(a)
+    right :: args_unicode.utf8_bytes(b)
+    columns :: b.len()
+    distances := [Int]{}
+    loop i in 0..columns -> &distances.push(i)
+    ai := 0
+    row := 0
+    loop ai < left.len() {
+        ca :: args_unicode.scalar_at(left, ai)
+        ai += args_unicode.utf8_width_at(left, ai)
+        row += 1
+        diagonal := distances[0]
+        distances[0] = row
+        bi := 0
+        column := 0
+        loop bi < right.len() {
+            cb :: args_unicode.scalar_at(right, bi)
+            bi += args_unicode.utf8_width_at(right, bi)
+            above :: distances[column + 1]
+            if ca == cb {
+                distances[column + 1] = diagonal
+            } else {
+                best := diagonal
+                if above < best -> best = above
+                if distances[column] < best -> best = distances[column]
+                distances[column + 1] = best + 1
+            }
+            diagonal = above
+            column += 1
+        }
+    }
+    distances[columns]
+}
+// Rust unknown:927–940: FIRST candidate <=2, not nearest; inherited before
+// local; flags/options only; no automatic help/version suggestion.
+pub fn jet_args_unknown(name: String, spec: JetArgsSpec, source_program_name: String) -> String Never! {
+    suggestion := ""
+    found := false
+    loop phase in 0..<2 {
+        entries :: if phase == 0 -> jet_args_inherited_entries(spec) else -> jet_args_local_entries(spec)
+        loop entry in entries {
+            candidate := ""
+            if entry == {
+                .Flag { name: n, .. } -> candidate = ~n
+                .Option { name: n, .. } -> candidate = ~n
+                .Positional { .. } -> next
+                .Subcommand { .. } -> next
+            }
+            if jet_args_edit_distance(candidate, name) <= 2 {
+                suggestion = "\ndid you mean `--{candidate}`?"
+                found = true
+                break
+            }
+        }
+        if found -> break
+    }
+    "unknown option `--{name}`{suggestion}\n\n{jet_args_help(spec, source_program_name)}"
+}
+
+// Rust JetShow implementations:1017–1031. Count map keys, not repeated values;
+// false flags still count, explicit sets and subcommand do not contribute.
+pub fn jet_args_show(spec: JetArgsSpec) -> String Never! { "ArgsSpec({spec.entries.len()})" }
+pub fn jet_parsed_args_show(parsed: JetParsedArgs) -> String Never! {
+    "ParsedArgs(flags={parsed.flags.len()}, options={parsed.options.len()}, positionals={parsed.positionals.len()})"
+}
+
+// Rust JetGuidedField:1033–1047, every field retained.
+pub struct JetGuidedField {
+    pub name: String
+    pub help: String
+    pub meta: String
+    pub default: String?
+    pub env: String?
+    pub required: Bool
+    pub repeat: Bool
+    pub value: JetArgValueKind
+    pub flag: Bool
+    pub positional: Bool
+    pub positional_index: Int?
+    pub page: Int
+}
+// Rust guided_skip_name:1049–1051.
+pub fn jet_args_guided_skip_name(name: String) -> Bool Never! {
+    name == "verbose" || name == "quiet" || name == "color" || name == "help" || name == "version"
+}
+fn guided_index(fields: [JetGuidedField], name: String) -> Int? Never! {
+    loop i in 0..<fields.len() {
+        if fields[i].name == name -> return Val(i)
+    }
+    None
+}
+// Rust guided_fields:1053–1153: option updates keep first-insertion order;
+// positional coalescing preserves existing metadata, including flag-ness.
+pub fn jet_args_guided_fields(spec: JetArgsSpec) -> [JetGuidedField] Never! {
+    fields := [JetGuidedField]{}
+    positional_index := 0
+    loop phase in 0..<2 {
+        entries :: if phase == 0 -> jet_args_inherited_entries(spec) else -> jet_args_local_entries(spec)
+        loop entry in entries {
+            if entry == {
+                .Flag { name, help, .. } -> {
+                    if jet_args_guided_skip_name(name) || guided_index(fields, name) != None -> next
+                    &fields.push(JetGuidedField{
+                        name: ~name, help: ~help, meta: "", default: None, env: None,
+                        required: false, repeat: false, value: JetArgValueKind.String,
+                        flag: true, positional: false, positional_index: None, page: 0
+                    })
+                }
+                .Option { name, help, meta, default, env, required, repeat, value, .. } -> {
+                    if jet_args_guided_skip_name(name) -> next
+                    if guided_index(fields, name) == .Val(i) {
+                        fields[i].help = ~help
+                        fields[i].meta = ~meta
+                        fields[i].default = ~default
+                        fields[i].env = ~env
+                        fields[i].required = required
+                        fields[i].repeat = repeat
+                        fields[i].value = ~value
+                        fields[i].flag = false
+                    } else {
+                        &fields.push(JetGuidedField{
+                            name: ~name, help: ~help, meta: ~meta, default: ~default,
+                            env: ~env, required: required, repeat: repeat, value: ~value,
+                            flag: false, positional: false, positional_index: None, page: 0
+                        })
+                    }
+                }
+                .Positional { name, help } -> {
+                    if jet_args_guided_skip_name(name) -> next
+                    if guided_index(fields, name) == .Val(i) {
+                        fields[i].positional = true
+                        fields[i].positional_index = Val(positional_index)
+                        if fields[i].default == None -> fields[i].required = true
+                    } else {
+                        &fields.push(JetGuidedField{
+                            name: ~name, help: ~help, meta: "VALUE", default: None, env: None,
+                            required: true, repeat: false, value: JetArgValueKind.String,
+                            flag: false, positional: true, positional_index: Val(positional_index), page: 0
+                        })
+                    }
+                    positional_index += 1
+                }
+                .Subcommand { .. } -> next
+            }
+        }
+    }
+    loop i in 0..<fields.len() -> fields[i].page = i /% 4
+    fields
+}
+// Rust guided_field_explicit:1168–1178.
+pub fn jet_args_guided_field_explicit(field: JetGuidedField, parsed: JetParsedArgs) -> Bool Never! {
+    if field.flag -> return parsed.explicit_flags.has(field.name)
+    if parsed.explicit_options.has(field.name) -> return true
+    if field.positional_index == .Val(i) -> return parsed.positionals.len() > i
+    false
+}
+// Rust guided_initial:1180–1195. Defaults/env are metadata; initial reads only
+// the actual parsed carrier, and takes the last option even for a positional.
+// Storage gate: Core/Collections.rs:463–467 Map.get clones its whole value,
+// so this value-only body clones an option list before choosing the last item.
+// Keep the original Args.rs:1180–1195 borrowed HashMap lookup + last-only clone
+// until a canonical typed borrowed-map read is available. No allocation/
+// borrowing/native acceptance is claimed for this body; do not cut over to it.
+pub fn jet_args_guided_initial(field: JetGuidedField, parsed: JetParsedArgs) -> String Never! {
+    if field.flag {
+        if parsed.flags.get(field.name) == .Val(value) {
+            if value -> return "true"
+        }
+        return ""
+    }
+    if parsed.options.get(field.name) == .Val(values) {
+        if values.len() > 0 -> return ~values[values.len() - 1]
+    }
+    ""
+}

@@ -1,0 +1,53 @@
+// Shared exact-Int route policy; Foundation owns arithmetic and the resident carrier.
+use jet_foundation.Numeric.[CtBigInt as ExactBigInt]
+use std.cmp.[Ordering]
+// Rust: crates/jet-codegen/src/Prelude/Core/ExactNumeric.rs:8
+pub fn add(left: ExactBigInt, right: ExactBigInt) -> ExactBigInt Never! { left.add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/ExactNumeric.rs:12
+pub fn sub(left: ExactBigInt, right: ExactBigInt) -> ExactBigInt Never! { left.sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/ExactNumeric.rs:16
+pub fn mul(left: ExactBigInt, right: ExactBigInt) -> ExactBigInt Never! { left.mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/ExactNumeric.rs:20
+pub fn bit_and(left: ExactBigInt, right: ExactBigInt) -> ExactBigInt Never! { left.bit_and(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/ExactNumeric.rs:24
+pub fn bit_or(left: ExactBigInt, right: ExactBigInt) -> ExactBigInt Never! { left.bit_or(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/ExactNumeric.rs:28
+pub fn bit_xor(left: ExactBigInt, right: ExactBigInt) -> ExactBigInt Never! { left.bit_xor(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/ExactNumeric.rs:32
+pub fn neg(value: ExactBigInt) -> ExactBigInt Never! { value.neg() }
+// Rust: crates/jet-codegen/src/Prelude/Core/ExactNumeric.rs:36
+pub fn bit_not(value: ExactBigInt) -> ExactBigInt Never! { value.neg().sub(ExactBigInt.from_int(1)) }
+// Rust: crates/jet-codegen/src/Prelude/Core/ExactNumeric.rs:40
+pub fn div_rem(left: ExactBigInt, right: ExactBigInt) -> (ExactBigInt, ExactBigInt)? Never! { left.div_rem(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/ExactNumeric.rs:47
+pub fn div_rem_euclid(left: ExactBigInt, right: ExactBigInt) -> (ExactBigInt, ExactBigInt)? Never! { left.div_rem_euclid(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/ExactNumeric.rs:54
+pub fn floor_div(left: ExactBigInt, right: ExactBigInt) -> ExactBigInt? Never! {
+    (quotient, remainder) :: left.div_rem(right) ?? return None
+    if !remainder.is_zero() && left.negative != right.negative {
+        Val(quotient.sub(ExactBigInt.from_int(1)))
+    } else { Val(^quotient) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/ExactNumeric.rs:63
+pub fn modulo(left: ExactBigInt, right: ExactBigInt) -> ExactBigInt? Never! {
+    (_, remainder) :: left.div_rem(right) ?? return None
+    if !remainder.is_zero() && left.negative != right.negative {
+        Val(remainder.add(right))
+    } else { Val(^remainder) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/ExactNumeric.rs:72
+pub fn pow(left: ExactBigInt, right: ExactBigInt) -> ExactBigInt? Never! { left.pow(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/ExactNumeric.rs:76
+pub fn shl(left: ExactBigInt, right: ExactBigInt) -> ExactBigInt? Never! { left.shl(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/ExactNumeric.rs:80
+pub fn shr(left: ExactBigInt, right: ExactBigInt) -> ExactBigInt? Never! { left.shr(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/ExactNumeric.rs:84
+pub fn compare(left: ExactBigInt, right: ExactBigInt) -> Ordering Never! { left.compare(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/ExactNumeric.rs:88
+pub fn failure_message(member: String) -> String Never! {
+    match member {
+        "pow" => "Negative default Int exponent"
+        "shl" | "shr" => "Invalid shift count"
+        _ => "divided by zero"
+    }
+}

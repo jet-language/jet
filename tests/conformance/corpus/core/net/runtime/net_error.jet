@@ -1,0 +1,42 @@
+// RT065 and its original NetHTTP field projections; no substitute typed carrier.
+use core.net.runtime.kernel_net_error as error_kernel
+
+#Test("all fourteen detail ordinals share the exact display and preserve Option absences") {
+    loop ordinal in 0..<14 {
+        v :: I64{ordinal}
+        assert_eq(error_kernel.jet_net_error_kernel_show(v, Val("native detail"), Val(I64{0}), Val("ignored")), "native detail")
+        assert_eq(error_kernel.jet_net_error_kernel_show(v, None, None, None), "")
+        assert_eq(error_kernel.jet_net_error_message(v, Val("native detail"), None, None), "native detail")
+        assert_eq(error_kernel.jet_net_error_operation(v, Val("tcp_read")), "tcp_read")
+        assert_eq(error_kernel.jet_net_error_address(v, None), None)
+        assert_eq(error_kernel.jet_net_error_address(v, Val("")), Val(""))
+        assert_eq(error_kernel.jet_net_error_name(v, Val("host"), None, None), Val("host"))
+        assert_eq(error_kernel.jet_net_error_name(v, None, Val(I64{0}), Val("ignored")), None)
+        assert_eq(error_kernel.jet_net_error_os_code(v, None), None)
+        assert_eq(error_kernel.jet_net_error_os_code(v, Val(I64{0})), Val(I64{0}))
+        assert_eq(error_kernel.jet_net_error_os_code(v, Val(I64{9223372036854775807})), Val(I64{9223372036854775807}))
+    }
+}
+
+#Test("DNS uses surface ordinal fourteen and exact NotFound Failure subordinals") {
+    assert_eq(error_kernel.jet_net_error_kernel_show(I64{14}, Val("ignored"), Val(I64{0}), Val("example.test")), "DNS name not found: `example.test`")
+    assert_eq(error_kernel.jet_net_error_message(I64{14}, None, Val(I64{0}), Val("")), "DNS name not found: ``")
+    assert_eq(error_kernel.jet_net_error_kernel_show(I64{14}, None, Val(I64{1}), Val("resolver failed")), "resolver failed")
+    assert_eq(error_kernel.jet_net_error_operation(I64{14}, Val("ignored")), "dns")
+    assert_eq(error_kernel.jet_net_error_address(I64{14}, Val("ignored")), None)
+    assert_eq(error_kernel.jet_net_error_name(I64{14}, Val("ignored"), Val(I64{0}), Val("name")), Val("name"))
+    assert_eq(error_kernel.jet_net_error_name(I64{14}, Val("ignored"), Val(I64{1}), Val("failure")), None)
+    assert_eq(error_kernel.jet_net_error_os_code(I64{14}, Val(I64{13})), None)
+}
+
+#Test("invalid display ordinal missing detail and incomplete DNS parts return empty") {
+    assert_eq(error_kernel.jet_net_error_kernel_show(I64{-1}, Val("ignored"), Val(I64{0}), Val("ignored")), "")
+    assert_eq(error_kernel.jet_net_error_kernel_show(I64{15}, Val("ignored"), Val(I64{0}), Val("ignored")), "")
+    assert_eq(error_kernel.jet_net_error_kernel_show(I64{14}, None, None, Val("name")), "")
+    assert_eq(error_kernel.jet_net_error_kernel_show(I64{14}, None, Val(I64{0}), None), "")
+    assert_eq(error_kernel.jet_net_error_kernel_show(I64{14}, None, Val(I64{1}), None), "")
+    assert_eq(error_kernel.jet_net_error_kernel_show(I64{14}, None, Val(I64{2}), Val("name")), "")
+    assert_eq(error_kernel.jet_net_error_kernel_show(I64{14}, None, Val(I64{-1}), Val("name")), "")
+    assert_eq(error_kernel.jet_net_error_name(I64{14}, None, None, Val("name")), None)
+    assert_eq(error_kernel.jet_net_error_name(I64{14}, None, Val(I64{0}), None), None)
+}

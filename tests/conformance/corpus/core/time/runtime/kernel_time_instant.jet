@@ -1,0 +1,25 @@
+use core.time.runtime.kernel_time_instant.[JetInstant]
+use core.time.runtime.kernel_time_monotonic.[jet_time_monotonic_provider_set]
+
+fn instant_start_clock() -> I64? { Val(I64{1000000}) }
+fn instant_elapsed_clock() -> I64? { Val(I64{3500000}) }
+// Rust: crates/jet-codegen/src/Prelude/Core/TimeInstant.rs:10
+// Behavioral controls: use the real controlled monotonic provider.
+#Test("instant_elapsed_arithmetic_order_and_saturation") {
+    saved :: jet_time_monotonic_provider_set(Val(instant_start_clock))
+    start :: JetInstant.now()
+    _ :: jet_time_monotonic_provider_set(Val(instant_elapsed_clock))
+    assert(start.elapsed_nanos() == I64{2500000})
+    assert(start.elapsed_millis() == I64{2})
+    next :: start.plus_duration_ns(500)
+    assert(next.difference_ns(start) == I64{500})
+    assert(next.minus_duration_ns(500) == start)
+    assert(start.compare_to(next) == I64{-1})
+    assert(next.compare_to(start) == I64{1})
+    assert(start.compare_to(start) == I64{0})
+    assert(start.to_string_fmt() == "Instant")
+    limit :: start.plus_duration_ns(I64.MAX)
+    assert(limit.plus_duration_ns(1) == limit)
+    assert(limit.elapsed_nanos() == I64{3500000}.saturating_sub(I64.MAX))
+    _ :: jet_time_monotonic_provider_set(saved)
+}

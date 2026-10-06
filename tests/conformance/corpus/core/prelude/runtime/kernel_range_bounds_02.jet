@@ -1,0 +1,22 @@
+use core.prelude.runtime.kernel_range_bounds.[jet_range_bounds, jet_checked_view_bounds, jet_string_slice_value, jet_range_contains, jet_range_equal]
+use core.prelude.runtime.kernel_range_bounds_02.[jet_range_structural_text]
+use jet_foundation.StructuralDebug.[jet_debug_range]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/RangeBounds.rs:3
+#Test("range empty half open and inclusive overflow") {
+    assert(jet_range_bounds(I64{2}, I64{2}, true, I64{2}) == Val((start: I64{2}, end_exclusive: I64{2})))
+    assert(jet_range_bounds(I64{0}, I64{9223372036854775807}, false, I64{9223372036854775807}).is_none())
+    assert(jet_checked_view_bounds(I64{-1}, I64{2}, true, I64{4}).is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/RangeBounds.rs:39
+#Test("string range operates on Unicode scalars") {
+    assert(jet_string_slice_value("aé🙂z", I64{1}, I64{2}, false)? == "é🙂")
+    assert(jet_string_slice_value("aé🙂z", I64{2}, I64{2}, true)? == "")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/RangeBounds.rs:61
+#Test("range membership and structural formatting retain raw range fields") {
+    assert(jet_range_contains(I64{-2}, I64{0}, false, I64{-1}))
+    assert(not jet_range_contains(I64{-2}, I64{0}, true, I64{0}))
+    assert(not jet_range_equal(I64{1}, I64{3}, true, I64{1}, I64{2}, false))
+    assert(jet_range_structural_text(I64{1}, I64{3}, true) == jet_debug_range(I64{1}, I64{3}, true))
+}

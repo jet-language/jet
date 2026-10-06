@@ -1,0 +1,1770 @@
+// PORT-PENDING 0134 crates-jet-jit-src-encoding-slice-1764: crates/jet-jit/src/Encoding.rs:1764-3529
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn typed_decode_map(
+//RS     tree: &json_rt::DataTree,
+//RS     descriptor: &runtime_host::RuntimeTypeDescriptor,
+//RS ) -> Result<JetVal, Vec<json_rt::FieldError>> {
+//RS     let json_rt::DataTree::Object(entries) = tree else {
+//RS         return Err(json_rt::FieldError::one(format!(
+//RS             "expected map, found {}",
+//RS             json_rt::datatree_kind_for(tree)
+//RS         )));
+//RS     };
+//RS     let key = typed_child_descriptor(descriptor, descriptor.key, "key")?;
+//RS     let value = typed_child_descriptor(descriptor, descriptor.value, "value")?;
+//RS     let map = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_map());
+//RS     let mut errors = Vec::new();
+//RS     for (name, tree) in entries {
+//RS         let key_slot = match key.kind {
+//RS             runtime_host::RuntimeValueKind::String => JetVal::String(name.clone()),
+//RS             runtime_host::RuntimeValueKind::Int => {
+//RS                 match typed_decode_int(&json_rt::DataTree::Text(name.clone()), &key) {
+//RS                     Ok(value) => value,
+//RS                     Err(error) => {
+//RS                         errors.extend(json_rt::FieldError::under_errors(name, error));
+//RS                         continue;
+//RS                     }
+//RS                 }
+//RS             }
+//RS             runtime_host::RuntimeValueKind::Bool => match name.as_str() {
+//RS                 "true" => JetVal::Bool(true),
+//RS                 "false" => JetVal::Bool(false),
+//RS                 _ => {
+//RS                     errors.extend(json_rt::FieldError::under_errors(
+//RS                         name,
+//RS                         json_rt::FieldError::one("boolean map key must be true or false"),
+//RS                     ));
+//RS                     continue;
+//RS                 }
+//RS             },
+//RS             _ => {
+//RS                 errors.extend(json_rt::FieldError::under_errors(
+//RS                     name,
+//RS                     json_rt::FieldError::one("map key must be String, Int, or Bool"),
+//RS                 ));
+//RS                 continue;
+//RS             }
+//RS         };
+//RS         let slot = match typed_decode_value(tree, &value) {
+//RS             Ok(slot) => slot,
+//RS             Err(error) => {
+//RS                 errors.extend(json_rt::FieldError::under_errors(name, error));
+//RS                 continue;
+//RS             }
+//RS         };
+//RS         let key_raw = match typed_slot_raw(key_slot, &key) {
+//RS             Ok(value) => value,
+//RS             Err(error) => {
+//RS                 errors.extend(json_rt::FieldError::under_errors(
+//RS                     name,
+//RS                     json_rt::FieldError::one(error),
+//RS                 ));
+//RS                 continue;
+//RS             }
+//RS         };
+//RS         let value_raw = match typed_slot_raw(slot, &value) {
+//RS             Ok(value) => value,
+//RS             Err(error) => {
+//RS                 errors.extend(json_rt::FieldError::under_errors(
+//RS                     name,
+//RS                     json_rt::FieldError::one(error),
+//RS                 ));
+//RS                 continue;
+//RS             }
+//RS         };
+//RS         let key_int = if key.kind == runtime_host::RuntimeValueKind::Int {
+//RS             if key.integer_width.is_some() {
+//RS                 Some(key_raw)
+//RS             } else {
+//RS                 json_rt::jet_int_to_i64(key_raw)
+//RS             }
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let inserted = Concurrency::with_runtime_mut(|rt| match key.kind {
+//RS             runtime_host::RuntimeValueKind::String => rt.heap.map_insert(map, key_raw, value_raw),
+//RS             runtime_host::RuntimeValueKind::Int => key_int
+//RS                 .and_then(|value| rt.heap.map_insert_int(map, value, value_raw)),
+//RS             runtime_host::RuntimeValueKind::Bool => {
+//RS                 rt.heap.map_insert_bool(map, name == "true", value_raw)
+//RS             }
+//RS             _ => None,
+//RS         });
+//RS         if inserted.is_none() {
+//RS             errors.extend(json_rt::FieldError::under_errors(
+//RS                 name,
+//RS                 json_rt::FieldError::one("map insertion failed"),
+//RS             ));
+//RS         }
+//RS     }
+//RS     if !errors.is_empty() {
+//RS         return Err(errors);
+//RS     }
+//RS     Ok(JetVal::Int(map))
+//RS }
+//RS 
+//RS fn typed_enum_shape_matches(
+//RS     tree: &json_rt::DataTree,
+//RS     parent: &runtime_host::RuntimeTypeDescriptor,
+//RS     variant: &runtime_host::RuntimeVariantDescriptor,
+//RS ) -> bool {
+//RS     if variant.fields.is_empty() {
+//RS         return match tree {
+//RS             json_rt::DataTree::Null => true,
+//RS             json_rt::DataTree::Text(name) | json_rt::DataTree::TypedText(name) => {
+//RS                 name == &variant.name || name == &variant.wire_name
+//RS             }
+//RS             _ => false,
+//RS         };
+//RS     }
+//RS     if variant.fields.len() == 1 {
+//RS         let Some(field) = variant.fields.first() else {
+//RS             return false;
+//RS         };
+//RS         let Ok(child) = typed_child_descriptor(parent, Some(field.type_id), "variant field") else {
+//RS             return false;
+//RS         };
+//RS         if typed_codec_kind(&child).is_some() {
+//RS             return matches!(
+//RS                 tree,
+//RS                 json_rt::DataTree::Text(_)
+//RS                     | json_rt::DataTree::TypedText(_)
+//RS                     | json_rt::DataTree::Int(_)
+//RS                     | json_rt::DataTree::Number(_)
+//RS                     | json_rt::DataTree::Float(_)
+//RS             );
+//RS         }
+//RS         return match child.kind {
+//RS             runtime_host::RuntimeValueKind::Unit => matches!(tree, json_rt::DataTree::Null),
+//RS             runtime_host::RuntimeValueKind::Int => matches!(
+//RS                 tree,
+//RS                 json_rt::DataTree::Int(_)
+//RS                     | json_rt::DataTree::Number(_)
+//RS                     | json_rt::DataTree::Text(_)
+//RS                     | json_rt::DataTree::TypedText(_)
+//RS             ),
+//RS             runtime_host::RuntimeValueKind::Float => matches!(
+//RS                 tree,
+//RS                 json_rt::DataTree::Int(_)
+//RS                     | json_rt::DataTree::Number(_)
+//RS                     | json_rt::DataTree::Float(_)
+//RS                     | json_rt::DataTree::Text(_)
+//RS             ),
+//RS             runtime_host::RuntimeValueKind::Bool => {
+//RS                 matches!(tree, json_rt::DataTree::Bool(_) | json_rt::DataTree::Text(_))
+//RS             }
+//RS             runtime_host::RuntimeValueKind::Char
+//RS             | runtime_host::RuntimeValueKind::String => matches!(
+//RS                 tree,
+//RS                 json_rt::DataTree::Text(_)
+//RS                     | json_rt::DataTree::TypedText(_)
+//RS                     | json_rt::DataTree::Int(_)
+//RS                     | json_rt::DataTree::Float(_)
+//RS                     | json_rt::DataTree::Bool(_)
+//RS             ),
+//RS             runtime_host::RuntimeValueKind::List => {
+//RS                 matches!(tree, json_rt::DataTree::Array(_) | json_rt::DataTree::Bytes(_))
+//RS             }
+//RS             runtime_host::RuntimeValueKind::Map
+//RS             | runtime_host::RuntimeValueKind::Record => {
+//RS                 matches!(tree, json_rt::DataTree::Object(_))
+//RS             }
+//RS             runtime_host::RuntimeValueKind::Option | runtime_host::RuntimeValueKind::Shared => true,
+//RS             runtime_host::RuntimeValueKind::Result => false,
+//RS             runtime_host::RuntimeValueKind::Named | runtime_host::RuntimeValueKind::Handle => {
+//RS                 (matches!(child.name.as_str(), "Path" | "JetPath")
+//RS                     || matches!(child.canonical.as_str(), "Path" | "JetPath"))
+//RS                     && matches!(
+//RS                         tree,
+//RS                         json_rt::DataTree::Text(_) | json_rt::DataTree::TypedText(_)
+//RS                     )
+//RS             }
+//RS             _ => false,
+//RS         };
+//RS     }
+//RS     let json_rt::DataTree::Object(entries) = tree else {
+//RS         return false;
+//RS     };
+//RS     variant.fields.iter().all(|field| {
+//RS         entries
+//RS             .iter()
+//RS             .any(|(name, _)| field.matches_name(name, ShapeProjectionKind::Json))
+//RS     })
+//RS }
+//RS 
+//RS fn typed_decode_enum(
+//RS     tree: &json_rt::DataTree,
+//RS     descriptor: &runtime_host::RuntimeTypeDescriptor,
+//RS ) -> Result<JetVal, Vec<json_rt::FieldError>> {
+//RS     let (variant, payload) = match tree {
+//RS         json_rt::DataTree::Text(name) | json_rt::DataTree::TypedText(name) => {
+//RS             let variant = if descriptor.serde_untagged {
+//RS                 descriptor
+//RS                     .variants
+//RS                     .iter()
+//RS                     .find(|variant| typed_enum_shape_matches(tree, descriptor, variant))
+//RS             } else {
+//RS                 descriptor
+//RS                     .variants
+//RS                     .iter()
+//RS                     .find(|variant| variant.name == *name || variant.wire_name == *name)
+//RS             };
+//RS             (
+//RS                 variant,
+//RS                 if descriptor.serde_untagged {
+//RS                     tree.clone()
+//RS                 } else {
+//RS                     json_rt::DataTree::Null
+//RS                 },
+//RS             )
+//RS         }
+//RS         json_rt::DataTree::Null => (
+//RS             descriptor
+//RS                 .serde_untagged
+//RS                 .then(|| {
+//RS                     descriptor
+//RS                         .variants
+//RS                         .iter()
+//RS                         .find(|variant| typed_enum_shape_matches(tree, descriptor, variant))
+//RS                 })
+//RS                 .flatten(),
+//RS             tree.clone(),
+//RS         ),
+//RS         json_rt::DataTree::Object(entries) => {
+//RS             if descriptor.serde_untagged {
+//RS                 (
+//RS                     descriptor
+//RS                         .variants
+//RS                         .iter()
+//RS                         .find(|variant| typed_enum_shape_matches(tree, descriptor, variant)),
+//RS                     tree.clone(),
+//RS                 )
+//RS             } else {
+//RS                 let tag_name = descriptor.serde_tag.as_deref().unwrap_or("tag");
+//RS                 let tagged = entries
+//RS                     .iter()
+//RS                     .find(|(name, _)| name == tag_name)
+//RS                     .and_then(|(_, value)| match value {
+//RS                         json_rt::DataTree::Text(name)
+//RS                         | json_rt::DataTree::TypedText(name) => Some(name),
+//RS                         _ => None,
+//RS                     });
+//RS                 if let Some(name) = tagged {
+//RS                     (
+//RS                         descriptor
+//RS                             .variants
+//RS                             .iter()
+//RS                             .find(|variant| variant.name == *name || variant.wire_name == *name),
+//RS                         tree.clone(),
+//RS                     )
+//RS                 } else if let Some((variant, value)) = entries.iter().find_map(|(name, value)| {
+//RS                     descriptor
+//RS                         .variants
+//RS                         .iter()
+//RS                         .find(|variant| variant.name == *name || variant.wire_name == *name)
+//RS                         .map(|variant| (variant, value.clone()))
+//RS                 }) {
+//RS                     (Some(variant), value)
+//RS                 } else {
+//RS                     (None, tree.clone())
+//RS                 }
+//RS             }
+//RS         }
+//RS         _ => (
+//RS             descriptor
+//RS                 .serde_untagged
+//RS                 .then(|| {
+//RS                     descriptor
+//RS                         .variants
+//RS                         .iter()
+//RS                         .find(|variant| typed_enum_shape_matches(tree, descriptor, variant))
+//RS                 })
+//RS                 .flatten(),
+//RS             tree.clone(),
+//RS         ),
+//RS     };
+//RS     let Some(variant) = variant else {
+//RS         return Err(json_rt::FieldError::one(format!(
+//RS             "unknown {} variant",
+//RS             descriptor.name
+//RS         )));
+//RS     };
+//RS     let mut slots = vec![JetVal::Int(variant.discriminant)];
+//RS     if variant.fields.len() == 1 {
+//RS         let value = match &payload {
+//RS             json_rt::DataTree::Object(entries) => entries
+//RS                 .iter()
+//RS                 .find(|(name, _)| name == &variant.fields[0].source_name)
+//RS                 .map(|(_, value)| value)
+//RS                 .unwrap_or(&payload),
+//RS             _ => &payload,
+//RS         };
+//RS         let child = typed_child_descriptor(descriptor, Some(variant.fields[0].type_id), "variant field")?;
+//RS         slots.push(typed_decode_value(value, &child)?);
+//RS     } else if !variant.fields.is_empty() {
+//RS         let json_rt::DataTree::Object(entries) = &payload else {
+//RS             return Err(json_rt::FieldError::one(format!(
+//RS                 "expected object payload for {}",
+//RS                 variant.name
+//RS             )));
+//RS         };
+//RS         for field in &variant.fields {
+//RS             let Some((_, value)) = entries
+//RS                 .iter()
+//RS                 .find(|(name, _)| field.matches_name(name, ShapeProjectionKind::Json))
+//RS             else {
+//RS 
+//RS                 return Err(json_rt::FieldError::at(
+//RS                     field.name_for(ShapeProjectionKind::Json),
+//RS                     "missing enum payload field",
+//RS                 ));
+//RS             };
+//RS             let child = typed_child_descriptor(descriptor, Some(field.type_id), "variant field")?;
+//RS             slots.push(typed_decode_value(value, &child)?);
+//RS         }
+//RS     }
+//RS     let record = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record_values(slots));
+//RS     Ok(JetVal::RecordRef(record))
+//RS }
+//RS 
+//RS fn typed_decode_int(
+//RS     tree: &json_rt::DataTree,
+//RS     descriptor: &runtime_host::RuntimeTypeDescriptor,
+//RS ) -> Result<JetVal, Vec<json_rt::FieldError>> {
+//RS     if let Some(width) = descriptor.integer_width {
+//RS         let value = json_rt::jet_datatree_decode_fixed_integer(
+//RS             tree,
+//RS             width.signed,
+//RS             width.bits,
+//RS             &descriptor.name,
+//RS         )?;
+//RS         if descriptor.integer_range.is_some_and(|(lo, hi)| !(lo..=hi).contains(&value)) {
+//RS             return Err(json_rt::FieldError::one(format!(
+//RS                 "expected {}, found out-of-range Int",
+//RS                 descriptor.name
+//RS             )));
+//RS         }
+//RS         // Fixed integers use native bits, not a tagged JetInt owner word.
+//RS         return Ok(JetVal::Int(value as i64));
+//RS     }
+//RS     let raw = json_rt::decode_int_with(
+//RS         tree,
+//RS         json_rt::jet_int_from_i64,
+//RS         json_rt::jet_int_from_str,
+//RS     )?;
+//RS     if let Some((lo, hi)) = descriptor.integer_range {
+//RS         let value = json_rt::jet_int_to_i128(raw).ok_or_else(|| {
+//RS             json_rt::FieldError::one(format!("expected {}, found out-of-range Int", descriptor.name))
+//RS         })?;
+//RS         if !(lo..=hi).contains(&value) {
+//RS             return Err(json_rt::FieldError::one(format!(
+//RS                 "expected {}, found out-of-range Int",
+//RS                 descriptor.name
+//RS             )));
+//RS         }
+//RS     }
+//RS     Ok(JetVal::Int(raw))
+//RS }
+//RS 
+//RS fn typed_decode_value(
+//RS     tree: &json_rt::DataTree,
+//RS     descriptor: &runtime_host::RuntimeTypeDescriptor,
+//RS ) -> Result<JetVal, Vec<json_rt::FieldError>> {
+//RS     if typed_codec_kind(descriptor).is_some() {
+//RS         return typed_codec_slot(descriptor, tree);
+//RS     }
+//RS     match descriptor.kind {
+//RS         runtime_host::RuntimeValueKind::Unit => match tree {
+//RS             json_rt::DataTree::Null => Ok(JetVal::Int(0)),
+//RS             _ => Err(json_rt::FieldError::one(format!(
+//RS                 "expected Unit, found {}",
+//RS                 json_rt::datatree_kind_for(tree)
+//RS             ))),
+//RS         },
+//RS         runtime_host::RuntimeValueKind::Int => typed_decode_int(tree, descriptor),
+//RS         runtime_host::RuntimeValueKind::Float => {
+//RS             if descriptor.abi == runtime_host::RuntimeValueAbi::Float32 {
+//RS                 json_rt::decode_f32(tree).map(|value| JetVal::Float(value as f64))
+//RS             } else {
+//RS                 json_rt::decode_float(tree).map(JetVal::Float)
+//RS             }
+//RS         }
+//RS         runtime_host::RuntimeValueKind::Bool => json_rt::decode_bool(tree).map(JetVal::Bool),
+//RS         runtime_host::RuntimeValueKind::Char => {
+//RS             let text = json_rt::decode_string(tree)?;
+//RS             let mut chars = text.chars();
+//RS             let Some(value) = chars.next() else {
+//RS                 return Err(json_rt::FieldError::one("expected Char, found empty text"));
+//RS             };
+//RS             if chars.next().is_some() {
+//RS                 return Err(json_rt::FieldError::one("expected Char, found multiple characters"));
+//RS             }
+//RS             Ok(JetVal::Char(value))
+//RS         }
+//RS         runtime_host::RuntimeValueKind::String => json_rt::decode_string(tree).map(JetVal::String),
+//RS         runtime_host::RuntimeValueKind::Option => {
+//RS             if matches!(tree, json_rt::DataTree::Null) {
+//RS                 return Ok(JetVal::Int(typed_result_handle(false, 0)));
+//RS             }
+//RS             let child = typed_child_descriptor(descriptor, descriptor.ok, "option")?;
+//RS             let value = typed_decode_value(tree, &child)?;
+//RS             let raw = typed_slot_raw(value, &child).map_err(json_rt::FieldError::one)?;
+//RS             Ok(JetVal::Int(typed_result_handle(true, raw as u64)))
+//RS         }
+//RS         runtime_host::RuntimeValueKind::Result => Err(json_rt::FieldError::one(format!(
+//RS             "type `{}` has no checked JSON decoder",
+//RS             descriptor.name
+//RS         ))),
+//RS         runtime_host::RuntimeValueKind::List => typed_decode_list(tree, descriptor),
+//RS         runtime_host::RuntimeValueKind::Map => typed_decode_map(tree, descriptor),
+//RS         runtime_host::RuntimeValueKind::Shared => {
+//RS             let child = typed_child_descriptor(descriptor, descriptor.element, "shared")?;
+//RS             let value = typed_slot_raw(typed_decode_value(tree, &child)?, &child)
+//RS                 .map_err(json_rt::FieldError::one)?;
+//RS             let shared = Concurrency::with_runtime_string(|rt| {
+//RS                 crate::Memory::shared_alloc_for_persist(rt, value, descriptor.id)
+//RS             })
+//RS             .map_err(json_rt::FieldError::one)?;
+//RS             Ok(JetVal::Int(shared))
+//RS         }
+//RS         runtime_host::RuntimeValueKind::Record => typed_decode_record(tree, descriptor),
+//RS         runtime_host::RuntimeValueKind::Enum => typed_decode_enum(tree, descriptor),
+//RS         runtime_host::RuntimeValueKind::Named | runtime_host::RuntimeValueKind::Handle
+//RS             if matches!(descriptor.name.as_str(), "Path" | "JetPath")
+//RS                 || matches!(descriptor.canonical.as_str(), "Path" | "JetPath") =>
+//RS         {
+//RS             let value = json_rt::decode_string(tree)?;
+//RS             let record = Concurrency::with_runtime_mut(|rt| {
+//RS                 let record = rt.heap.alloc_record(1);
+//RS                 let string = rt.heap.alloc_string(value);
+//RS                 let _ = rt.heap.record_set_string(record, 0, string);
+//RS                 record
+//RS             });
+//RS             Ok(JetVal::RecordRef(record))
+//RS         }
+//RS         runtime_host::RuntimeValueKind::Named | runtime_host::RuntimeValueKind::Handle
+//RS             if typed_is_secret(descriptor) =>
+//RS         {
+//RS             let text = json_rt::decode_string(tree)?;
+//RS             Ok(JetVal::Int(crate::Crypto::secret_from_text_value(text)))
+//RS         }
+//RS         _ => Err(json_rt::FieldError::one(format!(
+//RS             "type `{}` has no checked JSON decoder",
+//RS             descriptor.name
+//RS         ))),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn decode_datatree_for_type(
+//RS     tree: &json_rt::DataTree,
+//RS     type_key: &str,
+//RS ) -> Result<i64, Vec<json_rt::FieldError>> {
+//RS     let descriptor = typed_runtime_descriptor(type_key)
+//RS         .ok_or_else(|| json_rt::FieldError::one(format!("typed JSON has no type `{type_key}`")))?;
+//RS     typed_decode_value(tree, &descriptor)
+//RS         .and_then(|value| typed_slot_raw(value, &descriptor).map_err(json_rt::FieldError::one))
+//RS }
+//RS fn json_decode_callback_slot(
+//RS     callback: i64,
+//RS ) -> Result<Option<runtime_host::JitCallableSlot>, ()> {
+//RS     if callback == 0 {
+//RS         return Ok(None);
+//RS     }
+//RS     let slot = Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(slot) = runtime_host::jit_callable_parts(rt, callback) else {
+//RS             rt.set_host_fault("JSON Decode callback is invalid");
+//RS             return None;
+//RS         };
+//RS         if slot.raw_unary.is_none() || slot.raw_pair.is_some() || slot.raw_many.is_some() {
+//RS             rt.set_host_fault("JSON Decode callback has no unary universal thunk");
+//RS             return None;
+//RS         }
+//RS         Some(slot)
+//RS     });
+//RS     slot.map(Some).ok_or(())
+//RS }
+//RS fn migration_default_tree(type_name: &str) -> Option<json_rt::DataTree> {
+//RS     let leaf = type_name
+//RS         .rsplit(['.', ':'])
+//RS         .next()
+//RS         .unwrap_or(type_name)
+//RS         .split('<')
+//RS         .next()
+//RS         .unwrap_or(type_name);
+//RS     Some(match leaf {
+//RS         "Bool" => json_rt::DataTree::Bool(false),
+//RS         "Int" | "I8" | "I16" | "I32" | "I64" | "I128" | "U8" | "U16" | "U32"
+//RS         | "U64" | "U128" => json_rt::DataTree::Int(0),
+//RS         "Float" | "F32" | "F64" => json_rt::DataTree::Float(0.0),
+//RS         "String" => json_rt::DataTree::Text(String::new()),
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS fn migrate_typed_tree(
+//RS     tree: &json_rt::DataTree,
+//RS     plan: &SchemaMigrationPlan,
+//RS ) -> Result<json_rt::DataTree, Vec<json_rt::FieldError>> {
+//RS     let json_rt::DataTree::Object(entries) = tree else {
+//RS         return Err(json_rt::FieldError::one(format!(
+//RS             "migration `{}` expects an object",
+//RS             plan.type_name
+//RS         )));
+//RS     };
+//RS     let keys = entries.iter().map(|(key, _)| key.clone()).collect::<std::collections::BTreeSet<_>>();
+//RS     if keys == plan.current_shape_keys() {
+//RS         return Ok(tree.clone());
+//RS     }
+//RS     let Some(start) = plan
+//RS         .historical_shapes
+//RS         .iter()
+//RS         .position(|shape| shape.iter().cloned().collect::<std::collections::BTreeSet<_>>() == keys)
+//RS     else {
+//RS         return Err(json_rt::FieldError::one(format!(
+//RS             "migration `{}` does not recognize the input fields",
+//RS             plan.type_name
+//RS         )));
+//RS     };
+//RS     let mut fields = entries.clone();
+//RS     for step in plan.steps.iter().skip(start) {
+//RS         for op in &step.ops {
+//RS             match op {
+//RS                 SchemaMigrationOp::Rename { from_key, to_key } => {
+//RS                     let Some(index) = fields.iter().position(|(key, _)| key == from_key) else {
+//RS                         return Err(json_rt::FieldError::one(format!(
+//RS                             "migration `{}` is missing `{from_key}`",
+//RS                             plan.type_name
+//RS                         )));
+//RS                     };
+//RS                     if fields.iter().any(|(key, _)| key == to_key) {
+//RS                         return Err(json_rt::FieldError::one(format!(
+//RS                             "migration `{}` already has `{to_key}`",
+//RS                             plan.type_name
+//RS                         )));
+//RS                     }
+//RS                     let (_, value) = fields.remove(index);
+//RS                     fields.push((to_key.clone(), value));
+//RS                 }
+//RS                 SchemaMigrationOp::Remove { key } => {
+//RS                     let Some(index) = fields.iter().position(|(field, _)| field == key) else {
+//RS                         return Err(json_rt::FieldError::one(format!(
+//RS                             "migration `{}` is missing `{key}`",
+//RS                             plan.type_name
+//RS                         )));
+//RS                     };
+//RS                     fields.remove(index);
+//RS                 }
+//RS                 SchemaMigrationOp::Add {
+//RS                     key, type_name, ..
+//RS                 } => {
+//RS                     if fields.iter().any(|(field, _)| field == key) {
+//RS                         return Err(json_rt::FieldError::one(format!(
+//RS                             "migration `{}` already has `{key}`",
+//RS                             plan.type_name
+//RS                         )));
+//RS                     }
+//RS                     let Some(value) = migration_default_tree(type_name) else {
+//RS                         return Err(json_rt::FieldError::one(format!(
+//RS                             "migration `{}` cannot evaluate default for `{key}`",
+//RS                             plan.type_name
+//RS                         )));
+//RS                     };
+//RS                     fields.push((key.clone(), value));
+//RS                 }
+//RS                 SchemaMigrationOp::Change { key, .. } => {
+//RS                     return Err(json_rt::FieldError::one(format!(
+//RS                         "migration `{}` cannot convert `{key}` in resident JSON decode",
+//RS                         plan.type_name
+//RS                     )));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(json_rt::DataTree::Object(fields))
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_json_decode_typed(text: i64, callback: i64, type_key: i64) -> i64 {
+//RS     let text = clone_string(text);
+//RS     let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
+//RS         return result_err_fields(json_rt::FieldError::one("typed JSON received an invalid type key"));
+//RS     };
+//RS     let migration = typed_runtime_descriptor(&type_key).and_then(|descriptor| descriptor.migration);
+//RS     let callback = match json_decode_callback_slot(callback) {
+//RS         Ok(callback) => callback,
+//RS         Err(()) => return 0,
+//RS     };
+//RS     match json_rt::parse_datatree_typed_ordered(&text) {
+//RS         Ok(tree) => {
+//RS             let tree = match migration.as_ref() {
+//RS                 Some(plan) => match migrate_typed_tree(&tree, plan) {
+//RS                     Ok(tree) => tree,
+//RS                     Err(error) => return result_err_fields(error),
+//RS                 },
+//RS                 None => tree,
+//RS             };
+//RS             if let Some(callback) = callback {
+//RS                 let tree_handle = alloc_datatree(&tree);
+//RS                 let Some(decoded_result) =
+//RS                     runtime_host::invoke_universal_unary(callback, tree_handle)
+//RS                 else {
+//RS                     Concurrency::with_runtime_mut(|rt| {
+//RS                         rt.set_host_fault("JSON Decode callback invocation failed")
+//RS                     });
+//RS                     return 0;
+//RS                 };
+//RS                 let Some((ok, _)) =
+//RS                     Concurrency::with_runtime_mut(|rt| runtime_host::jit_result_parts(rt, decoded_result))
+//RS                 else {
+//RS                     Concurrency::with_runtime_mut(|rt| {
+//RS                         rt.set_host_fault("JSON Decode callback returned an invalid Result")
+//RS                     });
+//RS                     return 0;
+//RS                 };
+//RS                 if !ok && result_errors(decoded_result).is_none() {
+//RS                     Concurrency::with_runtime_mut(|rt| {
+//RS                         rt.set_host_fault("JSON Decode callback returned an invalid error")
+//RS                     });
+//RS                     return 0;
+//RS                 }
+//RS                 decoded_result
+//RS             } else {
+//RS                 match decode_datatree_for_type(&tree, &type_key) {
+//RS                     Ok(value) => result_ok(value as u64),
+//RS                     Err(errors) => result_err_fields(errors),
+//RS                 }
+//RS             }
+//RS         }
+//RS         Err(error) => result_err_fields(json_rt::FieldError::one(format!(
+//RS             "invalid JSON (line {}): {}",
+//RS             error.line.unwrap_or(0),
+//RS             error.reason
+//RS         ))),
+//RS     }
+//RS }
+//RS 
+//RS /// Typed `core.data.json<T>` host. Unlike `core.encoding.json.decode<T>`, the
+//RS /// data route's generic result is always a list, so each ordered JSON array
+//RS /// element is decoded against the supplied element type key.
+//RS fn jet_jit_data_json_decode_typed(text: i64, callback: i64, type_key: i64) -> i64 {
+//RS     let text = clone_string(text);
+//RS     let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
+//RS         return result_err_fields(json_rt::FieldError::one("typed JSON received an invalid type key"));
+//RS     };
+//RS     let callback = match json_decode_callback_slot(callback) {
+//RS         Ok(callback) => callback,
+//RS         Err(()) => return 0,
+//RS     };
+//RS     match json_rt::parse_datatree_typed_ordered(&text) {
+//RS         Ok(json_rt::DataTree::Array(items)) => {
+//RS             let Some(descriptor) = typed_runtime_descriptor(&type_key) else {
+//RS                 return result_err_fields(json_rt::FieldError::one(format!(
+//RS                     "typed JSON has no type `{type_key}`"
+//RS                 )));
+//RS             };
+//RS             let mut raw_values = Vec::with_capacity(items.len());
+//RS             let mut errors = Vec::new();
+//RS             let mut callback_fault = false;
+//RS             for (index, item) in items.iter().enumerate() {
+//RS                 if let Some(callback) = callback {
+//RS                     let tree_handle = alloc_datatree(item);
+//RS                     let Some(decoded_result) =
+//RS                         runtime_host::invoke_universal_unary(callback, tree_handle)
+//RS                     else {
+//RS                         callback_fault = true;
+//RS                         Concurrency::with_runtime_mut(|rt| {
+//RS                             rt.set_host_fault("JSON Decode callback invocation failed")
+//RS                         });
+//RS                         break;
+//RS                     };
+//RS                     let Some((ok, bits)) = Concurrency::with_runtime_mut(|rt| {
+//RS                         runtime_host::jit_result_parts(rt, decoded_result)
+//RS                     }) else {
+//RS                         callback_fault = true;
+//RS                         Concurrency::with_runtime_mut(|rt| {
+//RS                             rt.set_host_fault("JSON Decode callback returned an invalid Result")
+//RS                         });
+//RS                         break;
+//RS                     };
+//RS                     if !ok {
+//RS                         let Some(callback_errors) = result_errors(decoded_result) else {
+//RS                             callback_fault = true;
+//RS                             Concurrency::with_runtime_mut(|rt| {
+//RS                                 rt.set_host_fault("JSON Decode callback returned an invalid error")
+//RS                             });
+//RS                             break;
+//RS                         };
+//RS                         errors.extend(json_rt::FieldError::under_errors(
+//RS                             &format!("[{index}]"),
+//RS                             callback_errors,
+//RS                         ));
+//RS                     } else {
+//RS                         raw_values.push(bits as i64);
+//RS                     }
+//RS                 } else {
+//RS                     match decode_datatree_for_type(item, &type_key) {
+//RS                         Ok(value) => raw_values.push(value),
+//RS                         Err(error) => errors.extend(json_rt::FieldError::under_errors(
+//RS                             &format!("[{index}]"),
+//RS                             error,
+//RS                         )),
+//RS                     }
+//RS                 }
+//RS             }
+//RS             if callback_fault {
+//RS                 return 0;
+//RS             }
+//RS             if !errors.is_empty() {
+//RS                 return result_err_fields(errors);
+//RS             }
+//RS             let values = raw_values
+//RS                 .into_iter()
+//RS                 .map(|value| match descriptor.abi {
+//RS                     runtime_host::RuntimeValueAbi::Float => {
+//RS                         JetVal::Float(f64::from_bits(value as u64))
+//RS                     }
+//RS                     runtime_host::RuntimeValueAbi::Float32 => {
+//RS                         JetVal::Float(f32::from_bits(value as u32) as f64)
+//RS                     }
+//RS                     runtime_host::RuntimeValueAbi::Bool => JetVal::Bool(value != 0),
+//RS                     runtime_host::RuntimeValueAbi::Char => {
+//RS                         JetVal::Char(char::from_u32(value as u32).unwrap_or('\0'))
+//RS                     }
+//RS                     _ => JetVal::Int(value),
+//RS                 })
+//RS                 .collect();
+//RS             let list = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_list_values(values));
+//RS             result_ok(list as u64)
+//RS         }
+//RS         Ok(tree) => result_err_fields(json_rt::FieldError::one(format!(
+//RS             "expected a list, found {}",
+//RS             json_rt::datatree_kind_for(&tree)
+//RS         ))),
+//RS         Err(error) => result_err_fields(json_rt::FieldError::one(format!(
+//RS             "invalid JSON (line {}): {}",
+//RS             error.line.unwrap_or(0),
+//RS             error.reason
+//RS         ))),
+//RS     }
+//RS }
+//RS 
+//RS /// Typed codec ABI for TIR's borrowed DataTree route. The checked target type
+//RS /// travels as a heap string because the resident host has no monomorphized
+//RS /// Rust type to receive at this boundary.
+//RS fn jet_codec_decode_typed(tree: i64, type_key: i64) -> i64 {
+//RS     let Some(tree) = read_datatree(tree) else {
+//RS         return result_err_fields(json_rt::FieldError::one(
+//RS             "typed codec received an invalid DataTree",
+//RS         ));
+//RS     };
+//RS     let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
+//RS         return result_err_fields(json_rt::FieldError::one(
+//RS             "typed codec received an invalid type key",
+//RS         ));
+//RS     };
+//RS     match decode_datatree_for_type(&tree, &type_key) {
+//RS         Ok(value) => result_ok(value as u64),
+//RS         Err(errors) => result_err_fields(errors),
+//RS     }
+//RS }
+//RS 
+//RS fn typed_tree_insert(tree: &mut json_rt::DataTree, path: &[String], value: json_rt::DataTree) {
+//RS     let json_rt::DataTree::Object(entries) = tree else {
+//RS         return;
+//RS     };
+//RS     let Some(segment) = path.first() else {
+//RS         return;
+//RS     };
+//RS     if path.len() == 1 {
+//RS         if let Some((_, existing)) = entries
+//RS             .iter_mut()
+//RS             .find(|(name, _)| name.eq_ignore_ascii_case(segment))
+//RS         {
+//RS             *existing = value;
+//RS         } else {
+//RS             entries.push((segment.clone(), value));
+//RS         }
+//RS         return;
+//RS     }
+//RS     if let Some((_, child)) = entries.iter_mut().find(|(name, child)| {
+//RS         name.eq_ignore_ascii_case(segment) && matches!(child, json_rt::DataTree::Object(_))
+//RS     }) {
+//RS         typed_tree_insert(child, &path[1..], value);
+//RS     } else {
+//RS         let mut child = json_rt::DataTree::Object(Vec::new());
+//RS         typed_tree_insert(&mut child, &path[1..], value);
+//RS         entries.push((segment.clone(), child));
+//RS     }
+//RS }
+//RS 
+//RS fn typed_env_projection_descriptor(
+//RS     descriptor: runtime_host::RuntimeTypeDescriptor,
+//RS ) -> runtime_host::RuntimeTypeDescriptor {
+//RS     let child_id = match descriptor.kind {
+//RS         runtime_host::RuntimeValueKind::Option
+//RS         | runtime_host::RuntimeValueKind::Shared => descriptor.ok.or(descriptor.element),
+//RS         _ => None,
+//RS     };
+//RS     child_id
+//RS         .and_then(|id| {
+//RS             Concurrency::with_runtime_mut(|rt| rt.runtime_type_descriptor(id).cloned())
+//RS         })
+//RS         .map(typed_env_projection_descriptor)
+//RS         .unwrap_or(descriptor)
+//RS }
+//RS 
+//RS fn typed_env_project_tree(
+//RS     tree: &json_rt::DataTree,
+//RS     descriptor: &runtime_host::RuntimeTypeDescriptor,
+//RS     _prefix: &str,
+//RS     _origins: &[(String, String)],
+//RS ) -> json_rt::DataTree {
+//RS     let json_rt::DataTree::Object(entries) = tree else {
+//RS         return tree.clone();
+//RS     };
+//RS     let projected = entries
+//RS         .iter()
+//RS         .map(|(name, value)| {
+//RS             let field = descriptor.fields.iter().find(|field| {
+//RS                 !field.skip
+//RS                     && !field.computed
+//RS                     && (field.source_name.eq_ignore_ascii_case(name)
+//RS                         || field
+//RS                             .name_for(ShapeProjectionKind::Env)
+//RS                             .eq_ignore_ascii_case(name))
+//RS             });
+//RS             let Some(field) = field else {
+//RS                 return (name.clone(), value.clone());
+//RS             };
+//RS             let value = Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.runtime_type_descriptor(field.type_id).cloned()
+//RS             })
+//RS             .map(|child| {
+//RS                 let child = typed_env_projection_descriptor(child);
+//RS                 typed_env_project_tree(value, &child, "", &[])
+//RS             })
+//RS             .unwrap_or_else(|| value.clone());
+//RS             (field.name_for(ShapeProjectionKind::Json).to_string(), value)
+//RS         })
+//RS         .collect();
+//RS     json_rt::DataTree::Object(projected)
+//RS }
+//RS 
+//RS fn typed_env_error_result(
+//RS     errors: Vec<json_rt::FieldError>,
+//RS     origins: &[(String, String)],
+//RS ) -> i64 {
+//RS     let mapped = errors
+//RS         .into_iter()
+//RS         .map(|mut error| {
+//RS             let path = error.path.clone();
+//RS             let reason = std::mem::take(&mut error.reason);
+//RS             error.reason = env_config_rt::jet_env_config_error_reason(&path, &reason, origins);
+//RS             error
+//RS         })
+//RS         .collect();
+//RS     result_err_fields(mapped)
+//RS }
+//RS 
+//RS fn jet_jit_env_decode(prefix: i64, file: i64, allow: i64, type_key: i64) -> i64 {
+//RS     let prefix_text = clone_string(prefix);
+//RS     let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
+//RS         return result_err_fields(json_rt::FieldError::one("typed env received an invalid type key"));
+//RS     };
+//RS     let Some(descriptor) = typed_runtime_descriptor(&type_key) else {
+//RS         return result_err_fields(json_rt::FieldError::one(format!(
+//RS             "typed env has no type `{type_key}`"
+//RS         )));
+//RS     };
+//RS     let result = jet_jit_env_config(prefix, file, allow);
+//RS     let Some((tree_handle, origins_handle)) = Concurrency::with_runtime_mut(|rt| {
+//RS         let Some((ok, bits)) = runtime_host::jit_result_parts(rt, result) else {
+//RS             return None;
+//RS         };
+//RS         if !ok {
+//RS             return None;
+//RS         }
+//RS         let carrier = bits as i64;
+//RS         Some((
+//RS             rt.heap.record_get_int(carrier, 0)?,
+//RS             rt.heap.record_get_int(carrier, 1)?,
+//RS         ))
+//RS     }) else {
+//RS         return result;
+//RS     };
+//RS     let Some(tree) = read_datatree(tree_handle) else {
+//RS         return result_err_fields(json_rt::FieldError::one("typed env returned an invalid DataTree"));
+//RS     };
+//RS     let origins = clone_env_config_origins(origins_handle);
+//RS     let tree = typed_env_project_tree(&tree, &descriptor, &prefix_text, &origins);
+//RS     match typed_decode_value(&tree, &descriptor)
+//RS         .and_then(|value| typed_slot_raw(value, &descriptor).map_err(json_rt::FieldError::one))
+//RS     {
+//RS         Ok(value) => result_ok(value as u64),
+//RS         Err(errors) => typed_env_error_result(errors, &origins),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_db_decode(row: i64, type_key: i64) -> i64 {
+//RS     let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
+//RS         return result_err_fields(json_rt::FieldError::one("typed DB decode received an invalid type key"));
+//RS     };
+//RS     let Some(descriptor) = typed_runtime_descriptor(&type_key) else {
+//RS         return result_err_fields(json_rt::FieldError::one(format!(
+//RS             "typed DB decode has no type `{type_key}`"
+//RS         )));
+//RS     };
+//RS     let names = descriptor
+//RS         .fields
+//RS         .iter()
+//RS         .filter(|field| !field.skip && !field.computed)
+//RS         .map(|field| {
+//RS             (
+//RS                 field.name_for(ShapeProjectionKind::Db),
+//RS                 field.name_for(ShapeProjectionKind::Json),
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     let tree = match crate::DB::db_row_to_datatree(row, &names) {
+//RS         Ok(tree) => tree,
+//RS         Err(error) => return result_err_fields(json_rt::FieldError::one(error)),
+//RS     };
+//RS     match typed_decode_value(&tree, &descriptor)
+//RS         .and_then(|value| typed_slot_raw(value, &descriptor).map_err(json_rt::FieldError::one))
+//RS     {
+//RS         Ok(value) => result_ok(value as u64),
+//RS         Err(errors) => result_err_fields(errors),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS fn jet_jit_json_to_string(tree: i64) -> i64 {
+//RS     let rendered = read_datatree(tree)
+//RS         .map(|t| json_rt::render_datatree_json(&t, false, 0))
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
+//RS }
+//RS 
+//RS fn jet_jit_json_to_string_pretty(tree: i64) -> i64 {
+//RS     let rendered = read_datatree(tree)
+//RS         .map(|t| json_rt::render_datatree_json(&t, true, 0))
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
+//RS }
+//RS 
+//RS /// `core.encoding.json.canonical` — same sort+render as `jet_std_json_render_canonical`.
+//RS fn render_canonical(t: &json_rt::DataTree) -> String {
+//RS     fn sort_tree(t: &json_rt::DataTree) -> json_rt::DataTree {
+//RS         match t {
+//RS             json_rt::DataTree::Object(entries) => {
+//RS                 let mut sorted = entries.clone();
+//RS                 sorted.sort_by(|a, b| a.0.cmp(&b.0));
+//RS                 json_rt::DataTree::Object(
+//RS                     sorted
+//RS                         .into_iter()
+//RS                         .map(|(k, v)| (k, sort_tree(&v)))
+//RS                         .collect(),
+//RS                 )
+//RS             }
+//RS             json_rt::DataTree::Array(items) => {
+//RS                 json_rt::DataTree::Array(items.iter().map(sort_tree).collect())
+//RS             }
+//RS             other => other.clone(),
+//RS         }
+//RS     }
+//RS     json_rt::render_datatree_json(&sort_tree(t), false, 0)
+//RS }
+//RS 
+//RS fn jet_jit_json_canonical(tree: i64) -> i64 {
+//RS     let rendered = read_datatree(tree)
+//RS         .map(|t| render_canonical(&t))
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
+//RS }
+//RS 
+//RS /// D-JSONCANON1=A edition 2027 — marshall to Prelude `jet_enc_json_canonical`.
+//RS fn jet_jit_json_canonical_checked(tree: i64, limits: i64) -> i64 {
+//RS     crate::enc_stream::json_canonical_checked(tree, limits)
+//RS }
+//RS 
+//RS /// `core.encoding.json.events` — same walk as `jet_std_json_events`.
+//RS fn json_events(t: &json_rt::DataTree) -> String {
+//RS     fn walk(path: String, t: &json_rt::DataTree, out: &mut Vec<String>) {
+//RS         let here = if path.is_empty() {
+//RS             "$".to_string()
+//RS         } else {
+//RS             path
+//RS         };
+//RS         match t {
+//RS             json_rt::DataTree::Object(entries) => {
+//RS                 out.push(format!("object_start {here}"));
+//RS                 for (k, v) in entries {
+//RS                     walk(format!("{here}.{k}"), v, out);
+//RS                 }
+//RS                 out.push(format!("object_end {here}"));
+//RS             }
+//RS             json_rt::DataTree::Array(items) => {
+//RS                 out.push(format!("array_start {here}"));
+//RS                 for (i, v) in items.iter().enumerate() {
+//RS                     walk(format!("{here}[{i}]"), v, out);
+//RS                 }
+//RS                 out.push(format!("array_end {here}"));
+//RS             }
+//RS             _ => out.push(format!("value {here} {}", render_canonical(t))),
+//RS         }
+//RS     }
+//RS     let mut out = Vec::new();
+//RS     walk(String::new(), t, &mut out);
+//RS     out.join("\n")
+//RS }
+//RS 
+//RS fn jet_jit_json_events(tree: i64) -> i64 {
+//RS     let rendered = read_datatree(tree)
+//RS         .map(|t| json_events(&t))
+//RS         .unwrap_or_else(|| String::new());
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
+//RS }
+//RS 
+//RS /// `core.encoding.jsonl.parse` — same as `jet_std_jsonl_parse`.
+//RS fn jet_jit_jsonl_parse(text: i64) -> i64 {
+//RS     let src = clone_string(text);
+//RS     let mut handles = Vec::new();
+//RS     for (idx, line) in src.lines().enumerate() {
+//RS         let trimmed = line.trim();
+//RS         if trimmed.is_empty() {
+//RS             continue;
+//RS         }
+//RS         match json_rt::parse_datatree(trimmed) {
+//RS             Ok(tree) => handles.push(alloc_datatree(&tree)),
+//RS             Err(mut error) => {
+//RS                 error.format = json_rt::EncodingFormat::JSONL;
+//RS                 error.line = error.line.map(|line| idx as i64 + line);
+//RS                 return result_err_encoding(error);
+//RS             }
+//RS         }
+//RS     }
+//RS     let list = Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for h in handles {
+//RS             let _ = rt.heap.list_push_int(list, h);
+//RS         }
+//RS         list
+//RS     });
+//RS     result_ok(list as u64)
+//RS }
+//RS 
+//RS /// `core.encoding.jsonl.to_string` — same as `jet_std_jsonl_render`.
+//RS fn jet_jit_jsonl_to_string(rows: i64) -> i64 {
+//RS     let trees: Vec<json_rt::DataTree> = Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(rows).unwrap_or(0);
+//RS         let mut out = Vec::with_capacity(len as usize);
+//RS         for i in 0..len {
+//RS             out.push(rt.heap.list_get_int(rows, i).unwrap_or(0));
+//RS         }
+//RS         out
+//RS     })
+//RS     .into_iter()
+//RS     .filter_map(read_datatree)
+//RS     .collect();
+//RS     let mut rendered = trees
+//RS         .iter()
+//RS         .map(render_canonical)
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n");
+//RS     if !rendered.is_empty() {
+//RS         rendered.push('\n');
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
+//RS }
+//RS fn jet_jit_jsonl_loads(text: i64) -> i64 {
+//RS     jet_jit_jsonl_parse(text)
+//RS }
+//RS 
+//RS fn jet_jit_jsonl_dumps(rows: i64) -> i64 {
+//RS     jet_jit_jsonl_to_string(rows)
+//RS }
+//RS fn jet_jit_jsonl_count_rows(text: i64) -> i64 {
+//RS     clone_string(text)
+//RS         .lines()
+//RS         .filter(|line| !line.trim().is_empty())
+//RS         .count() as i64
+//RS }
+//RS 
+//RS fn jet_jit_jsonl_append_line(text: i64, value: i64) -> i64 {
+//RS     let source = clone_string(text);
+//RS     let rendered = read_datatree(value)
+//RS         .map(|tree| render_canonical(&tree))
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     let output = if source.is_empty() {
+//RS         format!("{rendered}\n")
+//RS     } else if source.ends_with('\n') {
+//RS         format!("{source}{rendered}\n")
+//RS     } else {
+//RS         format!("{source}\n{rendered}\n")
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(output))
+//RS }
+//RS 
+//RS fn jet_jit_jsonl_first(text: i64) -> i64 {
+//RS     let source = clone_string(text);
+//RS     for (idx, line) in source.lines().enumerate() {
+//RS         let trimmed = line.trim();
+//RS         if trimmed.is_empty() {
+//RS             continue;
+//RS         }
+//RS         match json_rt::parse_datatree(trimmed) {
+//RS             Ok(tree) => return result_ok(alloc_datatree(&tree) as u64),
+//RS             Err(mut error) => {
+//RS                 error.format = json_rt::EncodingFormat::JSONL;
+//RS                 error.line = error.line.map(|line| idx as i64 + line);
+//RS                 return result_err_encoding(error);
+//RS             }
+//RS         }
+//RS     }
+//RS     result_ok(0)
+//RS }
+//RS 
+//RS // ── XML via the shared foundation kernel ────────────────────────────────────
+//RS 
+//RS fn xml_value_to_datatree(value: jet_foundation::XmlPull::Value) -> json_rt::DataTree {
+//RS     use jet_foundation::XmlPull::Value;
+//RS     match value {
+//RS         Value::Null => json_rt::DataTree::Null,
+//RS         Value::Bool(b) => json_rt::DataTree::Bool(b),
+//RS         Value::Int(n) => json_rt::DataTree::Int(n),
+//RS         Value::Text(s) => json_rt::DataTree::Text(s),
+//RS         Value::Array(xs) => {
+//RS             json_rt::DataTree::Array(xs.into_iter().map(xml_value_to_datatree).collect())
+//RS         }
+//RS         Value::Object(es) => json_rt::DataTree::Object(
+//RS             es.into_iter()
+//RS                 .map(|(k, v)| (k, xml_value_to_datatree(v)))
+//RS                 .collect(),
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn datatree_to_xml_value(
+//RS     tree: &json_rt::DataTree,
+//RS ) -> Result<jet_foundation::XmlPull::Value, String> {
+//RS     use jet_foundation::XmlPull::Value;
+//RS     match tree {
+//RS         json_rt::DataTree::Null => Ok(Value::Null),
+//RS         json_rt::DataTree::Bool(b) => Ok(Value::Bool(*b)),
+//RS         json_rt::DataTree::Int(n) => Ok(Value::Int(*n)),
+//RS         json_rt::DataTree::Number(_) | json_rt::DataTree::TypedText(_) => {
+//RS             Err("internal JSON carrier escaped typed decode".to_string())
+//RS         }
+//RS         json_rt::DataTree::Text(s) => Ok(Value::Text(s.clone())),
+//RS         json_rt::DataTree::Array(xs) => Ok(Value::Array(
+//RS             xs.iter()
+//RS                 .map(datatree_to_xml_value)
+//RS                 .collect::<Result<Vec<_>, _>>()?,
+//RS         )),
+//RS         json_rt::DataTree::Object(es) => Ok(Value::Object(
+//RS             es.iter()
+//RS                 .map(|(k, v)| Ok((k.clone(), datatree_to_xml_value(v)?)))
+//RS                 .collect::<Result<Vec<_>, String>>()?,
+//RS         )),
+//RS         json_rt::DataTree::Float(_) | json_rt::DataTree::Bytes(_) => {
+//RS             Err("XML tree cannot contain Float or Bytes values".to_string())
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn xml_shape_error(reason: impl Into<String>) -> json_rt::EncodingError {
+//RS     json_rt::EncodingError::new(
+//RS         json_rt::EncodingFormat::XML,
+//RS         json_rt::EncodingErrorKind::Syntax,
+//RS         0,
+//RS         Err(json_rt::JetAbsent),
+//RS         Err(json_rt::JetAbsent),
+//RS         "",
+//RS         reason,
+//RS     )
+//RS }
+//RS 
+//RS fn xml_error_encoding(error: jet_foundation::XmlPull::Error) -> json_rt::EncodingError {
+//RS     use jet_foundation::XmlPull::Reason;
+//RS     let kind = match error.kind {
+//RS         Reason::EntityCycle | Reason::Limit => json_rt::EncodingErrorKind::Limit,
+//RS         Reason::Canonicalization | Reason::Unsupported => {
+//RS             json_rt::EncodingErrorKind::Unsupported
+//RS         }
+//RS         _ => json_rt::EncodingErrorKind::Syntax,
+//RS     };
+//RS     json_rt::EncodingError::new(
+//RS         json_rt::EncodingFormat::XML,
+//RS         kind,
+//RS         error.offset as i64,
+//RS         error
+//RS             .line
+//RS             .map(|line| Ok(line as i64))
+//RS             .unwrap_or(Err(json_rt::JetAbsent)),
+//RS         error
+//RS             .column
+//RS             .map(|column| Ok(column as i64))
+//RS             .unwrap_or(Err(json_rt::JetAbsent)),
+//RS         error.path,
+//RS         error.reason,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_jit_xml_parse(text: i64) -> i64 {
+//RS     match jet_foundation::XmlKernel::parse_document(&clone_string(text)) {
+//RS         Ok(value) => result_ok(alloc_datatree(&xml_value_to_datatree(value)) as u64),
+//RS         Err(error) => result_err_encoding(xml_error_encoding(error)),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn xml_parse_options_from_heap(
+//RS     handle: i64,
+//RS ) -> Result<jet_foundation::XmlPull::ParseOptions, String> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         Some((|| {
+//RS             let entities = rt
+//RS                 .heap
+//RS                 .record_get_record(handle, 0)
+//RS                 .ok_or_else(|| "invalid XML parse options entity policy".to_string())?;
+//RS             let limits = rt
+//RS                 .heap
+//RS                 .record_get_record(handle, 1)
+//RS                 .ok_or_else(|| "invalid XML parse options limits".to_string())?;
+//RS             let entity_kind = rt
+//RS                 .heap
+//RS                 .record_get_int(entities, 0)
+//RS                 .ok_or_else(|| "invalid XML entity policy discriminant".to_string())?;
+//RS             let entities = match entity_kind {
+//RS                 0 => jet_foundation::XmlPull::EntityPolicy::Preserve,
+//RS                 1 => jet_foundation::XmlPull::EntityPolicy::Reject,
+//RS                 2 => {
+//RS                     let map = rt
+//RS                         .heap
+//RS                         .record_get_int(entities, 1)
+//RS                         .ok_or_else(|| "invalid XML entity resolution map".to_string())?;
+//RS                     let length = rt
+//RS                         .heap
+//RS                         .map_len(map)
+//RS                         .ok_or_else(|| "invalid XML entity resolution map".to_string())?;
+//RS                     let mut resolved = std::collections::BTreeMap::new();
+//RS                     for index in 0..length {
+//RS                         let key = rt
+//RS                             .heap
+//RS                             .map_key_at(map, index)
+//RS                             .and_then(|key| rt.heap.clone_string(key))
+//RS                             .ok_or_else(|| {
+//RS                                 "XML entity resolution map keys must be strings".to_string()
+//RS                             })?;
+//RS                         let value = rt
+//RS                             .heap
+//RS                             .map_value_at(map, index)
+//RS                             .and_then(|value| rt.heap.clone_string(value))
+//RS                             .ok_or_else(|| {
+//RS                                 "XML entity resolution map values must be strings".to_string()
+//RS                             })?;
+//RS                         resolved.insert(key, value);
+//RS                     }
+//RS                     jet_foundation::XmlPull::EntityPolicy::Resolve(resolved)
+//RS                 }
+//RS                 _ => {
+//RS                     return Err(format!(
+//RS                         "invalid XML entity policy discriminant {entity_kind}"
+//RS                     ))
+//RS                 }
+//RS             };
+//RS             let number = |index: i64, name: &str| {
+//RS                 rt.heap
+//RS                     .record_get_int(limits, index)
+//RS                     .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
+//RS                     .ok_or_else(|| format!("invalid XML parse option `{name}`"))
+//RS             };
+//RS             Ok(jet_foundation::XmlPull::ParseOptions {
+//RS                 entities,
+//RS                 limits: jet_foundation::XmlPull::Limits {
+//RS                     max_depth: number(0, "max_depth")?,
+//RS                     max_nodes: number(1, "max_nodes")?,
+//RS                     max_attributes_per_element: number(2, "max_attributes_per_element")?,
+//RS                     max_name_bytes: number(3, "max_name_bytes")?,
+//RS                     max_text_bytes: number(4, "max_text_bytes")?,
+//RS                     max_entity_declarations: number(5, "max_entity_declarations")?,
+//RS                     max_entity_depth: number(6, "max_entity_depth")?,
+//RS                     max_entity_replacement_bytes: number(7, "max_entity_replacement_bytes")?,
+//RS                 },
+//RS             })
+//RS         })())
+//RS     })
+//RS     .unwrap_or_else(|| Err("XML parse options require an active runtime".to_string()))
+//RS }
+//RS 
+//RS fn jet_jit_xml_parse_with(text: i64, options: i64) -> i64 {
+//RS     let options = match xml_parse_options_from_heap(options) {
+//RS         Ok(options) => options,
+//RS         Err(reason) => return result_err_encoding(xml_shape_error(reason)),
+//RS     };
+//RS     match jet_foundation::XmlKernel::parse_document_with(&clone_string(text), &options) {
+//RS         Ok(value) => result_ok(alloc_datatree(&xml_value_to_datatree(value)) as u64),
+//RS         Err(error) => result_err_encoding(xml_error_encoding(error)),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_xml_parse_options_safe() -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let entities = rt.heap.alloc_record(1);
+//RS         let _ = rt.heap.record_set_int(entities, 0, 0);
+//RS         let limits = rt.heap.alloc_record(8);
+//RS         for (index, value) in [
+//RS             256,
+//RS             1_000_000,
+//RS             1024,
+//RS             4096,
+//RS             16_777_216,
+//RS             1024,
+//RS             32,
+//RS             8_388_608,
+//RS         ]
+//RS         .into_iter()
+//RS         .enumerate()
+//RS         {
+//RS             let _ = rt.heap.record_set_int(limits, index as i64, value);
+//RS         }
+//RS         let options = rt.heap.alloc_record(2);
+//RS         let _ = rt.heap.record_set_record(options, 0, entities);
+//RS         let _ = rt.heap.record_set_record(options, 1, limits);
+//RS         options
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_toml_decode_typed(text: i64, type_key: i64) -> i64 {
+//RS     let text = clone_string(text);
+//RS     let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
+//RS         return result_err_fields(json_rt::FieldError::one(
+//RS             "typed TOML received an invalid type key",
+//RS         ));
+//RS     };
+//RS     match json_rt::toml::parse_to_tree(&text) {
+//RS         Ok(tree) => match decode_datatree_for_type(&tree, &type_key) {
+//RS             Ok(value) => result_ok(value as u64),
+//RS             Err(errors) => result_err_fields(errors),
+//RS         },
+//RS         Err(error) => result_err_fields(json_rt::FieldError::one(format!(
+//RS             "invalid TOML (line {}): {}",
+//RS             error.line, error.message
+//RS         ))),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_yaml_decode_typed(text: i64, type_key: i64) -> i64 {
+//RS     let text = clone_string(text);
+//RS     let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
+//RS         return result_err_fields(json_rt::FieldError::one(
+//RS             "typed YAML received an invalid type key",
+//RS         ));
+//RS     };
+//RS     match yaml_rt::yaml::parse_to_tree(&text) {
+//RS         Ok(tree) => match decode_datatree_for_type(&tree, &type_key) {
+//RS             Ok(value) => result_ok(value as u64),
+//RS             Err(errors) => result_err_fields(errors),
+//RS         },
+//RS         Err(error) => result_err_fields(json_rt::FieldError::one(format!(
+//RS             "invalid YAML (line {}): {}",
+//RS             error.line, error.message
+//RS         ))),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_xml_to_string(tree: i64) -> i64 {
+//RS     let rendered = read_datatree(tree)
+//RS         .and_then(|t| datatree_to_xml_value(&t).ok())
+//RS         .and_then(|v| jet_foundation::XmlKernel::render_document(&v).ok())
+//RS         .unwrap_or_default();
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
+//RS }
+//RS 
+//RS fn xml_canonical_options_from_heap(
+//RS     handle: i64,
+//RS ) -> Result<jet_foundation::XmlPull::CanonicalOptions, String> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         Some((|| {
+//RS             let mode_value = rt
+//RS                 .heap
+//RS                 .record_get_int(handle, 0)
+//RS                 .ok_or_else(|| "invalid XML canonical mode".to_string())?;
+//RS             let mode = match rt.heap.record_get_int(mode_value, 0).unwrap_or(mode_value) {
+//RS                 0 => jet_foundation::XmlPull::CanonicalMode::Inclusive11,
+//RS                 1 => jet_foundation::XmlPull::CanonicalMode::Exclusive10,
+//RS                 value => return Err(format!("invalid XML canonical mode {value}")),
+//RS             };
+//RS             let comments = rt
+//RS                 .heap
+//RS                 .record_get_bool(handle, 1)
+//RS                 .or_else(|| rt.heap.record_get_int(handle, 1).map(|value| value != 0))
+//RS                 .ok_or_else(|| "invalid XML canonical comments flag".to_string())?;
+//RS             let prefixes_handle = rt
+//RS                 .heap
+//RS                 .record_get_int(handle, 2)
+//RS                 .ok_or_else(|| "invalid XML canonical inclusive prefixes".to_string())?;
+//RS             let length = rt
+//RS                 .heap
+//RS                 .list_len(prefixes_handle)
+//RS                 .ok_or_else(|| "invalid XML canonical inclusive prefixes".to_string())?;
+//RS             let length = usize::try_from(length)
+//RS                 .map_err(|_| "invalid XML canonical inclusive prefixes length".to_string())?;
+//RS             let mut inclusive_prefixes = Vec::with_capacity(length);
+//RS             for index in 0..length {
+//RS                 let prefix = rt
+//RS                     .heap
+//RS                     .list_get_string(prefixes_handle, index as i64)
+//RS                     .ok_or_else(|| {
+//RS                         "XML canonical inclusive prefixes must be strings".to_string()
+//RS                     })?;
+//RS                 inclusive_prefixes.push(prefix);
+//RS             }
+//RS             Ok(jet_foundation::XmlPull::CanonicalOptions {
+//RS                 mode,
+//RS                 comments,
+//RS                 inclusive_prefixes,
+//RS             })
+//RS         })())
+//RS     })
+//RS     .unwrap_or_else(|| Err("XML canonical options require an active runtime".to_string()))
+//RS }
+//RS 
+//RS fn jet_jit_xml_canonical(tree: i64, options: i64) -> i64 {
+//RS     let options = match xml_canonical_options_from_heap(options) {
+//RS         Ok(options) => options,
+//RS         Err(reason) => {
+//RS             return result_err_encoding(xml_shape_error(reason));
+//RS         }
+//RS     };
+//RS     match xml_tree_value(tree).and_then(|value| {
+//RS         jet_foundation::XmlKernel::canonical_document(&value, &options).map_err(xml_error_encoding)
+//RS     }) {
+//RS         Ok(rendered) => {
+//RS             let handle = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered));
+//RS             result_ok(handle as u64)
+//RS         }
+//RS         Err(error) => {
+//RS             result_err_encoding(error)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn xml_tree_value(
+//RS     tree: i64,
+//RS ) -> Result<jet_foundation::XmlPull::Value, json_rt::EncodingError> {
+//RS     let dt = read_datatree(tree).ok_or_else(|| xml_shape_error("invalid DataTree"))?;
+//RS     datatree_to_xml_value(&dt).map_err(xml_shape_error)
+//RS }
+//RS 
+//RS fn pack_opt_string(opt: Option<String>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| match opt {
+//RS         None => 0,
+//RS         Some(s) => {
+//RS             let sid = rt.heap.alloc_string(s);
+//RS             sid + 1
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS /// D-ENCXML-PROJECTION1: `xml.root` via the shared XML kernel.
+//RS fn jet_jit_xml_root(tree: i64) -> i64 {
+//RS     match xml_tree_value(tree)
+//RS         .and_then(|v| jet_foundation::XmlKernel::document_root(&v).map_err(xml_error_encoding))
+//RS     {
+//RS         Ok(root) => result_ok(alloc_datatree(&xml_value_to_datatree(root)) as u64),
+//RS         Err(error) => result_err_encoding(error),
+//RS     }
+//RS }
+//RS 
+//RS /// `xml.expanded_name` → Result[(raw, prefix?, local, namespace_uri?), EncodingError].
+//RS fn jet_jit_xml_expanded_name(tree: i64) -> i64 {
+//RS     match xml_tree_value(tree).and_then(|v| {
+//RS         jet_foundation::XmlKernel::expanded_name_parts(&v).map_err(xml_error_encoding)
+//RS     }) {
+//RS         Ok((raw, prefix, local, uri)) => {
+//RS             let handle = Concurrency::with_runtime_mut(|rt| {
+//RS                 let rec = rt.heap.alloc_record(4);
+//RS                 let raw_id = rt.heap.alloc_string(raw);
+//RS                 let _ = rt.heap.record_set_string(rec, 0, raw_id);
+//RS                 let prefix_bits = match prefix {
+//RS                     None => 0,
+//RS                     Some(s) => rt.heap.alloc_string(s) + 1,
+//RS                 };
+//RS                 let _ = rt.heap.record_set_int(rec, 1, prefix_bits);
+//RS                 let local_id = rt.heap.alloc_string(local);
+//RS                 let _ = rt.heap.record_set_string(rec, 2, local_id);
+//RS                 let uri_bits = match uri {
+//RS                     None => 0,
+//RS                     Some(s) => rt.heap.alloc_string(s) + 1,
+//RS                 };
+//RS                 let _ = rt.heap.record_set_int(rec, 3, uri_bits);
+//RS                 rec
+//RS             });
+//RS             result_ok(handle as u64)
+//RS         }
+//RS         Err(error) => result_err_encoding(error),
+//RS     }
+//RS }
+//RS 
+//RS /// `xml.attribute` → Result[String?, EncodingError] (Option packed as 0 / sid+1).
+//RS fn jet_jit_xml_attribute(tree: i64, name: i64) -> i64 {
+//RS     let key = clone_string(name);
+//RS     match xml_tree_value(tree).and_then(|v| {
+//RS         jet_foundation::XmlKernel::lookup_attribute(&v, &key).map_err(xml_error_encoding)
+//RS     }) {
+//RS         Ok(opt) => result_ok(pack_opt_string(opt) as u64),
+//RS         Err(error) => result_err_encoding(error),
+//RS     }
+//RS }
+//RS 
+//RS /// `xml.content` → Result[[DataTree], EncodingError].
+//RS fn jet_jit_xml_content(tree: i64) -> i64 {
+//RS     match xml_tree_value(tree)
+//RS         .and_then(|v| jet_foundation::XmlKernel::element_content(&v).map_err(xml_error_encoding))
+//RS     {
+//RS         Ok(nodes) => {
+//RS             let handles: Vec<i64> = nodes
+//RS                 .into_iter()
+//RS                 .map(|n| alloc_datatree(&xml_value_to_datatree(n)))
+//RS                 .collect();
+//RS             let list = Concurrency::with_runtime_mut(|rt| {
+//RS                 let list = rt.heap.alloc_empty_list();
+//RS                 for h in handles {
+//RS                     let _ = rt.heap.list_push_int(list, h);
+//RS                 }
+//RS                 list
+//RS             });
+//RS             result_ok(list as u64)
+//RS         }
+//RS         Err(error) => result_err_encoding(error),
+//RS     }
+//RS }
+//RS 
+//RS /// `xml.to_bytes` with XMLRenderOptions::safe (UTF-8 + PreserveValid).
+//RS fn jet_jit_xml_to_bytes(tree: i64) -> i64 {
+//RS     match xml_tree_value(tree).and_then(|v| {
+//RS         jet_foundation::XmlKernel::render_document_bytes(
+//RS             &v,
+//RS             jet_foundation::XmlPull::RenderEncoding::UTF8,
+//RS             jet_foundation::XmlPull::LexicalPolicy::PreserveValid,
+//RS         )
+//RS         .map_err(xml_error_encoding)
+//RS     }) {
+//RS         Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
+//RS         Err(error) => result_err_encoding(error),
+//RS     }
+//RS }
+//RS 
+//RS /// Parse + `project_document_for_decode` — front half of typed `xml.decode`.
+//RS fn jet_jit_xml_project(text: i64) -> i64 {
+//RS     match jet_foundation::XmlKernel::parse_document(&clone_string(text)) {
+//RS         Ok(value) => match jet_foundation::XmlKernel::project_document_for_decode(&value) {
+//RS             Ok(projected) => result_ok(alloc_datatree(&xml_value_to_datatree(projected)) as u64),
+//RS             Err(e) => result_err_fields(xml_decode_fields(e)),
+//RS         },
+//RS         Err(e) => result_err_fields(xml_decode_fields(e)),
+//RS     }
+//RS }
+//RS 
+//RS /// Parse bytes + project — front half of typed `xml.decode_bytes`.
+//RS fn jet_jit_xml_project_bytes(bytes: i64) -> i64 {
+//RS     let input = clone_bytes(bytes);
+//RS     match jet_foundation::XmlKernel::parse_document_bytes(&input) {
+//RS         Ok(value) => match jet_foundation::XmlKernel::project_document_for_decode(&value) {
+//RS             Ok(projected) => result_ok(alloc_datatree(&xml_value_to_datatree(projected)) as u64),
+//RS             Err(e) => result_err_fields(xml_decode_fields(e)),
+//RS         },
+//RS         Err(e) => result_err_fields(xml_decode_fields(e)),
+//RS     }
+//RS }
+//RS 
+//RS // ── CBOR (shared foundation kernel) ─────────────────────────────────────────
+//RS 
+//RS fn jet_jit_cbor_to_bytes(tree: i64) -> i64 {
+//RS     jet_jit_cbor_to_bytes_impl(tree, false)
+//RS }
+//RS 
+//RS fn jet_jit_cbor_to_bytes_canonical(tree: i64) -> i64 {
+//RS     jet_jit_cbor_to_bytes_impl(tree, true)
+//RS }
+//RS 
+//RS fn jet_jit_cbor_to_bytes_impl(tree: i64, canonical: bool) -> i64 {
+//RS     match read_datatree(tree) {
+//RS         Some(tree) => {
+//RS             let value = cbor_datatree_to_value(&tree);
+//RS             match CborKernel::encode(&value, canonical) {
+//RS                 Ok(out) => result_ok(alloc_byte_list(&out) as u64),
+//RS                 Err(error) => result_err_cbor(error),
+//RS             }
+//RS         }
+//RS         None => result_err_msg("invalid DataTree"),
+//RS     }
+//RS }
+//RS 
+//RS fn cbor_datatree_to_value(value: &json_rt::DataTree) -> Value {
+//RS     match value {
+//RS         json_rt::DataTree::Null => Value::Null,
+//RS         json_rt::DataTree::Bool(value) => Value::Bool(*value),
+//RS         json_rt::DataTree::Int(value) => Value::Int(*value),
+//RS         json_rt::DataTree::Float(value) => Value::Float(*value),
+//RS         json_rt::DataTree::Number(_) | json_rt::DataTree::TypedText(_) => {
+//RS             unreachable!("internal JSON carrier escaped typed decode")
+//RS         }
+//RS         json_rt::DataTree::Text(value) => Value::Text(value.clone()),
+//RS         json_rt::DataTree::Bytes(value) => Value::Bytes(value.clone()),
+//RS         json_rt::DataTree::Array(values) => {
+//RS             Value::Array(values.iter().map(cbor_datatree_to_value).collect())
+//RS         }
+//RS         json_rt::DataTree::Object(entries) => Value::Object(
+//RS             entries
+//RS                 .iter()
+//RS                 .map(|(key, value)| (key.clone(), cbor_datatree_to_value(value)))
+//RS                 .collect(),
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn cbor_value_to_datatree(value: Value) -> json_rt::DataTree {
+//RS     match value {
+//RS         Value::Null => json_rt::DataTree::Null,
+//RS         Value::Bool(value) => json_rt::DataTree::Bool(value),
+//RS         Value::Int(value) => json_rt::DataTree::Int(value),
+//RS         Value::Float(value) => json_rt::DataTree::Float(value),
+//RS         Value::Text(value) => json_rt::DataTree::Text(value),
+//RS         Value::Bytes(value) => json_rt::DataTree::Bytes(value),
+//RS         Value::Array(values) => json_rt::DataTree::Array(
+//RS             values.into_iter().map(cbor_value_to_datatree).collect(),
+//RS         ),
+//RS         Value::Object(entries) => json_rt::DataTree::Object(
+//RS             entries
+//RS                 .into_iter()
+//RS                 .map(|(key, value)| (key, cbor_value_to_datatree(value)))
+//RS                 .collect(),
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn cbor_error_kind(kind: CborKernel::ErrorKind) -> i64 {
+//RS     match kind {
+//RS         CborKernel::ErrorKind::Syntax => 0,
+//RS         CborKernel::ErrorKind::Truncated => 1,
+//RS         CborKernel::ErrorKind::Unsupported => 2,
+//RS         CborKernel::ErrorKind::Limit => 3,
+//RS         CborKernel::ErrorKind::TypeMismatch => 4,
+//RS         CborKernel::ErrorKind::TrailingData => 5,
+//RS         CborKernel::ErrorKind::NonCanonical => 6,
+//RS     }
+//RS }
+//RS 
+//RS fn result_err_cbor_parts(kind: i64, byte_offset: i64, path: String, reason: String) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let path = rt.heap.alloc_string(path);
+//RS         let reason = rt.heap.alloc_string(reason);
+//RS         let error = rt.heap.alloc_record(4);
+//RS         let _ = rt.heap.record_set_int(error, 0, kind);
+//RS         let _ = rt.heap.record_set_int(error, 1, byte_offset);
+//RS         let _ = rt.heap.record_set_string(error, 2, path);
+//RS         let _ = rt.heap.record_set_string(error, 3, reason);
+//RS         rt.results.push(super::JitResultValue {
+//RS             ok: false,
+//RS             bits: error as u64,
+//RS         });
+//RS         rt.results.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn result_err_cbor(error: CborKernel::Error) -> i64 {
+//RS     result_err_cbor_parts(
+//RS         cbor_error_kind(error.kind),
+//RS         error.byte_offset as i64,
+//RS         error.path,
+//RS         error.reason,
+//RS     )
+//RS }
+//RS 
+//RS /// Kernel `$`-rooted paths become the Prelude's field-error spelling: the
+//RS /// document root is the empty path and `$.` prefixes are dropped.
+//RS fn decode_path(path: &str) -> String {
+//RS     if path == "$" {
+//RS         String::new()
+//RS     } else if let Some(path) = path.strip_prefix("$.") {
+//RS         path.to_string()
+//RS     } else {
+//RS         path.strip_prefix('$').unwrap_or(path).to_string()
+//RS     }
+//RS }
+//RS 
+//RS fn xml_decode_fields(error: jet_foundation::XmlPull::Error) -> Vec<json_rt::FieldError> {
+//RS     json_rt::FieldError::at(
+//RS         decode_path(&error.path),
+//RS         format!("XML {:?}: {}", error.kind, error.reason),
+//RS     )
+//RS }
+//RS 
+//RS fn cbor_decode_fields(error: CborKernel::Error) -> Vec<json_rt::FieldError> {
+//RS     json_rt::FieldError::at(
+//RS         decode_path(&error.path),
+//RS         format!("CBOR at byte {}: {}", error.byte_offset, error.reason),
+//RS     )
+//RS }
+//RS 
+//RS fn jet_jit_cbor_parse_impl(bytes: i64, options: Option<i64>, allow_bytes: bool) -> i64 {
+//RS     let input = clone_bytes(bytes);
+//RS     let options = match options {
+//RS         Some(handle) => {
+//RS             let (max_depth, max_items, max_bytes, require_canonical) =
+//RS                 Concurrency::with_runtime_mut(|rt| {
+//RS                     (
+//RS                         rt.heap.record_get_int(handle, 0),
+//RS                         rt.heap.record_get_int(handle, 1),
+//RS                         rt.heap.record_get_int(handle, 2),
+//RS                         rt.heap.record_get_bool(handle, 3),
+//RS                     )
+//RS                 });
+//RS             match CborKernel::Options::from_fields(
+//RS                 max_depth,
+//RS                 max_items,
+//RS                 max_bytes,
+//RS                 require_canonical,
+//RS             ) {
+//RS                 Ok(options) => options,
+//RS                 Err(error) => {
+//RS                     return if allow_bytes {
+//RS                         result_err_fields(cbor_decode_fields(error))
+//RS                     } else {
+//RS                         result_err_cbor(error)
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         None => CborKernel::Options::safe(),
+//RS     };
+//RS     match CborKernel::decode(&input, &options, allow_bytes) {
+//RS         Ok(value) => result_ok(alloc_datatree(&cbor_value_to_datatree(value)) as u64),
+//RS         Err(error) if allow_bytes => result_err_fields(cbor_decode_fields(error)),
+//RS         Err(error) => result_err_cbor(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_cbor_parse(bytes: i64) -> i64 {
+//RS     jet_jit_cbor_parse_impl(bytes, None, false)
+//RS }
+//RS 
+//RS fn jet_jit_cbor_parse_options(bytes: i64, options: i64) -> i64 {
+//RS     jet_jit_cbor_parse_impl(bytes, Some(options), false)
+//RS }
+//RS 
+//RS fn jet_jit_cbor_decode_tree(bytes: i64) -> i64 {
+//RS     jet_jit_cbor_parse_impl(bytes, None, true)
+//RS }
+//RS 
+//RS fn jet_jit_cbor_decode_tree_options(bytes: i64, options: i64) -> i64 {
+//RS     jet_jit_cbor_parse_impl(bytes, Some(options), true)
+//RS }
+//RS 
+//RS /// Typed CSV decode: parse header+rows, then invoke the resident Decode
+//RS /// callback through the shared Prelude row kernel.
+// END-PORT-PENDING 0134 crates/jet-jit/src/Encoding.rs:1764-3529
+

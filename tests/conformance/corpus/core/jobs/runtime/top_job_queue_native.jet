@@ -1,0 +1,36 @@
+use core.jobs.runtime.top_job_queue_native.*
+use core.service.runtime.top_service_authority.[JetServiceEndpoint, JetServiceError]
+use core.encoding.runtime.std_data_tree.[EncodingError, EncodingFormat, EncodingErrorKind]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/JobQueueNative.rs:26-36
+#Test("native_job_cbor_failure_preserves_kind_location_and_reason") {
+    error :: EncodingError.new(.CBOR, .Limit, 7, None, None, "payload.name", "too large")
+    match jet_job_queue_cbor_error(error) {
+        JetServiceError.Policy(message) -> {
+            assert(message.starts_with("job payload cannot be encoded as canonical CBOR ("))
+            assert(message.contains("Limit"))
+            assert(message.ends_with(", payload.name at byte 7): too large"))
+        }
+        else -> panic("CBOR encoding error must become queue Policy, not panic")
+    }
+    error :: EncodingError.new(.CBOR, .Syntax, 0, None, None, "", "invalid")
+    match jet_job_queue_cbor_error(error) {
+        JetServiceError.Policy(message) -> assert(message.ends_with(", byte 0): invalid"))
+        else -> panic("empty CBOR path must retain the byte-only location")
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/JobQueueNative.rs:38-47
+#Test("native_job_payload_is_canonical_cbor_and_not_published") {
+    payload :: jet_job_queue_encode_payload("text-job", "hello").unwrap()
+    assert_eq(payload.type_id, "text-job")
+    assert_eq(payload.bytes, [U8{0x65}, U8{0x68}, U8{0x65}, U8{0x6c}, U8{0x6c}, U8{0x6f}])
+    assert(!payload.publish)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/JobQueueNative.rs:76-87
+#Test("native_job_empty_tick_does_not_consult_endpoint_authority") {
+    endpoint :: JetServiceEndpoint{tree: "not-started", worker: "worker", generation: 0, authority: "", channel: None}
+    assert_eq(jet_job_service_queue_tick_specs(&endpoint, &[], 0).unwrap(), USize{0})
+    assert_eq(jet_job_service_queue_tick_specs(&endpoint, &[], 16).unwrap(), USize{0})
+}

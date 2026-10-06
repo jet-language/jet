@@ -1,0 +1,892 @@
+use tests.conformance.corpus.core.port.http.*
+use tests.common as common
+use tests.tir_support as tir_support
+use tests.tir_support.[assert_example_cli_tiers_agree, assert_tiers_agree, build_and_run, compile_source, have_rustc, jit_run_with_env]
+use std.fs as fs
+use core.sys.target.[selected_os, selected_family]
+use jet.[format_source, Loader, Sema, Diagnostics]
+// GATE #4494: real native/process/provider fixtures. Retired JIT representation
+// probes are expressed as shared runtime source and O0/O1/O2 behavior assertions.
+
+// Rust: tests/http.rs:49
+#Test("jit_http_readiness_uses_shared_scheduler_poller") {
+    scheduler :: read("crates/jet-codegen/src/Prelude/Scheduler.rs")
+    net :: read("crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs")
+    loop symbol in ["jet_scheduler_io_wait", "jet_scheduler_tcp_listener_io_wait", "jet_scheduler_tcp_stream_ready_wait", "jet_scheduler_udp_io_wait"] {
+        assert(scheduler.contains("pub fn {symbol}"), "Prelude scheduler does not define {symbol}")
+    }
+    if selected_family() == "unix" {
+        assert(net.contains("jet_scheduler_tcp_stream_ready_wait(stream, read, write, operation)"), "TCP stream waits must use the shared raw-fd poller")
+    }
+    if have_rustc() { on_large_stack(() -> { assert_http_example_matches_all_tiers("http_readiness") }) }
+}
+// Rust: tests/http.rs:82
+#Test("resident_http_stop_uses_the_shared_runtime_boundary") {
+    source :: `use core.http as http
+fn run() -> {
+    _ :: http.get("http://127.0.0.1:0/") ?? panic("resident HTTP failure")
+}
+`
+    loop run in [tir_support.run_default_multi, tir_support.build_and_run_multi, tir_support.build_release_and_run_multi] {
+        (code, stdout, stderr) :: run("resident_http_stop", "main.jet", [("main.jet", source)])
+        assert_eq(code, 70, "resident HTTP failure must use the shared runtime report boundary: {stdout} {stderr}")
+        assert(stderr.contains("Stop [E3001]"), "resident HTTP failure must retain registered runtime stop: {stderr}")
+        assert_eq(stderr.matches("Stop [E3001]").count(), 1, "resident HTTP stop must be rendered once: {stderr}")
+    }
+}
+// Rust: tests/http.rs:134
+#Test("http_examples_match_interpreter_default_jit_and_aot") {
+    if !common.have_rustc() { return }
+    on_large_stack(() -> {
+        assert_http_example_matches_all_tiers("http_readiness")
+        assert_http_example_matches_all_tiers("http_client")
+    })
+}
+
+// Rust: tests/http_dependency_audit.rs:20
+#Test("http_manifests_have_no_new_external_http_or_compression_crates") {
+    forbidden :: ["hyper", "reqwest", "ureq", "attohttpc", "isahc", "surf", "awc", "actix-web", "axum", "warp", "tiny_http", "flate2", "libflate", "brotli", "async-compression", "tokio", "h2 ", "http-body"]
+    loop path in ["crates/jet-codegen/Cargo.toml", "crates/jet-pkg-model/Cargo.toml"] {
+        text :: read(path)
+        loop needle in forbidden {
+            if needle == "h2 " { next }
+            needle_eq :: "{needle} ="
+            needle_dot :: "{needle}."
+            assert(!text.contains(needle_eq) && !text.lines().any(line -> {
+                trimmed := line.trim_start() // #4303
+                trimmed.starts_with(needle) && (trimmed[needle.len()..].starts_with(" =") || trimmed[needle.len()..].starts_with("."))
+            }) && !text.contains(needle_dot), "{path} must not depend on `{needle}`")
+        }
+        if path.ends_with("jet-pkg-model/Cargo.toml") {
+            assert(text.contains("rustls"), "jet-pkg-model may keep the ratified rustls TLS bridge")
+        }
+    }
+}
+// Rust: tests/http_dependency_audit.rs:78
+#Test("http_prelude_sources_do_not_import_forbidden_http_crates") {
+    forbidden_imports :: ["use ureq", "use hyper", "use reqwest", "use flate2", "use brotli", "use tokio", "extern crate ureq", "extern crate hyper", "extern crate flate2"]
+    sources :: ["crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs", "crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs", "crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs", "crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs", "crates/jet-codegen/src/Prelude/CoreLib/Top/Ws.rs", "crates/jet-pkg-model/src/Prelude/HTTP.rs"]
+    loop path in sources {
+        text :: read(path)
+        loop needle in forbidden_imports { assert(!text.contains(needle), "{path} must not import `{needle}`") }
+    }
+    client :: read("crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs")
+    assert(!client.to_ascii_lowercase().contains("ureq"), "HTTPClient prelude must not mention ureq")
+}
+// Rust: tests/http_dependency_audit.rs:113
+#Test("unsupported_target_variant_is_mapped_from_bridge_and_server_bind") {
+    bridge :: read("crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs")
+    assert(bridge.contains("JetHTTPBridgeError::UnsupportedTarget => JetHTTPError::UnsupportedTarget") && bridge.contains("JetHTTPOperation::ClientConnect"), "client bridge must map UnsupportedTarget to ClientConnect")
+    assert(bridge.contains("unsupported-target:server-bind"), "server bind must map UnsupportedTarget before IO fallback")
+    assert(bridge.contains("JetHTTPOperation::ServerBind"), "server bind UnsupportedTarget must name ServerBind")
+    server :: read("crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs")
+    assert(server.contains("unsupported-target:server-bind"), "server bind must preflight unsupported targets")
+    client :: read("crates/jet-pkg-model/src/Prelude/HTTP.rs")
+    assert(client.contains("JetHTTPBridgeError::UnsupportedTarget"), "client send must be able to return UnsupportedTarget")
+}
+// Rust: tests/http_dependency_audit.rs:141
+#Test("current_host_supports_http_bind_and_ws_connect") {
+    assert(["linux", "android", "macos", "ios", "freebsd", "openbsd", "netbsd", "windows"].contains(selected_os()), "http_dependency_audit assumes a supported desktop/server OS")
+}
+
+// Rust: tests/resource_close.rs:94
+#Test("defer_close_has_explicit_tir_codegen_and_stable_formatting") {
+    out :: compile(SIMPLE)
+    assert(out.rust.contains("JetDeferredClose"), "{out.rust}")
+    assert(out.rust.contains("__jet_Close::close(__jet___resource_resource_") && out.rust.contains(".take())"), "{out.rust}")
+    once :: format_source(SIMPLE).expect("deferred close should format")
+    assert(once.contains("defer close(^resource)"), "{once}")
+    twice :: format_source(once).expect("formatted deferred close should parse")
+    assert_eq(once, twice)
+}
+// Rust: tests/resource_close.rs:112
+#Test("defer_rejects_general_actions_blocks_and_values_without_close_capability") {
+    statement :: codes("fn run() -> { defer print(\"not close\") }")
+    assert(statement.contains("E0003"), "{statement:?}")
+    block :: codes("fn run() -> { defer { print(\"not close\") } }")
+    assert(block.contains("E0003"), "{block:?}")
+    non_resource :: codes("fn run() -> {\n    value := 1\n    defer close(^value)\n}")
+    assert(non_resource.contains("E0905"), "{non_resource:?}")
+}
+// Rust: tests/resource_close.rs:124
+#Test("free_close_function_cannot_shadow_the_nominal_protocol") {
+    src :: `
+struct NotClose { value: Int }
+fn close(value: ^NotClose) -> { print(value.value) }
+fn run() -> {
+    value := NotClose{ value: 1 }
+    defer close(^value)
+}
+`
+    got :: codes(src)
+    assert(got.contains("E0905"), "{got:?}")
+}
+// Rust: tests/resource_close.rs:138
+#Test("nominal_close_is_the_automatic_scope_end_safety_net") {
+    src :: `
+struct Resource { name: String }
+impl Resource.Close {
+    fn close(^self) -> { print("auto {self.name}") }
+}
+
+fn scoped() -> {
+    resource := Resource{ name: "scope" }
+    print("body {resource.name}")
+}
+fn run() -> { scoped() }
+`
+    ran :: compile_and_run(src, "jet_resource_close_automatic")
+    assert(ran.status.success(), "{String.from_utf8_lossy(ran.stderr)}")
+    assert_eq(String.from_utf8_lossy(ran.stdout), "body scope\nauto scope\n")
+}
+// Rust: tests/resource_close.rs:161
+#Test("automatic_cleanup_runs_before_source_panic_exits_the_process") {
+    src :: `
+struct Resource { name: String }
+impl Resource.Close {
+    fn close(^self) -> { print("auto {self.name}") }
+}
+fn run() -> {
+    resource := Resource{ name: "panic" }
+    print("body")
+    panic("stop")
+}
+`
+    ran :: compile_and_run_with_scheduler_unwind(src, "jet_resource_close_automatic_panic")
+    assert(!ran.status.success())
+    assert_eq(ran.status.code(), Some(70))
+    assert_eq(String.from_utf8_lossy(ran.stdout), "body\nauto panic\n")
+    stderr :: String.from_utf8_lossy(ran.stderr)
+    assert_eq(stderr.matches("Stop [E3001]").count(), 1, "{stderr}")
+    assert(stderr.contains("Stop [E3001]: `panic: stop`\n"), "{stderr}")
+}
+// Rust: tests/resource_close.rs:183
+#Test("typed_runtime_stops_keep_cleanup_and_exit_code_through_native_boundary") {
+    cases :: [
+        ("E3010", "arithmetic", `
+struct Resource { name: String }
+impl Resource.Close {
+    fn close(^self) -> { print("auto {self.name}") }
+}
+fn run() -> {
+    resource := Resource{ name: "arithmetic" }
+    print("body")
+    zero :: 0
+    print(10 /% zero)
+}
+`),
+        ("E3011", "todo", `
+struct Resource { name: String }
+impl Resource.Close {
+    fn close(^self) -> { print("auto {self.name}") }
+}
+fn missing() -> Int { #Todo }
+fn run() -> {
+    resource := Resource{ name: "todo" }
+    print("body")
+    print(missing())
+}
+`),
+        ("E3012", "stack", `
+struct Resource { name: String }
+impl Resource.Close {
+    fn close(^self) -> { print("auto {self.name}") }
+}
+fn recurse(n: Int) -> Int {
+    return recurse(n + 1)
+}
+fn run() -> {
+    resource := Resource{ name: "stack" }
+    print("body")
+    print(recurse(0))
+}
+`)
+    ]
+    loop (code, name, src) in cases {
+        ran :: compile_and_run_with_scheduler_unwind(src, "jet_resource_close_{code}")
+        assert_eq(ran.status.code(), Some(70), "{code}: {ran:?}")
+        assert_eq(String.from_utf8_lossy(ran.stdout), "body\nauto {name}\n")
+        stderr :: String.from_utf8_lossy(ran.stderr)
+        assert(stderr.contains("Stop [{code}]"), "{code}: {stderr}")
+        assert_eq(stderr.matches("Stop [{code}]").count(), 1, "{code}: {stderr}")
+    }
+}
+// Rust: tests/resource_close.rs:255
+#Test("consuming_parameters_and_returns_transfer_the_cleanup_guard") {
+    src :: `
+struct Resource { name: String }
+impl Resource.Close {
+    fn close(^self) -> { print("close {self.name}") }
+}
+impl Resource {
+    fn handoff(^self) -> Resource { return self }
+}
+fn relay(^resource: Resource) -> Resource { return resource }
+fn consume(^resource: Resource) -> { print("consume {resource.name}") }
+fn run() -> {
+    first := Resource{ name: "transfer" }
+    second := relay(^first)
+    third := second.handoff()
+    consume(^third)
+}
+`
+    compiled :: compile(src)
+    assert(compiled.rust.contains(": JetResource<__jet_Resource> = JetResource::new(__jet_resource);"), "{compiled.rust}")
+    assert(compiled.rust.contains("return __jet___resource_param_resource.take();"), "{compiled.rust}")
+    out :: compile_and_run(src, "jet_resource_close_transfer")
+    assert_eq(String.from_utf8_lossy(out.stdout), "consume transfer\nclose transfer\n")
+}
+// Rust: tests/resource_close.rs:296
+#Test("scheduled_transfer_reuses_move_checks_for_every_second_use") {
+    use_after :: codes("{SIMPLE}\nfn bad() -> {{\n    resource := Resource{{ name: \"x\" }}\n    defer close(^resource)\n    print(resource.name)\n}}")
+    assert(use_after.contains("E0121"), "{use_after:?}")
+    double_defer :: codes("{SIMPLE}\nfn bad() -> {{\n    resource := Resource{{ name: \"x\" }}\n    defer close(^resource)\n    defer close(^resource)\n}}")
+    assert(double_defer.contains("E0121"), "{double_defer:?}")
+    double_close :: codes("{SIMPLE}\nfn bad() -> {{\n    resource := Resource{{ name: \"x\" }}\n    close(^resource)\n    close(^resource)\n}}")
+    assert(double_close.contains("E0121"), "{double_close:?}")
+    copied :: codes("{SIMPLE}\nfn bad() -> {{\n    resource := Resource{{ name: \"x\" }}\n    copied := ~resource\n    print(copied.name)\n}}")
+    assert(copied.contains("E0211"), "{copied:?}")
+}
+// Rust: tests/resource_close.rs:319
+#Test("cleanup_runs_once_in_lifo_order_on_all_scope_exits") {
+    src :: `
+struct Resource { name: String }
+
+impl Resource.Close {
+    fn close(^self) -> {
+        print("close {self.name}")
+    }
+}
+
+fn fail() -> Int Err! {
+    return Err("stop")
+}
+
+fn returned() -> {
+    resource := Resource{ name: "return" }
+    defer close(^resource)
+    print("return body")
+    return
+}
+
+fn questioned() -> Int Err! {
+    resource := Resource{ name: "question" }
+    defer close(^resource)
+    value := fail()
+    return Ok(value)
+}
+
+fn looped() -> {
+    loop n in [0, 1] {
+        resource := Resource{ name: if n == 0 -> "continue" else -> "break" }
+        defer close(^resource)
+        if n == 0 { next }
+        break
+    }
+}
+
+fn run() -> {
+    first := Resource{ name: "a" }
+    defer close(^first)
+    second := Resource{ name: "b" }
+    defer close(^second)
+    print("body")
+    returned()
+    questioned().drop(` + "\"this path intentionally proves `?` cleanup\"" + `)
+    looped()
+    unwind := Resource{ name: "unwind" }
+    defer close(^unwind)
+    panic("boom")
+}
+`
+    ran :: compile_and_run(src, "jet_resource_close_exits")
+    assert(!ran.status.success(), "panic path must unwind")
+    assert_eq(String.from_utf8(ran.stdout).unwrap(), "body\nreturn body\nclose return\nclose question\nclose continue\nclose break\nclose unwind\nclose b\nclose a\n")
+}
+// Rust: tests/resource_close.rs:379
+#Test("failed_require_drains_resources_only_on_the_failure_path") {
+    src :: `
+struct Resource { name: String }
+impl Resource.Close {
+    fn close(^self) -> { print("close {self.name}") }
+}
+fn run() -> {
+    automatic := Resource{ name: "automatic" }
+    deferred := Resource{ name: "deferred" }
+    defer close(^deferred)
+    assert(true)
+    print("before failure")
+    assert(false, "stop")
+    print(automatic.name)
+}
+`
+    ran :: compile_and_run(src, "jet_resource_close_require")
+    assert(!ran.status.success())
+    assert_eq(String.from_utf8_lossy(ran.stdout), "before failure\nclose deferred\nclose automatic\n")
+}
+// Rust: tests/resource_close.rs:404
+#Test("ordinary_scope_drop_and_reasoned_drop_remain_separate") {
+    src :: `
+struct Value { number: Int }
+fn maybe() -> Int Err! { return Err("unused") }
+fn run() -> {
+    value := Value{ number: 1 }
+    print(value.number)
+    maybe().drop("best effort remains an explicit value discard")
+}
+`
+    out :: compile(src)
+    assert(out.rust.contains("__jet_maybe();"), "{out.rust}")
+    assert_eq(out.rust.matches("JetDeferredClose::new").count(), 0, "ordinary scope cleanup must not become explicit deferred close")
+    ran :: compile_and_run(src, "jet_resource_close_ordinary_drop")
+    assert(ran.status.success())
+    assert_eq(String.from_utf8_lossy(ran.stdout), "1\n")
+}
+// Rust: tests/resource_close.rs:427
+#Test("allocator_handles_participate_in_nominal_close") {
+    src :: `
+use core.mem as mem
+
+fn run() -> {
+    arena := mem.Arena.new()
+    close(^arena)
+    bump := mem.Bump.new(capacity: 64)
+    defer close(^bump)
+    pool := mem.Pool.new(slots: 2)
+    close(^pool)
+    print("closed")
+}
+`
+    ran :: compile_and_run(src, "jet_resource_close_allocators")
+    assert(ran.status.success(), "{String.from_utf8_lossy(ran.stderr)}")
+    assert_eq(String.from_utf8_lossy(ran.stdout), "closed\n")
+}
+// Rust: tests/resource_close.rs:451
+#Test("explicit_close_of_a_database_connection_releases_the_provider_handle") {
+    open_only :: `
+use core.db as db
+fn run() -> {
+    conn := db.open_memory()
+    print("open")
+}
+`
+    closed :: `
+use core.db as db
+fn run() -> {
+    conn := db.open_memory()
+    print("open")
+    close(^conn)
+}
+`
+    provider_closes :: src -> compile(src).rust.matches("jet_db_close(").count()
+    assert(provider_closes(closed) > provider_closes(open_only), "explicit close must release the connection through the provider")
+}
+// Rust: tests/resource_close.rs:478
+#Test("default_dev_runs_deferred_close_with_native_parity") {
+    root :: common.unique_tmp("jet_resource_close_dev")
+    fs.create_dir_all(root).unwrap()
+    path :: root.join("main.jet")
+    fs.write(path, SIMPLE).unwrap()
+    bundle := Loader.load_entry(path.to_str().unwrap()).unwrap()
+    errors :: Sema.check_bundle(&bundle, Sema.CompileMode.Run).into_iter().filter(d -> d.severity == Diagnostics.Severity.Error).collect()
+    assert(errors.is_empty(), "{errors:?}")
+    native :: compile_and_run(SIMPLE, "jet_resource_close_native_parity")
+    assert(native.status.success())
+    assert_eq(String.from_utf8_lossy(native.stdout), "body\nclose dev\n")
+    assert_tiers_agree("jet_resource_close_dev_parity", SIMPLE, "body\nclose dev\n")
+    (code, stdout, stderr) :: tir_support.build_release_and_run_multi("jet_resource_close_release_parity", "main.jet", [("main.jet", SIMPLE)])
+    assert_eq(code, 0, "{stderr}")
+    assert_eq(stdout, "body\nclose dev\n")
+}
+
+// Rust: tests/tir_operators_and_runtime.rs:15
+#Test("user_operator_traits_route_through_tir") {
+    if !have_rustc() { return }
+    src :: `
+struct Vec2 { x: Int y: Int }
+struct Holder { value: Vec2 }
+struct EqBox<T: Equatable> { value: T }
+#Comparable
+struct Tier<T: Comparable> { value: T }
+#Comparable
+struct NestedTier<T: Comparable> {
+    head: T?
+    tail: [T]
+}
+struct Adder<T: Add> { value: T }
+
+impl Vec2.Add {
+    fn add(self, rhs: Vec2) -> Vec2 {
+        return Vec2{ x: self.x + rhs.x, y: self.y + rhs.y }
+    }
+}
+
+impl Vec2.Equatable {
+    fn equal(self, rhs: Vec2) -> Bool { return self.x == rhs.x && self.y == rhs.y }
+}
+
+impl Vec2.Comparable {
+    fn compare(self, rhs: Vec2) -> Ordering {
+        if self.x < rhs.x { return Ordering.Less }
+        if self.x > rhs.x { return Ordering.Greater }
+        return Ordering.Equal
+    }
+}
+
+fn add_generic<T: Add>(left: T, right: T) -> T { return left + right }
+fn equal_generic<T: Equatable>(left: T, right: T) -> Bool { return left == right }
+fn less_generic<T: Comparable>(left: T, right: T) -> Bool { return left < right }
+
+fn marked(x: Int) -> Vec2 {
+    print("marked {x}")
+    return Vec2{ x: x, y: 0 }
+}
+
+fn run() -> {
+    a :: Vec2{ x: 1, y: 2 }
+    b :: Vec2{ x: 3, y: 4 }
+    c :: add_generic(a, b)
+    d := Vec2{ x: 1, y: 2 }
+    d = { x: 1, y: 2 }
+    d += { x: 3, y: 4 }
+    holder := Holder{ value: Vec2{ x: 1, y: 2 } }
+    holder.value = { x: 1, y: 2 }
+    holder.value += { x: 3, y: 4 }
+    box := EqBox<Int>{ value: 1 }
+    box = { value: 7 }
+    chain :: marked(1) < marked(2) < marked(3)
+    boxes_equal :: equal_generic(EqBox<Int>{ value: 7 }, EqBox<Int>{ value: 7 })
+    ranks_ordered :: less_generic(Tier<Int>{ value: 1 }, Tier<Int>{ value: 2 })
+    nested_ordered :: less_generic(
+        NestedTier<Int>{ head: Val(1), tail: [2, 3] },
+        NestedTier<Int>{ head: Val(1), tail: [2, 4] }
+    )
+    cell := Adder<Int>{ value: 4 }
+    cell.value += 3
+    print("{c.x},{c.y} {d.x},{d.y} {holder.value.x},{holder.value.y} {(!equal_generic(a, b))} {less_generic(a, b)} {(b >= a)} {chain} {boxes_equal} {ranks_ordered} {nested_ordered} {cell.value} {box.value}")
+}
+`
+    (code, stdout) :: build_and_run("tir_user_operator_traits", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "marked 1\nmarked 2\nmarked 3\n4,6 4,6 4,6 true true true true true true true 7 7\n")
+}
+// Rust: tests/tir_operators_and_runtime.rs:92
+#Test("derived_nested_struct_equality_uses_raw_protocol_return_on_all_tiers") {
+    src :: `
+#Comparable
+struct Inner { value: Int }
+#Comparable
+struct Outer { inner: Inner }
+
+fn run() -> {
+    first :: Outer{ inner: Inner{ value: 1 } }
+    same :: Outer{ inner: Inner{ value: 1 } }
+    different :: Outer{ inner: Inner{ value: 2 } }
+    print(first == same)
+    print(first == different)
+}
+`
+    assert_tiers_agree("derived_nested_struct_equality", src, "true\nfalse\n")
+}
+// Rust: tests/tir_operators_and_runtime.rs:111
+#Test("infallible_operator_method_can_call_ordinary_helper") {
+    src :: `
+struct D {
+    value: Int
+}
+struct Pair {
+    a: Int
+    b: Int
+}
+fn align(left: D, right: D) -> Pair { Pair{a: left.value, b: right.value} }
+impl D.Add {
+    fn add(self, rhs: D) -> D {
+        pair :: align(self, rhs)
+        return D{value: pair.a + pair.b}
+    }
+}
+fn run() -> {
+    print(D{value: 1} + D{value: 2})
+}
+`
+    assert_tiers_agree("operator_ordinary_helper", src, "D { value: 3 }\n")
+}
+// Rust: tests/tir_operators_and_runtime.rs:137
+#Test("spaceship_and_ordering_route_through_tir") {
+    if !have_rustc() { return }
+    src :: `
+struct Score { points: Int }
+
+impl Score.Comparable {
+    fn compare(self, rhs: Score) -> Ordering {
+        if self.points < rhs.points { return Ordering.Less }
+        if self.points > rhs.points { return Ordering.Greater }
+        return Ordering.Equal
+    }
+}
+
+fn show_text_order(left: String, right: String) -> {
+    print("{(left < right)} {(left <= right)} {(left > right)} {(left >= right)}")
+}
+
+fn run() -> {
+    low :: Score{ points: 10 }
+    high :: Score{ points: 20 }
+    int_cmp :: 1 <=> 2
+    text_cmp :: "alpha" <=> "beta"
+    chained :: (low <=> high).then(high <=> high)
+    then_greater :: (low <=> low).then(high <=> low)
+    reverse_greater :: (high <=> low).reverse()
+    reverse_equal :: (low <=> low).reverse()
+    numbers := [3, 1, 2]
+    &numbers.sort_by((left: Int, right: Int) -> left <=> right)
+    scores := [Score{ points: 30 }, Score{ points: 10 }, Score{ points: 20 }]
+    &scores.sort_by((left: Score, right: Score) -> left.compare(right))
+    print("{(low < high)} {(low <= high)} {(high > low)} {(high >= low)} {(low == low)} {(low != high)}")
+    print("{(int_cmp == Ordering.Less)} {(text_cmp == Ordering.Less)} {(chained == Ordering.Less)} {(then_greater == Ordering.Greater)} {(reverse_greater == Ordering.Less)} {(reverse_equal == Ordering.Equal)}")
+    print("{numbers[0]} {numbers[1]} {numbers[2]}")
+    print("{scores[0].points} {scores[1].points} {scores[2].points}")
+    show_text_order("alpha", "beta")
+}
+`
+    assert_tiers_agree("tir_spaceship_ordering", src, "true true true true true true\ntrue true true true true true\n1 2 3\n10 20 30\ntrue true false false\n")
+}
+// Rust: tests/tir_operators_and_runtime.rs:185
+#Test("free_call_arg_conventions") {
+    if !have_rustc() { return }
+    src :: `fn show(msg: String) -> {
+    print(msg)
+}
+fn bump(n: &Int) -> {
+    n += 1
+}
+fn archive(name: ^String) -> String {
+    return name
+}
+fn run() -> {
+    score := 41
+    bump(&score)
+    print(score)
+greeting :: "hello"
+    show(greeting)
+saved :: archive(^"vault")
+    print(saved)
+}
+`
+    (code, stdout) :: build_and_run("tir_arg_conv", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "42\nhello\nvault\n")
+}
+// Rust: tests/tir_operators_and_runtime.rs:216
+#Test("list_destructure") {
+    if !have_rustc() { return }
+    src :: `fn double(n: Int) -> Int {
+    return (n * 2)
+}
+fn run() -> {
+    doubled :: [double(1), double(2), double(3)]
+    [a, b, c] :: doubled
+    print(a)
+    print(b)
+    print(c)
+}
+`
+    (code, stdout) :: build_and_run("tir_list_destructure", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "2\n4\n6\n")
+}
+// Rust: tests/tir_operators_and_runtime.rs:239
+#Test("fn_value_and_struct_fn_field") {
+    if !have_rustc() { return }
+    src :: `fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    return f(f(x))
+}
+fn double(x: Int) -> Int {
+    return (x * 2)
+}
+struct Worker {
+    step: fn(Int) -> Int
+}
+struct TextWorker {
+    step: fn(String) -> Int
+}
+fn text_len(text: String) -> Int {
+    return text.len()
+}
+fn run() -> {
+    double_fn :: double
+    print(apply_twice(double_fn, 3))
+    print(apply_twice((x: Int) -> (x + 1), 5))
+    w :: Worker{step: (n: Int) -> (n * n)}
+    print(w.step(4))
+    text_worker :: TextWorker{step: text_len}
+    text :: "read"
+    print(text_worker.step(text))
+    print(text)
+}
+`
+    (code, stdout) :: build_and_run("tir_fn_value_struct_field", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "12\n7\n16\n4\nread\n")
+}
+// Rust: tests/tir_operators_and_runtime.rs:278
+#Test("sized_integers") {
+    if !have_rustc() { return }
+    src :: `fn run() -> {
+red :: U8{ 255 }
+channel :: I32{ 100000 }
+depth :: I8{ -120 }
+    print(red)
+    print(channel)
+    print(depth)
+total :: I64{ 9000000000 }
+    print(total + 1)
+half :: U8{ 100 }
+    print(half + half)
+bytes :: [U8]{ 104, 105, 33 }
+    print(bytes)
+wide :: I64{ Int.from_u8(red) }
+    print(wide)
+clamped :: U8.from_i32(channel) ?? 255
+    print(clamped)
+    print(U8.MAX)
+    print(I32.MIN)
+flags :: U8{ 13 }
+    print(flags.count_ones())
+    print(Float.INFINITY.is_infinite())
+hi :: U8{ 200 }
+lo :: U8{ 100 }
+    print(wrapping(hi + lo))
+    print(saturating(hi + lo))
+fallback :: U8{ 0 }
+    print(checked(hi + lo) ?? fallback)
+}
+`
+    (code, stdout) :: build_and_run("tir_sized_integers", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "255\n100000\n-120\n9000000001\n200\n[104, 105, 33]\n255\n255\n255\n-2147483648\n3\ntrue\n44\n255\n0\n")
+}
+// Rust: tests/tir_operators_and_runtime.rs:324
+#Test("sized_integer_locals_widen_to_int_at_i64_u64_boundaries") {
+    if !have_rustc() { return }
+    src :: `
+fn accept(value: Int) -> Int { return value }
+fn pick(values: [U8], slot: I64) -> U8 { return values[slot] }
+
+fn run() -> {
+    i64_min :: I64.MIN
+    i64_max :: I64.MAX
+    u64_zero :: U64{0}
+    u64_max :: U64.MAX
+    values :: [U8]{7}
+    print(accept(i64_min))
+    print(accept(i64_max))
+    print(accept(u64_zero))
+    print(accept(u64_max))
+    print(pick(values, I64{0}))
+}
+`
+    assert_tiers_agree("tir_sized_integer_argument_boundaries", src, "-9223372036854775808\n9223372036854775807\n0\n18446744073709551615\n7\n")
+    loop (name, bad_source) in [
+        ("tir_reject_negative_to_unsigned", `
+fn accept(value: U64) -> U64 { return value }
+fn run() -> {
+    negative :: I64{-1}
+    print(accept(negative))
+}
+`),
+        ("tir_reject_i64_to_i8", `
+fn accept(value: I8) -> I8 { return value }
+fn run() -> {
+    wide :: I64{128}
+    print(accept(wide))
+}
+`)
+    ] {
+        diagnostics :: compile_source(name, bad_source).expect_err("incompatible sized integer argument must be rejected")
+        assert(diagnostics.iter().any(diagnostic -> diagnostic.code == "E0112"), "{name} produced unexpected diagnostics: {diagnostics:#?}")
+    }
+}
+// Rust: tests/tir_operators_and_runtime.rs:386
+#Test("lexical_arithmetic_policy_covers_fixed_width_operations_on_every_tier") {
+    src :: `
+#Arithmetic(.Wrapping)
+fn wrapped(left: U8, right: U8) -> U8 {
+    return left + right
+}
+
+#Arithmetic(.Saturating)
+fn saturated(left: U8, right: U8) -> U8 {
+    return left + right
+}
+
+struct Accumulator { value: U8 }
+impl Accumulator {
+    #Arithmetic(.Wrapping)
+    fn step(self, right: U8) -> U8 {
+        return self.value + right
+    }
+}
+
+fn run() -> {
+    left :: U8{200}
+    right :: U8{100}
+    #Arithmetic(.Wrapping) {
+        print(left + right)
+        print(left - U8{250})
+        print(left * U8{2})
+        print(U8{3} ^ U8{5})
+        print(left / U8{2})
+    }
+    print(wrapped(left, right))
+    print(saturated(left, right))
+    print(Accumulator{value: left}.step(right))
+}
+`
+    assert_tiers_agree("tir_lexical_arithmetic_policy", src, "44\n206\n144\n243\n100\n44\n255\n44\n")
+}
+// Rust: tests/tir_operators_and_runtime.rs:431
+#Test("nested_checked_arithmetic_policy_still_traps") {
+    src :: `
+use core.sys as env
+
+fn run() -> {
+    raw :: Int.parse(env.get("JET_ARITHMETIC_VALUE") ?? "0") ?? 0
+    value :: U8.from_int(raw) ?? U8{0}
+    #Arithmetic(.Wrapping) {
+        print(value + U8{100})
+        #Arithmetic(.Checked) {
+            print(value + U8{100})
+        }
+    }
+}
+`
+    (code, stdout, stderr) :: jit_run_with_env("tir_nested_checked_arithmetic_policy", src, [("JET_ARITHMETIC_VALUE", "200")])
+    assert_eq(code, 70, "checked island must trap: stdout={stdout} stderr={stderr}")
+    assert_eq(stdout, "44\n")
+    assert(stderr.contains("Stop [E3010]"), "{stderr}")
+    assert(stderr.contains("overflow"), "{stderr}")
+}
+// Rust: tests/tir_operators_and_runtime.rs:464
+#Test("non_arithmetic_checks_remain_checked_inside_wrapping_policy") {
+    src :: `
+use core.sys as env
+
+fn run() -> {
+    case :: Int.parse(env.get("JET_ARITHMETIC_CASE") ?? "0") ?? 0
+    raw :: Int.parse(env.get("JET_ARITHMETIC_VALUE") ?? "0") ?? 0
+    value :: U8.from_int(raw) ?? U8{0}
+    #Arithmetic(.Wrapping) {
+        if case == 0 {
+            #Arithmetic(.Checked) {
+                print(value + U8{100})
+            }
+        }
+        if case == 1 { print(U8{1} / value) }
+        if case == 2 { print(U8{1} << value) }
+        if case == 3 { print(U8{raw}) }
+        if case == 4 {
+            values :: [U8]{U8{10}, U8{20}}
+            print(values[raw])
+        }
+    }
+}
+`
+    loop (case, value, label) in [("0", "200", "nested checked arithmetic"), ("1", "0", "division by zero"), ("2", "8", "invalid shift"), ("3", "256", "conversion overflow"), ("4", "2", "out-of-bounds indexing")] {
+        (code, stdout, stderr) :: jit_run_with_env("tir_wrapping_safety_{case}", src, [("JET_ARITHMETIC_CASE", case), ("JET_ARITHMETIC_VALUE", value)])
+        assert_eq(code, 70, "{label} must trap: stdout={stdout} stderr={stderr}")
+        assert(stderr.contains("Stop [E3010]"), "{label}: {stderr}")
+    }
+}
+// Rust: tests/tir_operators_and_runtime.rs:507
+#Test("list_bounds_stop_keeps_registered_code_across_tiers") {
+    loop (body, expected_stdout) in [
+        ("fn run() -> { print(pick([2, 10], 4)) }", ""),
+        ("fn stop(value: Int) -> {\nprint(value)\nprint(pick([2, 10], 4))\n}\nfn run() -> { [7].each(stop) }", "7\n")
+    ] {
+        source :: "fn pick(values: [Int], index: Int) -> Int {{ values[index] }}\n{body}"
+        files :: [("main.jet", source)]
+        loop run in [tir_support.build_release_and_run_multi, tir_support.run_default_multi, tir_support.run_interpret_multi] {
+            (code, stdout, stderr) :: run("list_bounds_stop", "main.jet", files)
+            assert_eq(code, 70, "stdout={stdout}\nstderr={stderr}")
+            assert_eq(stdout, expected_stdout)
+            assert(stderr.contains("Stop [E3010]"), "{stderr}")
+        }
+    }
+}
+// Rust: tests/tir_operators_and_runtime.rs:533
+#Test("murmur3_port_matches_golden_on_default_release_and_interpreter") {
+    assert_example_cli_tiers_agree("ports/murmur3_x86_32", read("Examples/features/expected/ports/murmur3_x86_32.out"))
+}
+// Rust: tests/tir_operators_and_runtime.rs:541
+#Test("fixed_width_rotation_boundary_counts_match_every_tier") {
+    src :: `
+fn run() -> {
+    value :: U32{0x80000001}
+    print(value.rotate_left(0))
+    print(value.rotate_left(31))
+    print(value.rotate_right(0))
+    print(value.rotate_right(31))
+}
+`
+    assert_tiers_agree("tir_fixed_width_rotation_boundaries", src, "2147483649\n3221225472\n2147483649\n3\n")
+}
+// Rust: tests/tir_operators_and_runtime.rs:560
+#Test("checked_add_exact_int_matches_every_tier_card_2832") {
+    src :: `
+use core.math as math
+
+fn run() -> {
+    print(math.checked_add(9223372036854775807, 1))
+}
+`
+    assert_tiers_agree("tir_card_2832_checked_add_exact_int", src, "9223372036854775808\n")
+}
+// Rust: tests/tir_operators_and_runtime.rs:577
+#Test("interpreter_u64_card_2827") {
+    src :: `
+fn run() -> {
+    print(Int.from_u64(U64{9223372036854775808}))
+}
+`
+    assert_tiers_agree("tir_interpreter_u64_card_2827", src, "9223372036854775808\n")
+}
+// Rust: tests/tir_operators_and_runtime.rs:592
+#Test("interpreter_u64_card_2828") {
+    src :: `
+fn run() -> {
+    print(U64{1} << 63)
+}
+`
+    assert_tiers_agree("tir_interpreter_u64_card_2828", src, "9223372036854775808\n")
+}
+// Rust: tests/tir_operators_and_runtime.rs:607
+#Test("interpreter_u64_card_2829") {
+    src :: `
+fn run() -> {
+    print(U64{9223372036854775808}.count_ones())
+}
+`
+    assert_tiers_agree("tir_interpreter_u64_card_2829", src, "1\n")
+}
+// Rust: tests/tir_operators_and_runtime.rs:618
+#Test("card_2838_float_nan_predicate_tier_parity") {
+    src :: `
+fn run() -> {
+    value :: Float.NAN
+    print(value.is_nan())
+}
+`
+    assert_tiers_agree("tir_card_2838_float_nan_predicate", src, "true\n")
+}
+// Rust: tests/tir_operators_and_runtime.rs:630
+#Test("card_2833_calendar_arithmetic_is_pure_tier_parity") {
+    src :: `
+use core.time as time
+
+fn run() -> {
+    print(time.days_in_month(2024, 2))
+}
+`
+    assert_tiers_agree("tir_card_2833_calendar_arithmetic", src, "29\n")
+}

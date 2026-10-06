@@ -1,0 +1,1642 @@
+// PORT-PENDING 0239 crates-jet-jit-src-web-slice-1797: crates/jet-jit/src/Web.rs:1797-3434
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn jet_jit_web_forms_field(form: i64, name: i64, value_type: i64, required: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let form = rt
+//RS             .web
+//RS             .forms
+//RS             .get(form.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| web_rt::jet_web_forms_new(String::new()));
+//RS         let name = rt.heap.clone_string(name).unwrap_or_default();
+//RS         let value_type = rt.heap.clone_string(value_type).unwrap_or_default();
+//RS         match web_rt::jet_web_forms_field(&form, name, value_type, required != 0) {
+//RS             Ok(form) => {
+//RS                 rt.web.forms.push(form);
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, rt.web.forms.len() as u64)
+//RS             }
+//RS             Err(error) => {
+//RS                 let error = rt.heap.alloc_string(error);
+//RS                 crate::runtime_host::alloc_jit_result(rt, false, error as u64)
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_set(form: i64, name: i64, value: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let form = rt
+//RS             .web
+//RS             .forms
+//RS             .get(form.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| web_rt::jet_web_forms_new(String::new()));
+//RS         let name = rt.heap.clone_string(name).unwrap_or_default();
+//RS         let value = rt.heap.clone_string(value).unwrap_or_default();
+//RS         match web_rt::jet_web_forms_set(&form, name, value) {
+//RS             Ok(()) => crate::runtime_host::alloc_jit_result(rt, true, 0),
+//RS             Err(error) => {
+//RS                 let error = rt.heap.alloc_string(error);
+//RS                 crate::runtime_host::alloc_jit_result(rt, false, error as u64)
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_blur(form: i64, name: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let form = rt
+//RS             .web
+//RS             .forms
+//RS             .get(form.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| web_rt::jet_web_forms_new(String::new()));
+//RS         let name = rt.heap.clone_string(name).unwrap_or_default();
+//RS         match web_rt::jet_web_forms_blur(&form, name) {
+//RS             Ok(()) => crate::runtime_host::alloc_jit_result(rt, true, 0),
+//RS             Err(error) => {
+//RS                 let error = rt.heap.alloc_string(error);
+//RS                 crate::runtime_host::alloc_jit_result(rt, false, error as u64)
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_validate(form: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let form = rt
+//RS             .web
+//RS             .forms
+//RS             .get(form.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| web_rt::jet_web_forms_new(String::new()));
+//RS         match web_rt::jet_web_forms_validate(&form) {
+//RS             Ok(()) => crate::runtime_host::alloc_jit_result(rt, true, 0),
+//RS             Err(error) => {
+//RS                 let error = rt.heap.alloc_string(error);
+//RS                 crate::runtime_host::alloc_jit_result(rt, false, error as u64)
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_validate_async(form: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let form = rt
+//RS             .web
+//RS             .forms
+//RS             .get(form.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| web_rt::jet_web_forms_new(String::new()));
+//RS         let form = web_rt::jet_web_forms_validate_async(&form);
+//RS         rt.web.forms.push(form);
+//RS         rt.web.forms.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_submit(form: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let form = rt
+//RS             .web
+//RS             .forms
+//RS             .get(form.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| web_rt::jet_web_forms_new(String::new()));
+//RS         match web_rt::jet_web_forms_submit(&form) {
+//RS             Ok(value) => {
+//RS                 let value = rt.heap.alloc_string(value);
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, value as u64)
+//RS             }
+//RS             Err(error) => {
+//RS                 let error = rt.heap.alloc_string(error);
+//RS                 crate::runtime_host::alloc_jit_result(rt, false, error as u64)
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_no_script(form: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let form = rt
+//RS             .web
+//RS             .forms
+//RS             .get(form.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| web_rt::jet_web_forms_new(String::new()));
+//RS         match web_rt::jet_web_forms_no_script(&form) {
+//RS             Ok(value) => {
+//RS                 let value = rt.heap.alloc_string(value);
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, value as u64)
+//RS             }
+//RS             Err(error) => {
+//RS                 let error = rt.heap.alloc_string(error);
+//RS                 crate::runtime_host::alloc_jit_result(rt, false, error as u64)
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_html(form: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let form = rt
+//RS             .web
+//RS             .forms
+//RS             .get(form.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| web_rt::jet_web_forms_new(String::new()));
+//RS         rt.heap.alloc_string(web_rt::jet_web_forms_html(&form))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_show(form: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let form = rt
+//RS             .web
+//RS             .forms
+//RS             .get(form.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| web_rt::jet_web_forms_new(String::new()));
+//RS         rt.heap.alloc_string(web_rt::jet_web_forms_show(&form))
+//RS     })
+//RS }
+//RS 
+//RS fn web_form_input(input: i64) -> web_rt::JetWebFormInput {
+//RS     with_rt(|rt| rt.web.form_inputs.get(input.wrapping_sub(1) as usize).cloned())
+//RS         .expect("checked WebFormInput owner")
+//RS }
+//RS 
+//RS fn web_typed_form(form: i64) -> web_rt::JetWebFormTyped {
+//RS     with_rt(|rt| rt.web.typed_forms.get(form.wrapping_sub(1) as usize).cloned())
+//RS         .expect("checked WebFormTyped owner")
+//RS }
+//RS 
+//RS fn web_form_input_handle(rt: &mut crate::runtime_host::JitRuntime, input: web_rt::JetWebFormInput) -> i64 {
+//RS     rt.web.form_inputs.push(input);
+//RS     rt.web.form_inputs.len() as i64
+//RS }
+//RS 
+//RS fn web_typed_form_handle(rt: &mut crate::runtime_host::JitRuntime, form: web_rt::JetWebFormTyped) -> i64 {
+//RS     rt.web.typed_forms.push(form);
+//RS     rt.web.typed_forms.len() as i64
+//RS }
+//RS 
+//RS fn web_form_field_spec(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     value: i64,
+//RS ) -> Result<web_rt::JetWebFormFieldSpec, String> {
+//RS     let field = |index| rt.heap.record_get_int(value, index).expect("checked form field descriptor");
+//RS     let value_type = match rt.heap.record_get_int(field(1), 0) {
+//RS         Some(0) => web_rt::JetWebFormValueType::String,
+//RS         Some(1) => web_rt::JetWebFormValueType::Int,
+//RS         Some(2) => web_rt::JetWebFormValueType::Bool,
+//RS         Some(3) => web_rt::JetWebFormValueType::Float,
+//RS         _ => panic!("checked WebFormValueType variant"),
+//RS     };
+//RS     let control = match rt.heap.record_get_int(field(5), 0) {
+//RS         Some(0) => web_rt::JetWebFormControl::Text,
+//RS         Some(1) => web_rt::JetWebFormControl::Email,
+//RS         Some(2) => web_rt::JetWebFormControl::URL,
+//RS         Some(3) => web_rt::JetWebFormControl::Password,
+//RS         Some(4) => web_rt::JetWebFormControl::Number,
+//RS         Some(5) => web_rt::JetWebFormControl::Date,
+//RS         Some(6) => web_rt::JetWebFormControl::Checkbox,
+//RS         Some(7) => web_rt::JetWebFormControl::Hidden,
+//RS         _ => panic!("checked WebFormControl variant"),
+//RS     };
+//RS     let optional = |index| {
+//RS         let (present, payload) = crate::runtime_host::jit_result_parts(rt, field(index))
+//RS             .expect("checked optional form text");
+//RS         present.then(|| rt.heap.clone_string(payload as i64).expect("checked form text"))
+//RS     };
+//RS     let mut spec = web_rt::JetWebFormFieldSpec::new(
+//RS         web_record_text(rt, value, 0),
+//RS         value_type,
+//RS         rt.heap.record_get_bool(value, 2).expect("checked required field"),
+//RS     )?
+//RS         .with_control(control)
+//RS         .with_label(web_record_text(rt, value, 4))?
+//RS         .with_wire_name(web_record_text(rt, value, 7))?;
+//RS     if let Some(default) = optional(3) {
+//RS         spec = spec.default_value(default)?;
+//RS     }
+//RS     if let Some(group) = optional(6) {
+//RS         spec = spec.in_group(group)?;
+//RS     }
+//RS     Ok(spec)
+//RS }
+//RS 
+//RS fn web_form_decoded_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     input: web_rt::JetWebFormDecodedInput,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(3);
+//RS     let name = rt.heap.alloc_string(input.type_name);
+//RS     let values = web_map_handle(rt, input.values);
+//RS     let wire_values = web_map_handle(rt, input.wire_values);
+//RS     let _ = rt.heap.record_set_string(record, 0, name);
+//RS     let _ = rt.heap.record_set_int(record, 1, values);
+//RS     let _ = rt.heap.record_set_int(record, 2, wire_values);
+//RS     record
+//RS }
+//RS 
+//RS fn web_form_error_map_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     errors: std::collections::BTreeMap<String, Vec<String>>,
+//RS ) -> i64 {
+//RS     let map = rt.heap.alloc_empty_map();
+//RS     for (field, messages) in errors {
+//RS         let field = rt.heap.alloc_string(field);
+//RS         let messages = web_string_list_handle(rt, messages);
+//RS         let _ = rt.heap.map_insert(map, field, messages);
+//RS     }
+//RS     map
+//RS }
+//RS 
+//RS fn web_form_action_error_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     error: web_rt::JetWebFormActionError,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(2);
+//RS     let fields = web_form_error_map_handle(rt, error.field_errors);
+//RS     let form = web_string_list_handle(rt, error.form_errors);
+//RS     let _ = rt.heap.record_set_int(record, 0, fields);
+//RS     let _ = rt.heap.record_set_int(record, 1, form);
+//RS     record
+//RS }
+//RS 
+//RS fn web_form_action_error_value(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     value: i64,
+//RS ) -> web_rt::JetWebFormActionError {
+//RS     let fields = rt.heap.record_get_int(value, 0).expect("checked form action field errors");
+//RS     let count = rt.heap.map_len(fields).expect("checked form action error map");
+//RS     let mut field_errors = std::collections::BTreeMap::new();
+//RS     for index in 0..count {
+//RS         let field = rt.heap.map_key_at(fields, index).expect("checked form error field");
+//RS         let field = rt.heap.clone_string(field).expect("checked form error field name");
+//RS         let messages = rt.heap.map_value_at(fields, index).expect("checked form error messages");
+//RS         field_errors.insert(field, web_string_list_value(rt, messages));
+//RS     }
+//RS     let form = rt.heap.record_get_int(value, 1).expect("checked form action errors");
+//RS     web_rt::JetWebFormActionError {
+//RS         field_errors,
+//RS         form_errors: web_string_list_value(rt, form),
+//RS     }
+//RS }
+//RS 
+//RS fn web_form_field_state_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     state: web_rt::JetWebFormFieldState,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(7);
+//RS     let name = rt.heap.alloc_string(state.name);
+//RS     let value_type = web_enum_handle(rt, state.value_type as i64);
+//RS     let value = rt.heap.alloc_string(state.value);
+//RS     let errors = web_string_list_handle(rt, state.errors);
+//RS     let _ = rt.heap.record_set_string(record, 0, name);
+//RS     let _ = rt.heap.record_set_int(record, 1, value_type);
+//RS     let _ = rt.heap.record_set_bool(record, 2, state.required);
+//RS     let _ = rt.heap.record_set_string(record, 3, value);
+//RS     let _ = rt.heap.record_set_bool(record, 4, state.touched);
+//RS     let _ = rt.heap.record_set_bool(record, 5, state.validating);
+//RS     let _ = rt.heap.record_set_int(record, 6, errors);
+//RS     record
+//RS }
+//RS 
+//RS fn web_form_state_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     state: web_rt::JetWebFormState,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(7);
+//RS     let status = web_enum_handle(rt, state.status as i64);
+//RS     let fields = rt.heap.alloc_empty_map();
+//RS     for (name, state) in state.fields {
+//RS         let name = rt.heap.alloc_string(name);
+//RS         let state = web_form_field_state_handle(rt, state);
+//RS         let _ = rt.heap.map_insert(fields, name, state);
+//RS     }
+//RS     let _ = rt.heap.record_set_int(record, 0, status);
+//RS     let _ = rt.heap.record_set_int(record, 1, fields);
+//RS     for (index, text) in [state.action, state.method, state.result, state.error].into_iter().enumerate() {
+//RS         let text = rt.heap.alloc_string(text);
+//RS         let _ = rt.heap.record_set_string(record, index as i64 + 2, text);
+//RS     }
+//RS     let submissions = web_int_handle(rt, state.submission_count as i64);
+//RS     let _ = rt.heap.record_set_int(record, 6, submissions);
+//RS     record
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_input(name: i64, fields: i64) -> i64 {
+//RS     let input = with_rt(|rt| {
+//RS         let name = rt.heap.clone_string(name).expect("checked form input name");
+//RS         let fields = web_raw_list(rt, fields).expect("checked form input fields")
+//RS             .into_iter().map(|field| web_form_field_spec(rt, field))
+//RS             .collect::<Result<Vec<_>, _>>()?;
+//RS         web_rt::jet_web_forms_input(name, fields)
+//RS     });
+//RS     web_result_handle(input, web_form_input_handle)
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_input_rename(input: i64, name: i64, wire_name: i64) -> i64 {
+//RS     let input = web_form_input(input);
+//RS     let (name, wire_name) = with_rt(|rt| (
+//RS         rt.heap.clone_string(name).expect("checked form field name"),
+//RS         rt.heap.clone_string(wire_name).expect("checked form wire name"),
+//RS     ));
+//RS     web_result_handle(web_rt::jet_web_forms_input_rename(input, name, wire_name), web_form_input_handle)
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_input_exclude(input: i64, name: i64) -> i64 {
+//RS     let input = web_form_input(input);
+//RS     let name = with_rt(|rt| rt.heap.clone_string(name).expect("checked form field name"));
+//RS     web_result_handle(web_rt::jet_web_forms_input_exclude(input, name), web_form_input_handle)
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_input_group(input: i64, name: i64, group: i64) -> i64 {
+//RS     let input = web_form_input(input);
+//RS     let (name, group) = with_rt(|rt| (
+//RS         rt.heap.clone_string(name).expect("checked form field name"),
+//RS         rt.heap.clone_string(group).expect("checked form group"),
+//RS     ));
+//RS     web_result_handle(web_rt::jet_web_forms_input_group(input, name, group), web_form_input_handle)
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_input_replace(input: i64, name: i64, field: i64) -> i64 {
+//RS     let input = web_form_input(input);
+//RS     let (name, field) = with_rt(|rt| (
+//RS         rt.heap.clone_string(name).expect("checked form field name"),
+//RS         web_form_field_spec(rt, field),
+//RS     ));
+//RS     web_result_handle(
+//RS         field.and_then(|field| web_rt::jet_web_forms_input_replace(input, name, field)),
+//RS         web_form_input_handle,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_jit_web_form(input: i64, action: i64) -> i64 {
+//RS     let input = web_form_input(input);
+//RS     let action = with_rt(|rt| rt.heap.clone_string(action).expect("checked form action"));
+//RS     let form = web_rt::jet_web_form(&input, action);
+//RS     with_rt(|rt| web_typed_form_handle(rt, form))
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed(input: i64, action: i64) -> i64 {
+//RS     let input = web_form_input(input);
+//RS     let action = with_rt(|rt| rt.heap.clone_string(action).expect("checked form action"));
+//RS     web_result_handle(web_rt::jet_web_forms_typed(&input, action), web_typed_form_handle)
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_set(form: i64, name: i64, value: i64) -> i64 {
+//RS     let form = web_typed_form(form);
+//RS     let (name, value) = with_rt(|rt| (
+//RS         rt.heap.clone_string(name).expect("checked form field name"),
+//RS         rt.heap.clone_string(value).expect("checked form field value"),
+//RS     ));
+//RS     web_result_handle(web_rt::jet_web_forms_typed_set(&form, name, value), |_, ()| 0)
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_blur(form: i64, name: i64) -> i64 {
+//RS     let form = web_typed_form(form);
+//RS     let name = with_rt(|rt| rt.heap.clone_string(name).expect("checked form field name"));
+//RS     web_result_handle(web_rt::jet_web_forms_typed_blur(&form, name), |_, ()| 0)
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_validate(form: i64) -> i64 {
+//RS     web_result_handle(web_rt::jet_web_forms_typed_validate(&web_typed_form(form)), |_, ()| 0)
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_validate_async(form: i64) -> i64 {
+//RS     let validation = web_rt::jet_web_forms_typed_validate_async(&web_typed_form(form));
+//RS     with_rt(|rt| {
+//RS         rt.web.form_validations.push(Some(validation));
+//RS         rt.web.form_validations.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_submit(form: i64) -> i64 {
+//RS     web_result_handle(web_rt::jet_web_forms_typed_submit(&web_typed_form(form)), |rt, value| rt.heap.alloc_string(value))
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_submit_async(form: i64) -> i64 {
+//RS     let submission = web_rt::jet_web_forms_typed_submit_async(&web_typed_form(form));
+//RS     with_rt(|rt| {
+//RS         rt.web.form_submissions.push(Some(submission));
+//RS         rt.web.form_submissions.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_no_script(form: i64) -> i64 {
+//RS     web_result_handle(web_rt::jet_web_forms_typed_no_script(&web_typed_form(form)), |rt, value| rt.heap.alloc_string(value))
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_post(form: i64, body: i64) -> i64 {
+//RS     let form = web_typed_form(form);
+//RS     let body = with_rt(|rt| rt.heap.clone_string(body).expect("checked form POST body"));
+//RS     web_result_handle(web_rt::jet_web_forms_typed_post(&form, body), |rt, value| rt.heap.alloc_string(value))
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_decode_post(form: i64, body: i64) -> i64 {
+//RS     let form = web_typed_form(form);
+//RS     let body = with_rt(|rt| rt.heap.clone_string(body).expect("checked form POST body"));
+//RS     web_result_handle(web_rt::jet_web_forms_typed_decode_post(&form, body), web_form_decoded_handle)
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_html(form: i64) -> i64 {
+//RS     let html = web_rt::jet_web_forms_typed_html(&web_typed_form(form));
+//RS     with_rt(|rt| rt.heap.alloc_string(html))
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_show(form: i64) -> i64 {
+//RS     let show = web_rt::jet_web_forms_typed_show(&web_typed_form(form));
+//RS     with_rt(|rt| rt.heap.alloc_string(show))
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_state(form: i64) -> i64 {
+//RS     let state = web_rt::jet_web_forms_typed_state(&web_typed_form(form));
+//RS     with_rt(|rt| web_form_state_handle(rt, state))
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_lifecycle(form: i64) -> i64 {
+//RS     let state = web_rt::jet_web_forms_typed_lifecycle(&web_typed_form(form));
+//RS     with_rt(|rt| {
+//RS         let record = rt.heap.alloc_record(4);
+//RS         let status = web_enum_handle(rt, state.status as i64);
+//RS         let result = rt.heap.alloc_string(state.result);
+//RS         let error = rt.heap.alloc_string(state.error);
+//RS         let generation = web_int_handle(rt, state.generation as i64);
+//RS         let _ = rt.heap.record_set_int(record, 0, status);
+//RS         let _ = rt.heap.record_set_string(record, 1, result);
+//RS         let _ = rt.heap.record_set_string(record, 2, error);
+//RS         let _ = rt.heap.record_set_int(record, 3, generation);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_errors(form: i64) -> i64 {
+//RS     let errors = web_rt::jet_web_forms_typed_errors(&web_typed_form(form));
+//RS     with_rt(|rt| {
+//RS         let record = rt.heap.alloc_record(2);
+//RS         let fields = web_form_error_map_handle(rt, errors.fields);
+//RS         let form = web_string_list_handle(rt, errors.form);
+//RS         let _ = rt.heap.record_set_int(record, 0, fields);
+//RS         let _ = rt.heap.record_set_int(record, 1, form);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_focus(form: i64, name: i64) -> i64 {
+//RS     let form = web_typed_form(form);
+//RS     let name = with_rt(|rt| rt.heap.clone_string(name).expect("checked form field name"));
+//RS     web_result_handle(web_rt::jet_web_forms_typed_focus(&form, name), |_, ()| 0)
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_cancel(form: i64) {
+//RS     web_rt::jet_web_forms_typed_cancel(&web_typed_form(form));
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_select_field(form: i64, name: i64) -> i64 {
+//RS     let form = web_typed_form(form);
+//RS     let name = with_rt(|rt| rt.heap.clone_string(name).expect("checked form field name"));
+//RS     web_result_handle(web_rt::jet_web_forms_typed_select_field(&form, name), |rt, subscription| {
+//RS         rt.reactive.deriveds.push(crate::Reactive::DerivedSlot::typed(
+//RS             subscription,
+//RS             |state| with_rt(|rt| web_form_field_state_handle(rt, state)),
+//RS         ));
+//RS         rt.reactive.deriveds.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_validation_wait(validation: i64) -> i64 {
+//RS     let validation = with_rt(|rt| rt.web.form_validations
+//RS         .get_mut(validation.wrapping_sub(1) as usize).and_then(Option::take))
+//RS         .expect("checked unconsumed form validation");
+//RS     web_result_handle(web_rt::jet_web_forms_typed_validation_wait(validation), |_, ()| 0)
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_validation_cancel(validation: i64) {
+//RS     with_rt(|rt| web_rt::jet_web_forms_typed_validation_cancel(
+//RS         rt.web.form_validations.get(validation.wrapping_sub(1) as usize)
+//RS             .and_then(Option::as_ref).expect("checked unconsumed form validation"),
+//RS     ));
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_submission_wait(submission: i64) -> i64 {
+//RS     let submission = with_rt(|rt| rt.web.form_submissions
+//RS         .get_mut(submission.wrapping_sub(1) as usize).and_then(Option::take))
+//RS         .expect("checked unconsumed form submission");
+//RS     web_result_handle(web_rt::jet_web_forms_typed_submission_wait(submission), |rt, value| rt.heap.alloc_string(value))
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_submission_cancel(submission: i64) {
+//RS     with_rt(|rt| web_rt::jet_web_forms_typed_submission_cancel(
+//RS         rt.web.form_submissions.get(submission.wrapping_sub(1) as usize)
+//RS             .and_then(Option::as_ref).expect("checked unconsumed form submission"),
+//RS     ));
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_set_async_validator(
+//RS     form: i64,
+//RS     name: i64,
+//RS     timing: i64,
+//RS     debounce: i64,
+//RS     validator: i64,
+//RS ) -> i64 {
+//RS     let form = web_typed_form(form);
+//RS     let (epoch, validator) = Concurrency::http_callable_snapshot(validator)
+//RS         .expect("checked form validator owner");
+//RS     let (name, timing, debounce) = with_rt(|rt| {
+//RS         let timing = match rt.heap.record_get_int(timing, 0) {
+//RS             Some(0) => web_rt::JetWebFormValidationTiming::Change,
+//RS             Some(1) => web_rt::JetWebFormValidationTiming::Blur,
+//RS             Some(2) => web_rt::JetWebFormValidationTiming::Submit,
+//RS             _ => panic!("checked WebFormValidationTiming variant"),
+//RS         };
+//RS         (
+//RS             rt.heap.clone_string(name).expect("checked validated form field"),
+//RS             timing,
+//RS             debounce as u64,
+//RS         )
+//RS     });
+//RS     web_result_handle(
+//RS         web_rt::jet_web_forms_typed_set_async_validator(&form, name, timing, debounce, move |value| {
+//RS             Concurrency::try_with_http_jet_runtime_at(epoch, || {
+//RS                 let value = with_rt(|rt| rt.heap.alloc_string(value));
+//RS                 web_query_callback_for_kernel(validator, value).map(|_| ())
+//RS             }).expect("retained form validator runtime")
+//RS         }),
+//RS         |_, ()| 0,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_typed_set_action(form: i64, action: i64) {
+//RS     let form = web_typed_form(form);
+//RS     let (epoch, action) = Concurrency::http_callable_snapshot(action)
+//RS         .expect("checked typed form action owner");
+//RS     web_rt::jet_web_forms_typed_set_action(&form, move |input| {
+//RS         Concurrency::try_with_http_jet_runtime_at(epoch, || {
+//RS             let input = with_rt(|rt| web_form_decoded_handle(rt, input));
+//RS             let result = crate::runtime_host::invoke_universal_unary(action, input)
+//RS                 .expect("checked typed form action invocation");
+//RS             with_rt(|rt| {
+//RS                 let (ok, value) = crate::runtime_host::jit_result_parts(rt, result)
+//RS                     .expect("checked typed form action report");
+//RS                 if ok {
+//RS                     Ok(rt.heap.clone_string(value as i64).expect("checked form action result"))
+//RS                 } else {
+//RS                     Err(web_form_action_error_value(rt, value as i64))
+//RS                 }
+//RS             })
+//RS         }).expect("retained typed form action runtime")
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_action_error() -> i64 {
+//RS     with_rt(|rt| web_form_action_error_handle(rt, web_rt::jet_web_forms_action_error()))
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_action_field_error(error: i64, name: i64, message: i64) -> i64 {
+//RS     let (error, name, message) = with_rt(|rt| {
+//RS         let error = web_form_action_error_value(rt, error);
+//RS         (
+//RS             error,
+//RS             rt.heap.clone_string(name).expect("checked action error field"),
+//RS             rt.heap.clone_string(message).expect("checked action field error"),
+//RS         )
+//RS     });
+//RS     let error = web_rt::jet_web_forms_action_field_error(error, name, message);
+//RS     with_rt(|rt| web_form_action_error_handle(rt, error))
+//RS }
+//RS 
+//RS fn jet_jit_web_forms_action_form_error(error: i64, message: i64) -> i64 {
+//RS     let (error, message) = with_rt(|rt| {
+//RS         let error = web_form_action_error_value(rt, error);
+//RS         (
+//RS             error,
+//RS             rt.heap.clone_string(message).expect("checked action form error"),
+//RS         )
+//RS     });
+//RS     let error = web_rt::jet_web_forms_action_form_error(error, message);
+//RS     with_rt(|rt| web_form_action_error_handle(rt, error))
+//RS }
+//RS 
+//RS fn web_table(table: i64) -> web_rt::JetWebTable<i64> {
+//RS     with_rt(|rt| {
+//RS         rt.web.tables.get(table.saturating_sub(1) as usize)
+//RS             .cloned().expect("checked WebTable handle")
+//RS     })
+//RS }
+//RS 
+//RS fn web_table_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     table: web_rt::JetWebTable<i64>,
+//RS ) -> i64 {
+//RS     rt.web.tables.push(table);
+//RS     rt.web.tables.len() as i64
+//RS }
+//RS 
+//RS fn web_table_rows_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     rows: Vec<web_rt::JetWebTableRow<i64>>,
+//RS ) -> i64 {
+//RS     let list = rt.heap.alloc_empty_list();
+//RS     for row in rows {
+//RS         let value = rt.heap.alloc_record(2);
+//RS         let key = rt.heap.alloc_string(row.key);
+//RS         let _ = rt.heap.record_set_string(value, 0, key);
+//RS         let _ = rt.heap.record_set_int(value, 1, row.value);
+//RS         let _ = rt.heap.list_push_int(list, value);
+//RS     }
+//RS     list
+//RS }
+//RS 
+//RS fn web_table_state_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     state: web_rt::JetWebTableState,
+//RS ) -> i64 {
+//RS     let value = rt.heap.alloc_record(7);
+//RS     let sort = state.sort.map(|sort| {
+//RS         let value = rt.heap.alloc_record(2);
+//RS         let column = rt.heap.alloc_string(sort.column);
+//RS         let direction = web_enum_handle(rt, match sort.direction {
+//RS             web_rt::JetWebTableSortDirection::Ascending => 0,
+//RS             web_rt::JetWebTableSortDirection::Descending => 1,
+//RS         });
+//RS         let _ = rt.heap.record_set_string(value, 0, column);
+//RS         let _ = rt.heap.record_set_int(value, 1, direction);
+//RS         value
+//RS     });
+//RS     let sort = crate::runtime_host::alloc_jit_result(rt, sort.is_some(), sort.unwrap_or(0) as u64);
+//RS     let filter = state.filter.map(|filter| {
+//RS         let value = rt.heap.alloc_record(2);
+//RS         let column = rt.heap.alloc_string(filter.column);
+//RS         let text = rt.heap.alloc_string(filter.value);
+//RS         let _ = rt.heap.record_set_string(value, 0, column);
+//RS         let _ = rt.heap.record_set_string(value, 1, text);
+//RS         value
+//RS     });
+//RS     let filter = crate::runtime_host::alloc_jit_result(rt, filter.is_some(), filter.unwrap_or(0) as u64);
+//RS     let page_index = web_int_handle(rt, state.page_index);
+//RS     let page_size = web_int_handle(rt, state.page_size);
+//RS     let selected_keys = web_string_list_handle(rt, &state.selected_keys);
+//RS     let anchor = web_optional_string_handle(rt, state.selection_anchor);
+//RS     let mode = web_enum_handle(rt, match state.page_mode {
+//RS         web_rt::JetWebTablePageMode::Client => 0,
+//RS         web_rt::JetWebTablePageMode::Server => 1,
+//RS     });
+//RS     for (index, field) in [sort, filter, page_index, page_size, selected_keys, anchor, mode]
+//RS         .into_iter().enumerate()
+//RS     {
+//RS         let _ = rt.heap.record_set_int(value, index as i64, field);
+//RS     }
+//RS     value
+//RS }
+//RS 
+//RS fn web_table_page_value(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     page: i64,
+//RS ) -> web_rt::JetWebTablePage<i64> {
+//RS     let rows = rt.heap.record_get_int(page, 0).expect("checked Table page rows");
+//RS     let keys = rt.heap.record_get_int(page, 1).expect("checked Table page keys");
+//RS     let rows = web_raw_list(rt, rows).expect("checked Table page row list");
+//RS     let row_keys = web_string_list_value(rt, keys);
+//RS     let mut counts = [0; 4];
+//RS     for (index, count) in counts.iter_mut().enumerate() {
+//RS         let value = rt.heap.record_get_int(page, index as i64 + 2)
+//RS             .expect("checked Table page count");
+//RS         *count = web_int_value(rt, value);
+//RS     }
+//RS     web_rt::JetWebTablePage {
+//RS         rows, row_keys, total_rows: counts[0], page_index: counts[1],
+//RS         page_size: counts[2], page_count: counts[3],
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_web_table_new_keyed(name: i64, rows: i64, callback: i64) -> i64 {
+//RS     let callback = web_callable(callback).expect("checked Table key callback");
+//RS     let (name, rows) = with_rt(|rt| (
+//RS         rt.heap.clone_string(name).expect("checked Table name"),
+//RS         web_raw_list(rt, rows).expect("checked Table rows"),
+//RS     ));
+//RS     let table = web_rt::jet_web_table_new_keyed(name, rows, move |row| {
+//RS         web_invoke_string(callback, *row)
+//RS     });
+//RS     with_rt(|rt| web_table_handle(rt, table))
+//RS }
+//RS 
+//RS fn jet_jit_web_table_with_column(table: i64, column: i64) -> i64 {
+//RS     let column = with_rt(|rt| {
+//RS         rt.web.table_columns.get(column.saturating_sub(1) as usize)
+//RS             .cloned().expect("checked Table column handle")
+//RS     });
+//RS     let table = web_rt::jet_web_table_with_column(&web_table(table), column);
+//RS     with_rt(|rt| web_table_handle(rt, table))
+//RS }
+//RS 
+//RS fn jet_jit_web_table_with_server_page(table: i64, callback: i64) -> i64 {
+//RS     let callback = web_callable(callback).expect("checked Table page loader");
+//RS     let table = web_rt::jet_web_table_with_server_page(&web_table(table), move |state| {
+//RS         let state = with_rt(|rt| web_table_state_handle(rt, state));
+//RS         let result = crate::runtime_host::invoke_universal_unary(callback, state)
+//RS             .expect("checked Table page loader thunk");
+//RS         with_rt(|rt| {
+//RS             let (ok, value) = crate::runtime_host::jit_result_parts(rt, result)
+//RS                 .expect("checked Table page loader outcome");
+//RS             if ok {
+//RS                 Ok(web_table_page_value(rt, value as i64))
+//RS             } else {
+//RS                 Err(rt.heap.clone_string(value as i64).expect("checked Table page loader report"))
+//RS             }
+//RS         })
+//RS     });
+//RS     with_rt(|rt| web_table_handle(rt, table))
+//RS }
+//RS 
+//RS fn jet_jit_web_table_state(table: i64) -> i64 {
+//RS     let state = web_rt::jet_web_table_state(&web_table(table));
+//RS     with_rt(|rt| web_table_state_handle(rt, state))
+//RS }
+//RS 
+//RS fn jet_jit_web_table_facts(table: i64) -> i64 {
+//RS     let facts = web_rt::jet_web_table_facts(&web_table(table));
+//RS     with_rt(|rt| rt.heap.alloc_string(facts))
+//RS }
+//RS 
+//RS fn jet_jit_web_table_keys(table: i64) -> i64 {
+//RS     web_result_handle(web_rt::jet_web_table_keys(&web_table(table)), |rt, keys| {
+//RS         web_string_list_handle(rt, &keys)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_table_page_state(table: i64) -> i64 {
+//RS     web_result_handle(web_rt::jet_web_table_page_state(&web_table(table)), |rt, page| {
+//RS         web_table_page_handle(rt, &page)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_table_sort_by(table: i64, column: i64, direction: i64) -> i64 {
+//RS     let (column, direction) = with_rt(|rt| (
+//RS         rt.heap.clone_string(column).expect("checked Table sort column"),
+//RS         match rt.heap.record_get_int(direction, 0) {
+//RS             Some(0) => web_rt::JetWebTableSortDirection::Ascending,
+//RS             Some(1) => web_rt::JetWebTableSortDirection::Descending,
+//RS             _ => panic!("checked Table sort direction"),
+//RS         },
+//RS     ));
+//RS     let table = web_rt::jet_web_table_sort_by(&web_table(table), column, direction);
+//RS     with_rt(|rt| web_table_handle(rt, table))
+//RS }
+//RS 
+//RS fn jet_jit_web_table_filter_by(table: i64, column: i64, value: i64) -> i64 {
+//RS     let (column, value) = with_rt(|rt| (
+//RS         rt.heap.clone_string(column).expect("checked Table filter column"),
+//RS         rt.heap.clone_string(value).expect("checked Table filter value"),
+//RS     ));
+//RS     let table = web_rt::jet_web_table_filter_by(&web_table(table), column, value);
+//RS     with_rt(|rt| web_table_handle(rt, table))
+//RS }
+//RS 
+//RS fn jet_jit_web_table_paginate(table: i64, index: i64, size: i64) -> i64 {
+//RS     let table = web_rt::jet_web_table_paginate(&web_table(table), index, size);
+//RS     with_rt(|rt| web_table_handle(rt, table))
+//RS }
+//RS 
+//RS fn jet_jit_web_table_set_rows(table: i64, rows: i64) -> i64 {
+//RS     let rows = with_rt(|rt| web_raw_list(rt, rows).expect("checked Table rows"));
+//RS     web_result_handle(web_rt::jet_web_table_set_rows(&web_table(table), rows), |_, ()| 0)
+//RS }
+//RS 
+//RS fn jet_jit_web_table_set_selected(table: i64, key: i64, selected: i64) -> i64 {
+//RS     let key = with_rt(|rt| rt.heap.clone_string(key).expect("checked Table selection key"));
+//RS     web_result_handle(
+//RS         web_rt::jet_web_table_set_selected(&web_table(table), key, selected != 0),
+//RS         web_table_handle,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_jit_web_table_toggle_selection(table: i64, key: i64) -> i64 {
+//RS     let key = with_rt(|rt| rt.heap.clone_string(key).expect("checked Table selection key"));
+//RS     web_result_handle(
+//RS         web_rt::jet_web_table_toggle_selection(&web_table(table), key), web_table_handle,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_jit_web_table_clear_selection(table: i64) -> i64 {
+//RS     let table = web_rt::jet_web_table_clear_selection(&web_table(table));
+//RS     with_rt(|rt| web_table_handle(rt, table))
+//RS }
+//RS 
+//RS fn jet_jit_web_table_selected_keys(table: i64) -> i64 {
+//RS     let keys = web_rt::jet_web_table_selected_keys(&web_table(table));
+//RS     with_rt(|rt| web_string_list_handle(rt, &keys))
+//RS }
+//RS 
+//RS fn jet_jit_web_table_selected_rows(table: i64) -> i64 {
+//RS     web_result_handle(web_rt::jet_web_table_selected_rows(&web_table(table)), web_table_rows_handle)
+//RS }
+//RS 
+//RS fn jet_jit_web_table_insert_row(table: i64, row: i64) -> i64 {
+//RS     web_result_handle(web_rt::jet_web_table_insert_row(&web_table(table), row), |rt, key| {
+//RS         rt.heap.alloc_string(key)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_table_replace_row(table: i64, key: i64, row: i64) -> i64 {
+//RS     let key = with_rt(|rt| rt.heap.clone_string(key).expect("checked Table row key"));
+//RS     web_result_handle(web_rt::jet_web_table_replace_row(&web_table(table), key, row), |_, ()| 0)
+//RS }
+//RS 
+//RS fn jet_jit_web_table_update_row(table: i64, key: i64, callback: i64) -> i64 {
+//RS     let key = with_rt(|rt| rt.heap.clone_string(key).expect("checked Table row key"));
+//RS     let callback = web_callable(callback).expect("checked Table row update callback");
+//RS     web_result_handle(
+//RS         web_rt::jet_web_table_update_row(&web_table(table), key, move |row| {
+//RS             web_invoke_update(callback, row);
+//RS         }),
+//RS         |_, ()| 0,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_jit_web_table_remove_row(table: i64, key: i64) -> i64 {
+//RS     let key = with_rt(|rt| rt.heap.clone_string(key).expect("checked Table row key"));
+//RS     web_result_handle(web_rt::jet_web_table_remove_row(&web_table(table), key), |_, row| row)
+//RS }
+//RS 
+//RS fn jet_jit_web_table_first_page(table: i64) -> i64 {
+//RS     let table = web_rt::jet_web_table_first_page(&web_table(table));
+//RS     with_rt(|rt| web_table_handle(rt, table))
+//RS }
+//RS 
+//RS fn jet_jit_web_table_next_page(table: i64) -> i64 {
+//RS     let table = web_rt::jet_web_table_next_page(&web_table(table));
+//RS     with_rt(|rt| web_table_handle(rt, table))
+//RS }
+//RS 
+//RS fn jet_jit_web_table_last_page(table: i64) -> i64 {
+//RS     web_result_handle(web_rt::jet_web_table_last_page(&web_table(table)), web_table_handle)
+//RS }
+//RS 
+//RS fn jet_jit_web_table_visible_rows(table: i64, plan: i64) -> i64 {
+//RS     let plan = with_rt(|rt| web_virtual_plan_value(rt, plan).expect("checked virtual plan"));
+//RS     web_result_handle(
+//RS         web_rt::jet_web_table_visible_rows(&web_table(table), &plan), web_table_rows_handle,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_jit_web_table_new(name: i64, rows: i64) -> i64 {
+//RS     let (name, rows) = with_rt(|rt| (
+//RS         rt.heap.clone_string(name).expect("checked Table name"),
+//RS         web_raw_list(rt, rows).expect("checked Table rows"),
+//RS     ));
+//RS     let table = web_rt::jet_web_table(name, rows);
+//RS     with_rt(|rt| web_table_handle(rt, table))
+//RS }
+//RS 
+//RS fn jet_jit_web_table_column(name: i64, cell_type: i64, callback: i64) -> i64 {
+//RS     let slot = web_callable(callback).expect("checked Table column callback");
+//RS     let (name, cell_type) = with_rt(|rt| {
+//RS         (
+//RS             rt.heap.clone_string(name).expect("checked Table column name"),
+//RS             rt.heap.clone_string(cell_type).expect("checked Table cell type"),
+//RS         )
+//RS     });
+//RS     let column = web_rt::jet_web_table_column(name, cell_type, move |row: &i64| {
+//RS         web_invoke_string(slot, *row)
+//RS     });
+//RS     with_rt(|rt| {
+//RS         rt.web.table_columns.push(column);
+//RS         rt.web.table_columns.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_table_sort(rows: i64, descending: i64, callback: i64) -> i64 {
+//RS     let slot = web_callable(callback).expect("checked Table sort callback");
+//RS     let rows = with_rt(|rt| web_raw_list(rt, rows).expect("checked Table rows"));
+//RS     let sorted = web_rt::jet_web_table_sort(&rows, descending != 0, |row| {
+//RS         web_invoke_string(slot, *row)
+//RS     });
+//RS     with_rt(|rt| web_raw_list_handle(rt, sorted))
+//RS }
+//RS 
+//RS fn jet_jit_web_table_filter(rows: i64, callback: i64) -> i64 {
+//RS     let slot = web_callable(callback).expect("checked Table filter callback");
+//RS     let rows = with_rt(|rt| web_raw_list(rt, rows).expect("checked Table rows"));
+//RS     let filtered = web_rt::jet_web_table_filter(&rows, |row| {
+//RS         web_invoke_bool(slot, *row)
+//RS     });
+//RS     with_rt(|rt| web_raw_list_handle(rt, filtered))
+//RS }
+//RS 
+//RS fn jet_jit_web_table_page(rows: i64, page_index: i64, page_size: i64) -> i64 {
+//RS     let rows = with_rt(|rt| web_raw_list(rt, rows).expect("checked Table rows"));
+//RS     let page = web_rt::jet_web_table_page(&rows, page_index, page_size);
+//RS     with_rt(|rt| web_table_page_handle(rt, &page))
+//RS }
+//RS 
+//RS fn jet_jit_web_virtual_window(
+//RS     total_count: i64,
+//RS     scroll_offset: i64,
+//RS     viewport_size: i64,
+//RS     estimated_item_size: i64,
+//RS     overscan: i64,
+//RS ) -> i64 {
+//RS     let window = web_rt::jet_web_virtual_window(
+//RS         total_count, scroll_offset, viewport_size, estimated_item_size, overscan,
+//RS     );
+//RS     with_rt(|rt| web_virtual_window_handle(rt, &window))
+//RS }
+//RS 
+//RS fn jet_jit_web_virtual_window_measured(
+//RS     total_count: i64,
+//RS     scroll_offset: i64,
+//RS     viewport_size: i64,
+//RS     fallback_item_size: i64,
+//RS     overscan: i64,
+//RS     measurements: i64,
+//RS ) -> i64 {
+//RS     let measurements = with_rt(|rt| web_raw_list(rt, measurements).unwrap_or_default());
+//RS     let window = web_rt::jet_web_virtual_window_measured(
+//RS         total_count,
+//RS         scroll_offset,
+//RS         viewport_size,
+//RS         fallback_item_size,
+//RS         overscan,
+//RS         &measurements,
+//RS     );
+//RS     with_rt(|rt| web_virtual_window_handle(rt, &window))
+//RS }
+//RS 
+//RS fn jet_jit_web_virtual_slice(rows: i64, window: i64) -> i64 {
+//RS     let (rows, window) = with_rt(|rt| {
+//RS         (
+//RS             web_raw_list(rt, rows).unwrap_or_default(),
+//RS             web_virtual_window_value(rt, window).unwrap_or_else(|| {
+//RS                 web_rt::jet_web_virtual_window(0, 0, 0, 1, 0)
+//RS             }),
+//RS         )
+//RS     });
+//RS     let sliced = web_rt::jet_web_virtual_slice(&rows, &window);
+//RS     with_rt(|rt| web_raw_list_handle(rt, sliced))
+//RS }
+//RS 
+//RS fn jet_jit_web_virtual_indices(window: i64) -> i64 {
+//RS     let window = with_rt(|rt| {
+//RS         web_virtual_window_value(rt, window)
+//RS             .unwrap_or_else(|| web_rt::jet_web_virtual_window(0, 0, 0, 1, 0))
+//RS     });
+//RS     let indices = web_rt::jet_web_virtual_indices(&window)
+//RS         .into_iter()
+//RS         .map(|value| with_rt(|rt| web_int_handle(rt, value)))
+//RS         .collect();
+//RS     with_rt(|rt| web_raw_list_handle(rt, indices))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_new(name: i64, initial: i64) -> i64 {
+//RS     let name = with_rt(|rt| rt.heap.clone_string(name).expect("checked Store name"));
+//RS     let store = web_rt::jet_web_store(name, initial);
+//RS     with_rt(|rt| {
+//RS         rt.web.stores.push(store);
+//RS         rt.web.stores.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_store_with_history(name: i64, initial: i64, history_limit: i64) -> i64 {
+//RS     let name = with_rt(|rt| rt.heap.clone_string(name).expect("checked Store name"));
+//RS     let store = web_rt::jet_web_store_with_history(name, initial, history_limit);
+//RS     with_rt(|rt| {
+//RS         rt.web.stores.push(store);
+//RS         rt.web.stores.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn web_store(store: i64) -> web_rt::JetWebStore<i64> {
+//RS     with_rt(|rt| {
+//RS         rt.web.stores.get(store.saturating_sub(1) as usize)
+//RS             .cloned().expect("checked WebStore handle")
+//RS     })
+//RS }
+//RS 
+//RS fn web_store_transaction_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     transaction: web_rt::JetWebStoreTransaction<i64>,
+//RS ) -> i64 {
+//RS     let value = rt.heap.alloc_record(5);
+//RS     let generation = web_int_handle(rt, transaction.generation as i64);
+//RS     let action = rt.heap.alloc_string(transaction.action);
+//RS     let changed_fields = web_string_list_handle(rt, &transaction.changed_fields);
+//RS     let _ = rt.heap.record_set_int(value, 0, generation);
+//RS     let _ = rt.heap.record_set_string(value, 1, action);
+//RS     let _ = rt.heap.record_set_int(value, 2, changed_fields);
+//RS     let _ = rt.heap.record_set_int(value, 3, transaction.before);
+//RS     let _ = rt.heap.record_set_int(value, 4, transaction.after);
+//RS     value
+//RS }
+//RS 
+//RS fn web_store_event_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     event: web_rt::JetWebStoreEvent,
+//RS ) -> i64 {
+//RS     let value = rt.heap.alloc_record(6);
+//RS     let sequence = web_int_handle(rt, event.sequence as i64);
+//RS     let generation = web_int_handle(rt, event.generation as i64);
+//RS     let action = rt.heap.alloc_string(event.action);
+//RS     let changed_fields = web_string_list_handle(rt, &event.changed_fields);
+//RS     let cursor = web_int_handle(rt, event.cursor as i64);
+//RS     let kind = web_enum_handle(rt, match event.kind {
+//RS         web_rt::JetWebStoreEventKind::Transaction => 0,
+//RS         web_rt::JetWebStoreEventKind::Navigation => 1,
+//RS         web_rt::JetWebStoreEventKind::Rollback => 2,
+//RS     });
+//RS     let _ = rt.heap.record_set_int(value, 0, sequence);
+//RS     let _ = rt.heap.record_set_int(value, 1, generation);
+//RS     let _ = rt.heap.record_set_string(value, 2, action);
+//RS     let _ = rt.heap.record_set_int(value, 3, changed_fields);
+//RS     let _ = rt.heap.record_set_int(value, 4, cursor);
+//RS     let _ = rt.heap.record_set_int(value, 5, kind);
+//RS     value
+//RS }
+//RS 
+//RS fn web_optional_raw(value: Option<i64>) -> i64 {
+//RS     with_rt(|rt| match value {
+//RS         Some(value) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
+//RS         None => crate::runtime_host::alloc_jit_result(rt, false, 0),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_store_value(store: i64) -> i64 {
+//RS     web_rt::jet_web_store_value(&web_store(store))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_signal(store: i64) -> i64 {
+//RS     let signal = web_rt::jet_web_store_signal(&web_store(store));
+//RS     with_rt(|rt| {
+//RS         rt.reactive.signals.push(crate::Reactive::SignalSlot::Word(signal));
+//RS         rt.reactive.signals.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_store_state_signal(store: i64) -> i64 {
+//RS     let signal = web_rt::jet_web_store_state_signal(&web_store(store));
+//RS     with_rt(|rt| {
+//RS         rt.reactive.signals.push(crate::Reactive::SignalSlot::Word(signal));
+//RS         rt.reactive.signals.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_store_set(store: i64, value: i64) -> i64 {
+//RS     let transaction = web_rt::jet_web_store_set(&web_store(store), value);
+//RS     with_rt(|rt| web_store_transaction_handle(rt, transaction))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_set_state(store: i64, value: i64) -> i64 {
+//RS     let transaction = web_rt::jet_web_store_set_state(&web_store(store), value);
+//RS     with_rt(|rt| web_store_transaction_handle(rt, transaction))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_back(store: i64) -> i64 {
+//RS     web_optional_raw(web_rt::jet_web_store_back(&web_store(store)))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_forward(store: i64) -> i64 {
+//RS     web_optional_raw(web_rt::jet_web_store_forward(&web_store(store)))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_jump(store: i64, generation: i64) -> i64 {
+//RS     web_optional_raw(web_rt::jet_web_store_jump(&web_store(store), generation))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_scrub(store: i64, generation: i64) -> i64 {
+//RS     web_optional_raw(web_rt::jet_web_store_scrub(&web_store(store), generation))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_restore(store: i64, generation: i64) -> i64 {
+//RS     let generation = with_rt(|rt| web_int_value(rt, generation));
+//RS     web_optional_raw(web_rt::jet_web_store_restore(&web_store(store), generation))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_history(store: i64) -> i64 {
+//RS     let history = web_rt::jet_web_store_history(&web_store(store));
+//RS     with_rt(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for transaction in history {
+//RS             let value = web_store_transaction_handle(rt, transaction);
+//RS             let _ = rt.heap.list_push_int(list, value);
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_store_history_at(store: i64, index: i64) -> i64 {
+//RS     let transaction = web_rt::jet_web_store_history_at(&web_store(store), index);
+//RS     let value = transaction.map(|transaction| {
+//RS         with_rt(|rt| web_store_transaction_handle(rt, transaction))
+//RS     });
+//RS     web_optional_raw(value)
+//RS }
+//RS 
+//RS fn web_store_events_handle(events: Vec<web_rt::JetWebStoreEvent>) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for event in events {
+//RS             let value = web_store_event_handle(rt, event);
+//RS             let _ = rt.heap.list_push_int(list, value);
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_store_events(store: i64) -> i64 {
+//RS     web_store_events_handle(web_rt::jet_web_store_events(&web_store(store)))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_events_since(store: i64, sequence: i64) -> i64 {
+//RS     web_store_events_handle(web_rt::jet_web_store_events_since(&web_store(store), sequence))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_clear_history(store: i64) {
+//RS     web_rt::jet_web_store_clear_history(&web_store(store));
+//RS }
+//RS 
+//RS fn jet_jit_web_store_set_history_limit(store: i64, limit: i64) {
+//RS     web_rt::jet_web_store_set_history_limit(&web_store(store), limit);
+//RS }
+//RS 
+//RS fn jet_jit_web_store_history_enabled(store: i64) -> i64 {
+//RS     i64::from(web_rt::jet_web_store_history_enabled(&web_store(store)))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_history_limit(store: i64) -> i64 {
+//RS     web_rt::jet_web_store_history_limit(&web_store(store))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_cursor(store: i64) -> i64 {
+//RS     web_rt::jet_web_store_cursor(&web_store(store))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_current_generation(store: i64) -> i64 {
+//RS     web_rt::jet_web_store_current_generation(&web_store(store))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_facts_json(store: i64) -> i64 {
+//RS     let value = web_rt::jet_web_store_facts_json(&web_store(store));
+//RS     with_rt(|rt| rt.heap.alloc_string(value))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_event_json(store: i64) -> i64 {
+//RS     let value = web_rt::jet_web_store_event_json(&web_store(store));
+//RS     with_rt(|rt| rt.heap.alloc_string(value))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_inspect(store: i64) -> i64 {
+//RS     let inspection = web_rt::jet_web_store_inspect(&web_store(store));
+//RS     with_rt(|rt| {
+//RS         let value = rt.heap.alloc_record(7);
+//RS         let generation = web_int_handle(rt, inspection.generation as i64);
+//RS         let cursor = web_int_handle(rt, inspection.cursor as i64);
+//RS         let history = rt.heap.alloc_empty_list();
+//RS         for transaction in inspection.history {
+//RS             let transaction = web_store_transaction_handle(rt, transaction);
+//RS             let _ = rt.heap.list_push_int(history, transaction);
+//RS         }
+//RS         let events = rt.heap.alloc_empty_list();
+//RS         for event in inspection.events {
+//RS             let event = web_store_event_handle(rt, event);
+//RS             let _ = rt.heap.list_push_int(events, event);
+//RS         }
+//RS         let limit = web_int_handle(rt, inspection.history_limit as i64);
+//RS         let _ = rt.heap.record_set_int(value, 0, inspection.value);
+//RS         let _ = rt.heap.record_set_int(value, 1, generation);
+//RS         let _ = rt.heap.record_set_int(value, 2, cursor);
+//RS         let _ = rt.heap.record_set_int(value, 3, history);
+//RS         let _ = rt.heap.record_set_int(value, 4, events);
+//RS         let _ = rt.heap.record_set_int(value, 5, limit);
+//RS         let _ = rt.heap.record_set_bool(value, 6, inspection.history_enabled);
+//RS         value
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_store_derived(store: i64, callback: i64) -> i64 {
+//RS     let callback = web_callable(callback).expect("checked Store derived callback");
+//RS     let derived = web_rt::jet_web_store_derived(&web_store(store), move |value| {
+//RS         crate::runtime_host::invoke_universal_unary(callback, value)
+//RS             .expect("checked Store derived callback thunk")
+//RS     });
+//RS     with_rt(|rt| {
+//RS         rt.reactive.deriveds.push(crate::Reactive::DerivedSlot::Word(derived));
+//RS         rt.reactive.deriveds.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_store_selector(store: i64, callback: i64) -> i64 {
+//RS     let callback = web_callable(callback).expect("checked Store selector callback");
+//RS     let derived = web_rt::jet_web_store_selector(&web_store(store), move |value| {
+//RS         crate::runtime_host::invoke_universal_unary(callback, value)
+//RS             .expect("checked Store selector callback thunk")
+//RS     });
+//RS     with_rt(|rt| {
+//RS         rt.reactive.deriveds.push(crate::Reactive::DerivedSlot::Word(derived));
+//RS         rt.reactive.deriveds.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_store_subscribe(store: i64, callback: i64) -> i64 {
+//RS     let callback = web_callable(callback).expect("checked Store subscription callback");
+//RS     let subscription = web_rt::jet_web_store_subscribe(&web_store(store), move |value| {
+//RS         let _ = crate::runtime_host::invoke_universal_unary(callback, value)
+//RS             .expect("checked Store subscription callback thunk");
+//RS     });
+//RS     with_rt(|rt| {
+//RS         rt.web.store_subscriptions.push(subscription);
+//RS         rt.web.store_subscriptions.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_store_subscribe_selector(store: i64, selector: i64, callback: i64) -> i64 {
+//RS     let selector = web_callable(selector).expect("checked Store subscription selector");
+//RS     let callback = web_callable(callback).expect("checked Store subscription callback");
+//RS     let subscription = web_rt::jet_web_store_subscribe_selector(
+//RS         &web_store(store),
+//RS         move |value| crate::runtime_host::invoke_universal_unary(selector, value)
+//RS             .expect("checked Store subscription selector thunk"),
+//RS         move |value| {
+//RS             let _ = crate::runtime_host::invoke_universal_unary(callback, value)
+//RS                 .expect("checked Store subscription callback thunk");
+//RS         },
+//RS     );
+//RS     with_rt(|rt| {
+//RS         rt.web.store_subscriptions.push(subscription);
+//RS         rt.web.store_subscriptions.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn web_store_subscription(subscription: i64) -> web_rt::JetWebStoreSubscription {
+//RS     with_rt(|rt| {
+//RS         rt.web.store_subscriptions.get(subscription.saturating_sub(1) as usize)
+//RS             .cloned().expect("checked WebStoreSubscription handle")
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_store_subscription_unsubscribe(subscription: i64) {
+//RS     web_rt::jet_web_store_subscription_unsubscribe(&web_store_subscription(subscription));
+//RS }
+//RS 
+//RS fn jet_jit_web_store_subscription_active(subscription: i64) -> i64 {
+//RS     i64::from(web_rt::jet_web_store_subscription_active(&web_store_subscription(subscription)))
+//RS }
+//RS 
+//RS fn web_invoke_update(callback: crate::runtime_host::JitCallableSlot, value: &mut i64) {
+//RS     // The generated thunk decodes this word into a checked typed place and
+//RS     // writes the final carrier back before this synchronous borrow ends.
+//RS     let _ = crate::runtime_host::invoke_universal_unary(callback, value as *mut i64 as i64)
+//RS         .expect("checked mutable Web callback thunk");
+//RS }
+//RS 
+//RS fn web_store_update_arguments(
+//RS     action: i64,
+//RS     changed_fields: i64,
+//RS     callback: i64,
+//RS ) -> (String, Vec<String>, impl FnOnce(&mut i64)) {
+//RS     let callback = web_callable(callback).expect("checked Store update callback");
+//RS     let (action, fields) = with_rt(|rt| (
+//RS         rt.heap.clone_string(action).expect("checked Store action"),
+//RS         web_string_list_value(rt, changed_fields),
+//RS     ));
+//RS     (action, fields, move |value| web_invoke_update(callback, value))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_transaction(store: i64, action: i64, fields: i64, callback: i64) -> i64 {
+//RS     let (action, fields, update) = web_store_update_arguments(action, fields, callback);
+//RS     let transaction = web_rt::jet_web_store_transaction(&web_store(store), action, fields, update);
+//RS     with_rt(|rt| web_store_transaction_handle(rt, transaction))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_update(store: i64, action: i64, fields: i64, callback: i64) -> i64 {
+//RS     let (action, fields, update) = web_store_update_arguments(action, fields, callback);
+//RS     let transaction = web_rt::jet_web_store_update(&web_store(store), action, fields, update);
+//RS     with_rt(|rt| web_store_transaction_handle(rt, transaction))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_batch(store: i64, action: i64, fields: i64, callback: i64) -> i64 {
+//RS     let (action, fields, update) = web_store_update_arguments(action, fields, callback);
+//RS     let transaction = web_rt::jet_web_store_batch(&web_store(store), action, fields, update);
+//RS     with_rt(|rt| web_store_transaction_handle(rt, transaction))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_optimistic(store: i64, action: i64, fields: i64, callback: i64) -> i64 {
+//RS     let (action, fields, update) = web_store_update_arguments(action, fields, callback);
+//RS     let patch = web_rt::jet_web_store_optimistic(&web_store(store), action, fields, update);
+//RS     with_rt(|rt| {
+//RS         rt.web.store_patches.push(Some(patch));
+//RS         rt.web.store_patches.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_store_patch(store: i64, action: i64, fields: i64, callback: i64) -> i64 {
+//RS     let (action, fields, update) = web_store_update_arguments(action, fields, callback);
+//RS     let patch = web_rt::jet_web_store_patch(&web_store(store), action, fields, update);
+//RS     with_rt(|rt| {
+//RS         rt.web.store_patches.push(Some(patch));
+//RS         rt.web.store_patches.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_store_patch_generation(patch: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let patch = rt.web.store_patches.get(patch.saturating_sub(1) as usize)
+//RS             .and_then(Option::as_ref).expect("checked live WebStorePatch handle");
+//RS         web_rt::jet_web_store_patch_generation(patch)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_store_patch_transaction(patch: i64) -> i64 {
+//RS     let transaction = with_rt(|rt| {
+//RS         let patch = rt.web.store_patches.get(patch.saturating_sub(1) as usize)
+//RS             .and_then(Option::as_ref).expect("checked live WebStorePatch handle");
+//RS         web_rt::jet_web_store_patch_transaction(patch)
+//RS     });
+//RS     with_rt(|rt| web_store_transaction_handle(rt, transaction))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_patch_active(patch: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let patch = rt.web.store_patches.get(patch.saturating_sub(1) as usize)
+//RS             .and_then(Option::as_ref).expect("checked live WebStorePatch handle");
+//RS         i64::from(web_rt::jet_web_store_patch_active(patch))
+//RS     })
+//RS }
+//RS 
+//RS fn web_store_take_patch(patch: i64) -> web_rt::JetWebStorePatch<i64> {
+//RS     with_rt(|rt| {
+//RS         rt.web.store_patches.get_mut(patch.saturating_sub(1) as usize)
+//RS             .and_then(Option::take).expect("checked live WebStorePatch handle")
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_store_patch_commit(patch: i64) -> i64 {
+//RS     let transaction = web_rt::jet_web_store_patch_commit(web_store_take_patch(patch));
+//RS     with_rt(|rt| web_store_transaction_handle(rt, transaction))
+//RS }
+//RS 
+//RS fn jet_jit_web_store_patch_rollback(patch: i64) -> i64 {
+//RS     web_optional_raw(web_rt::jet_web_store_patch_rollback(web_store_take_patch(patch)))
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct WebHostFns;
+//RS     register: register_web_symbols;
+//RS     declare: declare_web_host_fns(module) {
+//RS         let cc = module.target_config().default_call_conv;
+//RS 
+//RS         let mut nullary = Signature::new(cc);
+//RS         nullary.returns.push(AbiParam::new(types::I64));
+//RS         let mut unary = Signature::new(cc);
+//RS         unary.params.push(AbiParam::new(types::I64));
+//RS         unary.returns.push(AbiParam::new(types::I64));
+//RS         let mut unary_void = Signature::new(cc);
+//RS         unary_void.params.push(AbiParam::new(types::I64));
+//RS         let nullary_void = Signature::new(cc);
+//RS         let mut binary_void = Signature::new(cc);
+//RS         binary_void.params.push(AbiParam::new(types::I64));
+//RS         binary_void.params.push(AbiParam::new(types::I64));
+//RS         let mut binary = Signature::new(cc);
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         binary.returns.push(AbiParam::new(types::I64));
+//RS         let mut ternary = Signature::new(cc);
+//RS         for _ in 0..3 {
+//RS             ternary.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         ternary.returns.push(AbiParam::new(types::I64));
+//RS         let mut ternary_void = Signature::new(cc);
+//RS         for _ in 0..3 {
+//RS             ternary_void.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         let mut fourary = Signature::new(cc);
+//RS         for _ in 0..4 {
+//RS             fourary.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         fourary.returns.push(AbiParam::new(types::I64));
+//RS         let mut penta = Signature::new(cc);
+//RS         for _ in 0..5 {
+//RS             penta.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         penta.returns.push(AbiParam::new(types::I64));
+//RS         let mut hexa = Signature::new(cc);
+//RS         for _ in 0..6 {
+//RS             hexa.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         hexa.returns.push(AbiParam::new(types::I64));
+//RS         let mut app_method = Signature::new(cc);
+//RS         for _ in 0..7 {
+//RS             app_method.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         app_method.returns.push(AbiParam::new(types::I64));
+//RS 
+//RS         let mut route_decode = Signature::new(cc);
+//RS         route_decode.params.push(AbiParam::new(types::I64));
+//RS         route_decode.params.push(AbiParam::new(types::I64));
+//RS         route_decode.returns.push(AbiParam::new(types::I64));
+//RS 
+//RS         let mut route_encode = Signature::new(cc);
+//RS         for _ in 0..3 {
+//RS             route_encode.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         route_encode.returns.push(AbiParam::new(types::I64));
+//RS 
+//RS         let mut route_stringify = Signature::new(cc);
+//RS         route_stringify.params.push(AbiParam::new(types::I64));
+//RS         route_stringify.params.push(AbiParam::new(types::I64));
+//RS         route_stringify.returns.push(AbiParam::new(types::I64));
+//RS 
+//RS     }
+//RS     app: "jet_jit_web_app" => jet_jit_web_app: nullary;
+//RS     page: "jet_jit_web_page" => jet_jit_web_page: binary;
+//RS     app_method: "jet_jit_web_app_method" => jet_jit_web_app_method: app_method;
+//RS     route_decode_tree: "jet_jit_web_route_decode_tree" => jet_jit_web_route_decode_tree: route_decode;
+//RS     route_encode_result: "jet_jit_web_route_encode_result" => jet_jit_web_route_encode_result: route_encode;
+//RS     route_stringify_error: "jet_jit_web_route_stringify_error" => jet_jit_web_route_stringify_error: route_stringify;
+//RS     storage_local_get: "jet_jit_web_storage_local_get" => jet_jit_web_storage_local_get: unary;
+//RS     storage_local_remove: "jet_jit_web_storage_local_remove" => jet_jit_web_storage_local_remove: unary_void;
+//RS     storage_local_set: "jet_jit_web_storage_local_set" => jet_jit_web_storage_local_set: binary_void;
+//RS     storage_local_clear: "jet_jit_web_storage_local_clear" => jet_jit_web_storage_local_clear: nullary_void;
+//RS     storage_session_get: "jet_jit_web_storage_session_get" => jet_jit_web_storage_session_get: unary;
+//RS     storage_session_remove: "jet_jit_web_storage_session_remove" => jet_jit_web_storage_session_remove: unary_void;
+//RS     storage_session_set: "jet_jit_web_storage_session_set" => jet_jit_web_storage_session_set: binary_void;
+//RS     storage_session_clear: "jet_jit_web_storage_session_clear" => jet_jit_web_storage_session_clear: nullary_void;
+//RS     devserver_app: "jet_jit_devserver_app" => jet_jit_devserver_app: nullary;
+//RS     devserver_for_app: "jet_jit_devserver_for_app" => jet_jit_devserver_for_app: unary;
+//RS     devserver_html: "jet_jit_devserver_html" => jet_jit_devserver_html: binary;
+//RS     devserver_port: "jet_jit_devserver_port" => jet_jit_devserver_port: binary;
+//RS     devserver_serve: "jet_jit_devserver_serve" => jet_jit_devserver_serve: unary_void;
+//RS     // Canonical MIR Prelude rows (`core.web` `app`/`page`, `core.web.devserver`,
+//RS     // browser storage) resolve by the exact symbol the row declares; the
+//RS     // `jet_jit_*` spellings above stay for Core rows projected through
+//RS     // `CoreCallRecord::jit_symbol_candidates`.
+//RS     row_app: "jet_app" => jet_jit_web_app: nullary;
+//RS     app_sync: "jet_app_sync" => jet_jit_app_sync: binary;
+//RS     row_page: "jet_web_page" => jet_jit_web_page: binary;
+//RS     row_devserver_app: "jet_devserver_app" => jet_jit_devserver_app: nullary;
+//RS     row_devserver_for_app: "jet_devserver_for_app" => jet_jit_devserver_for_app: unary;
+//RS     web_router_new: "jet_web_router_new" => jet_jit_web_router_new: nullary;
+//RS     web_router_navigate: "jet_web_router_navigate" => jet_jit_web_router_navigate: binary;
+//RS     web_router_preload: "jet_web_router_preload" => jet_jit_web_router_preload: binary;
+//RS     web_router_current: "jet_web_router_current" => jet_jit_web_router_current: unary;
+//RS     web_router_show: "jet_web_router_show" => jet_jit_web_router_show: unary;
+//RS     web_router_link: "jet_web_router_link" => jet_jit_web_router_link: fourary;
+//RS     web_router_abort: "jet_web_router_abort" => jet_jit_web_router_abort: unary;
+//RS     web_router_stale: "jet_web_router_stale" => jet_jit_web_router_stale: binary;
+//RS     web_router_invalidate: "jet_web_router_invalidate" => jet_jit_web_router_invalidate: binary;
+//RS     web_router_collect: "jet_web_router_collect" => jet_jit_web_router_collect: binary;
+//RS     web_router_cache_state: "jet_web_router_cache_state" => jet_jit_web_router_cache_state: binary;
+//RS     web_router_cache_show: "jet_web_router_cache_show" => jet_jit_web_router_cache_show: unary;
+//RS     web_query_new: "jet_web_query_new" => jet_jit_web_query_new: binary;
+//RS     web_query_live: "jet_web_query_live" => jet_jit_web_query_live: fourary;
+//RS     web_query_subscribe: "jet_web_query_subscribe" => jet_jit_web_query_subscribe: unary;
+//RS     web_query_invalidate: "jet_web_query_invalidate" => jet_jit_web_query_invalidate: unary;
+//RS     web_query_get: "jet_web_query_get" => jet_jit_web_query_get: unary;
+//RS     web_query_state: "jet_web_query_state" => jet_jit_web_query_state: unary;
+//RS     web_query_show: "jet_web_query_show" => jet_jit_web_query_show: unary;
+//RS     web_query_queue: "jet_web_query_queue" => jet_jit_web_query_queue: binary;
+//RS     web_query_refresh: "jet_web_query_refresh" => jet_jit_web_query_refresh: unary;
+//RS     web_query_facts: "jet_web_query_facts" => jet_jit_web_query_facts: unary;
+//RS     web_query_cancel: "jet_web_query_cancel" => jet_jit_web_query_cancel: unary;
+//RS     web_query_set_online: "jet_web_query_set_online" => jet_jit_web_query_set_online: binary_void;
+//RS     web_query_set_mode: "jet_web_query_set_mode" => jet_jit_web_query_set_mode: binary_void;
+//RS     web_query_mutation_state: "jet_web_query_mutation_state" => jet_jit_web_query_mutation_state: unary;
+//RS     web_query_state_signal: "jet_web_query_state_signal" => jet_jit_web_query_state_signal: unary;
+//RS     web_query_mutation_signal: "jet_web_query_mutation_signal" => jet_jit_web_query_mutation_signal: unary;
+//RS     web_query_mutate: "jet_web_query_mutate" => jet_jit_web_query_mutate: fourary;
+//RS     web_query_mutate_with_invalidations: "jet_web_query_mutate_with_invalidations" => jet_jit_web_query_mutate_with_invalidations: penta;
+//RS     web_query_retry: "jet_web_query_retry" => jet_jit_web_query_retry: binary;
+//RS     web_form: "jet_web_form" => jet_jit_web_form: binary;
+//RS     web_forms_new: "jet_web_forms_new" => jet_jit_web_forms_new: unary;
+//RS     web_forms_field: "jet_web_forms_field" => jet_jit_web_forms_field: fourary;
+//RS     web_forms_set: "jet_web_forms_set" => jet_jit_web_forms_set: ternary;
+//RS     web_forms_blur: "jet_web_forms_blur" => jet_jit_web_forms_blur: binary;
+//RS     web_forms_validate: "jet_web_forms_validate" => jet_jit_web_forms_validate: unary;
+//RS     web_forms_validate_async: "jet_web_forms_validate_async" => jet_jit_web_forms_validate_async: unary;
+//RS     web_forms_submit: "jet_web_forms_submit" => jet_jit_web_forms_submit: unary;
+//RS     web_forms_no_script: "jet_web_forms_no_script" => jet_jit_web_forms_no_script: unary;
+//RS     web_forms_html: "jet_web_forms_html" => jet_jit_web_forms_html: unary;
+//RS     web_forms_show: "jet_web_forms_show" => jet_jit_web_forms_show: unary;
+//RS     web_forms_input: "jet_web_forms_input" => jet_jit_web_forms_input: binary;
+//RS     web_forms_input_rename: "jet_web_forms_input_rename" => jet_jit_web_forms_input_rename: ternary;
+//RS     web_forms_input_exclude: "jet_web_forms_input_exclude" => jet_jit_web_forms_input_exclude: binary;
+//RS     web_forms_input_group: "jet_web_forms_input_group" => jet_jit_web_forms_input_group: ternary;
+//RS     web_forms_input_replace: "jet_web_forms_input_replace" => jet_jit_web_forms_input_replace: ternary;
+//RS     web_forms_typed: "jet_web_forms_typed" => jet_jit_web_forms_typed: binary;
+//RS     web_forms_typed_set: "jet_web_forms_typed_set" => jet_jit_web_forms_typed_set: ternary;
+//RS     web_forms_typed_set_async_validator: "jet_web_forms_typed_set_async_validator" => jet_jit_web_forms_typed_set_async_validator: penta;
+//RS     web_forms_typed_set_action: "jet_web_forms_typed_set_action" => jet_jit_web_forms_typed_set_action: binary_void;
+//RS     web_forms_typed_blur: "jet_web_forms_typed_blur" => jet_jit_web_forms_typed_blur: binary;
+//RS     web_forms_typed_validate: "jet_web_forms_typed_validate" => jet_jit_web_forms_typed_validate: unary;
+//RS     web_forms_typed_validate_async: "jet_web_forms_typed_validate_async" => jet_jit_web_forms_typed_validate_async: unary;
+//RS     web_forms_typed_submit: "jet_web_forms_typed_submit" => jet_jit_web_forms_typed_submit: unary;
+//RS     web_forms_typed_submit_async: "jet_web_forms_typed_submit_async" => jet_jit_web_forms_typed_submit_async: unary;
+//RS     web_forms_typed_no_script: "jet_web_forms_typed_no_script" => jet_jit_web_forms_typed_no_script: unary;
+//RS     web_forms_typed_post: "jet_web_forms_typed_post" => jet_jit_web_forms_typed_post: binary;
+//RS     web_forms_typed_decode_post: "jet_web_forms_typed_decode_post" => jet_jit_web_forms_typed_decode_post: binary;
+//RS     web_forms_typed_html: "jet_web_forms_typed_html" => jet_jit_web_forms_typed_html: unary;
+//RS     web_forms_typed_show: "jet_web_forms_typed_show" => jet_jit_web_forms_typed_show: unary;
+//RS     web_forms_typed_state: "jet_web_forms_typed_state" => jet_jit_web_forms_typed_state: unary;
+//RS     web_forms_typed_lifecycle: "jet_web_forms_typed_lifecycle" => jet_jit_web_forms_typed_lifecycle: unary;
+//RS     web_forms_typed_errors: "jet_web_forms_typed_errors" => jet_jit_web_forms_typed_errors: unary;
+//RS     web_forms_typed_focus: "jet_web_forms_typed_focus" => jet_jit_web_forms_typed_focus: binary;
+//RS     web_forms_typed_cancel: "jet_web_forms_typed_cancel" => jet_jit_web_forms_typed_cancel: unary_void;
+//RS     web_forms_typed_select_field: "jet_web_forms_typed_select_field" => jet_jit_web_forms_typed_select_field: binary;
+//RS     web_forms_typed_validation_wait: "jet_web_forms_typed_validation_wait" => jet_jit_web_forms_typed_validation_wait: unary;
+//RS     web_forms_typed_validation_cancel: "jet_web_forms_typed_validation_cancel" => jet_jit_web_forms_typed_validation_cancel: unary_void;
+//RS     web_forms_typed_submission_wait: "jet_web_forms_typed_submission_wait" => jet_jit_web_forms_typed_submission_wait: unary;
+//RS     web_forms_typed_submission_cancel: "jet_web_forms_typed_submission_cancel" => jet_jit_web_forms_typed_submission_cancel: unary_void;
+//RS     web_forms_action_error: "jet_web_forms_action_error" => jet_jit_web_forms_action_error: nullary;
+//RS     web_forms_action_field_error: "jet_web_forms_action_field_error" => jet_jit_web_forms_action_field_error: ternary;
+//RS     web_forms_action_form_error: "jet_web_forms_action_form_error" => jet_jit_web_forms_action_form_error: binary;
+//RS     web_table_new: "jet_web_table" => jet_jit_web_table_new: binary;
+//RS     web_table_column: "jet_web_table_column" => jet_jit_web_table_column: ternary;
+//RS     web_table_sort: "jet_web_table_sort" => jet_jit_web_table_sort: ternary;
+//RS     web_table_filter: "jet_web_table_filter" => jet_jit_web_table_filter: binary;
+//RS     web_table_page: "jet_web_table_page" => jet_jit_web_table_page: ternary;
+//RS     web_table_new_keyed: "jet_web_table_new_keyed" => jet_jit_web_table_new_keyed: ternary;
+//RS     web_table_with_column: "jet_web_table_with_column" => jet_jit_web_table_with_column: binary;
+//RS     web_table_with_server_page: "jet_web_table_with_server_page" => jet_jit_web_table_with_server_page: binary;
+//RS     web_table_state: "jet_web_table_state" => jet_jit_web_table_state: unary;
+//RS     web_table_facts: "jet_web_table_facts" => jet_jit_web_table_facts: unary;
+//RS     web_table_keys: "jet_web_table_keys" => jet_jit_web_table_keys: unary;
+//RS     web_table_page_state: "jet_web_table_page_state" => jet_jit_web_table_page_state: unary;
+//RS     web_table_sort_by: "jet_web_table_sort_by" => jet_jit_web_table_sort_by: ternary;
+//RS     web_table_filter_by: "jet_web_table_filter_by" => jet_jit_web_table_filter_by: ternary;
+//RS     web_table_paginate: "jet_web_table_paginate" => jet_jit_web_table_paginate: ternary;
+//RS     web_table_set_rows: "jet_web_table_set_rows" => jet_jit_web_table_set_rows: binary;
+//RS     web_table_set_selected: "jet_web_table_set_selected" => jet_jit_web_table_set_selected: ternary;
+//RS     web_table_toggle_selection: "jet_web_table_toggle_selection" => jet_jit_web_table_toggle_selection: binary;
+//RS     web_table_clear_selection: "jet_web_table_clear_selection" => jet_jit_web_table_clear_selection: unary;
+//RS     web_table_selected_keys: "jet_web_table_selected_keys" => jet_jit_web_table_selected_keys: unary;
+//RS     web_table_selected_rows: "jet_web_table_selected_rows" => jet_jit_web_table_selected_rows: unary;
+//RS     web_table_insert_row: "jet_web_table_insert_row" => jet_jit_web_table_insert_row: binary;
+//RS     web_table_replace_row: "jet_web_table_replace_row" => jet_jit_web_table_replace_row: ternary;
+//RS     web_table_update_row: "jet_web_table_update_row" => jet_jit_web_table_update_row: ternary;
+//RS     web_table_remove_row: "jet_web_table_remove_row" => jet_jit_web_table_remove_row: binary;
+//RS     web_table_first_page: "jet_web_table_first_page" => jet_jit_web_table_first_page: unary;
+//RS     web_table_next_page: "jet_web_table_next_page" => jet_jit_web_table_next_page: unary;
+//RS     web_table_last_page: "jet_web_table_last_page" => jet_jit_web_table_last_page: unary;
+//RS     web_table_visible_rows: "jet_web_table_visible_rows" => jet_jit_web_table_visible_rows: binary;
+//RS     web_virtual_plan: "jet_web_virtual_plan" => jet_jit_web_virtual_plan: hexa;
+//RS     web_virtual_plan_measured: "jet_web_virtual_plan_measured" => jet_jit_web_virtual_plan_measured: app_method;
+//RS     web_virtual_plan_from_sizes: "jet_web_virtual_plan_from_sizes" => jet_jit_web_virtual_plan_from_sizes: app_method;
+//RS     web_virtual_plan_measure: "jet_web_virtual_plan_measure" => jet_jit_web_virtual_plan_measure: ternary;
+//RS     web_virtual_plan_slice: "jet_web_virtual_plan_slice" => jet_jit_web_virtual_plan_slice: binary;
+//RS     web_virtual_plan_indices: "jet_web_virtual_plan_indices" => jet_jit_web_virtual_plan_indices: unary;
+//RS     web_virtual_plan_facts: "jet_web_virtual_plan_facts" => jet_jit_web_virtual_plan_facts: unary;
+//RS     web_virtual_plan_viewport: "jet_web_virtual_plan_viewport" => jet_jit_web_virtual_plan_viewport: unary;
+//RS     web_virtual_plan_viewport_state: "jet_web_virtual_plan_viewport_state" => jet_jit_web_virtual_plan_viewport_state: unary;
+//RS     web_virtual_plan_scroll_to: "jet_web_virtual_plan_scroll_to" => jet_jit_web_virtual_plan_scroll_to: binary_void;
+//RS     web_virtual_plan_resize: "jet_web_virtual_plan_resize" => jet_jit_web_virtual_plan_resize: ternary_void;
+//RS     web_virtual_plan_viewport_measure: "jet_web_virtual_plan_viewport_measure" => jet_jit_web_virtual_plan_viewport_measure: ternary_void;
+//RS     web_virtual_window: "jet_web_virtual_window" => jet_jit_web_virtual_window: penta;
+//RS     web_virtual_window_measured: "jet_web_virtual_window_measured" => jet_jit_web_virtual_window_measured: hexa;
+//RS     web_virtual_slice: "jet_web_virtual_slice" => jet_jit_web_virtual_slice: binary;
+//RS     web_virtual_indices: "jet_web_virtual_indices" => jet_jit_web_virtual_indices: unary;
+//RS     web_virtual_window_facts: "jet_web_virtual_window_facts" => jet_jit_web_virtual_window_facts: unary;
+//RS     web_store_new: "jet_web_store" => jet_jit_web_store_new: binary;
+//RS     web_store_with_history: "jet_web_store_with_history" => jet_jit_web_store_with_history: ternary;
+//RS     web_store_transaction: "jet_web_store_transaction" => jet_jit_web_store_transaction: fourary;
+//RS     web_store_value: "jet_web_store_value" => jet_jit_web_store_value: unary;
+//RS     web_store_signal: "jet_web_store_signal" => jet_jit_web_store_signal: unary;
+//RS     web_store_state_signal: "jet_web_store_state_signal" => jet_jit_web_store_state_signal: unary;
+//RS     web_store_set: "jet_web_store_set" => jet_jit_web_store_set: binary;
+//RS     web_store_set_state: "jet_web_store_set_state" => jet_jit_web_store_set_state: binary;
+//RS     web_store_back: "jet_web_store_back" => jet_jit_web_store_back: unary;
+//RS     web_store_forward: "jet_web_store_forward" => jet_jit_web_store_forward: unary;
+//RS     web_store_jump: "jet_web_store_jump" => jet_jit_web_store_jump: binary;
+//RS     web_store_scrub: "jet_web_store_scrub" => jet_jit_web_store_scrub: binary;
+//RS     web_store_restore: "jet_web_store_restore" => jet_jit_web_store_restore: binary;
+//RS     web_store_history: "jet_web_store_history" => jet_jit_web_store_history: unary;
+//RS     web_store_history_at: "jet_web_store_history_at" => jet_jit_web_store_history_at: binary;
+//RS     web_store_events: "jet_web_store_events" => jet_jit_web_store_events: unary;
+//RS     web_store_events_since: "jet_web_store_events_since" => jet_jit_web_store_events_since: binary;
+//RS     web_store_clear_history: "jet_web_store_clear_history" => jet_jit_web_store_clear_history: unary_void;
+//RS     web_store_set_history_limit: "jet_web_store_set_history_limit" => jet_jit_web_store_set_history_limit: binary_void;
+//RS     web_store_history_enabled: "jet_web_store_history_enabled" => jet_jit_web_store_history_enabled: unary;
+//RS     web_store_history_limit: "jet_web_store_history_limit" => jet_jit_web_store_history_limit: unary;
+//RS     web_store_cursor: "jet_web_store_cursor" => jet_jit_web_store_cursor: unary;
+//RS     web_store_current_generation: "jet_web_store_current_generation" => jet_jit_web_store_current_generation: unary;
+//RS     web_store_facts_json: "jet_web_store_facts_json" => jet_jit_web_store_facts_json: unary;
+//RS     web_store_event_json: "jet_web_store_event_json" => jet_jit_web_store_event_json: unary;
+//RS     web_store_inspect: "jet_web_store_inspect" => jet_jit_web_store_inspect: unary;
+//RS     web_store_derived: "jet_web_store_derived" => jet_jit_web_store_derived: binary;
+//RS     web_store_selector: "jet_web_store_selector" => jet_jit_web_store_selector: binary;
+//RS     web_store_subscribe: "jet_web_store_subscribe" => jet_jit_web_store_subscribe: binary;
+//RS     web_store_subscribe_selector: "jet_web_store_subscribe_selector" => jet_jit_web_store_subscribe_selector: ternary;
+//RS     web_store_subscription_unsubscribe: "jet_web_store_subscription_unsubscribe" => jet_jit_web_store_subscription_unsubscribe: unary_void;
+//RS     web_store_subscription_active: "jet_web_store_subscription_active" => jet_jit_web_store_subscription_active: unary;
+//RS     web_store_update: "jet_web_store_update" => jet_jit_web_store_update: fourary;
+//RS     web_store_batch: "jet_web_store_batch" => jet_jit_web_store_batch: fourary;
+//RS     web_store_optimistic: "jet_web_store_optimistic" => jet_jit_web_store_optimistic: fourary;
+//RS     web_store_patch: "jet_web_store_patch" => jet_jit_web_store_patch: fourary;
+//RS     web_store_patch_generation: "jet_web_store_patch_generation" => jet_jit_web_store_patch_generation: unary;
+//RS     web_store_patch_transaction: "jet_web_store_patch_transaction" => jet_jit_web_store_patch_transaction: unary;
+//RS     web_store_patch_active: "jet_web_store_patch_active" => jet_jit_web_store_patch_active: unary;
+//RS     web_store_patch_commit: "jet_web_store_patch_commit" => jet_jit_web_store_patch_commit: unary;
+//RS     web_store_patch_rollback: "jet_web_store_patch_rollback" => jet_jit_web_store_patch_rollback: unary;
+//RS }
+// END-PORT-PENDING 0239 crates/jet-jit/src/Web.rs:1797-3434
+

@@ -1,0 +1,60 @@
+use core.process.runtime.top_process_sandbox as sandbox
+use core.sys.target as target
+use std.process.[Command, Stdio]
+use std.time.[Duration]
+use std.io.[Cursor]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:58-90.
+#Test("sandbox_policy_preserves_target_specific_enforcement_text") {
+    text :: sandbox.policy(true, false)
+    assert(text.contains("environment=clear"))
+    if target.selected_os() == .Linux {
+        assert(text.contains("source-readonly,output-private-copy"))
+        assert(text.contains("network=isolated"))
+        assert(text.contains("privilege=no-new-privs+cap-drop-all"))
+    } else {
+        assert(text.contains("source-readonly,output-readwrite"))
+        assert(text.contains("network=denied"))
+    }
+    assert(sandbox.policy(false, true).contains("network=declared-shared"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:777-798.
+#Test("sandbox_mount_projection_preserves_max_remaining_depth_and_last_tie") {
+    exe :: OSPath.new("/host/pkg/bin/tool")
+    mounts :: [sandbox.ReadOnlyMount]{sandbox.ReadOnlyMount.new(OSPath.new("/host/pkg"), OSPath.new("/narrow")), sandbox.ReadOnlyMount.new(OSPath.new("/host"), OSPath.new("/wide")), sandbox.ReadOnlyMount.new(OSPath.new("/host"), OSPath.new("/last"))}
+    actual :: sandbox.mounted_executable_path(exe, mounts)
+    if target.selected_os() == .Linux { assert(actual == OSPath.new("/last/pkg/bin/tool")) }
+    else { assert(actual == exe) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:969-1055.
+#Test("sandbox_seatbelt_path_escaping_and_write_scope") {
+    assert(sandbox.sbpl_path(OSPath.new("/a\"b\\c")).unwrap() == "/a\\\"b\\\\c")
+    match sandbox.sbpl_path(OSPath.new("/a\nb")) {
+        Err(sandbox.Error.Unsupported(reason)) -> assert(reason == "sandbox path contains a control character"),
+        _ -> assert(false),
+    }
+    profile :: sandbox.build_profile(OSPath.new("/bin/tool"), OSPath.new("/source"), Val(OSPath.new("/output")), false, false, true, [sandbox.ReadOnlyMount]{}).unwrap()
+    assert(profile.contains("(allow file-write* (subpath \"/output\"))"))
+    assert(!profile.contains("(allow file-write* (subpath \"/source\"))"))
+    assert(profile.contains("(deny network*)"))
+    assert(profile.ends_with("(deny device*)\n"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:470-485.
+#Test("sandbox_bounded_reader_preserves_bytes_and_eof") {
+    (bytes, exceeded) :: sandbox.read_output_limited(Cursor.new([U8]{0, 10, 255, 65})).unwrap()
+    assert(bytes == [U8]{0, 10, 255, 65})
+    assert(!exceeded)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:592-726.
+#Test("sandbox_real_child_pipes_drain_and_reap") {
+    if target.selected_os() == .Linux || target.selected_os() == .MacOS {
+        // GATE #4565: kernel primitive — real child, no mock process provider.
+        child :: #Unsafe("launch a real private-group child with actual piped output") {
+            Command.new("/bin/sh").arg("-c").arg("printf out; printf err >&2").stdin(Stdio.null()).stdout(Stdio.piped()).stderr(Stdio.piped()).process_group(0).spawn().unwrap()
+        }
+        output :: sandbox.wait_with_limited_output(^child, Val(Duration.from_secs(5))).unwrap()
+        assert(output.status.success())
+        assert(output.stdout == "out".as_bytes())
+        assert(output.stderr == "err".as_bytes())
+    }
+}

@@ -1,0 +1,127 @@
+use std.io as io
+use std.net.TcpStream
+use std.net.SocketAddr
+use std.sync.Arc
+use std.time.Duration
+use rustls
+use rustls.client.danger.[HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier]
+use rustls.pki_types.[CertificateDer, ServerName, UnixTime]
+use rustls.[DigitallySignedStruct, SignatureScheme]
+use rustls.Error as TLSError
+use tests.conformance.corpus.core.port.http_server_lifecycle.*
+// GATE #4494: native TLS provider primitives retain rustls names; fixture-only verifier.
+// GATE #4494: native socket IO.
+// GATE #4409: WouldBlock and TimedOut are distinct recoverable IO kinds.
+
+// Rust: tests/http_server_lifecycle.rs:6504
+fn h2_try_read_frame(stream: &TcpStream) -> (U8, U8, U32, [U8])? {
+    header := [U8]{0}.repeat(9)
+    match stream.read_exact(&header) {
+        Ok(()) -> {}
+        Err(error) -> {
+            if error.kind() == io.ErrorKind.WouldBlock || error.kind() == io.ErrorKind.TimedOut { return None }
+            panic("frame header: {error}")
+        }
+    }
+    length :: (USize(header[0]) << 16) | (USize(header[1]) << 8) | USize(header[2])
+    payload := [U8]{0}.repeat(length)
+    stream.read_exact(&payload).expect("frame payload")
+    Val((header[3], header[4], U32.from_be_bytes(header[5..9].try_into().unwrap()) & 0x7fff_ffff, ^payload))
+}
+
+// Rust: tests/http_server_lifecycle.rs:7005
+fn rustls_fixture_client(addr: SocketAddr) -> rustls.StreamOwned<rustls.ClientConnection, TcpStream> {
+    rustls_fixture_client_with_alpn(addr, [])
+}
+
+// Rust: tests/http_server_lifecycle.rs:7011
+fn rustls_fixture_client_with_alpn(addr: SocketAddr, alpn_protocols: [[U8]]) -> rustls.StreamOwned<rustls.ClientConnection, TcpStream> {
+    _ :: rustls.crypto.ring.default_provider().install_default()
+    // Rust: tests/http_server_lifecycle.rs:7022
+    #Derive(Debug)
+    struct AcceptFixture {}
+    impl AcceptFixture.ServerCertVerifier {
+        // Rust: tests/http_server_lifecycle.rs:7024
+        fn verify_server_cert(self: &AcceptFixture, _end_entity: &CertificateDer, _intermediates: &[CertificateDer], _server_name: &ServerName, _ocsp_response: &[U8], _now: UnixTime) -> ServerCertVerified TLSError! {
+            Ok(ServerCertVerified.assertion())
+        }
+        // Rust: tests/http_server_lifecycle.rs:7034
+        fn verify_tls12_signature(self: &AcceptFixture, _message: &[U8], _cert: &CertificateDer, _dss: &DigitallySignedStruct) -> HandshakeSignatureValid TLSError! {
+            Ok(HandshakeSignatureValid.assertion())
+        }
+        // Rust: tests/http_server_lifecycle.rs:7042
+        fn verify_tls13_signature(self: &AcceptFixture, _message: &[U8], _cert: &CertificateDer, _dss: &DigitallySignedStruct) -> HandshakeSignatureValid TLSError! {
+            Ok(HandshakeSignatureValid.assertion())
+        }
+        // Rust: tests/http_server_lifecycle.rs:7050
+        fn supported_verify_schemes(self: &AcceptFixture) -> [SignatureScheme] {
+            rustls.crypto.ring.default_provider().signature_verification_algorithms.supported_schemes()
+        }
+    }
+    config := rustls.ClientConfig.builder().dangerous().with_custom_certificate_verifier(Arc.new(AcceptFixture{})).with_no_client_auth()
+    config.alpn_protocols = alpn_protocols.iter().map(protocol -> protocol.to_vec()).collect()
+    shared_config :: Arc.new(^config)
+    name :: ServerName.try_from("localhost").expect("name")
+    conn :: rustls.ClientConnection.new(shared_config, name).expect("conn")
+    sock :: TcpStream.connect(addr).expect("connect")
+    sock.set_read_timeout(Val(Duration.from_secs(2))).unwrap()
+    sock.set_write_timeout(Val(Duration.from_secs(2))).unwrap()
+    rustls.StreamOwned.new(^conn, ^sock)
+}
+
+// Rust: tests/http_server_lifecycle.rs:7076
+fn rustls_exchange(stream: &rustls.StreamOwned<rustls.ClientConnection, TcpStream>, request: &[U8]) -> String {
+    stream.write_all(request).expect("write")
+    stream.flush().expect("flush")
+    raw: [U8] := []
+    buf := [U8]{0}.repeat(4096)
+    loop {
+        match stream.read(&buf) {
+            Ok(0) -> break
+            Ok(n) -> {
+                raw.extend_from_slice(buf[..n])
+                if raw.windows(4).position(window -> window == "\r\n\r\n".as_bytes()) == .Val(header_end) {
+                    headers :: std.str.from_utf8(raw[..header_end]).unwrap_or("")
+                    length :: headers.lines().skip(1).find_map(line -> {
+                        split :: line.split_once(':')
+                        if split.is_none() { return None }
+                        (name, value) :: split.unwrap()
+                        if name.eq_ignore_ascii_case("content-length") {
+                            trimmed := value.trim() // #4303
+                            trimmed.parse::<USize>().ok()
+                        } else { None }
+                    })
+                    if length == .Val(length) {
+                        if raw.len() >= header_end + 4 + length { break }
+                    } else if headers.lines().skip(1).any(line -> line.split_once(':').is_some_and((name, value) -> {
+                        trimmed := value.trim() // #4303
+                        name.eq_ignore_ascii_case("transfer-encoding") && trimmed.eq_ignore_ascii_case("chunked")
+                    })) {
+                        trailer_values :: headers.lines().skip(1).filter_map(line -> {
+                            split :: line.split_once(':')
+                            if split.is_none() { return None }
+                            (name, value) :: split.unwrap()
+                            if name.eq_ignore_ascii_case("trailer") {
+                                trimmed := value.trim() // #4303
+                                Val(trimmed.to_string())
+                            } else { None }
+                        }).collect()
+                        trailer_names :: jet_http_parse_trailer_names(trailer_values).expect("response trailer declaration")
+                        state := JetHTTPChunkState.new(8 * 1024 * 1024, ^trailer_names)
+                        if state.advance(raw[header_end + 4..]) == .Ok(.Val(end)) {
+                            raw.truncate(header_end + 4 + end)
+                            break
+                        }
+                    } else { break }
+                }
+            }
+            Err(error) -> {
+                if error.kind() == io.ErrorKind.WouldBlock || error.kind() == io.ErrorKind.TimedOut {
+                    if !raw.is_empty() { break }
+                } else { panic("read: {error}") }
+            }
+        }
+    }
+    String.from_utf8_lossy(raw).into_owned()
+}
+

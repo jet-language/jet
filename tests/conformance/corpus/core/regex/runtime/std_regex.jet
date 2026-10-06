@@ -1,0 +1,65 @@
+use core.regex.runtime.std_regex.[JetRegex, jet_regex_compile, jet_regex_flags, jet_regex_escape]
+use std.sync.Arc
+use core.prelude.runtime.kernel_values.JetShow
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2364
+#Test("cache_reuses_compiled_program") {
+    first :: jet_regex_compile(&"__regex_cache_probe__").unwrap()
+    second :: jet_regex_compile(&"__regex_cache_probe__").unwrap()
+    assert(Arc.ptr_eq(&first.program, &second.program))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2371
+#Test("match_and_replacement_preserve_captures") {
+    regex :: JetRegex.parse(&"(?<word>[A-Za-z]+)_(\\d+)").unwrap()
+    matched :: regex.match_value(&"xx Jet_2026 yy").ok() ?? panic("expected regex match")
+    assert_eq(matched.group(0).ok(), Val("Jet_2026"))
+    assert_eq(matched.group(1).ok(), Val("Jet"))
+    assert_eq(matched.group(2).ok(), Val("2026"))
+    assert_eq(matched.name(&"word").ok(), Val("Jet"))
+    assert_eq(matched.start(), I64{3})
+    assert_eq(matched.end(), I64{11})
+    assert_eq(regex.replace(&"Jet_2026 Rust_2025", &"${{word}}:$2"), "Jet:2026 Rust:2025")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2389
+#Test("ascii_class_bitmap_keeps_unicode_fallback") {
+    not_close :: JetRegex.parse(&"[^]]+").unwrap()
+    assert_eq(not_close.find(&"abc]def").ok(), Val("abc"))
+    assert_eq(not_close.find(&"éx]def").ok(), Val("éx"))
+    alphabetic :: JetRegex.parse(&"\\p{{Alphabetic}}+").unwrap()
+    assert_eq(alphabetic.find(&"123λ!").ok(), Val("λ"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:295/755
+#Test("regex flags and escape retain exact source spelling") {
+    assert_eq(jet_regex_flags(true, true, true).jet_show(), "RegexFlags(ims)")
+    assert_eq(jet_regex_flags(false, false, false).jet_show(), "RegexFlags()")
+    assert_eq(jet_regex_escape(&"a.λ+[x]"), "a\\.λ\\+\\[x\\]")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1567/2080/2290
+#Test("regex scan retains nonoverlap and UTF8 zero width boundaries") {
+    literal :: JetRegex.parse(&"λλ").unwrap()
+    assert_eq(literal.find_all(&"λλλ λλ"), ["λλ", "λλ"])
+    empty :: JetRegex.parse(&"").unwrap()
+    assert_eq(empty.count(&"éλ"), I64{3})
+    assert_eq(empty.replace(&"éλ", &"|"), "|é|λ|")
+    greedy :: JetRegex.parse(&"a+").unwrap()
+    assert_eq(greedy.find_all(&"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bb aaa"), ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "aaa"])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1567/1799
+#Test("regex scan keeps leftmost winner captures across alternative threads") {
+    regex :: JetRegex.parse(&"(a|ab)+").unwrap()
+    text :: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxabab!"
+    matched :: regex.match_value(&text).unwrap()
+    assert_eq(matched.group(0).ok(), Val("abab"))
+    assert_eq(matched.group(1).ok(), Val("ab"))
+    assert_eq(matched.start(), I64{40})
+    assert_eq(matched.end(), I64{44})
+    assert(!regex.is_match(&"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2310
+#Test("regex replacement consumes overflow digits and unknown groups") {
+    regex :: JetRegex.parse(&"(?<word>a)").unwrap()
+    text :: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxa"
+    assert_eq(regex.replace(&text, &"$$:$1:$0:${{word}}:${{missing}}:$9223372036854775808:$x"),
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx$:a:a:a:::$x")
+}

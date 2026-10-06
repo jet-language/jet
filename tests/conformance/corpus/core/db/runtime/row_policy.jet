@@ -1,0 +1,191 @@
+// RowPolicy.rs:1–108 constructor/lowering tests; no native DB scope substitute.
+// db_policy.rs:238–262 constructor assertions + :209 exact audit are below.
+// Original :263–277 padded scope INSERT/query golden (padded-rows:1) and
+// :199–225 native scope/all-tier SQL goldens remain integration gates, NOT
+// exercised by this private corpus. sync_crdt.rs:60–69 rejection/compiled
+// owner-filter facts are ported; policy_allows execution stays with its owner.
+use core.db.runtime.std_row_policy as row_policy
+use core.text.runtime.kernel_unicode_string as row_policy_test_text
+
+fn row_policy_test_compile(table: String, expression: String) -> (table: String, compiled: row_policy.JetRowPolicyExpr) Never! {
+    row_policy.jet_db_policy_compile(table, expression) ?? panic("unexpected row policy rejection")
+}
+fn row_policy_test_table_error(table: String, expected: String) Never! {
+    _ :: row_policy.jet_db_policy_validate_table(table) ?? {
+        assert_eq(err.message, expected)
+        return
+    }
+    panic("invalid policy table accepted")
+}
+fn row_policy_test_error(table: String, expression: String, expected: String) Never! {
+    _ :: row_policy.jet_db_policy_compile(table, expression) ?? {
+        assert_eq(err.message, expected)
+        return
+    }
+    panic("invalid row policy accepted")
+}
+fn row_policy_test_unsupported(expression: String) -> String Never! {
+    "unsupported row policy expression `{expression}`; supported forms are `true` and `owner == user`"
+}
+fn row_policy_test_scalar(cp: Int) -> String Never! {
+    bytes := [U8]{}
+    row_policy_test_text.append_cp(&bytes, cp)
+    String.from_bytes(bytes) ?? panic("test scalar is valid UTF-8")
+}
+
+#Test("row policy original db constructor rejections and padded normalization") {
+    row_policy_test_error("9tasks", "true", "row policy table must be a simple identifier")
+    row_policy_test_error("two words", "true", "row policy table must be a simple identifier")
+    row_policy_test_error("tasks", "owner != user", row_policy_test_unsupported("owner != user"))
+    padded :: row_policy_test_compile("  tasks  ", "owner == user")
+    assert_eq(padded.table, "tasks")
+    assert(padded.compiled == .OwnerEqualsUser)
+}
+
+#Test("row policy both closed variants canonical predicates and owner flags") {
+    allow :: row_policy_test_compile("public", "true")
+    owner :: row_policy_test_compile("tickets", "owner == user")
+    assert(allow.compiled == .AllowAll)
+    assert_eq(allow.compiled.canonical(), "true")
+    assert_eq(allow.compiled.sql_predicate(), "true")
+    assert(!allow.compiled.requires_owner_filter())
+    assert(owner.compiled == .OwnerEqualsUser)
+    assert_eq(owner.compiled.canonical(), "owner == user")
+    assert_eq(owner.compiled.sql_predicate(), "owner = ?")
+    assert(owner.compiled.requires_owner_filter())
+    // sync_crdt.rs:60–69: original rejection and public/owner compiled facts.
+    row_policy_test_error("tickets", "owner == admin", row_policy_test_unsupported("owner == admin"))
+}
+
+#Test("row policy original exact scope audit golden and unescaped audit facts") {
+    owner :: row_policy_test_compile("tasks", "owner == user")
+    assert_eq(row_policy.jet_db_policy_audit_line(owner.table, owner.compiled, "alice"), "DBPolicy(table=tasks, user=alice, expr=owner == user, predicate=owner = ?)")
+    allow :: row_policy_test_compile("public", "true")
+    assert_eq(row_policy.jet_db_policy_audit_line(allow.table, allow.compiled, "bob"), "DBPolicy(table=public, user=bob, expr=true, predicate=true)")
+    assert_eq(row_policy.jet_db_policy_audit_line("raw table", owner.compiled, "a, user=b"), "DBPolicy(table=raw table, user=a, user=b, expr=owner == user, predicate=owner = ?)")
+}
+
+#Test("row policy canonical recompile is idempotent and preserves original inputs") {
+    table :: "  _Tasks_09  "
+    expression :: "  owner == user  "
+    first :: row_policy_test_compile(table, expression)
+    second :: row_policy_test_compile(first.table, first.compiled.canonical())
+    assert_eq(second.table, first.table)
+    assert(second.compiled == first.compiled)
+    public :: row_policy_test_compile(" public ", " true ")
+    public_again :: row_policy_test_compile(public.table, public.compiled.canonical())
+    assert_eq(public_again.table, "public")
+    assert(public_again.compiled == public.compiled)
+    assert_eq(table, "  _Tasks_09  ")
+    assert_eq(expression, "  owner == user  ")
+}
+
+#Test("row policy canonical Unicode whitespace trim includes Cc boundary whitespace") {
+    // Complete Unicode White_Space set from the pinned canonical owner.
+    whitespace :: [Int]{9, 10, 11, 12, 13, 32, 133, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288}
+    loop cp in whitespace {
+        space :: row_policy_test_scalar(cp)
+        compiled :: row_policy_test_compile("{space}tasks{space}", "{space}true{space}")
+        assert_eq(compiled.table, "tasks")
+        assert(compiled.compiled == .AllowAll)
+        row_policy_test_error("{space}", "true", "row policy needs a table and expression")
+        row_policy_test_error("tasks", "{space}", "row policy needs a table and expression")
+    }
+}
+
+#Test("row policy empty text and every Cc control inside table or expression") {
+    row_policy_test_error("", "true", "row policy needs a table and expression")
+    row_policy_test_error("tasks", "", "row policy needs a table and expression")
+    loop cp in 0..<160 {
+        if cp > 31 && cp < 127 -> next
+        control :: row_policy_test_scalar(cp)
+        row_policy_test_error("t{control}asks", "true", "row policy needs a table and expression")
+        row_policy_test_error("tasks", "tr{control}ue", "row policy needs a table and expression")
+        // Cc rejection must win even after a nonidentifier scalar was seen.
+        row_policy_test_table_error("9{control}tasks", "row policy needs a table and expression")
+    }
+}
+
+#Test("row policy table identifiers are strictly ASCII with first scalar restriction") {
+    valid :: [String]{"a", "Z", "_", "_9", "a09_Z", "tasks", "Tasks"}
+    loop table in valid -> assert_eq(row_policy.jet_db_policy_validate_table(table) ?? panic("valid identifier"), table)
+    invalid :: [String]{"0", "9tasks", "two words", "a-b", "a.b", "a/b", "a$", "'tasks'", "é", "tâsks", "α", "a９", "á", "😀", "a{row_policy_test_scalar(173)}b", "a{row_policy_test_scalar(8203)}b", "a{row_policy_test_scalar(65279)}b"}
+    loop table in invalid -> row_policy_test_table_error(table, "row policy table must be a simple identifier")
+}
+
+#Test("row policy unsupported expression quoting uses normalized text exactly") {
+    unsupported :: [String]{"TRUE", "True", "false", "owner==user", "owner  == user", "owner ==  user", "owner = user", "user == owner", "owner != user", "true;", "`quoted`", "'true'", "é", "a{row_policy_test_scalar(173)}b", "a{row_policy_test_scalar(8203)}b", "a{row_policy_test_scalar(65279)}b"}
+    loop expression in unsupported {
+        row_policy_test_error("tasks", expression, row_policy_test_unsupported(expression))
+        row_policy_test_error("tasks", " {expression} ", row_policy_test_unsupported(expression))
+    }
+}
+
+#Test("row policy table error precedence over all expression errors") {
+    row_policy_test_error("9tasks", "", "row policy table must be a simple identifier")
+    row_policy_test_error("two words", "owner != user", "row policy table must be a simple identifier")
+    row_policy_test_error("", "owner != user", "row policy needs a table and expression")
+    nul :: row_policy_test_scalar(0)
+    row_policy_test_error("9tasks", "tr{nul}ue", "row policy table must be a simple identifier")
+    row_policy_test_error("9tasks", "x".repeat(row_policy.JET_ROW_POLICY_MAX_TEXT + 1), "row policy table must be a simple identifier")
+}
+
+#Test("row policy ASCII table UTF8 byte cap minus one cap and cap plus one") {
+    cap :: row_policy.JET_ROW_POLICY_MAX_TEXT
+    loop size in (cap - 1)..<(cap + 1) {
+        table :: "a".repeat(size)
+        accepted :: row_policy_test_compile(" {table} ", "true")
+        assert_eq(accepted.table.count_bytes(), size)
+        assert_eq(accepted.table, table)
+        assert(accepted.compiled == .AllowAll)
+    }
+    row_policy_test_table_error("a".repeat(cap + 1), "row policy needs a table and expression")
+    // Size rejection precedes a leading-digit identifier rejection.
+    row_policy_test_table_error("9".repeat(cap + 1), "row policy needs a table and expression")
+}
+
+#Test("row policy nonASCII table cap is bytes not scalars after trim") {
+    cap :: row_policy.JET_ROW_POLICY_MAX_TEXT
+    below :: "a{ "é".repeat(cap /% 2 - 1)}"
+    exact :: "é".repeat(cap /% 2)
+    above :: "a{exact}"
+    assert_eq(below.count_bytes(), cap - 1)
+    assert_eq(exact.count_bytes(), cap)
+    assert_eq(above.count_bytes(), cap + 1)
+    row_policy_test_table_error(" {below} ", "row policy table must be a simple identifier")
+    row_policy_test_table_error(" {exact} ", "row policy table must be a simple identifier")
+    row_policy_test_table_error(" {above} ", "row policy needs a table and expression")
+}
+
+#Test("row policy ASCII expression cap minus one cap and cap plus one after trim") {
+    cap :: row_policy.JET_ROW_POLICY_MAX_TEXT
+    loop size in (cap - 1)..<(cap + 1) {
+        expression :: "x".repeat(size)
+        row_policy_test_error("tasks", " {expression} ", row_policy_test_unsupported(expression))
+    }
+    row_policy_test_error("tasks", "x".repeat(cap + 1), "row policy needs a table and expression")
+}
+
+#Test("row policy multibyte expression byte cap and nonCc Unicode remain unsupported") {
+    cap :: row_policy.JET_ROW_POLICY_MAX_TEXT
+    below :: "aaa{ "😀".repeat(cap /% 4 - 1)}"
+    exact :: "😀".repeat(cap /% 4)
+    above :: "a{exact}"
+    assert_eq(below.count_bytes(), cap - 1)
+    assert_eq(exact.count_bytes(), cap)
+    assert_eq(above.count_bytes(), cap + 1)
+    row_policy_test_error("tasks", " {below} ", row_policy_test_unsupported(below))
+    row_policy_test_error("tasks", " {exact} ", row_policy_test_unsupported(exact))
+    row_policy_test_error("tasks", " {above} ", "row policy needs a table and expression")
+}
+
+#Test("row policy cap ignores discarded padding and Cc wins at the cap") {
+    padding :: " ".repeat(row_policy.JET_ROW_POLICY_MAX_TEXT + 1)
+    accepted :: row_policy_test_compile("{padding}tasks{padding}", "{padding}true{padding}")
+    assert_eq(accepted.table, "tasks")
+    assert(accepted.compiled == .AllowAll)
+    nul :: row_policy_test_scalar(0)
+    tail :: "x".repeat(row_policy.JET_ROW_POLICY_MAX_TEXT - 1)
+    row_policy_test_error("tasks", "{nul}{tail}", "row policy needs a table and expression")
+    row_policy_test_table_error("{tail}{nul}", "row policy needs a table and expression")
+}

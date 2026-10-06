@@ -1,0 +1,1804 @@
+// PORT-PENDING 2074 crates-jet-jit-src-sourcecallbacks-slice-1: crates/jet-jit/src/SourceCallbacks.rs:1-1800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Per-session transport for retained Source callback invocations.
+//RS //!
+//RS //! This module deliberately does not know how a callback is evaluated. A
+//RS //! request owns only a command, task context, and one-shot reply channel; the
+//RS //! session owner pumps requests and uses its own retained Source/Eval graph to
+//RS //! execute them. Payloads and identities are session-local: there is no
+//RS //! process-wide callback table and no machine pointer in this transport.
+//RS 
+//RS use std::collections::{HashMap, VecDeque};
+//RS use std::fmt;
+//RS use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
+//RS 
+//RS /// Session-local identity for one retained callback payload.
+//RS #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+//RS pub struct SourceCallbackId(u64);
+//RS 
+//RS impl SourceCallbackId {
+//RS     /// Return the opaque session-local identity carried by this lease.
+//RS     pub fn get(self) -> u64 {
+//RS         self.0
+//RS     }
+//RS }
+//RS 
+//RS /// Session-local identity for one queued invocation.
+//RS #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+//RS pub struct SourceCallbackRequestId(u64);
+//RS 
+//RS impl SourceCallbackRequestId {
+//RS     /// Return the opaque session-local identity carried by this request.
+//RS     pub fn get(self) -> u64 {
+//RS         self.0
+//RS     }
+//RS }
+//RS 
+//RS /// Transport and helper-execution failures. Evaluation and task policy stay
+//RS /// outside this enum; ordinary Source outcomes travel through the generic
+//RS /// reply value.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum SourceCallbackError {
+//RS     /// The session has finished retirement and accepts no new work.
+//RS     Closed,
+//RS     /// Retirement has started and accepts no new payloads or invocations.
+//RS     Retiring,
+//RS     /// A lease or event referred to an identity that is no longer present.
+//RS     UnknownCallback,
+//RS     /// A release event was observed before its invocation/lease count drained.
+//RS     ReleaseNotReady,
+//RS     /// A payload is temporarily owned by an owner-side borrow or release event.
+//RS     PayloadBusy,
+//RS     /// The one-shot reply receiver was dropped before a response was sent.
+//RS     ReplyClosed,
+//RS     /// A reply value is still owned by the pump and must be taken before
+//RS     /// cleanup can be committed.
+//RS     ReplyValueBusy,
+//RS     /// The retained payload mutex was poisoned by its owner thread.
+//RS     PayloadPoisoned,
+//RS     /// The session-local checked identity space is exhausted.
+//RS     IdExhausted,
+//RS     /// Native helper dispatch or transport failed before a Source result existed.
+//RS     ExecutionFailed { detail: String },
+//RS }
+//RS impl fmt::Display for SourceCallbackError {
+//RS     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             Self::Closed => f.write_str("Source callback session is closed"),
+//RS             Self::Retiring => f.write_str("Source callback session is retiring"),
+//RS             Self::UnknownCallback => f.write_str("unknown Source callback lease"),
+//RS             Self::ReleaseNotReady => f.write_str("Source callback release is not ready"),
+//RS             Self::PayloadBusy => f.write_str("Source callback payload is temporarily owned"),
+//RS             Self::ReplyClosed => f.write_str("Source callback reply receiver is closed"),
+//RS             Self::ReplyValueBusy => f.write_str("Source callback reply value is still owned"),
+//RS             Self::PayloadPoisoned => f.write_str("Source callback payload lock is poisoned"),
+//RS             Self::IdExhausted => f.write_str("Source callback identity space is exhausted"),
+//RS             Self::ExecutionFailed { detail } => {
+//RS                 write!(f, "Source callback execution failed: {detail}")
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for SourceCallbackError {}
+//RS 
+//RS /// Failure while sending a one-shot invocation response.
+//RS #[derive(Debug, Eq, PartialEq)]
+//RS pub enum SourceCallbackReplyError<R> {
+//RS     /// The callback owner already sent one response. The rejected value stays
+//RS     /// owned by this error for Source cleanup.
+//RS     AlreadySent(Result<R, SourceCallbackError>),
+//RS     /// The producer stopped waiting. The exact result is queued to the owner
+//RS     /// pump's ReplyCleanup event and remains an invocation obligation until
+//RS     /// that event commits Source cleanup.
+//RS     Disconnected,
+//RS }
+//RS 
+//RS impl<R> fmt::Display for SourceCallbackReplyError<R> {
+//RS     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             Self::AlreadySent(_) => f.write_str("Source callback reply was already sent"),
+//RS             Self::Disconnected => {
+//RS                 f.write_str("Source callback reply receiver is disconnected")
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<R: fmt::Debug + Send + 'static> std::error::Error for SourceCallbackReplyError<R> {}
+//RS 
+//RS 
+//RS /// The owned command/context returned when enqueue is rejected. The caller
+//RS /// must decide how to clean up those Source values; this transport never drops
+//RS /// a rejected logical command implicitly.
+//RS pub struct SourceCallbackEnqueueError<C, X> {
+//RS     pub error: SourceCallbackError,
+//RS     pub command: C,
+//RS     pub context: X,
+//RS }
+//RS 
+//RS impl<C, X> SourceCallbackEnqueueError<C, X> {
+//RS     /// Split the error into its transport reason and owned command envelope.
+//RS     pub fn into_parts(self) -> (SourceCallbackError, C, X) {
+//RS         (self.error, self.command, self.context)
+//RS     }
+//RS }
+//RS 
+//RS impl<C, X> fmt::Debug for SourceCallbackEnqueueError<C, X>
+//RS where
+//RS     C: fmt::Debug,
+//RS     X: fmt::Debug,
+//RS {
+//RS     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         f.debug_struct("SourceCallbackEnqueueError")
+//RS             .field("error", &self.error)
+//RS             .field("command", &self.command)
+//RS             .field("context", &self.context)
+//RS             .finish()
+//RS     }
+//RS }
+//RS 
+//RS /// The owned payload returned when registration is rejected.
+//RS pub struct SourceCallbackRegisterError<P> {
+//RS     pub error: SourceCallbackError,
+//RS     pub payload: P,
+//RS }
+//RS 
+//RS impl<P> SourceCallbackRegisterError<P> {
+//RS     /// Split the error into its transport reason and owned payload.
+//RS     pub fn into_parts(self) -> (SourceCallbackError, P) {
+//RS         (self.error, self.payload)
+//RS     }
+//RS }
+//RS 
+//RS impl<P> fmt::Debug for SourceCallbackRegisterError<P>
+//RS where
+//RS     P: fmt::Debug,
+//RS {
+//RS     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         f.debug_struct("SourceCallbackRegisterError")
+//RS             .field("error", &self.error)
+//RS             .field("payload", &self.payload)
+//RS             .finish()
+//RS     }
+//RS }
+//RS 
+//RS /// Counts that must reach zero before a session can become retired.
+//RS #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+//RS pub struct SourceCallbackDrainStatus {
+//RS     /// Live callback lease aliases, including aliases held by producers.
+//RS     pub producers: usize,
+//RS     /// Invocations that have been dequeued but whose event is still alive.
+//RS     pub inflight: usize,
+//RS     /// Events waiting in the owner pump's queue.
+//RS     pub pending: usize,
+//RS     /// Owner-side payload borrows that must return their temporary roots.
+//RS     pub borrows: usize,
+//RS     /// Release events waiting for the owner to drop their retained payload.
+//RS     pub releases: usize,
+//RS }
+//RS 
+//RS impl SourceCallbackDrainStatus {
+//RS     fn drained(self) -> bool {
+//RS         self.producers == 0
+//RS             && self.inflight == 0
+//RS             && self.pending == 0
+//RS             && self.borrows == 0
+//RS             && self.releases == 0
+//RS     }
+//RS }
+//RS 
+//RS /// Type-erased callback-owner job retained by the origin lifecycle tracker.
+//RS pub type SourceCallbackJob = Box<
+//RS     dyn FnOnce() -> Result<(), jet_codegen::scheduler::JetTaskFailure> + Send + 'static,
+//RS >;
+//RS 
+//RS /// Result of draining callback-owner jobs.
+//RS #[derive(Debug)]
+//RS pub enum SourceCallbackJobDrainOutcome {
+//RS     /// The actual callback-session lifecycle has not closed, or jobs remain.
+//RS     Pending {
+//RS         open_callback_sessions: usize,
+//RS         pending_jobs: usize,
+//RS     },
+//RS     /// Every submitted job has been joined; failures remain typed and complete.
+//RS     Complete {
+//RS         failures: Vec<jet_codegen::scheduler::JetTaskFailure>,
+//RS     },
+//RS }
+//RS 
+//RS /// Shared object-safe seam for callback jobs owned by one origin runtime.
+//RS ///
+//RS /// Implementations must balance `session_started` and `session_finished`.
+//RS /// `close_admission` prevents new registrations but does not reject cleanup or
+//RS /// Ready jobs from sessions that already hold a registration. A drain reports
+//RS /// `Pending` until real callback sessions have closed and all queued jobs are
+//RS /// consumed. Jobs are joined in batches outside tracker locks; all job and join
+//RS /// failures are accumulated rather than short-circuiting. If a drain unwinds,
+//RS /// active and unjoined handles and their completion debt must remain available
+//RS /// for the next drain. `Complete` is valid only once no callback session or
+//RS /// job remains; accumulated failures remain available for repeat reporting.
+//RS pub trait SourceCallbackJobOwner: Send + Sync {
+//RS     /// Admit one callback session before creating its owned session state.
+//RS     /// On success, acquire exactly one session registration; on error, change
+//RS     /// no registration count.
+//RS     fn session_started(&self) -> Result<(), String>;
+//RS     /// Balance one admitted session after normal or abandonment cleanup
+//RS     /// completes; missing registrations are an invariant error, never saturated.
+//RS     fn session_finished(&self);
+//RS     /// Seal session admission while existing sessions may still submit jobs.
+//RS     fn close_admission(&self);
+//RS     /// Return the exact owned job if admission is rejected. Existing
+//RS     /// registrations may submit cleanup and Ready jobs after close.
+//RS     fn submit(&self, job: SourceCallbackJob) -> Result<(), SourceCallbackJob>;
+//RS     fn drain(&self) -> SourceCallbackJobDrainOutcome;
+//RS }
+//RS 
+//RS /// Balanced registration tying one actual callback session to its job owner.
+//RS #[must_use = "retain the registration until callback-session cleanup completes"]
+//RS pub struct SourceCallbackJobSessionRegistration {
+//RS     owner: Arc<dyn SourceCallbackJobOwner>,
+//RS }
+//RS 
+//RS impl SourceCallbackJobSessionRegistration {
+//RS     /// Register before creating the owned callback session.
+//RS     pub fn start(owner: Arc<dyn SourceCallbackJobOwner>) -> Result<Self, String> {
+//RS         owner.session_started()?;
+//RS         Ok(Self { owner })
+//RS     }
+//RS 
+//RS     /// Submit cleanup or Ready work for this still-registered session.
+//RS     pub fn submit(&self, job: SourceCallbackJob) -> Result<(), SourceCallbackJob> {
+//RS         self.owner.submit(job)
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for SourceCallbackJobSessionRegistration {
+//RS     fn drop(&mut self) {
+//RS         self.owner.session_finished();
+//RS     }
+//RS }
+//RS 
+//RS /// Retirement was requested before all producers and callback events drained.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum SourceCallbackRetireError {
+//RS     NotDrained(SourceCallbackDrainStatus),
+//RS }
+//RS 
+//RS impl fmt::Display for SourceCallbackRetireError {
+//RS     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             Self::NotDrained(status) => write!(
+//RS                 f,
+//RS                 "Source callback session is not drained (producers={}, inflight={}, pending={}, borrows={}, releases={})",
+//RS                 status.producers,
+//RS                 status.inflight,
+//RS                 status.pending,
+//RS                 status.borrows,
+//RS                 status.releases
+//RS             ),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for SourceCallbackRetireError {}
+//RS 
+//RS /// A one-shot reply returned to the producer of a queued invocation.
+//RS ///
+//RS /// The result is stored in a transport-owned cell rather than directly in a
+//RS /// channel queue.  This matters for Source values: a successful notification
+//RS /// only means that the result became available, not that the producer took it.
+//RS /// Dropping this reply therefore transfers an undelivered successful value to
+//RS /// an owner-pump cleanup event instead of letting Rust drop it in `mpsc`.
+//RS pub struct SourceCallbackReply<R> {
+//RS     cell: Arc<ReplyCell<R>>,
+//RS }
+//RS 
+//RS impl<R> SourceCallbackReply<R> {
+//RS     /// Wait for the owner pump to publish this invocation's result.
+//RS     pub fn recv(self) -> Result<R, SourceCallbackError> {
+//RS         self.cell.take_blocking()
+//RS     }
+//RS 
+//RS     /// Poll this reply without blocking.
+//RS     pub fn try_recv(&self) -> Result<Option<R>, SourceCallbackError> {
+//RS         match self.cell.try_take()? {
+//RS             Some(Ok(value)) => Ok(Some(value)),
+//RS             Some(Err(error)) => Err(error),
+//RS             None => Ok(None),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Wait for a bounded interval for the owner pump to publish this result.
+//RS     pub fn recv_timeout(
+//RS         &self,
+//RS         timeout: std::time::Duration,
+//RS     ) -> Result<Option<R>, SourceCallbackError> {
+//RS         match self.cell.take_timeout(timeout)? {
+//RS             Some(Ok(value)) => Ok(Some(value)),
+//RS             Some(Err(error)) => Err(error),
+//RS             None => Ok(None),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<R> Drop for SourceCallbackReply<R> {
+//RS     fn drop(&mut self) {
+//RS         self.cell.drop_receiver();
+//RS     }
+//RS }
+//RS 
+//RS enum ReplyCellState<R> {
+//RS     Pending,
+//RS     Ready(Option<Result<R, SourceCallbackError>>),
+//RS     ReceiverGone,
+//RS     Consumed,
+//RS }
+//RS 
+//RS /// Shared one-shot result state. `on_lost` transfers an unreceived result to
+//RS /// owner-side Source cleanup without retaining the callback state while an
+//RS /// invocation is still queued.
+//RS struct ReplyCell<R> {
+//RS     state: Mutex<ReplyCellState<R>>,
+//RS     wake: Condvar,
+//RS     completion: Arc<InvocationCompletion>,
+//RS     state_anchor: Mutex<Option<Arc<dyn std::any::Any + Send + Sync>>>,
+//RS     on_publish:
+//RS         Arc<dyn Fn() -> Option<Arc<dyn std::any::Any + Send + Sync>> + Send + Sync>,
+//RS     on_lost: Arc<dyn Fn(Result<R, SourceCallbackError>) + Send + Sync>,
+//RS }
+//RS 
+//RS impl<R> ReplyCell<R> {
+//RS     fn send(
+//RS         &self,
+//RS         result: Result<R, SourceCallbackError>,
+//RS     ) -> Result<(), Result<R, SourceCallbackError>> {
+//RS         let state_anchor = (self.on_publish)();
+//RS         let mut state = self
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         match &mut *state {
+//RS             ReplyCellState::Pending => {
+//RS                 *self
+//RS                     .state_anchor
+//RS                     .lock()
+//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner()) = state_anchor;
+//RS                 *state = ReplyCellState::Ready(Some(result));
+//RS                 self.wake.notify_all();
+//RS                 Ok(())
+//RS             }
+//RS             ReplyCellState::ReceiverGone | ReplyCellState::Consumed => Err(result),
+//RS             ReplyCellState::Ready(_) => Err(result),
+//RS         }
+//RS     }
+//RS 
+//RS     fn sender_drop(&self) {
+//RS         let mut state = self
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         match &*state {
+//RS             ReplyCellState::Pending => {
+//RS                 *state = ReplyCellState::Ready(Some(Err(SourceCallbackError::ReplyClosed)));
+//RS                 self.wake.notify_all();
+//RS             }
+//RS             ReplyCellState::ReceiverGone => self.completion.reply_done(),
+//RS             ReplyCellState::Ready(_) | ReplyCellState::Consumed => {}
+//RS         }
+//RS     }
+//RS 
+//RS     fn release_state_anchor(&self) {
+//RS         self.state_anchor
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS             .take();
+//RS     }
+//RS 
+//RS     fn take_blocking(&self) -> Result<R, SourceCallbackError> {
+//RS         let mut state = self
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         loop {
+//RS             match &mut *state {
+//RS                 ReplyCellState::Pending => {
+//RS                     state = self
+//RS                         .wake
+//RS                         .wait(state)
+//RS                         .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS                 }
+//RS                 ReplyCellState::Ready(result) => {
+//RS                     let result = result
+//RS                         .take()
+//RS                         .expect("Source callback reply result was consumed twice");
+//RS                     *state = ReplyCellState::Consumed;
+//RS                     drop(state);
+//RS                     self.completion.reply_done();
+//RS                     self.release_state_anchor();
+//RS                     return result;
+//RS                 }
+//RS                 ReplyCellState::ReceiverGone | ReplyCellState::Consumed => {
+//RS                     return Err(SourceCallbackError::ReplyClosed);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn try_take(&self) -> Result<Option<Result<R, SourceCallbackError>>, SourceCallbackError> {
+//RS         let mut state = self
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         match &mut *state {
+//RS             ReplyCellState::Pending => Ok(None),
+//RS             ReplyCellState::Ready(result) => {
+//RS                 let result = result
+//RS                     .take()
+//RS                     .expect("Source callback reply result was consumed twice");
+//RS                 *state = ReplyCellState::Consumed;
+//RS                 drop(state);
+//RS                 self.completion.reply_done();
+//RS                 self.release_state_anchor();
+//RS                 Ok(Some(result))
+//RS             }
+//RS             ReplyCellState::ReceiverGone | ReplyCellState::Consumed => {
+//RS                 Err(SourceCallbackError::ReplyClosed)
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn take_timeout(
+//RS         &self,
+//RS         timeout: std::time::Duration,
+//RS     ) -> Result<Option<Result<R, SourceCallbackError>>, SourceCallbackError> {
+//RS         let deadline = std::time::Instant::now() + timeout;
+//RS         let mut state = self
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         loop {
+//RS             match &mut *state {
+//RS                 ReplyCellState::Pending => {
+//RS                     let now = std::time::Instant::now();
+//RS                     if now >= deadline {
+//RS                         return Ok(None);
+//RS                     }
+//RS                     let remaining = deadline.saturating_duration_since(now);
+//RS                     let (next, wait) = self
+//RS                         .wake
+//RS                         .wait_timeout(state, remaining)
+//RS                         .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS                     state = next;
+//RS                     if wait.timed_out() && matches!(&*state, ReplyCellState::Pending) {
+//RS                         return Ok(None);
+//RS                     }
+//RS                 }
+//RS                 ReplyCellState::Ready(result) => {
+//RS                     let result = result
+//RS                         .take()
+//RS                         .expect("Source callback reply result was consumed twice");
+//RS                     *state = ReplyCellState::Consumed;
+//RS                     drop(state);
+//RS                     self.completion.reply_done();
+//RS                     self.release_state_anchor();
+//RS                     return Ok(Some(result));
+//RS                 }
+//RS                 ReplyCellState::ReceiverGone | ReplyCellState::Consumed => {
+//RS                     return Err(SourceCallbackError::ReplyClosed);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn drop_receiver(&self) {
+//RS         let (lost, reply_done, release_state_anchor) = {
+//RS             let mut state = self
+//RS                 .state
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             match &mut *state {
+//RS                 ReplyCellState::Pending => {
+//RS                     *state = ReplyCellState::ReceiverGone;
+//RS                     (None, false, false)
+//RS                 }
+//RS                 ReplyCellState::Ready(result) => {
+//RS                     let result = result
+//RS                         .take()
+//RS                         .expect("Source callback reply result was consumed twice");
+//RS                     *state = ReplyCellState::ReceiverGone;
+//RS                     if result.is_ok() {
+//RS                         (Some(result), false, true)
+//RS                     } else {
+//RS                         (None, true, true)
+//RS                     }
+//RS                 }
+//RS                 ReplyCellState::ReceiverGone | ReplyCellState::Consumed => {
+//RS                     (None, false, false)
+//RS                 }
+//RS             }
+//RS         };
+//RS         if let Some(result) = lost {
+//RS             (self.on_lost)(result);
+//RS         }
+//RS         if reply_done {
+//RS             self.completion.reply_done();
+//RS         }
+//RS         if release_state_anchor {
+//RS             self.release_state_anchor();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// Shared completion claim for one callback invocation.  Input cleanup and
+//RS /// reply delivery are independent obligations; callback retirement waits for
+//RS /// both claims, including when a responder is detached from its event.
+//RS struct InvocationCompletion {
+//RS     inputs_done: std::sync::atomic::AtomicBool,
+//RS     reply_done: std::sync::atomic::AtomicBool,
+//RS     finished: std::sync::atomic::AtomicBool,
+//RS     finish: Box<dyn Fn() + Send + Sync>,
+//RS }
+//RS 
+//RS impl InvocationCompletion {
+//RS     fn inputs_done(&self) {
+//RS         self.inputs_done.store(true, std::sync::atomic::Ordering::Release);
+//RS         self.try_finish();
+//RS     }
+//RS 
+//RS     fn reply_done(&self) {
+//RS         self.reply_done.store(true, std::sync::atomic::Ordering::Release);
+//RS         self.try_finish();
+//RS     }
+//RS 
+//RS     fn try_finish(&self) {
+//RS         if self.inputs_done.load(std::sync::atomic::Ordering::Acquire)
+//RS             && self.reply_done.load(std::sync::atomic::Ordering::Acquire)
+//RS             && !self.finished.swap(true, std::sync::atomic::Ordering::AcqRel)
+//RS         {
+//RS             (self.finish)();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Owner-side half of a one-shot invocation reply.
+//RS pub struct SourceCallbackResponder<R> {
+//RS     reply: Option<Arc<ReplyCell<R>>>,
+//RS     completion: Arc<InvocationCompletion>,
+//RS     state_anchor: Option<Arc<dyn std::any::Any + Send + Sync>>,
+//RS }
+//RS 
+//RS impl<R: Send + 'static> SourceCallbackResponder<R> {
+//RS     /// Publish either the callback value or a transport-level failure.
+//RS     pub fn send(
+//RS         &mut self,
+//RS         result: Result<R, SourceCallbackError>,
+//RS     ) -> Result<(), SourceCallbackReplyError<R>> {
+//RS         let Some(reply) = self.reply.take() else {
+//RS             return Err(SourceCallbackReplyError::AlreadySent(result));
+//RS         };
+//RS         match reply.send(result) {
+//RS             Ok(()) => {
+//RS                 self.state_anchor.take();
+//RS                 Ok(())
+//RS             }
+//RS             Err(result) => {
+//RS                 (reply.on_lost)(result);
+//RS                 self.state_anchor.take();
+//RS                 Err(SourceCallbackReplyError::Disconnected)
+//RS             }
+//RS         }
+//RS     }
+//RS     /// Publish a successful callback value.
+//RS     pub fn reply(&mut self, value: R) -> Result<(), SourceCallbackReplyError<R>> {
+//RS         self.send(Ok(value))
+//RS     }
+//RS 
+//RS     /// Publish a transport-level failure without inventing a Source semantic
+//RS     /// failure value.
+//RS     pub fn reject(
+//RS         &mut self,
+//RS         error: SourceCallbackError,
+//RS     ) -> Result<(), SourceCallbackReplyError<R>> {
+//RS         self.send(Err(error))
+//RS     }
+//RS 
+//RS     /// Whether this response has already been consumed.
+//RS     pub fn is_sent(&self) -> bool {
+//RS         self.reply.is_none()
+//RS     }
+//RS }
+//RS 
+//RS impl<R> Drop for SourceCallbackResponder<R> {
+//RS     fn drop(&mut self) {
+//RS         if let Some(reply) = self.reply.take() {
+//RS             // A pending receiver must still be able to observe ReplyClosed;
+//RS             // its completion claim is released when that receiver consumes or
+//RS             // abandons the terminal result.
+//RS             reply.sender_drop();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS enum PendingEvent<C, X, R> {
+//RS     Invoke {
+//RS         callback: SourceCallbackId,
+//RS         request: SourceCallbackRequestId,
+//RS         command: C,
+//RS         context: X,
+//RS         responder: SourceCallbackResponder<R>,
+//RS     },
+//RS     Cleanup {
+//RS         callback: SourceCallbackId,
+//RS         request: SourceCallbackRequestId,
+//RS         command: Option<C>,
+//RS         context: Option<X>,
+//RS         completion: Arc<InvocationCompletion>,
+//RS     },
+//RS     ReplyCleanup {
+//RS         callback: SourceCallbackId,
+//RS         request: SourceCallbackRequestId,
+//RS         result: Result<R, SourceCallbackError>,
+//RS         completion: Arc<InvocationCompletion>,
+//RS     },
+//RS     Release {
+//RS         callback: SourceCallbackId,
+//RS     },
+//RS }
+//RS /// Values left in a session when its last transport owner is abandoned. The
+//RS /// origin callback must move these packets to a live Source owner for semantic
+//RS /// cleanup; the transport does not interpret or Rust-drop them as a fallback.
+//RS pub enum SourceCallbackAbandonedEvent<C, X, R> {
+//RS     Invoke {
+//RS         callback: SourceCallbackId,
+//RS         request: SourceCallbackRequestId,
+//RS         command: C,
+//RS         context: X,
+//RS     },
+//RS     Cleanup {
+//RS         callback: SourceCallbackId,
+//RS         request: SourceCallbackRequestId,
+//RS         command: Option<C>,
+//RS         context: Option<X>,
+//RS     },
+//RS     ReplyCleanup {
+//RS         callback: SourceCallbackId,
+//RS         request: SourceCallbackRequestId,
+//RS         result: Result<R, SourceCallbackError>,
+//RS     },
+//RS }
+//RS 
+//RS /// Complete owned handoff for a session whose final transport owner is being
+//RS /// dropped. Its callback must route every payload/event to the per-origin
+//RS /// Source cleanup owner without retaining this session or creating a cycle.
+//RS pub struct SourceCallbackAbandonment<P, C, X, R> {
+//RS     callbacks: HashMap<SourceCallbackId, CallbackEntry<P>>,
+//RS     events: VecDeque<PendingEvent<C, X, R>>,
+//RS }
+//RS 
+//RS impl<P, C, X, R> SourceCallbackAbandonment<P, C, X, R> {
+//RS     pub fn is_empty(&self) -> bool {
+//RS         self.events.is_empty() && self.callbacks.values().all(|entry| entry.payload.is_none())
+//RS     }
+//RS 
+//RS     pub fn with_payload<T>(
+//RS         &mut self,
+//RS         callback: SourceCallbackId,
+//RS         body: impl FnOnce(&mut P) -> T,
+//RS     ) -> Option<T> {
+//RS         let payload = self.callbacks.get_mut(&callback)?.payload.as_mut()?;
+//RS         Some(body(payload))
+//RS     }
+//RS 
+//RS     pub fn next_payload(&mut self) -> Option<(SourceCallbackId, P)> {
+//RS         loop {
+//RS             let callback = self.callbacks.keys().next().copied()?;
+//RS             let mut entry = self.callbacks.remove(&callback)?;
+//RS             if let Some(payload) = entry.payload.take() {
+//RS                 return Some((callback, payload));
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn next_event(&mut self) -> Option<SourceCallbackAbandonedEvent<C, X, R>> {
+//RS         loop {
+//RS             match self.events.pop_front()? {
+//RS                 PendingEvent::Invoke {
+//RS                     callback,
+//RS                     request,
+//RS                     command,
+//RS                     context,
+//RS                     responder,
+//RS                 } => {
+//RS                     drop(responder);
+//RS                     return Some(SourceCallbackAbandonedEvent::Invoke {
+//RS                         callback,
+//RS                         request,
+//RS                         command,
+//RS                         context,
+//RS                     });
+//RS                 }
+//RS                 PendingEvent::Cleanup {
+//RS                     callback,
+//RS                     request,
+//RS                     command,
+//RS                     context,
+//RS                     completion: _,
+//RS                 } => {
+//RS                     return Some(SourceCallbackAbandonedEvent::Cleanup {
+//RS                         callback,
+//RS                         request,
+//RS                         command,
+//RS                         context,
+//RS                     });
+//RS                 }
+//RS                 PendingEvent::ReplyCleanup {
+//RS                     callback,
+//RS                     request,
+//RS                     result,
+//RS                     completion: _,
+//RS                 } => {
+//RS                     return Some(SourceCallbackAbandonedEvent::ReplyCleanup {
+//RS                         callback,
+//RS                         request,
+//RS                         result,
+//RS                     });
+//RS                 }
+//RS                 PendingEvent::Release { .. } => {}
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS enum SessionPhase {
+//RS     Open,
+//RS     Retiring,
+//RS     Retired,
+//RS }
+//RS 
+//RS struct CallbackEntry<P> {
+//RS     payload: Option<P>,
+//RS     leases: usize,
+//RS     inflight: usize,
+//RS     borrows: usize,
+//RS     release_requested: bool,
+//RS     release_in_queue: bool,
+//RS }
+//RS 
+//RS 
+//RS /// Weak handle passed to the scheduler notification hook. Each hook invocation
+//RS /// corresponds to one queued event; the owner must schedule one `try_next` per
+//RS /// notification or explicitly drain the session. A worker can capture a handle
+//RS /// without making the callback session own that worker or itself.
+//RS pub struct SourceCallbackReadyHandle<P, C, X, R> {
+//RS     state: Weak<Mutex<CallbackState<P, C, X, R>>>,
+//RS }
+//RS 
+//RS impl<P, C, X, R> Clone for SourceCallbackReadyHandle<P, C, X, R> {
+//RS     fn clone(&self) -> Self {
+//RS         Self {
+//RS             state: self.state.clone(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<P, C, X, R> SourceCallbackReadyHandle<P, C, X, R>
+//RS where
+//RS     P: Send + 'static,
+//RS     C: Send + 'static,
+//RS     X: Send + 'static,
+//RS     R: Send + 'static,
+//RS {
+//RS     /// Retain the existing transport only for a notified owner job. The ready
+//RS     /// hook itself remains weak and cannot make the session own its worker.
+//RS     pub fn session(&self) -> Option<SourceCallbackSession<P, C, X, R>> {
+//RS         Some(SourceCallbackSession { state: self.state.upgrade()? })
+//RS     }
+//RS 
+//RS     /// Pop and materialize exactly one ready event for an independent owner
+//RS     /// task. Returns `None` if the session was dropped or another task won.
+//RS     /// Owners must schedule one call per ready notification or drain the session.
+//RS     pub fn try_next(&self) -> Option<SourceCallbackEvent<P, C, X, R>> {
+//RS         self.session()?.try_next()
+//RS     }
+//RS }
+//RS 
+//RS fn notify_ready<P, C, X, R>(state: &Arc<Mutex<CallbackState<P, C, X, R>>>) {
+//RS     let on_ready = state
+//RS         .lock()
+//RS         .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS         .on_ready
+//RS         .clone();
+//RS     on_ready(SourceCallbackReadyHandle {
+//RS         state: Arc::downgrade(state),
+//RS     });
+//RS }
+//RS struct CallbackState<P, C, X, R> {
+//RS     phase: SessionPhase,
+//RS     next_callback: Option<u64>,
+//RS     next_request: Option<u64>,
+//RS     callbacks: HashMap<SourceCallbackId, CallbackEntry<P>>,
+//RS     queue: VecDeque<PendingEvent<C, X, R>>,
+//RS     deferred: HashMap<SourceCallbackId, VecDeque<PendingEvent<C, X, R>>>,
+//RS     wake: Arc<Condvar>,
+//RS     on_ready: Arc<dyn Fn(SourceCallbackReadyHandle<P, C, X, R>) + Send + Sync>,
+//RS     on_abandoned: Arc<dyn Fn(SourceCallbackAbandonment<P, C, X, R>) + Send + Sync>,
+//RS }
+//RS 
+//RS impl<P, C, X, R> Drop for CallbackState<P, C, X, R> {
+//RS     fn drop(&mut self) {
+//RS         let mut events = std::mem::take(&mut self.queue);
+//RS         for mut deferred in std::mem::take(&mut self.deferred).into_values() {
+//RS             events.append(&mut deferred);
+//RS         }
+//RS         (self.on_abandoned)(SourceCallbackAbandonment {
+//RS             callbacks: std::mem::take(&mut self.callbacks),
+//RS             events,
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS impl<P, C, X, R> CallbackState<P, C, X, R> {
+//RS     fn status(&self) -> SourceCallbackDrainStatus {
+//RS         SourceCallbackDrainStatus {
+//RS             producers: self.callbacks.values().map(|entry| entry.leases).sum(),
+//RS             inflight: self.callbacks.values().map(|entry| entry.inflight).sum(),
+//RS             pending: self.queue.len()
+//RS                 + self.deferred.values().map(VecDeque::len).sum::<usize>(),
+//RS             borrows: self.callbacks.values().map(|entry| entry.borrows).sum(),
+//RS             releases: self
+//RS                 .callbacks
+//RS                 .values()
+//RS                 .filter(|entry| entry.release_requested)
+//RS                 .count(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn next_callback_id(&mut self) -> Result<SourceCallbackId, SourceCallbackError> {
+//RS         let current = self.next_callback.take().ok_or(SourceCallbackError::IdExhausted)?;
+//RS         self.next_callback = current.checked_add(1);
+//RS         Ok(SourceCallbackId(current))
+//RS     }
+//RS 
+//RS     fn next_request_id(&mut self) -> Result<SourceCallbackRequestId, SourceCallbackError> {
+//RS         let current = self.next_request.take().ok_or(SourceCallbackError::IdExhausted)?;
+//RS         self.next_request = current.checked_add(1);
+//RS         Ok(SourceCallbackRequestId(current))
+//RS     }
+//RS 
+//RS     fn queue_release(&mut self, callback: SourceCallbackId) -> bool {
+//RS         let should_queue = {
+//RS             let Some(entry) = self.callbacks.get_mut(&callback) else {
+//RS                 return false;
+//RS             };
+//RS             if entry.release_requested
+//RS                 || entry.leases != 0
+//RS                 || entry.inflight != 0
+//RS                 || entry.borrows != 0
+//RS                 || entry.payload.is_none()
+//RS             {
+//RS                 false
+//RS             } else {
+//RS                 entry.release_requested = true;
+//RS                 entry.release_in_queue = true;
+//RS                 true
+//RS             }
+//RS         };
+//RS         if should_queue {
+//RS             self.queue.push_back(PendingEvent::Release { callback });
+//RS             self.wake.notify_one();
+//RS         }
+//RS         should_queue
+//RS     }
+//RS 
+//RS     fn finish_invocation(&mut self, callback: SourceCallbackId) -> bool {
+//RS         let should_release = {
+//RS             let Some(entry) = self.callbacks.get_mut(&callback) else {
+//RS                 return false;
+//RS             };
+//RS             if entry.inflight != 0 {
+//RS                 entry.inflight -= 1;
+//RS             }
+//RS             entry.leases == 0 && entry.inflight == 0 && entry.borrows == 0
+//RS         };
+//RS         let queued = should_release && self.queue_release(callback);
+//RS         self.wake.notify_all();
+//RS         queued
+//RS     }
+//RS 
+//RS     fn queue_cleanup(
+//RS         &mut self,
+//RS         callback: SourceCallbackId,
+//RS         request: SourceCallbackRequestId,
+//RS         command: Option<C>,
+//RS         context: Option<X>,
+//RS         completion: Arc<InvocationCompletion>,
+//RS     ) -> bool {
+//RS         if !self.callbacks.contains_key(&callback) {
+//RS             return false;
+//RS         }
+//RS         self.queue.push_back(PendingEvent::Cleanup {
+//RS             callback,
+//RS             request,
+//RS             command,
+//RS             context,
+//RS             completion,
+//RS         });
+//RS         self.wake.notify_one();
+//RS         true
+//RS     }
+//RS 
+//RS     fn queue_reply_cleanup(
+//RS         &mut self,
+//RS         callback: SourceCallbackId,
+//RS         request: SourceCallbackRequestId,
+//RS         result: Result<R, SourceCallbackError>,
+//RS         completion: Arc<InvocationCompletion>,
+//RS     ) -> bool {
+//RS         if !self.callbacks.contains_key(&callback) {
+//RS             return false;
+//RS         }
+//RS         self.queue.push_back(PendingEvent::ReplyCleanup {
+//RS             callback,
+//RS             request,
+//RS             result,
+//RS             completion,
+//RS         });
+//RS         self.wake.notify_one();
+//RS         true
+//RS     }
+//RS }
+//RS 
+//RS /// Owner-side invocation event. Dropping an unanswered event queues its still
+//RS /// owned command/context as a cleanup event rather than silently dropping them.
+//RS pub struct SourceCallbackInvocation<P, C, X, R> {
+//RS     state: Arc<Mutex<CallbackState<P, C, X, R>>>,
+//RS     callback: SourceCallbackId,
+//RS     request: SourceCallbackRequestId,
+//RS     command: Option<C>,
+//RS     context: Option<X>,
+//RS     responder: Option<SourceCallbackResponder<R>>,
+//RS     completion: Arc<InvocationCompletion>,
+//RS     deferred: bool,
+//RS }
+//RS 
+//RS impl<P, C, X, R> SourceCallbackInvocation<P, C, X, R>
+//RS where
+//RS     P: Send + 'static,
+//RS     C: Send + 'static,
+//RS     X: Send + 'static,
+//RS     R: Send + 'static,
+//RS {
+//RS     /// Callback payload lease selected for this invocation.
+//RS     pub fn callback_id(&self) -> SourceCallbackId {
+//RS         self.callback
+//RS     }
+//RS 
+//RS     /// Session-local request identity for diagnostics and correlation.
+//RS     pub fn request_id(&self) -> SourceCallbackRequestId {
+//RS         self.request
+//RS     }
+//RS 
+//RS     /// Borrow the queued command without taking ownership from the event.
+//RS     pub fn command(&self) -> &C {
+//RS         self.command
+//RS             .as_ref()
+//RS             .expect("Source callback command was taken once")
+//RS     }
+//RS 
+//RS     /// Borrow the preserved task/scope context without taking ownership.
+//RS     pub fn context(&self) -> &X {
+//RS         self.context
+//RS             .as_ref()
+//RS             .expect("Source callback context was taken once")
+//RS     }
+//RS 
+//RS     /// Take the command for owner-side invocation. The owner then owns it and
+//RS     /// must perform any semantic cleanup if the invocation is abandoned.
+//RS     pub fn take_command(&mut self) -> C {
+//RS         self.command
+//RS             .take()
+//RS             .expect("Source callback command was taken once")
+//RS     }
+//RS 
+//RS     /// Take the task/scope context for owner-side invocation.
+//RS     pub fn take_context(&mut self) -> X {
+//RS         self.context
+//RS             .take()
+//RS             .expect("Source callback context was taken once")
+//RS     }
+//RS 
+//RS     /// Take the reply responder for an adapter that owns response dispatch.
+//RS     pub fn take_responder(&mut self) -> Option<SourceCallbackResponder<R>> {
+//RS         self.responder.take()
+//RS     }
+//RS 
+//RS     /// Send one response for this invocation. If the producer disconnected,
+//RS     /// dropping this event queues any still-owned command/context for cleanup.
+//RS     pub fn respond(
+//RS         &mut self,
+//RS         result: Result<R, SourceCallbackError>,
+//RS     ) -> Result<(), SourceCallbackReplyError<R>> {
+//RS         match self.responder.as_mut() {
+//RS             Some(responder) => responder.send(result),
+//RS             None => Err(SourceCallbackReplyError::AlreadySent(result)),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Invoke this callback while its unique retained payload is borrowed.
+//RS     ///
+//RS     /// If another owner currently has the payload, this invocation is parked
+//RS     /// atomically and requeued only when that borrow returns. In that case this
+//RS     /// method returns `PayloadBusy`; it does not notify workers or spin.
+//RS     pub fn try_with_payload_mut<T>(
+//RS         mut self,
+//RS         body: impl FnOnce(&mut P, &mut Self) -> T,
+//RS     ) -> Result<T, SourceCallbackError> {
+//RS         let mut state = self
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         let Some(entry) = state.callbacks.get_mut(&self.callback) else {
+//RS             drop(state);
+//RS             return Err(SourceCallbackError::UnknownCallback);
+//RS         };
+//RS         let payload = if entry.payload.is_some() {
+//RS             entry.borrows += 1;
+//RS             entry.payload.take()
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let Some(payload) = payload else {
+//RS             if self.command.is_none() || self.context.is_none() || self.responder.is_none() {
+//RS                 drop(state);
+//RS                 return Err(SourceCallbackError::ReplyValueBusy);
+//RS             }
+//RS             let pending = PendingEvent::Invoke {
+//RS                 callback: self.callback,
+//RS                 request: self.request,
+//RS                 command: self.command.take().expect("deferred callback command is present"),
+//RS                 context: self.context.take().expect("deferred callback context is present"),
+//RS                 responder: self
+//RS                     .responder
+//RS                     .take()
+//RS                     .expect("deferred callback responder is present"),
+//RS             };
+//RS             state
+//RS                 .deferred
+//RS                 .entry(self.callback)
+//RS                 .or_default()
+//RS                 .push_back(pending);
+//RS             self.deferred = true;
+//RS             drop(state);
+//RS             return Err(SourceCallbackError::PayloadBusy);
+//RS         };
+//RS         drop(state);
+//RS 
+//RS         let mut root = PayloadRoot {
+//RS             state: self.state.clone(),
+//RS             callback: self.callback,
+//RS             payload: Some(payload),
+//RS         };
+//RS         let result = body(
+//RS             root.payload
+//RS                 .as_mut()
+//RS                 .expect("borrowed callback payload is present"),
+//RS             &mut self,
+//RS         );
+//RS         drop(root);
+//RS         Ok(result)
+//RS     }
+//RS }
+//RS 
+//RS impl<P, C, X, R> Drop for SourceCallbackInvocation<P, C, X, R> {
+//RS     fn drop(&mut self) {
+//RS         if self.deferred {
+//RS             return;
+//RS         }
+//RS         // Dropping the event always discharges its input side separately from
+//RS         // the reply claim. In particular, a successful response does not
+//RS         // permit still-owned command/context values to bypass Source cleanup.
+//RS         self.responder.take();
+//RS         let command = self.command.take();
+//RS         let context = self.context.take();
+//RS         if command.is_some() || context.is_some() {
+//RS             let queued = {
+//RS                 let mut state = self
+//RS                     .state
+//RS                     .lock()
+//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS                 state.queue_cleanup(
+//RS                     self.callback,
+//RS                     self.request,
+//RS                     command,
+//RS                     context,
+//RS                     self.completion.clone(),
+//RS                 )
+//RS             };
+//RS             if queued {
+//RS                 notify_ready(&self.state);
+//RS             }
+//RS         } else {
+//RS             self.completion.inputs_done();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Owner-side cleanup event for a disconnected or abandoned invocation.
+//RS pub struct SourceCallbackCleanup<P, C, X, R> {
+//RS     state: Arc<Mutex<CallbackState<P, C, X, R>>>,
+//RS     callback: SourceCallbackId,
+//RS     request: SourceCallbackRequestId,
+//RS     command: Option<C>,
+//RS     context: Option<X>,
+//RS     completion: Arc<InvocationCompletion>,
+//RS     completed: bool,
+//RS }
+//RS 
+//RS impl<P, C, X, R> SourceCallbackCleanup<P, C, X, R>
+//RS where
+//RS     P: Send + 'static,
+//RS     C: Send + 'static,
+//RS     X: Send + 'static,
+//RS     R: Send + 'static,
+//RS {
+//RS     /// Session-local callback identity whose command needs cleanup.
+//RS     pub fn callback_id(&self) -> SourceCallbackId {
+//RS         self.callback
+//RS     }
+//RS 
+//RS     /// Session-local request identity for diagnostics and correlation.
+//RS     pub fn request_id(&self) -> SourceCallbackRequestId {
+//RS         self.request
+//RS     }
+//RS 
+//RS     /// Borrow the command still owned by this cleanup event, if the producer
+//RS     /// already took it from the original invocation then it is `None` here.
+//RS     pub fn command(&self) -> Option<&C> {
+//RS         self.command.as_ref()
+//RS     }
+//RS 
+//RS     /// Borrow the preserved task/scope context, if still owned by transport.
+//RS     pub fn context(&self) -> Option<&X> {
+//RS         self.context.as_ref()
+//RS     }
+//RS 
+//RS     /// Take the command for owner-side cleanup.
+//RS     pub fn take_command(&mut self) -> Option<C> {
+//RS         self.command.take()
+//RS     }
+//RS 
+//RS     /// Take the context for owner-side cleanup.
+//RS     pub fn take_context(&mut self) -> Option<X> {
+//RS         self.context.take()
+//RS     }
+//RS     /// Borrow the cleanup origin without spinning while an invocation owns it.
+//RS     /// A busy payload parks this exact event until the existing borrow returns.
+//RS     pub fn try_with_payload_mut<T>(
+//RS         mut self,
+//RS         body: impl FnOnce(&mut P, &mut Self) -> T,
+//RS     ) -> Result<T, SourceCallbackError> {
+//RS         let mut state = self
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         let Some(entry) = state.callbacks.get_mut(&self.callback) else {
+//RS             drop(state);
+//RS             return Err(SourceCallbackError::UnknownCallback);
+//RS         };
+//RS         let payload = if entry.payload.is_some() {
+//RS             entry.borrows += 1;
+//RS             entry.payload.take()
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let Some(payload) = payload else {
+//RS             let pending = PendingEvent::Cleanup {
+//RS                 callback: self.callback,
+//RS                 request: self.request,
+//RS                 command: self.command.take(),
+//RS                 context: self.context.take(),
+//RS                 completion: self.completion.clone(),
+//RS             };
+//RS             state
+//RS                 .deferred
+//RS                 .entry(self.callback)
+//RS                 .or_default()
+//RS                 .push_back(pending);
+//RS             self.completed = true;
+//RS             drop(state);
+//RS             return Err(SourceCallbackError::PayloadBusy);
+//RS         };
+//RS         drop(state);
+//RS         let mut root = PayloadRoot {
+//RS             state: self.state.clone(),
+//RS             callback: self.callback,
+//RS             payload: Some(payload),
+//RS         };
+//RS         let result = body(
+//RS             root.payload
+//RS                 .as_mut()
+//RS                 .expect("borrowed cleanup payload is present"),
+//RS             &mut self,
+//RS         );
+//RS         drop(root);
+//RS         Ok(result)
+//RS     }
+//RS 
+//RS     /// Commit cleanup after the owner has handled any command/context values.
+//RS     pub fn complete(mut self) {
+//RS         self.completed = true;
+//RS         self.completion.inputs_done();
+//RS     }
+//RS }
+//RS 
+//RS impl<P, C, X, R> Drop for SourceCallbackCleanup<P, C, X, R> {
+//RS     fn drop(&mut self) {
+//RS         if self.completed {
+//RS             return;
+//RS         }
+//RS         let command = self.command.take();
+//RS         let context = self.context.take();
+//RS         if command.is_some() || context.is_some() {
+//RS             let queued = {
+//RS                 let mut state = self
+//RS                     .state
+//RS                     .lock()
+//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS                 state.queue_cleanup(
+//RS                     self.callback,
+//RS                     self.request,
+//RS                     command,
+//RS                     context,
+//RS                     self.completion.clone(),
+//RS                 )
+//RS             };
+//RS             if queued {
+//RS                 notify_ready(&self.state);
+//RS             }
+//RS         } else {
+//RS             self.completion.inputs_done();
+//RS         }
+//RS     }
+//RS }
+//RS /// Owner-side cleanup event for a reply value that was published but never
+//RS /// received by its producer. The result stays in this envelope until Source
+//RS /// explicitly takes it.
+//RS pub struct SourceCallbackReplyCleanup<R> {
+//RS     callback: SourceCallbackId,
+//RS     request: SourceCallbackRequestId,
+//RS     result: Option<Result<R, SourceCallbackError>>,
+//RS     completion: Arc<InvocationCompletion>,
+//RS     on_lost: Arc<dyn Fn(Result<R, SourceCallbackError>) + Send + Sync>,
+//RS     completed: bool,
+//RS }
+//RS 
+//RS impl<R: Send + 'static> SourceCallbackReplyCleanup<R> {
+//RS     pub fn callback_id(&self) -> SourceCallbackId {
+//RS         self.callback
+//RS     }
+//RS 
+//RS     pub fn request_id(&self) -> SourceCallbackRequestId {
+//RS         self.request
+//RS     }
+//RS 
+//RS     pub fn result(&self) -> &Result<R, SourceCallbackError> {
+//RS         self.result
+//RS             .as_ref()
+//RS             .expect("Source callback reply cleanup result was taken once")
+//RS     }
+//RS 
+//RS     pub fn take_result(&mut self) -> Result<R, SourceCallbackError> {
+//RS         self.result
+//RS             .take()
+//RS             .expect("Source callback reply cleanup result was taken once")
+//RS     }
+//RS 
+//RS     pub fn complete(mut self) -> Result<(), SourceCallbackError> {
+//RS         if self.result.is_some() {
+//RS             return Err(SourceCallbackError::ReplyValueBusy);
+//RS         }
+//RS         self.completed = true;
+//RS         self.completion.reply_done();
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS impl<R> Drop for SourceCallbackReplyCleanup<R> {
+//RS     fn drop(&mut self) {
+//RS         if self.completed {
+//RS             return;
+//RS         }
+//RS         if let Some(result) = self.result.take() {
+//RS             (self.on_lost)(result);
+//RS         } else {
+//RS             self.completion.reply_done();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// Owner-side release event. It owns the original registered payload exactly
+//RS /// once. The owner runs Source/Eval cleanup on `payload_mut`, then calls
+//RS /// `complete`; dropping an uncompleted event requeues that same payload.
+//RS pub struct SourceCallbackRelease<P, C, X, R> {
+//RS     state: Arc<Mutex<CallbackState<P, C, X, R>>>,
+//RS     callback: SourceCallbackId,
+//RS     payload: Option<P>,
+//RS     completed: bool,
+//RS }
+//RS 
+//RS impl<P, C, X, R> SourceCallbackRelease<P, C, X, R>
+//RS where
+//RS     P: Send + 'static,
+//RS     C: Send + 'static,
+//RS     X: Send + 'static,
+//RS     R: Send + 'static,
+//RS {
+//RS     /// Callback payload lease selected for release.
+//RS     pub fn callback_id(&self) -> SourceCallbackId {
+//RS         self.callback
+//RS     }
+//RS 
+//RS     /// Borrow the original payload without taking the session mutex.
+//RS     pub fn payload(&self) -> &P {
+//RS         self.payload
+//RS             .as_ref()
+//RS             .expect("Source callback release payload was taken once")
+//RS     }
+//RS 
+//RS     /// Mutably borrow the original payload for owner-side Source/Eval drop.
+//RS     pub fn payload_mut(&mut self) -> &mut P {
+//RS         self.payload
+//RS             .as_mut()
+//RS             .expect("Source callback release payload was taken once")
+//RS     }
+//RS 
+//RS     /// Commit owner-side payload cleanup and remove this callback from the
+//RS     /// session. The payload is dropped only after the session mutex is free.
+//RS     pub fn complete(mut self) -> Result<(), SourceCallbackError> {
+//RS         let mut state = self
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         let Some(entry) = state.callbacks.get(&self.callback) else {
+//RS             return Err(SourceCallbackError::UnknownCallback);
+//RS         };
+//RS         if entry.leases != 0
+//RS             || entry.inflight != 0
+//RS             || entry.borrows != 0
+//RS             || !entry.release_requested
+//RS             || entry.release_in_queue
+//RS             || entry.payload.is_some()
+//RS         {
+//RS             return Err(SourceCallbackError::ReleaseNotReady);
+//RS         }
+//RS         state.callbacks.remove(&self.callback);
+//RS         state.wake.notify_all();
+//RS         drop(state);
+//RS         self.completed = true;
+//RS         // `self.payload` is dropped after the mutex guard has gone away.
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS impl<P, C, X, R> Drop for SourceCallbackRelease<P, C, X, R> {
+//RS     fn drop(&mut self) {
+//RS         if self.completed {
+//RS             return;
+//RS         }
+//RS         let Some(mut payload) = self.payload.take() else {
+//RS             return;
+//RS         };
+//RS         let mut state = self
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         let mut payload = Some(payload);
+//RS         let requeued = if let Some(entry) = state.callbacks.get_mut(&self.callback) {
+//RS             if entry.payload.is_none() {
+//RS                 entry.payload = payload.take();
+//RS                 entry.release_in_queue = true;
+//RS                 true
+//RS             } else {
+//RS                 false
+//RS             }
+//RS         } else {
+//RS             false
+//RS         };
+//RS         if requeued {
+//RS             state.queue.push_back(PendingEvent::Release {
+//RS                 callback: self.callback,
+//RS             });
+//RS             state.wake.notify_one();
+//RS             drop(state);
+//RS             notify_ready(&self.state);
+//RS             return;
+//RS         }
+//RS         drop(state);
+//RS         drop(payload);
+//RS     }
+//RS }
+//RS /// transports generic commands, context, replies, cleanup, and final-release
+//RS /// notices.
+//RS pub enum SourceCallbackEvent<P, C, X, R> {
+//RS     Invoke(SourceCallbackInvocation<P, C, X, R>),
+//RS     Cleanup(SourceCallbackCleanup<P, C, X, R>),
+//RS     ReplyCleanup(SourceCallbackReplyCleanup<R>),
+//RS     Release(SourceCallbackRelease<P, C, X, R>),
+//RS }
+//RS 
+//RS /// Temporary owner-side payload root. It removes the payload from session
+//RS /// state before invoking the caller's closure, then restores it on every exit
+//RS /// path, including panic unwinding. This prevents a session mutex from being
+//RS /// held across Source semantic work and prevents an uncounted escaped borrow.
+//RS struct PayloadRoot<P, C, X, R> {
+//RS     state: Arc<Mutex<CallbackState<P, C, X, R>>>,
+//RS     callback: SourceCallbackId,
+//RS     payload: Option<P>,
+//RS }
+//RS 
+//RS impl<P, C, X, R> Drop for PayloadRoot<P, C, X, R> {
+//RS     fn drop(&mut self) {
+//RS         let Some(payload) = self.payload.take() else {
+//RS             return;
+//RS         };
+//RS         let mut payload = Some(payload);
+//RS         let mut state = self
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         let (restored, should_release) =
+//RS             if let Some(entry) = state.callbacks.get_mut(&self.callback) {
+//RS                 if entry.payload.is_none() {
+//RS                     entry.payload = payload.take();
+//RS                     entry.borrows = entry.borrows.saturating_sub(1);
+//RS                     (
+//RS                         true,
+//RS                         entry.leases == 0 && entry.inflight == 0 && entry.borrows == 0,
+//RS                     )
+//RS                 } else {
+//RS                     (false, false)
+//RS                 }
+//RS             } else {
+//RS                 (false, false)
+//RS             };
+//RS         if restored {
+//RS             let mut deferred = state.deferred.remove(&self.callback).unwrap_or_default();
+//RS             let deferred_count = deferred.len();
+//RS             state.queue.append(&mut deferred);
+//RS             if deferred_count != 0 {
+//RS                 state.wake.notify_all();
+//RS             }
+//RS             let queued = should_release && state.queue_release(self.callback);
+//RS             let ready_notifications = deferred_count + if queued { 1 } else { 0 };
+//RS             drop(state);
+//RS             for _ in 0..ready_notifications {
+//RS                 notify_ready(&self.state);
+//RS             }
+//RS             return;
+//RS         }
+//RS         drop(state);
+//RS         drop(payload);
+//RS     }
+//RS }
+//RS 
+//RS /// One session-owned callback transport. Clones share only this session's
+//RS /// state; there is no process-global callback table or machine pointer.
+//RS pub struct SourceCallbackSession<P, C, X = (), R = ()> {
+//RS     state: Arc<Mutex<CallbackState<P, C, X, R>>>,
+//RS }
+//RS 
+//RS impl<P, C, X, R> Clone for SourceCallbackSession<P, C, X, R> {
+//RS     fn clone(&self) -> Self {
+//RS         Self {
+//RS             state: self.state.clone(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<P, C, X, R> SourceCallbackSession<P, C, X, R>
+//RS where
+//RS     P: Send + 'static,
+//RS     C: Send + 'static,
+//RS     X: Send + 'static,
+//RS     R: Send + 'static,
+//RS {
+//RS     /// Create an open, empty callback transport with an origin-owned cleanup
+//RS     /// sink for any payloads or events left when its last owner is abandoned.
+//RS     /// The sink must not retain this session or capture origin Machine state;
+//RS     /// cross-thread users should enqueue checked sendable owner packets.
+//RS     pub fn new(
+//RS         on_abandoned: impl Fn(SourceCallbackAbandonment<P, C, X, R>) + Send + Sync + 'static,
+//RS         on_ready: impl Fn(SourceCallbackReadyHandle<P, C, X, R>) + Send + Sync + 'static,
+//RS     ) -> Self {
+//RS         Self {
+//RS             state: Arc::new(Mutex::new(CallbackState {
+//RS                 phase: SessionPhase::Open,
+//RS                 next_callback: Some(1),
+//RS                 next_request: Some(1),
+//RS                 callbacks: HashMap::new(),
+//RS                 queue: VecDeque::new(),
+//RS                 deferred: HashMap::new(),
+//RS                 wake: Arc::new(Condvar::new()),
+//RS                 on_ready: Arc::new(on_ready),
+//RS                 on_abandoned: Arc::new(on_abandoned),
+//RS             })),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Register one retained Source callback payload and return its first
+//RS     /// counted lease alias. A rejected registration returns its original
+//RS     /// payload to the caller.
+//RS     pub fn register(
+//RS         &self,
+//RS         payload: P,
+//RS     ) -> Result<SourceCallbackLease<P, C, X, R>, SourceCallbackRegisterError<P>> {
+//RS         let mut state = self.lock_state();
+//RS         if let Err(error) = match state.phase {
+//RS             SessionPhase::Open => Ok(()),
+//RS             SessionPhase::Retiring => Err(SourceCallbackError::Retiring),
+//RS             SessionPhase::Retired => Err(SourceCallbackError::Closed),
+//RS         } {
+//RS             return Err(SourceCallbackRegisterError { error, payload });
+//RS         }
+//RS         let callback = match state.next_callback_id() {
+//RS             Ok(callback) => callback,
+//RS             Err(error) => return Err(SourceCallbackRegisterError { error, payload }),
+//RS         };
+//RS         state.callbacks.insert(
+//RS             callback,
+//RS             CallbackEntry {
+//RS                 payload: Some(payload),
+//RS                 leases: 1,
+//RS                 inflight: 0,
+//RS                 borrows: 0,
+//RS                 release_requested: false,
+//RS                 release_in_queue: false,
+//RS             },
+//RS         );
+//RS         Ok(SourceCallbackLease {
+//RS             state: self.state.clone(),
+//RS             callback,
+//RS             _types: std::marker::PhantomData,
+//RS         })
+//RS     }
+//RS 
+//RS     /// Mark the session as no longer accepting new payloads or invocations.
+//RS     /// Existing producer leases and queued work are deliberately not canceled.
+//RS     pub fn begin_retire(&self) {
+//RS         let mut state = self.lock_state();
+//RS         if state.phase == SessionPhase::Open {
+//RS             state.phase = SessionPhase::Retiring;
+//RS             state.wake.notify_all();
+//RS         }
+//RS     }
+//RS 
+//RS     /// Finish retirement if every producer, invocation, payload borrow, and
+//RS     /// release event has drained. Calling this too early leaves the session in
+//RS     /// Retiring so the owner can pump and try again.
+//RS     pub fn retire(&self) -> Result<(), SourceCallbackRetireError> {
+//RS         let mut state = self.lock_state();
+//RS         if state.phase == SessionPhase::Open {
+//RS             state.phase = SessionPhase::Retiring;
+//RS         }
+//RS         if state.phase == SessionPhase::Retired {
+//RS             return Ok(());
+//RS         }
+//RS         let status = state.status();
+//RS         if !status.drained() || !state.callbacks.is_empty() {
+//RS             state.wake.notify_all();
+//RS             return Err(SourceCallbackRetireError::NotDrained(status));
+//RS         }
+//RS         state.phase = SessionPhase::Retired;
+//RS         state.wake.notify_all();
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Return whether this session has completed logical retirement.
+//RS     pub fn is_retired(&self) -> bool {
+//RS         self.lock_state().phase == SessionPhase::Retired
+//RS     }
+//RS 
+//RS     /// Return current producer/in-flight/pending/borrow/release counts.
+//RS     pub fn drain_status(&self) -> SourceCallbackDrainStatus {
+//RS         self.lock_state().status()
+//RS     }
+//RS 
+//RS     /// Pop one event for the owner pump without blocking.
+//RS     pub fn try_next(&self) -> Option<SourceCallbackEvent<P, C, X, R>> {
+//RS         let pending = self.lock_state().queue.pop_front()?;
+//RS         Some(self.wrap_event(pending))
+//RS     }
+//RS 
+//RS     /// Wait for the next owner-pump event. Returns `None` only after logical
+//RS     /// retirement and complete queue drain.
+//RS     pub fn next(&self) -> Option<SourceCallbackEvent<P, C, X, R>> {
+//RS         let mut state = self.lock_state();
+//RS         loop {
+//RS             if let Some(pending) = state.queue.pop_front() {
+//RS                 drop(state);
+//RS                 return Some(self.wrap_event(pending));
+//RS             }
+//RS             if state.phase == SessionPhase::Retired {
+//RS                 return None;
+//RS             }
+//RS             let wake = Arc::clone(&state.wake);
+//RS             state = wake
+//RS                 .wait(state)
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         }
+//RS     }
+//RS 
+//RS     /// Read the retained payload without keeping the session mutex held while
+//RS     /// the callback runs. The temporary root returns before this method exits.
+//RS     pub fn with_payload<T>(
+//RS         &self,
+//RS         callback: SourceCallbackId,
+//RS         body: impl FnOnce(&P) -> T,
+//RS     ) -> Result<T, SourceCallbackError> {
+//RS         let mut root = self.take_payload_root(callback)?;
+//RS         let result = body(root.payload.as_ref().expect("payload root is present"));
+//RS         drop(root);
+//RS         Ok(result)
+//RS     }
+//RS 
+//RS     /// Mutably borrow the retained payload without holding the session mutex
+//RS     /// across Source/Eval work.
+//RS     pub fn with_payload_mut<T>(
+//RS         &self,
+//RS         callback: SourceCallbackId,
+//RS         body: impl FnOnce(&mut P) -> T,
+//RS     ) -> Result<T, SourceCallbackError> {
+//RS         let mut root = self.take_payload_root(callback)?;
+//RS         let result = body(root.payload.as_mut().expect("payload root is present"));
+//RS         drop(root);
+//RS         Ok(result)
+//RS     }
+//RS 
+//RS     fn take_payload_root(
+//RS         &self,
+//RS         callback: SourceCallbackId,
+//RS     ) -> Result<PayloadRoot<P, C, X, R>, SourceCallbackError> {
+//RS         let mut state = self.lock_state();
+//RS         let entry = state
+//RS             .callbacks
+//RS             .get_mut(&callback)
+//RS             .ok_or(SourceCallbackError::UnknownCallback)?;
+//RS         let payload = entry.payload.take().ok_or(SourceCallbackError::PayloadBusy)?;
+//RS         entry.borrows += 1;
+//RS         drop(state);
+//RS         Ok(PayloadRoot {
+//RS             state: self.state.clone(),
+//RS             callback,
+//RS             payload: Some(payload),
+//RS         })
+//RS     }
+//RS 
+//RS     fn lock_state(&self) -> MutexGuard<'_, CallbackState<P, C, X, R>> {
+//RS         self.state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS     }
+//RS 
+//RS     fn wrap_event(&self, pending: PendingEvent<C, X, R>) -> SourceCallbackEvent<P, C, X, R> {
+//RS         match pending {
+//RS             PendingEvent::Invoke {
+//RS                 callback,
+//RS                 request,
+//RS                 command,
+//RS                 context,
+//RS                 responder,
+//RS             } => {
+//RS                 let mut responder = responder;
+//RS                 responder.state_anchor = Some(self.state.clone());
+//RS                 let completion = responder.completion.clone();
+//RS                 SourceCallbackEvent::Invoke(SourceCallbackInvocation {
+//RS                     state: self.state.clone(),
+//RS                     callback,
+//RS                     request,
+//RS                     command: Some(command),
+//RS                     context: Some(context),
+//RS                     responder: Some(responder),
+//RS                     completion,
+//RS                     deferred: false,
+//RS                 })
+//RS             },
+//RS             PendingEvent::Cleanup {
+//RS                 callback,
+//RS                 request,
+//RS                 command,
+//RS                 context,
+//RS                 completion,
+//RS             } => SourceCallbackEvent::Cleanup(SourceCallbackCleanup {
+//RS                 state: self.state.clone(),
+//RS                 callback,
+//RS                 request,
+//RS                 command,
+//RS                 context,
+//RS                 completion,
+//RS                 completed: false,
+//RS             }),
+//RS             PendingEvent::ReplyCleanup {
+//RS                 callback,
+//RS                 request,
+//RS                 result,
+//RS                 completion,
+//RS             } => {
+//RS                 let state = self.state.clone();
+//RS                 let requeue_completion = completion.clone();
+//RS                 let on_lost: Arc<dyn Fn(Result<R, SourceCallbackError>) + Send + Sync> =
+//RS                     Arc::new(move |result| {
+//RS                         let queued = {
+//RS                             let mut state = state
+//RS                                 .lock()
+//RS                                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS                             state.queue_reply_cleanup(
+//RS                                 callback,
+//RS                                 request,
+//RS                                 result,
+//RS                                 requeue_completion.clone(),
+//RS                             )
+//RS                         };
+//RS                         if queued {
+//RS                             notify_ready(&state);
+//RS                         }
+//RS                     });
+//RS                 SourceCallbackEvent::ReplyCleanup(SourceCallbackReplyCleanup {
+//RS                     callback,
+//RS                     request,
+//RS                     result: Some(result),
+//RS                     completion,
+//RS                     on_lost,
+//RS                     completed: false,
+//RS                 })
+//RS             }
+//RS             PendingEvent::Release { callback } => {
+//RS                 let mut state = self.lock_state();
+//RS                 let entry = state
+//RS                     .callbacks
+//RS                     .get_mut(&callback)
+//RS                     .expect("Source callback release entry disappeared");
+//RS                 entry.release_in_queue = false;
+//RS                 let payload = entry
+//RS                     .payload
+//RS                     .take()
+//RS                     .expect("Source callback release payload disappeared");
+//RS                 drop(state);
+//RS                 SourceCallbackEvent::Release(SourceCallbackRelease {
+//RS                     state: self.state.clone(),
+//RS                     callback,
+//RS                     payload: Some(payload),
+//RS                     completed: false,
+//RS                 })
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// Counted alias to one session-retained callback payload. Cloning this lease
+//RS /// explicitly increments the transport's producer count; the payload itself
+//RS /// is never cloned. The final drop queues owner-side Source cleanup.
+//RS pub struct SourceCallbackLease<P, C, X = (), R = ()> {
+//RS     state: Arc<Mutex<CallbackState<P, C, X, R>>>,
+//RS     callback: SourceCallbackId,
+//RS     _types: std::marker::PhantomData<fn(C, X, R)>,
+//RS }
+//RS 
+//RS impl<P, C, X, R> Clone for SourceCallbackLease<P, C, X, R>
+//RS where
+//RS     P: Send + 'static,
+//RS     C: Send + 'static,
+//RS     X: Send + 'static,
+//RS     R: Send + 'static,
+//RS {
+//RS     fn clone(&self) -> Self {
+//RS         let mut state = self
+// END-PORT-PENDING 2074 crates/jet-jit/src/SourceCallbacks.rs:1-1800
+

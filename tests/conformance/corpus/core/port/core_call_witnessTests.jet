@@ -1,0 +1,828 @@
+// Rust: tests/core_call_witness.rs:1
+use tests.conformance.corpus.core.port.core_call_witness.*
+use tests.common as common
+use tests.tir_support as tir_support
+use tests.tir_support.[assert_tiers_agree, compile_source, build_and_run_full, have_rustc, interpreter_run, jit_run]
+use std.fs as fs
+use jet_foundation.MIR.[MirArtifactBuildMode, MirArtifactKind, MirArtifactRequest, MirArtifactTarget, MirConstant, MirAccess, MirCallee, MirOperation, MirOwnership, MirPlaceBase, MirTerminator, MirOptimizationPolicy, optimize_mir_program]
+// GATE #4494: actual entropy, files, retained native handles and native subprocess execution.
+
+// Rust: tests/core_call_witness.rs:24
+#Test("non_corpus_printing_fixture_cannot_succeed_silently") {
+    (jit_code, jit_stdout, jit_stderr) :: jit_run("core_call_witness_jit", PRINTING_FIXTURE)
+    assert_not_silent("default JIT", jit_code, jit_stdout, jit_stderr)
+    (interpreter_code, interpreter_stdout, interpreter_stderr) :: interpreter_run("core_call_witness_interpreter", PRINTING_FIXTURE)
+    assert_not_silent("forced interpreter", interpreter_code, interpreter_stdout, interpreter_stderr)
+    if have_rustc() {
+        (aot_code, aot_stdout, aot_stderr) :: build_and_run_full("jet_core_call_witness", "core_call_witness_aot", PRINTING_FIXTURE)
+        assert_not_silent("AOT", aot_code, aot_stdout, aot_stderr)
+    }
+}
+// Rust: tests/core_call_witness.rs:48
+#Test("canonical_core_module_witness_rejects_retired_dispatcher_spellings") {
+    dispatcher :: read("crates/jet-foundation/src/Syntax/core_calls.rs")
+    assert(dispatcher.contains("\"core.service\""))
+    assert(dispatcher.contains("\"core.tasks\""))
+    assert(not dispatcher.contains("\"core.task\""))
+    assert(not dispatcher.contains("\"core.services\""))
+}
+// Rust: tests/core_compute_solve.rs:7
+#Test("compute_solve_uses_scale_relative_pivots_and_checked_errors") {
+    assert_tiers_agree("compute_solve_relative_pivot_and_errors", `
+use core.compute.[Tensor, ComputeError]
+use core.compute.solve as solve
+
+fn run() {
+    scaled :: Tensor{shape: [Int]{1, 1}, data: [Float]{1e-20}, device: "CPU", numeric_profile: ""}
+    rhs :: Tensor{shape: [Int]{1}, data: [Float]{2e-20}, device: "CPU", numeric_profile: ""}
+    solution :: solve.dense(scaled, rhs) ?? panic("scaled dense solve")
+    print("dense:{solution.data}")
+    factors :: solve.lu(scaled) ?? panic("scaled LU")
+    print("lu:{factors.pivots}")
+    singular :: Tensor{shape: [Int]{2, 2}, data: [Float]{1.0, 2.0, 2.0, 4.0}, device: "CPU", numeric_profile: ""}
+    if solve.lu(singular) == {
+        .Ok(_) -> print("singular:accepted")
+        .Err(error) -> {
+            if error == ComputeError.Singular { print("singular:Singular") }
+            else { print("singular:wrong-error") }
+        }
+    }
+    wrong_rhs :: Tensor{shape: [Int]{2}, data: [Float]{1.0, 2.0}, device: "CPU", numeric_profile: ""}
+    if solve.dense(scaled, wrong_rhs) == {
+        .Ok(_) -> print("shape:accepted")
+        .Err(error) -> {
+            if error == ComputeError.Shape { print("shape:Shape") }
+            else { print("shape:wrong-error") }
+        }
+    }
+    cuda :: Tensor{shape: [Int]{1, 1}, data: [Float]{1.0}, device: "CUDA", numeric_profile: ""}
+    if solve.lu(cuda) == {
+        .Ok(_) -> print("device:accepted")
+        .Err(error) -> {
+            if error == ComputeError.Unsupported { print("device:Unsupported") }
+            else { print("device:wrong-error") }
+        }
+    }
+}
+`, "dense:[2.0]\nlu:[0]\nsingular:Singular\nshape:Shape\ndevice:Unsupported\n")
+}
+// Rust: tests/core_crypto_api.rs:2
+#Test("imported_secret_type_keeps_its_static_conversion_apis") {
+    output :: jet.compile(`
+use core.crypto as crypto
+use core.crypto.[Secret]
+
+fn run() {
+    text_secret :: Secret.from_text("mail credential")
+    byte_secret :: Secret.from_bytes([0x41, 0x42])
+    qualified_text_secret :: crypto.Secret.from_text("module-qualified")
+    qualified_byte_secret :: crypto.Secret.from_bytes([0x43, 0x44])
+}
+`).expect("selectively imported Secret constructors should compile")
+    assert(output.lints.iter().all(|diagnostic| -> diagnostic.code != "L0103"), "used Secret static conversions must mark the selective import as used: {output.lints.debug()}")
+}
+// Rust: tests/core_crypto_api.rs:29
+#Test("crypto_file_helpers_accept_typed_paths_with_mixed_call_labels") {
+    _ :: jet.compile(`
+use core.crypto as crypto
+
+fn run() {
+    source :: Path.from("plain.txt")
+    sealed :: Path.from("sealed.bin")
+    identity :: crypto.X25519SecretKey.new_random() ?? return
+    crypto.file_seal([identity.public_key()], source: source, destination: sealed) ?? return
+    crypto.file_open(&identity, source: sealed, destination: source) ?? return
+}
+`).expect("crypto file helpers should accept Path and mixed positional/named arguments")
+}
+// Rust: tests/core_crypto_api.rs:58
+#Test("live_secret_scope_exit_closes_through_the_zeroize_kernel") {
+    output :: jet.compile(`
+use core.crypto as crypto
+
+fn scoped(seed: [U8]) {
+    secret :: crypto.Secret{bytes: seed}
+    print("secret made")
+}
+
+fn run() { scoped([U8]{1, 2, 3}) }
+`).expect("a scoped Secret should compile")
+    rust :: output.rust
+    secret :: "__jet__x3ccorelib_x3e_sCore_scrypto_c_cCore_scrypto_scrypto_djet_c_cSecret"
+    close :: emitted_body(rust, "impl __jet_Close for {secret} {{")
+    assert(close.contains("jet_crypto_zeroize("), "Secret.close must wipe through jet_crypto_zeroize:\n{close}")
+    scoped :: emitted_body(rust, "_cscoped(__jet_seed")
+    assert(scoped.contains("<{secret} as __jet_Close>::close("), "the scope exit must close the live Secret, not drop it:\n{scoped}")
+}
+// Rust: tests/core_crypto_argon2id.rs:7
+#Test("argon2id_parallel_lanes_match_rfc_vector_across_tiers") {
+    assert_tiers_agree("core_crypto_argon2id_parallel", `
+use core.crypto as crypto
+use core.crypto.expert as expert
+
+fn run() {
+    password :: crypto.Secret.from_text("password")
+    #Unsafe("fixed Argon2id parallel-lane known-answer vector") {
+        derived :: expert.argon2id(password, "somesalt".bytes(), 8192, 2, 2, 32) ?? panic("argon2id")
+        print(expert.secret_bytes(derived) == [U8]{0xd1, 0xe8, 0x3a, 0xa7, 0x38, 0x3f, 0x70, 0x87, 0x3a, 0x17, 0x1b, 0x45, 0x32, 0x06, 0xa0, 0x0d, 0xac, 0xa5, 0x34, 0x0f, 0x35, 0x05, 0x54, 0x2e, 0x17, 0xb4, 0x1e, 0xd6, 0x2d, 0x3b, 0x11, 0x0e})
+    }
+}
+`, "true\n")
+}
+// Rust: tests/core_crypto_foundations.rs:7
+#Test("crypto_random_boundaries_preserve_error_carriers_across_tiers") {
+    assert_tiers_agree("core_crypto_random_boundaries", `
+use core.crypto as crypto
+use core.crypto.random as random
+
+fn run() {
+    if random.token_hex(-1) == {
+        .Err(.Length) -> print("hex:length")
+        else -> print("hex:wrong-error")
+    }
+    if random.token_urlsafe(-1) == {
+        .Err(.Length) -> print("url:length")
+        else -> print("url:wrong-error")
+    }
+    if random.token_hex(0) == {
+        .Ok(value) -> print(value == "")
+        else -> print(false)
+    }
+    if random.token_urlsafe(0) == {
+        .Ok(value) -> print(value == "")
+        else -> print(false)
+    }
+    if random.int_range(4, 4) == {
+        .Err(.Length) -> print("range:length")
+        else -> print("range:wrong-error")
+    }
+    if random.int_range(0, 18446744073709551617) == {
+        .Err(.Length) -> print("range:wide")
+        else -> print("range:wrong-error")
+    }
+    print(crypto.constant_time_equal_bytes([U8]{1, 2, 3}, [U8]{1, 2, 3}))
+    print(crypto.constant_time_equal_bytes([U8]{1, 2, 3}, [U8]{1, 2, 4}))
+    print(crypto.constant_time_equal_bytes([U8]{1, 2, 3}, [U8]{1, 2}))
+    print(random.compare_digest([U8]{}, [U8]{}))
+    print(random.compare_digest([U8]{1}, [U8]{}))
+}
+`, "hex:length\nurl:length\ntrue\ntrue\nrange:length\nrange:wide\ntrue\nfalse\nfalse\ntrue\nfalse\n")
+}
+// Rust: tests/core_crypto_foundations.rs:52
+#Test("crypto_random_valid_ranges_stay_inside_the_requested_interval_on_all_tiers") {
+    assert_tiers_agree("core_crypto_random_range", `
+use core.crypto.random as random
+
+fn run() {
+    value :: random.int_range(-17, 17) ?? return
+    print(value >= -17 && value < 17)
+    bits :: random.randbits(13) ?? return
+    print(bits >= 0 && bits < 8192)
+}
+`, "true\ntrue\n")
+}
+// Rust: tests/core_crypto_foundations.rs:70
+#Test("crypto_aead_tampering_is_rejected_across_tiers") {
+    assert_tiers_agree("core_crypto_aead_tamper", `
+use core.crypto.expert as expert
+
+fn run() {
+    key := [U8]{
+        0, 1, 2, 3, 4, 5, 6, 7,
+        8, 9, 10, 11, 12, 13, 14, 15,
+        16, 17, 18, 19, 20, 21, 22, 23,
+        24, 25, 26, 27, 28, 29, 30, 31,
+    }
+    nonce := [U8]{
+        0, 1, 2, 3, 4, 5, 6, 7,
+        8, 9, 10, 11, 12, 13, 14, 15,
+        16, 17, 18, 19, 20, 21, 22, 23,
+    }
+    #Unsafe("fixed AEAD tamper vector") {
+        sealed :: expert.xchacha20poly1305_seal(key, nonce, [U8]{1, 2, 3}, [U8]{4, 5}) ?? return
+        tampered := sealed
+        tampered[0] = U8{Int.from_u8(tampered[0]) ~| 1}
+        if expert.xchacha20poly1305_open(key, nonce, tampered, [U8]{4, 5}) == {
+            .Err(_) -> print("tamper:rejected")
+            else -> print("tamper:wrong-error")
+        }
+    }
+}
+`, "tamper:rejected\n")
+}
+// Rust: tests/core_crypto_foundations.rs:104
+#Test("immutable_integer_array_constants_preserve_values_across_tiers") {
+    assert_tiers_agree("module_integer_array_constants", `
+C_WORDS :: [Int]{17, 18446744073709551615}
+C_BYTES :: [U8]{0, 127, 255}
+
+fn run() {
+    print(C_WORDS[0])
+    print(C_WORDS[1])
+    print(Int.from_u8(C_BYTES[1]))
+    print(Int.from_u8(C_BYTES[2]))
+}
+`, "17\n18446744073709551615\n127\n255\n")
+}
+// Rust: tests/core_crypto_foundations.rs:124
+#Test("module_array_constants_reject_computed_elements_in_sema") {
+    diagnostics :: compile_source("computed_module_array_constant", `
+BAD_TABLE :: [Int]{1 + 2}
+fn run() {}
+`).expect_err("computed module array elements must be rejected by sema")
+    assert(diagnostics.iter().any(|diagnostic| -> diagnostic.code == "E0622"), "computed module array elements must produce E0622: {diagnostics.debug()}")
+}
+// Rust: tests/core_encoding_foundations.rs:7
+#Test("encoding_foundation_hostile_and_multiline_cases_match_all_tiers") {
+    assert_tiers_agree("core_encoding_foundations", `
+use core.encoding.base64 as base64
+use core.encoding.binary as binary
+use core.encoding.hex as hex
+use core.encoding.json as json
+use core.encoding.xml as xml
+use core.encoding.toml as toml
+use core.encoding.yaml as yaml
+
+fn run() {
+    print(yaml.parse(": value\n") == .Err(_))
+    data := [U8]{}
+    loop i in 0..<46 -> &data.push(U8{i})
+    print(toml.parse("x = bare") == .Err(_))
+    print(toml.parse("date = 2024-02-29") != .Err(_))
+    print(toml.parse("date = 2023-02-29") == .Err(_))
+    print(hex.a2b_uu(hex.b2a_uu(data)) == data)
+    print(base64.a85decode("uuuuu") == .Err(_))
+    print(base64.b85decode("~~~~~") == .Err(_))
+    print(binary.unpack("I", [U8]{0, 0, 0, 0, 0}) == .Err(_))
+    print(json.parse("1e9999") == .Err(_))
+    print(xml.parse("<1root/>") == .Err(_))
+    print(xml.parse("<r>&</r>") == .Err(_))
+}
+`, "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n")
+}
+// Rust: tests/core_files_foundations.rs:7
+#Test("core_files_copy_dir_does_not_follow_symlinked_entries") {
+    scratch :: common.Scratch.new("core_files_copy_dir_symlinks")
+    fixture :: scratch.path.to_string_lossy().replace("\\", "\\\\").replace("\"", "\\\"")
+    source :: `
+use core.files as files
+
+fn run() {
+    root :: "__FIXTURE__"
+    source :: files.join(root, "source")
+    destination :: files.join(root, "destination")
+    outside :: files.join(root, "outside.txt")
+    linked :: files.join(source, "linked.txt")
+    copied_link :: files.join(destination, "linked.txt")
+    regular :: files.join(source, "regular.txt")
+    copied_regular :: files.join(destination, "regular.txt")
+    files.create_dir(source) ?? panic("source")
+    files.write(outside, "do not copy") ?? panic("outside")
+    files.write(regular, "keep") ?? panic("regular")
+    files.symlink(outside, linked) ?? panic("symlink")
+    files.copy_dir(source, destination) ?? panic("copy_dir")
+    print(files.read(copied_regular) ?? "missing")
+    print(files.lexists(copied_link))
+    print(files.read(copied_link) == .Err(_))
+    files.remove_all(root) ?? panic("cleanup")
+}
+`.replace("__FIXTURE__", fixture)
+    assert_tiers_agree("core_files_foundations", source, "keep\nfalse\ntrue\n")
+}
+// Rust: tests/core_files_foundations.rs:40
+#Test("core_files_read_bytes_plain_iteration_preserves_unsigned_bytes_and_empty_input") {
+    scratch :: common.Scratch.new("core_files_byte_iteration")
+    fixture_root :: scratch.path.join("fixture")
+    fs.create_dir(fixture_root).expect("create byte iteration fixture root")
+    fs.write(fixture_root.join("bytes.bin"), [U8]{0, 1, 127, 128, 255}).expect("write byte iteration fixture")
+    fs.write(fixture_root.join("empty.bin"), [U8]{}).expect("write empty byte fixture")
+    fixture :: fixture_root.to_string_lossy().replace("\\", "\\\\").replace("\"", "\\\"")
+    source :: `
+use core.files as files
+
+fn run() {
+    root :: "__FIXTURE__"
+    bytes_path :: files.join(root, "bytes.bin")
+    empty_path :: files.join(root, "empty.bin")
+    bytes :: files.read_bytes(bytes_path) ?? panic("read bytes")
+    loop byte in bytes { print(byte) }
+    print(bytes.len())
+    empty :: files.read_bytes(empty_path) ?? panic("read empty bytes")
+    loop byte in empty { print(byte) }
+    print(empty.len())
+    loop value in [7, 13] { print(value) }
+}
+`.replace("__FIXTURE__", fixture)
+    assert_tiers_agree("core_files_byte_iteration", source, "0\n1\n127\n128\n255\n5\n0\n7\n13\n")
+}
+// Rust: tests/core_files_foundations.rs:83
+#Test("core_files_canonicalize_resolves_symlinks_and_rejects_missing_paths") {
+    scratch :: common.Scratch.new("core_files_canonicalize")
+    fixture_path :: fs.canonicalize(scratch.path).expect("canonicalize test scratch path")
+    fixture :: fixture_path.join("fixture").to_string_lossy().replace("\\", "\\\\").replace("\"", "\\\"")
+    source :: `
+use core.files as files
+
+fn run() {
+    root :: "__FIXTURE__"
+    target_dir :: files.join(root, "target-dir")
+    target :: files.join(target_dir, "target.txt")
+    linked :: files.join(root, "linked.txt")
+    missing :: files.join(target_dir, "missing.txt")
+    files.create_dir_all(target_dir) ?? panic("target dir")
+    files.write(target, "canonical target") ?? panic("target")
+    files.symlink(target, linked) ?? panic("symlink")
+    canonical_target :: files.canonicalize(target) ?? panic("target canonicalize")
+    canonical_link :: files.canonicalize(linked) ?? panic("symlink canonicalize")
+    print(files.is_abs(canonical_target))
+    print(canonical_target == canonical_link)
+    print(files.canonicalize(missing) == .Err(_))
+    files.remove(linked) ?? panic("cleanup symlink")
+    files.remove_all(root) ?? panic("cleanup")
+}
+`.replace("__FIXTURE__", fixture)
+    assert_tiers_agree("core_files_canonicalize", source, "true\ntrue\ntrue\n")
+}
+
+// Rust: tests/core_files_opaque_handles.rs:11
+#Test("file_handle_paths_are_read_only_provider_views_across_tiers") {
+    scratch :: common.Scratch.new("core_files_opaque_handles")
+    fixture :: scratch.path.to_string_lossy().replace("\\", "\\\\").replace("\"", "\\\"")
+    source :: `
+use core.files as files
+
+fn make_writer_path(path: String) -> String {
+    writer :: files.create(path) ?? panic("create")
+    print(writer.path == path)
+    writer.write_line("payload") ?? panic("write")
+    &writer.flush() ?? panic("flush")
+    writer.path
+}
+fn make_reader_path(path: String) -> String {
+    reader :: files.open(path) ?? panic("open")
+    line :: reader.read_line() ?? panic("read")
+    print(line == "payload")
+    reader.path
+}
+fn make_temp_dir_path() -> String {
+    temp_dir :: files.temp_dir("opaque-handles-dir") ?? panic("temp dir")
+    temp_dir.path
+}
+fn make_temp_file_path() -> String {
+    temp_file :: files.temp_file("opaque-handles-file") ?? panic("temp file")
+    temp_file.path
+}
+fn make_lock_path(path: String) -> String {
+    lock :: files.lock(path) ?? panic("lock")
+    lock.path
+}
+fn run() {
+    root :: "__FIXTURE__"
+    files.create_dir_all(root) ?? panic("root")
+    path :: files.join(root, "value.txt")
+    writer_path :: make_writer_path(path)
+    print(writer_path == path)
+    reader_path :: make_reader_path(path)
+    print(reader_path == path)
+    print((files.read(path) ?? panic("read")) == "payload\n")
+    temp_dir_path :: make_temp_dir_path()
+    print(temp_dir_path.bytes().len() > 0 && !files.exists(temp_dir_path))
+    temp_file_path :: make_temp_file_path()
+    print(temp_file_path.bytes().len() > 0 && !files.exists(temp_file_path))
+    lock_path :: files.join(root, "value.lock")
+    shown_lock_path :: make_lock_path(lock_path)
+    print(shown_lock_path == lock_path)
+    print(!files.exists(lock_path))
+}
+`.replace("__FIXTURE__", fixture)
+    assert_tiers_agree("core_files_opaque_handles", source, "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n")
+}
+// Rust: tests/core_files_opaque_handles.rs:82
+#Test("file_owner_cleanup_tracks_lexical_exits_and_checked_transfers") {
+    source :: `
+use core.files as files
+
+fn borrowed_path(owner: files.TempFile) -> String {
+    owner.path
+}
+fn transfer_owner(owner: ^files.TempFile) -> files.TempFile {
+    owner
+}
+fn return_owner(early: Bool) -> files.TempFile {
+    owner :: files.temp_file("opaque-owner-return") ?? panic("temp file")
+    if early { return owner }
+    owner
+}
+fn nested_exit(early: Bool) -> String {
+    if early {
+        owner :: files.temp_file("opaque-owner-early") ?? panic("temp file")
+        path :: owner.path
+        print(files.exists(path))
+        return path
+    }
+    owner :: files.temp_file("opaque-owner-normal") ?? panic("temp file")
+    owner.path
+}
+fn conditional_move_path(transfer: Bool) -> String {
+    owner :: files.temp_file("opaque-owner-transfer") ?? panic("temp file")
+    path :: owner.path
+    if transfer {
+        moved :: transfer_owner(^owner)
+        print(files.exists(path))
+    }
+    print(files.exists(path) == !transfer)
+    path
+}
+fn run() {
+    first :: return_owner(true)
+    first_path :: borrowed_path(first)
+    print(files.exists(first_path))
+    second :: return_owner(false)
+    second_path :: borrowed_path(second)
+    print(files.exists(second_path))
+    loop i in [0, 1] {
+        path :: nested_exit(i == 0)
+        print(!files.exists(path))
+    }
+    moved_path :: conditional_move_path(true)
+    print(!files.exists(moved_path))
+    kept_path :: conditional_move_path(false)
+    print(!files.exists(kept_path))
+    paths := [String]{}
+    loop i in [0, 1] {
+        if i == 0 {
+            owner :: files.temp_dir("opaque-owner-nested") ?? panic("temp dir")
+            path :: owner.path
+            print(files.exists(path))
+            &paths.push(path)
+        } else {
+            owner :: files.temp_file("opaque-owner-loop") ?? panic("temp file")
+            path :: owner.path
+            print(files.exists(path))
+            &paths.push(path)
+        }
+    }
+    loop path in paths { print(!files.exists(path)) }
+    print(files.exists(first_path))
+    print(files.exists(second_path))
+}
+`
+    scratch :: common.Scratch.new("core_files_owner_mir")
+    tir_support.write_test_package(scratch.path, tir_support.TIR_TEST_PACKAGE)
+    entry :: scratch.path.join("run.jet")
+    fs.write(entry, source).expect("write file owner fixture")
+    mir :: jet.run_compiler_work(|| -> {
+        bundle := jet.Loader.load_entry(entry.to_str().expect("UTF-8 fixture path")).expect("load file owner fixture")
+        errors :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run).into_iter().filter(|diagnostic| -> diagnostic.severity is jet.Diagnostics.Severity.Error).collect()
+        assert(errors.is_empty(), "checked file owner fixture: {errors.debug()}")
+        request :: MirArtifactRequest.new(MirArtifactTarget.Cranelift, MirArtifactKind.NativeExecutable, MirArtifactBuildMode.Dev)
+        tir :: jet.Codegen.TIR.lower_checked_tir_program_for(bundle, request).expect("checked file owner TIR")
+        jet.Codegen.TIR.lower_tir_to_mir(tir).expect("file owner MIR")
+    })
+    temp_file :: mir.types.iter().find(|definition| ->
+        definition.name == "TempFile" and mir.modules.iter().any(|module| ->
+            module.id == definition.module and module.path == "Core/files/files.jet" and definition.key == "{module.key}::TempFile"
+        )
+    ).expect("checked core.files TempFile type")
+    function :: mir.functions.iter().find(|function| -> function.name == "conditional_move_path").expect("conditional owner transfer function")
+    transfer :: mir.functions.iter().find(|function| -> function.name == "transfer_owner").expect("checked owned-parameter transfer function")
+    assert_eq(transfer.params[0].access, MirAccess.Move)
+    assert(transfer.blocks.iter().flat_map(|block| -> block.instructions).any(|instruction| -> {
+        match instruction.operation {
+            .MovePlace { place } -> transfer.places.iter().any(|candidate| -> candidate.id == place and candidate.base is .Parameter(_)),
+            _ -> false
+        }
+    }), "an owned imported Close parameter must be consumed into its guard, not returned as a parameter borrow")
+    args :: function.blocks.iter().flat_map(|block| -> block.instructions).find_map(|instruction| -> {
+        match instruction.operation {
+            .Call { callee: .User(callee), args, .. } -> if callee == transfer.id { Val(args) } else { None },
+            _ -> None
+        }
+    }).expect("checked transfer call")
+    assert_eq(args[0].access, MirAccess.Move, "materializing ^owner into an argument temporary must not change Move to Read")
+    assert(function.blocks.iter().flat_map(|block| -> block.instructions).any(|instruction| -> instruction.result == Val(args[0].value) and instruction.operation is .MovePlace { .. }), "the transfer must consume the argument temporary rather than retain its owner until caller return")
+    owner :: function.locals.iter().find(|local| -> local.ty.identity == Val(temp_file.id)).expect("checked TempFile owner local")
+    cleared_flag :: function.blocks.iter().find_map(|block| -> {
+        block.instructions.windows(3).find_map(|instructions| -> {
+            if instructions.len() != 3 { return None }
+            moved :: instructions[0]
+            cleared :: instructions[1]
+            stored :: instructions[2]
+            if moved.result.is_some_and(|value| -> block.instructions.iter().any(|instruction| -> {
+                match instruction.operation { .Drop { value: dropped, .. } -> dropped == value, _ -> false }
+            })) { return None }
+            moved_owner :: match moved.operation { .MovePlace { place } -> place == owner.place, _ -> false }
+            if moved_owner and cleared.operation is .Constant(MirConstant.Bool(false)) {
+                if stored.operation is .WritePlace { place, value } {
+                    if Val(value) == cleared.result { return Val(place) }
+                }
+            }
+            None
+        })
+    }).expect("checked owner transfer must clear its live place")
+    guarded_drop :: function.blocks.iter().any(|block| -> {
+        branch :: match block.terminator {
+            .Branch { condition, then_target, .. } -> (condition, then_target),
+            _ -> return false
+        }
+        reads_live :: block.instructions.iter().any(|instruction| -> {
+            instruction.result == Val(branch.0) and match instruction.operation {
+                .ReadPlace(place) -> place == cleared_flag,
+                _ -> false
+            }
+        })
+        reads_live and function.blocks.iter().find(|candidate| -> candidate.id == branch.1).is_some_and(|target| -> {
+            owner_moves :: target.instructions.iter().filter_map(|instruction| -> {
+                match instruction.operation {
+                    .MovePlace { place } -> if place == owner.place { instruction.result } else { None },
+                    _ -> None
+                }
+            }).collect()
+            target.instructions.iter().any(|instruction| -> {
+                match instruction.operation { .Drop { value, .. } -> owner_moves.contains(value), _ -> false }
+            })
+        })
+    })
+    assert(guarded_drop, "checked TempFile owner must drop only on its live branch")
+    assert_tiers_agree("core_files_owner_lifetime", source, "true\n".repeat(16))
+}
+// Rust: tests/core_files_opaque_handles.rs:275
+#Test("file_handles_have_no_fd_fields_and_cannot_be_written_or_forged") {
+    source :: `
+use core.files as files
+
+fn run() {
+    reader :: files.open("unused") ?? panic("open")
+    writer :: files.create("unused") ?? panic("create")
+    lock :: files.lock("unused") ?? panic("lock")
+    temp_dir :: files.temp_dir("unused") ?? panic("temp dir")
+    temp_file :: files.temp_file("unused") ?? panic("temp file")
+    print(reader.fd)
+    print(writer.fd)
+    print(lock.fd)
+    reader.path = "forged"
+    writer.path = "forged"
+    lock.path = "forged"
+    temp_dir.path = "forged"
+    temp_file.path = "forged"
+    _ :: files.FileReader{path: "forged"}
+    _ :: files.FileWriter{path: "forged"}
+    _ :: files.FileLock{path: "forged"}
+    _ :: files.TempDir{path: "forged"}
+    _ :: files.TempFile{path: "forged"}
+}
+`
+    diagnostics :: compile_source("opaque_file_handles", source).expect_err("fd access, path mutation, and handle construction must be rejected")
+    loop code in ["E0302", "E0339", "E0605"] {
+        assert(diagnostics.iter().any(|diagnostic| -> diagnostic.code == code), "expected {code} among opaque-handle diagnostics, got {diagnostics.debug()}")
+    }
+}
+// Rust: tests/core_files_opaque_handles.rs:314
+#Test("file_manual_close_consumes_the_checked_provider_owner") {
+    scratch :: common.Scratch.new("core_files_manual_close")
+    root :: scratch.path.to_string_lossy().replace("\\", "\\\\").replace("\"", "\\\"")
+    source :: `
+use core.files as files
+
+fn replace_closed_temp() -> String {
+    owner :: files.temp_file("opaque-close-replacement") ?? panic("temp")
+    path :: owner.path
+    close(^owner)
+    files.write(path, "replacement") ?? panic("replace temp")
+    path
+}
+fn replace_closed_lock(path: String) {
+    owner :: files.lock(path) ?? panic("lock")
+    close(^owner)
+    files.write(path, "replacement") ?? panic("replace lock")
+}
+fn run() {
+    temp :: files.temp_file("opaque-manual-close") ?? panic("temp")
+    temp_path :: temp.path
+    print(files.exists(temp_path))
+    close(^temp)
+    print(!files.exists(temp_path))
+    path :: files.join("__ROOT__", "reader.txt")
+    writer :: files.create(path) ?? panic("create")
+    writer.write_line("payload") ?? panic("write")
+    &writer.flush() ?? panic("flush")
+    close(^writer)
+    reader :: files.open(path) ?? panic("open")
+    print(reader.path == path)
+    line :: reader.read_line() ?? panic("read")
+    close(^reader)
+    print(line == "payload")
+    lock_path :: files.join("__ROOT__", "owner.lock")
+    lock :: files.lock(lock_path) ?? panic("lock")
+    print(files.exists(lock_path))
+    close(^lock)
+    print(!files.exists(lock_path))
+    // Lexical cleanup must not delete a replacement file after consuming close.
+    replaced_temp :: replace_closed_temp()
+    print((files.read(replaced_temp) ?? panic("read replaced temp")) == "replacement")
+    files.remove(replaced_temp) ?? panic("remove replaced temp")
+    replaced_lock :: files.join("__ROOT__", "replacement.lock")
+    replace_closed_lock(replaced_lock)
+    print((files.read(replaced_lock) ?? panic("read replaced lock")) == "replacement")
+    files.remove(replaced_lock) ?? panic("remove replaced lock")
+}
+`.replace("__ROOT__", root)
+    assert_tiers_agree("core_files_manual_close", source, "true\n".repeat(8))
+    loop (name, after_close) in [
+        ("core_files_use_after_close_temp", `
+use core.files as files
+fn run() {
+    owner :: files.temp_file("opaque-use-after-close") ?? panic("temp")
+    close(^owner)
+    print(owner.path)
+}
+`),
+        ("core_files_use_after_close_reader", `
+use core.files as files
+fn run() {
+    reader :: files.open("unused") ?? panic("open")
+    close(^reader)
+    print(reader.path)
+}
+`),
+        ("core_files_use_after_close_writer", `
+use core.files as files
+fn run() {
+    writer :: files.create("unused") ?? panic("create")
+    close(^writer)
+    print(writer.path)
+}
+`)
+    ] {
+        diagnostics :: compile_source(name, after_close).expect_err("manual close must consume the source owner")
+        assert(diagnostics.iter().any(|diagnostic| -> diagnostic.code == "E0121"), "use after close must be rejected by sema: {diagnostics.debug()}")
+        assert(diagnostics.iter().all(|diagnostic| -> diagnostic.code != "E0905"), "checked Core owner must implement Close: {diagnostics.debug()}")
+    }
+}
+// Rust: tests/core_files_opaque_handles.rs:424
+#Test("owned_file_replacement_releases_only_the_displaced_live_owner") {
+    scratch :: common.Scratch.new("core_files_owner_replacement")
+    root :: scratch.path.to_string_lossy().replace("\\", "\\\\").replace("\"", "\\\"")
+    source :: `
+use core.files as files
+
+struct Holder { owner: files.TempFile }
+fn transfer_owner(owner: ^files.TempFile) -> files.TempFile {
+    owner
+}
+fn replaced_paths() -> [String] {
+    owner := files.temp_file("replace-before") ?? panic("before")
+    old_path :: owner.path
+    owner = files.temp_file("replace-after") ?? panic("after")
+    print(!files.exists(old_path))
+    path :: owner.path
+    print(files.exists(path))
+    [old_path, path]
+}
+fn replace_moved_slot() {
+    owner := files.temp_file("replace-moved") ?? panic("moved")
+    moved :: transfer_owner(^owner)
+    path :: moved.path
+    owner = files.temp_file("replace-reinit") ?? panic("reinit")
+    print(files.exists(path))
+    close(^moved)
+    print(!files.exists(path))
+    replacement :: owner.path
+    close(^owner)
+    print(!files.exists(replacement))
+}
+fn failed_replacement(root: String) -> String {
+    old_path :: files.join(root, "old.lock")
+    owner := files.lock(old_path) ?? panic("old lock")
+    occupied :: files.join(root, "occupied.lock")
+    files.write(occupied, "occupied") ?? panic("occupy")
+    owner = files.lock(occupied) ?? {
+        print(files.exists(old_path))
+        files.remove(occupied) ?? panic("remove occupied")
+        return old_path
+    }
+    panic("lock of occupied path must fail")
+}
+fn replace_aggregate_slot() {
+    holder := Holder{owner: files.temp_file("aggregate-before") ?? panic("before")}
+    old_path :: holder.owner.path
+    holder.owner = files.temp_file("aggregate-after") ?? panic("after")
+    print(!files.exists(old_path))
+    path :: holder.owner.path
+    close(^holder.owner)
+    print(!files.exists(path))
+}
+fn run() {
+    paths :: replaced_paths()
+    print(!files.exists(paths[0]))
+    print(!files.exists(paths[1]))
+    replace_moved_slot()
+    old_lock :: failed_replacement("__ROOT__")
+    print(!files.exists(old_lock))
+    replace_aggregate_slot()
+}
+`.replace("__ROOT__", root)
+    assert_tiers_agree("core_files_owner_replacement", source, "true\n".repeat(11))
+}
+// Rust: tests/core_files_opaque_handles.rs:500
+#Test("aggregate_partial_moves_preserve_siblings_and_reinitialize_across_branches") {
+    source :: read("tests/fixtures/core_files_partial_move_siblings.jet")
+    assert_tiers_agree("core_files_partial_move_siblings", source, "true\n".repeat(25))
+}
+// Rust: tests/core_files_opaque_handles.rs:510
+#Test("moved_aggregate_parameter_drops_only_its_remaining_owned_sibling") {
+    source :: `
+use core.files as files
+
+struct Pair { left: files.TempFile, right: files.TempFile }
+fn consume(pair: ^Pair) -> String {
+    left :: pair.left.path
+    sibling :: pair.right.path
+    close(^pair.left)
+    print(!files.exists(left))
+    print(files.exists(sibling))
+    sibling
+}
+fn run() {
+    pair := Pair{
+        left: files.temp_file("parameter-left") ?? panic("left"),
+        right: files.temp_file("parameter-right") ?? panic("right")
+    }
+    sibling :: consume(^pair)
+    print(!files.exists(sibling))
+}
+`
+    assert_tiers_agree("core_files_partial_move_parameter", source, "true\ntrue\ntrue\n")
+}
+// Rust: tests/core_files_opaque_handles.rs:542
+#Test("precondition_read_temporary_does_not_release_its_callers_owners") {
+    source :: `
+use core.files as files
+
+struct Pair { left: files.TempFile, right: files.TempFile }
+#Pre(pair.left.path != pair.right.path, "distinct owners")
+fn inspect(pair: Pair) {
+    print(files.exists(pair.left.path))
+    print(files.exists(pair.right.path))
+}
+fn exercise() -> String {
+    pair := Pair{
+        left: files.temp_file("alias-left") ?? panic("left"),
+        right: files.temp_file("alias-right") ?? panic("right")
+    }
+    left :: pair.left.path
+    right :: pair.right.path
+    inspect(pair)
+    print(files.exists(left))
+    print(files.exists(right))
+    close(^pair.left)
+    print(!files.exists(left))
+    print(files.exists(right))
+    right
+}
+fn run() {
+    remaining :: exercise()
+    print(!files.exists(remaining))
+}
+`
+    scratch :: common.Scratch.new("core_files_borrowed_temporary_mir")
+    tir_support.write_test_package(scratch.path, tir_support.TIR_TEST_PACKAGE)
+    entry :: scratch.path.join("run.jet")
+    fs.write(entry, source).expect("write borrowed temporary fixture")
+    mir :: jet.run_compiler_work(|| -> {
+        bundle := jet.Loader.load_entry(entry.to_str().expect("UTF-8 fixture path")).expect("load borrowed temporary fixture")
+        errors :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run).into_iter().filter(|diagnostic| -> diagnostic.severity is jet.Diagnostics.Severity.Error).collect()
+        assert(errors.is_empty(), "checked borrowed temporary fixture: {errors.debug()}")
+        request :: MirArtifactRequest.new(MirArtifactTarget.Cranelift, MirArtifactKind.NativeExecutable, MirArtifactBuildMode.Dev)
+        tir :: jet.Codegen.TIR.lower_checked_tir_program_for(bundle, request).expect("checked borrowed temporary TIR")
+        result :: jet.Codegen.TIR.lower_tir_to_mir(tir).expect("borrowed temporary MIR")
+        optimize_mir_program(result.clone(), MirOptimizationPolicy.conservative()).expect("contract metadata must remain canonical through optimization")
+        result
+    })
+    inspect :: mir.functions.iter().find(|function| -> function.name == "inspect").expect("checked read-parameter function")
+    contract :: mir.tests.iter().find(|test| -> test.contract_generated and test.name == "contract::inspect").expect("generated contract test metadata")
+    contract_target :: mir.functions.iter().find(|function| -> function.id == contract.function).expect("checked contract target")
+    parameter :: contract.parameters.first().expect("sampled Pair parameter")
+    checked_parameter :: contract_target.params.iter().find(|candidate| -> candidate.index == parameter.index).expect("checked contract parameter slot")
+    assert_eq(parameter.ty, checked_parameter.ty)
+    assert_eq(parameter.ty, inspect.params[0].ty)
+    assert_eq(parameter.access, checked_parameter.access)
+    exercise :: mir.functions.iter().find(|function| -> function.name == "exercise").expect("checked caller")
+    owner :: exercise.locals.iter().find(|local| -> local.name == "pair").expect("original Pair owner")
+    argument :: exercise.blocks.iter().flat_map(|block| -> block.instructions).find_map(|instruction| -> {
+        match instruction.operation {
+            .Call { callee: .User(callee), args, .. } -> if callee == inspect.id { args.first() } else { None },
+            _ -> None
+        }
+    }).expect("checked inspect argument")
+    assert_eq(argument.access, MirAccess.Read)
+    argument_place :: exercise.places.iter().find(|place| -> Val(place.id) == argument.place).expect("read argument has a checked owner place")
+    assert_eq(argument_place.id, owner.place)
+    assert_eq(argument_place.base, MirPlaceBase.Local(owner.id))
+    alias :: exercise.locals.iter().find(|local| -> local.id != owner.id and local.place == owner.place).expect("precondition temporary must be a genuine alias of the original owner")
+    assert_eq(alias.ownership, MirOwnership.from_access(MirAccess.Read))
+    assert(not alias.mutable, "a read borrow must not gain write access")
+    assert_eq(alias.ty, owner.ty)
+    assert(not exercise.places.iter().any(|place| -> place.base == MirPlaceBase.Local(alias.id)), "a read alias must not acquire independent owner storage or consuming cleanup")
+    assert_tiers_agree("core_files_precondition_read_temporary", source, "true\n".repeat(7))
+}

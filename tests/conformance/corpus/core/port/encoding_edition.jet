@@ -1,0 +1,21 @@
+use tests.common
+use std.[fs, env, process]
+// Rust: tests/encoding_edition.rs:9
+fn scratch(name: String) -> OSPath {
+    // GATE #4494: native filesystem and process identity.
+    dir :: env.temp_dir().join("jet_enc_edition_{name}_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    dir
+}
+// Rust: tests/encoding_edition.rs:16
+fn write_single_file(root: OSPath, body: String) -> OSPath {
+    path :: root.join("run.jet")
+    fs.write(path, body).unwrap()
+    path
+}
+// Rust: tests/encoding_edition.rs:22
+fn write_project(root: OSPath, edition: String, body: String) -> OSPath {
+    fs.write(root.join("package.jet"), "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"{edition}\"\n").unwrap()
+    write_single_file(root, body)
+}

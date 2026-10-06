@@ -1,0 +1,555 @@
+// GameAssetPipeline.rs:1-2351 has no inline/generated/included tests. These are
+// faithful behavioral controls over its real pure kernel, not host mocks.
+// #4499 gates the typed-map coalescing/graph tests. #4494/#4500 Store native
+// journeys are NOT represented by these assertions. Main owns paired suites
+// 1099/1162, publication and positive/control/restored execution; none run here.
+use core.game.runtime.kernel_game_asset_pipeline as assets
+use core.text.runtime.kernel_unicode_string as asset_test_text
+
+fn asset_test_root(id: String, path: String) -> assets.JetGameAssetRootIdentity Never! {
+    assets.JetGameAssetRootIdentity.new(id, path) ?? panic("root fixture")
+}
+fn asset_test_source(path: String) -> assets.JetGameAssetSourceIdentity Never! {
+    assets.JetGameAssetSourceIdentity.new(asset_test_root("root", "assets"), path, "source-hash") ?? panic("source fixture")
+}
+fn asset_test_plan() -> assets.JetGameAssetImportPlan Never! {
+    source :: asset_test_source("sprite.png")
+    recipe :: assets.JetGameAssetRecipeIdentity.new("texture", "1") ?? panic("recipe")
+    tool :: assets.JetGameAssetToolIdentity.new("importer", "2") ?? panic("tool")
+    version :: assets.JetGameAssetVersionIdentity.numeric(U64{3})
+    assets.JetGameAssetImportPlan.new(source, recipe, tool, version) ?? panic("plan")
+}
+fn asset_test_cp(cp: Int) -> String Never! {
+    bytes := [U8]{}
+    asset_test_text.append_cp(&bytes, cp)
+    String.from_bytes(bytes) ?? panic("scalar fixture")
+}
+fn asset_test_text_error(value: String, expected: assets.JetGameAssetPipelineError) Never! {
+    if assets.jet_game_asset_text(value, "test") == {
+        .Ok(_) -> panic("invalid identity accepted")
+        .Err(actual) -> assert(actual == expected)
+    }
+}
+fn asset_test_path_error(value: String, expected: assets.JetGameAssetPipelineError) Never! {
+    if assets.jet_game_asset_normalize_path(value) == {
+        .Ok(_) -> panic("invalid physical path accepted")
+        .Err(actual) -> assert(actual == expected)
+    }
+}
+fn asset_test_logical_error(value: String, expected: assets.JetGameAssetPipelineError) Never! {
+    if assets.jet_game_asset_normalize_logical_path(value) == {
+        .Ok(_) -> panic("invalid logical path accepted")
+        .Err(actual) -> assert(actual == expected)
+    }
+}
+fn asset_test_outcome_error(outcome: assets.JetGameAssetImportOutcome, plan: assets.JetGameAssetImportPlan, expected: assets.JetGameAssetPipelineError) Never! {
+    if outcome.validate_against(plan) == {
+        .Ok(_) -> panic("invalid outcome accepted")
+        .Err(actual) -> assert(actual == expected)
+    }
+}
+
+#Test("asset identity trim Cc and byte limits preserve error precedence") {
+    assert_eq(assets.jet_game_asset_text("  texture  ", "test") ?? panic("trim"), "texture")
+    asset_test_text_error(" \n ", .EmptyIdentity("test"))
+    exact :: "é".repeat(128)
+    assert_eq(assets.jet_game_asset_text(exact, "test") ?? panic("256 UTF8 bytes"), exact)
+    asset_test_text_error("{exact}a", .IdentityTooLong("test"))
+    loop cp in 0..<160 {
+        if cp >= 32 && cp <= 126 -> next
+        control :: asset_test_cp(cp)
+        asset_test_text_error("a{control}b", .ControlIdentity("test"))
+        asset_test_text_error("{ "a".repeat(256)}{control}", .IdentityTooLong("test"))
+    }
+    // Format characters are not char::is_control, unlike Cc.
+    assert_eq(assets.jet_game_asset_text("a{asset_test_cp(8203)}b", "test") ?? panic("Cf allowed"), "a{asset_test_cp(8203)}b")
+}
+
+#Test("asset metadata remains opaque untrimmed and bounded separately") {
+    assert_eq(assets.jet_game_asset_metadata("  ") ?? panic("metadata spaces"), "  ")
+    assert_eq(assets.jet_game_asset_metadata("") ?? panic("empty metadata"), "")
+    assert_eq((assets.jet_game_asset_metadata("é".repeat(2048)) ?? panic("metadata cap")).count_bytes(), 4096)
+    if assets.jet_game_asset_metadata("a".repeat(4097)) == {
+        .Ok(_) -> panic("long metadata accepted")
+        .Err(error) -> assert(error == .IdentityTooLong("runtime metadata"))
+    }
+    if assets.jet_game_asset_metadata("line\n") == {
+        .Ok(_) -> panic("metadata Cc accepted")
+        .Err(error) -> assert(error == .ControlIdentity("runtime metadata"))
+    }
+}
+
+#Test("asset lexical path normalization preserves Unix drive and relative roots") {
+    assert_eq(assets.jet_game_asset_normalize_path(" ./a//b/../c ") ?? panic("relative"), "a/c")
+    assert_eq(assets.jet_game_asset_normalize_path("\\assets\\textures\\..\\hero") ?? panic("backslash"), "/assets/hero")
+    assert_eq(assets.jet_game_asset_normalize_path("C:\\assets\\x\\..\\hero") ?? panic("drive"), "C:/assets/hero")
+    assert_eq(assets.jet_game_asset_normalize_path("C:/") ?? panic("drive root"), "C:/")
+    assert_eq(assets.jet_game_asset_normalize_path("/a/..") ?? panic("slash root"), "/")
+    assert_eq(assets.jet_game_asset_normalize_path("a/..") ?? panic("dot root"), ".")
+    assert_eq(assets.jet_game_asset_normalize_path("é/素材") ?? panic("scalar extents"), "é/素材")
+    asset_test_path_error("  ", .InvalidPath("  "))
+    asset_test_path_error("  a/../../b  ", .PathEscape("  a/../../b  "))
+    asset_test_path_error("/../b", .PathEscape("/../b"))
+    asset_test_path_error("a{asset_test_cp(127)}b", .ControlIdentity("path"))
+    assert_eq((assets.jet_game_asset_normalize_path("a".repeat(4096)) ?? panic("path cap")).count_bytes(), 4096)
+    asset_test_path_error("a".repeat(4097), .IdentityTooLong("path"))
+}
+
+#Test("asset logical paths reject absolute and empty but retain colon names") {
+    assert_eq(assets.jet_game_asset_normalize_logical_path("a/../素材/file") ?? panic("logical"), "素材/file")
+    assert_eq(assets.jet_game_asset_normalize_logical_path("C:file") ?? panic("relative colon"), "C:file")
+    asset_test_logical_error("/a", .InvalidPath("/a"))
+    asset_test_logical_error("C:/a", .InvalidPath("C:/a"))
+    asset_test_logical_error("a/..", .InvalidPath("a/.."))
+    asset_test_logical_error("../a", .PathEscape("../a"))
+    assert(assets.jet_game_asset_relative_path(".", "x") == Val("x"))
+    assert(assets.jet_game_asset_relative_path(".", ".") == None)
+    assert(assets.jet_game_asset_relative_path(".", "/x") == None)
+    assert(assets.jet_game_asset_relative_path("/", "/x") == Val("x"))
+    assert(assets.jet_game_asset_relative_path("/", "/") == None)
+    assert(assets.jet_game_asset_relative_path("é", "é/素材") == Val("素材"))
+    assert(assets.jet_game_asset_relative_path("assets", "assets2/file") == None)
+    // Preserve Rust's physical-root delimiter law, including drive-only roots.
+    assert(assets.jet_game_asset_relative_path("C:/", "C:/x") == None)
+    assert_eq(assets.jet_game_asset_path_key("é", "x"), "2:é:x")
+}
+
+#Test("asset declared roots sort reject duplicates resolve deepest and never observe host") {
+    roots := assets.JetGameAssetRootSet.new([assets.JetGameAssetRootIdentity]{asset_test_root("outer", "assets"), asset_test_root("inner", "assets/textures")}) ?? panic("roots")
+    assert_eq(roots.roots()[0].id, "inner")
+    resolved :: roots.resolve("assets/textures/hero.png") ?? panic("resolve")
+    assert_eq(resolved.root.id, "inner")
+    assert_eq(resolved.logical_path, "hero.png")
+    assert(resolved.node() == (assets.JetGameAssetNodeIdentity.new("inner", "hero.png") ?? panic("node")))
+    if roots.resolve("assets2/hero.png") == {
+        .Ok(_) -> panic("undeclared accepted")
+        .Err(error) -> assert(error == .UndeclaredPath("assets2/hero.png"))
+    }
+    if &roots.declare(asset_test_root("outer", "other")) == {
+        .Ok(_) -> panic("duplicate id accepted")
+        .Err(error) -> assert(error == .DuplicateRoot("outer"))
+    }
+    if &roots.declare(asset_test_root("new", "assets")) == {
+        .Ok(_) -> panic("duplicate path accepted")
+        .Err(error) -> assert(error == .DuplicateRoot("new"))
+    }
+    invalid :: assets.JetGameAssetRootIdentity{id: " outer ", path: "assets"}
+    if invalid.validate() == {
+        .Ok(_) -> panic("noncanonical root accepted")
+        .Err(error) -> assert(error == .InvalidPath("assets"))
+    }
+    assert(roots.contains_root(asset_test_root("outer", "assets")))
+    assert(!roots.contains_root(asset_test_root("outer", "other")))
+    assert_eq(roots.render_json(), "[{asset_test_root("inner", "assets/textures").render_json()},{asset_test_root("outer", "assets").render_json()}]")
+}
+
+#Test("asset root capacity validation comes before capacity and capacity before duplicate") {
+    roots := assets.JetGameAssetRootSet.default()
+    loop i in 0..<64 -> &roots.declare(asset_test_root("r{i}", "p{i}")) ?? panic("capacity fill")
+    if &roots.declare(asset_test_root("r0", "p0")) == {
+        .Ok(_) -> panic("overcapacity accepted")
+        .Err(error) -> assert(error == .TooManyRoots)
+    }
+    if &roots.declare(assets.JetGameAssetRootIdentity{id: "", path: "p"}) == {
+        .Ok(_) -> panic("invalid root at capacity accepted")
+        .Err(error) -> assert(error == .EmptyIdentity("root id"))
+    }
+}
+
+#Test("asset SHA256 source identity and wire Cc escaping use exact shared digest") {
+    assert_eq(assets.jet_game_asset_hash_bytes([U8]{}), "sha256-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+    source :: assets.JetGameAssetSourceIdentity.from_bytes(asset_test_root("root", "assets"), "a/../sprite.png", [U8]{U8{97}, U8{98}, U8{99}}) ?? panic("from bytes")
+    assert_eq(source.content_hash, "sha256-ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    assert_eq(source.absolute_path(), "assets/sprite.png")
+    dot_source :: assets.JetGameAssetSourceIdentity.new(asset_test_root("r", "."), "x", "h") ?? panic("source dot")
+    assert_eq(dot_source.absolute_path(), "x")
+    assert_eq(assets.jet_game_asset_json_string("\"\\\n\r\t{asset_test_cp(8)}{asset_test_cp(12)}{asset_test_cp(127)}{asset_test_cp(159)}é😀"), "\"\\\"\\\\\\n\\r\\t\\u0008\\u000c\\u007f\\u009fé😀\"")
+    assert_eq(assets.JetGameAssetVersionIdentity.numeric(U64{18446744073709551615}).value, "18446744073709551615")
+    assert_eq(assets.JetGameAssetVersionIdentity.numeric(U64{0}).render_json(), "\"0\"")
+}
+
+#Test("asset cache identities are dependency-set ordered and length delimited") {
+    plan :: asset_test_plan()
+    a :: assets.JetGameAssetDependencyIdentity.new("root", "a") ?? panic("dep a")
+    b :: assets.JetGameAssetDependencyIdentity.new("root", "b") ?? panic("dep b")
+    first_input := ~plan
+    second_input := ~plan
+    first :: ^first_input.with_dependencies([assets.JetGameAssetDependencyIdentity]{b, a, b}) ?? panic("dependencies")
+    second :: ^second_input.with_dependencies([assets.JetGameAssetDependencyIdentity]{a, b}) ?? panic("dependencies")
+    assert_eq(first.dependencies.len(), 2)
+    assert_eq(first.dependencies[0].logical_path, "a")
+    assert_eq(first.cache_key, second.cache_key)
+    assert(first.cache_key != plan.cache_key)
+    assert(first.cache_key.starts_with("sha256-"))
+    assert_eq(first.cache_key.count_bytes(), 71)
+    changed := ~plan
+    changed.recipe.version = "2"
+    assert(changed.compute_cache_key() != plan.cache_key)
+    changed = ~plan
+    changed.tool.version = "3"
+    assert(changed.compute_cache_key() != plan.cache_key)
+    changed = ~plan
+    changed.source.content_hash = "other"
+    assert(changed.compute_cache_key() != plan.cache_key)
+    changed = ~plan
+    changed.version.value = "4"
+    assert(changed.compute_cache_key() != plan.cache_key)
+    raw_a :: assets.JetGameAssetRecipeIdentity{name: "a", version: "bc"}
+    raw_b :: assets.JetGameAssetRecipeIdentity{name: "ab", version: "c"}
+    assert(assets.jet_game_asset_import_cache_key("h", raw_a, plan.tool, plan.version, [assets.JetGameAssetDependencyIdentity]{}) != assets.jet_game_asset_import_cache_key("h", raw_b, plan.tool, plan.version, [assets.JetGameAssetDependencyIdentity]{}))
+}
+
+#Test("asset plan cache validation dependency cap and source hash error precedence") {
+    plan := asset_test_plan()
+    plan.cache_key = "wrong"
+    if plan.validate() == {
+        .Ok(_) -> panic("wrong cache accepted")
+        .Err(error) -> assert(error == .ArtifactMismatch("cache key"))
+    }
+    plan.source.content_hash = "  "
+    if plan.validate() == {
+        .Ok(_) -> panic("empty hash accepted")
+        .Err(error) -> assert(error == .EmptyHash("source"))
+    }
+    dependencies := [assets.JetGameAssetDependencyIdentity]{}
+    loop i in 0..<257 -> &dependencies.push(assets.JetGameAssetDependencyIdentity{root_id: "root", logical_path: "d{i}"})
+    if assets.jet_game_asset_normalize_dependency_list(^dependencies) == {
+        .Ok(_) -> panic("too many dependencies accepted")
+        .Err(error) -> assert(error == .TooManyDependencies)
+    }
+}
+
+#Test("asset artifact matching preserves exact cache source recipe tool version precedence") {
+    plan :: asset_test_plan()
+    artifact := assets.JetGameAssetArtifactIdentity.new(plan, "output") ?? panic("artifact")
+    artifact.compatible_with(plan) ?? panic("compatible")
+    artifact.cache_key = "other"
+    artifact.source.content_hash = "other"
+    if artifact.compatible_with(plan) == {
+        .Ok(_) -> panic("cache mismatch accepted")
+        .Err(error) -> assert(error == .ArtifactMismatch("cache key"))
+    }
+    artifact.cache_key = plan.cache_key
+    if artifact.compatible_with(plan) == {
+        .Ok(_) -> panic("source mismatch accepted")
+        .Err(error) -> assert(error == .ArtifactMismatch("source"))
+    }
+    artifact.source = plan.source
+    artifact.recipe.name = "other"
+    if artifact.compatible_with(plan) == {
+        .Ok(_) -> panic("recipe mismatch accepted")
+        .Err(error) -> assert(error == .ArtifactMismatch("recipe"))
+    }
+    artifact.recipe = plan.recipe
+    artifact.tool.name = "other"
+    if artifact.compatible_with(plan) == {
+        .Ok(_) -> panic("tool mismatch accepted")
+        .Err(error) -> assert(error == .ArtifactMismatch("tool"))
+    }
+    artifact.tool = plan.tool
+    artifact.version.value = "other"
+    if artifact.compatible_with(plan) == {
+        .Ok(_) -> panic("version mismatch accepted")
+        .Err(error) -> assert(error == .ArtifactMismatch("version"))
+    }
+}
+
+#Test("asset ready failed and runtime payload keep checked artifact separate from opaque bytes") {
+    plan :: asset_test_plan()
+    ready :: assets.JetGameAssetImportOutcome.ready(plan, "output") ?? panic("ready")
+    ready.validate_against(plan) ?? panic("ready validation")
+    assert(ready.is_ready())
+    assert(ready.artifact() != None)
+    payload :: assets.JetGameAssetRuntimeFact.from_ready(plan, ready, [U8]{U8{255}, U8{0}}, " opaque ") ?? panic("runtime fact")
+    payload.validate_against(plan, ready) ?? panic("runtime validation")
+    assert_eq(payload.byte_len(), U64{2})
+    assert_eq(payload.metadata, " opaque ")
+    assert(payload.render_json().ends_with(",\"byte_len\":2,\"metadata\":\" opaque \"}"))
+    failed :: assets.JetGameAssetImportOutcome.failed(plan, "E-IMPORT", "failed") ?? panic("failed")
+    failed.validate_against(plan) ?? panic("failed validation")
+    assert(!failed.is_ready())
+    assert(failed.artifact() == None)
+    if assets.JetGameAssetRuntimeFact.from_ready(plan, failed, [U8]{}, "") == {
+        .Ok(_) -> panic("failed runtime fact accepted")
+        .Err(error) -> assert(error == .MissingArtifact("sprite.png"))
+    }
+    wrong := ~payload
+    wrong.artifact.output_hash = "other"
+    if wrong.validate_against(plan, ready) == {
+        .Ok(_) -> panic("outcome runtime mismatch accepted")
+        .Err(error) -> assert(error == .ArtifactMismatch("runtime fact"))
+    }
+}
+
+#Test("asset outcome rejects structural corruption in original validation order") {
+    plan :: asset_test_plan()
+    ready := assets.JetGameAssetImportOutcome.ready(plan, "output") ?? panic("ready")
+    ready.source.content_hash = "other"
+    asset_test_outcome_error(ready, plan, .OutcomeSourceMismatch)
+    ready.source = plan.source
+    &ready.dependencies.push(assets.JetGameAssetDependencyIdentity{root_id: "root", logical_path: "extra"})
+    asset_test_outcome_error(ready, plan, .OutcomeDependencyMismatch)
+    ready.dependencies = [assets.JetGameAssetDependencyIdentity]{}
+    ready.artifacts = [assets.JetGameAssetArtifactIdentity]{}
+    asset_test_outcome_error(ready, plan, .MissingArtifact("sprite.png"))
+    artifact := assets.JetGameAssetArtifactIdentity.new(plan, "output") ?? panic("artifact")
+    artifact.output_hash = "  "
+    ready.artifacts = [assets.JetGameAssetArtifactIdentity]{artifact}
+    asset_test_outcome_error(ready, plan, .EmptyHash("output"))
+    failed := assets.JetGameAssetImportOutcome.failed(plan, "E", "message") ?? panic("failed")
+    &failed.artifacts.push(artifact)
+    asset_test_outcome_error(failed, plan, .ArtifactMismatch("failed outcome output"))
+    failed.artifacts = [assets.JetGameAssetArtifactIdentity]{}
+    failed.diagnostics = [assets.JetGameAssetImportDiagnostic]{}
+    asset_test_outcome_error(failed, plan, .FailedImportWithoutDiagnostic)
+    &failed.diagnostics.push(assets.JetGameAssetImportDiagnostic.new(.Warning, plan.source, "W", "warning") ?? panic("warning"))
+    asset_test_outcome_error(failed, plan, .FailedImportWithoutDiagnostic)
+    failed.diagnostics[0].severity = .Error
+    failed.diagnostics[0].source.content_hash = "other"
+    asset_test_outcome_error(failed, plan, .FailedImportWithoutDiagnostic)
+}
+
+#Test("asset watch transition table preserves first event rather than previous net kind") {
+    kinds :: [assets.JetGameAssetWatchEventKind]{.Created, .Changed, .Deleted}
+    expected :: [assets.JetGameAssetWatchEventKind?]{Val(.Created), Val(.Created), None, Val(.Changed), Val(.Changed), Val(.Deleted), Val(.Changed), Val(.Changed), Val(.Deleted)}
+    loop i in 0..<3 -> loop j in 0..<3 -> assert(assets.jet_game_asset_net_event_kind(kinds[i], kinds[j]) == expected[i * 3 + j])
+    roots :: assets.JetGameAssetRootSet.new([assets.JetGameAssetRootIdentity]{asset_test_root("root", "assets")}) ?? panic("roots")
+    first :: assets.JetGameAssetWatchEvent.from_path(roots, "assets/hero.png", .Created) ?? panic("event")
+    changed :: assets.JetGameAssetWatchEvent.new(first.root, first.logical_path, .Changed) ?? panic("changed")
+    deleted :: assets.JetGameAssetWatchEvent.new(first.root, first.logical_path, .Deleted) ?? panic("deleted")
+    gone :: assets.JetGameAssetWatchFacts.coalesce_with_skipped(roots, [assets.JetGameAssetWatchEvent]{first, changed, deleted}, 7) ?? panic("coalesce")
+    assert(gone.events.is_empty())
+    assert_eq(gone.skipped_count, 7)
+    restarted :: assets.JetGameAssetWatchFacts.coalesce(roots, [assets.JetGameAssetWatchEvent]{first, deleted, changed}) ?? panic("restart")
+    assert_eq(restarted.events.len(), 1)
+    assert(restarted.events[0].kind == .Changed)
+    // Deleted -> Created yields Changed, but subsequent Deleted retains FIRST
+    // Deleted, so the final event is Deleted, not the Created-cancellation case.
+    replacement :: assets.JetGameAssetWatchFacts.coalesce(roots, [assets.JetGameAssetWatchEvent]{deleted, first, deleted}) ?? panic("replacement")
+    assert(replacement.events[0].kind == .Deleted)
+}
+
+#Test("asset watch caps root identity mismatch and normalization error precedence") {
+    roots :: assets.JetGameAssetRootSet.new([assets.JetGameAssetRootIdentity]{asset_test_root("root", "assets")}) ?? panic("roots")
+    if assets.JetGameAssetWatchFacts.coalesce_with_skipped(roots, [assets.JetGameAssetWatchEvent]{}, 4097) == {
+        .Ok(_) -> panic("skipped cap accepted")
+        .Err(error) -> assert(error == .TooManyEvents)
+    }
+    bad :: assets.JetGameAssetWatchEvent{root: asset_test_root("other", "elsewhere"), logical_path: "../escape", kind: .Changed}
+    if assets.JetGameAssetWatchFacts.coalesce(roots, [assets.JetGameAssetWatchEvent]{bad}) == {
+        .Ok(_) -> panic("undeclared watch root accepted")
+        .Err(error) -> assert(error == .RootNotDeclared("other"))
+    }
+    mismatch :: assets.JetGameAssetWatchEvent{root: asset_test_root("root", "elsewhere"), logical_path: "../escape", kind: .Changed}
+    if assets.JetGameAssetWatchFacts.coalesce(roots, [assets.JetGameAssetWatchEvent]{mismatch}) == {
+        .Ok(_) -> panic("mismatched watch root accepted")
+        .Err(error) -> assert(error == .RootMismatch("assets", "elsewhere"))
+    }
+}
+
+#Test("asset graph dependencies come first cycles reject transactionally and error chain is ordered") {
+    roots :: assets.JetGameAssetRootSet.new([assets.JetGameAssetRootIdentity]{asset_test_root("root", "assets")}) ?? panic("roots")
+    graph := assets.JetGameAssetDependencyGraph.new(roots)
+    a :: asset_test_source("a")
+    b :: asset_test_source("b")
+    da :: assets.JetGameAssetDependencyIdentity.new("root", "a") ?? panic("da")
+    db :: assets.JetGameAssetDependencyIdentity.new("root", "b") ?? panic("db")
+    _ :: &graph.add_source(a) ?? panic("source a")
+    _ :: &graph.add_source(b) ?? panic("source b")
+    &graph.set_dependencies(a, [assets.JetGameAssetDependencyIdentity]{db, db}) ?? panic("dependencies")
+    assert_eq(graph.dependencies_for(a.node()).len(), 1)
+    prior :: graph.render_json()
+    if &graph.add_dependency(b, da) == {
+        .Ok(_) -> panic("cycle accepted")
+        .Err(error) -> assert(error == .DependencyCycle([String]{"4:root:a", "4:root:b"}))
+    }
+    assert_eq(graph.render_json(), prior)
+    assert(graph.source(a.node()) == Val(a))
+    assert_eq(graph.nodes()[0].logical_path, "a")
+    edges := [assets.JetGameAssetNodeIdentity: [assets.JetGameAssetDependencyIdentity]]{}
+    edges[a.node()] = [assets.JetGameAssetDependencyIdentity]{db}
+    edges[b.node()] = [assets.JetGameAssetDependencyIdentity]{}
+    order :: assets.jet_game_asset_graph_order(edges) ?? panic("graph order")
+    assert(order[0] == b.node())
+    assert(order[1] == a.node())
+    // Arbitrary helper input retains duplicate-edge indegree behavior of Rust.
+    edges[a.node()] = [assets.JetGameAssetDependencyIdentity]{db, db}
+    if assets.jet_game_asset_graph_order(edges) == {
+        .Ok(_) -> panic("duplicate raw edge unexpectedly resolved")
+        .Err(error) -> assert(error == .DependencyCycle([String]{"4:root:a"}))
+    }
+}
+
+#Test("asset import report records sorted bounded facts with source code diagnostic order") {
+    report := assets.JetGameAssetImportReport.default()
+    a :: assets.JetGameAssetDependencyIdentity.new("root", "a") ?? panic("a")
+    b :: assets.JetGameAssetDependencyIdentity.new("root", "b") ?? panic("b")
+    &report.record_dependency(b)
+    &report.record_dependency(a)
+    &report.record_dependency(a)
+    assert_eq(report.dependencies.len(), 2)
+    assert_eq(report.dependencies[0].logical_path, "a")
+    &report.record_skipped(b.node())
+    &report.record_skipped(a.node())
+    &report.record_skipped(a.node())
+    assert_eq(report.skipped.len(), 2)
+    loop i in 0..<64 -> &report.record_diagnostic(assets.JetGameAssetImportDiagnostic.error(asset_test_source("sprite.png"), "E{i}", "message") ?? panic("diagnostic")) ?? panic("record")
+    if &report.record_diagnostic(assets.JetGameAssetImportDiagnostic.error(asset_test_source("sprite.png"), "overflow", "message") ?? panic("diagnostic")) == {
+        .Ok(_) -> panic("diagnostic cap accepted")
+        .Err(error) -> assert(error == .TooManyDiagnostics)
+    }
+    assert_eq(report.diagnostics[0].code, "E0")
+    assert_eq(report.diagnostics[2].code, "E10")
+    assert(report.render_json().starts_with("{\"imported\":[],\"dependencies\":["))
+}
+
+#Test("asset receipt wire preserves full-width revisions nulls booleans and all status labels") {
+    receipt :: assets.JetGameAssetTransactionReceipt{transaction_id: U64{18446744073709551615}, status: .Rejected, revision_before: U64{0}, revision_after: U64{18446744073709551615}, entries: [assets.JetGameAssetReloadReceipt]{}, reason: Val("rejected")}
+    assert(!receipt.is_committed())
+    assert_eq(receipt.render_json(), "{\"transaction_id\":18446744073709551615,\"status\":\"rejected\",\"revision_before\":0,\"revision_after\":18446744073709551615,\"entries\":[],\"reason\":\"rejected\"}")
+    assert_eq(assets.JetGameAssetReloadStatus.Applied.as_str(), "applied")
+    assert_eq(assets.JetGameAssetReloadStatus.Unchanged.as_str(), "unchanged")
+    assert_eq(assets.JetGameAssetReloadStatus.Failed.as_str(), "failed")
+    assert_eq(assets.JetGameAssetReloadStatus.RolledBack.as_str(), "rolled_back")
+    assert_eq(assets.JetGameAssetReloadStatus.Rejected.as_str(), "rejected")
+    assert_eq(assets.JetGameAssetTransactionStatus.Committed.as_str(), "committed")
+    assert_eq(assets.JetGameAssetTransactionStatus.RolledBack.as_str(), "rolled_back")
+    assert_eq(assets.JetGameAssetDiagnosticSeverity.Info.as_str(), "info")
+    assert_eq(assets.JetGameAssetDiagnosticSeverity.Warning.as_str(), "warning")
+    assert_eq(assets.JetGameAssetDiagnosticSeverity.Error.as_str(), "error")
+    assert_eq(assets.JetGameAssetImportStatus.Ready.as_str(), "ready")
+    assert_eq(assets.JetGameAssetImportStatus.Failed.as_str(), "failed")
+}
+
+#Test("asset typed Display messages preserve native reload refusal text") {
+    assert_eq(assets.JetGameAssetPipelineError.TransactionClosed.text(), "game asset reload transaction is closed")
+    assert_eq(assets.JetGameAssetPipelineError.TooManyTransactionItems.text(), "game asset reload transaction limit exceeded")
+    assert_eq(assets.JetGameAssetPipelineError.ReadyArtifactLimit.text(), "ready game asset artifact limit exceeded")
+    assert_eq(assets.JetGameAssetPipelineError.StaleTransaction(U64{5}, U64{6}).text(), "stale game asset reload transaction: expected revision 5, current revision 6")
+    assert_eq(assets.JetGameAssetPipelineError.RejectedTransaction("reason").text(), "game asset reload transaction rejected: reason")
+    assert_eq(assets.JetGameAssetPipelineError.DependencyCycle([String]{"a", "b"}).text(), "game asset dependency cycle: a -> b")
+    assert_eq(assets.JetGameAssetPipelineError.DuplicateDependency("4:root:a").text(), "game asset dependency `4:root:a` is duplicated")
+}
+
+#Test("asset outcome diagnostic cap precedes output cap and every output is checked") {
+    plan :: asset_test_plan()
+    outcome := assets.JetGameAssetImportOutcome.ready(plan, "output") ?? panic("ready")
+    diagnostic :: assets.JetGameAssetImportDiagnostic.error(plan.source, "E", "message") ?? panic("diagnostic")
+    loop i in 0..<65 -> &outcome.diagnostics.push(~diagnostic)
+    artifact :: outcome.artifacts[0]
+    loop i in 0..<64 -> &outcome.artifacts.push(~artifact)
+    asset_test_outcome_error(outcome, plan, .TooManyDiagnostics)
+    outcome.diagnostics = [assets.JetGameAssetImportDiagnostic]{}
+    asset_test_outcome_error(outcome, plan, .TooManyOutputs)
+    outcome.artifacts = [assets.JetGameAssetArtifactIdentity]{artifact, artifact}
+    outcome.artifacts[1].cache_key = "other"
+    asset_test_outcome_error(outcome, plan, .ArtifactMismatch("cache key"))
+    // Only the FIRST artifact's output hash is checked for blankness in Rust.
+    outcome.artifacts[1] = artifact
+    outcome.artifacts[1].output_hash = " "
+    outcome.validate_against(plan) ?? panic("later empty output hash is original behavior")
+}
+
+#Test("asset outcome dependencies compare normalized sets without revalidating dependency text") {
+    plan_input := asset_test_plan()
+    dependency :: assets.JetGameAssetDependencyIdentity.new("root", "a") ?? panic("dependency")
+    plan :: ^plan_input.with_dependencies([assets.JetGameAssetDependencyIdentity]{dependency}) ?? panic("plan dependencies")
+    outcome := assets.JetGameAssetImportOutcome.ready(plan, "output") ?? panic("ready")
+    &outcome.dependencies.push(dependency)
+    outcome.validate_against(plan) ?? panic("duplicate dependency is normalized at comparison")
+    outcome.dependencies[1].logical_path = "./a"
+    asset_test_outcome_error(outcome, plan, .OutcomeDependencyMismatch)
+}
+
+#Test("asset graph missing sources undeclared dependencies and self cycles leave prior facts") {
+    roots :: assets.JetGameAssetRootSet.new([assets.JetGameAssetRootIdentity]{asset_test_root("root", "assets")}) ?? panic("roots")
+    graph := assets.JetGameAssetDependencyGraph.new(roots)
+    source :: asset_test_source("x")
+    assert(graph.source(source.node()) == None)
+    assert(graph.dependencies_for(source.node()).is_empty())
+    before :: graph.render_json()
+    undeclared :: assets.JetGameAssetDependencyIdentity{root_id: "missing", logical_path: "../escape"}
+    if &graph.set_dependencies(source, [assets.JetGameAssetDependencyIdentity]{undeclared}) == {
+        .Ok(_) -> panic("undeclared dependency accepted")
+        .Err(error) -> assert(error == .RootNotDeclared("missing"))
+    }
+    self_dependency :: assets.JetGameAssetDependencyIdentity.new("root", "x") ?? panic("self dependency")
+    if &graph.set_dependencies(source, [assets.JetGameAssetDependencyIdentity]{self_dependency}) == {
+        .Ok(_) -> panic("self cycle accepted")
+        .Err(error) -> assert(error == .DependencyCycle([String]{"4:root:x"}))
+    }
+    assert_eq(graph.render_json(), before)
+    assert(graph.source(source.node()) == None)
+    mismatch :: assets.JetGameAssetSourceIdentity.new(asset_test_root("root", "other"), "x", "h") ?? panic("mismatch")
+    if &graph.add_source(mismatch) == {
+        .Ok(_) -> panic("source root mismatch accepted")
+        .Err(error) -> assert(error == .RootMismatch("assets", "other"))
+    }
+}
+
+#Test("asset deterministic Kahn scheduling picks lexical minimum after every newly ready node") {
+    a :: assets.JetGameAssetNodeIdentity.new("root", "a") ?? panic("a")
+    b :: assets.JetGameAssetNodeIdentity.new("root", "b") ?? panic("b")
+    c :: assets.JetGameAssetNodeIdentity.new("root", "c") ?? panic("c")
+    d :: assets.JetGameAssetNodeIdentity.new("root", "d") ?? panic("d")
+    db :: assets.JetGameAssetDependencyIdentity.new("root", "b") ?? panic("db")
+    edges := [assets.JetGameAssetNodeIdentity: [assets.JetGameAssetDependencyIdentity]]{}
+    edges[d] = [assets.JetGameAssetDependencyIdentity]{}
+    edges[c] = [assets.JetGameAssetDependencyIdentity]{}
+    edges[b] = [assets.JetGameAssetDependencyIdentity]{}
+    edges[a] = [assets.JetGameAssetDependencyIdentity]{db}
+    order :: assets.jet_game_asset_graph_order(edges) ?? panic("order")
+    assert(order == [assets.JetGameAssetNodeIdentity]{b, a, c, d})
+}
+
+#Test("asset watch facts and import report share sorted deduplicated imported identities") {
+    roots :: assets.JetGameAssetRootSet.new([assets.JetGameAssetRootIdentity]{asset_test_root("root", "assets")}) ?? panic("roots")
+    created :: assets.JetGameAssetWatchEvent.from_path(roots, "assets/b", .Created) ?? panic("created")
+    changed :: assets.JetGameAssetWatchEvent.from_path(roots, "assets/a", .Changed) ?? panic("changed")
+    deleted :: assets.JetGameAssetWatchEvent.from_path(roots, "assets/c", .Deleted) ?? panic("deleted")
+    facts :: assets.JetGameAssetWatchFacts.coalesce_with_skipped(roots, [assets.JetGameAssetWatchEvent]{deleted, created, changed}, 4096) ?? panic("facts")
+    assert_eq(facts.events[0].logical_path, "a")
+    assert_eq(facts.events[1].logical_path, "b")
+    assert_eq(facts.events[2].logical_path, "c")
+    assert_eq(facts.imported_nodes()[0].logical_path, "a")
+    report :: assets.JetGameAssetImportReport.from_watch(facts)
+    assert_eq(report.imported.len(), 2)
+    assert_eq(report.created[0].logical_path, "b")
+    assert_eq(report.deleted[0].logical_path, "c")
+    assert_eq(report.skipped_count, 4096)
+    assert(report.skipped.is_empty())
+    assert_eq(assets.JetGameAssetWatchFacts.default().render_json(), "{\"events\":[],\"created\":[],\"changed\":[],\"deleted\":[],\"skipped_count\":0}")
+    assert_eq(assets.JetGameAssetImportReport.default().render_json(), "{\"imported\":[],\"dependencies\":[],\"created\":[],\"deleted\":[],\"skipped\":[],\"skipped_count\":0,\"diagnostics\":[]}")
+}
+
+#Test("asset every remaining typed Display branch preserves exact Rust message") {
+    errors :: [assets.JetGameAssetPipelineError]{
+        .EmptyIdentity("id"), .IdentityTooLong("id"), .ControlIdentity("id"),
+        .InvalidPath("x"), .PathEscape("x"), .UndeclaredPath("x"),
+        .DuplicateRoot("r"), .RootNotDeclared("r"), .RootMismatch("a", "b"),
+        .TooManyRoots, .TooManyDependencies, .TooManyEvents, .TooManyDiagnostics,
+        .TooManyOutputs, .EmptyHash("source"), .MissingArtifact("x"),
+        .ArtifactMismatch("source"), .OutcomeSourceMismatch,
+        .OutcomeDependencyMismatch, .FailedImportWithoutDiagnostic
+    }
+    expected :: [String]{
+        "game asset id must not be empty",
+        "game asset id exceeds the Prelude identity limit",
+        "game asset id contains a control character",
+        "invalid game asset path `x`",
+        "game asset path escapes its declared root: `x`",
+        "game asset path is not under a declared root: `x`",
+        "game asset root `r` is declared more than once",
+        "game asset root `r` is not declared",
+        "game asset root mismatch: expected `a`, got `b`",
+        "game asset root limit exceeded", "game asset dependency limit exceeded",
+        "game asset watch event limit exceeded", "game asset diagnostic limit exceeded",
+        "game asset output limit exceeded", "game asset source hash must not be empty",
+        "game asset import returned no artifact for `x`",
+        "game asset artifact does not match plan source",
+        "game asset import outcome source does not match plan",
+        "game asset import outcome dependencies do not match plan",
+        "failed game asset import has no source-linked diagnostic"
+    }
+    loop i in 0..<errors.len() -> assert_eq(errors[i].text(), expected[i])
+}

@@ -1,0 +1,31 @@
+use core.game.runtime.top_game_assets_runtime.GameAssetRuntimeAdapter
+use core.game.runtime.kernel_game_asset_pipeline.[JetGameAssetRootIdentity, JetGameAssetSourceIdentity,
+    JetGameAssetRootSet, JetGameAssetImportPlan, JetGameAssetRecipeIdentity, JetGameAssetToolIdentity,
+    JetGameAssetVersionIdentity, JetGameAssetImportOutcome]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameAssetsRuntime.rs:19/27/31/38/45/49
+#Test("game_runtime_roots_start_without_published_assets") {
+    root :: JetGameAssetRootIdentity.new("game", "/assets").unwrap()
+    roots :: JetGameAssetRootSet.new([root.clone()]).unwrap()
+    runtime :: GameAssetRuntimeAdapter.with_roots(roots).unwrap()
+    source :: JetGameAssetSourceIdentity.new(root, "texture.png", "content").unwrap()
+    assert_eq(runtime.revision(), U64{0})
+    assert(runtime.ready(&source).is_none())
+    assert(runtime.ready_for_node(&source.node()).is_none())
+    assert(runtime.ready_assets().is_empty())
+    assert(runtime.latest(&source).is_none())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameAssetsRuntime.rs:80
+#Test("game_runtime_transaction_stage_error_rolls_back_all_prior_entries") {
+    root :: JetGameAssetRootIdentity.new("game", "/assets").unwrap()
+    runtime :: GameAssetRuntimeAdapter.with_roots(JetGameAssetRootSet.new([root.clone()]).unwrap()).unwrap()
+    source :: JetGameAssetSourceIdentity.new(root, "texture.png", "content").unwrap()
+    plan :: JetGameAssetImportPlan.new(source.clone(), JetGameAssetRecipeIdentity.new("image", "1").unwrap(),
+        JetGameAssetToolIdentity.new("compiler", "1").unwrap(), JetGameAssetVersionIdentity.new("1").unwrap()).unwrap()
+    outcome :: JetGameAssetImportOutcome.ready(plan.clone(), "output").unwrap()
+    result :: runtime.apply_transaction([(plan.clone(), outcome.clone()), (plan, outcome)])
+    assert(result.is_err())
+    assert_eq(runtime.revision(), U64{0})
+    assert(runtime.ready(&source).is_none())
+    assert(runtime.ready_assets().is_empty())
+}

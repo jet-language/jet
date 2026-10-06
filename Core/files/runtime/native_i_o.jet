@@ -1,0 +1,1519 @@
+// PORT-PENDING 0219 crates-jet-jit-src-io: crates/jet-jit/src/IO.rs:1-1515
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! `core.term` stdout/stderr/stdin + terminal hosts (#1219). TTY writes use the
+//RS //! real terminal; non-TTY writes use the resident capture buffers so
+//RS //! ProgramOutput matches AOT under the process harness.
+//RS //! parity: include path=crates/jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS use super::CoreHost::{jit_env_value, jit_env_value_raw};
+//RS use crate::runtime_host;
+//RS use crate::Marshal::{clone_string, result_err_msg, result_ok};
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_module::Module;
+//RS use std::collections::{HashMap, HashSet};
+//RS use std::io::BufRead;
+//RS use std::sync::{Mutex, OnceLock};
+//RS 
+//RS pub(crate) mod term_prelude {
+//RS     include!("../../jet-codegen/src/Prelude/Term.rs");
+//RS }
+//RS 
+//RS mod human_output_semantics {
+//RS     include!("../../jet-codegen/src/Prelude/Core/HumanOutput.rs");
+//RS }
+//RS 
+//RS 
+//RS // #1480: literal Prelude source for line/byte stdin primitives. The extern "C"
+//RS // wrappers below only marshal jit heap i64 handles to/from Rust values and
+//RS // call these included functions — no logic is re-encoded here (I9). The
+//RS // nested `jet_std` mirrors only the IOError shape these functions construct
+//RS // via `.other(...)`; it carries no behavior of its own.
+//RS mod io_line_stream {
+//RS     use crate::fault_injection::jet_fault_should_fail;
+//RS 
+//RS     use super::term_prelude::{
+//RS         jet_term_read_stdin_line, jet_term_read_text, jet_term_write_stdout,
+//RS     };
+//RS 
+//RS     #[allow(dead_code)]
+//RS     mod jet_std {
+//RS         #[derive(Debug)]
+//RS         pub enum IOOperation {
+//RS             Read,
+//RS             Write,
+//RS             Flush,
+//RS         }
+//RS         #[derive(Debug)]
+//RS         pub struct IOContext {
+//RS             pub operation: IOOperation,
+//RS             pub resource: Option<String>,
+//RS             pub os_code: Option<i64>,
+//RS             pub cause: Option<String>,
+//RS         }
+//RS         #[derive(Debug)]
+//RS         pub enum IOError {
+//RS             Other(IOContext),
+//RS         }
+//RS         impl IOError {
+//RS             pub fn other(
+//RS                 operation: IOOperation,
+//RS                 resource: Option<String>,
+//RS                 cause: impl ToString,
+//RS             ) -> Self {
+//RS                 Self::Other(IOContext {
+//RS                     operation,
+//RS                     resource,
+//RS                     os_code: None,
+//RS                     cause: Some(cause.to_string()),
+//RS                 })
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs");
+//RS 
+//RS     pub(super) fn jet_jit_io_take(n: i64) -> i64 {
+//RS         match jet_std_io_take(n) {
+//RS             Ok(buf) => {
+//RS                 let list = super::Concurrency::with_runtime_mut(|rt| {
+//RS                     let list = rt.heap.alloc_empty_list();
+//RS                     for b in buf {
+//RS                         let _ = rt.heap.list_push_int(list, b as i64);
+//RS                     }
+//RS                     list
+//RS                 });
+//RS                 super::result_ok(list as u64)
+//RS             }
+//RS             Err(e) => super::result_err(&format!("{e:?}")),
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn jet_jit_io_read_until(delim: i64) -> i64 {
+//RS         let needle = super::clone_string(delim);
+//RS         match jet_std_io_read_until(&needle) {
+//RS             Ok(s) => {
+//RS                 let id = super::Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
+//RS                 super::result_ok(id as u64)
+//RS             }
+//RS             Err(e) => super::result_err(&format!("{e:?}")),
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn jet_jit_io_readline() -> i64 {
+//RS         match jet_std_io_readline() {
+//RS             Ok(s) => {
+//RS                 let id = super::Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
+//RS                 super::result_ok(id as u64)
+//RS             }
+//RS             Err(e) => super::result_err(&format!("{e:?}")),
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn jet_jit_io_input(prompt: i64) -> i64 {
+//RS         // The AmbientInput ABI uses the heap's zero handle for an absent
+//RS         // optional prompt; every allocated String handle is nonzero.
+//RS         let prompt = (prompt != 0).then(|| super::clone_string(prompt));
+//RS         match jet_std_io_input(prompt.as_ref()) {
+//RS             Ok(s) => {
+//RS                 let id = super::Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
+//RS                 super::result_ok(id as u64)
+//RS             }
+//RS             Err(e) => super::result_err(&format!("{e:?}")),
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn jet_jit_io_read_all_input() -> i64 {
+//RS         match jet_std_io_read_all_input() {
+//RS             Ok(s) => {
+//RS                 let id = super::Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
+//RS                 super::result_ok(id as u64)
+//RS             }
+//RS             Err(e) => super::result_err(&format!("{e:?}")),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct JitProgressState {
+//RS     description: String,
+//RS     format: String,
+//RS     total: Option<usize>,
+//RS     started: std::time::Instant,
+//RS     count: usize,
+//RS     /// `None` means the caller supplies raw source-pull counts (a direct
+//RS     /// loop). `Some` maps each materialized adapter output to the number of
+//RS     /// source pulls needed to produce it.
+//RS     plan: Option<Vec<usize>>,
+//RS     yielded: usize,
+//RS     tail: usize,
+//RS     displayed: bool,
+//RS }
+//RS 
+//RS fn progress_states() -> &'static Mutex<HashMap<i64, JitProgressState>> {
+//RS     static STATES: OnceLock<Mutex<HashMap<i64, JitProgressState>>> = OnceLock::new();
+//RS     STATES.get_or_init(|| Mutex::new(HashMap::new()))
+//RS }
+//RS 
+//RS fn known_iter_lists() -> &'static Mutex<HashSet<i64>> {
+//RS     static KNOWN: OnceLock<Mutex<HashSet<i64>>> = OnceLock::new();
+//RS     KNOWN.get_or_init(|| Mutex::new(HashSet::new()))
+//RS }
+//RS 
+//RS fn result_ok_unit() -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.results.push(super::JitResultValue { ok: true, bits: 0 });
+//RS         rt.results.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn result_err(msg: &str) -> i64 {
+//RS     result_err_msg(msg)
+//RS }
+//RS 
+//RS fn list_from_lines(lines: Vec<String>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for line in lines {
+//RS             let sid = rt.heap.alloc_string(line);
+//RS             let _ = rt.heap.list_push_int(list, sid);
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn style_enabled() -> bool {
+//RS     term_prelude::jet_term_style_enabled(
+//RS         jit_env_value_raw("NO_COLOR").is_some(),
+//RS         jit_env_value_raw("FORCE_COLOR").is_some(),
+//RS         term_prelude::jet_term_stdout_is_terminal(),
+//RS     )
+//RS }
+//RS 
+//RS // D-CLI-GLOBAL1=E: marshal the Standard color choice into the shared Term
+//RS // Prelude. The CLI does not duplicate terminal/NO_COLOR policy here.
+//RS pub(crate) fn set_cli_color_mode(mode: &str) {
+//RS     term_prelude::jet_term_set_color_mode(mode);
+//RS }
+//RS 
+//RS fn write_prompt_with_sink(
+//RS     prompt: &str,
+//RS     sink: &mut Option<&mut jet_codegen::Comptime::DevSink>,
+//RS ) -> Result<(), String> {
+//RS     if crate::fault_injection::jet_fault_should_fail("IO.Write") {
+//RS         return Err("fault injected: IO.Write".to_string());
+//RS     }
+//RS     if crate::fault_injection::jet_fault_should_fail("IO.Flush") {
+//RS         return Err("fault injected: IO.Flush".to_string());
+//RS     }
+//RS     if term_prelude::jet_term_stdout_is_program_stream() || sink.is_none() {
+//RS         return runtime_host::write_jit_stdout(prompt, true);
+//RS     }
+//RS     sink.as_deref_mut()
+//RS         .expect("ambient output sink disappeared")
+//RS         .stdout
+//RS         .push_str(prompt);
+//RS     Ok(())
+//RS }
+//RS 
+//RS // I9: the JIT host marshals the prompt read and never re-encodes it. The
+//RS // closed-stream fact and the trailing-newline trim are the Prelude's, exactly
+//RS // as AOT embeds them, so no tier can spin where another one stops.
+//RS fn read_prompt_line() -> Result<term_prelude::JetTermRead, String> {
+//RS     if crate::fault_injection::jet_fault_should_fail("IO.Read") {
+//RS         return Err("fault injected: IO.Read".to_string());
+//RS     }
+//RS     term_prelude::jet_term_read_stdin_line().map_err(|error| format!("read stdin: {error}"))
+//RS }
+//RS 
+//RS pub(crate) fn prompt_input(prompt: Option<&str>) -> Result<String, String> {
+//RS     let mut sink: Option<&mut jet_codegen::Comptime::DevSink> = None;
+//RS     if let Some(prompt) = prompt {
+//RS         write_prompt_with_sink(prompt, &mut sink)?;
+//RS     }
+//RS     Ok(term_prelude::jet_term_read_text(read_prompt_line()?))
+//RS }
+//RS 
+//RS pub(crate) fn prompt_confirm(prompt: &str) -> bool {
+//RS     prompt_confirm_with_sink(prompt, None)
+//RS }
+//RS 
+//RS pub(crate) fn prompt_confirm_with_sink(
+//RS     prompt: &str,
+//RS     sink: Option<&mut jet_codegen::Comptime::DevSink>,
+//RS ) -> bool {
+//RS     let mut sink = sink;
+//RS     term_prelude::jet_term_confirm_with_io(
+//RS         prompt,
+//RS         |text| write_prompt_with_sink(text, &mut sink),
+//RS         read_prompt_line,
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn prompt_choose(prompt: &str, values: &[String]) -> Result<String, String> {
+//RS     prompt_choose_with_sink(prompt, values, None)
+//RS }
+//RS 
+//RS pub(crate) fn prompt_choose_with_sink(
+//RS     prompt: &str,
+//RS     values: &[String],
+//RS     sink: Option<&mut jet_codegen::Comptime::DevSink>,
+//RS ) -> Result<String, String> {
+//RS     let mut sink = sink;
+//RS     term_prelude::jet_term_choose_with_io(
+//RS         prompt,
+//RS         values,
+//RS         |text| write_prompt_with_sink(text, &mut sink),
+//RS         read_prompt_line,
+//RS         |message| message.to_string(),
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn prompt_input_secret(
+//RS     prompt: &str,
+//RS ) -> Result<String, term_prelude::JetTermSecretError> {
+//RS     prompt_input_secret_with_sink(prompt, None)
+//RS }
+//RS 
+//RS pub(crate) fn prompt_input_secret_with_sink(
+//RS     prompt: &str,
+//RS     sink: Option<&mut jet_codegen::Comptime::DevSink>,
+//RS ) -> Result<String, term_prelude::JetTermSecretError> {
+//RS     let mut sink = sink;
+//RS     term_prelude::jet_term_input_secret(
+//RS         prompt,
+//RS         |text| write_prompt_with_sink(text, &mut sink),
+//RS         read_prompt_line,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_jit_io_stdout() -> i64 {
+//RS     1
+//RS }
+//RS 
+//RS fn jet_jit_io_stderr() -> i64 {
+//RS     2
+//RS }
+//RS 
+//RS fn jet_jit_io_stdin() -> i64 {
+//RS     3
+//RS }
+//RS 
+//RS fn jet_jit_stdout_write(_h: i64, text: i64) -> i64 {
+//RS     let s = clone_string(text);
+//RS     if crate::fault_injection::jet_fault_should_fail("IO.Write") {
+//RS         return result_err_msg("fault injected: IO.Write");
+//RS     }
+//RS     match runtime_host::write_jit_stdout(&s, false) {
+//RS         Ok(()) => result_ok_unit(),
+//RS         Err(error) => result_err(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_stdout_write_line(_h: i64, text: i64) -> i64 {
+//RS     let s = clone_string(text);
+//RS     let text = format!("{s}\n");
+//RS     if crate::fault_injection::jet_fault_should_fail("IO.Write") {
+//RS         return result_err_msg("fault injected: IO.Write");
+//RS     }
+//RS     match runtime_host::write_jit_stdout(&text, false) {
+//RS         Ok(()) => result_ok_unit(),
+//RS         Err(error) => result_err(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_stdout_write_bytes(_h: i64, list: i64) -> i64 {
+//RS     if crate::fault_injection::jet_fault_should_fail("IO.Write") {
+//RS         return result_err_msg("fault injected: IO.Write");
+//RS     }
+//RS     let bytes = Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(list).unwrap_or(0);
+//RS         let mut out = Vec::with_capacity(len as usize);
+//RS         for i in 0..len {
+//RS             out.push(rt.heap.list_get_int(list, i).unwrap_or(0) as u8);
+//RS         }
+//RS         out
+//RS     });
+//RS     match runtime_host::write_jit_stdout_bytes(&bytes, false) {
+//RS         Ok(()) => result_ok_unit(),
+//RS         Err(error) => result_err(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_stdout_flush(_h: i64) -> i64 {
+//RS     if crate::fault_injection::jet_fault_should_fail("IO.Flush") {
+//RS         return result_err_msg("fault injected: IO.Flush");
+//RS     }
+//RS     match runtime_host::write_jit_stdout("", true) {
+//RS         Ok(()) => result_ok_unit(),
+//RS         Err(error) => result_err(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_stdout_is_tty(_h: i64) -> i8 {
+//RS     i8::from(term_prelude::jet_term_stdout_is_terminal())
+//RS }
+//RS 
+//RS fn jet_jit_stderr_write(_h: i64, text: i64) -> i64 {
+//RS     let s = clone_string(text);
+//RS     if crate::fault_injection::jet_fault_should_fail("IO.Write") {
+//RS         return result_err_msg("fault injected: IO.Write");
+//RS     }
+//RS     match runtime_host::write_jit_stderr(&s, false) {
+//RS         Ok(()) => result_ok_unit(),
+//RS         Err(error) => result_err(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_stderr_write_line(_h: i64, text: i64) -> i64 {
+//RS     let s = clone_string(text);
+//RS     let text = format!("{s}\n");
+//RS     if crate::fault_injection::jet_fault_should_fail("IO.Write") {
+//RS         return result_err_msg("fault injected: IO.Write");
+//RS     }
+//RS     match runtime_host::write_jit_stderr(&text, false) {
+//RS         Ok(()) => result_ok_unit(),
+//RS         Err(error) => result_err(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_stderr_write_bytes(_h: i64, list: i64) -> i64 {
+//RS     if crate::fault_injection::jet_fault_should_fail("IO.Write") {
+//RS         return result_err_msg("fault injected: IO.Write");
+//RS     }
+//RS     let bytes = Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(list).unwrap_or(0);
+//RS         let mut out = Vec::with_capacity(len as usize);
+//RS         for i in 0..len {
+//RS             out.push(rt.heap.list_get_int(list, i).unwrap_or(0) as u8);
+//RS         }
+//RS         out
+//RS     });
+//RS     match runtime_host::write_jit_stderr_bytes(&bytes, false) {
+//RS         Ok(()) => result_ok_unit(),
+//RS         Err(error) => result_err(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_stderr_flush(_h: i64) -> i64 {
+//RS     if crate::fault_injection::jet_fault_should_fail("IO.Flush") {
+//RS         return result_err_msg("fault injected: IO.Flush");
+//RS     }
+//RS     match runtime_host::write_jit_stderr("", true) {
+//RS         Ok(()) => result_ok_unit(),
+//RS         Err(error) => result_err(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_stderr_is_tty(_h: i64) -> i8 {
+//RS     i8::from(term_prelude::jet_term_stderr_is_terminal())
+//RS }
+//RS 
+//RS fn jet_jit_terminal_width() -> i64 {
+//RS     term_prelude::jet_term_width(jit_env_value)
+//RS }
+//RS 
+//RS fn jet_jit_terminal_height() -> i64 {
+//RS     term_prelude::jet_term_height(jit_env_value)
+//RS }
+//RS 
+//RS fn jet_jit_io_style(style: i64, text: i64) -> i64 {
+//RS     let style = clone_string(style);
+//RS     let text = clone_string(text);
+//RS     let out = term_prelude::jet_term_style(&style, &text, style_enabled());
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
+//RS }
+//RS 
+//RS fn jet_jit_io_style_force(style: i64, text: i64) -> i64 {
+//RS     let style = clone_string(style);
+//RS     let text = clone_string(text);
+//RS     let out = term_prelude::jet_term_style_force(&style, &text);
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
+//RS }
+//RS 
+//RS fn jet_jit_io_progress(text: i64) -> i64 {
+//RS     let s = clone_string(text);
+//RS     if term_prelude::jet_term_progress_enabled() {
+//RS         let frame = term_prelude::jet_term_progress_frame(true, &s);
+//RS         return match runtime_host::write_jit_stderr(&frame, true) {
+//RS             Ok(()) => result_ok_unit(),
+//RS             Err(error) => result_err(&error),
+//RS         };
+//RS     }
+//RS     // Captured / non-tty runs still record the progress line so feature
+//RS     // goldens and redirected logs see the status text.
+//RS     let frame = term_prelude::jet_term_progress_frame(false, &s);
+//RS     match runtime_host::write_jit_stdout(&frame, true) {
+//RS         Ok(()) => result_ok_unit(),
+//RS         Err(error) => result_err(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_io_progress_iter_with_total(
+//RS     list: i64,
+//RS     description: i64,
+//RS     format: i64,
+//RS     total: Option<usize>,
+//RS ) -> i64 {
+//RS     let description = clone_string(description);
+//RS     let format = clone_string(format);
+//RS     let total = total.or_else(|| {
+//RS         Concurrency::with_runtime_mut(|rt| runtime_host::lazy_iter_exact_len(rt, list))
+//RS     });
+//RS     let wrapped = Concurrency::with_runtime_mut(|rt| {
+//RS         let wrapped = rt.heap.clone_list(list).unwrap_or(list);
+//RS         wrapped
+//RS     });
+//RS     progress_states()
+//RS         .lock()
+//RS         .expect("JIT progress state poisoned")
+//RS         .insert(
+//RS             wrapped,
+//RS             JitProgressState {
+//RS                 description,
+//RS                 format,
+//RS                 total,
+//RS                 started: std::time::Instant::now(),
+//RS                 count: 0,
+//RS                 plan: None,
+//RS                 yielded: 0,
+//RS                 tail: 0,
+//RS                 displayed: false,
+//RS             },
+//RS         );
+//RS     wrapped
+//RS }
+//RS 
+//RS fn jet_jit_io_progress_iter(list: i64, description: i64, format: i64) -> i64 {
+//RS     let known_total = known_iter_lists()
+//RS         .lock()
+//RS         .expect("JIT progress known-iter state poisoned")
+//RS         .remove(&list);
+//RS     let total = known_total
+//RS         .then(|| {
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 runtime_host::lazy_iter_exact_len(rt, list).or_else(|| {
+//RS                     rt.heap
+//RS                         .list_len(list)
+//RS                         .and_then(|length| usize::try_from(length).ok())
+//RS                 })
+//RS             })
+//RS         })
+//RS         .flatten();
+//RS     jet_jit_io_progress_iter_with_total(list, description, format, total)
+//RS }
+//RS 
+//RS fn jet_jit_io_progress_list(list: i64, description: i64, format: i64) -> i64 {
+//RS     known_iter_lists()
+//RS         .lock()
+//RS         .expect("JIT progress known-iter state poisoned")
+//RS         .remove(&list);
+//RS     let total = Concurrency::with_runtime_mut(|rt| {
+//RS         runtime_host::lazy_iter_exact_len(rt, list).or_else(|| {
+//RS             rt.heap
+//RS                 .list_len(list)
+//RS                 .and_then(|length| usize::try_from(length).ok())
+//RS         })
+//RS     });
+//RS     jet_jit_io_progress_iter_with_total(list, description, format, total)
+//RS }
+//RS 
+//RS fn jet_jit_io_mark_exact_iter(list: i64) -> i64 {
+//RS     known_iter_lists()
+//RS         .lock()
+//RS         .expect("JIT progress known-iter state poisoned")
+//RS         .insert(list);
+//RS     list
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_io_progress_pull_n(list: i64, pulls: i64) {
+//RS     let requested = pulls.max(0) as usize;
+//RS     if requested == 0 {
+//RS         return;
+//RS     }
+//RS     let tty = term_prelude::jet_term_stderr_is_terminal();
+//RS     let enabled = term_prelude::jet_term_progress_enabled();
+//RS     let Some((texts, finished)) = (|| {
+//RS         let mut states = progress_states()
+//RS             .lock()
+//RS             .expect("JIT progress state poisoned");
+//RS         let state = states.get_mut(&list)?;
+//RS         let pulls = if let Some(plan) = &state.plan {
+//RS             let end = (state.yielded + requested).min(plan.len());
+//RS             let pulls = plan[state.yielded..end].iter().sum();
+//RS             state.yielded = end;
+//RS             pulls
+//RS         } else {
+//RS             requested
+//RS         };
+//RS         let pulls = state
+//RS             .total
+//RS             .map(|total| pulls.min(total.saturating_sub(state.count)))
+//RS             .unwrap_or(pulls);
+//RS         if pulls == 0 {
+//RS             return Some((Vec::new(), state.total == Some(state.count)));
+//RS         }
+//RS         let mut texts = Vec::with_capacity(pulls);
+//RS         for _ in 0..pulls {
+//RS             state.count = state.count.saturating_add(1);
+//RS             texts.push(human_output_semantics::jet_output_progress_legacy(
+//RS                 &state.description,
+//RS                 &state.format,
+//RS                 state.count,
+//RS                 state.total,
+//RS                 state.started.elapsed().as_secs_f64(),
+//RS                 style_enabled(),
+//RS             ));
+//RS         }
+//RS         state.displayed = true;
+//RS         Some((texts, state.total == Some(state.count)))
+//RS     })() else {
+//RS         return;
+//RS     };
+//RS     if enabled {
+//RS         for text in texts {
+//RS             let frame = term_prelude::jet_term_progress_frame(tty, &text);
+//RS             let _ = runtime_host::write_jit_stderr(&frame, true);
+//RS         }
+//RS     }
+//RS     if finished {
+//RS         progress_finish_state(list);
+//RS     }
+//RS }
+//RS 
+//RS /// Finish a naturally exhausted JIT iterator. A stepped iterator can consume
+//RS /// trailing source items while looking for its next yielded item, so account
+//RS /// for the final unreported pulls before removing the sidecar state. Early
+//RS /// break/return paths call `progress_finish_state` directly and must not claim
+//RS /// those source pulls.
+//RS pub(crate) fn progress_exhaust_state(list: i64) {
+//RS     let remaining = progress_states()
+//RS         .lock()
+//RS         .expect("JIT progress state poisoned")
+//RS         .get(&list)
+//RS         .map(|state| {
+//RS             if state.plan.is_some() {
+//RS                 state.tail
+//RS             } else {
+//RS                 state
+//RS                     .total
+//RS                     .map(|total| total.saturating_sub(state.count))
+//RS                     .unwrap_or(0)
+//RS             }
+//RS         })
+//RS         .unwrap_or_default();
+//RS     if remaining != 0 {
+//RS         // A plan's tail is already a raw source-pull count. The direct-loop
+//RS         // form has no plan and uses the same argument as a raw count.
+//RS         let tty = term_prelude::jet_term_stderr_is_terminal();
+//RS         let enabled = term_prelude::jet_term_progress_enabled();
+//RS         let Some(texts) = (|| {
+//RS             let mut states = progress_states()
+//RS                 .lock()
+//RS                 .expect("JIT progress state poisoned");
+//RS             let state = states.get_mut(&list)?;
+//RS             let pulls = state
+//RS                 .total
+//RS                 .map(|total| remaining.min(total.saturating_sub(state.count)))
+//RS                 .unwrap_or(remaining);
+//RS             let mut texts = Vec::with_capacity(pulls);
+//RS             for _ in 0..pulls {
+//RS                 state.count = state.count.saturating_add(1);
+//RS                 texts.push(human_output_semantics::jet_output_progress_legacy(
+//RS                     &state.description,
+//RS                     &state.format,
+//RS                     state.count,
+//RS                     state.total,
+//RS                     state.started.elapsed().as_secs_f64(),
+//RS                     style_enabled(),
+//RS                 ));
+//RS             }
+//RS             state.displayed |= !texts.is_empty();
+//RS             Some(texts)
+//RS         })() else {
+//RS             return;
+//RS         };
+//RS         if enabled {
+//RS             for text in texts {
+//RS                 let frame = term_prelude::jet_term_progress_frame(tty, &text);
+//RS                 let _ = runtime_host::write_jit_stderr(&frame, true);
+//RS             }
+//RS         }
+//RS     }
+//RS     progress_finish_state(list);
+//RS }
+//RS 
+//RS /// Move progress ownership when the JIT materializes a lazy adapter into a
+//RS /// fresh list handle. Ordinary lists have no state, so this is a no-op for all
+//RS /// other callers.
+//RS pub(crate) fn progress_transfer_state(source: i64, target: i64) {
+//RS     if source == target {
+//RS         return;
+//RS     }
+//RS     let mut states = progress_states()
+//RS         .lock()
+//RS         .expect("JIT progress state poisoned");
+//RS     if let Some(state) = states.remove(&source) {
+//RS         states.remove(&target);
+//RS         let target_len =
+//RS             Concurrency::with_runtime_mut(|rt| rt.heap.list_len(target).unwrap_or(0)) as usize;
+//RS         let (plan, tail) = match state.plan.as_ref() {
+//RS             Some(source_plan) => {
+//RS                 let mut plan = source_plan.clone();
+//RS                 plan.truncate(target_len);
+//RS                 if plan.len() < target_len {
+//RS                     plan.resize(target_len, 1);
+//RS                 }
+//RS                 (plan, state.tail)
+//RS             }
+//RS             None => (vec![1; target_len], 0),
+//RS         };
+//RS         states.insert(
+//RS             target,
+//RS             JitProgressState {
+//RS                 plan: Some(plan),
+//RS                 yielded: 0,
+//RS                 tail,
+//RS                 ..state
+//RS             },
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS fn source_plan(source: i64) -> Option<(Vec<usize>, usize)> {
+//RS     let states = progress_states()
+//RS         .lock()
+//RS         .expect("JIT progress state poisoned");
+//RS     let state = states.get(&source)?;
+//RS     let plan = match &state.plan {
+//RS         Some(plan) => plan.clone(),
+//RS         None => {
+//RS             let len =
+//RS                 Concurrency::with_runtime_mut(|rt| rt.heap.list_len(source).unwrap_or(0)) as usize;
+//RS             vec![1; len]
+//RS         }
+//RS     };
+//RS     Some((plan, state.tail))
+//RS }
+//RS 
+//RS /// Read the source-pull plan while a lazy progress adapter is being lowered.
+//RS /// A missing state means the value is an ordinary list and needs no sidecar.
+//RS pub(crate) fn progress_source_plan(source: i64) -> Option<(Vec<usize>, usize)> {
+//RS     source_plan(source)
+//RS }
+//RS 
+//RS fn install_plan(source: i64, target: i64, plan: Vec<usize>, tail: usize) {
+//RS     if source == target {
+//RS         return;
+//RS     }
+//RS     let mut states = progress_states()
+//RS         .lock()
+//RS         .expect("JIT progress state poisoned");
+//RS     let Some(mut state) = states.remove(&source) else {
+//RS         return;
+//RS     };
+//RS     states.remove(&target);
+//RS     state.plan = Some(plan);
+//RS     state.yielded = 0;
+//RS     state.tail = tail;
+//RS     states.insert(target, state);
+//RS }
+//RS 
+//RS /// Install an operation-specific source-pull plan on a materialized result.
+//RS /// The operation owns the mapping because output values alone cannot recover
+//RS /// how many source items a lazy adapter consumed.
+//RS pub(crate) fn progress_transfer_plan(source: i64, target: i64, plan: Vec<usize>, tail: usize) {
+//RS     install_plan(source, target, plan, tail);
+//RS }
+//RS 
+//RS fn progress_remove_state(list: i64) {
+//RS     progress_states()
+//RS         .lock()
+//RS         .expect("JIT progress state poisoned")
+//RS         .remove(&list);
+//RS }
+//RS 
+//RS pub(crate) fn progress_transfer_step_state(source: i64, target: i64, n: i64) {
+//RS     let Some((plan, old_tail)) = source_plan(source) else {
+//RS         return;
+//RS     };
+//RS     let n = n.max(1) as usize;
+//RS     let mut output = Vec::new();
+//RS     let mut index = 0;
+//RS     if !plan.is_empty() {
+//RS         output.push(plan[0]);
+//RS         index = 1;
+//RS         while index < plan.len() {
+//RS             let end = (index + n).min(plan.len());
+//RS             if end - index < n {
+//RS                 break;
+//RS             }
+//RS             output.push(plan[index..end].iter().sum());
+//RS             index = end;
+//RS         }
+//RS     }
+//RS     install_plan(
+//RS         source,
+//RS         target,
+//RS         output,
+//RS         plan[index..].iter().sum::<usize>() + old_tail,
+//RS     );
+//RS }
+//RS 
+//RS pub(crate) fn progress_transfer_filter_state(source: i64, target: i64) {
+//RS     let Some((plan, old_tail)) = source_plan(source) else {
+//RS         return;
+//RS     };
+//RS     let source_values =
+//RS         Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(source).unwrap_or_default());
+//RS     let target_values =
+//RS         Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(target).unwrap_or_default());
+//RS     let target_len = target_values.len();
+//RS     let mut output = Vec::with_capacity(target_len);
+//RS     let mut source_index = 0;
+//RS     for &target_value in &target_values {
+//RS         let Some(found) = source_values[source_index..]
+//RS             .iter()
+//RS             .position(|source_value| {
+//RS                 *source_value == target_value || string_handle_eq(*source_value, target_value)
+//RS             })
+//RS             .map(|offset| source_index + offset)
+//RS         else {
+//RS             install_plan(source, target, vec![1; target_values.len()], old_tail);
+//RS             return;
+//RS         };
+//RS         output.push(plan[source_index..=found].iter().sum());
+//RS         source_index = found + 1;
+//RS     }
+//RS     let tail = plan[source_index..].iter().sum::<usize>() + old_tail;
+//RS     install_plan(source, target, output, tail);
+//RS }
+//RS 
+//RS fn progress_value_equal(a: i64, b: i64) -> bool {
+//RS     if a == b {
+//RS         return true;
+//RS     }
+//RS     Concurrency::with_runtime_mut(
+//RS         |rt| matches!((rt.heap.get_string(a), rt.heap.get_string(b)), (Some(a), Some(b)) if a == b),
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn progress_transfer_dedup_state(source: i64, target: i64, string_elems: bool) {
+//RS     let Some((plan, old_tail)) = source_plan(source) else {
+//RS         return;
+//RS     };
+//RS     let values =
+//RS         Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(source).unwrap_or_default());
+//RS     let mut output = Vec::new();
+//RS     let mut pending = 0usize;
+//RS     let mut previous = None;
+//RS     for (index, value) in values.into_iter().enumerate() {
+//RS         let pull = plan.get(index).copied().unwrap_or(1);
+//RS         let duplicate = previous.is_some_and(|last| {
+//RS             if string_elems {
+//RS                 progress_value_equal(last, value)
+//RS             } else {
+//RS                 last == value
+//RS             }
+//RS         });
+//RS         if duplicate {
+//RS             pending += pull;
+//RS         } else {
+//RS             output.push(pending + pull);
+//RS             pending = 0;
+//RS             previous = Some(value);
+//RS         }
+//RS     }
+//RS     install_plan(source, target, output, pending + old_tail);
+//RS }
+//RS 
+//RS pub(crate) fn progress_transfer_chunks_state(source: i64, target: i64, n: i64) {
+//RS     let Some((plan, old_tail)) = source_plan(source) else {
+//RS         return;
+//RS     };
+//RS     let source_len =
+//RS         Concurrency::with_runtime_mut(|rt| rt.heap.list_len(source).unwrap_or(0)) as usize;
+//RS     let size = n.max(1) as usize;
+//RS     let mut output = Vec::new();
+//RS     let mut start = 0usize;
+//RS     while start < source_len {
+//RS         let end = (start + size).min(source_len);
+//RS         output.push(plan[start..end].iter().sum());
+//RS         start = end;
+//RS     }
+//RS     install_plan(source, target, output, old_tail);
+//RS }
+//RS 
+//RS pub(crate) fn progress_transfer_windows_state(source: i64, target: i64, n: i64) {
+//RS     let Some((plan, old_tail)) = source_plan(source) else {
+//RS         return;
+//RS     };
+//RS     let source_len = plan.len();
+//RS     let size = n.max(1) as usize;
+//RS     if source_len < size {
+//RS         install_plan(
+//RS             source,
+//RS             target,
+//RS             Vec::new(),
+//RS             plan.iter().sum::<usize>() + old_tail,
+//RS         );
+//RS         return;
+//RS     }
+//RS     let mut output = Vec::with_capacity(source_len - size + 1);
+//RS     output.push(plan[..size].iter().sum());
+//RS     output.extend(plan.iter().copied().skip(size).take(source_len - size));
+//RS     install_plan(source, target, output, old_tail);
+//RS }
+//RS 
+//RS pub(crate) fn progress_transfer_flatten_state(source: i64, target: i64) {
+//RS     let Some((plan, old_tail)) = source_plan(source) else {
+//RS         return;
+//RS     };
+//RS     let outer =
+//RS         Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(source).unwrap_or_default());
+//RS     let mut output = Vec::new();
+//RS     let mut pending = 0usize;
+//RS     for (index, inner_handle) in outer.into_iter().enumerate() {
+//RS         let pull = plan.get(index).copied().unwrap_or(1);
+//RS         let inner = Concurrency::with_runtime_mut(|rt| {
+//RS             rt.heap.clone_int_list(inner_handle).unwrap_or_default()
+//RS         });
+//RS         if inner.is_empty() {
+//RS             pending += pull;
+//RS         } else {
+//RS             output.push(pending + pull);
+//RS             output.extend(std::iter::repeat(0).take(inner.len() - 1));
+//RS             pending = 0;
+//RS         }
+//RS     }
+//RS     install_plan(source, target, output, pending + old_tail);
+//RS }
+//RS 
+//RS pub(crate) fn progress_transfer_intersperse_state(source: i64, target: i64) {
+//RS     let Some((plan, old_tail)) = source_plan(source) else {
+//RS         return;
+//RS     };
+//RS     let source_len = plan.len();
+//RS     let mut output = Vec::with_capacity(source_len.saturating_mul(2));
+//RS     for pull in plan {
+//RS         output.push(pull);
+//RS         output.push(0);
+//RS     }
+//RS     if !output.is_empty() {
+//RS         output.pop();
+//RS     }
+//RS     install_plan(source, target, output, old_tail);
+//RS }
+//RS 
+//RS pub(crate) fn progress_transfer_take_while_state(source: i64, target: i64, is_skip: bool) {
+//RS     let Some((plan, old_tail)) = source_plan(source) else {
+//RS         return;
+//RS     };
+//RS     let source_len =
+//RS         Concurrency::with_runtime_mut(|rt| rt.heap.list_len(source).unwrap_or(0)) as usize;
+//RS     let target_len =
+//RS         Concurrency::with_runtime_mut(|rt| rt.heap.list_len(target).unwrap_or(0)) as usize;
+//RS     let target_len = target_len.min(source_len);
+//RS     if is_skip {
+//RS         if target_len == 0 {
+//RS             install_plan(
+//RS                 source,
+//RS                 target,
+//RS                 Vec::new(),
+//RS                 plan.iter().sum::<usize>() + old_tail,
+//RS             );
+//RS             return;
+//RS         }
+//RS         let skipped = source_len.saturating_sub(target_len);
+//RS         let first = plan[..=skipped.min(plan.len().saturating_sub(1))]
+//RS             .iter()
+//RS             .sum();
+//RS         let mut output = Vec::with_capacity(target_len);
+//RS         output.push(first);
+//RS         output.extend(plan.iter().copied().skip(skipped + 1).take(target_len - 1));
+//RS         install_plan(source, target, output, old_tail);
+//RS     } else {
+//RS         let output = plan.iter().copied().take(target_len).collect::<Vec<_>>();
+//RS         let tail = if target_len < source_len {
+//RS             plan.get(target_len).copied().unwrap_or(0)
+//RS         } else {
+//RS             old_tail
+//RS         };
+//RS         install_plan(source, target, output, tail);
+//RS     }
+//RS }
+//RS 
+//RS fn string_handle_eq(a: i64, b: i64) -> bool {
+//RS     if a == b {
+//RS         return true;
+//RS     }
+//RS     Concurrency::with_runtime_mut(
+//RS         |rt| matches!((rt.heap.get_string(a), rt.heap.get_string(b)), (Some(a), Some(b)) if a == b),
+//RS     )
+//RS }
+//RS 
+//RS /// D-COREIO1=A: the zip family is N-column and the receiver is column 0. A
+//RS /// progress sidecar on any column becomes the zipped result's plan; the other
+//RS /// columns' sidecars retire with their handles.
+//RS pub(crate) fn progress_transfer_zip_state(columns: &[i64], target: i64) {
+//RS     let active = {
+//RS         let states = progress_states()
+//RS             .lock()
+//RS             .expect("JIT progress state poisoned");
+//RS         columns
+//RS             .iter()
+//RS             .copied()
+//RS             .filter(|handle| states.contains_key(handle))
+//RS             .collect::<Vec<_>>()
+//RS     };
+//RS     let Some(source) = active.first().copied() else {
+//RS         return;
+//RS     };
+//RS     let target_len =
+//RS         Concurrency::with_runtime_mut(|rt| rt.heap.list_len(target).unwrap_or(0)) as usize;
+//RS     if let Some((plan, old_tail)) = source_plan(source) {
+//RS         let consumed = target_len.min(plan.len());
+//RS         // `Iterator::zip` asks the receiver for one item before it asks the
+//RS         // other side. When another column ends first, an exhaustive zip
+//RS         // therefore consumes one extra receiver item while probing for the
+//RS         // next row. Preserve that source pull in the progress sidecar; a
+//RS         // non-receiver active column has no such probe.
+//RS         let tail = if target_len < plan.len() && Some(source) == columns.first().copied() {
+//RS             plan.get(target_len).copied().unwrap_or(0)
+//RS         } else if target_len >= plan.len() {
+//RS             old_tail
+//RS         } else {
+//RS             0
+//RS         };
+//RS         install_plan(
+//RS             source,
+//RS             target,
+//RS             plan.into_iter().take(consumed).collect(),
+//RS             tail,
+//RS         );
+//RS     }
+//RS     for retired in active.into_iter().skip(1) {
+//RS         progress_remove_state(retired);
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn progress_finish_state(list: i64) {
+//RS     let Some(state) = progress_states()
+//RS         .lock()
+//RS         .expect("JIT progress state poisoned")
+//RS         .remove(&list)
+//RS     else {
+//RS         return;
+//RS     };
+//RS     if state.displayed && term_prelude::jet_term_progress_enabled() {
+//RS         let frame =
+//RS             term_prelude::jet_term_progress_finish(term_prelude::jet_term_stderr_is_terminal());
+//RS         if !frame.is_empty() {
+//RS             let _ = runtime_host::write_jit_stderr(frame, true);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_io_progress_pull(list: i64, pulls: i64) {
+//RS     jet_jit_io_progress_pull_n(list, pulls);
+//RS }
+//RS 
+//RS fn jet_jit_io_progress_finish(list: i64) {
+//RS     progress_finish_state(list);
+//RS }
+//RS 
+//RS fn jet_jit_io_progress_exhaust(list: i64) {
+//RS     progress_exhaust_state(list);
+//RS }
+//RS 
+//RS fn jet_jit_io_progress_transfer(source: i64, target: i64) {
+//RS     progress_transfer_state(source, target);
+//RS }
+//RS 
+//RS fn jet_jit_io_progress_transfer_filter(source: i64, target: i64) {
+//RS     progress_transfer_filter_state(source, target);
+//RS }
+//RS 
+//RS fn jet_jit_io_progress_transfer_dedup(source: i64, target: i64, string_elems: i64) {
+//RS     progress_transfer_dedup_state(source, target, string_elems != 0);
+//RS }
+//RS 
+//RS fn jet_jit_io_progress_transfer_chunks(source: i64, target: i64, n: i64) {
+//RS     progress_transfer_chunks_state(source, target, n);
+//RS }
+//RS 
+//RS fn jet_jit_io_progress_transfer_windows(source: i64, target: i64, n: i64) {
+//RS     progress_transfer_windows_state(source, target, n);
+//RS }
+//RS 
+//RS fn jet_jit_io_progress_transfer_flatten(source: i64, target: i64) {
+//RS     progress_transfer_flatten_state(source, target);
+//RS }
+//RS 
+//RS fn jet_jit_io_progress_transfer_intersperse(source: i64, target: i64) {
+//RS     progress_transfer_intersperse_state(source, target);
+//RS }
+//RS 
+//RS fn jet_jit_io_progress_transfer_take_while(source: i64, target: i64, is_skip: i64) {
+//RS     progress_transfer_take_while_state(source, target, is_skip != 0);
+//RS }
+//RS 
+//RS fn jet_jit_io_progress_source_pull(source: i64, index: i64) -> i64 {
+//RS     progress_source_plan(source)
+//RS         .and_then(|(plan, _)| plan.get(index.max(0) as usize).copied())
+//RS         .unwrap_or(1) as i64
+//RS }
+//RS 
+//RS fn jet_jit_io_progress_transfer_plan(source: i64, target: i64, plan: i64, tail: i64) {
+//RS     let plan = Concurrency::with_runtime_mut(|rt| {
+//RS         rt.heap
+//RS             .clone_int_list(plan)
+//RS             .unwrap_or_default()
+//RS             .into_iter()
+//RS             .map(|value| value.max(0) as usize)
+//RS             .collect::<Vec<_>>()
+//RS     });
+//RS     progress_transfer_plan(source, target, plan, tail.max(0) as usize);
+//RS }
+//RS 
+//RS fn jet_jit_io_progress_collect(list: i64) -> i64 {
+//RS     let active = progress_states()
+//RS         .lock()
+//RS         .expect("JIT progress state poisoned")
+//RS         .contains_key(&list);
+//RS     if active {
+//RS         let is_lazy = Concurrency::with_runtime_mut(|rt| {
+//RS             runtime_host::lazy_iter_index(rt, list).is_some()
+//RS         });
+//RS         if is_lazy {
+//RS             let _ = Concurrency::with_runtime_mut(|rt| runtime_host::lazy_iter_collect(rt, list));
+//RS         } else if let Some(total) = Concurrency::with_runtime_mut(|rt| {
+//RS             runtime_host::lazy_iter_exact_len(rt, list).or_else(|| {
+//RS                 rt.heap
+//RS                     .list_len(list)
+//RS                     .and_then(|length| usize::try_from(length).ok())
+//RS             })
+//RS         }) {
+//RS             jet_jit_io_progress_pull_n(list, total as i64);
+//RS             progress_exhaust_state(list);
+//RS         }
+//RS     }
+//RS     list
+//RS }
+//RS 
+//RS fn jet_jit_io_confirm(prompt: i64) -> i8 {
+//RS     i8::from(prompt_confirm(&clone_string(prompt)))
+//RS }
+//RS 
+//RS fn jet_jit_io_choose(prompt: i64, items: i64) -> i64 {
+//RS     let prompt = clone_string(prompt);
+//RS     let values = Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(items).unwrap_or(0);
+//RS         (0..len)
+//RS             .map(|index| {
+//RS                 rt.heap
+//RS                     .list_get_int(items, index)
+//RS                     .and_then(|id| rt.heap.clone_string(id))
+//RS                     .unwrap_or_default()
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS     });
+//RS     match prompt_choose(&prompt, &values) {
+//RS         Ok(item) => {
+//RS             let id = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(item));
+//RS             result_ok(id as u64)
+//RS         }
+//RS         Err(error) => result_err(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_io_input_secret(prompt: i64) -> i64 {
+//RS     match prompt_input_secret(&clone_string(prompt)) {
+//RS         Ok(secret) => {
+//RS             let id = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(secret));
+//RS             result_ok(id as u64)
+//RS         }
+//RS         Err(error) => runtime_host::result_err_terminal(error),
+//RS     }
+//RS }
+//RS 
+//RS /// `core.term.binread` is the Prelude's `jet_std_fs_read_bytes` row; the
+//RS /// resident host marshals that same typed `IOError` result.
+//RS fn jet_jit_io_binread(path: i64) -> i64 {
+//RS     crate::CoreHost::jet_jit_fs_read_bytes(path)
+//RS }
+//RS 
+//RS /// A resident callable is the JIT carrier for the generic Prelude guard.
+//RS /// Preserve that callback in a per-guard slot; the slot is consumed exactly
+//RS /// once when MIR moves the `ScopeGuard` value at scope exit.
+//RS fn jet_jit_scope_guard(callback: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(callback) = runtime_host::jit_callable_parts(rt, callback) else {
+//RS             rt.set_host_fault("MIR scope guard closure has an invalid callable handle");
+//RS             return 0;
+//RS         };
+//RS         let Some(handle) = rt
+//RS             .scope_guards
+//RS             .len()
+//RS             .checked_add(1)
+//RS             .and_then(|index| i64::try_from(index).ok())
+//RS         else {
+//RS             rt.set_host_fault("MIR scope guard arena is full");
+//RS             return 0;
+//RS         };
+//RS         rt.scope_guards.push(Some(callback));
+//RS         handle
+//RS     })
+//RS }
+//RS 
+//RS /// Invoke one resident scope guard and consume its callback slot. The runtime
+//RS /// borrow ends before entering generated code so callbacks may call hosts.
+//RS fn jet_jit_scope_guard_drop(guard: i64) -> i64 {
+//RS     let callback = Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(index) = guard
+//RS             .checked_sub(1)
+//RS             .and_then(|index| usize::try_from(index).ok())
+//RS         else {
+//RS             rt.set_host_fault("MIR scope guard has an invalid handle");
+//RS             return None;
+//RS         };
+//RS         let Some(slot) = rt.scope_guards.get_mut(index) else {
+//RS             rt.set_host_fault("MIR scope guard has an unknown handle");
+//RS             return None;
+//RS         };
+//RS         slot.take()
+//RS     });
+//RS     if let Some(callback) = callback {
+//RS         runtime_host::invoke_jit_callable_zero(&callback);
+//RS     }
+//RS     0
+//RS }
+//RS 
+//RS 
+//RS /// Materialize FileReader lines into a string list without consuming the handle.
+//RS fn jet_jit_file_lines(handle: i64) -> i64 {
+//RS     use super::enc_stream::FileReaderSlot;
+//RS     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+//RS         return result_err_msg("fault injected: FS.Read");
+//RS     }
+//RS     let lines = Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = handle.saturating_sub(1) as usize;
+//RS         let Some(FileReaderSlot::Live(reader)) = rt.file_readers.get_mut(idx) else {
+//RS             return Vec::new();
+//RS         };
+//RS         let mut out = Vec::new();
+//RS         let mut buf = String::new();
+//RS         loop {
+//RS             buf.clear();
+//RS             match reader.inner.read_line(&mut buf) {
+//RS                 Ok(0) => break,
+//RS                 Ok(_) => {
+//RS                     if buf.ends_with('\n') {
+//RS                         buf.pop();
+//RS                         if buf.ends_with('\r') {
+//RS                             buf.pop();
+//RS                         }
+//RS                     }
+//RS                     out.push(std::mem::take(&mut buf));
+//RS                 }
+//RS                 Err(_) => break,
+//RS             }
+//RS         }
+//RS         out
+//RS     });
+//RS     list_from_lines(lines)
+//RS }
+//RS fn jet_jit_file_reader_path(handle: i64) -> i64 {
+//RS     use super::enc_stream::FileReaderSlot;
+//RS     let path = Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(index) = usize::try_from(handle)
+//RS             .ok()
+//RS             .and_then(|value| value.checked_sub(1))
+//RS         else {
+//RS             rt.set_host_fault("FileReader.path requires a live provider handle");
+//RS             return None;
+//RS         };
+//RS         match rt.file_readers.get(index) {
+//RS             Some(FileReaderSlot::Live(reader)) => Some(reader.path.clone()),
+//RS             _ => {
+//RS                 rt.set_host_fault("FileReader.path requires a live provider handle");
+//RS                 None
+//RS             }
+//RS         }
+//RS     });
+//RS     match path {
+//RS         Some(path) => Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(path)),
+//RS         None => 0,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_file_reader_read_line(handle: i64) -> i64 {
+//RS     use super::enc_stream::FileReaderSlot;
+//RS     use std::io::BufRead;
+//RS     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+//RS         return result_err_msg("fault injected: FS.Read");
+//RS     }
+//RS     let mut outcome = None;
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = handle.saturating_sub(1) as usize;
+//RS         let result = match rt.file_readers.get_mut(idx) {
+//RS             Some(FileReaderSlot::Live(reader)) => {
+//RS                 let mut line = String::new();
+//RS                 match reader.inner.read_line(&mut line) {
+//RS                     Ok(0) => Ok(None),
+//RS                     Ok(_) => {
+//RS                         while line.ends_with('\n') || line.ends_with('\r') {
+//RS                             line.pop();
+//RS                         }
+//RS                         Ok(Some(line))
+//RS                     }
+//RS                     Err(error) => Err(format!("read {}: {error}", reader.path)),
+//RS                 }
+//RS             }
+//RS             _ => Err("bad FileReader".to_string()),
+//RS         };
+//RS         outcome = Some(result);
+//RS     });
+//RS     match outcome.unwrap_or_else(|| Err("no active JIT runtime".to_string())) {
+//RS         Ok(Some(line)) => {
+//RS             let handle = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(line));
+//RS             let some = result_ok(handle as u64);
+//RS             result_ok(some as u64)
+//RS         }
+//RS         Ok(None) => result_ok(0),
+//RS         Err(error) => result_err_msg(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_file_writer_path(handle: i64) -> i64 {
+//RS     use super::enc_stream::FileWriterSlot;
+//RS     let path = Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(index) = usize::try_from(handle)
+//RS             .ok()
+//RS             .and_then(|value| value.checked_sub(1))
+//RS         else {
+//RS             rt.set_host_fault("FileWriter.path requires a live provider handle");
+//RS             return None;
+//RS         };
+//RS         match rt.file_writers.get(index) {
+//RS             Some(FileWriterSlot::Live(writer)) => Some(writer.path.clone()),
+//RS             _ => {
+//RS                 rt.set_host_fault("FileWriter.path requires a live provider handle");
+//RS                 None
+//RS             }
+//RS         }
+//RS     });
+//RS     match path {
+//RS         Some(path) => Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(path)),
+//RS         None => 0,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_file_writer_write_line(handle: i64, line: i64) -> i64 {
+//RS     use super::enc_stream::FileWriterSlot;
+//RS     use std::io::Write;
+//RS     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+//RS         return result_err_msg("fault injected: FS.Write");
+//RS     }
+//RS     let text = clone_string(line);
+//RS     let err = Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = handle.saturating_sub(1) as usize;
+//RS         let Some(FileWriterSlot::Live(writer)) = rt.file_writers.get_mut(idx) else {
+//RS             return Some("bad FileWriter".to_string());
+//RS         };
+//RS         writer
+//RS             .inner
+//RS             .write_all(text.as_bytes())
+//RS             .and_then(|_| writer.inner.write_all(b"\n"))
+//RS             .and_then(|_| writer.inner.flush())
+//RS             .err()
+//RS             .map(|e| format!("write {}: {e}", writer.path))
+//RS     });
+//RS     match err {
+//RS         None => result_ok_unit(),
+//RS         Some(msg) => result_err(&msg),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_file_writer_flush(handle: i64) -> i64 {
+//RS     use super::enc_stream::FileWriterSlot;
+//RS     use std::io::Write;
+//RS     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+//RS         return result_err_msg("fault injected: FS.Write");
+//RS     }
+//RS     let err = Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = handle.saturating_sub(1) as usize;
+//RS         let Some(FileWriterSlot::Live(writer)) = rt.file_writers.get_mut(idx) else {
+//RS             return Some("bad FileWriter".to_string());
+//RS         };
+//RS         writer
+//RS             .inner
+//RS             .flush()
+//RS             .err()
+//RS             .map(|e| format!("flush {}: {e}", writer.path))
+//RS     });
+//RS     match err {
+//RS         None => result_ok_unit(),
+//RS         Some(msg) => result_err(&msg),
+//RS     }
+//RS }
+//RS 
+//RS // `live { … }` enter/restore. Both call the shared Prelude dispatchers, so the
+//RS // resident tier cannot drift from AOT's raw-mode entry decision (I9).
+//RS fn jet_jit_term_enter() {
+//RS     jet_codegen::terminal_runtime::jet_term_enter();
+//RS }
+//RS 
+//RS fn jet_jit_term_leave() {
+//RS     jet_codegen::terminal_runtime::jet_term_leave();
+//RS }
+//RS 
+//RS /// `term.read_key()` — marshal the shared kernel's `JetKey` into the resident
+//RS /// scalar enum carrier (`pack_enum_scalar`: `(payload << 8) | disc`). The
+//RS /// discriminant comes from the generated Prelude enum metadata, which build.rs
+//RS /// derives from the same `JetKey` declaration this matches on, so the resident
+//RS /// and AOT tiers cannot disagree about a variant's number.
+//RS fn jet_jit_term_read_key() -> i64 {
+//RS     use jet_codegen::terminal_runtime::JetKey;
+//RS     let (variant, payload) = match jet_codegen::terminal_runtime::jet_term_read_key() {
+//RS         JetKey::Char(value) => ("Char", i64::from(u32::from(value))),
+//RS         JetKey::Enter => ("Enter", 0),
+//RS         JetKey::Escape => ("Escape", 0),
+//RS         JetKey::Backspace => ("Backspace", 0),
+//RS         JetKey::Tab => ("Tab", 0),
+//RS         JetKey::Delete => ("Delete", 0),
+//RS         JetKey::Up => ("Up", 0),
+//RS         JetKey::Down => ("Down", 0),
+//RS         JetKey::Left => ("Left", 0),
+//RS         JetKey::Right => ("Right", 0),
+//RS         JetKey::F(number) => ("F", number),
+//RS         JetKey::Ctrl(value) => ("Ctrl", i64::from(u32::from(value))),
+//RS         JetKey::Unknown => ("Unknown", 0),
+//RS     };
+//RS     let Some(disc) =
+//RS         crate::types_meta::prelude_enum_variant_index(jet_foundation::Syntax::TYPE_KEY, variant)
+//RS     else {
+//RS         jet_foundation::ice!(None, "jit read_key: Key variant metadata");
+//RS     };
+//RS     let packed = (payload << 8) | disc;
+//RS     packed
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct IOHostFns;
+//RS     register: register_io_symbols;
+//RS     declare: declare_io_host_fns(module) {
+//RS         let cc = module.target_config().default_call_conv;
+//RS         let mut nullary = Signature::new(cc);
+//RS         nullary.returns.push(AbiParam::new(types::I64));
+//RS         let mut nullary_void = Signature::new(cc);
+//RS         let mut unary = Signature::new(cc);
+//RS         unary.params.push(AbiParam::new(types::I64));
+//RS         unary.returns.push(AbiParam::new(types::I64));
+//RS         let mut unary_void = Signature::new(cc);
+//RS         unary_void.params.push(AbiParam::new(types::I64));
+//RS         let mut unary_i8 = Signature::new(cc);
+//RS         unary_i8.params.push(AbiParam::new(types::I64));
+//RS         unary_i8.returns.push(AbiParam::new(types::I8));
+//RS         let mut binary = Signature::new(cc);
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         binary.returns.push(AbiParam::new(types::I64));
+//RS         let mut binary_void = Signature::new(cc);
+//RS         binary_void.params.push(AbiParam::new(types::I64));
+//RS         binary_void.params.push(AbiParam::new(types::I64));
+//RS         let mut ternary = Signature::new(cc);
+//RS         ternary.params.push(AbiParam::new(types::I64));
+//RS         ternary.params.push(AbiParam::new(types::I64));
+//RS         ternary.params.push(AbiParam::new(types::I64));
+//RS         ternary.returns.push(AbiParam::new(types::I64));
+//RS         let mut ternary_void = Signature::new(cc);
+//RS         ternary_void.params.push(AbiParam::new(types::I64));
+//RS         ternary_void.params.push(AbiParam::new(types::I64));
+//RS         ternary_void.params.push(AbiParam::new(types::I64));
+//RS         let mut quaternary_void = Signature::new(cc);
+//RS         quaternary_void.params.push(AbiParam::new(types::I64));
+//RS         quaternary_void.params.push(AbiParam::new(types::I64));
+//RS         quaternary_void.params.push(AbiParam::new(types::I64));
+//RS         quaternary_void.params.push(AbiParam::new(types::I64));
+//RS 
+//RS 
+//RS     }
+//RS     stdout: "jet_jit_io_stdout" => jet_jit_io_stdout: nullary;
+//RS     stderr: "jet_jit_io_stderr" => jet_jit_io_stderr: nullary;
+//RS     stdin: "jet_jit_io_stdin" => jet_jit_io_stdin: nullary;
+//RS     buffered_canonical: "jet_std_io_buffered" => jet_jit_io_stdin: nullary;
+//RS     stdout_write_canonical: "jet_std_io_stdout_write" => jet_jit_stdout_write: binary;
+//RS     stdout_write: "jet_jit_stdout_write" => jet_jit_stdout_write: binary;
+//RS     stdout_write_line: "jet_jit_stdout_write_line" => jet_jit_stdout_write_line: binary;
+//RS     stdout_write_line_canonical: "jet_std_io_stdout_write_line" => jet_jit_stdout_write_line: binary;
+//RS     stdout_write_bytes: "jet_jit_stdout_write_bytes" => jet_jit_stdout_write_bytes: binary;
+//RS     stdout_write_bytes_canonical: "jet_std_io_stdout_write_bytes" => jet_jit_stdout_write_bytes: binary;
+//RS     stdout_flush: "jet_jit_stdout_flush" => jet_jit_stdout_flush: unary;
+//RS     stdout_flush_canonical: "jet_std_io_stdout_flush" => jet_jit_stdout_flush: unary;
+//RS     stdout_is_tty: "jet_jit_stdout_is_tty" => jet_jit_stdout_is_tty: unary_i8;
+//RS     stdout_is_tty_canonical: "jet_std_io_stdout_is_tty" => jet_jit_stdout_is_tty: unary_i8;
+//RS     stderr_write: "jet_jit_stderr_write" => jet_jit_stderr_write: binary;
+//RS     stderr_write_canonical: "jet_std_io_stderr_write" => jet_jit_stderr_write: binary;
+//RS     stderr_write_line: "jet_jit_stderr_write_line" => jet_jit_stderr_write_line: binary;
+//RS     stderr_write_line_canonical: "jet_std_io_stderr_write_line" => jet_jit_stderr_write_line: binary;
+//RS     stderr_write_bytes: "jet_jit_stderr_write_bytes" => jet_jit_stderr_write_bytes: binary;
+//RS     stderr_write_bytes_canonical: "jet_std_io_stderr_write_bytes" => jet_jit_stderr_write_bytes: binary;
+//RS     stderr_flush: "jet_jit_stderr_flush" => jet_jit_stderr_flush: unary;
+//RS     stderr_flush_canonical: "jet_std_io_stderr_flush" => jet_jit_stderr_flush: unary;
+//RS     stderr_is_tty: "jet_jit_stderr_is_tty" => jet_jit_stderr_is_tty: unary_i8;
+//RS     stderr_is_tty_canonical: "jet_std_io_stderr_is_tty" => jet_jit_stderr_is_tty: unary_i8;
+//RS     terminal_width: "jet_jit_terminal_width" => jet_jit_terminal_width: nullary;
+//RS     terminal_height: "jet_jit_terminal_height" => jet_jit_terminal_height: nullary;
+//RS     style: "jet_jit_io_style" => jet_jit_io_style: binary;
+//RS     style_force: "jet_jit_io_style_force" => jet_jit_io_style_force: binary;
+//RS     progress: "jet_jit_io_progress" => jet_jit_io_progress: unary;
+//RS     progress_iter: "jet_jit_io_progress_iter" => jet_jit_io_progress_iter: ternary;
+//RS     progress_list: "jet_jit_io_progress_list" => jet_jit_io_progress_list: ternary;
+//RS     progress_mark_exact: "jet_jit_io_mark_exact_iter" => jet_jit_io_mark_exact_iter: unary;
+//RS     progress_pull: "jet_jit_io_progress_pull" => jet_jit_io_progress_pull: binary_void;
+//RS     progress_finish: "jet_jit_io_progress_finish" => jet_jit_io_progress_finish: unary_void;
+//RS     progress_exhaust: "jet_jit_io_progress_exhaust" => jet_jit_io_progress_exhaust: unary_void;
+//RS     progress_transfer: "jet_jit_io_progress_transfer" => jet_jit_io_progress_transfer: binary_void;
+//RS     progress_transfer_filter: "jet_jit_io_progress_transfer_filter" => jet_jit_io_progress_transfer_filter: binary_void;
+//RS     progress_transfer_dedup: "jet_jit_io_progress_transfer_dedup" => jet_jit_io_progress_transfer_dedup: ternary_void;
+//RS     progress_transfer_chunks: "jet_jit_io_progress_transfer_chunks" => jet_jit_io_progress_transfer_chunks: ternary_void;
+//RS     progress_transfer_windows: "jet_jit_io_progress_transfer_windows" => jet_jit_io_progress_transfer_windows: ternary_void;
+//RS     progress_transfer_flatten: "jet_jit_io_progress_transfer_flatten" => jet_jit_io_progress_transfer_flatten: binary_void;
+//RS     progress_transfer_intersperse: "jet_jit_io_progress_transfer_intersperse" => jet_jit_io_progress_transfer_intersperse: binary_void;
+//RS     progress_transfer_take_while: "jet_jit_io_progress_transfer_take_while" => jet_jit_io_progress_transfer_take_while: ternary_void;
+//RS     progress_source_pull: "jet_jit_io_progress_source_pull" => jet_jit_io_progress_source_pull: binary;
+//RS     progress_transfer_plan: "jet_jit_io_progress_transfer_plan" => jet_jit_io_progress_transfer_plan: quaternary_void;
+//RS     progress_collect: "jet_jit_io_progress_collect" => jet_jit_io_progress_collect: unary;
+//RS     confirm: "jet_jit_io_confirm" => jet_jit_io_confirm: unary_i8;
+//RS     choose: "jet_jit_io_choose" => jet_jit_io_choose: binary;
+//RS     input_secret: "jet_jit_io_input_secret" => jet_jit_io_input_secret: unary;
+//RS     binread: "jet_std_io_binread" => jet_jit_io_binread: unary;
+//RS     scope_guard: "jet_scope_guard" => jet_jit_scope_guard: unary;
+//RS     scope_guard_drop: "jet_scope_guard_drop" => jet_jit_scope_guard_drop: unary;
+//RS     take: "jet_jit_io_take" => io_line_stream::jet_jit_io_take: unary;
+//RS     read_until: "jet_jit_io_read_until" => io_line_stream::jet_jit_io_read_until: unary;
+//RS     input: "jet_std_io_input" => io_line_stream::jet_jit_io_input: unary;
+//RS     readline: "jet_jit_io_readline" => io_line_stream::jet_jit_io_readline: nullary;
+//RS     read_all_input: "jet_jit_io_read_all_input" => io_line_stream::jet_jit_io_read_all_input: nullary;
+//RS     file_reader_path: "jet_std_file_reader_path" => jet_jit_file_reader_path: unary;
+//RS     file_reader_read_line: "jet_std_file_reader_read_line" => jet_jit_file_reader_read_line: unary;
+//RS     file_lines: "jet_jit_file_lines" => jet_jit_file_lines: unary;
+//RS     file_writer_path: "jet_std_file_writer_path" => jet_jit_file_writer_path: unary;
+//RS     file_writer_write_line: "jet_std_file_writer_write_line" => jet_jit_file_writer_write_line: binary;
+//RS     file_writer_flush: "jet_std_file_writer_flush" => jet_jit_file_writer_flush: unary;
+//RS     file_writer_close: "jet_jit_file_writer_close" => super::enc_stream::jet_jit_file_writer_close: unary_void;
+//RS     file_reader_close: "jet_jit_file_reader_close" => super::enc_stream::jet_jit_file_reader_close: unary_void;
+//RS     term_enter: "jet_jit_term_enter" => jet_jit_term_enter: nullary_void;
+//RS     term_leave: "jet_jit_term_leave" => jet_jit_term_leave: nullary_void;
+//RS     term_read_key: "jet_jit_term_read_key" => jet_jit_term_read_key: nullary;
+//RS }
+// END-PORT-PENDING 0219 crates/jet-jit/src/IO.rs:1-1515
+

@@ -4,6 +4,7 @@
 // v4/v7 entropy crosses the typed CSPRNG leaf in core.crypto.random.
 use core.crypto as crypto
 use core.crypto.random as random
+use core.encoding as uuid_encoding
 #Error
 pub struct UUIDError {
     pub reason: String
@@ -45,7 +46,7 @@ pub fn v5(namespace: String, name: String) -> String UUIDError! {
     input := copy_bytes(ns)
     loop b in name.bytes() -> &input.push(b)
     digest_hex :: crypto.sha1(input) ?? return Err(UUIDError{reason: "invalid UUID digest"})
-    digest :: hex_decode(~digest_hex) ?? return Err(UUIDError{reason: "invalid UUID digest"})
+    digest :: uuid_encoding.hex_to_bytes(~digest_hex) ?? return Err(UUIDError{reason: "invalid UUID digest"})
     if digest.len() != 20 -> return Err(UUIDError{reason: "invalid UUID digest length"})
     bytes := [U8]{}
     loop i in 0..<16 -> &bytes.push(digest[i])
@@ -84,19 +85,11 @@ fn parse_uuid(text: String) -> [U8]? {
     if digits.len() != 32 -> return None
     out := [U8]{}
     loop i in 0..<16 {
-        hi :: hex_value(digits[i * 2]) ?? return None
-        lo :: hex_value(digits[i * 2 + 1]) ?? return None
+        hi :: uuid_encoding.hex_value(digits[i * 2]) ?? return None
+        lo :: uuid_encoding.hex_value(digits[i * 2 + 1]) ?? return None
         &out.push(to_u8((hi << 4) | lo))
     }
     Val(~out)
-}
-
-fn hex_value(b: U8) -> Int? {
-    n :: Int.from_u8(b)
-    if n >= 48 && n <= 57 -> return Val(n - 48)
-    if n >= 65 && n <= 70 -> return Val(n - 55)
-    if n >= 97 && n <= 102 -> return Val(n - 87)
-    None
 }
 
 fn format_uuid(bytes: [U8]) -> String? {
@@ -105,27 +98,10 @@ fn format_uuid(bytes: [U8]) -> String? {
     loop i in 0..<16 {
         if i == 4 || i == 6 || i == 8 || i == 10 -> &out.push(U8{45})
         value :: Int.from_u8(bytes[i])
-        &out.push(hex_digit(value >> 4))
-        &out.push(hex_digit(value & 15))
+        &out.push(uuid_encoding.hex_nibble(value >> 4))
+        &out.push(uuid_encoding.hex_nibble(value & 15))
     }
     Val(String.from_bytes(out) ?? "")
-}
-
-fn hex_digit(n: Int) -> U8 Never! {
-    if n < 10 -> return U8{48 + n}
-    U8{87 + n}
-}
-
-fn hex_decode(text: String) -> [U8]? {
-    raw :: text.bytes()
-    if raw.len() % 2 != 0 -> return None
-    out := [U8]{}
-    loop i in 0..<raw.len(), 2 {
-        hi :: hex_value(raw[i]) ?? return None
-        lo :: hex_value(raw[i + 1]) ?? return None
-        &out.push(to_u8((hi << 4) | lo))
-    }
-    Val(~out)
 }
 
 /// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the

@@ -1,0 +1,324 @@
+use tests.conformance.corpus.core.port.encoding_hostile_io.*
+use tests.common as common
+use std.fs as fs
+use std.env as env
+use std.process.id
+use core.sys.target as target
+// GATE #4494 native retained files, hostile IO seam and process execution.
+// GATE #4483 selected Linux dev/full probe. #4499 and #4409 unused.
+
+// Rust: tests/encoding_hostile_io.rs:401
+#Test("encoding_hostile_one_byte_reads_match_baseline_for_all_codecs") {
+    if not common.have_rustc() {
+        eprintln("note: skipping hostile one-byte read matrix (need rustc)")
+        return
+    }
+    dir :: env.temp_dir().join("jet_enc_hostile_read1_{id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    json_in :: dir.join("json.in")
+    fs.write(json_in, `{"a":[1,true]}`).unwrap()
+    jsonl_in :: dir.join("jsonl.in")
+    fs.write(jsonl_in, "\"one\"\n7\n").unwrap()
+    csv_in :: dir.join("csv.in")
+    fs.write(csv_in, "p,q\x0D\n").unwrap()
+    cbor_in :: dir.join("cbor.in")
+    fs.write(cbor_in, [U8]{0x82, 0x01, 0x02}).unwrap()
+    cases :: [
+        ("json", json_reader_fixture(json_in.to_string_lossy().replace("\\", "\\\\")), "7\neof\n"),
+        ("jsonl", jsonl_reader_fixture(jsonl_in.to_string_lossy().replace("\\", "\\\\")), "one\n7\neof\n"),
+        ("csv", csv_reader_fixture(csv_in.to_string_lossy().replace("\\", "\\\\")), "p\nq\neof\n"),
+        ("cbor", cbor_reader_fixture(cbor_in.to_string_lossy().replace("\\", "\\\\")), "4\neof\n"),
+    ]
+    loop (name, source, expected) in cases {
+        (base_code, base_out, base_err) :: build_and_run(dir, "{name}_base", source, [])
+        assert_eq((base_code, base_err), (0, ""), "{name} baseline stderr")
+        assert_eq(base_out, expected, "{name} baseline stdout")
+        (host_code, host_out, host_err) :: run_with_env(dir, "{name}_read1", source, hostile_env([("JET_ENC_HOSTILE_READ_ONE", "1")]))
+        assert_eq((host_code, host_err), (0, ""), "{name} hostile stderr")
+        assert_eq(host_out, expected, "{name} one-byte read drift")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/encoding_hostile_io.rs:469
+#Test("encoding_hostile_short_writes_match_baseline_for_all_codecs") {
+    if not common.have_rustc() {
+        eprintln("note: skipping hostile short-write matrix (need rustc)")
+        return
+    }
+    dir :: env.temp_dir().join("jet_enc_hostile_write1_{id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    json_out :: dir.join("json.out")
+    jsonl_out :: dir.join("jsonl.out")
+    csv_out :: dir.join("csv.out")
+    cbor_out :: dir.join("cbor.out")
+    cases :: [
+        ("json", json_writer_fixture(json_out.to_string_lossy().replace("\\", "\\\\")), "finish-ok\n{\"a\":1}\n"),
+        ("jsonl", jsonl_writer_fixture(jsonl_out.to_string_lossy().replace("\\", "\\\\")), "\"alpha\"\n7\n\n"),
+        ("csv", csv_writer_fixture(csv_out.to_string_lossy().replace("\\", "\\\\")), "x,y\x0D\n\n"),
+        ("cbor", cbor_writer_fixture(cbor_out.to_string_lossy().replace("\\", "\\\\")), "finish-ok\ndone\n"),
+    ]
+    loop (name, source, expected) in cases {
+        (base_code, base_out, base_err) :: build_and_run(dir, "{name}_base", source, [])
+        assert_eq((base_code, base_err), (0, ""), "{name} baseline")
+        assert_eq(base_out, expected, "{name} baseline stdout")
+        (host_code, host_out, host_err) :: run_with_env(dir, "{name}_chunk1", source, hostile_env([("JET_ENC_HOSTILE_WRITE_MAX", "1")]))
+        assert_eq((host_code, host_err), (0, ""), "{name} hostile stderr")
+        assert_eq(host_out, expected, "{name} short-write drift")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/encoding_hostile_io.rs:529
+#Test("encoding_hostile_io_failures_latch_terminal_for_read_and_write") {
+    if not common.have_rustc() {
+        eprintln("note: skipping hostile interrupt matrix (need rustc)")
+        return
+    }
+    dir :: env.temp_dir().join("jet_enc_hostile_intr_{id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    directory :: dir.to_string_lossy().replace("\\", "\\\\")
+    source_read :: `
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+fn run() -> {
+    directory_input :: files.open("@DIRECTORY@") ?? panic("open dir")
+    directory_reader := cbor.reader(^directory_input) ?? panic("reader")
+    result :: directory_reader.next()
+    if result == {
+        .Ok(_) -> { print("read-ok-missed") }
+        .Err(first) -> {
+            again :: directory_reader.next()
+            if again == {
+                .Ok(_) -> { print("not-latched") }
+                .Err(second) -> {
+                    print(first.kind == encoding.EncodingErrorKind.IO)
+                    print(first.reason == second.reason)
+                }
+            }
+        }
+    }
+}
+`.replace("@DIRECTORY@", directory)
+    json_out :: dir.join("json.out")
+    _ :: json_out
+    (code, stdout, stderr) :: run_with_env(dir, "json_intr_read", source_read, hostile_env([]))
+    assert_eq((code, stderr), (0, ""))
+    assert(stdout.contains("true"), "expected IO error, got: {stdout}")
+    source_write :: `
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+fn writer_io(writer: &cbor.CBORWriter) -[IO]> Bool {
+    repeated :: &writer.flush()
+    if repeated == {
+        .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
+        .Ok(_) -> return false
+    }
+    return false
+}
+fn run() -> {
+    full_output :: files.create("/dev/full") ?? panic("full open")
+    full_writer := cbor.writer(^full_output) ?? panic("full writer")
+    write_result :: full_writer.write(encoding.DataEvent.Null)
+    if write_result == {
+        .Err(first) -> {
+            print(first.kind == encoding.EncodingErrorKind.IO)
+            flush_again :: &full_writer.flush()
+            if flush_again == {
+                .Err(second) -> print(first.reason == second.reason)
+                .Ok(done) -> print(false)
+            }
+        }
+        .Ok(_) -> {
+            flush_result :: &full_writer.flush()
+            if flush_result == {
+                .Err(io_error) -> print(writer_io(&full_writer))
+                .Ok(done) -> print(false)
+            }
+        }
+    }
+}
+`
+    (write_code, write_stdout, write_stderr) :: run_with_env(dir, "json_intr_write", source_write, hostile_env([("JET_ENC_HOSTILE_WRITE_MAX", "1")]))
+    assert_eq((write_code, write_stderr), (0, ""))
+    assert(write_stdout.contains("true"), "expected IO on write, got: {write_stdout}")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/encoding_hostile_io.rs:626
+#Test("encoding_hostile_fail_after_write_preserves_prefix_without_duplication") {
+    if not common.have_rustc() {
+        eprintln("note: skipping hostile fail-after write test (need rustc)")
+        return
+    }
+    dir :: env.temp_dir().join("jet_enc_hostile_failw_{id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    output :: dir.join("partial.json")
+    output_text :: output.to_string_lossy().replace("\\", "\\\\")
+    limits_source :: `
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+fn run() -> {
+    limits := encoding.EncodingLimits.safe()
+    limits.max_item_bytes = 1
+    output :: files.create("@OUTPUT@") ?? panic("create")
+    writer :: json.writer(^output, limits) ?? panic("writer")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+    result :: writer.write(encoding.DataEvent.Text("ab"))
+    if result == {
+        .Ok(_) -> { print("missed-limit") }
+        .Err(first) -> {
+            again :: writer.finish()
+            if again == {
+                .Ok(_) -> { print("finish-after-limit-missed") }
+                .Err(second) -> {
+                    print(first.kind == encoding.EncodingErrorKind.Limit)
+                    print(first.reason == second.reason)
+                }
+            }
+        }
+    }
+    wire := files.read("@OUTPUT@") ?? panic("read")
+    print(wire)
+}
+`.replace("@OUTPUT@", output_text)
+    (code, stdout, stderr) :: build_and_run(dir, "fail_limit", limits_source, [])
+    assert_eq((code, stderr), (0, ""))
+    assert(stdout.contains("true"), "limit latch: {stdout}")
+    wire :: fs.read_to_string(output).unwrap()
+    assert_eq(wire, "[", "prefix only: {wire}")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/encoding_hostile_io.rs:676
+#Test("encoding_hostile_malformed_and_truncated_corpora_latch_under_chunked_io") {
+    if not common.have_rustc() {
+        eprintln("note: skipping hostile malformed corpus (need rustc)")
+        return
+    }
+    dir :: env.temp_dir().join("jet_enc_hostile_mal_{id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    corpora :: [
+        ("json_trunc", "json", `{"a":"`.bytes(), "Truncated"),
+        ("json_bad", "json", `{"a":}`.bytes(), "Syntax"),
+        ("jsonl_bad", "jsonl", "{\"a\":1}\n[2,]\n".bytes(), "Syntax"),
+        ("csv_bad", "csv", "\"unclosed\x0D\n".bytes(), "Truncated"),
+        ("csv_utf8", "csv", [U8]{97, 44, 0xff}, "Syntax"),
+        ("cbor_trunc", "cbor", [U8]{0x81}, "Truncated"),
+        ("cbor_tag", "cbor", [U8]{0xC0, 0x00}, "Unsupported"),
+        ("cbor_dup", "cbor", [U8]{0xA2, 0x61, 0x61, 0x01, 0x61, 0x61, 0x02}, "Unsupported"),
+    ]
+    loop (label, codec, bytes, _kind) in corpora {
+        path :: dir.join("{label}.in")
+        fs.write(path, bytes).unwrap()
+        path_text :: path.to_string_lossy().replace("\\", "\\\\")
+        source :: malformed_reader_fixture(codec, path_text)
+        (base_code, base_out, _) :: build_and_run(dir, "{label}_base", source, [])
+        assert_eq(base_code, 0, "{label} baseline failed")
+        (host_code, host_out, _) :: run_with_env(dir, "{label}_hostile", source, hostile_env([("JET_ENC_HOSTILE_READ_ONE", "1")]))
+        assert_eq(host_code, 0, "{label} hostile failed")
+        assert(base_out.contains("true") && host_out.contains("true"), "{label}: base={base_out} host={host_out} expected terminal latch")
+        assert(not base_out.contains("not-latched") && not host_out.contains("not-latched"), "{label}: latch failure base={base_out} host={host_out}")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/encoding_hostile_io.rs:733
+#Test("encoding_hostile_drop_scope_emits_no_false_success") {
+    if not common.have_rustc() {
+        eprintln("note: skipping hostile drop test (need rustc)")
+        return
+    }
+    dir :: env.temp_dir().join("jet_enc_hostile_drop_{id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    partial :: dir.join("partial.jsonl")
+    partial_text :: partial.to_string_lossy().replace("\\", "\\\\")
+    source :: `
+use core.encoding as encoding
+use core.encoding.jsonl as jsonl
+use core.files as files
+fn write_partial(path: String) -> {
+    output :: files.create(path) ?? panic("create")
+    writer :: jsonl.writer(^output) ?? panic("writer")
+    writer.write(DataTree.Text("kept")) ?? panic("write")
+    &writer.flush() ?? panic("flush")
+}
+fn run() -> {
+    write_partial("@PARTIAL@")
+    leftover :: files.read("@PARTIAL@") ?? panic("read")
+    print(leftover == "\"kept\"")
+    print(leftover.contains("\n") == false)
+}
+`.replace("@PARTIAL@", partial_text)
+    (code, stdout, stderr) :: run_with_env(dir, "drop_scope", source, hostile_env([("JET_ENC_HOSTILE_WRITE_MAX", "1")]))
+    assert_eq((code, stderr), (0, ""))
+    assert_eq(stdout, "true\ntrue\n")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/encoding_hostile_io.rs:777
+#Test("encoding_hostile_retains_real_file_and_dev_full_probes") {
+    if target.selected_os() != .Linux { return }
+    if not common.have_rustc() {
+        eprintln("note: skipping /dev/full probe (need rustc)")
+        return
+    }
+    dir :: env.temp_dir().join("jet_enc_hostile_full_{id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    directory :: dir.to_string_lossy().replace("\\", "\\\\")
+    source :: `
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+fn reader_io(reader: &cbor.CBORReader) -[IO]> Bool {
+    repeated :: reader.next()
+    if repeated == {
+        .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
+        .Ok(_) -> return false
+    }
+    return false
+}
+fn writer_io(writer: &cbor.CBORWriter) -[IO]> Bool {
+    repeated :: &writer.flush()
+    if repeated == {
+        .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
+        .Ok(_) -> return false
+    }
+    return false
+}
+fn run() -> {
+    directory_input :: files.open("@DIRECTORY@") ?? panic("open dir")
+    directory_reader := cbor.reader(^directory_input) ?? panic("reader")
+    print(reader_io(&directory_reader))
+    full_output :: files.create("/dev/full") ?? panic("full")
+    full_writer := cbor.writer(^full_output) ?? panic("writer")
+    write_result :: full_writer.write(encoding.DataEvent.Null)
+    if write_result == {
+        .Err(io_error) -> print(writer_io(&full_writer))
+        .Ok(wrote) -> {
+            flush_result :: &full_writer.flush()
+            if flush_result == {
+                .Err(io_error) -> print(writer_io(&full_writer))
+                .Ok(done) -> print(false)
+            }
+        }
+    }
+}
+`.replace("@DIRECTORY@", directory)
+    (code, stdout, stderr) :: build_and_run(dir, "full_probe", source, [])
+    assert_eq((code, stdout, stderr), (0, "true\ntrue\n", ""))
+    (host_code, host_stdout, host_stderr) :: run_with_env(dir, "full_probe_hostile", source, hostile_env([("JET_ENC_HOSTILE_WRITE_MAX", "1")]))
+    assert_eq((host_code, host_stderr), (0, ""))
+    assert_eq(host_stdout, "true\ntrue\n")
+    _ :: fs.remove_dir_all(dir)
+}

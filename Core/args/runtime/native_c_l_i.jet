@@ -1,0 +1,1323 @@
+// PORT-PENDING 0194 crates-jet-jit-src-cli: crates/jet-jit/src/CLI.rs:1-1319
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Typed CLI entry adapter (#1219) — CLISchema + canonical Args parser.
+//RS //! The zero-argument `jet_jit_cli_main` trampoline decodes argv and calls user
+//RS //! `run(args)`.
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS use crate::Marshal::{alloc_string, result_ok};
+//RS use jet_foundation::MIR::{
+//RS     MirArtifactId, MirArtifactTarget, MirCliDefault, MirCliEntry, MirCliInput,
+//RS     MirCliInputShape, MirCliValueKind, MirConstant, MirFunctionId, MirProgram, MirType,
+//RS     MirTypeKind,
+//RS };
+//RS use std::cell::RefCell;
+//RS use std::sync::atomic::{AtomicPtr, Ordering};
+//RS 
+//RS #[allow(dead_code, unused_imports, clippy::all)]
+//RS mod runtime {
+//RS     use super::{Concurrency, MirCliValueKind};
+//RS     use crate::Job::jet_args_source_program_name;
+//RS 
+//RS     trait JetShow {
+//RS         fn jet_show(&self) -> String;
+//RS     }
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Args.rs");
+//RS 
+//RS     #[derive(Clone)]
+//RS     pub(super) struct Spec(JetArgsSpec);
+//RS     #[derive(Clone)]
+//RS     pub(super) struct Parsed(JetParsedArgs);
+//RS 
+//RS     pub(super) fn empty_spec(prog: &str) -> Spec {
+//RS         Spec(jet_args_program(jet_args_spec(), prog))
+//RS     }
+//RS 
+//RS     pub(super) fn description(spec: Spec, description: &str) -> Spec {
+//RS         Spec(jet_args_description(spec.0, &description.to_string()))
+//RS     }
+//RS 
+//RS     pub(super) fn flag(spec: Spec, name: &str, help: &str) -> Spec {
+//RS         Spec(jet_args_flag(spec.0, &name.to_string(), &help.to_string()))
+//RS     }
+//RS 
+//RS     pub(super) fn flag_short(spec: Spec, name: &str, short: &str, help: &str) -> Spec {
+//RS         Spec(jet_args_flag_short(
+//RS             spec.0,
+//RS             &name.to_string(),
+//RS             &short.to_string(),
+//RS             &help.to_string(),
+//RS         ))
+//RS     }
+//RS 
+//RS     pub(super) fn option(
+//RS         spec: Spec,
+//RS         name: &str,
+//RS         short: Option<&str>,
+//RS         help: &str,
+//RS         meta: &str,
+//RS         default: Option<String>,
+//RS         env: Option<&str>,
+//RS         required: bool,
+//RS         repeat: bool,
+//RS         kind: MirCliValueKind,
+//RS     ) -> Spec {
+//RS         let value = match kind {
+//RS             MirCliValueKind::Int => JetArgValueKind::Int,
+//RS             MirCliValueKind::Float => JetArgValueKind::Float,
+//RS             MirCliValueKind::String | MirCliValueKind::Path => JetArgValueKind::String,
+//RS             MirCliValueKind::Bool => JetArgValueKind::String,
+//RS         };
+//RS         Spec(jet_args_option_base(
+//RS             spec.0,
+//RS             &name.to_string(),
+//RS             short.map(str::to_string),
+//RS             &help.to_string(),
+//RS             &meta.to_string(),
+//RS             default,
+//RS             env.map(str::to_string),
+//RS             required,
+//RS             repeat,
+//RS             value,
+//RS         ))
+//RS     }
+//RS 
+//RS     pub(super) fn option_choice(
+//RS         spec: Spec,
+//RS         name: &str,
+//RS         help: &str,
+//RS         meta: &str,
+//RS         choices: &str,
+//RS     ) -> Spec {
+//RS         Spec(jet_args_option_choice(
+//RS             spec.0,
+//RS             &name.to_string(),
+//RS             &help.to_string(),
+//RS             &meta.to_string(),
+//RS             &choices.to_string(),
+//RS         ))
+//RS     }
+//RS 
+//RS     pub(super) fn version(spec: Spec, version: &str) -> Spec {
+//RS         Spec(jet_args_version(spec.0, &version.to_string()))
+//RS     }
+//RS 
+//RS     pub(super) fn positional(spec: Spec, name: &str, help: &str) -> Spec {
+//RS         Spec(jet_args_positional(
+//RS             spec.0,
+//RS             &name.to_string(),
+//RS             &help.to_string(),
+//RS         ))
+//RS     }
+//RS 
+//RS     pub(super) fn subcommand_spec(spec: Spec, name: &str, help: &str, nested: Spec) -> Spec {
+//RS         Spec(jet_args_subcommand(
+//RS             spec.0,
+//RS             &name.to_string(),
+//RS             &help.to_string(),
+//RS             nested.0,
+//RS         ))
+//RS     }
+//RS 
+//RS     pub(super) fn parse(spec: &Spec, argv: &[String]) -> Result<Parsed, String> {
+//RS         let argv = argv.to_vec();
+//RS         jet_args_parse(&spec.0, &argv).map(Parsed)
+//RS     }
+//RS 
+//RS     pub(super) fn parse_guided(spec: &Spec, argv: &[String]) -> Result<Parsed, String> {
+//RS         let argv = argv.to_vec();
+//RS         jet_args_parse_guided(&spec.0, &argv).map(Parsed)
+//RS     }
+//RS 
+//RS     pub(super) fn explicit_names(parsed: &Parsed) -> Vec<String> {
+//RS         parsed
+//RS             .0
+//RS             .explicit_flags
+//RS             .iter()
+//RS             .chain(parsed.0.explicit_options.iter())
+//RS             .cloned()
+//RS             .collect()
+//RS     }
+//RS     pub(super) fn guided_argv(spec: &Spec, argv: &[String]) -> Result<Vec<String>, String> {
+//RS         if !crate::IO::term_prelude::jet_term_stdin_is_terminal()
+//RS             || !crate::IO::term_prelude::jet_term_stderr_is_terminal()
+//RS             || crate::IO::term_prelude::jet_term_machine_output()
+//RS             || std::env::var_os("CI").is_some()
+//RS         {
+//RS             return Ok(argv.to_vec());
+//RS         }
+//RS         let input = argv.to_vec();
+//RS         jet_args_guided_argv_with(&spec.0, &input, |field, initial, error| {
+//RS             let mut prompt = if field.help.is_empty() {
+//RS                 format!("{}:", field.name)
+//RS             } else {
+//RS                 format!("{} — {}:", field.name, field.help)
+//RS             };
+//RS             if !initial.is_empty() {
+//RS                 prompt.push_str(&format!(" [{}]", initial));
+//RS             }
+//RS             if let Some(error) = error {
+//RS                 prompt.push_str(&format!(" Correction: {error}"));
+//RS             }
+//RS             prompt.push(' ');
+//RS             crate::runtime_host::write_jit_stderr(&prompt, true)?;
+//RS             match crate::IO::term_prelude::jet_term_read_stdin_line() {
+//RS                 Ok(crate::IO::term_prelude::JetTermRead::Line(value)) => Ok(value),
+//RS                 Ok(crate::IO::term_prelude::JetTermRead::EndOfInput) => {
+//RS                     Err("guided input ended before the form was submitted".to_string())
+//RS                 }
+//RS                 Err(error) => Err(format!("guided input could not read stdin: {error}")),
+//RS             }
+//RS         })
+//RS     }
+//RS 
+//RS     pub(super) fn help_text(spec: &Spec) -> String {
+//RS         spec.0.help()
+//RS     }
+//RS 
+//RS     pub(super) fn flag_set(parsed: &Parsed, name: &str) -> bool {
+//RS         jet_parsed_flag(&parsed.0, &name.to_string())
+//RS     }
+//RS 
+//RS     pub(super) fn option_val(parsed: &Parsed, name: &str) -> Option<String> {
+//RS         jet_parsed_option(&parsed.0, &name.to_string()).ok()
+//RS     }
+//RS 
+//RS     pub(super) fn option_values(parsed: &Parsed, name: &str) -> Vec<String> {
+//RS         jet_parsed_options(&parsed.0, &name.to_string())
+//RS     }
+//RS 
+//RS     pub(super) fn standard_log_level(parsed: &Parsed) -> String {
+//RS         jet_args_standard_log_level(&parsed.0)
+//RS     }
+//RS 
+//RS     pub(super) fn standard_color_mode(parsed: &Parsed) -> String {
+//RS         jet_args_standard_color_mode(&parsed.0)
+//RS     }
+//RS 
+//RS     pub(super) fn subcommand(parsed: &Parsed) -> Option<String> {
+//RS         jet_parsed_subcommand(&parsed.0).ok()
+//RS     }
+//RS }
+//RS 
+//RS use crate::Job::{jet_args_source_program_name, jet_cli_banner};
+//RS 
+//RS use runtime::{
+//RS     empty_spec, explicit_names, flag, flag_set, flag_short, help_text, option, option_val,
+//RS     option_values, parse, parse_guided, positional, standard_color_mode, standard_log_level, Parsed,
+//RS     Spec,
+//RS };
+//RS 
+//RS mod inline_range_semantics {
+//RS     include!("../../jet-codegen/src/Prelude/Core/InlineRange.rs");
+//RS }
+//RS 
+//RS fn apply_standard_cli(parsed: &Parsed, standard: bool) {
+//RS     if !standard {
+//RS         return;
+//RS     }
+//RS     super::CoreHost::set_cli_log_level(&standard_log_level(parsed));
+//RS     crate::IO::set_cli_color_mode(&standard_color_mode(parsed));
+//RS }
+//RS #[derive(Clone)]
+//RS pub(crate) struct CLIPlan {
+//RS     pub schema: MirCliEntry,
+//RS     pub version: Option<String>,
+//RS     /// Field types for the entry record, or the direct `run` parameters.
+//RS     pub field_types: Vec<(String, MirType)>,
+//RS     /// Canonical callable members. Stable MIR function IDs are resolved to
+//RS     /// native pointers only after the artifact has been compiled.
+//RS     pub commands: Vec<CLICommandPlan>,
+//RS     /// The CLI frame passed to the `run` adapter is already the entry record.
+//RS     pub run_record: bool,
+//RS     /// The typed entry's ABI carries a non-unit return value.
+//RS     pub run_returns_value: bool,
+//RS     pub user_run: MirFunctionId,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub(crate) struct CLICommandPlan {
+//RS     pub name: String,
+//RS     pub function: MirFunctionId,
+//RS     pub method: bool,
+//RS     pub ptr: Option<*const u8>,
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static CLI_PLAN: RefCell<Option<CLIPlan>> = const { RefCell::new(None) };
+//RS }
+//RS 
+//RS static CLI_RUN_PTR: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
+//RS 
+//RS pub(crate) fn clear_cli_plan() {
+//RS     CLI_PLAN.with(|slot| *slot.borrow_mut() = None);
+//RS     CLI_RUN_PTR.store(std::ptr::null_mut(), Ordering::SeqCst);
+//RS }
+//RS 
+//RS pub(crate) fn install_cli_plan(plan: CLIPlan) {
+//RS     CLI_PLAN.with(|slot| *slot.borrow_mut() = Some(plan));
+//RS }
+//RS 
+//RS pub(crate) fn install_cli_run_ptr(ptr: *const u8) {
+//RS     CLI_RUN_PTR.store(ptr as *mut (), Ordering::SeqCst);
+//RS }
+//RS pub(crate) fn install_cli_command_ptr(function: MirFunctionId, ptr: *const u8) {
+//RS     CLI_PLAN.with(|slot| {
+//RS         let mut plan_slot = slot.borrow_mut();
+//RS         let Some(plan) = plan_slot.as_mut() else {
+//RS             return;
+//RS         };
+//RS         if let Some(command) = plan
+//RS             .commands
+//RS             .iter_mut()
+//RS             .find(|command| command.function == function)
+//RS         {
+//RS             command.ptr = Some(ptr);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS pub(crate) fn cli_run_requires_adapter() -> bool {
+//RS     CLI_PLAN.with(|slot| slot.borrow().is_some())
+//RS }
+//RS 
+//RS pub(crate) fn cli_user_run_target() -> Option<MirFunctionId> {
+//RS     CLI_PLAN.with(|slot| slot.borrow().as_ref().map(|plan| plan.user_run))
+//RS }
+//RS 
+//RS pub(crate) fn cli_command_targets() -> Vec<MirFunctionId> {
+//RS     CLI_PLAN.with(|slot| {
+//RS         slot.borrow()
+//RS             .as_ref()
+//RS             .map(|plan| plan.commands.iter().map(|command| command.function).collect())
+//RS             .unwrap_or_default()
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS /// Install a CLI plan from the exact canonical MIR artifact.
+//RS pub(crate) fn prepare_cli_from_mir(program: &MirProgram, artifact_id: MirArtifactId) {
+//RS     clear_cli_plan();
+//RS     let Some(artifact) = program
+//RS         .artifacts
+//RS         .iter()
+//RS         .find(|artifact| artifact.id == artifact_id)
+//RS     else {
+//RS         return;
+//RS     };
+//RS     if artifact.target != MirArtifactTarget::Cranelift {
+//RS         return;
+//RS     }
+//RS     let Some(entry) = artifact.entry.as_ref() else {
+//RS         return;
+//RS     };
+//RS     let Some(cli) = entry.cli.clone() else {
+//RS         return;
+//RS     };
+//RS     let Some(user_run) = entry.function else {
+//RS         return;
+//RS     };
+//RS     let Some(run_function) = program.functions.iter().find(|function| function.id == user_run)
+//RS     else {
+//RS         return;
+//RS     };
+//RS     if !cli.record_inputs || run_function.params.len() != 1 {
+//RS         return;
+//RS     }
+//RS     let field_types = cli
+//RS         .inputs
+//RS         .iter()
+//RS         .map(|input| (input.name.clone(), input.ty.clone()))
+//RS         .collect();
+//RS     let commands = cli
+//RS         .commands
+//RS         .iter()
+//RS         .map(|command| CLICommandPlan {
+//RS             name: command.name.clone(),
+//RS             function: command.function,
+//RS             method: command.receiver.is_some(),
+//RS             ptr: None,
+//RS         })
+//RS         .collect();
+//RS     let version = (!entry.package_version.is_empty()).then(|| entry.package_version.clone());
+//RS     install_cli_plan(CLIPlan {
+//RS         schema: cli,
+//RS         version,
+//RS         field_types,
+//RS         commands,
+//RS         run_record: true,
+//RS         run_returns_value: !run_function.return_type.is_unit(),
+//RS         user_run,
+//RS     });
+//RS }
+//RS 
+//RS /// D-DX-JOBGRAPH1=A: parse-only argv check for one checked MIR artifact
+//RS /// entry, built from the same spec `jet_jit_cli_main` decodes with. A job
+//RS /// graph validates its root arguments with this before any predecessor runs,
+//RS /// matching the generated AOT job validator (plain parse, never guided input).
+//RS /// `argv[0]` is the program name.
+//RS pub fn validate_entry_argv(
+//RS     program: &MirProgram,
+//RS     artifact_id: MirArtifactId,
+//RS     argv: &[String],
+//RS ) -> Result<(), String> {
+//RS     let entry = program
+//RS         .artifacts
+//RS         .iter()
+//RS         .find(|artifact| artifact.id == artifact_id)
+//RS         .and_then(|artifact| artifact.entry.as_ref());
+//RS     let Some(cli) = entry.and_then(|entry| entry.cli.as_ref()) else {
+//RS         return if argv.len() <= 1 {
+//RS             Ok(())
+//RS         } else {
+//RS             Err("job takes no arguments".to_string())
+//RS         };
+//RS     };
+//RS     let version = entry
+//RS         .map(|entry| entry.package_version.clone())
+//RS         .filter(|version| !version.is_empty());
+//RS     let prog = argv.first().map(String::as_str).unwrap_or("program");
+//RS     let spec = if cli.commands.is_empty() {
+//RS         build_spec(
+//RS             &cli.inputs,
+//RS             cli.description.as_deref(),
+//RS             cli.standard,
+//RS             version.as_deref(),
+//RS             prog,
+//RS         )?
+//RS     } else {
+//RS         build_command_spec(cli, version.as_deref(), prog)?.0
+//RS     };
+//RS     parse(&spec, argv).map(|_| ())
+//RS }
+//RS 
+//RS fn alloc_path_record(path: String) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(1);
+//RS         let string = rt.heap.alloc_string(path);
+//RS         let _ = rt.heap.record_set_string(record, 0, string);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS fn cli_value_kind(input: &MirCliInput) -> MirCliValueKind {
+//RS     match &input.shape {
+//RS         MirCliInputShape::Flag => MirCliValueKind::Bool,
+//RS         MirCliInputShape::Value { kind, .. } => *kind,
+//RS     }
+//RS }
+//RS 
+//RS fn build_spec(
+//RS     inputs: &[MirCliInput],
+//RS     description: Option<&str>,
+//RS     standard: bool,
+//RS     version: Option<&str>,
+//RS     prog: &str,
+//RS ) -> Result<Spec, String> {
+//RS     let mut spec = empty_spec(&jet_args_source_program_name(prog));
+//RS     if let Some(description) = description {
+//RS         spec = runtime::description(spec, description);
+//RS     }
+//RS     if standard {
+//RS         spec = flag_short(spec, "verbose", "v", "print extra detail");
+//RS         spec = flag_short(spec, "quiet", "q", "suppress normal output");
+//RS         spec = runtime::option_choice(
+//RS             spec,
+//RS             "color",
+//RS             "control terminal color",
+//RS             "MODE",
+//RS             "auto,always,never",
+//RS         );
+//RS         if let Some(version) = version {
+//RS             spec = runtime::version(spec, version);
+//RS         }
+//RS     }
+//RS     for input in inputs {
+//RS         let flag_name = input.name.clone();
+//RS         let help = input.help.clone();
+//RS         match &input.shape {
+//RS             MirCliInputShape::Flag => {
+//RS                 spec = match &input.short {
+//RS                     Some(short) => flag_short(spec, &flag_name, short, &help),
+//RS                     None => flag(spec, &flag_name, &help),
+//RS                 };
+//RS             }
+//RS             MirCliInputShape::Value {
+//RS                 default,
+//RS                 optional,
+//RS                 ..
+//RS             } => {
+//RS                 let meta = input
+//RS                     .metavar
+//RS                     .clone()
+//RS                     .unwrap_or_else(|| "VALUE".to_string());
+//RS                 let has_declared_default = default.is_some();
+//RS                 let default = input_default_text(input)?;
+//RS                 let required =
+//RS                     !optional && !has_declared_default && input.positional.is_none();
+//RS                 spec = option(
+//RS                     spec,
+//RS                     &flag_name,
+//RS                     input.short.as_deref(),
+//RS                     &help,
+//RS                     &meta,
+//RS                     default,
+//RS                     input.env.as_deref(),
+//RS                     required,
+//RS                     input.variadic,
+//RS                     cli_value_kind(input),
+//RS                 );
+//RS                 if input.positional.is_some() {
+//RS                     spec = positional(spec, &flag_name, &help);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(spec)
+//RS }
+//RS 
+//RS fn build_command_spec(
+//RS     schema: &MirCliEntry,
+//RS     version: Option<&str>,
+//RS     prog: &str,
+//RS ) -> Result<(Spec, Vec<(String, Spec)>), String> {
+//RS     let mut root = build_spec(
+//RS         &schema.inputs,
+//RS         schema.description.as_deref(),
+//RS         schema.standard,
+//RS         version,
+//RS         prog,
+//RS     )?;
+//RS     let mut commands = Vec::new();
+//RS     for command in &schema.commands {
+//RS         let nested_prog = format!("{} {}", jet_args_source_program_name(prog), command.name);
+//RS         let nested = build_spec(
+//RS             &command.inputs,
+//RS             command.description.as_deref(),
+//RS             false,
+//RS             None,
+//RS             &nested_prog,
+//RS         )?;
+//RS         root = runtime::subcommand_spec(
+//RS             root,
+//RS             &command.name,
+//RS             &command.description.clone().unwrap_or_default(),
+//RS             nested.clone(),
+//RS         );
+//RS         commands.push((command.name.clone(), nested));
+//RS     }
+//RS     Ok((root, commands))
+//RS }
+//RS 
+//RS fn is_path_type(ty: &MirType) -> bool {
+//RS     match &ty.kind {
+//RS         MirTypeKind::Int
+//RS         | MirTypeKind::Float
+//RS         | MirTypeKind::Bool
+//RS         | MirTypeKind::String
+//RS         | MirTypeKind::Char
+//RS         | MirTypeKind::TraitObject(_)
+//RS         | MirTypeKind::Measure(_) => false,
+//RS         MirTypeKind::List(inner)
+//RS         | MirTypeKind::Shared(inner)
+//RS         | MirTypeKind::Option(inner)
+//RS         | MirTypeKind::InlineRange { base: inner, .. }
+//RS         | MirTypeKind::Tagged { inner, .. }
+//RS         | MirTypeKind::Quantity { base: inner, .. } => is_path_type(inner),
+//RS         MirTypeKind::Map { .. }
+//RS         | MirTypeKind::Result { .. }
+//RS         | MirTypeKind::Fn(_)
+//RS         | MirTypeKind::SendFn { .. }
+//RS         | MirTypeKind::Tuple(_)
+//RS         | MirTypeKind::FixedList { .. }
+//RS         | MirTypeKind::IntN { .. }
+//RS         | MirTypeKind::Float32
+//RS         | MirTypeKind::Union(_) => false,
+//RS         MirTypeKind::Apply { name, .. } => {
+//RS             name.name == jet_foundation::Syntax::TYPE_PATH
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn inline_range_bounds(ty: &MirType) -> Option<(i64, i64)> {
+//RS     match &ty.kind {
+//RS         MirTypeKind::InlineRange { lo, hi, .. } => Some((*lo, *hi)),
+//RS         MirTypeKind::Tagged { inner, .. } | MirTypeKind::Quantity { base: inner, .. } => {
+//RS             inline_range_bounds(inner)
+//RS         }
+//RS         MirTypeKind::Int
+//RS         | MirTypeKind::Float
+//RS         | MirTypeKind::Bool
+//RS         | MirTypeKind::String
+//RS         | MirTypeKind::Char
+//RS         | MirTypeKind::List(_)
+//RS         | MirTypeKind::Map { .. }
+//RS         | MirTypeKind::Shared(_)
+//RS         | MirTypeKind::Option(_)
+//RS         | MirTypeKind::Result { .. }
+//RS         | MirTypeKind::Fn(_)
+//RS         | MirTypeKind::SendFn { .. }
+//RS         | MirTypeKind::Apply { .. }
+//RS         | MirTypeKind::TraitObject(_)
+//RS         | MirTypeKind::Tuple(_)
+//RS         | MirTypeKind::FixedList { .. }
+//RS         | MirTypeKind::IntN { .. }
+//RS         | MirTypeKind::Float32
+//RS         | MirTypeKind::Union(_)
+//RS         | MirTypeKind::Measure(_) => None,
+//RS     }
+//RS }
+//RS 
+//RS fn constant_text(value: &MirConstant) -> Result<String, String> {
+//RS     match value {
+//RS         MirConstant::Int { value, .. } => Ok(value.to_string()),
+//RS         MirConstant::Float { value, .. } => Ok(value.to_string()),
+//RS         MirConstant::Bool(value) => Ok(value.to_string()),
+//RS         MirConstant::Char(value) => Ok(value.to_string()),
+//RS         MirConstant::String(value) => Ok(value.clone()),
+//RS         MirConstant::Bytes(_) => Err("byte defaults are not valid CLI scalars".to_string()),
+//RS         MirConstant::Unit => Err("unit defaults are not valid CLI scalars".to_string()),
+//RS         MirConstant::BigInt(value) => Ok(value.clone()),
+//RS         MirConstant::List(_) => Err("list defaults are not valid CLI scalars".to_string()),
+//RS         MirConstant::Map(_) => Err("map defaults are not valid CLI scalars".to_string()),
+//RS         MirConstant::Struct { .. } => {
+//RS             Err("struct defaults are not valid CLI scalars".to_string())
+//RS         }
+//RS         MirConstant::Enum { .. } => Err("enum defaults are not valid CLI scalars".to_string()),
+//RS         MirConstant::Present(value) => constant_text(value),
+//RS         MirConstant::Failed(report) => match report {
+//RS             jet_foundation::MIR::MirConstReport::Clean(_) => {
+//RS                 Err("failed defaults are not valid CLI scalars".to_string())
+//RS             }
+//RS             jet_foundation::MIR::MirConstReport::Told(value) => constant_text(value),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn default_text(default: Option<&MirCliDefault>) -> Result<Option<String>, String> {
+//RS     match default {
+//RS         None => Ok(None),
+//RS         Some(MirCliDefault::TypeDefault) => Ok(None),
+//RS         Some(MirCliDefault::Value(value)) => constant_text(value).map(Some),
+//RS     }
+//RS }
+//RS 
+//RS fn type_default_text(ty: &MirType) -> Option<String> {
+//RS     if let Some((lo, _)) = inline_range_bounds(ty) {
+//RS         return Some(lo.to_string());
+//RS     }
+//RS     if ty.is_bool() {
+//RS         return Some("false".to_string());
+//RS     }
+//RS     if ty.is_integer() || ty.is_float() {
+//RS         return Some("0".to_string());
+//RS     }
+//RS     if ty.is_string() || is_path_type(ty) {
+//RS         return Some(String::new());
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn input_default_text(input: &MirCliInput) -> Result<Option<String>, String> {
+//RS     let MirCliInputShape::Value { default, .. } = &input.shape else {
+//RS         return Ok(None);
+//RS     };
+//RS     match default {
+//RS         Some(MirCliDefault::TypeDefault) => Ok(type_default_text(&input.ty)),
+//RS         Some(MirCliDefault::Value(value)) => constant_text(value).map(Some),
+//RS         None => Ok(None),
+//RS     }
+//RS }
+//RS 
+//RS fn required_input_value(
+//RS     input: &MirCliInput,
+//RS     fty: &MirType,
+//RS     parsed: &Parsed,
+//RS     spec: &Spec,
+//RS ) -> Result<String, String> {
+//RS     if let Some(value) = option_val(parsed, &input.name) {
+//RS         return Ok(value);
+//RS     }
+//RS     if let MirCliInputShape::Value { default, .. } = &input.shape {
+//RS         if let Some(value) = default_text(default.as_ref())? {
+//RS             return Ok(value);
+//RS         }
+//RS         if matches!(default, Some(MirCliDefault::TypeDefault)) {
+//RS             if let Some(value) = type_default_text(fty) {
+//RS                 return Ok(value);
+//RS             }
+//RS         }
+//RS     }
+//RS     let kind = if input.positional.is_some() {
+//RS         "argument"
+//RS     } else {
+//RS         "flag"
+//RS     };
+//RS     Err(format!(
+//RS         "missing required {kind} {}\n\n{}",
+//RS         input.name,
+//RS         help_text(spec)
+//RS     ))
+//RS }
+//RS 
+//RS fn parse_bool(text: &str, name: &str) -> Result<bool, String> {
+//RS     match text.to_ascii_lowercase().as_str() {
+//RS         "true" => Ok(true),
+//RS         "false" => Ok(false),
+//RS         _ => Err(format!("invalid bool for --{name}")),
+//RS     }
+//RS }
+//RS 
+//RS fn decode_struct(
+//RS     inputs: &[MirCliInput],
+//RS     field_types: &[(String, MirType)],
+//RS     parsed: &Parsed,
+//RS     spec: &Spec,
+//RS ) -> Result<i64, String> {
+//RS     let words = decode_words(inputs, field_types, parsed, spec)?;
+//RS     let rec = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record(words.len()));
+//RS     for (idx, ((_, fty), bits)) in field_types.iter().zip(words).enumerate() {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             let index = idx as i64;
+//RS             if fty.is_float() {
+//RS                 let _ = rt
+//RS                     .heap
+//RS                     .record_set_float(rec, index, f64::from_bits(bits as u64));
+//RS             } else if fty.is_bool() && fty.option_inner().is_none() {
+//RS                 let _ = rt.heap.record_set_bool(rec, index, bits != 0);
+//RS             } else if fty.is_string() && fty.option_inner().is_none() {
+//RS                 let _ = rt.heap.record_set_string(rec, index, bits);
+//RS             } else {
+//RS                 let _ = rt.heap.record_set_int(rec, index, bits);
+//RS             }
+//RS         });
+//RS     }
+//RS     Ok(rec)
+//RS }
+//RS 
+//RS /// A decoded `T?` input crosses as the same result carrier `Present`/`Absent`
+//RS /// lowering builds, so compiled field reads and command parameters see one
+//RS /// optional representation (not the packed `bits + 1` host-return word).
+//RS fn optional_carrier(present: Option<i64>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         crate::runtime_host::alloc_jit_result(
+//RS             rt,
+//RS             present.is_some(),
+//RS             present.unwrap_or(0) as u64,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS /// Decode each CLI input into the one-word value the JIT ABI passes for its
+//RS /// type, in `field_types` order.
+//RS fn decode_words(
+//RS     inputs: &[MirCliInput],
+//RS     field_types: &[(String, MirType)],
+//RS     parsed: &Parsed,
+//RS     spec: &Spec,
+//RS ) -> Result<Vec<i64>, String> {
+//RS     let mut words = Vec::with_capacity(field_types.len());
+//RS     for (fname, fty) in field_types.iter() {
+//RS         let input = inputs
+//RS             .iter()
+//RS             .find(|input| input.name == *fname)
+//RS             .ok_or_else(|| format!("missing CLI input for `{fname}`"))?;
+//RS         let bits = match &input.shape {
+//RS             MirCliInputShape::Flag => {
+//RS                 if !fty.is_bool() {
+//RS                     return Err(format!("CLI flag `{}` is not Bool", input.name));
+//RS                 }
+//RS                 i64::from(flag_set(parsed, &input.name))
+//RS             }
+//RS             MirCliInputShape::Value {
+//RS                 kind,
+//RS                 optional,
+//RS                 ..
+//RS             } => {
+//RS                 if *optional {
+//RS                     let present = match fty.option_inner() {
+//RS                         Some(inner) if inner.is_bool() && *kind == MirCliValueKind::Bool => {
+//RS                             match option_val(parsed, &input.name) {
+//RS                                 Some(value) => Some(i64::from(parse_bool(&value, &input.name)?)),
+//RS                                 None => None,
+//RS                             }
+//RS                         }
+//RS                         Some(inner) if inner.is_integer() && *kind == MirCliValueKind::Int => {
+//RS                             match option_val(parsed, &input.name) {
+//RS                                 Some(value) => Some(if let Some((lo, hi)) =
+//RS                                     inline_range_bounds(inner)
+//RS                                 {
+//RS                                     let value = value.parse::<i64>().map_err(|_| {
+//RS                                         format!("invalid int for --{}", input.name)
+//RS                                     })?;
+//RS                                     inline_range_semantics::jet_inline_range_from_int(
+//RS                                         value, lo, hi,
+//RS                                     )
+//RS                                     .map_err(|reason| {
+//RS                                         format!("invalid value for --{}: {reason}", input.name)
+//RS                                     })?
+//RS                                 } else {
+//RS                                     Concurrency::with_runtime_mut(|rt| {
+//RS                                         rt.heap.int_from_str(value.trim()).ok()
+//RS                                     })
+//RS                                     .ok_or_else(|| format!("invalid int for --{}", input.name))?
+//RS                                 }),
+//RS                                 None => None,
+//RS                             }
+//RS                         }
+//RS                         Some(inner) if inner.is_float() && *kind == MirCliValueKind::Float => {
+//RS                             match option_val(parsed, &input.name) {
+//RS                                 Some(value) => Some(
+//RS                                     value
+//RS                                         .parse::<f64>()
+//RS                                         .map(|value| value.to_bits() as i64)
+//RS                                         .map_err(|_| {
+//RS                                             format!("invalid float for --{}", input.name)
+//RS                                         })?,
+//RS                                 ),
+//RS                                 None => None,
+//RS                             }
+//RS                         }
+//RS                         Some(inner)
+//RS                             if (inner.is_string() || is_path_type(inner))
+//RS                                 && matches!(
+//RS                                     kind,
+//RS                                     MirCliValueKind::String | MirCliValueKind::Path
+//RS                                 ) =>
+//RS                         {
+//RS                             option_val(parsed, &input.name).map(|value| {
+//RS                                 if is_path_type(inner) {
+//RS                                     alloc_path_record(value)
+//RS                                 } else {
+//RS                                     alloc_string(value)
+//RS                                 }
+//RS                             })
+//RS                         }
+//RS                         Some(_) => {
+//RS                             return Err(format!("jit CLI decode unsupported field `{fname}`"));
+//RS                         }
+//RS                         None => {
+//RS                             return Err(format!(
+//RS                                 "optional CLI input `{}` has a non-option MIR type",
+//RS                                 input.name
+//RS                             ));
+//RS                         }
+//RS                     };
+//RS                     optional_carrier(present)
+//RS                 } else {
+//RS                     let value = required_input_value(input, fty, parsed, spec)?;
+//RS                     match kind {
+//RS                         MirCliValueKind::Bool => {
+//RS                             if !fty.is_bool() {
+//RS                                 return Err(format!("CLI input `{}` is not Bool", input.name));
+//RS                             }
+//RS                             i64::from(parse_bool(&value, &input.name)?)
+//RS                         }
+//RS                         MirCliValueKind::Int => {
+//RS                             if !fty.is_integer() {
+//RS                                 return Err(format!("CLI input `{}` is not Int", input.name));
+//RS                             }
+//RS                             if let Some((lo, hi)) = inline_range_bounds(fty) {
+//RS                                 let value = value.parse::<i64>().map_err(|_| {
+//RS                                     format!("invalid int for --{}", input.name)
+//RS                                 })?;
+//RS                                 inline_range_semantics::jet_inline_range_from_int(value, lo, hi)
+//RS                                     .map_err(|reason| {
+//RS                                         format!("invalid value for --{}: {reason}", input.name)
+//RS                                     })?
+//RS                             } else {
+//RS                                 Concurrency::with_runtime_mut(|rt| {
+//RS                                     rt.heap.int_from_str(value.trim()).ok()
+//RS                                 })
+//RS                                 .ok_or_else(|| format!("invalid int for --{}", input.name))?
+//RS                             }
+//RS                         }
+//RS                         MirCliValueKind::Float => {
+//RS                             if !fty.is_float() {
+//RS                                 return Err(format!("CLI input `{}` is not Float", input.name));
+//RS                             }
+//RS                             value
+//RS                                 .parse::<f64>()
+//RS                                 .map(|value| value.to_bits() as i64)
+//RS                                 .map_err(|_| format!("invalid float for --{}", input.name))?
+//RS                         }
+//RS                         MirCliValueKind::String | MirCliValueKind::Path => {
+//RS                             if !(fty.is_string() || is_path_type(fty)) {
+//RS                                 return Err(format!("CLI input `{}` is not String", input.name));
+//RS                             }
+//RS                             if is_path_type(fty) {
+//RS                                 alloc_path_record(value)
+//RS                             } else {
+//RS                                 alloc_string(value)
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS         };
+//RS         words.push(bits);
+//RS     }
+//RS     Ok(words)
+//RS }
+//RS 
+//RS fn typed_cli_tree(
+//RS     inputs: &[MirCliInput],
+//RS     parsed: &Parsed,
+//RS     descriptor: &crate::runtime_host::RuntimeTypeDescriptor,
+//RS ) -> Result<crate::Encoding::json_rt::DataTree, Vec<crate::Encoding::json_rt::FieldError>> {
+//RS     let mut fields = Vec::new();
+//RS     for input in inputs {
+//RS         let Some(field) = descriptor.fields.iter().find(|field| {
+//RS             !field.skip
+//RS                 && !field.computed
+//RS                 && (field.name_for(jet_foundation::Shape::ShapeProjectionKind::Args)
+//RS                     == input.name
+//RS                     || field.source_name == input.label)
+//RS         }) else {
+//RS             return Err(crate::Encoding::json_rt::FieldError::at(
+//RS                 input.name.clone(),
+//RS                 "checked CLI input has no target record field",
+//RS             ));
+//RS         };
+//RS         let output_name = field
+//RS             .name_for(jet_foundation::Shape::ShapeProjectionKind::Json)
+//RS             .to_string();
+//RS         if fields.iter().any(|(name, _)| name == &output_name) {
+//RS             return Err(crate::Encoding::json_rt::FieldError::at(
+//RS                 output_name,
+//RS                 "ambiguous duplicate argument shape field",
+//RS             ));
+//RS         }
+//RS         let value = match &input.shape {
+//RS             MirCliInputShape::Flag => {
+//RS                 crate::Encoding::json_rt::DataTree::Bool(flag_set(parsed, &input.name))
+//RS             }
+//RS             MirCliInputShape::Value { .. } => {
+//RS                 let values = option_values(parsed, &input.name);
+//RS                 if values.is_empty() {
+//RS                     continue;
+//RS                 }
+//RS                 let mut decoded = Vec::with_capacity(values.len());
+//RS                 for value in values {
+//RS                     let value = match cli_value_kind(input) {
+//RS                         MirCliValueKind::Bool => match parse_bool(&value, &input.name) {
+//RS                             Ok(value) => crate::Encoding::json_rt::DataTree::Bool(value),
+//RS                             Err(error) => {
+//RS                                 return Err(crate::Encoding::json_rt::FieldError::at(
+//RS                                     input.name.clone(),
+//RS                                     error,
+//RS                                 ));
+//RS                             }
+//RS                         },
+//RS                         MirCliValueKind::String | MirCliValueKind::Path => {
+//RS                             crate::Encoding::json_rt::DataTree::Text(value)
+//RS                         }
+//RS                         MirCliValueKind::Int => {
+//RS                             if let Some((lo, hi)) = inline_range_bounds(&input.ty) {
+//RS                                 let parsed = match value.parse::<i64>() {
+//RS                                     Ok(value) => value,
+//RS                                     Err(_) => {
+//RS                                         return Err(crate::Encoding::json_rt::FieldError::at(
+//RS                                             input.name.clone(),
+//RS                                             format!("expected Int, found {value:?}"),
+//RS                                         ));
+//RS                                     }
+//RS                                 };
+//RS                                 if let Err(reason) =
+//RS                                     inline_range_semantics::jet_inline_range_from_int(parsed, lo, hi)
+//RS                                 {
+//RS                                     return Err(crate::Encoding::json_rt::FieldError::at(
+//RS                                         input.name.clone(),
+//RS                                         reason,
+//RS                                     ));
+//RS                                 }
+//RS                             }
+//RS                             match crate::Encoding::json_rt::jet_int_from_str(&value) {
+//RS                                 Ok(value) => crate::Encoding::json_rt::DataTree::Int(value),
+//RS                                 Err(_) => {
+//RS                                     return Err(crate::Encoding::json_rt::FieldError::at(
+//RS                                         input.name.clone(),
+//RS                                         format!("expected Int, found {value:?}"),
+//RS                                     ));
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                         MirCliValueKind::Float => match value.parse::<f64>() {
+//RS                             Ok(value) => crate::Encoding::json_rt::DataTree::Float(value),
+//RS                             Err(_) => {
+//RS                                 return Err(crate::Encoding::json_rt::FieldError::at(
+//RS                                     input.name.clone(),
+//RS                                     format!("expected Float, found {value:?}"),
+//RS                                 ));
+//RS                             }
+//RS                         },
+//RS                     };
+//RS                     decoded.push(value);
+//RS                 }
+//RS                 if input.variadic {
+//RS                     crate::Encoding::json_rt::DataTree::Array(decoded)
+//RS                 } else {
+//RS                     decoded
+//RS                         .pop()
+//RS                         .expect("checked CLI option values are non-empty")
+//RS                 }
+//RS             }
+//RS         };
+//RS         fields.push((output_name, value));
+//RS     }
+//RS     Ok(crate::Encoding::json_rt::DataTree::Object(fields))
+//RS }
+//RS 
+//RS fn typed_cli_descriptor(type_key: &str) -> Option<crate::runtime_host::RuntimeTypeDescriptor> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let id = type_key
+//RS             .strip_prefix("id:")
+//RS             .and_then(|value| value.parse::<u64>().ok());
+//RS         match id {
+//RS             Some(id) => rt.runtime_type_descriptor(id).cloned(),
+//RS             None => rt.runtime_type_descriptor_by_name(type_key).cloned(),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn typed_cli_error(error: impl Into<String>) -> i64 {
+//RS     crate::Encoding::result_err_fields(crate::Encoding::json_rt::FieldError::one(error))
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_args_decode(type_key: i64) -> i64 {
+//RS     let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
+//RS         return typed_cli_error("typed CLI decode received an invalid type key");
+//RS     };
+//RS     let Some(descriptor) = typed_cli_descriptor(&type_key) else {
+//RS         return typed_cli_error(format!("typed CLI decode has no type `{type_key}`"));
+//RS     };
+//RS     let Some(cli) = descriptor.cli.clone() else {
+//RS         return typed_cli_error(format!("type `{type_key}` has no checked CLI schema"));
+//RS     };
+//RS     let argv = jet_codegen::Comptime::runtime_argv().unwrap_or_default();
+//RS     let prog = argv.first().map(String::as_str).unwrap_or("program");
+//RS     let spec = match build_spec(
+//RS         &cli.inputs,
+//RS         cli.description.as_deref(),
+//RS         cli.standard,
+//RS         cli.version.as_deref(),
+//RS         prog,
+//RS     ) {
+//RS         Ok(spec) => spec,
+//RS         Err(error) => return typed_cli_error(error),
+//RS     };
+//RS     let parsed = match parse(&spec, &argv) {
+//RS         Ok(parsed) => parsed,
+//RS         Err(error) => return typed_cli_error(error),
+//RS     };
+//RS     let tree = match typed_cli_tree(&cli.inputs, &parsed, &descriptor) {
+//RS         Ok(tree) => tree,
+//RS         Err(errors) => return crate::Encoding::result_err_fields(errors),
+//RS     };
+//RS     match crate::Encoding::decode_datatree_for_type(&tree, &type_key) {
+//RS         Ok(value) => result_ok(value as u64),
+//RS         Err(errors) => crate::Encoding::result_err_fields(errors),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_args_merge(flags: i64, settings: i64, type_key: i64) -> i64 {
+//RS     let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
+//RS         return typed_cli_error("typed CLI merge received an invalid type key");
+//RS     };
+//RS     let Some(descriptor) = typed_cli_descriptor(&type_key) else {
+//RS         return typed_cli_error(format!("typed CLI merge has no type `{type_key}`"));
+//RS     };
+//RS     let Some(cli) = descriptor.cli.clone() else {
+//RS         return typed_cli_error(format!("type `{type_key}` has no checked CLI schema"));
+//RS     };
+//RS     let argv = jet_codegen::Comptime::runtime_argv().unwrap_or_default();
+//RS     let prog = argv.first().map(String::as_str).unwrap_or("program");
+//RS     let spec = match build_spec(
+//RS         &cli.inputs,
+//RS         cli.description.as_deref(),
+//RS         cli.standard,
+//RS         cli.version.as_deref(),
+//RS         prog,
+//RS     ) {
+//RS         Ok(spec) => spec,
+//RS         Err(error) => return typed_cli_error(error),
+//RS     };
+//RS     let parsed = match parse_guided(&spec, &argv) {
+//RS         Ok(parsed) => parsed,
+//RS         Err(error) => return typed_cli_error(error),
+//RS     };
+//RS     let explicit = explicit_names(&parsed);
+//RS     let Some((mut merged, flag_slots)) = Concurrency::with_runtime_mut(|rt| {
+//RS         Some((
+//RS             rt.heap.clone_record_values(settings)?,
+//RS             rt.heap.clone_record_values(flags)?,
+//RS         ))
+//RS     }) else {
+//RS         return typed_cli_error("typed CLI merge requires record flags and settings");
+//RS     };
+//RS     if merged.len() != flag_slots.len() {
+//RS         return typed_cli_error("typed CLI merge flags/settings record shape mismatch");
+//RS     }
+//RS     for input in &cli.inputs {
+//RS         if !explicit.iter().any(|name| name == &input.name) {
+//RS             continue;
+//RS         }
+//RS         let Some(field) = descriptor.fields.iter().find(|field| {
+//RS             !field.skip
+//RS                 && !field.computed
+//RS                 && (field.name_for(jet_foundation::Shape::ShapeProjectionKind::Args)
+//RS                     == input.name
+//RS                     || field.source_name == input.label)
+//RS         }) else {
+//RS             return typed_cli_error(format!(
+//RS                 "typed CLI merge has no record field `{}`",
+//RS                 input.name
+//RS             ));
+//RS         };
+//RS         if field.index >= merged.len() {
+//RS             return typed_cli_error(format!(
+//RS                 "typed CLI merge field `{}` is outside its record",
+//RS                 input.name
+//RS             ));
+//RS         }
+//RS         merged[field.index] = flag_slots[field.index].clone();
+//RS     }
+//RS     let record = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record_values(merged));
+//RS     result_ok(record as u64)
+//RS }
+//RS 
+//RS fn report_cli_error(error: &str) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.stderr.push_str(&jet_cli_banner(error));
+//RS         rt.exit_code = Some(2);
+//RS     });
+//RS }
+//RS 
+//RS fn finish_cli_success() {
+//RS     Concurrency::with_runtime_mut(|rt| rt.exit_code = Some(0));
+//RS }
+//RS 
+//RS fn finish_cli_version(plan: &CLIPlan) {
+//RS     let Some(version) = plan.version.as_deref() else {
+//RS         report_cli_error("jit CLI: standard version metadata missing");
+//RS         return;
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.stdout.push_str(&jet_cli_banner(version));
+//RS     });
+//RS     finish_cli_success();
+//RS }
+//RS 
+//RS /// Zero-arg trampoline installed as `jet_jit_cli_main` for typed CLI programs.
+//RS pub(crate) fn jet_jit_cli_main() -> i64 {
+//RS     let plan = CLI_PLAN.with(|slot| slot.borrow().clone());
+//RS     let Some(plan) = plan else {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.stderr.push_str("jit CLI: no plan installed\n");
+//RS         });
+//RS         return 0;
+//RS     };
+//RS     let argv = jet_codegen::Comptime::runtime_argv().unwrap_or_default();
+//RS     let run_ptr = CLI_RUN_PTR.load(Ordering::SeqCst);
+//RS     if run_ptr.is_null() {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.stderr.push_str("jit CLI: run pointer missing\n");
+//RS         });
+//RS         return 0;
+//RS     }
+//RS     let call_run = |args: i64| {
+//RS         if plan.run_returns_value {
+//RS             let run: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(run_ptr) };
+//RS             run(args)
+//RS         } else {
+//RS             let run: extern "C" fn(i64) = unsafe { std::mem::transmute(run_ptr) };
+//RS             run(args);
+//RS             0
+//RS         }
+//RS     };
+//RS 
+//RS     let prog = argv.first().map(String::as_str).unwrap_or("program");
+//RS     if !plan.commands.is_empty() {
+//RS         let (spec, command_specs) =
+//RS             match build_command_spec(&plan.schema, plan.version.as_deref(), prog) {
+//RS                 Ok(value) => value,
+//RS                 Err(error) => {
+//RS                     report_cli_error(&error);
+//RS                     return 0;
+//RS                 }
+//RS             };
+//RS         let guided_argv = match runtime::guided_argv(&spec, &argv) {
+//RS             Ok(value) => value,
+//RS             Err(error) => {
+//RS                 report_cli_error(&error);
+//RS                 return 0;
+//RS             }
+//RS         };
+//RS         let parsed = match parse(&spec, &guided_argv) {
+//RS             Ok(p) => p,
+//RS             Err(e) => {
+//RS                 report_cli_error(&e);
+//RS                 return 0;
+//RS             }
+//RS         };
+//RS         apply_standard_cli(&parsed, plan.schema.standard);
+//RS         let command_name = runtime::subcommand(&parsed);
+//RS         if flag_set(&parsed, "help") {
+//RS             let help_spec = command_name
+//RS                 .as_deref()
+//RS                 .and_then(|name| {
+//RS                     command_specs
+//RS                         .iter()
+//RS                         .find(|(candidate, _)| candidate.as_str() == name)
+//RS                         .map(|(_, spec)| spec.clone())
+//RS                 })
+//RS                 .unwrap_or_else(|| spec.clone());
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.stdout.push_str(&jet_cli_banner(&help_text(&help_spec)));
+//RS             });
+//RS             finish_cli_success();
+//RS             return 0;
+//RS         }
+//RS         if plan.schema.standard && flag_set(&parsed, "version") {
+//RS             finish_cli_version(&plan);
+//RS             return 0;
+//RS         }
+//RS         let Some(command_name) = command_name else {
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.stdout.push_str(&jet_cli_banner(&help_text(&spec)));
+//RS             });
+//RS             finish_cli_success();
+//RS             return 0;
+//RS         };
+//RS         let Some(command) = plan
+//RS             .commands
+//RS             .iter()
+//RS             .find(|command| command.name.as_str() == command_name.as_str())
+//RS         else {
+//RS             report_cli_error(&format!("unknown command `{command_name}`"));
+//RS             return 0;
+//RS         };
+//RS         let Some(command_schema) = plan
+//RS             .schema
+//RS             .commands
+//RS             .iter()
+//RS             .find(|candidate| candidate.name.as_str() == command_name.as_str())
+//RS         else {
+//RS             report_cli_error("jit CLI: command schema missing");
+//RS             return 0;
+//RS         };
+//RS         let Some((_, command_spec)) = command_specs
+//RS             .iter()
+//RS             .find(|(candidate, _)| candidate.as_str() == command_name.as_str())
+//RS         else {
+//RS             report_cli_error("jit CLI: command parser missing");
+//RS             return 0;
+//RS         };
+//RS         let receiver = if command.method {
+//RS             match decode_struct(&plan.schema.inputs, &plan.field_types, &parsed, &spec) {
+//RS                 Ok(receiver) => Some(receiver),
+//RS                 Err(error) => {
+//RS                     report_cli_error(&error);
+//RS                     return 0;
+//RS                 }
+//RS             }
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let command_types: Vec<(String, MirType)> = command_schema
+//RS             .inputs
+//RS             .iter()
+//RS             .map(|input| (input.name.clone(), input.ty.clone()))
+//RS             .collect();
+//RS         if command_types.len() != command_schema.inputs.len() {
+//RS             report_cli_error("jit CLI: command signature/schema mismatch");
+//RS             return 0;
+//RS         }
+//RS         // A command is an ordinary compiled callable: the receiver (for a
+//RS         // method) and each declared parameter cross as separate ABI words.
+//RS         let mut words: Vec<i64> = receiver.into_iter().collect();
+//RS         match decode_words(&command_schema.inputs, &command_types, &parsed, command_spec) {
+//RS             Ok(decoded) => words.extend(decoded),
+//RS             Err(error) => {
+//RS                 report_cli_error(&error);
+//RS                 return 0;
+//RS             }
+//RS         }
+//RS         let Some(ptr) = command.ptr else {
+//RS             report_cli_error(&format!(
+//RS                 "jit CLI: command `{command_name}` pointer missing"
+//RS             ));
+//RS             return 0;
+//RS         };
+//RS         return match crate::resident::invoke_word_entry(ptr, &words) {
+//RS             Ok(result) => result,
+//RS             Err(error) => {
+//RS                 report_cli_error(&format!("jit CLI: command `{command_name}`: {error}"));
+//RS                 0
+//RS             }
+//RS         };
+//RS     }
+//RS 
+//RS     let spec = match build_spec(
+//RS         &plan.schema.inputs,
+//RS         plan.schema.description.as_deref(),
+//RS         plan.schema.standard,
+//RS         plan.version.as_deref(),
+//RS         prog,
+//RS     ) {
+//RS         Ok(spec) => spec,
+//RS         Err(error) => {
+//RS             report_cli_error(&error);
+//RS             return 0;
+//RS         }
+//RS     };
+//RS     let guided_argv = match runtime::guided_argv(&spec, &argv) {
+//RS         Ok(value) => value,
+//RS         Err(error) => {
+//RS             report_cli_error(&error);
+//RS             return 0;
+//RS         }
+//RS     };
+//RS     let parsed = match parse(&spec, &guided_argv) {
+//RS         Ok(p) => p,
+//RS         Err(e) => {
+//RS             report_cli_error(&e);
+//RS             return 0;
+//RS         }
+//RS     };
+//RS     apply_standard_cli(&parsed, plan.schema.standard);
+//RS     if flag_set(&parsed, "help") {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.stdout.push_str(&jet_cli_banner(&help_text(&spec)));
+//RS         });
+//RS         finish_cli_success();
+//RS         return 0;
+//RS     }
+//RS     if plan.schema.standard && flag_set(&parsed, "version") {
+//RS         finish_cli_version(&plan);
+//RS         return 0;
+//RS     }
+//RS     let args = match decode_struct(&plan.schema.inputs, &plan.field_types, &parsed, &spec) {
+//RS         Ok(h) => h,
+//RS         Err(e) => {
+//RS             report_cli_error(&e);
+//RS             return 0;
+//RS         }
+//RS     };
+//RS     call_run(args)
+//RS }
+//RS 
+//RS // `jet_jit_cli_main`'s registration + import lives in the top-level
+//RS // `HostFns` table (jit/runtime_host.rs) — the CLI trampoline is present
+//RS // on every JIT module (like every other host symbol), not only for
+//RS // `cli_entry` programs, so `host_fns_audit` sees a matching pair on every
+//RS // `new_jit_module()` call instead of only when compiling a CLI program.
+// END-PORT-PENDING 0194 crates/jet-jit/src/CLI.rs:1-1319
+

@@ -1,0 +1,21 @@
+// std 1.97.1 commit8bab26f4f68e0e26f0bb7960be334d5b520ea452,
+// std/sys/thread/windows.rs:87–101. Physical selected native unit: Windows
+// with native pointer width64 ONLY; Main selects the actual checked provider
+// row. No Linux/Darwin raw imports or Win32 storage reference lives here.
+use core.sys.runtime.hardware_facts as hardware_policy
+use core.mem as hardware_mem
+use core.sys.host.windows_file as hardware_windows
+use c.kernel32 as hardware_kernel32
+
+// count_field loans storage.dwNumberOfProcessors at checked offset32, NOT a
+// separate fixture scratch. GetSystemInfo initializes caller-owned storage;
+// no copied SYSTEM_INFO is materialized just to read one scalar. #4494 must
+// preserve same-owner field loan/provenance through the synchronous call.
+pub fn windows64_parallelism(storage: *hardware_windows.WindowsSystemInfo64, count_field: *U32) -[Env]> hardware_policy.ParallelismResult Never! {
+    #Unsafe("selected Win64 GetSystemInfo writes caller-owned SYSTEM_INFO; count pointer borrows same-owner field at offset32") {
+        hardware_kernel32.get_system_info64(storage)
+        count :: U64.from_u32(hardware_mem.volatile_read(count_field))
+        if count == (U64{0}) -> return hardware_policy.ParallelismResult.UnknownThreadCount
+        return hardware_policy.ParallelismResult.Count(count)
+    }
+}

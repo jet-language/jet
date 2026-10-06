@@ -1,0 +1,600 @@
+// PORT-PENDING 0237 crates-jet-jit-src-ui-module-group-slice-3609: crates/jet-jit/src/Watcher.rs:1-596
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! `core.event` / `core.watcher` hosts (#1219).
+//RS //! Canonical watch snapshot/diff + EventScope cancel semantics (D-WATCH-SCOPE1 / D-EVENT1).
+//RS 
+//RS use super::Concurrency;
+//RS use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_module::Module;
+//RS use std::cell::{Cell, RefCell};
+//RS use std::collections::BTreeMap;
+//RS use std::rc::Rc;
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS 
+//RS /// stdlib-api-laws D4 (#2055): `domain`/`kind` are the Prelude's `WatchDomain`/
+//RS /// `WatchKind` enums. This host keeps the variant NAME and marshals it through
+//RS /// the Prelude-derived variant table (`watch_disc`), so a discriminant here can
+//RS /// never drift from `Prelude/CoreLib/JetStd/CommonTypes.rs`.
+//RS #[derive(Clone)]
+//RS struct WatchEvent {
+//RS     domain: &'static str,
+//RS     kind: &'static str,
+//RS     path: String,
+//RS     detail: String,
+//RS     pid: i64,
+//RS     port: i64,
+//RS }
+//RS 
+//RS fn watch_disc(enum_name: &str, variant: &str) -> i64 {
+//RS     crate::types_meta::prelude_enum_variant_index(enum_name, variant)
+//RS         .expect("Prelude watch enum variants must be registered")
+//RS }
+//RS 
+//RS type Snapshot = BTreeMap<String, (u64, i64, bool, String)>;
+//RS 
+//RS #[derive(Clone)]
+//RS enum WatchTarget {
+//RS     Files { root: String },
+//RS     Process { pid: i64 },
+//RS     Port { host: String, port: i64 },
+//RS }
+//RS 
+//RS struct WatchState {
+//RS     target: WatchTarget,
+//RS     snapshot: Snapshot,
+//RS     seen_ready: bool,
+//RS     active: bool,
+//RS     callbacks: Vec<WatchCallback>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct WatchCallback {
+//RS     scope: i64,
+//RS     once: bool,
+//RS     fn_ptr: i64,
+//RS     active: Rc<Cell<bool>>,
+//RS }
+//RS 
+//RS struct EventScopeState {
+//RS     cancelled: bool,
+//RS     subs: Vec<Rc<Cell<bool>>>,
+//RS }
+//RS 
+//RS struct SubscriptionState {
+//RS     active: Rc<Cell<bool>>,
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static WATCHES: RefCell<Vec<Option<WatchState>>> = const { RefCell::new(Vec::new()) };
+//RS     static SCOPES: RefCell<Vec<Option<EventScopeState>>> = const { RefCell::new(Vec::new()) };
+//RS     static SUBS: RefCell<Vec<Option<SubscriptionState>>> = const { RefCell::new(Vec::new()) };
+//RS     static SETS: RefCell<Vec<Option<Vec<i64>>>> = const { RefCell::new(Vec::new()) };
+//RS     /// Nested block frames: EventScope handles created in each frame.
+//RS     static SCOPE_FRAMES: RefCell<Vec<Vec<i64>>> = const { RefCell::new(Vec::new()) };
+//RS     static NEXT_ID: AtomicU64 = const { AtomicU64::new(1) };
+//RS }
+//RS 
+//RS fn event_record(ev: &WatchEvent) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let p = rt.heap.alloc_string(ev.path.clone());
+//RS         // MIR WatchEvent fields are path, domain, kind. domain/kind are packed
+//RS         // payload-free Core enums (declaration-order discriminant).
+//RS         let rec = rt.heap.alloc_record(3);
+//RS         let _ = rt.heap.record_set_string(rec, 0, p);
+//RS         let _ = rt
+//RS             .heap
+//RS             .record_set_int(rec, 1, watch_disc("WatchDomain", ev.domain));
+//RS         let _ = rt
+//RS             .heap
+//RS             .record_set_int(rec, 2, watch_disc("WatchKind", ev.kind));
+//RS         rec
+//RS     })
+//RS }
+//RS 
+//RS fn list_from_events(events: Vec<WatchEvent>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for ev in &events {
+//RS             let p = rt.heap.alloc_string(ev.path.clone());
+//RS             let rec = rt.heap.alloc_record(3);
+//RS             let _ = rt.heap.record_set_string(rec, 0, p);
+//RS             let _ = rt
+//RS                 .heap
+//RS                 .record_set_int(rec, 1, watch_disc("WatchDomain", ev.domain));
+//RS             let _ = rt
+//RS                 .heap
+//RS                 .record_set_int(rec, 2, watch_disc("WatchKind", ev.kind));
+//RS             let _ = rt.heap.list_push_int(list, rec);
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn result_err(msg: &str) -> i64 {
+//RS     result_err_msg(msg)
+//RS }
+//RS 
+//RS fn push_watch(state: WatchState) -> i64 {
+//RS     WATCHES.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         v.push(Some(state));
+//RS         v.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn push_scope(state: EventScopeState) -> i64 {
+//RS     let h = SCOPES.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         v.push(Some(state));
+//RS         v.len() as i64
+//RS     });
+//RS     SCOPE_FRAMES.with(|frames| {
+//RS         if let Some(frame) = frames.borrow_mut().last_mut() {
+//RS             frame.push(h);
+//RS         }
+//RS     });
+//RS     h
+//RS }
+//RS 
+//RS /// Shared with UI/reactive hosts so `core.event.scope` is one handle space (#1225+#1219).
+//RS pub(crate) fn mirror_event_scope() -> i64 {
+//RS     push_scope(EventScopeState {
+//RS         cancelled: false,
+//RS         subs: Vec::new(),
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn mirror_event_scope_cancel(handle: i64) {
+//RS     jet_jit_event_scope_cancel(handle);
+//RS }
+//RS 
+//RS fn push_sub(state: SubscriptionState) -> i64 {
+//RS     SUBS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         v.push(Some(state));
+//RS         v.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn watch_snapshot(root: &str) -> Result<Snapshot, String> {
+//RS     let mut out = Snapshot::new();
+//RS     let mut stack = vec![std::path::PathBuf::from(root)];
+//RS     while let Some(path) = stack.pop() {
+//RS         let meta = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+//RS         let modified = meta
+//RS             .modified()
+//RS             .ok()
+//RS             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+//RS             .map(|d| d.as_millis() as u64)
+//RS             .unwrap_or(0);
+//RS         let path_s = path.to_string_lossy().to_string();
+//RS         let is_dir = meta.is_dir();
+//RS         let digest = if is_dir {
+//RS             String::new()
+//RS         } else {
+//RS             let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+//RS             jet_foundation::SHA256::sha256_hex(&bytes)
+//RS         };
+//RS         out.insert(path_s, (modified, meta.len() as i64, is_dir, digest));
+//RS         if is_dir {
+//RS             for entry in std::fs::read_dir(&path).map_err(|e| e.to_string())? {
+//RS                 let entry = entry.map_err(|e| e.to_string())?;
+//RS                 stack.push(entry.path());
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn watch_event(kind: &'static str, path: &str, is_dir: bool) -> WatchEvent {
+//RS     WatchEvent {
+//RS         domain: "File",
+//RS         kind,
+//RS         path: path.to_string(),
+//RS         detail: if is_dir { "dir" } else { "file" }.to_string(),
+//RS         pid: 0,
+//RS         port: 0,
+//RS     }
+//RS }
+//RS 
+//RS fn watch_diff(old: &Snapshot, new: &Snapshot) -> Vec<WatchEvent> {
+//RS     let mut out = Vec::new();
+//RS     for (path, facts) in new {
+//RS         match old.get(path) {
+//RS             None => out.push(watch_event("Created", path, facts.2)),
+//RS             Some(prev) if prev != facts => out.push(watch_event("Modified", path, facts.2)),
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     for (path, facts) in old {
+//RS         if !new.contains_key(path) {
+//RS             // `WatchKind::Removed` — this host said `"Deleted"`, a name the
+//RS             // Prelude never emitted, while both fields were untyped strings.
+//RS             out.push(watch_event("Removed", path, facts.2));
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn process_alive(pid: i64) -> bool {
+//RS     if pid <= 0 {
+//RS         return false;
+//RS     }
+//RS     std::path::Path::new(&format!("/proc/{pid}")).exists()
+//RS }
+//RS 
+//RS fn invoke_callback(cb: &WatchCallback, ev: &WatchEvent) {
+//RS     if !cb.active.get() {
+//RS         return;
+//RS     }
+//RS     if SCOPES.with(|s| {
+//RS         s.borrow()
+//RS             .get(cb.scope.saturating_sub(1) as usize)
+//RS             .and_then(|x| x.as_ref())
+//RS             .map(|st| st.cancelled)
+//RS             .unwrap_or(true)
+//RS     }) {
+//RS         cb.active.set(false);
+//RS         return;
+//RS     }
+//RS     let event = event_record(ev);
+//RS     let callback = Concurrency::with_runtime_mut(|rt| {
+//RS         if cb.fn_ptr >= 0 {
+//RS             rt.set_host_fault("JIT Watch listener requires a universal callback thunk");
+//RS             return None;
+//RS         }
+//RS         crate::runtime_host::jit_callable_parts(rt, cb.fn_ptr)
+//RS     });
+//RS     let Some(callback) = callback else {
+//RS         return;
+//RS     };
+//RS     if crate::runtime_host::invoke_universal_unary(callback, event).is_none() {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_host_fault("JIT Watch listener callback invocation failed");
+//RS         });
+//RS     }
+//RS     if cb.once {
+//RS         cb.active.set(false);
+//RS     }
+//RS }
+//RS 
+//RS fn poll_watch(handle: i64) -> Vec<WatchEvent> {
+//RS     WATCHES.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         let Some(Some(state)) = v.get_mut(handle.saturating_sub(1) as usize) else {
+//RS             return Vec::new();
+//RS         };
+//RS         if !state.active {
+//RS             return Vec::new();
+//RS         }
+//RS         let events = match &state.target {
+//RS             WatchTarget::Files { root } => match watch_snapshot(root) {
+//RS                 Ok(next) => {
+//RS                     let events = watch_diff(&state.snapshot, &next);
+//RS                     state.snapshot = next;
+//RS                     events
+//RS                 }
+//RS                 Err(e) => vec![WatchEvent {
+//RS                     domain: "File",
+//RS                     kind: "Error",
+//RS                     path: root.clone(),
+//RS                     detail: e,
+//RS                     pid: 0,
+//RS                     port: 0,
+//RS                 }],
+//RS             },
+//RS             WatchTarget::Process { pid } => {
+//RS                 let alive = process_alive(*pid);
+//RS                 if state.seen_ready && !alive {
+//RS                     state.seen_ready = false;
+//RS                     vec![WatchEvent {
+//RS                         domain: "Process",
+//RS                         kind: "Exited",
+//RS                         path: String::new(),
+//RS                         detail: "process exited".to_string(),
+//RS                         pid: *pid,
+//RS                         port: 0,
+//RS                     }]
+//RS                 } else if !state.seen_ready && !alive {
+//RS                     vec![WatchEvent {
+//RS                         domain: "Process",
+//RS                         kind: "Exited",
+//RS                         path: String::new(),
+//RS                         detail: "process is not running".to_string(),
+//RS                         pid: *pid,
+//RS                         port: 0,
+//RS                     }]
+//RS                 } else {
+//RS                     Vec::new()
+//RS                 }
+//RS             }
+//RS             WatchTarget::Port { host, port } => {
+//RS                 let ready = std::net::TcpStream::connect((host.as_str(), *port as u16)).is_ok();
+//RS                 if ready && !state.seen_ready {
+//RS                     state.seen_ready = true;
+//RS                     vec![WatchEvent {
+//RS                         domain: "Port",
+//RS                         kind: "Ready",
+//RS                         path: String::new(),
+//RS                         detail: format!("{host}:{port}"),
+//RS                         pid: 0,
+//RS                         port: *port,
+//RS                     }]
+//RS                 } else {
+//RS                     Vec::new()
+//RS                 }
+//RS             }
+//RS         };
+//RS         let callbacks = state.callbacks.clone();
+//RS         drop(v);
+//RS         for ev in &events {
+//RS             for cb in &callbacks {
+//RS                 invoke_callback(cb, ev);
+//RS             }
+//RS         }
+//RS         events
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_event_scope() -> i64 {
+//RS     let _ = NEXT_ID.with(|n| n.fetch_add(1, Ordering::Relaxed));
+//RS     push_scope(EventScopeState {
+//RS         cancelled: false,
+//RS         subs: Vec::new(),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_event_scope_cancel(handle: i64) {
+//RS     SCOPES.with(|slot| {
+//RS         if let Some(Some(st)) = slot.borrow_mut().get_mut(handle.saturating_sub(1) as usize) {
+//RS             if st.cancelled {
+//RS                 return;
+//RS             }
+//RS             st.cancelled = true;
+//RS             for sub in st.subs.drain(..) {
+//RS                 sub.set(false);
+//RS             }
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_event_scope_frame_push() {
+//RS     SCOPE_FRAMES.with(|f| f.borrow_mut().push(Vec::new()));
+//RS }
+//RS 
+//RS fn jet_jit_event_scope_frame_pop() {
+//RS     let handles = SCOPE_FRAMES
+//RS         .with(|f| f.borrow_mut().pop())
+//RS         .unwrap_or_default();
+//RS     for h in handles {
+//RS         jet_jit_event_scope_cancel(h);
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn subscription_is_active(handle: i64) -> i64 {
+//RS     i64::from(jet_jit_subscription_is_active(handle))
+//RS }
+//RS 
+//RS fn jet_jit_subscription_is_active(handle: i64) -> i8 {
+//RS     SUBS.with(|slot| {
+//RS         slot.borrow()
+//RS             .get(handle.saturating_sub(1) as usize)
+//RS             .and_then(|s| s.as_ref())
+//RS             .map(|s| i8::from(s.active.get()))
+//RS             .unwrap_or(0)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_watcher_files(path: i64) -> i64 {
+//RS     let root = clone_string(path);
+//RS     match watch_snapshot(&root) {
+//RS         Ok(snapshot) => result_ok(push_watch(WatchState {
+//RS             target: WatchTarget::Files { root },
+//RS             snapshot,
+//RS             seen_ready: false,
+//RS             active: true,
+//RS             callbacks: Vec::new(),
+//RS         }) as u64),
+//RS         Err(e) => result_err(&e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_watcher_process_pid(pid: i64) -> i64 {
+//RS     push_watch(WatchState {
+//RS         target: WatchTarget::Process { pid },
+//RS         snapshot: Snapshot::new(),
+//RS         seen_ready: process_alive(pid),
+//RS         active: true,
+//RS         callbacks: Vec::new(),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_watcher_port(host: i64, port: i64) -> i64 {
+//RS     push_watch(WatchState {
+//RS         target: WatchTarget::Port {
+//RS             host: clone_string(host),
+//RS             port,
+//RS         },
+//RS         snapshot: Snapshot::new(),
+//RS         seen_ready: false,
+//RS         active: true,
+//RS         callbacks: Vec::new(),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_watcher_set() -> i64 {
+//RS     SETS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         v.push(Some(Vec::new()));
+//RS         v.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_watch_poll(handle: i64) -> i64 {
+//RS     list_from_events(poll_watch(handle))
+//RS }
+//RS 
+//RS fn jet_jit_watch_cancel(handle: i64) {
+//RS     WATCHES.with(|slot| {
+//RS         if let Some(Some(st)) = slot.borrow_mut().get_mut(handle.saturating_sub(1) as usize) {
+//RS             st.active = false;
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_watch_is_active(handle: i64) -> i8 {
+//RS     WATCHES.with(|slot| {
+//RS         slot.borrow()
+//RS             .get(handle.saturating_sub(1) as usize)
+//RS             .and_then(|s| s.as_ref())
+//RS             .map(|s| i8::from(s.active))
+//RS             .unwrap_or(0)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_watch_summary(handle: i64) -> i64 {
+//RS     let text = WATCHES.with(|slot| {
+//RS         slot.borrow()
+//RS             .get(handle.saturating_sub(1) as usize)
+//RS             .and_then(|s| s.as_ref())
+//RS             .map(|s| match &s.target {
+//RS                 WatchTarget::Files { root } => format!("watch file {root}"),
+//RS                 WatchTarget::Process { pid } => format!("watch process {pid}"),
+//RS                 WatchTarget::Port { host, port } => format!("watch port {host}:{port}"),
+//RS             })
+//RS             .unwrap_or_default()
+//RS     });
+//RS     alloc_string(text)
+//RS }
+//RS 
+//RS fn jet_jit_watch_on(watch: i64, scope: i64, fn_ptr: i64) -> i64 {
+//RS     watch_register(watch, scope, fn_ptr, false)
+//RS }
+//RS 
+//RS fn jet_jit_watch_once(watch: i64, scope: i64, fn_ptr: i64) -> i64 {
+//RS     watch_register(watch, scope, fn_ptr, true)
+//RS }
+//RS 
+//RS fn watch_register(watch: i64, scope: i64, fn_ptr: i64, once: bool) -> i64 {
+//RS     if fn_ptr >= 0 {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_host_fault("JIT Watch listener requires a universal callback thunk");
+//RS         });
+//RS         return 0;
+//RS     }
+//RS     let active = Rc::new(Cell::new(true));
+//RS     SCOPES.with(|slot| {
+//RS         if let Some(Some(st)) = slot.borrow_mut().get_mut(scope.saturating_sub(1) as usize) {
+//RS             if st.cancelled {
+//RS                 active.set(false);
+//RS             } else {
+//RS                 st.subs.push(active.clone());
+//RS             }
+//RS         }
+//RS     });
+//RS     WATCHES.with(|slot| {
+//RS         if let Some(Some(st)) = slot.borrow_mut().get_mut(watch.saturating_sub(1) as usize) {
+//RS             st.callbacks.push(WatchCallback {
+//RS                 scope,
+//RS                 once,
+//RS                 fn_ptr,
+//RS                 active: active.clone(),
+//RS             });
+//RS         }
+//RS     });
+//RS     push_sub(SubscriptionState { active })
+//RS }
+//RS 
+//RS fn jet_jit_watchset_add(set: i64, watch: i64) {
+//RS     SETS.with(|slot| {
+//RS         if let Some(Some(handles)) = slot.borrow_mut().get_mut(set.saturating_sub(1) as usize) {
+//RS             handles.push(watch);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_watchset_poll(set: i64) -> i64 {
+//RS     let handles = SETS.with(|slot| {
+//RS         slot.borrow()
+//RS             .get(set.saturating_sub(1) as usize)
+//RS             .and_then(|s| s.clone())
+//RS             .unwrap_or_default()
+//RS     });
+//RS     let mut events = Vec::new();
+//RS     for h in handles {
+//RS         events.extend(poll_watch(h));
+//RS     }
+//RS     list_from_events(events)
+//RS }
+//RS 
+//RS fn jet_jit_watchset_summary(set: i64) -> i64 {
+//RS     let n = SETS.with(|slot| {
+//RS         slot.borrow()
+//RS             .get(set.saturating_sub(1) as usize)
+//RS             .and_then(|s| s.as_ref())
+//RS             .map(|h| h.len())
+//RS             .unwrap_or(0)
+//RS     });
+//RS     alloc_string(format!("watchset handles={n}"))
+//RS }
+//RS 
+//RS pub(crate) fn clear_watcher_state() {
+//RS     WATCHES.with(|s| s.borrow_mut().clear());
+//RS     SCOPES.with(|s| s.borrow_mut().clear());
+//RS     SUBS.with(|s| s.borrow_mut().clear());
+//RS     SETS.with(|s| s.borrow_mut().clear());
+//RS     SCOPE_FRAMES.with(|s| s.borrow_mut().clear());
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct WatcherHostFns;
+//RS     register: register_watcher_symbols;
+//RS     declare: declare_watcher_host_fns(module) {
+//RS         let cc = module.target_config().default_call_conv;
+//RS         let mut nullary_i64 = Signature::new(cc);
+//RS         nullary_i64.returns.push(AbiParam::new(types::I64));
+//RS         let nullary_void = Signature::new(cc);
+//RS         let mut unary_void = Signature::new(cc);
+//RS         unary_void.params.push(AbiParam::new(types::I64));
+//RS         let mut unary_i64 = Signature::new(cc);
+//RS         unary_i64.params.push(AbiParam::new(types::I64));
+//RS         unary_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut unary_i8 = Signature::new(cc);
+//RS         unary_i8.params.push(AbiParam::new(types::I64));
+//RS         unary_i8.returns.push(AbiParam::new(types::I8));
+//RS         let mut binary_i64 = Signature::new(cc);
+//RS         binary_i64.params.push(AbiParam::new(types::I64));
+//RS         binary_i64.params.push(AbiParam::new(types::I64));
+//RS         binary_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut binary_void = Signature::new(cc);
+//RS         binary_void.params.push(AbiParam::new(types::I64));
+//RS         binary_void.params.push(AbiParam::new(types::I64));
+//RS         let mut listener = Signature::new(cc);
+//RS         for _ in 0..3 {
+//RS             listener.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         listener.returns.push(AbiParam::new(types::I64));
+//RS     }
+//RS     event_scope_frame_push: "jet_jit_event_scope_frame_push" => jet_jit_event_scope_frame_push: nullary_void;
+//RS     event_scope_frame_pop: "jet_jit_event_scope_frame_pop" => jet_jit_event_scope_frame_pop: nullary_void;
+//RS     subscription_is_active: "jet_jit_subscription_is_active" => jet_jit_subscription_is_active: unary_i8;
+//RS     watcher_files: "jet_jit_watcher_files" => jet_jit_watcher_files: unary_i64;
+//RS     watcher_process_pid: "jet_jit_watcher_process_pid" => jet_jit_watcher_process_pid: unary_i64;
+//RS     watcher_port: "jet_jit_watcher_port" => jet_jit_watcher_port: binary_i64;
+//RS     watcher_set: "jet_jit_watcher_set" => jet_jit_watcher_set: nullary_i64;
+//RS     watch_poll: "jet_jit_watch_poll" => jet_jit_watch_poll: unary_i64;
+//RS     watch_cancel: "jet_jit_watch_cancel" => jet_jit_watch_cancel: unary_void;
+//RS     watch_is_active: "jet_jit_watch_is_active" => jet_jit_watch_is_active: unary_i8;
+//RS     watch_summary: "jet_jit_watch_summary" => jet_jit_watch_summary: unary_i64;
+//RS     watch_on: "jet_jit_watch_on" => jet_jit_watch_on: listener;
+//RS     watch_once: "jet_jit_watch_once" => jet_jit_watch_once: listener;
+//RS     watchset_add: "jet_jit_watchset_add" => jet_jit_watchset_add: binary_void;
+//RS     watchset_poll: "jet_jit_watchset_poll" => jet_jit_watchset_poll: unary_i64;
+//RS     watchset_summary: "jet_jit_watchset_summary" => jet_jit_watchset_summary: unary_i64;
+//RS     // registered once by Reactive::register_reactive_symbols (unified event-scope symbol with UI).
+//RS     @shared event_scope: "jet_jit_event_scope": nullary_i64;
+//RS     @shared event_scope_cancel: "jet_jit_event_scope_cancel": unary_void;
+//RS }
+// END-PORT-PENDING 0237 crates/jet-jit/src/Watcher.rs:1-596
+

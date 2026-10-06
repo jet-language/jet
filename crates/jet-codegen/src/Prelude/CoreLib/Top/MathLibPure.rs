@@ -1477,19 +1477,6 @@ pub fn jet_std_math_dist(left: Vec<f64>, right: Vec<f64>) -> f64 {
 }
 
 
-pub fn jet_std_math_digits(value: i64) -> i64 {
-    if value == 0 {
-        return 1;
-    }
-    let mut n = value.unsigned_abs();
-    let mut count = 0i64;
-    while n > 0 {
-        count += 1;
-        n /= 10;
-    }
-    count
-}
-
 pub fn jet_std_math_leading_ones(value: i64) -> i64 {
     (value as u64).leading_ones() as i64
 }
