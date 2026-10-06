@@ -128,6 +128,15 @@ item. The adapter translates those host conventions to the checked callable's
 read/write/move parameters rather than passing the boxed Jet callable directly
 to a Rust `FnOnce`/`FnMut` parameter.
 
+An eager collection adapter retains the checked failure contract of a callable
+value, just like a direct call to that value. A sequence's `map` or `filter`,
+and a list's one-argument sort key, therefore count a `fn(T) -> U` parameter's
+default `Err` route as a failure source for the enclosing function. Lowering
+uses the corresponding fallible kernel rather than declaring the enclosing
+function infallible while emitting a fallible call. Literal lambdas keep their
+own inferred propagation; explicitly written optional or typed failure
+contracts retain their existing carrier projections.
+
 ## Core keepers
 
 Engines must handle literals (`IntLit`, `FloatLit`, `BoolLit`, `CharLit`, and
