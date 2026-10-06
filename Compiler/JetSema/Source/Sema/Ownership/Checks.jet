@@ -1785,7 +1785,16 @@ fn sema_ownership_write_capability(state: &SemaOwnershipState, expr: Expr, actio
     if !has_view && !info.mutable && info.access != AccessConvention.Write && !sema_ownership_binding_is_edit_shared_guard(info) {
         if action == "be assigned" && sema_ownership_report_assignment_capability(expr, display.root, info, &diagnostics) -> return false
         if info.access == {
-            .Read -> &diagnostics.push(sema_error("E0205", expr_span(expr), "cannot edit through `{display.root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead"))
+            .Read -> {
+                // D-PARAM-CONST1=A: an unmarked parameter is read access for
+                // the whole call; the fix is the parameter's `&` mark.
+                if info.symbol.kind == SymbolKind.Parameter {
+                    param_type :: type_name(info.symbol.ty ?? Type.Named{name: "Unit"})
+                    &diagnostics.push(sema_error("E0205", expr_span(expr), "cannot edit through `{display.root}` — it has read access only", "an unmarked parameter gives read access only; nobody changes it during the call", "change the parameter to `{display.root}: &{param_type}` with the write-access marker `&`, and write `&` at its call sites"))
+                } else {
+                    &diagnostics.push(sema_error("E0205", expr_span(expr), "cannot edit through `{display.root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead"))
+                }
+            }
             else -> &diagnostics.push(sema_error("E0202", expr_span(expr), "cannot take a write window into `{display.root}`", "a write window can change its owner, so the owner must be mutable", "declare `{display.root}` as a mutable binding"))
         }
         return false

@@ -2541,6 +2541,15 @@ keep E0121 on the later use. A share is materialized as a copy at the share
 site today; copy on first write and inferred kept parameters complete the
 model in later cards.
 
+**D-PARAM-CONST1=A — read is Jet's const** *(ratified 2026-10-06)*: Jet has
+no `const` or frozen parameter mark. An unmarked parameter is deep,
+call-long, no-copy read access: nobody, including the caller, changes the
+value during the call, and the promise cannot be cast away. `freeze(x)` stays
+the way to make a value immutable for good. Editor hover prints each
+parameter's promise in words (`xs: read: nobody changes this during the
+call`), and a write through a read parameter names the fix as the
+parameter's `&` mark (`xs: &[Int]`), never a `:=` binding.
+
 **D-MEM-VIEWRET1=B — stored and returned safe views** *(ratified 2026-07-15,
 card #643)*: `View<T>` and `ViewMut<T>` may cross a return or field boundary.
 This explicitly supersedes D-MEM1/S3's blanket ban on returned and stored
