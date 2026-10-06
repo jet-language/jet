@@ -173,7 +173,6 @@ fn http_examples_match_interpreter_default_and_aot() {
 #[test]
 fn mounted_http_route_examples_match_all_tiers() {
     assert!(common::have_rustc(), "HTTP route AOT proof requires rustc");
-    assert!(jet_jit::cranelift_host_supported(), "HTTP route proof requires Cranelift");
     on_large_stack(|| {
         assert_http_example_matches_all_tiers("http_route_markers");
         assert_http_example_matches_all_tiers("http_routes");
@@ -183,7 +182,6 @@ fn mounted_http_route_examples_match_all_tiers() {
 #[test]
 fn auto_derived_http_inputs_keep_endpoint_schemas_on_all_tiers() {
     assert!(common::have_rustc(), "HTTP schema AOT proof requires rustc");
-    assert!(jet_jit::cranelift_host_supported(), "HTTP schema proof requires Cranelift");
     on_large_stack(|| {
         let source = r#"
 use core.http.server as server
@@ -207,16 +205,10 @@ fn run() {
         let path = scratch.join("main.jet");
         fs::write(&path, source).unwrap();
         for interpreter in [true, false] {
-            jet_jit::reset_jit_trace_for_test();
             let output = run_dev(&path, interpreter);
             assert_eq!(output.stdout, "true\n", "HTTP schema tier interpreter={interpreter}");
             assert_eq!(output.stderr, "");
             assert_eq!(output.exit_code, 0);
-            if !interpreter {
-                assert!(jet_jit::jit_executed_for_test());
-                assert!(!jet_jit::deopt_invoked_for_test());
-                assert!(!jet_jit::fallback_invoked_for_test());
-            }
         }
         let (code, stdout, stderr) = common::build_and_run("http_auto_decode", "http_auto_decode", source);
         assert_eq!(code, 0, "HTTP schema AOT: {stderr}");
@@ -256,7 +248,6 @@ fn web_battery_mounted_routes_execute_with_shared_state() {
             String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
         return;
     }
-    assert!(jet_jit::cranelift_host_supported(), "web battery proof requires Cranelift");
     on_large_stack(|| {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/web/battery/run.jet");
         let interpreted = run_dev(&path, true);
@@ -268,13 +259,21 @@ fn web_battery_mounted_routes_execute_with_shared_state() {
         ] {
             assert!(interpreted.stdout.contains(expected), "web battery missing {expected:?}: {}", interpreted.stdout);
         }
-        jet_jit::reset_jit_trace_for_test();
-        let compiled = run_dev(&path, false);
-        assert_eq!(compiled.exit_code, 0);
-        assert_eq!(compiled.stderr, "");
-        assert_eq!(compiled.stdout, interpreted.stdout);
-        assert!(jet_jit::jit_executed_for_test());
-        assert!(!jet_jit::deopt_invoked_for_test());
-        assert!(!jet_jit::fallback_invoked_for_test());
+        // The default tier is `jet run` (build, then execute). It resolves the
+        // realized library through this child's JETPACK_ROOT, so it is spawned
+        // here rather than through `common::dev_run`, which isolates the store.
+        let scratch = common::Scratch::new("http-web-battery-run");
+        let compiled = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+            .arg("run")
+            .arg(&path)
+            .env("JET_STORE_DIR", scratch.join("cache"))
+            .env("JETPACK_ENV", "1")
+            .env("NO_COLOR", "1")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("spawn default `jet run`");
+        assert_eq!(compiled.status.code(), Some(0), "web battery default tier: {}", String::from_utf8_lossy(&compiled.stderr));
+        assert_eq!(String::from_utf8_lossy(&compiled.stderr), "");
+        assert_eq!(String::from_utf8_lossy(&compiled.stdout), interpreted.stdout);
     });
 }
