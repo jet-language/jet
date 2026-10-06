@@ -4515,7 +4515,7 @@ fn jet_rust_emit_list_aggregate_builder(ctx: &JetRustEmitContext, function: MIRF
     }
     if shape.kind == {
         .Tuple(fields) -> {
-            if fields.len() == 2 && fields[0].name == "min" && fields[1].name == "max" -> return "|min, max| (min, max)"
+            if fields.len() == 2 && fields[0].name == "min" && fields[1].name == "max" -> return "|min, max| {jet_rust_emit_tuple_expression(fields, [String]{"min", "max"})}"
         }
         .Apply(name, _) -> {
             id :: shape.identity ?? name.id
@@ -4555,7 +4555,7 @@ fn jet_rust_emit_map_aggregate_builder(ctx: &JetRustEmitContext, function: MIRFu
         .List(element) -> {
             if element.kind == {
                 .Tuple(fields) -> {
-                    if fields.len() == 2 && fields[0].name == "key" && fields[1].name == "value" -> return "|key, value| (key, value)"
+                    if fields.len() == 2 && fields[0].name == "key" && fields[1].name == "value" -> return "|key, value| {jet_rust_emit_tuple_expression(fields, [String]{"key", "value"})}"
                 }
                 else -> {}
             }
@@ -4982,20 +4982,17 @@ fn jet_rust_emit_native_int_result(ctx: &JetRustEmitContext, value: String, ty: 
             return None
         }
         .Tuple(fields) -> {
-            converted_any := false
             values := [String]{}
             loop (index, field) in fields {
                 original :: "__jet_value.{index}"
                 if jet_rust_emit_native_int_result(&ctx, original, field.ty) == .Val(converted) {
-                    converted_any = true
                     &values.push(converted)
                 } else {
                     &values.push(original)
                 }
             }
-            if !converted_any -> return None
-            rendered :: if values.len() == 1 -> "{values[0]}," else -> values.join(", ")
-            return Val("{{ let __jet_value = {value}; ({rendered}) }}")
+            rendered :: jet_rust_emit_tuple_expression(fields, values)
+            return Val("{{ let __jet_value = {value}; {rendered} }}")
         }
         .List(inner) -> {
             converted :: jet_rust_emit_native_int_result(&ctx, "__jet_value", inner) ?? return None
@@ -5159,10 +5156,13 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
         .Field(base, field) -> return jet_rust_emit_field_read(&ctx, function, base, field)
         .Enum(type_id, variant, args) -> return jet_rust_emit_enum_value(&ctx, function, type_id, variant, args, location)
         .Tuple(_, fields) -> {
-            rendered := [String]{}
-            loop field in fields -> &rendered.push(jet_rust_emit_value_move(ctx, field.value))
-            if rendered.len() == 1 -> return "({rendered[0]},)"
-            return "({rendered.join(", ")})"
+            value :: result ?? panic("MIR tuple constructor has no result")
+            declared_type :: jet_rust_emit_value_type(ctx, function, value)
+            if declared_type.kind == .Tuple(declared) {
+                rendered :: loop field in fields -> jet_rust_emit_value_move(ctx, field.value)
+                return jet_rust_emit_tuple_expression(declared, rendered)
+            }
+            panic("MIR tuple constructor has a non-tuple result")
         }
         .Present(value) -> return "Ok({jet_rust_emit_value_move(ctx, value)})"
         .ResultOk(value) -> return "Ok({jet_rust_emit_value_move(ctx, value)})"

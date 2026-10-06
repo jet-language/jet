@@ -2333,6 +2333,22 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
         &lines.push("    let __jet_memo_key: {jet_rust_emit_memo_key_type(&ctx, function)} = {jet_rust_emit_memo_key_value(&ctx, function)};")
         &lines.push("    {ctx.config.root_prefix}jet_memo_call(__jet_memo_store_{function.id.value}.get_or_init(|| std::sync::Mutex::new({ctx.config.root_prefix}JetMemo::with_bound({jet_rust_emit_memo_bound(function)}))), __jet_memo_key, || {{")
     }
+    generator :: function.generator != None
+    // MIRRust emit_callable_named: the producer runs on its own task thread
+    // (`Send + 'static`), so a read-borrowed parameter is snapshotted into the
+    // closure; a read parameter cannot change during the call.
+    borrowed := [String]{}
+    if generator {
+        loop parameter in function.params {
+            rendered :: jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
+            if rendered.starts_with("&") && !rendered.starts_with("&mut ") -> &borrowed.push(jet_rust_emit_parameter_name(function, parameter.index))
+        }
+        loop name in borrowed -> &lines.push("    let {name} = {name}.to_owned();")
+        &lines.push("    {ctx.config.root_prefix}jet_std::jet_stream_task(move |__jet_yield_tx| {{")
+        loop name in borrowed -> &lines.push("        let {name} = &{name};")
+    }
+    // Even empty cursor slots inherit their payload's Send requirement.
+    // Body storage belongs inside the producer, not in its task captures.
     partial_lines :: jet_rust_emit_partial_declarations(&ctx, function)
     loop line in partial_lines -> &lines.push("    {line}")
     loop local in function.locals -> &lines.push("    {jet_rust_emit_local_declaration(&ctx, local)}")
@@ -2358,20 +2374,6 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
         if ctx.move_facts.payload_groups.get(subject_key) == None -> next
         members :: ctx.move_facts.payload_groups.get(subject_key) ?? panic("checked last-use row is missing")
         if members[0].result != value.id -> &lines.push("    let mut {jet_rust_emit_payload_slot(value.id)}: Option<{jet_rust_emit_type(&ctx, value.ty)}> = None;")
-    }
-    generator :: function.generator != None
-    // MIRRust emit_callable_named: the producer runs on its own task thread
-    // (`Send + 'static`), so a read-borrowed parameter is snapshotted into the
-    // closure; a read parameter cannot change during the call.
-    borrowed := [String]{}
-    if generator {
-        loop parameter in function.params {
-            rendered :: jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
-            if rendered.starts_with("&") && !rendered.starts_with("&mut ") -> &borrowed.push(jet_rust_emit_parameter_name(function, parameter.index))
-        }
-        loop name in borrowed -> &lines.push("    let {name} = {name}.to_owned();")
-        &lines.push("    {ctx.config.root_prefix}jet_std::jet_stream_task(move |__jet_yield_tx| {{")
-        loop name in borrowed -> &lines.push("        let {name} = &{name};")
     }
     indent :: if generator -> "    " else -> ""
     // MIRRust emit_callable_named: every body enters a stack frame for runtime

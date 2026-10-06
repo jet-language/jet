@@ -382,7 +382,7 @@ fn jet_rust_emit_pattern_capture_value(ctx: &JetRustEmitContext, function: MIRFu
 fn jet_rust_emit_capture_tuple(ctx: &JetRustEmitContext, function: MIRFunction, fields: [MIRTupleField], missing: String) -> String Never! {
     captures := [String]{}
     loop field in fields -> &captures.push(jet_rust_emit_pattern_capture_value(&ctx, function, field.ty, "__jet_captures.next().expect({jet_rust_emit_quote(missing)})"))
-    "({captures.join(", ")},)"
+    jet_rust_emit_tuple_expression(fields, captures)
 }
 
 fn jet_rust_emit_tuple_fields(ty: MIRType) -> [MIRTupleField]? {
@@ -516,7 +516,7 @@ fn jet_rust_emit_fixed_reader_take_pattern(ctx: &JetRustEmitContext, function: M
     }
     reader :: jet_rust_emit_place_reference(&ctx, function, receiver_place, MIRAccess.Write)
     condition :: if checks.len() == 0 -> "false" else -> checks.join(" || ")
-    tuple :: if typed.len() == 0 -> "()" else -> "({typed.join(", ")},)"
+    tuple :: jet_rust_emit_tuple_expression(fields, typed)
     Val("{{ let __jet_reader = {reader}; match jet_reader_region_bounds(&*__jet_reader, {offset}i64) {{ Some((__jet_start, __jet_end)) => {{ let __jet_bytes = &__jet_reader.buf[__jet_start..__jet_end]; if {condition} {{ Err(jet_reader_pattern_miss(&*__jet_reader)) }} else {{ jet_reader_take_pattern_checked(__jet_reader, __jet_start, __jet_end); Ok({tuple}) }} }}, None => Err(jet_reader_pattern_miss(&*__jet_reader)), }} }}")
 }
 
@@ -788,7 +788,7 @@ fn jet_rust_emit_named_task_group_all(ctx: &JetRustEmitContext, function: MIRFun
         &pulls.push("__jet_named_tasks.{index}")
         &nexts.push("__jet_named_iter.next().expect(\"named task.all result field\")")
     }
-    result_tuple :: if fields.len() == 1 -> "({nexts[0]},)" else -> "({nexts.join(", ")})"
+    result_tuple :: jet_rust_emit_tuple_expression(fields, nexts)
     invoked :: jet_rust_emit_prelude_args(&ctx, function, call, [String]{"vec![{pulls.join(", ")}]"})
     Val("{{ let __jet_named_tasks = {jet_rust_emit_value_move(ctx, tasks[0])}; match {invoked} {{ Ok(__jet_named_values) => {{ let mut __jet_named_iter = __jet_named_values.into_iter(); Ok({result_tuple}) }}, Err(__jet_named_err) => Err(__jet_named_err) }} }}")
 }

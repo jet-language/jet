@@ -1134,6 +1134,7 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
                 emitter.emit_handle_type(handle, EmissionUnits::sink(&mut units, out, None));
             }
         }
+        emitter.emit_tuple_carriers(EmissionUnits::sink(&mut units, out, None));
         for def in &program.types {
             let unit = units.as_ref().map(|units| units.module_unit(def.module, def.span.start));
             if emitter.declares_type_def(def) {
@@ -5711,14 +5712,14 @@ impl<'a> RustEmitter<'a> {
                     .join(" + ")
             ),
             MirTypeKind::Tuple(fields) => {
-                let values = fields
-                    .iter()
-                    .map(|(_, field)| self.rust_type(field))
-                    .collect::<Vec<_>>();
-                match values.len() {
-                    0 => "()".to_string(),
-                    1 => format!("({},)", values[0]),
-                    _ => format!("({})", values.join(", ")),
+                if fields.is_empty() {
+                    "()".to_string()
+                } else {
+                    format!(
+                        "{}<{}>",
+                        Self::tuple_carrier_name(fields.iter().map(|(name, _)| name.as_str())),
+                        fields.iter().map(|(_, field)| self.rust_type(field)).collect::<Vec<_>>().join(", ")
+                    )
                 }
             }
             MirTypeKind::FixedList { elem, len } => {
@@ -8327,7 +8328,9 @@ impl<'a> RustEmitter<'a> {
                 .is_some_and(|trait_ref| trait_ref.name == trait_name)
                 && self.module_selected(implementation.module)
                 && self.impl_selected_for_target(implementation)
-                && self.type_identity(&implementation.self_type) == def.id
+                && self
+                    .structural_type_def_for(&implementation.self_type)
+                    .is_some_and(|owner| owner.id == def.id)
         })
     }
 
@@ -8860,11 +8863,99 @@ impl<'a> RustEmitter<'a> {
         );
     }
 
+    fn tuple_carrier_name<'b>(labels: impl Iterator<Item = &'b str>) -> String {
+        let mut path = String::from("__jet_tuple");
+        for label in labels {
+            path.push_str("::");
+            path.push_str(label);
+        }
+        mangle_path(&path)
+    }
+
+    fn tuple_expression(&self, fields: &[(String, MirType)], values: Vec<String>) -> String {
+        if fields.is_empty() {
+            "()".to_string()
+        } else {
+            format!(
+                "{}({})",
+                Self::tuple_carrier_name(fields.iter().map(|(name, _)| name.as_str())),
+                values.join(", ")
+            )
+        }
+    }
+
+    fn emit_tuple_carriers(&self, out: &mut String) {
+        let mut emitted = BTreeSet::new();
+        for ty in &self.program.type_instances {
+            let MirTypeKind::Tuple(fields) = ty.kind() else { continue };
+            if fields.is_empty() {
+                continue;
+            }
+            let name = Self::tuple_carrier_name(fields.iter().map(|(label, _)| label.as_str()));
+            if emitted.contains(&name) {
+                continue;
+            }
+            // Labels, not field types, identify the carrier: instantiating a
+            // generic function must produce the same carrier as its caller.
+            let params = (0..fields.len()).map(|index| format!("T{index}")).collect::<Vec<_>>().join(", ");
+            let stored = (0..fields.len()).map(|index| format!("pub T{index}")).collect::<Vec<_>>().join(", ");
+            let _ = writeln!(out, "#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]\nstruct {name}<{params}>({stored});");
+            let source = format!("({})", fields.iter().map(|(label, _)| label.as_str()).collect::<Vec<_>>().join(","));
+            for (protocol, method, helper) in [
+                ("JetShow", "jet_show", "jet_debug_record"),
+                ("JetDebug", "jet_debug", "jet_debug_record"),
+            ] {
+                let bounds = (0..fields.len()).map(|index| format!("T{index}: {protocol}")).collect::<Vec<_>>().join(", ");
+                let values = fields.iter().enumerate().map(|(index, (label, _))| {
+                    format!("({label:?}.to_string(), self.{index}.{method}())")
+                }).collect::<Vec<_>>().join(", ");
+                let _ = writeln!(out, "impl<{bounds}> {protocol} for {name}<{params}> {{\n    fn {method}(&self) -> String {{ jet_foundation::StructuralDebug::{helper}({source:?}, [{values}]) }}\n}}");
+            }
+            let bounds = (0..fields.len()).map(|index| format!("T{index}: JetShow")).collect::<Vec<_>>().join(", ");
+            let _ = writeln!(out, "impl<{bounds}> JetDisplay for {name}<{params}> {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n");
+            emitted.insert(name);
+        }
+    }
+
+    fn emit_selected_display_impl(
+        &self,
+        def: &MirTypeDef,
+        emit_show: bool,
+        out: &mut String,
+    ) {
+        let generics = self.type_def_generics(def, &self.generic_params_from(&def.generic_params));
+        let args = if def.generic_params.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<{}>",
+                def.generic_params.iter().map(|param| mangle(&param.name)).collect::<Vec<_>>().join(", ")
+            )
+        };
+        let name = format!("{}{}", self.type_name(def.id), self.type_def_impl_args(def, &args));
+        // The source Display implementation supplies both bare and nested display;
+        // neither formatting protocol may substitute a structural rendering.
+        let _ = writeln!(
+            out,
+            "impl{generics} JetDisplay for {name} {{\n    fn jet_display(&self) -> String {{\n        <Self as __jet_Display>::display(self)\n    }}\n}}\n"
+        );
+        if emit_show {
+            let _ = writeln!(
+                out,
+                "impl{generics} JetShow for {name} {{\n    fn jet_show(&self) -> String {{\n        <Self as __jet_Display>::display(self)\n    }}\n}}\n"
+            );
+        }
+    }
+
     fn emit_structural_show_impl(&self, def: &MirTypeDef, out: &mut String) {
         let emit_show = def.auto_printable
             && !self.selected_trait_impl_for_type(def, crate::Generics::PRINTABLE);
         let emit_debug = self.derives_trait(def, crate::Generics::DEBUG)
             && !self.selected_trait_impl_for_type(def, crate::Generics::DEBUG);
+        let selected_display = self.selected_trait_impl_for_type(def, crate::Generics::DISPLAY);
+        if selected_display && !matches!(&def.kind, MirTypeDefKind::Alias { .. }) {
+            self.emit_selected_display_impl(def, emit_show, out);
+        }
         self.emit_plain_enum_display_impl(def, out);
         self.emit_printable_distinct_display_impl(def, out);
         if emit_show {
@@ -8900,7 +8991,7 @@ impl<'a> RustEmitter<'a> {
                 }
             }
         }
-        if emit_show {
+        if emit_show && !selected_display {
             self.emit_structural_impl(def, crate::Generics::PRINTABLE, "JetShow", "jet_show", out);
         }
         if emit_debug {
@@ -14484,9 +14575,6 @@ impl<'a> RustEmitter<'a> {
                 self.config.root_prefix
             );
         }
-        let slots_start = out.len();
-        self.emit_slots(function, out);
-        let slots_end = out.len();
         let generator = function.generator.is_some();
         if generator {
             // The producer runs on its own task thread (`Send + 'static`), so a
@@ -14510,6 +14598,12 @@ impl<'a> RustEmitter<'a> {
                 let _ = writeln!(out, "        let {name} = &{name};");
             }
         }
+        // Empty cursor/local slots are not task captures: even an empty slot
+        // inherits its payload's Send requirement. Construct body storage on
+        // the producer thread instead of transporting it into that thread.
+        let slots_start = out.len();
+        self.emit_slots(function, out);
+        let slots_end = out.len();
         let body_indent = if generator { 8 } else { 4 };
         let (stack_file, stack_line, stack_source) = self.function_stack_context(function);
         let retain_stack_frame = !matches!(function.failure, MirFailureCarrier::Infallible)
@@ -19137,7 +19231,10 @@ impl<'a> RustEmitter<'a> {
             else { format!("{}: {value}", self.field_name(field.id)) }
         }).collect();
         let value = if self.is_structural_tuple_type(node.owner) {
-            format!("({},)", values.join(", "))
+            let MirTypeKind::Tuple(fields) = self.type_instances[&node.owner].kind() else {
+                unreachable!("checked tuple partial storage");
+            };
+            self.tuple_expression(fields, values)
         } else {
             format!("{} {{ {}{} }}", self.type_name(self.type_def(node.owner).id), self.record_phantom_initializer(node.owner), values.join(", "))
         };
@@ -20522,17 +20619,16 @@ impl<'a> RustEmitter<'a> {
                 self.rust_struct_literal(*type_id, fields, &[], false)
             },
             MirOperation::Enum { type_id, variant, args } => self.enum_value(function, *type_id, variant, args, location.as_ref()),
-            // A one-field tuple keeps its trailing comma: `(value,)` is the
-            // singleton tuple `rust_type` spells as `(T,)`, not a scalar.
-            MirOperation::Tuple { fields, .. } => format!(
-                "({}{})",
-                fields
-                    .iter()
-                    .map(|(_, value)| self.value_move(*value))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                if fields.len() == 1 { "," } else { "" }
-            ),
+            MirOperation::Tuple { fields, .. } => {
+                let value = result.expect("MIR tuple constructor has no result");
+                let MirTypeKind::Tuple(declared) = self.value_type(function, value).kind() else {
+                    panic!("MIR tuple constructor has a non-tuple result");
+                };
+                self.tuple_expression(
+                    declared,
+                    fields.iter().map(|(_, value)| self.value_move(*value)).collect(),
+                )
+            },
             MirOperation::Present { value } | MirOperation::ResultOk { value } => format!("Ok({})", self.value_move(*value)),
             MirOperation::Convert { value, parameters, target, conversion } => self.conversion(function, *value, parameters, target, conversion),
             MirOperation::Absent => format!("{}JetOutcome::Err({}JetAbsent)", self.config.root_prefix, self.config.root_prefix),
@@ -24222,13 +24318,6 @@ impl<'a> RustEmitter<'a> {
         format!("{}{name}", self.config.root_prefix)
     }
 
-    fn compute_tuple(&self, values: Vec<String>) -> String {
-        match values.len() {
-            0 => "()".to_string(),
-            1 => format!("({},)", values[0]),
-            _ => format!("({})", values.join(", ")),
-        }
-    }
 
     fn compute_result_shape(&self, output: &MirType) -> String {
         match output.kind() {
@@ -24267,7 +24356,8 @@ impl<'a> RustEmitter<'a> {
         target: usize,
     ) -> String {
         match value_type.kind() {
-            MirTypeKind::Tuple(fields) => self.compute_tuple(
+            MirTypeKind::Tuple(fields) => self.tuple_expression(
+                fields,
                 fields
                     .iter()
                     .enumerate()
@@ -24282,7 +24372,8 @@ impl<'a> RustEmitter<'a> {
         let MirTypeKind::Tuple(fields) = gradient_type.kind() else {
             panic!("MIR compute gradient result is not a named tuple");
         };
-        self.compute_tuple(
+        self.tuple_expression(
+            fields,
             fields
                 .iter()
                 .enumerate()
@@ -24322,7 +24413,7 @@ impl<'a> RustEmitter<'a> {
                         ),
                     })
                     .collect::<Vec<_>>();
-                let values = self.compute_tuple(values);
+                let values = self.tuple_expression(fields, values);
                 format!(
                     "match {result} {{ \
                      {result_enum}::ValueAndGradient {{ value: __jet_value, gradients: __jet_gradients }} => {values}, \
@@ -24388,7 +24479,7 @@ impl<'a> RustEmitter<'a> {
                         other => panic!("MIR compute.jvp has unknown result field `{other}`"),
                     })
                     .collect::<Vec<_>>();
-                let values = self.compute_tuple(values);
+                let values = self.tuple_expression(fields, values);
                 format!(
                     "match {result} {{ \
                      {result_enum}::Jvp {{ value: __jet_value, tangent: __jet_tangent }} => {values}, \
@@ -25003,28 +25094,16 @@ impl<'a> RustEmitter<'a> {
                 }
             }
             MirTypeKind::Tuple(fields) => {
-                let mut needs_conversion = false;
                 let values = fields
                     .iter()
                     .enumerate()
                     .map(|(index, (_, field))| {
                         let original = format!("__jet_value.{index}");
-                        if let Some(converted) = self.native_int_widening(&original, field, source) {
-                            needs_conversion = true;
-                            converted
-                        } else {
-                            original
-                        }
+                        self.native_int_widening(&original, field, source).unwrap_or(original)
                     })
                     .collect::<Vec<_>>();
-                needs_conversion.then(|| {
-                    let values = if values.len() == 1 {
-                        format!("{},", values[0])
-                    } else {
-                        values.join(", ")
-                    };
-                    format!("{{ let __jet_value = {value}; ({values}) }}")
-                })
+                let tuple = self.tuple_expression(fields, values);
+                Some(format!("{{ let __jet_value = {value}; {tuple} }}"))
             }
             MirTypeKind::List(inner) => self.native_int_widening("__jet_value", inner, source).map(|inner| {
                 format!("({value}).into_iter().map(|__jet_value| {inner}).collect::<Vec<_>>()")
@@ -25723,9 +25802,9 @@ impl<'a> RustEmitter<'a> {
                         "__jet_captures.next().expect(\"MIR pattern capture is missing\")",
                     )
                 })
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("|__jet_captures| {{ let mut __jet_captures = __jet_captures.into_iter(); ({captures},) }}")
+                .collect::<Vec<_>>();
+            let captures = self.tuple_expression(fields, captures);
+            format!("|__jet_captures| {{ let mut __jet_captures = __jet_captures.into_iter(); {captures} }}")
         };
         format!(
             "({scan}).map({tuple}).ok_or({}JetAbsent)",
@@ -28947,11 +29026,7 @@ impl<'a> RustEmitter<'a> {
         let nexts = (0..fields.len())
             .map(|_| "__jet_named_iter.next().expect(\"named task.all result field\")".to_string())
             .collect::<Vec<_>>();
-        let result_tuple = if fields.len() == 1 {
-            format!("({},)", nexts[0])
-        } else {
-            format!("({})", nexts.join(", "))
-        };
+        let result_tuple = self.tuple_expression(fields, nexts);
         let invoked = self.prelude_call_args(call, &[format!("vec![{pulls}]")]);
         Some(format!(
             "{{ let __jet_named_tasks = {tuple}; match {invoked} {{ Ok(__jet_named_values) => {{ let mut __jet_named_iter = __jet_named_values.into_iter(); Ok({result_tuple}) }}, Err(__jet_named_err) => Err(__jet_named_err) }} }}"
@@ -29069,11 +29144,7 @@ impl<'a> RustEmitter<'a> {
         } else {
             checks.join(" || ")
         };
-        let tuple = if captures.is_empty() {
-            "()".to_string()
-        } else {
-            format!("({},)", captures.join(", "))
-        };
+        let tuple = self.tuple_expression(fields, captures);
         Some(format!(
             "{{ let __jet_reader = {reader}; \
                match jet_reader_region_bounds(&*__jet_reader, {offset}i64) {{ \
@@ -29626,10 +29697,10 @@ impl<'a> RustEmitter<'a> {
                                 "__jet_captures.next().expect(\"MIR Cursor pattern capture is missing\")",
                             )
                         })
-                        .collect::<Vec<_>>()
-                        .join(", ");
+                        .collect::<Vec<_>>();
+                    let captures = self.tuple_expression(fields, captures);
                     format!(
-                        "{{ let mut __jet_captures = __jet_captures.into_iter(); ({captures},) }}"
+                        "{{ let mut __jet_captures = __jet_captures.into_iter(); {captures} }}"
                     )
                 };
                 let cursor = self.place_reference(function, *receiver_place, MirAccess::Write);
@@ -29679,10 +29750,10 @@ impl<'a> RustEmitter<'a> {
                                 "__jet_captures.next().expect(\"MIR Reader pattern capture is missing\")",
                             )
                         })
-                        .collect::<Vec<_>>()
-                        .join(", ");
+                        .collect::<Vec<_>>();
+                    let captures = self.tuple_expression(fields, captures);
                     format!(
-                        "{{ let mut __jet_captures = __jet_captures.into_iter(); ({captures},) }}"
+                        "{{ let mut __jet_captures = __jet_captures.into_iter(); {captures} }}"
                     )
                 };
                 let reader = self.place_reference(function, *receiver_place, MirAccess::Write);
@@ -30356,7 +30427,7 @@ impl<'a> RustEmitter<'a> {
                 if fields.len() != 2 || fields[0].0 != "min" || fields[1].0 != "max" {
                     panic!("MIR list aggregate result is not the checked min/max shape");
                 }
-                "|min, max| (min, max)".to_string()
+                format!("|min, max| {}", self.tuple_expression(fields, vec!["min".to_string(), "max".to_string()]))
             }
             MirTypeKind::Apply { .. } => {
                 let type_id = result_type
@@ -30403,7 +30474,7 @@ impl<'a> RustEmitter<'a> {
         if fields.len() != 2 || fields[0].0 != "key" || fields[1].0 != "value" {
             panic!("MIR map aggregate result is not the checked key/value shape");
         }
-        "|key, value| (key, value)".to_string()
+        format!("|key, value| {}", self.tuple_expression(fields, vec!["key".to_string(), "value".to_string()]))
     }
 
     fn canonical_builtin_optional_result(&self, call: MirPreludeCallId, value: String) -> String {
@@ -32219,14 +32290,17 @@ impl<'a> RustEmitter<'a> {
             }
             MirConstKey::Bool(value) => value.to_string(),
             MirConstKey::Char(value) => format!("{value:?}"),
-            MirConstKey::Tuple(values) => format!(
-                "({})",
-                values
-                    .iter()
-                    .map(|(_, value)| self.const_key(value))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+            MirConstKey::Tuple(values) => {
+                if values.is_empty() {
+                    "()".to_string()
+                } else {
+                    format!(
+                        "{}({})",
+                        Self::tuple_carrier_name(values.iter().map(|(name, _)| name.as_str())),
+                        values.iter().map(|(_, value)| self.const_key(value)).collect::<Vec<_>>().join(", ")
+                    )
+                }
+            }
             MirConstKey::Struct { type_name, fields } => {
                 let native = has_native_type_projection(type_name);
                 format!(

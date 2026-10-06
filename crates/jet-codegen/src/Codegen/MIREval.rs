@@ -637,6 +637,7 @@ mod fixed_float_reduction_prelude {
 
 mod mir_sort_prelude {
     include!("../Prelude/Core/SortKernel.rs");
+    include!("../Prelude/Core/FloatOrdering.rs");
 }
 #[allow(dead_code)]
 mod mir_ascii_prelude {
@@ -19043,7 +19044,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                             Err(failure) => Err(KeyError::Failure(failure)),
                         }
                     },
-                    |left, right| match mir_compare(left, right, span) {
+                    |left, right| match mir_sort_compare(left, right, span) {
                         Ok(ordering) if descending => ordering.reverse(),
                         Ok(ordering) => ordering,
                         Err(error) => {
@@ -25739,8 +25740,8 @@ fn direct_mutating_collection(
             MirEvalValue::List(items) => {
                 let descending = member == "list_sort_desc";
                 let mut sort_error = None;
-                items.sort_by(|left, right| {
-                    let ordering = mir_compare(left, right, span);
+                mir_sort_prelude::jet_list_sort_by_compare_kernel(items, |left, right| {
+                    let ordering = mir_sort_compare(left, right, span);
                     match ordering {
                         Ok(ordering) if descending => ordering.reverse(),
                         Ok(ordering) => ordering,
@@ -30213,6 +30214,23 @@ fn mir_numeric_unordered(left: &MirEvalValue, right: &MirEvalValue) -> bool {
 
 fn mir_big_negative(value: &CtBigInt) -> bool {
     value.to_string_rep().starts_with('-')
+}
+
+fn mir_sort_compare(
+    left: &MirEvalValue,
+    right: &MirEvalValue,
+    span: Span,
+) -> Result<std::cmp::Ordering, Diagnostic> {
+    if let (
+        MirEvalValue::Float { value: left, f32: left_f32 },
+        MirEvalValue::Float { value: right, f32: right_f32 },
+    ) = (left, right)
+    {
+        let left = if *left_f32 { f64::from(*left as f32) } else { *left };
+        let right = if *right_f32 { f64::from(*right as f32) } else { *right };
+        return Ok(mir_sort_prelude::jet_float_sort_cmp(left, right));
+    }
+    mir_compare(left, right, span)
 }
 
 fn mir_compare(
