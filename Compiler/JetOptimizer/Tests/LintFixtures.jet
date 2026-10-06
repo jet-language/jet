@@ -506,7 +506,7 @@ fn lf_group_lend(first: Int, second: Int, owner_move: Int) -> MIRProgram Never! 
     fx_do(&r, MIROperation.ScopeEnter{scope: lf_group_scope(), test_member: None})
     made :: fx_owned(&r, fx_named("Group"), MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("core.tasks", "group"), args: [MIRCallArg]{}, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
     fx_do(&r, MIROperation.WritePlace{place: group, value: made})
-    loop index in [Int]{first, second} {
+    loop index in ([Int]{first, second}) {
         if index < 0 -> next
         at :: fx_int_const(&r, index)
         element :: lf_index_place(&r, particles, at, fx_named("Particle"))

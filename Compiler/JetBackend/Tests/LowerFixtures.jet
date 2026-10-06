@@ -685,7 +685,7 @@ fn fx_dropless_inline_snapshots() -> MIRProgram Never! {
     whole_bits :: fx_value(&r, bits, fx_borrow(), MIROperation.Field{base: whole, field: mir_field_id("SnapshotPacket.inner")})
     copied_bits :: fx_value(&r, bits, fx_borrow(), MIROperation.Field{base: copied, field: mir_field_id("SnapshotPacket.inner")})
     window_bits :: fx_value(&r, bits, fx_borrow(), MIROperation.Field{base: window, field: mir_field_id("SnapshotPacket.inner")})
-    loop snapshot in [MIRValueID]{whole_bits, copied_bits, member, projected, window_bits, member_window} {
+    loop snapshot in ([MIRValueID]{whole_bits, copied_bits, member, projected, window_bits, member_window}) {
         flag :: fx_copy(&r, fx_bool(), MIROperation.Field{base: snapshot, field: mir_field_id("SnapshotBits.on")})
         fx_print(&r, flag)
     }
