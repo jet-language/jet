@@ -239,6 +239,13 @@ pub fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_
 // host verbs above it stay unannotated, like the bootstrap entry
 // (Compiler/Bootstrap/Host/Entry.jet).
 pub fn jet_cli_compile_file(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
+    jet_cli_compile_entry(file, color, threads, mode, None)
+}
+
+// `jet_cli_compile_file` with the entry file's bytes replaced by
+// `entry_source` when given (`jet fmt --explicit-copies` asks sema about a
+// policy-marked copy of the entry; nothing is written).
+pub fn jet_cli_compile_entry(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?) -> JetCLICompiled {
     entry_path :: cli_files.realpath(file) ?? return jet_cli_refused("can't securely read the file `{file}`", "check the spelling, or run jet from the folder that contains it", color)
     root :: jet_cli_source_root(entry_path)
     root_stat :: cli_files.stat(root) ?? return jet_cli_refused("can't securely read the source root `{root}`", "check that the directory exists and is readable", color)
@@ -247,8 +254,10 @@ pub fn jet_cli_compile_file(file: String, color: Bool, threads: Int?, mode: JetD
         return jet_cli_refused("can't securely read the sources under `{root}`: {problem}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
     }
     entry_found := false
-    loop source_file in files {
-        if source_file.path == entry_path -> entry_found = true
+    loop index in 0..<files.len() {
+        if files[index].path != entry_path -> next
+        entry_found = true
+        if entry_source == .Val(replacement) -> files[index].source = replacement
     }
     if !entry_found {
         return jet_cli_refused("`{file}` is not a checked source file of `{root}`", "check a `.jet` file that is not inside a skipped or nested project directory", color)

@@ -1,7 +1,7 @@
 // The `jet` front door (Source/main.rs `main` up to verb dispatch): output
 // flags, retired, moved, and grouped routes, help and the greeting, unknown
 // commands (E2101) and flags (E2102), then the verbs the Jet driver owns
-// (`explain <CODE>`, `check`, `build`, `run <file>`, `test <file>`, and `new <name>`), and the inspect group (Inspect.jet). Every report is the
+// (`explain <CODE>`, `check`, `build`, `run <file>`, `test <file>`, `new <name>`, and `fmt`), and the inspect group (Inspect.jet). Every report is the
 // Rust host's exact bytes and exit status for the same argv. A command whose
 // Jet port has not landed yet is refused with E2104 instead of guessing its
 // behavior.
@@ -45,11 +45,35 @@ pub enum JetCLIPlan {
     // `jet new <name>`: write the project folder (Source/CmdCompile.rs
     // `run_new`); `template` is "" for the print-only starter.
     New(name: String, template: String, annotated: Bool, quiet: Bool, color: Bool)
+    // `jet fmt [paths…] [-]` (Source/CmdCompile.rs `run_fmt`).
+    Fmt(request: JetCLIFmtRequest)
+    // `jet fmt --lang <language>` (CmdCompile.rs `run_external_fmt`): the
+    // environment formatter over staged files; `argv` starts at `fmt`.
+    FmtLang(argv: [String], color: Bool)
     // An inspect projection over a checked entry (Inspect.jet): the host
     // compiles `job.file`, then projects the checked program.
     Inspect(job: JetCLIInspectJob)
     // An inspect command the host runs (InspectB.jet).
     InspectB(plan: JetCLIInspectBPlan)
+}
+
+// One native `jet fmt` invocation (Source/main.rs `"fmt"` -> `run_fmt`).
+pub struct JetCLIFmtRequest {
+    // Explicit file/directory targets; empty formats the project root.
+    pub paths: [String]
+    // `-`: format stdin to stdout under the `stdin_path` label.
+    pub stdin_mode: Bool
+    pub stdin_path: String?
+    // `--check`/`--dry-run` report instead of writing; `diff` adds unified diffs.
+    pub check: Bool
+    pub diff: Bool
+    // `--changed`: only the VCS-changed `.jet` files (git).
+    pub changed: Bool
+    // `--explicit-copies`: write `~` at each implicit copy site sema reports.
+    pub explicit_copies: Bool
+    pub simplify: Bool
+    pub color: Bool
+    pub quiet: Bool
 }
 
 // The `jet test` options the Jet host carries out (Source/CmdCompile.rs
@@ -756,6 +780,44 @@ fn jet_cli_new(jet_argv: [String], args: [String], color: Bool, quiet: Bool) -[F
     JetCLIPlan.New{name: name, template: template, annotated: jet_argv.contains("--annotated"), quiet: quiet, color: color}
 }
 
+// `jet fmt` (Source/main.rs `"fmt"`): `--lang` selects the environment
+// formatter (`argv` is the whole command line from `fmt`, `--` included);
+// otherwise native `.jet` formatting.
+fn jet_cli_fmt(argv: [String], jet_argv: [String], args: [String], color: Bool, quiet: Bool) -> JetCLIPlan Never! {
+    loop argument in jet_argv {
+        if argument == "--lang" || argument.starts_with("--lang=") -> return JetCLIPlan.FmtLang{argv: argv, color: color}
+    }
+    dry_run :: jet_argv.contains("--dry-run")
+    stdin_path := String?{None}
+    loop argument in jet_argv {
+        if argument.starts_with("--stdin-path=") {
+            stdin_path = Val(argument.slice(13..<argument.len()))
+            break
+        }
+    }
+    paths := [String]{}
+    stdin_mode := false
+    loop index in 1..<args.len() {
+        if args[index] == "-" {
+            stdin_mode = true
+        } else {
+            &paths.push(args[index])
+        }
+    }
+    JetCLIPlan.Fmt{request: JetCLIFmtRequest{
+        paths: paths,
+        stdin_mode: stdin_mode,
+        stdin_path: stdin_path,
+        check: jet_argv.contains("--check") || dry_run,
+        diff: jet_argv.contains("--diff") || dry_run,
+        changed: jet_argv.contains("--changed"),
+        explicit_copies: jet_argv.contains("--explicit-copies"),
+        simplify: jet_argv.contains("--simplify"),
+        color: color,
+        quiet: quiet,
+    }}
+}
+
 // Plan one `jet` invocation; `raw` is argv without the program name.
 pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
     // Output flags, parsed once from the jet-owned prefix before `--`.
@@ -943,6 +1005,7 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
         "run" -> return jet_cli_run(jet_argv, args, passthrough, false, color, quiet, verbose, threads)
         "test" -> return jet_cli_test(jet_argv, color, quiet, verbose, threads)
         "new" -> return jet_cli_new(jet_argv, args, color, quiet)
+        "fmt" -> return jet_cli_fmt(argv, jet_argv, args, color, quiet)
         else -> {}
     }
     if jet_cli_inspect_word(command) -> return jet_cli_inspect(argv, jet_argv, args, color, quiet, json, threads)
