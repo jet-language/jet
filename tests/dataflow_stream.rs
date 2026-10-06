@@ -162,7 +162,7 @@ fn run() {
         "NonFinite rolling_mean, index 1: numeric input must be finite\n0.3333333333333333\nOverflow sum: finite overflow while summing\n0.0\n"
     );
     let path = dir.join("rolling_nonfinite.jet");
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: dev_stdout,
             stderr: dev_stderr,

@@ -267,10 +267,11 @@ pub(crate) fn run_generate(args: &[String], json: bool) {
     );
     let staged_entry_text = staged_entry.to_string_lossy().into_owned();
     let run_args = [fact.name.as_str()];
-    let run = jet::Interpreter::run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority_and_entry(
+    let run = jet::Interpreter::run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints_and_authority_and_entry(
         &staged_entry_text,
         &run_args,
         jet_foundation::Policy::GateSet::default(),
+        "dev",
         &BTreeMap::new(),
         None,
         None,

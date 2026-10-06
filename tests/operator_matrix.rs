@@ -14,15 +14,9 @@ const EXPECTED: &str = include_str!("../Examples/features/expected/operators/mix
 fn mixed_operator_matrix_agrees_across_execution_tiers() {
     tir_support::assert_example_cli_tiers_agree("operators/mixed_types", EXPECTED);
 
-    let (code, stdout, stderr) = tir_support::jit_run_traced("operator_matrix_native", SOURCE);
+    let (code, stdout, stderr) = tir_support::default_run("operator_matrix_native", SOURCE);
     assert_eq!(code, 0, "default `jet run` failed for {SOURCE_PATH}: {stderr}");
     assert_eq!(stdout, EXPECTED);
-    assert!(
-        stderr
-            .lines()
-            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-        "{SOURCE_PATH} did not execute on the resident JIT: {stderr}"
-    );
 }
 
 

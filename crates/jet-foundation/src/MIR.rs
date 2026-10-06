@@ -1905,7 +1905,6 @@ pub struct MirEffectFacts {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MirTargetApplicability {
     pub rust_aot: bool,
-    pub cranelift: bool,
     pub interpreter: bool,
     pub web: bool,
 }
@@ -6563,7 +6562,6 @@ pub enum MirArtifactKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MirArtifactTarget {
     RustAot,
-    Cranelift,
     Interpreter,
     Web,
 }
@@ -6630,7 +6628,6 @@ impl MirArtifactTarget {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::RustAot => "rust-aot",
-            Self::Cranelift => "cranelift",
             Self::Interpreter => "interpreter",
             Self::Web => "web",
         }
@@ -7514,8 +7511,6 @@ pub struct MirCoreCall {
     pub symbol: CoreCallSymbol,
     pub coverage_bits: u8,
     pub aot_direct: bool,
-    pub jit_direct: bool,
-    pub jit_symbol: Option<String>,
     /// The registry's raw-machine-word `Int` result fact
     /// (`CoreCallRecord::native_int_result`).
     pub native_int_result: bool,
@@ -7547,8 +7542,6 @@ impl MirCoreCall {
             symbol: record.symbol,
             coverage_bits: record.coverage.bits(),
             aot_direct: record.aot_direct,
-            jit_direct: record.jit_direct,
-            jit_symbol: record.jit_symbol.map(str::to_string),
             native_int_result: record.native_int_result,
             marker: record.marker,
         }
@@ -8193,9 +8186,8 @@ impl MirProgram {
             target_facts.push((
                 format!("function.{}.targets", function.id.0),
                 format!(
-                    "rust_aot={},cranelift={},interpreter={},web={}",
+                    "rust_aot={},interpreter={},web={}",
                     applicability.rust_aot,
-                    applicability.cranelift,
                     applicability.interpreter,
                     applicability.web
                 ),

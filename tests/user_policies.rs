@@ -66,7 +66,7 @@ fn run() {
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
-    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(file.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran {
             exit_code,
             stdout,

@@ -706,10 +706,36 @@ fn __jet_bootstrap_validate_diagnostic_channel(
     }
     Ok(())
 }
+/// One shared origin per source file for a whole compile result: every
+/// diagnostic of a file names that file's exact bytes, so the file is copied
+/// and hashed once instead of once per diagnostic (the compiler unit is one
+/// 12.8 MB file with thousands of lints: ~36 GB copied and hashed otherwise).
+/// An entry is keyed by the address and length of the borrowed source text
+/// plus its display and path, so it is reused only for the same authorized
+/// file or generated sidecar of this result. The Rust driver's loader shares
+/// one origin per module the same way.
+type __JetBootstrapOrigins = Vec<(usize, usize, ::std::sync::Arc<::jet_foundation::Diagnostics::DiagnosticOrigin>)>;
+fn __jet_bootstrap_shared_origin(
+    origins: &mut __JetBootstrapOrigins,
+    display: &str,
+    path: &str,
+    source: &str,
+) -> ::std::sync::Arc<::jet_foundation::Diagnostics::DiagnosticOrigin> {
+    let address = source.as_ptr() as usize;
+    for (cached_address, cached_len, origin) in origins.iter() {
+        if *cached_address == address && *cached_len == source.len() && origin.display == display && origin.path == path {
+            return origin.clone();
+        }
+    }
+    let origin = ::std::sync::Arc::new(::jet_foundation::Diagnostics::DiagnosticOrigin::new(display, path, source));
+    origins.push((address, source.len(), origin.clone()));
+    origin
+}
 fn __jet_bootstrap_diagnostic_to_host_with_sources(
     diagnostic: &@t.Diagnostic@,
     generated_source_files: &[@t.MIRSourceFile@],
     snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,
+    origins: &mut __JetBootstrapOrigins,
 ) -> Result<::jet_foundation::Diagnostics::Diagnostic, String> {
     let code = diagnostic.@f.Diagnostic.code@.clone();
     let row = ::jet_foundation::Registry::diagnostic(&code)
@@ -769,20 +795,17 @@ fn __jet_bootstrap_diagnostic_to_host_with_sources(
         }
         if let Some(file) = generated {
             report_source = file.@f.MIRSourceFile.source@.as_str();
-            origin = Some(::std::sync::Arc::new(::jet_foundation::Diagnostics::DiagnosticOrigin::new(
-                file.@f.MIRSourceFile.path@.clone(),
-                file.@f.MIRSourceFile.path@.clone(),
-                file.@f.MIRSourceFile.source@.clone(),
-            )));
+            origin = Some(__jet_bootstrap_shared_origin(
+                origins,
+                &file.@f.MIRSourceFile.path@,
+                &file.@f.MIRSourceFile.path@,
+                &file.@f.MIRSourceFile.source@,
+            ));
             generated_origin = true;
         } else {
             let file = selected.ok_or_else(|| format!("Jet diagnostic source path `{source_path}` is absent from the authorized snapshot and generated sidecar"))?;
             report_source = file.source.as_str();
-            origin = Some(::std::sync::Arc::new(::jet_foundation::Diagnostics::DiagnosticOrigin::new(
-                file.relative_path.clone(),
-                file.path.clone(),
-                file.source.clone(),
-            )));
+            origin = Some(__jet_bootstrap_shared_origin(origins, &file.relative_path, &file.path, &file.source));
         }
     } else if source_offset.is_some() || source_start_value.is_some() {
         return Err("Jet diagnostic has source mapping anchors without a source path".to_string());
@@ -869,7 +892,7 @@ pub(crate) fn __jet_bootstrap_diagnostic_to_host(
     value: &@t.Diagnostic@,
     snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,
 ) -> Result<::jet_foundation::Diagnostics::Diagnostic, String> {
-    __jet_bootstrap_diagnostic_to_host_with_sources(value, &[], snapshot)
+    __jet_bootstrap_diagnostic_to_host_with_sources(value, &[], snapshot, &mut Vec::new())
 }
 pub(crate) fn __jet_bootstrap_reports_from_result(
     value: &@t.JetDriverCompileResult@,
@@ -877,11 +900,13 @@ pub(crate) fn __jet_bootstrap_reports_from_result(
 ) -> Result<Vec<::jet_foundation::Report::ReportEnvelope>, String> {
     let report_file = ::jet_foundation::Report::ReportPath::from_process(&snapshot.entry_path);
     let mut reports = Vec::with_capacity(value.@f.JetDriverCompileResult.diagnostics@.len());
+    let mut origins = Vec::new();
     for diagnostic in &value.@f.JetDriverCompileResult.diagnostics@ {
         let native = __jet_bootstrap_diagnostic_to_host_with_sources(
             diagnostic,
             &value.@f.JetDriverCompileResult.generated_source_files@,
             snapshot,
+            &mut origins,
         )?;
         let report_source = native.origin.as_deref().map(|origin| origin.source.as_str()).unwrap_or("");
         reports.push(native.to_report(&report_file, report_source));

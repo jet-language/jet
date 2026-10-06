@@ -70,7 +70,7 @@ fn run() {
     assert_eq!(stdout, "true\ntrue\ntrue\n2\ntrue\nsmtp.example.com\n1\nmatched\ntls-error\ntrue\n");
     let file = dir.join("email_policy.jet");
     fs::write(&file, src).unwrap();
-    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(file.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -1111,11 +1111,11 @@ fn run() {
     let source = dir.join("data_group_collision.jet");
     fs::write(&source, src).unwrap();
     let jit = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--trace-tiers", source.to_str().unwrap()])
+        .args(["run", source.to_str().unwrap()])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .env("JET_STORE_DIR", dir.join("jit-cache"))
-        .env("JET_RUN_CACHE_DIR", dir.join("jit-run-cache"))
+        .env("JET_STORE_DIR", dir.join("jit-run-cache"))
         .output()
         .unwrap();
     assert!(
@@ -1125,7 +1125,7 @@ fn run() {
     );
     assert_eq!(String::from_utf8_lossy(&jit.stdout), stdout);
 
-    match jet::Interpreter::dev_iteration(source.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(source.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: dev_stdout,
             stderr: dev_stderr,

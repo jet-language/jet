@@ -126,7 +126,7 @@ fn jet_codegen_last_use_view(ty: MIRType) -> Bool Never! {
 }
 
 // A value that may hold a borrow of the storage it came from.
-fn jet_codegen_last_use_holds_borrow(builder: JetCodegenBuilder, value_row: [U64:Int], value: MIRValueID) -> Bool Never! {
+fn jet_codegen_last_use_holds_borrow(builder: JetCodegenBuilder, program: JetCodegenProgram, value_row: [U64:Int], value: MIRValueID) -> Bool Never! {
     if value_row.get(value.value) == None -> return false
     row :: value_row.get(value.value) ?? panic("checked last-use row is missing")
     jet_codegen_last_use_borrowed(builder.values[row].ownership.mode) || jet_codegen_last_use_view(builder.values[row].ty)
@@ -184,7 +184,7 @@ fn jet_codegen_operation_borrow_mask(builder: JetCodegenBuilder, operation: MIRO
 
 // Whether `value` is consumed: some use takes it, directly or through the
 // results that carry it onward.
-fn jet_codegen_last_use_consumed(builder: JetCodegenBuilder, users_block: [U64:[Int]], users_index: [U64:[Int]], value: MIRValueID) -> Bool Never! {
+fn jet_codegen_last_use_consumed(builder: JetCodegenBuilder, program: JetCodegenProgram, users_block: [U64:[Int]], users_index: [U64:[Int]], value: MIRValueID) -> Bool Never! {
     pending := [MIRValueID]{value}
     seen := [U64:Bool]{}
     loop pending.len() > 0 {
@@ -259,12 +259,12 @@ fn jet_codegen_last_use_in_window(windows: [String:[Int]], block: Int, index: In
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_last_use.rs::LowerCtx::last_use_instruction
-fn jet_codegen_last_use_instruction(builder: &JetCodegenBuilder, span: Span, role: String, ty: MIRType?, ownership: MIROwnership, operation: MIROperation) -> MIRInstruction Never! {
-    identity := jet_codegen_identity(&builder, "operation", span, role, "")
+fn jet_codegen_last_use_instruction(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, role: String, ty: MIRType?, ownership: MIROwnership, operation: MIROperation) -> MIRInstruction Never! {
+    identity := jet_codegen_identity(&builder, program, "operation", span, role, "")
     result := MIRValueID?{None}
     if ty == .Val(value_type) {
         value := MIRValueID{value: stable_id("mir-value", identity)}
-        jet_codegen_push_value(&builder, MIRValueFact{id: value, ty: value_type, span: span, ownership: ownership})
+        jet_codegen_push_value(&builder, program, MIRValueFact{id: value, ty: value_type, span: span, ownership: ownership})
         result = Val(value)
     }
     MIRInstruction{id: MIROpID{value: stable_id("mir-op", identity)}, span: span, source_line: None, result: result, ty: ty, operation: operation}
@@ -275,7 +275,7 @@ fn jet_codegen_last_use_new_candidate(local: Bool, field: Bool, copied: Bool, pl
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_last_use.rs::LowerCtx::move_last_uses
-fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
+fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenProgram) Never! {
     block_count :: builder.blocks.len()
     block_index := [U64:Int]{}
     def_block := [U64:Int]{}
@@ -308,7 +308,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
         row_index :: place_row.get(record.place.value) ?? panic("checked last-use row is missing")
         row :: builder.places[row_index]
         if row.projections.len() != 0 || row.persist_key != None -> next
-        if jet_codegen_scope_end_close_function(builder, record.ty) != None -> next
+        if jet_codegen_scope_end_close_function(builder, program, record.ty) != None -> next
         if jet_codegen_last_use_view(row.ty) -> next
         root_key := String?{None}
         if row.base == {
@@ -506,7 +506,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
             .Owned | .Move -> {}
             else -> valid = false
         }
-        if jet_codegen_read_window_of(builder, MIRValueID{value: subject}) != None -> valid = false
+        if jet_codegen_read_window_of(builder, program, MIRValueID{value: subject}) != None -> valid = false
         if !valid -> next
         indices := [Int]{}
         loop row in payloads -> &indices.push(enum_uses[row].index)
@@ -602,7 +602,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
             if observed.len() == 0 -> next
             if instruction.operation == .ReadPlace(_) -> next
             if instruction.result == .Val(result) {
-                if jet_codegen_last_use_holds_borrow(builder, value_row, result) {
+                if jet_codegen_last_use_holds_borrow(builder, program, value_row, result) {
                     if borrow_roots.get(result.value) == None -> &borrow_order.push(result.value)
                     _ := &borrow_roots.add(result.value, observed)
                 }
@@ -619,7 +619,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
             loop instruction in row.instructions {
                 result :: instruction.result ?? next
                 if copy_place.get(result.value) != None || borrow_roots.get(result.value) != None -> next
-                if !jet_codegen_last_use_holds_borrow(builder, value_row, result) -> next
+                if !jet_codegen_last_use_holds_borrow(builder, program, value_row, result) -> next
                 carried := origins.get(result.value) ?? [U64]{}
                 before :: carried.len()
                 seen := [U64:Bool]{}
@@ -931,7 +931,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
                     loop bit in bits {
                         if bit != own && (live_out[block].get(bit) ?? false) -> other_copy = true
                     }
-                    if worth && !rejected[target] && !rejected[root] && !(live_out[block].get(target) ?? false) && !jet_codegen_last_use_in_window(read_windows, block, index, target) && !other_copy && jet_codegen_read_window_of(builder, result) == None && jet_codegen_last_use_consumed(builder, users_block, users_index, result) {
+                    if worth && !rejected[target] && !rejected[root] && !(live_out[block].get(target) ?? false) && !jet_codegen_last_use_in_window(read_windows, block, index, target) && !other_copy && jet_codegen_read_window_of(builder, program, result) == None && jet_codegen_last_use_consumed(builder, program, users_block, users_index, result) {
                         _ := &conversions.add("{block}:{index}", target)
                     }
                 }
@@ -963,7 +963,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
         if value_row.get(subject.value) == None -> next
         fact_row :: value_row.get(subject.value) ?? panic("checked last-use row is missing")
         subject_ty := builder.values[fact_row].ty
-        moved_take :: jet_codegen_last_use_instruction(&builder, first_span, "match.payload.take", Val(subject_ty), mir_ownership_from_access(MIRAccess.Move), MIROperation.Move{value: subject})
+        moved_take :: jet_codegen_last_use_instruction(&builder, program, first_span, "match.payload.take", Val(subject_ty), mir_ownership_from_access(MIRAccess.Move), MIROperation.Move{value: subject})
         if moved_take.result == None -> next
         taken :: moved_take.result ?? panic("checked last-use row is missing")
         _ := &takes.add("{row.block}:{row.payloads[0]}", moved_take)
@@ -972,7 +972,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
     }
     moved_reads := [String:MIRPlaceID]{}
     clears := [String:[MIRInstruction]]{}
-    bool_type :: jet_codegen_lower_type_for_function(Type.Bool, builder)
+    bool_type :: jet_codegen_lower_type_for_function(Type.Bool, builder, program)
     loop block in 0..<block_count {
         loop index in 0..<builder.blocks[block].instructions.len() {
             key :: "{block}:{index}"
@@ -988,10 +988,10 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
             }
             if !candidates[candidate].local -> next
             span := builder.blocks[block].instructions[index].span
-            off :: jet_codegen_last_use_instruction(&builder, span, "owned.local.last-use.state", Val(bool_type), mir_copy_ownership(), MIROperation.Constant{value: MIRConstant.Bool{value: false}})
+            off :: jet_codegen_last_use_instruction(&builder, program, span, "owned.local.last-use.state", Val(bool_type), mir_copy_ownership(), MIROperation.Constant{value: MIRConstant.Bool{value: false}})
             if off.result == None -> next
             off_value :: off.result ?? panic("checked last-use row is missing")
-            write :: jet_codegen_last_use_instruction(&builder, span, "owned.local.last-use.update", None, mir_copy_ownership(), MIROperation.WritePlace{place: candidates[candidate].flag, value: off_value})
+            write :: jet_codegen_last_use_instruction(&builder, program, span, "owned.local.last-use.update", None, mir_copy_ownership(), MIROperation.WritePlace{place: candidates[candidate].flag, value: off_value})
             _ := &clears.add(key, [MIRInstruction]{off, write})
         }
     }

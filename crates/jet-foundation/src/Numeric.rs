@@ -3016,9 +3016,10 @@ fn jet_int_is_pointer(raw: u64) -> bool {
     if (raw & JET_INT_TAG_MASK) != JET_INT_POINTER_TAG {
         return false;
     }
-    // Bit 62 also appears in IEEE-754 values in [2, 4). Zip optional packing
-    // and other raw i64 words can therefore look tagged. A real node pointer
-    // is never null and is aligned to JetIntNode.
+    // Top bits `01` also appear in every positive IEEE-754 double >= 2.0, in
+    // zip optional packing, and in other raw i64 words. This null/alignment
+    // filter rejects only some of them, so callers must never pass a word
+    // that is not an exact Int carrier.
     let pointer = raw & JET_INT_POINTER_MASK;
     pointer != 0 && pointer % (std::mem::align_of::<JetIntNode>() as u64) == 0
 }

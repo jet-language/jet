@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Prebuild the Jet runtime rlib for the default build-fact set beside a jet binary,
-# link the runtime pack the Jet-native dev build links against (#4549), and
-# install the stripped Cranelift dev-build runner (#3953) next to it.
+# and link the runtime pack the Jet-native dev build links against (#4549).
 #
 # usage: [JET_PACK_MUSL_LIB=<dir with musl's static libc.a>]
 #        Tools/packaging/prebuild-runtime.sh <jet-binary> [<prebuilt-dir>]
@@ -14,19 +13,13 @@
 # entries serve machines with the same rustc and CPU features; any other build
 # falls back to compiling the runtime into the store on demand.
 #
-# The --release profile's rlib (the Rust-hosted default profile runs the
-# Cranelift runner below and exports none), the Rust standard library rlibs of the same rustc,
+# The --release profile's rlib, the Rust standard library rlibs of the same rustc,
 # musl's libc.a and libgcc_eh.a/libgcc.a are then linked once by the in-process
 # linker (`x64_link_runtime_pack`, run through Compiler/JetBackend/Tests/run-link.mjs)
 # into <prebuilt-dir>/<key>/jet_runtime.pack.o, and <prebuilt-dir>/native.key
 # names that key: the Jet-hosted `jet build` reads it (Host.jet
 # `jet_cli_runtime_key`) because it has neither rustc nor the runtime's Rust
 # text to compute the key itself.
-#
-# Every dev `jet build` copies the runner `jet-aot-rt` (built beside jet by
-# `cargo build --release --bin jet --bin jet-aot-rt`) into its output, and the
-# build cache stores and verifies that copy, so the runner ships without its
-# symbol table: <prebuilt-dir>/jet-aot-rt, which `jet build` prefers.
 set -euo pipefail
 if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
   echo "usage: $0 <jet-binary> [<prebuilt-dir>]" >&2
@@ -84,14 +77,3 @@ mv "$work/jet_runtime.pack.o" "$out/$key/jet_runtime.pack.o"
 printf '%s\n' "$key" > "$work/native.key"
 mv "$work/native.key" "$out/native.key"
 echo "prebuild-runtime: runtime pack $out/$key/jet_runtime.pack.o; $out/native.key names it"
-runner=$(dirname "$jet")/jet-aot-rt
-if [ ! -x "$runner" ]; then
-  echo "prebuild-runtime: no dev-build runner at $runner; build it with the jet binary" >&2
-  exit 1
-fi
-strip_tool=$(command -v llvm-strip || command -v strip) || {
-  echo "prebuild-runtime: neither llvm-strip nor strip is on PATH" >&2
-  exit 1
-}
-"$strip_tool" -o "$out/jet-aot-rt" "$runner"
-echo "prebuild-runtime: stripped runner $out/jet-aot-rt ($(wc -c < "$out/jet-aot-rt") bytes)"

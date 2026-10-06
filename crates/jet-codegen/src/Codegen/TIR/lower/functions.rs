@@ -94,7 +94,6 @@ fn type_param_names(f: &Func) -> Vec<String> {
 fn default_target_applicability() -> TTargetApplicability {
     TTargetApplicability {
         rust_aot: true,
-        cranelift: true,
         interpreter: true,
         web: true,
     }

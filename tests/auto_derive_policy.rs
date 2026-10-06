@@ -1,4 +1,3 @@
-use jet::JitBackend::JitBackend;
 use std::process::Command;
 
 mod common;
@@ -175,8 +174,7 @@ fn run() {
     assert_eq!(impl_count(&rust, "__jet_Equatable", "Mixed"), 0);
 
     let policy = common::development_policy();
-    let mut backend = jet_jit::CraneliftBackend::new();
-    let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
+    let outcome = common::run_interpreted(&bundle, &policy);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("signed auto-derive program did not run: {outcome:?}");
     };
@@ -224,14 +222,13 @@ fn run() {
     }
 
     let policy = common::development_policy();
-    let mut backend = jet_jit::CraneliftBackend::new();
-    let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
+    let outcome = common::run_interpreted(&bundle, &policy);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("plain Codable program did not run in the default JIT: {outcome:?}");
     };
     assert_eq!(stdout, expected);
 
-    let outcome = jet::Interpreter::dev_iteration(
+    let outcome = crate::common::dev_run(
         project_dir("plain_codable")
             .join("main.jet")
             .to_str()
@@ -479,8 +476,7 @@ fn run() {
     assert_eq!(impl_count(&rust, "JetDebug", "Manual"), 1);
 
     let policy = common::development_policy();
-    let mut backend = jet_jit::CraneliftBackend::new();
-    let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
+    let outcome = common::run_interpreted(&bundle, &policy);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("package-off auto-derive program did not run: {outcome:?}");
     };
@@ -489,7 +485,7 @@ fn run() {
         "Enabled { value: 3 }\nEnabled { value: 3 }\ntrue\nmanual\n"
     );
 
-    let outcome = jet::Interpreter::dev_iteration(
+    let outcome = crate::common::dev_run(
         project_dir("package_off")
             .join("main.jet")
             .to_str()
@@ -606,7 +602,7 @@ fn run() {
     }
     for (tier, force_interpreter) in [("JIT", false), ("interpreter", true)] {
         let outcome =
-            jet::Interpreter::dev_iteration(entry.to_str().unwrap(), false, force_interpreter);
+            crate::common::dev_run(entry.to_str().unwrap(), false, force_interpreter);
         let jet::Interpreter::RunOutcome::Problems(diagnostics) = outcome else {
             panic!("{tier} bypassed sema: {outcome:?}");
         };
@@ -845,17 +841,22 @@ fn run() {
         .unwrap();
     assert!(badge_identity.contains("::"), "{badge_identity}");
     let dep_facts = &facts[dep_idx];
-    for selected in [
-        &app_facts.auto_printable,
-        &app_facts.auto_debug,
-        &app_facts.auto_equatable,
+    assert!(std::sync::Arc::ptr_eq(
+        app_facts.canonical_auto_derives.as_ref().unwrap(),
+        dep_facts.canonical_auto_derives.as_ref().unwrap(),
+    ));
+    for (trait_name, selected) in [
+        (jet::Generics::PRINTABLE, &app_facts.auto_printable),
+        (jet::Generics::DEBUG, &app_facts.auto_debug),
+        (jet::Generics::EQUATABLE, &app_facts.auto_equatable),
     ] {
         assert!(selected.contains("Token"), "{selected:?}");
         assert!(selected.contains("LocalEnvelope"), "{selected:?}");
         assert!(selected.contains("UnionEnvelope"), "{selected:?}");
         assert!(!selected.contains("DependencyEnvelope"), "{selected:?}");
         assert!(!selected.contains("vendor.Token"), "{selected:?}");
-        assert!(selected.contains(&badge_identity), "{selected:?}");
+        assert!(app_facts.has_auto_derive(trait_name, &badge_identity), "{selected:?}");
+        assert!(!selected.contains(&badge_identity), "canonical facts must not be copied into local selections");
         assert!(selected.contains("ImportedEnvelope"), "{selected:?}");
     }
     // Anonymous unions support structural equality, but there is no total
@@ -866,7 +867,7 @@ fn run() {
     assert!(!comparable.contains("UnionEnvelope"), "{comparable:?}");
     assert!(!comparable.contains("DependencyEnvelope"), "{comparable:?}");
     assert!(!comparable.contains("vendor.Token"), "{comparable:?}");
-    assert!(comparable.contains(&badge_identity), "{comparable:?}");
+    assert!(app_facts.has_auto_derive(jet::Generics::COMPARABLE, &badge_identity), "{comparable:?}");
     assert!(comparable.contains("ImportedEnvelope"), "{comparable:?}");
     assert!(app_facts.auto_encode.contains("ImportedEnvelope"));
     assert!(app_facts.auto_decode.contains("ImportedEnvelope"));
@@ -911,14 +912,13 @@ true\n";
         assert_eq!(stdout, expected);
     }
     let policy = common::development_policy();
-    let mut backend = jet_jit::CraneliftBackend::new();
-    let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
+    let outcome = common::run_interpreted(&bundle, &policy);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("same-name program did not run in the default JIT: {outcome:?}");
     };
     assert_eq!(stdout, expected);
     let outcome =
-        jet::Interpreter::dev_iteration(app.join("main.jet").to_str().unwrap(), false, true);
+        crate::common::dev_run(app.join("main.jet").to_str().unwrap(), false, true);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("same-name program did not run in the forced interpreter: {outcome:?}");
     };

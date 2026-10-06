@@ -394,7 +394,7 @@ pub(crate) fn solve_inferred_failure(
         })
         .collect();
     let members: Vec<Vec<usize>> = (0..module_count)
-        .map(|module_idx| name_ledger.namespace_siblings(module_idx))
+        .map(|module_idx| name_ledger.namespace_siblings(module_idx).collect())
         .collect();
     let owner_of = |module: usize, leaf: &str| {
         if declared[module].contains(leaf) {

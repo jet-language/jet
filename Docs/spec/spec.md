@@ -740,8 +740,8 @@ non-function is **E0803** (S47).
 
 Function values expose only read parameters when coerced from a named
 function. This rule prevents the value conversion from erasing a write or
-move requirement. The same capture and call checks apply to interpretation,
-JIT, and generated programs.
+move requirement. The same capture and call checks apply to interpretation
+and generated programs.
 
 ### Collection adapters
 
@@ -899,7 +899,7 @@ Modes are `TowardZero`, `Floor`, `Ceiling`, and `NearestEven`; `digits` is
 nonnegative destination decimal places, and the rounded rational must be
 exactly representable by the destination. Imported `Quantity<Dimension, Kind>`
 retains its concrete unit through checking, API freeze, semantic inspection,
-Codable, AOT, and JIT lowering (D-QUAL3, D-QUANTITY-DECL1).
+Codable, AOT, and interpreter lowering (D-QUAL3, D-QUANTITY-DECL1).
 
 Dimension identities retain raw UTF-8 axis names. Their percent escapes protect
 only the separators `%`, `;`, and `:`; decoding does not reinterpret non-ASCII
@@ -1049,7 +1049,7 @@ covers bindings, returns, fields, collection elements, enum payloads, fallback
 values, and stored read-only captures. Declared `View<T>` and `ViewMut<T>`
 boundaries retain their provenance; `ViewMut<T>` is never copied implicitly.
 `#Policy(copies: .Explicit)` makes read-only materialization explicit. The same
-rule is shared by AOT, JIT, interpreter, comptime, and web lowering; each engine
+rule is shared by AOT, interpreter, comptime, and web lowering; each engine
 marshals the sema-approved result.
 
 A place is a name followed by its maximal field, index, or range projection. A
@@ -1345,10 +1345,10 @@ The ratified instances use the same grid:
 | error | checker column of every row | registered E-codes, `FieldError` values, and typed foreign errors name what failed and its repair path |
 
 The grid is a planning and proof obligation, not a runtime layer. Sema owns
-checks and facts; the Prelude owns runtime boundary meaning. Rust emission,
-Cranelift, and interpreter paths marshal the same typed result and fact
-semantics. A boundary with a runtime path must preserve the same cell through
-AOT, the default `jet run`, and interpreter execution.
+checks and facts; the Prelude owns runtime boundary meaning. Rust emission
+and interpreter paths marshal the same typed result and fact semantics. A
+boundary with a runtime path must preserve the same cell through AOT, the
+default `jet run`, and interpreter execution.
 
 ## Effect system
 
@@ -1703,8 +1703,8 @@ The fallible allocation family is separate from plain abort-on-failure calls:
 `List.try_new`, `List.try_with_capacity`, `try_push`, `try_reserve`,
 `Map.try_insert`, `String.try_push`, and each allocator's `try_alloc` return
 `AllocError { requested_bytes, allocator }`. A plain `new`, `alloc`, or
-mutation retains its abort-on-failure behavior. The AOT emitter, Cranelift
-host, and interpreter carry the same fallible result; they do not choose a
+mutation retains its abort-on-failure behavior. The AOT emitter and the
+interpreter carry the same fallible result; they do not choose a
 different allocation policy. See
 [`Examples/features/memory/try_allocation.jet`](../../Examples/features/memory/try_allocation.jet). (D-ALLOCFAIL1=A)
 
@@ -2518,8 +2518,8 @@ is the checked ABI contract. C, C++, and assembly require an enclosing
 `#Unsafe("reason")` gate; assembly also requires `use core.mem`. The checker
 validates scalar signatures, named operands, the `; -> return` anchor, clobbers,
 and the selected target before lowering. Native code is linked by the native
-build path; resident JIT execution reports the boundary by name rather than
-pretending that the raw body is portable JIT code. See
+build path; the in-process evaluator reports the boundary by name rather than
+pretending that the raw body is portable evaluator code. See
 [`Examples/features/lowlevel/inline_c.jet`](../../Examples/features/lowlevel/inline_c.jet)
 and [`Examples/features/lowlevel/inline_asm.jet`](../../Examples/features/lowlevel/inline_asm.jet).
 (D-FFI-INLINE1, D-FFI-RAWBODY1, D-FFI-ASM1, D-FFI-CPP1)
