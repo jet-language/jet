@@ -1,7 +1,7 @@
 // The `jet` front door (Source/main.rs `main` up to verb dispatch): output
 // flags, retired, moved, and grouped routes, help and the greeting, unknown
 // commands (E2101) and flags (E2102), then the verbs the Jet driver owns
-// (`explain <CODE>`, `check`, `build`, `run <file>`, and `test <file>`). Every report is the
+// (`explain <CODE>`, `check`, `build`, `run <file>`, `test <file>`, and `new <name>`). Every report is the
 // Rust host's exact bytes and exit status for the same argv. A command whose
 // Jet port has not landed yet is refused with E2104 instead of guessing its
 // behavior.
@@ -42,6 +42,9 @@ pub enum JetCLIPlan {
     // has no harness entry), and run it under `options`
     // (Source/CmdCompile.rs `run_test_target`).
     Test(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions)
+    // `jet new <name>`: write the project folder (Source/CmdCompile.rs
+    // `run_new`); `template` is "" for the print-only starter.
+    New(name: String, template: String, annotated: Bool, quiet: Bool, color: Bool)
 }
 
 // The `jet test` options the Jet host carries out (Source/CmdCompile.rs
@@ -716,6 +719,36 @@ fn jet_cli_explain(jet_argv: [String], args: [String], color: Bool) -> JetCLIPla
     JetCLIPlan.Done{output: jet_driver_explain_code(None, color)}
 }
 
+// `jet new` templates (CmdCompile.rs `NewTemplate::NAMES`).
+JET_CLI_NEW_TEMPLATES :: [String]{"cli", "ui", "web", "overrides"}
+
+// `jet new <name> [--template <t>] [--annotated]` (Source/main.rs `"new"`):
+// a bare `jet new` is a usage error that prints the command's help; the
+// backend scaffolds (`new service|route|job|migration`) are not ported yet.
+fn jet_cli_new(jet_argv: [String], args: [String], color: Bool, quiet: Bool) -[FS]> JetCLIPlan Never! {
+    if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("new"), JET_DRIVER_EXIT_USAGE)
+    name :: args[1]
+    if name == "service" || name == "route" || name == "job" || name == "migration" -> return jet_cli_not_ported("new {name}", color)
+    template := ""
+    asks_template := false
+    loop argument in jet_argv {
+        if argument == "--template" || argument.starts_with("--template=") -> asks_template = true
+    }
+    if asks_template {
+        template = jet_cli_option_value(jet_argv, "--template") ?? ""
+        if !JET_CLI_NEW_TEMPLATES.contains(template) {
+            return jet_cli_fail("E2104", "`{template}` is not a `jet new` template", jet_cli_why("E2104"), "choose one of {JET_CLI_NEW_TEMPLATES.join(", ")}: `jet new {name} --template ui`", color, JET_DRIVER_EXIT_USAGE)
+        }
+    }
+    if name.len() == 0 || name.contains("/") || name.contains("\\") {
+        return jet_cli_fail("E2104", "project name must be a simple folder name", jet_cli_why("E2104"), "try: jet new my_app", color, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    if cli_files.exists(name) {
+        return jet_cli_fail("E2104", "`{name}` already exists", jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    JetCLIPlan.New{name: name, template: template, annotated: jet_argv.contains("--annotated"), quiet: quiet, color: color}
+}
+
 // Plan one `jet` invocation; `raw` is argv without the program name.
 pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
     // Output flags, parsed once from the jet-owned prefix before `--`.
@@ -901,6 +934,7 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
         "build" -> return jet_cli_build(jet_argv, args, color, quiet, threads)
         "run" -> return jet_cli_run(jet_argv, args, passthrough, false, color, quiet, verbose, threads)
         "test" -> return jet_cli_test(jet_argv, color, quiet, verbose, threads)
+        "new" -> return jet_cli_new(jet_argv, args, color, quiet)
         else -> {}
     }
     jet_cli_not_ported(command, color)

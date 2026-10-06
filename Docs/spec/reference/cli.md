@@ -171,7 +171,7 @@ For C and C++, the driver-specific options are `--project-root`, `--build-root`,
 `--target`. The exact acceptance and forwarding behavior is documented in
 [CC driver hosts](cc-driver.md).
 
-## Jet-hosted `check`, `build`, `run`, and `test`
+## Jet-hosted `check`, `build`, `run`, `test`, and `new`
 
 The Jet-hosted CLI ([`Compiler/JetCli`](../../../Compiler/JetCli)) runs
 `jet check <file>`, `jet build <file>`, `jet run <file>`, and
@@ -240,3 +240,13 @@ Directory and package targets, doctests, a `fn test` override, a bare
 ported. The test-result cache, the evidence report, and the package claims
 floor are not ported yet: every run compiles fresh, and the outcome is the
 harness exit (the Rust host's outcome for a package without a claims floor).
+
+`jet new <name> [--template cli|ui|web|overrides] [--annotated]` writes the
+same project the Rust host writes (CmdCompile.rs `run_new`): `package.jet`
+with the template's authority holds, `.jet/lock` with the running toolchain
+pin and the build stamp (the git revision when the folder is inside a
+repository), the template's `run.jet`, the four comment-only `@*.jet` command
+homes for `overrides`, and `.gitignore`, then the status lines on stderr
+(muted by `--quiet`). A bare `jet new` prints the command help with exit 2.
+The backend scaffolds (`jet new service|route|job|migration`) are refused with
+E2104 until they are ported.
