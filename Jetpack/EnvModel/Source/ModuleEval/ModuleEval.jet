@@ -61,10 +61,10 @@ pub fn envmodel_environment_reads(src: String) -> [EnvironmentRead] EnvModelEval
 
 fn envmodel_collect_environment_reads(all_tokens: [Token], reads: &[EnvironmentRead]) Never! {
     tokens :: lexer_without_comments(all_tokens)
-    loop index in 0..<tokens.len() {
-        token :: tokens[index]
-        if token.kind == TOKEN_DOLLAR && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_IDENT {
-            name :: "${tokens[index + 1].payload.decoded}"
+    loop token in tokens {
+        // The lexer reads `$NAME` as one identifier word (D-ONCE-DOLLAR1=B).
+        if token.kind == TOKEN_IDENT && token.payload.decoded.starts_with(COMPTIME_MARK) {
+            name :: token.payload.decoded
             seen := false
             loop read in reads {
                 if read.name == name -> seen = true
