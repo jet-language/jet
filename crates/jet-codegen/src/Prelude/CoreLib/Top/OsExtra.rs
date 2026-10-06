@@ -23,13 +23,6 @@ pub(crate) fn jet_std_os_executable() -> String {
 pub(crate) fn jet_std_os_pid() -> i64 {
     std::process::id() as i64
 }
-pub(crate) fn jet_std_os_hostname() -> String {
-    std::env::var("HOSTNAME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| std::fs::read_to_string("/etc/hostname").ok().map(|s| s.trim().to_string()))
-        .unwrap_or_else(|| "localhost".to_string())
-}
 pub(crate) fn jet_std_os_username() -> String {
     std::env::var("USER")
         .ok()

@@ -10233,23 +10233,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.net.getservbyname
-    #[no_mangle]
-    pub extern "C" fn jet_net_getservbyname(a0: JetCString, ok: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_getservbyname(unsafe { &*a0 }) {
-            Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.net.getservbyport
-    #[no_mangle]
-    pub extern "C" fn jet_net_getservbyport(a0: i64, ok: *mut JetCString, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_getservbyport(a0) {
-            Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
 
     /// core.net.ip_addr
     #[no_mangle]
@@ -11496,17 +11479,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_ring_log_debug(unsafe { &*a0 }))
     }
 
-    /// core.log.disable
-    #[no_mangle]
-    pub extern "C" fn jet_ring_log_disable() {
-        guard(|| crate::jet_ring_log_disable())
-    }
-
-    /// core.log.enabled
-    #[no_mangle]
-    pub extern "C" fn jet_ring_log_enabled(a0: JetCString) -> bool {
-        guard(|| crate::jet_ring_log_enabled(unsafe { &*a0 }))
-    }
 
     /// core.log.enter
     #[no_mangle]
@@ -11556,11 +11528,6 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_ring_log_int(unsafe { &*a0 }, a1))))
     }
 
-    /// core.log.otlp_file
-    #[no_mangle]
-    pub extern "C" fn jet_ring_log_otlp_file(a0: JetCString) {
-        guard(|| crate::jet_ring_log_otlp_file(unsafe { &*a0 }))
-    }
 
     /// core.log.redact
     #[no_mangle]
@@ -11568,23 +11535,6 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_ring_log_redact(unsafe { &*a0 }))))
     }
 
-    /// core.log.sample_every
-    #[no_mangle]
-    pub extern "C" fn jet_ring_log_sample_every(a0: i64) {
-        guard(|| crate::jet_ring_log_sample_every(a0))
-    }
-
-    /// core.log.set_level
-    #[no_mangle]
-    pub extern "C" fn jet_ring_log_set_level(a0: JetCString) {
-        guard(|| crate::jet_ring_log_set_level(unsafe { &*a0 }))
-    }
-
-    /// core.log.set_sink
-    #[no_mangle]
-    pub extern "C" fn jet_ring_log_set_sink(a0: JetCString, a1: JetCString) {
-        guard(|| crate::jet_ring_log_set_sink(unsafe { &*a0 }, unsafe { &*a1 }))
-    }
 
     /// core.log.set_trace_id
     #[no_mangle]
@@ -11592,11 +11542,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_ring_log_set_trace_id(view(a0)))
     }
 
-    /// core.log.setup
-    #[no_mangle]
-    pub extern "C" fn jet_ring_log_setup(a0: JetCString) {
-        guard(|| crate::jet_ring_log_setup(unsafe { &*a0 }))
-    }
 
     /// core.log.span
     #[no_mangle]
@@ -13997,11 +13942,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_os_getuid()))
     }
 
-    /// core.sys.hostname, core.net.gethostname
-    #[no_mangle]
-    pub extern "C" fn jet_std_os_hostname() -> JetCString {
-        guard(|| handle(crate::jet_std_os_hostname()))
-    }
 
     /// core.sys.initgroups
     #[no_mangle]

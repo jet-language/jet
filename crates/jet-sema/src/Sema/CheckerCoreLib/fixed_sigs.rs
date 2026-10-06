@@ -4333,9 +4333,16 @@ fn core_fixed_sig_impl(
         ("core.log", "disable" | "flush") => Some((vec![], None)),
         ("core.log", "enabled") => Some((vec![(read, Type::String)], Some(bool_))),
         // D-OBS3: set OTel trace_id for all subsequent log entries on this thread.
-        ("core.log", "set_trace_id") => Some((vec![(read, Type::String)], None)),
+        ("core.log", "set_trace_id" | "__trace_store") => Some((vec![(read, Type::String)], None)),
         // D-LOGFMT1=A: override log output format ("json" | "text").
         ("core.log", "setup") => Some((vec![(read, Type::String)], None)),
+        ("core.log", "__level_load") => Some((vec![], Some(Type::Int))),
+        ("core.log", "__disabled_load") => Some((vec![], Some(Type::Bool))),
+        ("core.log", "__level_store" | "__format_store" | "__sample_store" | "__sample_count_store") => {
+            Some((vec![(read, Type::Int)], None))
+        }
+        ("core.log", "__disabled_store") => Some((vec![(read, Type::Bool)], None)),
+        ("core.log", "__sink_store") => Some((vec![(read, Type::String)], None)),
         // core.crypto: vetted hash functions (D-LR3).
         ("core.crypto", "sha256") => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],

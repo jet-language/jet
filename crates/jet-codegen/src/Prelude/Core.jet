@@ -120,7 +120,7 @@ module core.http.server exports { access_log, bind, cors, cors_policy, json, mux
 source_module core.http.server path Core/http/server.jet alias core_core_http_server owns { access_log, cors, cors_policy, json, mux, request_id, response, serve_once, serve_once_listener, sse, static_file, static_file_range, static_files, tls }
 module core.jobs exports { JobQueue, JobPayload, JobResult, JobError, JobQueueReceipt, JobQueueClaim, JobQueueDeliveryPolicy, JobQueueEvent, JobQueueRecord, JobQueueState, JobQueueStatus, queue, ack, cancel, claim, enqueue, fail, named, status, with_max_attempts, queue_name, state, attempts, payload, event, events, is_terminal, is_cancelled } types { JobQueue:plain, JobPayload:plain, JobResult:plain, JobError:plain(Empty|Duplicate|Failed|Missing), JobQueueReceipt:plain, JobQueueClaim:plain, JobQueueDeliveryPolicy:plain(AtLeastOnce), JobQueueEvent:plain, JobQueueRecord:plain, JobQueueState:plain(Queued|Running|Retrying|Completed|Failed|DeadLettered|Cancelled), JobQueueStatus:plain } depends_on []
 source_module core.jobs path Core/jobs/jobs.jet alias core_core_jobs owns { ack, cancel, claim, enqueue, fail, named, queue, status, with_max_attempts, queue_name, state, attempts, payload, event, events, is_terminal, is_cancelled }
-module core.log exports { bool, close, counter, critical, debug, debug_fields, disable, enabled, enter, error, error_fields, fatal, field, float, flush, info, info_fields, int, otlp_file, redact, sample_every, set_level, set_sink, set_trace_id, setup, span, warn, warn_fields, LogField, Pair, LogRecord, Formatter, Handler, record, formatter, handler, handler_format, format, handle, add, group, time, clear, log, warning } types { LogRecord:plain, Formatter:plain, Handler:plain, LogField:plain, Pair:plain } depends_on []
+module core.log exports { bool, close, counter, critical, debug, debug_fields, disable, enabled, enter, error, error_fields, fatal, field, float, flush, info, info_fields, int, otlp_file, redact, sample_every, set_level, set_sink, set_trace_id, setup, span, warn, warn_fields, LogField, Pair, LogRecord, Formatter, Handler, record, formatter, handler, handler_format, format, handle, add, group, time, clear, log, warning, __trace_store, __level_load, __level_store, __disabled_load, __disabled_store, __format_store, __sink_store, __sample_store, __sample_count_store } types { LogRecord:plain, Formatter:plain, Handler:plain, LogField:plain, Pair:plain } depends_on []
 source_module core.log path Core/log/log.jet alias core_core_log owns { bool, close, counter, critical, debug, debug_fields, disable, enabled, enter, error, error_fields, fatal, field, float, flush, format, formatter, handle, handler, handler_format, info, info_fields, int, log, otlp_file, record, redact, sample_every, set_level, set_sink, set_trace_id, setup, span, warn, warn_fields, warning, add, group, time, clear }
 module core.math exports { abs, acos, acosh, asin, asinh, atan, atan2, atanh, binomial, cbrt, ceil, checked_abs, checked_add, checked_div, checked_mul, checked_neg, checked_pow, checked_rem, checked_sub, clamp, cmp, copy, copysign, conj, cos, cosh, cot, decimal, degrees, digits, div_mod, div_rem, e, erf, erfc, exp, exp2, exp_m1, factorial, floor, fma, float32, float64, fract, fraction, frexp, from_bits, gamma, gcd, hypot, ilogb, imag, infinity, int_pow, inv, is_canonical, is_even, is_finite, is_inf, is_integer, is_nan, is_normal, is_odd, is_signed, is_subnormal, is_zero, isqrt, lcm, ldexp, leading_ones, lerp, lgamma, ln, ln_1p, log, log10, log2, logb, max, min, modf, muladd, nan, next_after, nextafter, next_down, next_up, pi, pow, radians, radix, real, round, saturating_add, saturating_mul, saturating_sub, scaleb, sign, sign_bit, significand, signum, sin, sin_cos, sinh, sqrt, tan, tanh, tau, to_bits, trailing_ones, trunc, truncate, ulp, zero, Fraction, abs_diff, abs_float, clamp_float, comb, dist, even, fmod, fsum, gcd_many, hypot3, in_range, isclose, isfinite, isinf, isnan, lcm_many, max_float, midpoint, min_float, odd, perm, powmod, prod, prod_int, remainder, sum_int, sumprod, tau_const, log1p, xor, random, fabs, expm1 } types { Fraction:plain } depends_on []
 source_module core.math path Core/math/math.jet alias core_math owns { abs, abs_float, min, max, clamp, is_even, is_odd, sign, isqrt, gcd, lcm, acos, acosh, asin, asinh, atan, atan2, atanh, cbrt, ceil, checked_abs, checked_add, checked_div, checked_mul, checked_neg, checked_pow, checked_rem, checked_sub, conj, copysign, cos, cosh, cot, degrees, e, erf, erfc, exp, exp2, exp_m1, expm1, fabs, factorial, float32, float64, floor, fma, fract, frexp, from_bits, gamma, hypot, ilogb, imag, infinity, int_pow, inv, is_canonical, is_finite, is_inf, is_integer, is_nan, is_normal, is_signed, is_subnormal, is_zero, isfinite, isinf, isnan, ldexp, lerp, lgamma, ln, ln_1p, log, log10, log1p, log2, logb, modf, muladd, nan, next_after, next_down, next_up, pi, pow, radians, radix, real, round, saturating_add, saturating_mul, saturating_sub, scaleb, sign_bit, significand, signum, sin, sin_cos, sinh, sqrt, tan, tanh, tau, tau_const, to_bits, trunc, truncate, ulp, zero, binomial, comb, perm, gcd_many, lcm_many, powmod, div_mod, div_rem, digits, leading_ones, trailing_ones, cmp, abs_diff, even, odd, xor, in_range, sum_int, prod_int, prod, fmod, remainder, isclose, dist, hypot3, clamp_float, min_float, max_float, midpoint, fsum, sumprod, random, fraction, decimal }
@@ -360,7 +360,6 @@ dispatcher_row plain core.sys temp_dir | CoreCallRecord::new("core.sys", "temp_d
 dispatcher_row plain core.sys executable | CoreCallRecord::new("core.sys", "executable", "jet_std_os_executable", true, &[])
 dispatcher_row plain core.sys pid | CoreCallRecord::new("core.sys", "pid", "jet_std_os_pid", true, &[]) .with_native_int_result()
 dispatcher_row plain core.sys getpid | CoreCallRecord::new("core.sys", "getpid", "jet_std_os_pid", true, &[]) .with_native_int_result()
-dispatcher_row plain core.sys hostname | CoreCallRecord::new("core.sys", "hostname", "jet_std_os_hostname", true, &[])
 dispatcher_row plain core.sys username | CoreCallRecord::new("core.sys", "username", "jet_std_os_username", true, &[])
 dispatcher_row plain core.sys release | CoreCallRecord::new("core.sys", "release", "jet_std_os_release", true, &[])
 dispatcher_row plain core.sys version | CoreCallRecord::new("core.sys", "version", "jet_std_os_version", true, &[])
@@ -1211,9 +1210,7 @@ dispatcher_row plain core.log error | CoreCallRecord::new("core.log", "error", "
 dispatcher_row plain core.log debug | CoreCallRecord::new("core.log", "debug", "jet_ring_log_debug", true, &[true])
 dispatcher_row plain core.log critical | CoreCallRecord::new( "core.log", "critical", "jet_ring_log_critical", true, &[true], )
 dispatcher_row plain core.log fatal | CoreCallRecord::new("core.log", "fatal", "jet_ring_log_fatal", true, &[true])
-dispatcher_row plain core.log disable | CoreCallRecord::new("core.log", "disable", "jet_ring_log_disable", true, &[])
 dispatcher_row plain core.log flush | CoreCallRecord::new("core.log", "flush", "jet_ring_log_flush", true, &[])
-dispatcher_row plain core.log enabled | CoreCallRecord::new("core.log", "enabled", "jet_ring_log_enabled", true, &[true])
 dispatcher_row plain core.log field | CoreCallRecord::new( "core.log", "field", "jet_ring_log_field", true, &[true, true], )
 dispatcher_row plain core.log int | CoreCallRecord::new("core.log", "int", "jet_ring_log_int", true, &[true, false])
 dispatcher_row plain core.log float | CoreCallRecord::new( "core.log", "float", "jet_ring_log_float", true, &[true, false], )
@@ -1226,13 +1223,16 @@ dispatcher_row plain core.log debug_fields | CoreCallRecord::new( "core.log", "d
 dispatcher_row plain core.log span | CoreCallRecord::new("core.log", "span", "jet_ring_log_span", true, &[true])
 dispatcher_row plain core.log enter | CoreCallRecord::new("core.log", "enter", "jet_ring_log_enter", true, &[true])
 dispatcher_row plain core.log close | CoreCallRecord::new("core.log", "close", "jet_ring_log_close", true, &[true])
-dispatcher_row plain core.log set_sink | CoreCallRecord::new( "core.log", "set_sink", "jet_ring_log_set_sink", true, &[true, true], )
-dispatcher_row plain core.log sample_every | CoreCallRecord::new( "core.log", "sample_every", "jet_ring_log_sample_every", true, &[false], )
 dispatcher_row plain core.log counter | CoreCallRecord::new( "core.log", "counter", "jet_ring_log_counter", true, &[true, false], )
-dispatcher_row plain core.log otlp_file | CoreCallRecord::new( "core.log", "otlp_file", "jet_ring_log_otlp_file", true, &[true], )
-dispatcher_row plain core.log set_level | CoreCallRecord::new( "core.log", "set_level", "jet_ring_log_set_level", true, &[true], )
-dispatcher_row plain core.log set_trace_id | CoreCallRecord::new( "core.log", "set_trace_id", "jet_ring_log_set_trace_id", true, &[true], )
-dispatcher_row plain core.log setup | CoreCallRecord::new("core.log", "setup", "jet_ring_log_setup", true, &[true])
+dispatcher_row plain core.log __trace_store | CoreCallRecord::new( "core.log", "__trace_store", "jet_ring_log_set_trace_id", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.log __level_load | CoreCallRecord::new("core.log", "__level_load", "jet_log_level_load", true, &[]) .with_native_int_result() .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.log __level_store | CoreCallRecord::new("core.log", "__level_store", "jet_log_level_store", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.log __disabled_load | CoreCallRecord::new("core.log", "__disabled_load", "jet_log_disabled_load", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.log __disabled_store | CoreCallRecord::new("core.log", "__disabled_store", "jet_log_disabled_store", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.log __format_store | CoreCallRecord::new("core.log", "__format_store", "jet_log_format_store", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.log __sink_store | CoreCallRecord::new("core.log", "__sink_store", "jet_log_sink_store", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.log __sample_store | CoreCallRecord::new("core.log", "__sample_store", "jet_log_sample_store", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.log __sample_count_store | CoreCallRecord::new("core.log", "__sample_count_store", "jet_log_sample_count_store", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.auth session_validate | CoreCallRecord::new( "core.auth", "session_validate", "jet_auth_session_validate", true, &[true, false], )
 dispatcher_row plain core.auth session_show | CoreCallRecord::new( "core.auth", "session_show", "jet_auth_session_show", true, &[true], )
 dispatcher_row plain core.auth session_user | CoreCallRecord::new( "core.auth", "session_user", "jet_auth_session_user", true, &[true], )
@@ -1259,7 +1259,6 @@ dispatcher_row plain core.sync list_show | CoreCallRecord::new( "core.sync", "li
 dispatcher_row plain core.sync policy_allows | CoreCallRecord::new( "core.sync", "policy_allows", "jet_db_policy_allows", true, &[true, true, true], )
 dispatcher_row plain core.sync policy_show | CoreCallRecord::new( "core.sync", "policy_show", "jet_db_policy_show", true, &[true], )
 dispatcher_row plain core.net ip_addr | CoreCallRecord::new("core.net", "ip_addr", "jet_net_ip_addr", true, &[true]) .with_pure_route(CoreCallPureRoute::Net)
-dispatcher_row plain core.net gethostname | CoreCallRecord::new("core.net", "gethostname", "jet_std_os_hostname", true, &[])
 dispatcher_row plain core.net ip_to_string | CoreCallRecord::new( "core.net", "ip_to_string", "jet_net_ip_to_string", true, &[true], ) .with_pure_route(CoreCallPureRoute::Net)
 dispatcher_row plain core.net ip_is_ipv4 | CoreCallRecord::new( "core.net", "ip_is_ipv4", "jet_net_ip_is_ipv4", true, &[true], ) .with_pure_route(CoreCallPureRoute::Net)
 dispatcher_row plain core.net socket_addr | CoreCallRecord::new( "core.net", "socket_addr", "jet_net_socket_addr", true, &[true, false], )
@@ -1330,8 +1329,6 @@ dispatcher_row plain core.net.tls write | CoreCallRecord::new("core.net.tls", "w
 dispatcher_row plain core.net.tls write_all | CoreCallRecord::new("core.net.tls", "write_all", "jet_net_tls_write_all_bytes", true, &[true, true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.net.tls write_text | CoreCallRecord::new("core.net.tls", "write_text", "jet_net_tls_write_text", true, &[true, true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 
-dispatcher_row plain core.net getservbyname | CoreCallRecord::new( "core.net", "getservbyname", "jet_net_getservbyname", true, &[true], ) .with_native_int_result()
-dispatcher_row plain core.net getservbyport | CoreCallRecord::new( "core.net", "getservbyport", "jet_net_getservbyport", true, &[false], )
 dispatcher_row plain core.net dns_srv_target | CoreCallRecord::new( "core.net", "dns_srv_target", "jet_net_dns_srv_target", true, &[true], ) .with_pure_route(CoreCallPureRoute::Net)
 dispatcher_row plain core.net dns_srv_port | CoreCallRecord::new( "core.net", "dns_srv_port", "jet_net_dns_srv_port", true, &[true], ) .with_pure_route(CoreCallPureRoute::Net) .with_native_int_result()
 dispatcher_row plain core.net dns_srv_priority | CoreCallRecord::new( "core.net", "dns_srv_priority", "jet_net_dns_srv_priority", true, &[true], ) .with_pure_route(CoreCallPureRoute::Net) .with_native_int_result()
@@ -2083,16 +2080,10 @@ ambient_route core.ui box
 ambient_route core.log span
 ambient_route core.log critical
 ambient_route core.log enter
-ambient_route core.log enabled
 ambient_route core.log fatal
 ambient_route core.log float
 ambient_route core.log redact
-ambient_route core.log set_level
-ambient_route core.log set_trace_id
 ambient_route core.log close
-ambient_route core.log setup
-ambient_route core.net getservbyname
-ambient_route core.net getservbyport
 ambient_route core.sys temp_dir
 ambient_route core.sys name
 ambient_route core.sys executable
@@ -2147,7 +2138,6 @@ ambient_route core.sys arch
 ambient_route core.sys cpu_count
 ambient_route core.sys pid
 ambient_route core.sys getpid
-ambient_route core.sys hostname
 ambient_route core.sys username
 ambient_route core.sys release
 ambient_route core.sys expand
@@ -2202,7 +2192,6 @@ ambient_route core.log info
 ambient_route core.log warn
 ambient_route core.log error
 ambient_route core.log debug
-ambient_route core.log disable
 ambient_route core.log flush
 ambient_route core.log field
 ambient_route core.log int
@@ -2212,9 +2201,6 @@ ambient_route core.log info_fields
 ambient_route core.log warn_fields
 ambient_route core.log error_fields
 ambient_route core.log debug_fields
-ambient_route core.log set_sink
-ambient_route core.log sample_every
-ambient_route core.log otlp_file
 ambient_route core.auth session_validate
 ambient_route core.auth session_show
 ambient_route core.auth session_user

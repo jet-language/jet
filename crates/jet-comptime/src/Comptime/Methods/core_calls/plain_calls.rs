@@ -260,7 +260,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         // the AOT-only black-box effect has no observable CtValue equivalent.
         // D-OBS3: retain trace context in the shared log Prelude state even
         // when the default evaluator executes a service call.
-        ("core.log", "set_trace_id") => {
+        ("core.log", "__trace_store") => {
             log_kernel::set_trace_id(as_string(one(0)?, span)?);
             Ok(CtValue::Unit)
         }
