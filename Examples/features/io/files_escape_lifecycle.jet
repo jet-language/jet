@@ -47,9 +47,13 @@ fn run() {
     after :: fd_count()
     print("fds leaked after 5 early exits: {after - before}")
 
-    // A missing file is a typed error, not an empty stream.
+    // A missing file is a typed error, not an empty stream. The temp root's
+    // name differs per run, so the message shows paths relative to it.
     if first_line("{root}/missing.txt") == {
         .Ok(_) -> print("missing: accepted")
-        .Err(error) -> print("missing: {error}")
+        .Err(error) -> {
+            message :: "{error}".replace("{base}/", "")
+            print("missing: {message}")
+        }
     }
 }
