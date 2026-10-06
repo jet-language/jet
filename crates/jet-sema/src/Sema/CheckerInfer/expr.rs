@@ -2663,10 +2663,10 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0116",
                             format!("`{}` doesn't hand back a value", call.name),
-                            "a call is a value only when its function declares a result after the parameter list"
+                            "a call is a value only when its function declares a return type after `->`"
                                 .to_string(),
                             format!(
-                                "inside an arm, wrap the call in `{{ … }}`; otherwise put `{}` on its own line, or declare it as `fn {}(…) Type -> …`",
+                                "inside an arm, wrap the call in `{{ … }}`; otherwise put `{}` on its own line, or declare it as `fn {}(…) -> Type {{ … }}`",
                                 call.name, call.name
                             ),
                             Some(span),
@@ -4682,10 +4682,10 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0116",
                             format!("`{}` doesn't hand back a value", call.name),
-                            "a call is a value only when its function declares a result after the parameter list"
+                            "a call is a value only when its function declares a return type after `->`"
                                 .to_string(),
                             format!(
-                                "inside an arm, wrap the call in `{{ … }}`; otherwise put `{}` on its own line, or declare it as `fn {}(…) Type -> …`",
+                                "inside an arm, wrap the call in `{{ … }}`; otherwise put `{}` on its own line, or declare it as `fn {}(…) -> Type {{ … }}`",
                                 call.name, call.name
                             ),
                             Some(span),

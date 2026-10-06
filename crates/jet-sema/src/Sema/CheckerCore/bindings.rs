@@ -1965,10 +1965,10 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0116",
                     format!("`.{method}()` doesn't hand back a value"),
-                    "a call is a value only when its function declares a result after the parameter list"
+                    "a call is a value only when its function declares a return type after `->`"
                         .to_string(),
                     format!(
-                        "put `{method}` on its own line, or declare a result after the parameter list"
+                        "put `{method}` on its own line, or declare it as `fn {method}(…) -> Type {{ … }}`"
                     ),
                     Some(*method_span),
                 ));
