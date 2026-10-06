@@ -101,11 +101,13 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
                 )),
                 // D-SHAPE-PLACE1=A: `w := &list[a..b]` aliases the range
                 // window place, so `w[i] = x` lands in the owner's storage.
+                // D-MEMPROVENANCE2: `w :: &view[a..b]` over a write view
+                // aliases the narrower range of the same owner place.
                 TExprKind::BuiltinMethod {
                     recv,
                     op: TBuiltinOp::ViewMutNew { .. },
                     ..
-                } if matches!(recv.ty.without_user_tags(), Type::List(_)) => {
+                } if super::tir_to_mir_expr::write_window_receiver(&recv.ty) => {
                     super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Write)?
                         .map(|place| (place, true))
                 }

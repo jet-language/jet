@@ -29352,8 +29352,16 @@ fn replace_data_steps(
             )
             .map_err(|message| mir_error_at(&message, span))?;
             let (start, end) = (start as usize, end as usize);
+            // D-MEMPROVENANCE2: a window over a window narrows the same
+            // storage; write the inner steps into the outer window's items.
             if !rest.is_empty() {
-                return Err(mir_error_at("MIR range window write has trailing steps", span));
+                let mut window = MirEvalValue::List(values.drain(start..end).collect());
+                let written = replace_data_steps(&mut window, rest, replacement, span);
+                let MirEvalValue::List(window) = window else {
+                    unreachable!("a range window stays a list");
+                };
+                values.splice(start..start, window);
+                return written;
             }
             let MirEvalValue::List(replacement) = replacement else {
                 return Err(mir_error_at("MIR range window write is not a list", span));

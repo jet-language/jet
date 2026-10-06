@@ -1,13 +1,11 @@
 // A `View<T>` lends only read windows; a write window needs a `ViewMut<T>`.
-fn clear(window: ViewMut<U8>) {
-    loop i in 0..<window.len() -> window[i] = U8{0}
-}
-
 fn clear_front(bytes: View<U8>) {
-    clear(&bytes[0..<1])
+    window :: &bytes[0..<1]
+    window[0] = U8{0}
 }
 
 fn run() {
     data :: [U8{1}, U8{2}]
-    clear_front(data[0..<2])
+    all :: data[0..<2]
+    clear_front(all)
 }

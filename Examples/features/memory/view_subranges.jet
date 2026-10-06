@@ -38,15 +38,6 @@ fn split(bytes: View<U8>) -> Packet Err! from bytes {
     Ok(Packet{header: header, body: body})
 }
 
-fn fill(window: ViewMut<U8>, value: Int) {
-    loop i in 0..<window.len() -> window[i] = U8{value}
-}
-
-// A write window over part of a write window reborrows the same storage.
-fn tail_mut(window: ViewMut<U8>, start: Int) -> ViewMut<U8> from window {
-    &window[start..<window.len()]
-}
-
 fn run() {
     asset :: [U8{1}, U8{2}, U8{3}, U8{4}, U8{5}, U8{6}]
     all :: asset[0..<6]
@@ -67,12 +58,14 @@ fn run() {
     packet :: split(all) ?? return
     print(total(packet.header))
     print(total(packet.body))
-    // Writes through nested write subranges are visible in `data`.
+    // A write subrange of a write view takes over that view's exclusive loan,
+    // and writes through it land in `data`.
     data := [U8{0}, U8{0}, U8{0}, U8{0}, U8{0}]
-    edit :: &data[0..<5]
+    edit :: &data[0..<data.len()]
     window :: &edit[1..<4]
-    fill(window, 7)
-    rest :: tail_mut(edit, 3)
-    fill(rest, 9)
+    window[0] = U8{7}
+    window[2] = U8{9}
+    center :: &window[1..<2]
+    center[0] = U8{5}
     loop byte in data -> print(Int.from_u8(byte))
 }

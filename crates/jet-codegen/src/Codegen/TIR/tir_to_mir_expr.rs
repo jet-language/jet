@@ -1051,8 +1051,7 @@ pub(super) fn lower_receiver_place(
             recv,
             op: TBuiltinOp::ViewMutNew { line },
             args,
-        } if access == MirAccess::Write
-            && matches!(recv.ty.without_user_tags(), Type::List(_)) =>
+        } if access == MirAccess::Write && write_window_receiver(&recv.ty) =>
         {
             let Some(base) = lower_receiver_place(ctx, recv, access)? else {
                 return Ok(None);
@@ -1088,6 +1087,16 @@ pub(super) fn lower_receiver_place(
         _ => None,
     };
     Ok(place)
+}
+
+/// The receivers whose `&recv[a..b]` is a write range place over the owner's
+/// storage: a list, or a declared `ViewMut<T>` (D-MEMPROVENANCE2 reborrow).
+pub(super) fn write_window_receiver(ty: &Type) -> bool {
+    match ty.without_user_tags() {
+        Type::List(_) => true,
+        Type::Apply { name, args } => name == "ViewMut" && args.len() == 1,
+        _ => false,
+    }
 }
 
 fn lower_builtin_receiver(

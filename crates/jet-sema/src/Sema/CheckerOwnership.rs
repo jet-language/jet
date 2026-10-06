@@ -103,6 +103,25 @@ fn const_place_int(expr: &Expr) -> Option<i64> {
     }
 }
 
+/// Inclusive constant bounds of a range projection operand; a non-literal
+/// range leaves both bounds unknown.
+fn range_place_bounds(range: &Expr) -> (Option<i64>, Option<i64>) {
+    let Expr::Range {
+        start,
+        end,
+        exclusive,
+        ..
+    } = range
+    else {
+        return (None, None);
+    };
+    let mut end = const_place_int(end);
+    if *exclusive {
+        end = end.and_then(|value| value.checked_sub(1));
+    }
+    (const_place_int(start), end)
+}
+
 fn cell_guard_projection_path(expr: &Expr, parameter: &str) -> Option<Vec<String>> {
     match expr {
         Expr::Ident(name, _) if name == parameter => Some(Vec::new()),
@@ -2081,6 +2100,21 @@ impl<'a> Checker<'a> {
                 place.projections.push(ViewProjection::Field(field.clone()));
                 Some(place)
             }
+            // `xs[a..b]` parses as an index whose operand is the range; infer
+            // rewrites it to the `Slice` below, so both spellings name the same
+            // range projection (a call argument's place is taken before infer).
+            Expr::Index {
+                base, index, span, ..
+            } if matches!(index.as_ref(), Expr::Range { .. }) => {
+                let mut place = self.place_from_expr(base)?;
+                let (start, end) = range_place_bounds(index);
+                place.projections.push(ViewProjection::Range {
+                    start,
+                    end,
+                    span: *span,
+                });
+                Some(place)
+            }
             Expr::Index {
                 base, index, span, ..
             } => {
@@ -2100,20 +2134,7 @@ impl<'a> Checker<'a> {
             } => {
                 let mut place = self.place_from_expr(base)?;
                 let (start, end) = match range.as_deref() {
-                    Some(Expr::Range {
-                        start,
-                        end,
-                        exclusive,
-                        ..
-                    }) => {
-                        let start = const_place_int(start);
-                        let mut end = const_place_int(end);
-                        if *exclusive {
-                            end = end.and_then(|value| value.checked_sub(1));
-                        }
-                        (start, end)
-                    }
-                    Some(_) => (None, None),
+                    Some(range) => range_place_bounds(range),
                     None => (const_place_int(start), const_place_int(end)),
                 };
                 place.projections.push(ViewProjection::Range {
@@ -3810,7 +3831,12 @@ impl<'a> Checker<'a> {
 
     /// D-MEMPROVENANCE2: a call that returns a write view borrowed from a
     /// live write-view argument takes over that argument's exclusive loan.
+    /// Inference may wrap the call in its propagation node (`Try`).
     fn mutable_view_call_root(&self, expr: &Expr) -> Option<String> {
+        let expr = match expr.without_parens() {
+            Expr::Try(inner, ..) => inner.without_parens(),
+            other => other,
+        };
         let Expr::Call(call) = expr else {
             return None;
         };

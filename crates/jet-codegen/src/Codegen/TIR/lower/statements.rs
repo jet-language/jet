@@ -1507,6 +1507,17 @@ impl<'a> LowerBlock<'a> {
         }
 
         let index = self.index;
+        // D-MEMPROVENANCE2: a window over a declared view (not a list) is a
+        // reborrow of that view; it lowers as an ordinary binding, not a split.
+        let split_over_view = self.split_views.get(&index).is_some_and(|view| {
+            matches!(
+                tir_recv_jet_ty(&view.candidate.owner, &self.env),
+                Some(Type::Apply { name, args }) if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1
+            )
+        });
+        if split_over_view {
+            self.split_views.remove(&index);
+        }
         if let Some(view) = self.split_views.remove(&index) {
             let stmt = &self.stmts[index];
             if self.markers {
