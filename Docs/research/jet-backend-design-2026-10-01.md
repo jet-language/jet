@@ -1020,15 +1020,19 @@ function (a `validate` block or a default expression). Skipped, defaulted and
 computed fields, `#[Flatten]`, `#[DenyUnknownFields]`, `#[Tag]` and
 `#[Untagged]` keep the template.
 
-**Codec reachability.** Derived serde impls whose type no emitted body
-demands are skipped: a body demands an impl by calling one of its methods or
-by naming its type anywhere in a call's type arguments (generic Prelude
-codecs reach impls through trait bounds), and a demanded impl's methods are
-scanned in turn (`Compiler/JetFoundation/Source/MIR/Reachability.jet`
-`mir_demanded_codec_impls`, used by the Jet emitter for every program;
-MIRRust `demanded_codec_impls`, enabled only for stage zero through
-`MirRustExecutionConfig.prune_unreachable_codecs`). A missed demand fails
-rustc with E0277 rather than changing behavior.
+**Codec reachability.** Derived serde impls are emitted only for a checked
+use of their codec, per codec: a call of one of the impl's methods, a
+codec-bounded runtime route (the `CODEC_ROUTE_PREFIXES`/`_LEAVES` symbol
+families: typed decode, `json.to_string`, HTTP JSON, jobs, sync, data, App
+handlers) at the types in its type arguments, operands or result, a user call
+whose callee's generic parameters carry the codec bound, and the signatures
+of exports and jobs, whose wrappers decode inputs and encode results. A
+demanded impl's methods are scanned in turn, so a derived body demands its
+field types (`Compiler/JetFoundation/Source/MIR/Reachability.jet`
+`mir_demanded_codec_impls`, MIRRust `demanded_codec_impls`; both emitters, every
+program). The drift test `codec_bounded_runtime_functions_are_codec_routes`
+checks every codec-bounded Prelude function against the route families. A
+missed demand fails rustc with E0277 rather than changing behavior.
 
 **Proof.** The repro above and both `Core/app/app.jet` patterns, compiled
 from the Rust compiler's checked MIR through the Jet emitter (MIR from
