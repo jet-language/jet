@@ -57,7 +57,9 @@ pub fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment
     key := tir_test_artifact_key(environment.module_identity, test)
     owner_id := SymbolID{key: key}
     scopes := sema_scope_snapshot(module_scopes)
-    temporary_name := "__jet_test_{test.span.start}_{test.span.end}"
+    // Rust Validation.rs names the synthetic body `__test_<name>`; a runtime
+    // stop inside the test reports that name (`in __test_<name>`).
+    temporary_name := "__test_{test.name ?? "anonymous"}"
     synthetic := ast_func(temporary_name, test.name_span, test.span)
     synthetic.params = test.params
     synthetic.body = test.body
