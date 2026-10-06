@@ -3503,7 +3503,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             if let Err(error) =
                 crate::CmdDevTools::merge_cost_diagnostics(&projection.bundle, &mut all_diags)
             {
-                crate::CmdDevTools::exit_cost_projection_error(file, &error);
+                crate::CmdDevTools::exit_cost_projection_fault(&error);
             }
         }
         let has_errors = all_diags

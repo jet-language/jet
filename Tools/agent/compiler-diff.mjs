@@ -304,7 +304,6 @@ function uiCommands(source, file) {
   if (has("cli_build")) return [{ phase: "build", args: ["build", file] }];
   if (has("sandbox_effect") || has("plugin_target")) return [{ phase: "build", args: ["build", file, "--target=sandbox"] }];
   if (complexity) return [{ phase: "check", args: ["lint", "--complexity", file, `--max=${complexity.split(/\s+/u)[1]}`] }];
-  if (has("cost_cli")) return [{ phase: "check", args: ["explain", "--cost", file] }];
   if (has("dev_interpreter") || has("runtime_ffi") || has("parent_control_cancel")) {
     return [{ phase: "interpret", args: ["run", "--interpret", file] }];
   }

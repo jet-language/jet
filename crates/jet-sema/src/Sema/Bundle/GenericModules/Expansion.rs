@@ -598,9 +598,12 @@ fn hoist_inline_module_types(
         // to the wrapper's canonical identity before body checking.
         direct_types.insert(module_type_name(&display_alias, name), resolved.clone());
         direct_names.push(name.clone());
+        // The file reaches a public member only by its full module path. A
+        // nested module's own name (`bank` inside `vis2`) is a relative
+        // spelling inside its parent's body; exporting it file-wide would let
+        // `vis2.bank.Account` answer for a top-level `bank.Account`.
         if is_pub {
-            exported.insert(format!("{source_path}.{name}"), resolved.clone());
-            exported.insert(format!("{module_name}.{name}"), resolved);
+            exported.insert(format!("{source_path}.{name}"), resolved);
         }
     }
 

@@ -2131,34 +2131,30 @@ fn cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs() {
 }
 
 #[test]
-fn cost_cli_rejects_incomplete_reachable_tir_projection() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for (fixture, surface) in [
-        ("cost_incomplete_generic.jet", "identity"),
-        ("cost_incomplete_foreign.jet", "value"),
-    ] {
-        let file = root.join("tests/cli").join(fixture);
-        for args in [
-            vec!["check", file.to_str().unwrap()],
-            vec!["lint", "--cost", file.to_str().unwrap()],
-            vec!["explain", "--cost", file.to_str().unwrap(), "--json"],
-        ] {
-            let output = Command::new(jet())
-                .args(args)
-                .env("NO_COLOR", "1")
-                .output()
-                .unwrap();
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            assert!(
-                !output.status.success()
-                    && stderr.contains("E2104")
-                    && stderr.contains("cost projection")
-                    && stderr.contains("incomplete")
-                    && stderr.contains(surface),
-                "{fixture} must reject the omitted reachable {surface} surface:\n{stderr}"
-            );
-        }
-    }
+fn cost_cli_projects_generic_specializations() {
+    // Typed TIR lowers each generic specialization, so the projection is
+    // complete and names every specialization it costed. An incomplete
+    // projection is an internal compiler fault, never a user diagnostic.
+    let dir = isolated_cwd("cost_generic_specializations");
+    let file = dir.join("generic.jet");
+    fs::write(
+        &file,
+        "fn identity<T>(value: T) -> T {\n    return value\n}\n\nfn run() {\n    first :: identity(1)\n    second :: identity(\"text\")\n    print(first)\n    print(second)\n}\n",
+    )
+    .unwrap();
+    let output = Command::new(jet())
+        .args(["explain", "--cost", file.to_str().unwrap()])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success()
+            && stdout.contains("identity__generic__Int")
+            && stdout.contains("identity__generic__String"),
+        "generic specializations must be projected:\n{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

@@ -4296,7 +4296,7 @@ pub(crate) fn run_explain_cost(
     };
     let report = match jet::Codegen::TIR::cost_report(&projection.bundle) {
         Ok(report) => report,
-        Err(error) => exit_cost_projection_error(file, &error),
+        Err(error) => exit_cost_projection_fault(&error),
     };
     if mode.json {
         let sites = StatusValue::array(report.sites.iter().map(|site| {
@@ -4339,26 +4339,11 @@ pub(crate) fn run_explain_cost(
 
 const COST_TIER: &str = "shared-tir";
 
-pub(crate) fn exit_cost_projection_error(
-    file: &str,
-    error: &jet::Codegen::TIR::TCostReportError,
-) -> ! {
-    let fix = match error {
-        jet::Codegen::TIR::TCostReportError::Incomplete { surfaces } => format!(
-            "report the missing checked specialization for {} with this source file; its cost cannot be proved until the compiler lowers that specialization",
-            surfaces.join("; ")
-        ),
-        jet::Codegen::TIR::TCostReportError::Lowering { .. } => {
-            "report this checked-TIR lowering failure with the source file".to_string()
-        }
-    };
-    crate::cli_error!(
-        @full "E2104",
-        format!("cost projection for `{file}` failed"),
-        error.message(),
-        fix
-    );
-    exit(ExitCodes::USER_ERROR);
+/// A sema-checked program whose typed TIR cannot carry a complete cost
+/// projection is a compiler fault, not a user error: report it as an internal
+/// error (exit 101) instead of a user diagnostic.
+pub(crate) fn exit_cost_projection_fault(error: &jet::Codegen::TIR::TCostReportError) -> ! {
+    emit_internal_fault("", &error.message())
 }
 
 fn source_line(source: &str, span: jet::Diagnostics::Span) -> usize {
@@ -8436,7 +8421,7 @@ pub(crate) fn run_lint_cost(file: &str, mode: OutputMode) {
     };
     let lints = match cost_diagnostics(&projection.bundle, &projection.diagnostics) {
         Ok(lints) => lints,
-        Err(error) => exit_cost_projection_error(file, &error),
+        Err(error) => exit_cost_projection_fault(&error),
     };
     if lints.is_empty() {
         if mode.json {

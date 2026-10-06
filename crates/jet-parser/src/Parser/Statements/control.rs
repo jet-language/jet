@@ -2960,6 +2960,13 @@ impl<'a> Parser<'a> {
             TokKind::Hash if self.at_marker_head() && !self.at_expression_only_marker() => {
                 let marker =
                     self.parse_registered_marker_at_site(crate::Policy::RuleSite::Statement)?;
+                // A statement marker may sit on its own line above the
+                // statement it applies to, like a declaration marker.
+                while matches!(self.peek().kind, TokKind::Semi)
+                    && self.peek().span.start == self.peek().span.end
+                {
+                    self.bump();
+                }
                 let statement = self.stmt()?;
                 let target = statement.span();
                 self.bind_rule_fact(

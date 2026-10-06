@@ -5839,102 +5839,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         });
                     if let Some((wrapper, policy)) = user_policy {
                         let callee_expr = &call.args.last().expect("checked above").expr;
-                        let mut callee = lower_expr(callee_expr, cx, env);
-                        let policy_sig = cx
-                            .sigs
-                            .get(&wrapper)
-                            .expect("sema materialized the user policy wrapper");
-                        // The wrapper's `call` parameter (after the policy
-                        // parameters, before the target's own) is this
-                        // `apply`'s checked callable type. Sema fixed it before
-                        // the failure solve, so a named target inferred
-                        // `T Never!` since then enters that slot through the
-                        // plain-function adapter with the slot's carrier.
-                        let target_arity = match callee.ty.without_user_tags() {
-                            Type::Fn { params, .. } => Some(params.len()),
-                            _ => None,
-                        };
-                        let call_slot = target_arity
-                            .and_then(|arity| policy_sig.len().checked_sub(arity + 1))
-                            .and_then(|index| policy_sig.get(index))
-                            .map(|(_, slot)| slot)
-                            .filter(|slot| matches!(slot.without_user_tags(), Type::Fn { .. }));
-                        let named_target = matches!(
-                            &callee.kind,
-                            TExprKind::FnValue {
-                                kind: TFnValueKind::NamedFn {
-                                    name: Some(_),
-                                    lambda: None,
-                                },
-                            }
-                        );
-                        if let Some(slot) = call_slot.filter(|_| named_target) {
-                            callee.ty = slot.clone();
-                        }
-                        let policy_args = policy
-                            .args
-                            .iter()
-                            .enumerate()
-                            .map(|(index, argument)| {
-                                lower_one_call_arg(
-                                    argument,
-                                    policy_sig.get(index).cloned(),
-                                    env,
-                                    cx,
-                                )
-                            })
-                            .collect();
-                        let policy_conventions = policy
-                            .args
-                            .iter()
-                            .enumerate()
-                            .map(|(index, _)| {
-                                policy_sig
-                                    .get(index)
-                                    .map(|(convention, _)| *convention)
-                                    .unwrap_or(AccessConvention::Read)
-                            })
-                            .collect();
-                        let mut capture_names = HashSet::new();
-                        for argument in &policy.args {
-                            let (reads, calls) =
-                                crate::Sema::expr_free_reads_and_calls(&argument.expr);
-                            capture_names.extend(reads);
-                            capture_names.extend(calls);
-                        }
-                        let (reads, calls) = crate::Sema::expr_free_reads_and_calls(callee_expr);
-                        capture_names.extend(reads);
-                        capture_names.extend(calls);
-                        let mut capture_names = capture_names.into_iter().collect::<Vec<_>>();
-                        capture_names.sort();
-                        let captures = capture_names
-                            .into_iter()
-                            .filter_map(|name| {
-                                env.locals.contains_key(&name).then(|| {
-                                    (
-                                        name.clone(),
-                                        env.local_of(&name).name,
-                                        env.ty_of(&name)
-                                            .expect("checked policy capture has a type")
-                                            .clone(),
-                                    )
-                                })
-                            })
-                            .collect();
-                        let fn_type = callee.ty.clone();
-                        return TExpr {
-                            ty: fn_type.clone(),
-                            kind: TExprKind::FnValue {
-                                kind: TFnValueKind::Policy {
-                                    fn_type,
-                                    policy_args,
-                                    policy_conventions,
-                                    wrapper_name: Some(wrapper),
-                                    captures,
-                                    callee: Box::new(callee),
-                                },
-                            },
-                        };
+                        return lower_user_policy_value(callee_expr, policy, wrapper, cx, env);
                     }
                     return lower_expr(&call.args.last().expect("checked above").expr, cx, env);
                 }
@@ -6728,6 +6633,34 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             ),
                             None => lowered,
                         };
+                    });
+                }
+                // D-CALLPOLICY1=E: the declared `#Policy` chain is the default
+                // for every direct call of its target, so the call runs through
+                // the same policy value `apply` builds.
+                if let Some((wrapper, policy)) = declared_user_policy(call, cx, env) {
+                    return in_own_frame(|| {
+                        let policy = bind_declared_policy_args(policy, &wrapper, &call.name, cx);
+                        let target = Expr::Ident(call.name.clone(), call.name_span);
+                        let value = lower_user_policy_value(&target, &policy, wrapper, cx, env);
+                        let lowered = lower_fn_value_call(
+                            None,
+                            value,
+                            &call.args,
+                            call.name_span.start as u32,
+                            cx,
+                            env,
+                        );
+                        let resolved_ret = call.resolved_ret.clone().or_else(|| {
+                            crate::Codegen::TIR::mir::never_carrier_success(&lowered.ty).cloned()
+                        });
+                        consume_plain_helper_route(
+                            resolved_ret.as_ref(),
+                            call.name_span,
+                            lowered,
+                            cx,
+                            env,
+                        )
                     });
                 }
                 // Resolve the callee's signature so each arg's borrow/clone/fn-coercion is
@@ -9368,6 +9301,179 @@ pub(crate) fn lower_owned_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     } else {
         lowered
     }
+}
+
+/// D-STRUCT-POLICY1=A: close one checked package policy over its setting
+/// values and the target callable. `apply(policy(...), f)` and a direct call
+/// of a `#Policy(policy(...))` target both produce this one value.
+fn lower_user_policy_value(
+    callee_expr: &Expr,
+    policy: &crate::AST::Call,
+    wrapper: String,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    let mut callee = lower_expr(callee_expr, cx, env);
+    let policy_sig = cx
+        .sigs
+        .get(&wrapper)
+        .expect("sema materialized the user policy wrapper");
+    // The wrapper's `call` parameter (after the policy parameters, before the
+    // target's own) is the checked callable type. Sema fixed it before the
+    // failure solve, so a named target inferred `T Never!` since then enters
+    // that slot through the plain-function adapter with the slot's carrier.
+    let target_arity = match callee.ty.without_user_tags() {
+        Type::Fn { params, .. } => Some(params.len()),
+        _ => None,
+    };
+    let call_slot = target_arity
+        .and_then(|arity| policy_sig.len().checked_sub(arity + 1))
+        .and_then(|index| policy_sig.get(index))
+        .map(|(_, slot)| slot)
+        .filter(|slot| matches!(slot.without_user_tags(), Type::Fn { .. }));
+    let named_target = matches!(
+        &callee.kind,
+        TExprKind::FnValue {
+            kind: TFnValueKind::NamedFn {
+                name: Some(_),
+                lambda: None,
+            },
+        }
+    );
+    if let Some(slot) = call_slot.filter(|_| named_target) {
+        callee.ty = slot.clone();
+    }
+    let policy_args = policy
+        .args
+        .iter()
+        .enumerate()
+        .map(|(index, argument)| {
+            lower_one_call_arg(argument, policy_sig.get(index).cloned(), env, cx)
+        })
+        .collect();
+    let policy_conventions = policy
+        .args
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            policy_sig
+                .get(index)
+                .map(|(convention, _)| *convention)
+                .unwrap_or(AccessConvention::Read)
+        })
+        .collect();
+    let mut capture_names = HashSet::new();
+    for argument in &policy.args {
+        let (reads, calls) = crate::Sema::expr_free_reads_and_calls(&argument.expr);
+        capture_names.extend(reads);
+        capture_names.extend(calls);
+    }
+    let (reads, calls) = crate::Sema::expr_free_reads_and_calls(callee_expr);
+    capture_names.extend(reads);
+    capture_names.extend(calls);
+    let mut capture_names = capture_names.into_iter().collect::<Vec<_>>();
+    capture_names.sort();
+    let captures = capture_names
+        .into_iter()
+        .filter_map(|name| {
+            env.locals.contains_key(&name).then(|| {
+                (
+                    name.clone(),
+                    env.local_of(&name).name,
+                    env.ty_of(&name)
+                        .expect("checked policy capture has a type")
+                        .clone(),
+                )
+            })
+        })
+        .collect();
+    let fn_type = callee.ty.clone();
+    TExpr {
+        ty: fn_type.clone(),
+        kind: TExprKind::FnValue {
+            kind: TFnValueKind::Policy {
+                fn_type,
+                policy_args,
+                policy_conventions,
+                wrapper_name: Some(wrapper),
+                captures,
+                callee: Box::new(callee),
+            },
+        },
+    }
+}
+
+/// D-CALLPOLICY1=E: a `#Policy(...)` chain is the declaration default, so a
+/// direct call of its target runs through the same checked wrapper `apply`
+/// selects. Returns the first user policy that sema materialized a wrapper for.
+fn declared_user_policy<'a>(
+    call: &crate::AST::Call,
+    cx: &'a Cx,
+    env: &LowerEnv,
+) -> Option<(String, &'a crate::AST::Call)> {
+    if env.locals.contains_key(&call.name) {
+        return None;
+    }
+    cx.fn_policy_calls.get(&call.name)?.iter().find_map(|policy| {
+        let wrapper = crate::AST::CallablePolicyChain::user_wrapper_name(&policy.name, &call.name);
+        cx.sigs.contains_key(&wrapper).then_some((wrapper, policy))
+    })
+}
+
+/// The marker spelling `#Policy(audit("users.load"))` is not a checked call,
+/// so bind its arguments to the wrapper's policy parameters here: labels by
+/// declaration name, the rest by position, and every omitted slot from the
+/// policy declaration's default.
+fn bind_declared_policy_args(
+    policy: &crate::AST::Call,
+    wrapper: &str,
+    target: &str,
+    cx: &Cx,
+) -> crate::AST::Call {
+    let mut bound = policy.clone();
+    let Some(Type::Fn {
+        call_metadata: Some(metadata),
+        ..
+    }) = cx.fn_types.get(wrapper)
+    else {
+        return bound;
+    };
+    let target_arity = cx.sigs.get(target).map_or(0, Vec::len);
+    let count = metadata.names.len().saturating_sub(target_arity + 1);
+    let mut slots: Vec<Option<CallArg>> = vec![None; count];
+    let mut next = 0;
+    for argument in &policy.args {
+        let index = match &argument.label {
+            Some((label, _)) => metadata.names.iter().position(|name| name == label),
+            None => {
+                next += 1;
+                Some(next - 1)
+            }
+        };
+        if let Some(slot) = index.and_then(|index| slots.get_mut(index)) {
+            let mut argument = argument.clone();
+            argument.label = None;
+            *slot = Some(argument);
+        }
+    }
+    bound.args = slots
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, slot)| {
+            slot.or_else(|| {
+                let default = metadata.defaults.get(index).cloned().flatten()?;
+                Some(CallArg {
+                    convention: AccessConvention::Read,
+                    span: default.span(),
+                    expr: default,
+                    flags: Default::default(),
+                    label: None,
+                    spread: false,
+                })
+            })
+        })
+        .collect();
+    bound
 }
 
 /// D-APILABEL1=A: keep the ratified evaluation order across a label reorder.
