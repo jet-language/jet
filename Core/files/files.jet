@@ -189,27 +189,27 @@ pub struct Directory {
 
     /// Open the regular file `name` for reading.
     pub fn open(self, name: String) -[FS.Read]> FileReader IOError! {
-        held_name(self.path, name, .Read)
+        held_name(self.path, name, false)
         core.files.__open_reader(self.handle, name, 1)
     }
 
     /// Create the file `name`, with the same labels as `files.create`.
     pub fn create(self, name: String, if_exists: CreateIfExists{.Replace}, mode: Int?{None}) -[FS.Write]> FileWriter IOError! {
-        held_name(self.path, name, .Write)
+        held_name(self.path, name, true)
         core.files.__open_writer(self.handle, name, false, create_code(if_exists), mode ?? -1, 1)
     }
 
     /// Hold the directory `name` inside this one.
     pub fn open_directory(self, name: String) -[FS.Read]> Directory IOError! {
-        held_name(self.path, name, .Read)
+        held_name(self.path, name, false)
         key :: core.files.__open_directory(self.handle, name)
         Ok(Directory{path: join(self.path, name), handle: key})
     }
 
     /// Create the directory `name` and hold it. An existing name reports
     /// `IOError.AlreadyExists`.
-    pub fn create_directory(self, name: String, mode: Int?{None}) -[FS.Write]> Directory IOError! {
-        held_name(self.path, name, .Write)
+    pub fn create_directory(self, name: String, mode: Int?{None}) -[FS.Read, FS.Write]> Directory IOError! {
+        held_name(self.path, name, true)
         core.files.__create_directory(self.handle, name, mode ?? -1)
         key :: core.files.__open_directory(self.handle, name)
         Ok(Directory{path: join(self.path, name), handle: key})
@@ -226,21 +226,21 @@ pub struct Directory {
 
     /// Describe the entry `name` without following a final link.
     pub fn entry_stat(self, name: String) -[FS.Read]> Stat IOError! {
-        held_name(self.path, name, .Read)
+        held_name(self.path, name, false)
         row :: core.files.__stat_at(self.handle, name, false)
         Ok(stat_from_row(row))
     }
 
     /// The text stored in the link `name`, exactly as stored (D-CORE-HANDLEFD1=A).
     pub fn read_link(self, name: String) -[FS.Read]> String IOError! {
-        held_name(self.path, name, .Read)
+        held_name(self.path, name, false)
         core.files.__read_link_at(self.handle, name)
     }
 
     /// Rename `from` to `to`, both inside this directory unless `into` names
     /// the directory that receives `to`. `if_exists` follows `files.rename`.
     pub fn rename(self, from: String, to: String, into: Directory?{None}, if_exists: RenameIfExists{.Replace}) IOError! -[FS.Write]> {
-        held_name(self.path, from, .Write)
+        held_name(self.path, from, true)
         target := self.handle
         target_path := self.path
         if into == {
@@ -250,19 +250,19 @@ pub struct Directory {
             }
             else -> {}
         }
-        held_name(target_path, to, .Write)
+        held_name(target_path, to, true)
         core.files.__rename_at(self.handle, from, target, to, rename_code(if_exists))
     }
 
     /// Remove the non-directory entry `name`; a link is removed, not followed.
     pub fn remove(self, name: String) IOError! -[FS.Write]> {
-        held_name(self.path, name, .Write)
+        held_name(self.path, name, true)
         core.files.__remove_at(self.handle, name, false)
     }
 
     /// Remove the empty directory `name`.
     pub fn remove_directory(self, name: String) IOError! -[FS.Write]> {
-        held_name(self.path, name, .Write)
+        held_name(self.path, name, true)
         core.files.__remove_at(self.handle, name, true)
     }
 
@@ -286,9 +286,17 @@ pub fn open_directory(path: String) -[FS.Read]> Directory IOError! {
 }
 
 
-fn held_name_error(shown: String, operation: IOOperation, why: String) -> IOError Never! {
+fn held_name_error(shown: String, write: Bool, why: String) -> IOError Never! {
+    if write {
+        return IOError.InvalidInput(IOContext{
+            operation: .Write,
+            resource: Val(shown),
+            os_code: None,
+            cause: Val(why),
+        })
+    }
     IOError.InvalidInput(IOContext{
-        operation: operation,
+        operation: .Read,
         resource: Val(shown),
         os_code: None,
         cause: Val(why),
@@ -297,23 +305,22 @@ fn held_name_error(shown: String, operation: IOOperation, why: String) -> IOErro
 
 
 // D-CORE-FILEDIR1=A: a held-directory name is plain parts separated by `/`.
-fn held_name(base: String, name: String, operation: IOOperation) IOError! {
+fn held_name(base: String, name: String, write: Bool) IOError! {
     shown :: join(~base, ~name)
     raw :: (~name).bytes()
-    if raw.len() == 0 -> return Err(held_name_error(shown, operation, "the name is empty; pass a relative name such as `pkg/data`"))
-    if is_abs_impl(~name) -> return Err(held_name_error(shown, operation, "the name is absolute; a held directory takes a relative name"))
+    if raw.len() == 0 -> return Err(held_name_error(shown, write, "the name is empty; pass a relative name such as `pkg/data`"))
+    if is_abs_impl(~name) -> return Err(held_name_error(shown, write, "the name is absolute; a held directory takes a relative name"))
     start := 0
     i := 0
     loop i <= raw.len() {
         if i == raw.len() || raw[i] == (U8{47}) || raw[i] == (U8{92}) {
             part :: slice_path(~name, start, i)
-            if part == "" -> return Err(held_name_error(shown, operation, "the name has an empty part; remove the doubled or trailing `/`"))
-            if part == "." || part == ".." -> return Err(held_name_error(shown, operation, "the part `{part}` is refused; a held directory takes only plain names, so open the parent directory instead"))
+            if part == "" -> return Err(held_name_error(shown, write, "the name has an empty part; remove the doubled or trailing `/`"))
+            if part == "." || part == ".." -> return Err(held_name_error(shown, write, "the part `{part}` is refused; a held directory takes only plain names, so open the parent directory instead"))
             start = i + 1
         }
         i = i + 1
     }
-    Ok()
 }
 
 
@@ -1329,7 +1336,7 @@ pub fn getsize(path: String) -[FS]> Int IOError! {
 
 pub fn getmtime(path: String) -[FS]> Int IOError! {
     row :: core.files.__stat_at(-1, path, false)
-    Ok(row[9] / 1000000)
+    Ok(row[9] /% 1000000)
 }
 
 

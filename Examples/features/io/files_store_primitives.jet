@@ -1,6 +1,6 @@
 package {
     name: "files_store_primitives"
-    authority: { holds: { allow: [FS.Read, FS.Write, IO] } }
+    authority: { holds: { allow: [FS.Read, FS.Write, IO, Mem.Alloc, Time.Wait] } }
 }
 
 // Store-grade core.files primitives (#3593): exclusive create with a mode,
@@ -106,8 +106,9 @@ fn run() {
     print("absent attribute: {missing == None}")
     if files.set_extended_attribute(partial, "user.origin", "jet".bytes()) == {
         .Ok(_) -> {
-            value :: files.extended_attribute(partial, "user.origin")
-            print("attribute written: {value == Val("jet".bytes())}")
+            stored :: files.extended_attribute(partial, "user.origin")
+            bytes :: stored ?? [U8]{}
+            print("attribute written: {bytes == "jet".bytes()}")
         }
         .Err(error) -> print("attribute written: {kind(error) == "Unsupported"}")
     }

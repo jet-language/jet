@@ -480,6 +480,15 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "glob",
                 "canonicalize",
                 "absolute",
+                // #3593 provider leaves behind Core/files/files.jet.
+                "__open_reader",
+                "__open_directory",
+                "__close_directory",
+                "__list_directory",
+                "__stat_at",
+                "__read_link_at",
+                "__xattr_names",
+                "__xattr_get",
             ],
         )
     {
@@ -512,6 +521,12 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "temp_dir",
                 "temp_file",
                 "lock",
+                "__open_writer",
+                "__create_directory",
+                "__fsync_directory",
+                "__rename_at",
+                "__remove_at",
+                "__xattr_set",
             ],
         )
     {
