@@ -973,6 +973,117 @@ fn inline_range_literal(expr: &Expr) -> Option<(crate::Numeric::CtBigInt, Span)>
 }
 
 impl<'a> Checker<'a> {
+    /// D-ALLOC-D: `mem.Fixed.new(size:)` / `mem.Fixed.over(&bytes)` validation.
+    /// Shared by the `core.mem` constructor-sentinel route and the
+    /// `Fixed`-typed receiver route, so neither skips the E0103 checks.
+    fn check_fixed_constructor(
+        &mut self,
+        method: &str,
+        args: &mut Vec<crate::AST::CallArg>,
+        span: Span,
+    ) {
+        if !self.allow_fixed_constructor {
+            self.diags.push(Diagnostic::error(
+                "E0103",
+                format!("`Fixed.{method}` must directly initialize a lexical binding"),
+                "the Fixed handle borrows inline storage whose lifetime and drop order are fixed at its declaration".to_string(),
+                format!("write `fixed :: mem.Fixed.{method}(…)`"),
+                Some(span),
+            ));
+        }
+        if args.len() != 1 {
+            self.diags.push(Diagnostic::error(
+                "E0103",
+                format!("`Fixed.{method}` takes exactly one argument"),
+                if method == "new" {
+                    "the inline backing size must be a positive compile-time integer".to_string()
+                } else {
+                    "the backing must be one mutable fixed-size byte array".to_string()
+                },
+                if method == "new" {
+                    "write `fixed :: mem.Fixed.new(size: 4096)`".to_string()
+                } else {
+                    "write `fixed :: mem.Fixed.over(&bytes)` with the write-access marker `&`".to_string()
+                },
+                Some(span),
+            ));
+            for arg in args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            return;
+        }
+        let inferred = self.infer(&mut args[0].expr);
+        if method == "new" {
+            let direct_size = match &args[0].expr {
+                Expr::Int(value, _, _, _) => Some(*value),
+                Expr::ComptimeName {
+                    value: Some(CtValue::Int(value)),
+                    ..
+                } => Some(*value),
+                Expr::Ident(name, _) => match self.current_ct_globals().get(name) {
+                    Some(CtValue::Int(value)) => Some(*value),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if !self.defer_ct_evaluation {
+                let size = direct_size.or_else(|| {
+                    let evaluated = {
+                        let globals = self.current_ct_globals();
+                        crate::Comptime::evaluate_owned_with_imports_opts_collecting(
+                            &args[0].expr,
+                            self.ct_checked_funcs_for_evaluation(),
+                            self.ct_externs,
+                            self.ct_base_dir,
+                            globals.as_ref(),
+                            self.core_imports,
+                            self.gates,
+                            0,
+                            None,
+                        )
+                    };
+                    match evaluated {
+                        Ok((CtValue::Int(value), inputs)) => {
+                            self.ct_embed_inputs.extend(inputs);
+                            Some(value)
+                        }
+                        _ => None,
+                    }
+                });
+                if let Some(size) = size.filter(|size| *size > 0) {
+                    let arg_span = args[0].expr.span();
+                    args[0].expr = Expr::Int(size, arg_span, None, None);
+                } else {
+                    self.diags.push(Diagnostic::error(
+                        "E0103",
+                        "`Fixed.new` needs a positive compile-time byte size".to_string(),
+                        "runtime-sized storage cannot become an inline fixed array in the current stack frame".to_string(),
+                        "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`".to_string(),
+                        Some(args[0].expr.span()),
+                    ));
+                }
+            }
+        } else {
+            let fixed_bytes = matches!(
+                inferred,
+                Some(Type::FixedList { elem, len, .. })
+                    if len.literal_value().is_some_and(|len| len > 0)
+                        && matches!(*elem, Type::IntN { signed: false, bits: 8 })
+            );
+            let direct_mutable_buffer = args[0].convention == AccessConvention::Write
+                && matches!(&args[0].expr, Expr::Ident(..));
+            if !fixed_bytes || !direct_mutable_buffer {
+                self.diags.push(Diagnostic::error(
+                    "E0103",
+                    "`Fixed.over` needs one mutable fixed-size byte buffer".to_string(),
+                    "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed".to_string(),
+                    "bind `[Byte#N]` storage, then write `fixed :: mem.Fixed.over(&storage)` with the write-access marker `&`".to_string(),
+                    Some(args[0].expr.span()),
+                ));
+            }
+        }
+    }
+
     fn check_http_route_constant(
         &mut self,
         type_name: &str,
@@ -1621,6 +1732,12 @@ impl<'a> Checker<'a> {
                             leaf.clone()
                         };
                         **receiver = Expr::Ident(type_name.clone(), span);
+                        if type_name == "Fixed" && matches!(method, "new" | "over") {
+                            *recv_type_out = Some(type_name.clone());
+                            *resolved_ret_out = Some(Type::Named(type_name.clone()));
+                            self.check_fixed_constructor(method, args, span);
+                            return Some(Type::Named(type_name));
+                        }
                         // `core.mem` allocator fields are constructor sentinels, not
                         // ordinary static types. Preserve the checked return fact on
                         // the call node before the generic static-method fallback.
@@ -5867,106 +5984,7 @@ impl<'a> Checker<'a> {
             if handle_ty_s == "Fixed" && matches!(method, "new" | "over") {
                 *recv_type_out = Some(handle_ty_s.clone());
                 *resolved_ret_out = Some(Type::Named(handle_ty_s.clone()));
-                if !self.allow_fixed_constructor {
-                    self.diags.push(Diagnostic::error(
-                            "E0103",
-                            format!("`Fixed.{method}` must directly initialize a lexical binding"),
-                            "the Fixed handle borrows inline storage whose lifetime and drop order are fixed at its declaration".to_string(),
-                            format!("write `fixed :: mem.Fixed.{method}(…)`"),
-                            Some(span),
-                        ));
-                }
-                if args.len() != 1 {
-                    self.diags.push(Diagnostic::error(
-                            "E0103",
-                            format!("`Fixed.{method}` takes exactly one argument"),
-                            if method == "new" {
-                                "the inline backing size must be a positive compile-time integer".to_string()
-                            } else {
-                                "the backing must be one mutable fixed-size byte array".to_string()
-                            },
-                            if method == "new" {
-                                "write `fixed :: mem.Fixed.new(size: 4096)`".to_string()
-                            } else {
-                                "write `fixed :: mem.Fixed.over(&bytes)` with the write-access marker `&`".to_string()
-                            },
-                            Some(span),
-                        ));
-                    for arg in args.iter_mut() {
-                        self.infer(&mut arg.expr);
-                    }
-                    return Some(Type::Named(handle_ty_s));
-                }
-                let inferred = self.infer(&mut args[0].expr);
-                if method == "new" {
-                    let direct_size = match &args[0].expr {
-                        Expr::Int(value, _, _, _) => Some(*value),
-                        Expr::ComptimeName {
-                            value: Some(CtValue::Int(value)),
-                            ..
-                        } => Some(*value),
-                        Expr::Ident(name, _) => match self.current_ct_globals().get(name) {
-                            Some(CtValue::Int(value)) => Some(*value),
-                            _ => None,
-                        },
-                        _ => None,
-                    };
-                    if !self.defer_ct_evaluation {
-                        let size = direct_size.or_else(|| {
-                            let evaluated = {
-                                let globals = self.current_ct_globals();
-                                crate::Comptime::evaluate_owned_with_imports_opts_collecting(
-                                    &args[0].expr,
-                                    self.ct_checked_funcs_for_evaluation(),
-                                    self.ct_externs,
-                                    self.ct_base_dir,
-                                    globals.as_ref(),
-                                    self.core_imports,
-                                    self.gates,
-                                    0,
-                                    None,
-                                )
-                            };
-                            match evaluated {
-                                Ok((CtValue::Int(value), inputs)) => {
-                                    self.ct_embed_inputs.extend(inputs);
-                                    Some(value)
-                                }
-                                _ => None,
-                            }
-                        });
-                        if let Some(size) = size.filter(|size| *size > 0) {
-                            let arg_span = args[0].expr.span();
-                            args[0].expr = Expr::Int(size, arg_span, None, None);
-                        } else {
-                            self.diags.push(Diagnostic::error(
-                                    "E0103",
-                                    "`Fixed.new` needs a positive compile-time byte size".to_string(),
-                                    "runtime-sized storage cannot become an inline fixed array in the current stack frame".to_string(),
-                                    "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`".to_string(),
-                                    Some(args[0].expr.span()),
-                                ));
-                        }
-                    }
-                } else {
-                    let fixed_bytes = matches!(
-                        inferred,
-                        Some(Type::FixedList { elem, len, .. })
-                            if len.literal_value().is_some_and(|len| len > 0)
-                                && matches!(*elem, Type::IntN { signed: false, bits: 8 })
-                    );
-                    let direct_mutable_buffer = args[0].convention == AccessConvention::Write
-                        && matches!(&args[0].expr, Expr::Ident(..));
-                    if !fixed_bytes || !direct_mutable_buffer {
-                        self.diags.push(Diagnostic::error(
-                                "E0103",
-                                "`Fixed.over` needs one mutable fixed-size byte buffer".to_string(),
-                                "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed".to_string(),
-                                "bind `[Byte#N]` storage, then write `fixed :: mem.Fixed.over(&storage)` with the write-access marker `&`".to_string(),
-                                Some(args[0].expr.span()),
-                            ));
-                    }
-                }
+                self.check_fixed_constructor(method, args, span);
                 return Some(Type::Named(handle_ty_s));
             }
             if let Some(ret) =

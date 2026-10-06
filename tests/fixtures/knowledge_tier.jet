@@ -37,14 +37,14 @@ fn exactness_value() -> Bool {
 }
 
 fn unit_value() -> Float {
-    source :: Half.from_float(5.0)
+    source :: Half.from_float(Float{5.0})
     value :: Meter.from_half_rounded(source, .NearestEven, digits: 0) ?? panic("unit gate")
     value.raw()
 }
 
 fn state_value() -> String {
     reservation := Reservation.book("state")
-    reservation = reservation.pay()
+    reservation = ^reservation.pay()
     reservation.guest
 }
 

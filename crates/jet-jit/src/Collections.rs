@@ -11636,6 +11636,7 @@ host_fns! {
     get_disjoint_write: "jet_jit_get_disjoint_write" => jet_jit_get_disjoint_write: sig_disjoint;
     range_contains: "jet_jit_range_contains" => jet_jit_range_contains: sig_range_contains;
     checked_range_contains: "jet_range_contains" => jet_jit_range_contains_value: sig_list_eq;
+    checked_range_value_contains: "jet_range_value_contains" => jet_jit_range_contains_value: sig_list_eq;
     index_map_set: "jet_index_map_set" => jet_jit_index_map_set: sig_index_map_set;
     range_show: "jet_jit_range_show" => jet_jit_range_show: sig_range_show;
     range_equal: "jet_jit_range_equal" => jet_jit_range_equal: sig_range_equal;
