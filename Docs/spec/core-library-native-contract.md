@@ -110,6 +110,12 @@ both signed zeros without assigning policy to the native cell.
 `play_sound` preserves the existing non-empty-path acceptance contract, not a
 claim of native audio submission; this pair requires no host operation.
 
+`core.web.virtual` windows are Jet records. Window construction, measured-size
+estimation, bounded slicing and indices, and `WebVirtualWindow.facts_json` use
+the source implementation rather than a native window carrier. The facts
+method emits all nine stored fields in declaration order without serializing
+row payloads or recomputing layout.
+
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.

@@ -257,3 +257,17 @@ fn empty_window_facts() -> Bool {
     w :: window(-1, -1, -1, 0, -1)
     w.facts_json() == "{{\"total_count\":0,\"scroll_offset\":0,\"viewport_size\":0,\"estimated_item_size\":1,\"overscan\":0,\"start\":0,\"end\":0,\"total_size\":0,\"measured_count\":0}}"
 }
+
+#Test
+fn measured_window_estimate() -> Bool {
+    w :: window_measured(100, 0, 30, 10, 0, [Int]{0, -1, 10, 20})
+    w.estimated_item_size == 15 && w.measured_count == 2 && w.start == 0 && w.end == 2 && w.total_size == 1500
+}
+
+#Test
+fn window_slice_bounds() -> Bool {
+    w :: window(5, 20, 20, 10, 0)
+    rows :: slice<Int>([Int]{10, 11, 12, 13, 14}, w)
+    positions :: indices(w)
+    rows.len() == 2 && rows[0] == 12 && rows[1] == 13 && positions.len() == 2 && positions[0] == 2 && positions[1] == 3
+}

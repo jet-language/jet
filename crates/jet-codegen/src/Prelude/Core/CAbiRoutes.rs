@@ -4174,33 +4174,6 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetWebVirtualViewport(value: *mut crate::JetWebVirtualViewport) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_JetWebVirtualViewport(value: *mut crate::JetWebVirtualViewport) -> *mut crate::JetWebVirtualViewport {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetWebVirtualWindow(value: *mut crate::JetWebVirtualWindow) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_JetWebVirtualWindow(value: *mut crate::JetWebVirtualWindow) -> *mut crate::JetWebVirtualWindow {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_JetWorkflowHandle(value: *mut crate::JetWorkflowHandle) {
