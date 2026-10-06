@@ -207,18 +207,21 @@ fn assert_front_end(entry: &GoldenEntry, src: &str) {
     );
 }
 
-/// Does running this example start a service that serves until the process is
-/// stopped? One canonical answer, `jet::AST::bundle_serves_until_stopped` — the
-/// same fact `tests/dev_parts/support.rs` reads, never a stem list.
-fn example_serves_until_stopped(path: &Path) -> bool {
-    let Some(path) = path.to_str() else {
-        return false;
-    };
-    let Ok(mut bundle) = jet::Loader::load_entry(path) else {
-        return false;
-    };
+/// Why this example's native binary is built but not run, from facts the
+/// program declares — never a stem list. A service serves until stopped
+/// (`jet::AST::bundle_serves_until_stopped`, the same fact
+/// `tests/dev_parts/support.rs` reads). A browser-only program (`#Target(Web)`
+/// on its entry file) has its run proof in `tests/web_build.rs`.
+fn example_native_run_skip(path: &Path) -> Option<&'static str> {
+    let mut bundle = jet::Loader::load_entry(path.to_str()?).ok()?;
     let _ = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    jet::AST::bundle_serves_until_stopped(&bundle)
+    if jet::AST::bundle_serves_until_stopped(&bundle) {
+        return Some("service entry serves until stopped");
+    }
+    let browser_only = bundle.modules.get(bundle.entry).is_some_and(|module| {
+        module.default_target.as_deref() == Some(jet::Syntax::BUILD_TARGET_WEB)
+    });
+    browser_only.then_some("declared #Target(Web): browser-only, run by tests/web_build.rs")
 }
 
 #[test]
@@ -780,19 +783,17 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         stem,
         String::from_utf8_lossy(&out.stderr)
     );
-    // #2016 / D-WEBAPP-SERVE1=D: an `App`-returning entry is handed to
-    // `App::serve`, which binds a listener and then serves until the process is
-    // stopped. Such a program has no terminating stdout and no exit code of its
-    // own, so it cannot have a `.out` golden — running it here would hang the
-    // suite (or, for the three `App` examples, race a fixed port). It stays in
-    // the COMPILE universe: front end, I1, and I2 above all still apply.
-    // Held back by the canonical derived predicate — the same one
-    // `tests/dev_parts/support.rs` uses — so a fourth service example is
-    // classified instead of discovered as a timeout.
-    if example_serves_until_stopped(&entry.path) {
-        eprintln!(
-            "note: built Examples/features/{stem}.jet; not run (service entry serves until stopped)"
-        );
+    // #2016 / D-WEBAPP-SERVE1=D: a service entry (an `App`-returning `run`, or
+    // a declared `Output.Service`) binds a listener and then serves until the
+    // process is stopped. Such a program has no terminating stdout and no exit
+    // code of its own, so it cannot have a `.out` golden — running it here
+    // would hang the suite or race a fixed port. A browser-only program's
+    // native run fails closed by design; its run proof is tests/web_build.rs.
+    // Both stay in the COMPILE universe: front end, I1, and I2 above all still
+    // apply. Held back by declared facts, so a new example is classified
+    // instead of discovered as a timeout.
+    if let Some(reason) = example_native_run_skip(&entry.path) {
+        eprintln!("note: built Examples/features/{stem}.jet; not run ({reason})");
         return;
     }
 

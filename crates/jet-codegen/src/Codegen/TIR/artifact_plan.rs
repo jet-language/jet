@@ -1061,8 +1061,7 @@ fn lower_entry(
             output_kind: output.kind,
             initialize_environment: initialize_environment(bundle, target),
             initialize_gc: false,
-            serves_until_stopped: matches!(output.kind, OutputKind::Service)
-                || crate::AST::bundle_serves_until_stopped(bundle),
+            serves_until_stopped: crate::AST::bundle_serves_until_stopped(bundle),
             package_version: bundle.build_facts.package_version.clone(),
         });
     }
