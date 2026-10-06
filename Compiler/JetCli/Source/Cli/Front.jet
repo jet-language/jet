@@ -4,9 +4,10 @@
 // (`explain <CODE>`, `check [<file>|<dir>]`, `build <file>`,
 // `run [<file>|<dir>]`, `test <file>`, `new <name>`, `doc <file>`, and
 // `emit --rust <file>`; a bare or directory target resolves the project
-// entry, Entry.jet). Every report is the Rust host's exact bytes and exit
-// status for the same argv. A command whose Jet port has not landed yet is
-// refused with E2104 instead of guessing its behavior.
+// entry, Entry.jet), and the inspect group (Inspect.jet). Every report is
+// the Rust host's exact bytes and exit status for the same argv. A command
+// whose Jet port has not landed yet is refused with E2104 instead of
+// guessing its behavior.
 use core.files as cli_files
 use jet_driver.[
     JetDriverVerbOutput,
@@ -65,6 +66,11 @@ pub enum JetCLIPlan {
     // `jet lint --a11y <file>`: report the accessibility lints of the entry
     // (CmdDevTools.rs `run_lint_a11y`); `notice` is resolution's stderr.
     Lint(file: String, source: String, color: Bool, notice: String)
+    // An inspect projection over a checked entry (Inspect.jet): the host
+    // compiles `job.file`, then projects the checked program.
+    Inspect(job: JetCLIInspectJob)
+    // An inspect command the host runs (InspectB.jet).
+    InspectB(plan: JetCLIInspectBPlan)
 }
 
 // The `jet test` options the Jet host carries out (Source/CmdCompile.rs
@@ -143,14 +149,16 @@ fn jet_cli_fail(code: String, what: String, why: String, fix: String, color: Boo
 
 // A real `jet` command whose Jet port has not landed: refused, never guessed.
 fn jet_cli_not_ported(command: String, color: Bool) -> JetCLIPlan Never! {
-    jet_cli_fail(
-        "E2104",
-        "`jet {command}` is not part of the Jet-hosted CLI yet",
-        jet_cli_why("E2104"),
-        "run `jet {command}` with the Rust-hosted `jet` until the Jet CLI owns it",
-        color,
-        JET_DRIVER_EXIT_USAGE,
-    )
+    JetCLIPlan.Done{output: jet_cli_not_ported_output(command, color)}
+}
+
+// The bytes and status of that refusal, for a host-side projection.
+fn jet_cli_not_ported_output(command: String, color: Bool) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{
+        stdout: "",
+        stderr: jet_cli_report("E2104", "`jet {command}` is not part of the Jet-hosted CLI yet", jet_cli_why("E2104"), "run `jet {command}` with the Rust-hosted `jet` until the Jet CLI owns it", color),
+        exit_code: JET_DRIVER_EXIT_USAGE,
+    }
 }
 
 fn jet_cli_prefix(items: [String], end: Int) -> [String] Never! {
@@ -916,7 +924,9 @@ fn jet_cli_plan(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
     json :: jet_cli_wants_json(owned)
     if raw.len() == 0 -> return jet_cli_not_ported("repl", color)
     if raw[0] == "?" -> return jet_cli_not_ported("?", color)
-    if json && raw[0] != "doc" && raw[0] != "check" -> return jet_cli_not_ported("{raw[0]} --json", color)
+    // `check`, `doc`, and the inspect group render their own `--json`
+    // envelopes (Report.jet, Inspect.jet).
+    if json && raw[0] != "doc" && raw[0] != "check" && raw[0] != "inspect" -> return jet_cli_not_ported("{raw[0]} --json", color)
 
     // Retired, moved, and grouped spellings (Source/main.rs `normalize_frequency_ring_argv`).
     if jet_cli_retired_report(raw, color) == .Val(report) -> return jet_cli_done("", report, JET_DRIVER_EXIT_USAGE)
@@ -1076,5 +1086,6 @@ fn jet_cli_plan(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
         "lint" -> return jet_cli_lint(jet_argv, args, color, quiet)
         else -> {}
     }
+    if jet_cli_inspect_word(command) -> return jet_cli_inspect(argv, jet_argv, args, color, quiet, json, threads)
     jet_cli_not_ported(command, color)
 }

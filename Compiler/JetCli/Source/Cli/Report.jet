@@ -20,6 +20,7 @@ use jet_foundation.[
     DIAGNOSTIC_LINT,
     TextEdit,
     diagnostic_column_at,
+    diagnostic_from_registry,
     diagnostic_line_at,
 ]
 
@@ -368,6 +369,12 @@ pub fn jet_cli_reports_status_json(action: String, ok: Bool, cwd: String?, file:
 // status envelope, with no file.
 pub fn jet_cli_report_status_json(diagnostic: Diagnostic) -> String Never! {
     "{jet_cli_status_render_with_reports("cli", false, [String]{jet_cli_report_json(diagnostic, None, "", "", 0)}, [JetCLIStatusField]{})}\n"
+}
+
+// The `--json` form of a spanless CLI error (Source/main.rs `cli_error!` in
+// machine mode): one failed `cli` status line on stdout.
+pub fn jet_cli_fail_json(code: String, what: String, why: String, fix: String) -> String Never! {
+    jet_cli_report_status_json(diagnostic_from_registry(code, None, what, why, fix))
 }
 
 // CmdInspect.rs `explicit_file_proof_rows`.
