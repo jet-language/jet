@@ -629,32 +629,31 @@ fn render_xml_array(items: [DataTree]) -> String Never! {
     out
 }
 
-fn escape_xml(text: String) -> String Never! {
-    out := ""
-    loop b in text.bytes() {
-        n :: b
-        if {
-            n == 60 -> out = "{out}&lt;"
-            n == 62 -> out = "{out}&gt;"
-            n == 38 -> out = "{out}&amp;"
-            else -> out = "{out}{String.from_bytes([U8]{b}) ?? ""}"
-        }
-    }
-    out
-}
+fn escape_xml(text: String) -> String Never! { escape_xml_bytes(text, false) }
 
-fn escape_xml_attr(text: String) -> String Never! {
-    out := ""
+fn escape_xml_attr(text: String) -> String Never! { escape_xml_bytes(text, true) }
+
+// Replaces markup bytes with entities and copies every other byte unchanged,
+// including each byte of a multi-byte UTF-8 sequence, so non-ASCII text
+// round-trips.
+fn escape_xml_bytes(text: String, quotes: Bool) -> String Never! {
+    out := [U8]{}
     loop b in text.bytes() {
         n :: b
+        entity := ""
         if {
-            n == 60 -> out = "{out}&lt;"
-            n == 62 -> out = "{out}&gt;"
-            n == 38 -> out = "{out}&amp;"
-            n == 34 -> out = "{out}&quot;"
-            n == 39 -> out = "{out}&apos;"
-            else -> out = "{out}{String.from_bytes([U8]{b}) ?? ""}"
+            n == 60 -> entity = "&lt;"
+            n == 62 -> entity = "&gt;"
+            n == 38 -> entity = "&amp;"
+            quotes && n == 34 -> entity = "&quot;"
+            quotes && n == 39 -> entity = "&apos;"
+            else -> entity = ""
+        }
+        if entity.len() == 0 {
+            &out.push(b)
+        } else {
+            loop e in entity.bytes() -> &out.push(e)
         }
     }
-    out
+    String.from_bytes(out) ?? ""
 }
