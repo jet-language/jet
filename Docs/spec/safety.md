@@ -97,10 +97,10 @@ required.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 204,
+  "total": 216,
   "counts": {
     "Examples": 39,
-    "jet": 77,
+    "jet": 89,
     "jetpack": 1,
     "tests": 87
   },
@@ -380,22 +380,78 @@ required.
     },
     {
       "package": "jet",
+      "file": "Compiler/JetBackend/Source/Image/Calls.jet",
+      "line": 55,
+      "column": 9,
+      "reason": "each argument cell is inside this call's writable mapping"
+    },
+    {
+      "package": "jet",
+      "file": "Compiler/JetBackend/Source/Image/Calls.jet",
+      "line": 60,
+      "column": 5,
+      "reason": "loaded.entry is the selector-generated pointer-to-cells adapter; all cells remain mapped through its return"
+    },
+    {
+      "package": "jet",
+      "file": "Compiler/JetBackend/Source/Image/ComptimeValues.jet",
+      "line": 48,
+      "column": 5,
+      "reason": "function is the resolved (ptr,len)->word runtime constructor; buffer remains readable until it returns"
+    },
+    {
+      "package": "jet",
+      "file": "Compiler/JetBackend/Source/Image/ComptimeValues.jet",
+      "line": 117,
+      "column": 5,
+      "reason": "word is a live String handle and both functions borrow it through the canonical runtime C ABI"
+    },
+    {
+      "package": "jet",
+      "file": "Compiler/JetBackend/Source/Image/ComptimeValues.jet",
+      "line": 124,
+      "column": 9,
+      "reason": "the runtime's borrowed UTF-8 projection holds length readable bytes until the owning String is dropped"
+    },
+    {
+      "package": "jet",
+      "file": "Compiler/JetBackend/Source/Image/ComptimeValues.jet",
+      "line": 144,
+      "column": 13,
+      "reason": "word is a live exact-Int carrier and stringify returns a fresh owning String"
+    },
+    {
+      "package": "jet",
+      "file": "Compiler/JetBackend/Source/Image/ComptimeValues.jet",
+      "line": 148,
+      "column": 13,
+      "reason": "the temporary String is owned here and decoding has copied its bytes"
+    },
+    {
+      "package": "jet",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 63,
+      "line": 100,
       "column": 9,
       "reason": "the slot is an aligned word inside the writable mapping, checked above"
     },
     {
       "package": "jet",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 83,
+      "line": 106,
+      "column": 9,
+      "reason": "the relocation is an aligned word inside the writable mapping, checked above"
+    },
+    {
+      "package": "jet",
+      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
+      "line": 127,
       "column": 5,
       "reason": "`main` is the runtime's `int32_t jet_rt_main(void (*)(void))` and `entry` is the image's checked no-argument entry"
     },
     {
       "package": "jet",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 102,
+      "line": 149,
       "column": 5,
       "reason": "the slot is an aligned word inside the mapping, now writable"
     },
@@ -458,44 +514,72 @@ required.
     {
       "package": "jet",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 147,
+      "line": 131,
+      "column": 1,
+      "reason": "reads one word at an address the caller owns and has mapped readable"
+    },
+    {
+      "package": "jet",
+      "file": "Compiler/JetBackend/Source/OS/Linux.jet",
+      "line": 138,
+      "column": 1,
+      "reason": "reads one byte at an address the caller owns and has mapped readable"
+    },
+    {
+      "package": "jet",
+      "file": "Compiler/JetBackend/Source/OS/Linux.jet",
+      "line": 161,
       "column": 9,
       "reason": "the caller owns the destination words"
     },
     {
       "package": "jet",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 157,
+      "line": 171,
       "column": 1,
       "reason": "calls machine code; the caller vouches for the code and its System V signature"
     },
     {
       "package": "jet",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 167,
+      "line": 184,
+      "column": 1,
+      "reason": "calls machine code; the caller vouches for the code and its two-word System V signature"
+    },
+    {
+      "package": "jet",
+      "file": "Compiler/JetBackend/Source/OS/Linux.jet",
+      "line": 199,
       "column": 1,
       "reason": "dlopen reads the NUL-terminated path at `path`"
     },
     {
       "package": "jet",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 175,
+      "line": 207,
       "column": 1,
       "reason": "dlsym reads the NUL-terminated name at `name`"
     },
     {
       "package": "jet",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 198,
+      "line": 230,
       "column": 5,
       "reason": "`name` is a NUL-terminated copy of `path`"
     },
     {
       "package": "jet",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 210,
+      "line": 242,
       "column": 5,
       "reason": "`name` is a NUL-terminated copy of `symbol`; dlsym only reads the library's symbol table"
+    },
+    {
+      "package": "jet",
+      "file": "Compiler/JetBackend/Tests/ComptimeScalars.jet",
+      "line": 29,
+      "column": 9,
+      "reason": "the identity returns its single owning String unchanged; decoding has copied it"
     },
     {
       "package": "jet",
@@ -1542,10 +1626,10 @@ required.
 | crate/package | regions |
 | --- | ---: |
 | Examples | 39 |
-| jet | 77 |
+| jet | 89 |
 | jetpack | 1 |
 | tests | 87 |
-| **total** | **204** |
+| **total** | **216** |
 
 ### Regions
 
@@ -1590,9 +1674,17 @@ required.
 | Examples | Examples/features/net/http_observability.jet | 14:5 | "core.http.serve blocks until the listener exits" |
 | Examples | Examples/features/net/http_serve_entry.jet | 11:5 | "core.http.serve blocks until the listener exits" |
 | Examples | Examples/features/tooling/checked_text_type.jet | 20:5 | "checked text example output" |
-| jet | Compiler/JetBackend/Source/Image/Loader.jet | 63:9 | "the slot is an aligned word inside the writable mapping, checked above" |
-| jet | Compiler/JetBackend/Source/Image/Loader.jet | 83:5 | "`main` is the runtime's `int32_t jet_rt_main(void (*)(void))` and `entry` is the image's checked no-argument entry" |
-| jet | Compiler/JetBackend/Source/Image/Loader.jet | 102:5 | "the slot is an aligned word inside the mapping, now writable" |
+| jet | Compiler/JetBackend/Source/Image/Calls.jet | 55:9 | "each argument cell is inside this call's writable mapping" |
+| jet | Compiler/JetBackend/Source/Image/Calls.jet | 60:5 | "loaded.entry is the selector-generated pointer-to-cells adapter; all cells remain mapped through its return" |
+| jet | Compiler/JetBackend/Source/Image/ComptimeValues.jet | 48:5 | "function is the resolved (ptr,len)-&gt;word runtime constructor; buffer remains readable until it returns" |
+| jet | Compiler/JetBackend/Source/Image/ComptimeValues.jet | 117:5 | "word is a live String handle and both functions borrow it through the canonical runtime C ABI" |
+| jet | Compiler/JetBackend/Source/Image/ComptimeValues.jet | 124:9 | "the runtime's borrowed UTF-8 projection holds length readable bytes until the owning String is dropped" |
+| jet | Compiler/JetBackend/Source/Image/ComptimeValues.jet | 144:13 | "word is a live exact-Int carrier and stringify returns a fresh owning String" |
+| jet | Compiler/JetBackend/Source/Image/ComptimeValues.jet | 148:13 | "the temporary String is owned here and decoding has copied its bytes" |
+| jet | Compiler/JetBackend/Source/Image/Loader.jet | 100:9 | "the slot is an aligned word inside the writable mapping, checked above" |
+| jet | Compiler/JetBackend/Source/Image/Loader.jet | 106:9 | "the relocation is an aligned word inside the writable mapping, checked above" |
+| jet | Compiler/JetBackend/Source/Image/Loader.jet | 127:5 | "`main` is the runtime's `int32_t jet_rt_main(void (*)(void))` and `entry` is the image's checked no-argument entry" |
+| jet | Compiler/JetBackend/Source/Image/Loader.jet | 149:5 | "the slot is an aligned word inside the mapping, now writable" |
 | jet | Compiler/JetBackend/Source/OS/Linux.jet | 38:1 | "a raw Linux x86-64 system call; the caller passes the call number and arguments that call expects" |
 | jet | Compiler/JetBackend/Source/OS/Linux.jet | 84:5 | "the caller owns `count` writable bytes at `address`" |
 | jet | Compiler/JetBackend/Source/OS/Linux.jet | 91:5 | "the caller owns `count` readable bytes at `address`" |
@@ -1601,12 +1693,16 @@ required.
 | jet | Compiler/JetBackend/Source/OS/Linux.jet | 112:5 | "the caller owns the mapping and nothing uses it any more" |
 | jet | Compiler/JetBackend/Source/OS/Linux.jet | 119:5 | "exit_group ends every thread of the process" |
 | jet | Compiler/JetBackend/Source/OS/Linux.jet | 124:1 | "stores one word at an address the caller owns and has mapped writable" |
-| jet | Compiler/JetBackend/Source/OS/Linux.jet | 147:9 | "the caller owns the destination words" |
-| jet | Compiler/JetBackend/Source/OS/Linux.jet | 157:1 | "calls machine code; the caller vouches for the code and its System V signature" |
-| jet | Compiler/JetBackend/Source/OS/Linux.jet | 167:1 | "dlopen reads the NUL-terminated path at `path`" |
-| jet | Compiler/JetBackend/Source/OS/Linux.jet | 175:1 | "dlsym reads the NUL-terminated name at `name`" |
-| jet | Compiler/JetBackend/Source/OS/Linux.jet | 198:5 | "`name` is a NUL-terminated copy of `path`" |
-| jet | Compiler/JetBackend/Source/OS/Linux.jet | 210:5 | "`name` is a NUL-terminated copy of `symbol`; dlsym only reads the library's symbol table" |
+| jet | Compiler/JetBackend/Source/OS/Linux.jet | 131:1 | "reads one word at an address the caller owns and has mapped readable" |
+| jet | Compiler/JetBackend/Source/OS/Linux.jet | 138:1 | "reads one byte at an address the caller owns and has mapped readable" |
+| jet | Compiler/JetBackend/Source/OS/Linux.jet | 161:9 | "the caller owns the destination words" |
+| jet | Compiler/JetBackend/Source/OS/Linux.jet | 171:1 | "calls machine code; the caller vouches for the code and its System V signature" |
+| jet | Compiler/JetBackend/Source/OS/Linux.jet | 184:1 | "calls machine code; the caller vouches for the code and its two-word System V signature" |
+| jet | Compiler/JetBackend/Source/OS/Linux.jet | 199:1 | "dlopen reads the NUL-terminated path at `path`" |
+| jet | Compiler/JetBackend/Source/OS/Linux.jet | 207:1 | "dlsym reads the NUL-terminated name at `name`" |
+| jet | Compiler/JetBackend/Source/OS/Linux.jet | 230:5 | "`name` is a NUL-terminated copy of `path`" |
+| jet | Compiler/JetBackend/Source/OS/Linux.jet | 242:5 | "`name` is a NUL-terminated copy of `symbol`; dlsym only reads the library's symbol table" |
+| jet | Compiler/JetBackend/Tests/ComptimeScalars.jet | 29:9 | "the identity returns its single owning String unchanged; decoding has copied it" |
 | jet | Core/auth/auth.jet | 126:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
 | jet | Core/crypto/crypto.jet | 782:5 | "crypto expert: Argon2id password hashing" |
 | jet | Core/crypto/crypto.jet | 809:5 | "crypto expert: Argon2id password verification" |
