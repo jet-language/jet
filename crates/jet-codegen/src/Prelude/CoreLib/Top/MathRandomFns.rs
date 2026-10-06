@@ -48,9 +48,6 @@ fn jet_std_math_log2(x: f64) -> f64 {
 fn jet_std_math_trunc(x: f64) -> f64 {
     x.trunc()
 }
-fn jet_std_math_fract(x: f64) -> f64 {
-    x.fract()
-}
 fn jet_std_math_atan2(y: f64, x: f64) -> f64 {
     y.atan2(x)
 }

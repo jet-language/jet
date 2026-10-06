@@ -13269,17 +13269,7 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_math_clamp_f64(a0, a1, a2))
     }
 
-    /// core.math.cmp
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_cmp(a0: f64, a1: f64) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_math_cmp(a0, a1)))
-    }
 
-    /// core.math.copysign
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_copysign(a0: f64, a1: f64) -> f64 {
-        guard(|| crate::jet_std_math_copysign(a0, a1))
-    }
 
     /// core.math.cos
     #[no_mangle]
@@ -13293,29 +13283,9 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_math_cosh(a0))
     }
 
-    /// core.math.cot
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_cot(a0: f64) -> f64 {
-        guard(|| crate::jet_std_math_cot(a0))
-    }
 
-    /// core.math.degrees
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_degrees(a0: f64) -> f64 {
-        guard(|| crate::jet_std_math_degrees(a0))
-    }
 
-    /// core.math.digits
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_digits(a0: i64) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_math_digits(a0)))
-    }
 
-    /// core.math.dist
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_dist(a0_0: *const u64, a0_1: i64, a1_0: *const u64, a1_1: i64) -> f64 {
-        guard(|| crate::jet_std_math_dist(list_in(a0_0, a0_1, |w| f64::from_bits(w)), list_in(a1_0, a1_1, |w| f64::from_bits(w))))
-    }
 
     /// core.math.div_mod
     #[no_mangle]
@@ -13337,17 +13307,7 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.math.erf
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_erf(a0: f64) -> f64 {
-        guard(|| crate::jet_std_math_erf(a0))
-    }
 
-    /// core.math.erfc
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_erfc(a0: f64) -> f64 {
-        guard(|| crate::jet_std_math_erfc(a0))
-    }
 
     /// core.math.exp
     #[no_mangle]
@@ -13394,21 +13354,7 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_math_fmod(a0, a1))
     }
 
-    /// core.math.fract
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_fract(a0: f64) -> f64 {
-        guard(|| crate::jet_std_math_fract(a0))
-    }
 
-    /// core.math.frexp
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_frexp(a0: f64, item0: *mut f64, item1: *mut i64) {
-        guard(|| {
-            let (e0, e1) = crate::jet_std_math_frexp(a0);
-            unsafe { item0.write(e0) };
-            unsafe { item1.write(crate::jet_std::jet_int_from_i64(e1)) };
-        })
-    }
 
     /// core.math.from_bits
     #[no_mangle]
@@ -13422,11 +13368,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_math_fsum(list_in(a0_0, a0_1, |w| f64::from_bits(w))))
     }
 
-    /// core.math.gamma
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_gamma(a0: f64) -> f64 {
-        guard(|| crate::jet_std_math_gamma(a0))
-    }
 
     /// core.math.gcd_many
     #[no_mangle]
@@ -13440,26 +13381,8 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_math_hypot(a0, a1))
     }
 
-    /// core.math.hypot3
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_hypot3(a0: f64, a1: f64, a2: f64) -> f64 {
-        guard(|| crate::jet_std_math_hypot3(a0, a1, a2))
-    }
 
-    /// core.math.real, core.math.conj, core.math.float32, core.math.float64
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_identity_f64(a0: f64) -> f64 {
-        guard(|| crate::jet_std_math_identity_f64(a0))
-    }
 
-    /// core.math.ilogb
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_ilogb(a0: f64, some: *mut i64) -> i64 {
-        guard(|| match crate::jet_std_math_ilogb(a0) {
-            Some(value) => { unsafe { some.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
-            None => 0,
-        })
-    }
 
     /// core.math.in_range
     #[no_mangle]
@@ -13473,17 +13396,7 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_math_int_pow(a0, a1)))
     }
 
-    /// core.math.inv
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_inv(a0: f64) -> f64 {
-        guard(|| crate::jet_std_math_inv(a0))
-    }
 
-    /// core.math.is_canonical
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_is_canonical(a0: f64) -> bool {
-        guard(|| crate::jet_std_math_is_canonical(a0))
-    }
 
     /// core.math.even
     #[no_mangle]
@@ -13491,35 +13404,10 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_math_is_even(a0))
     }
 
-    /// core.math.is_finite, core.math.isfinite
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_is_finite(a0: f64) -> bool {
-        guard(|| crate::jet_std_math_is_finite(a0))
-    }
 
-    /// core.math.isinf, core.math.is_inf
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_is_infinite(a0: f64) -> bool {
-        guard(|| crate::jet_std_math_is_infinite(a0))
-    }
 
-    /// core.math.is_integer
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_is_integer(a0: f64) -> bool {
-        guard(|| crate::jet_std_math_is_integer(a0))
-    }
 
-    /// core.math.isnan, core.math.is_nan
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_is_nan(a0: f64) -> bool {
-        guard(|| crate::jet_std_math_is_nan(a0))
-    }
 
-    /// core.math.is_normal
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_is_normal(a0: f64) -> bool {
-        guard(|| crate::jet_std_math_is_normal(a0))
-    }
 
     /// core.math.odd
     #[no_mangle]
@@ -13527,29 +13415,9 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_math_is_odd(a0))
     }
 
-    /// core.math.is_signed
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_is_signed(a0: f64) -> bool {
-        guard(|| crate::jet_std_math_is_signed(a0))
-    }
 
-    /// core.math.is_subnormal
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_is_subnormal(a0: f64) -> bool {
-        guard(|| crate::jet_std_math_is_subnormal(a0))
-    }
 
-    /// core.math.is_zero
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_is_zero(a0: f64) -> bool {
-        guard(|| crate::jet_std_math_is_zero(a0))
-    }
 
-    /// core.math.isclose
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_isclose(a0: f64, a1: f64, a2: f64, a3: f64) -> bool {
-        guard(|| crate::jet_std_math_isclose(a0, a1, a2, a3))
-    }
 
     /// core.math.lcm_many
     #[no_mangle]
@@ -13557,29 +13425,9 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_math_lcm_many(&list_in(a0_0, a0_1, |w| w as i64))))
     }
 
-    /// core.math.ldexp, core.math.scaleb
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_ldexp(a0: f64, a1: i64) -> f64 {
-        guard(|| crate::jet_std_math_ldexp(a0, a1))
-    }
 
-    /// core.math.leading_ones
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_leading_ones(a0: i64) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_math_leading_ones(a0)))
-    }
 
-    /// core.math.lerp
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_lerp(a0: f64, a1: f64, a2: f64) -> f64 {
-        guard(|| crate::jet_std_math_lerp(a0, a1, a2))
-    }
 
-    /// core.math.lgamma
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_lgamma(a0: f64) -> f64 {
-        guard(|| crate::jet_std_math_lgamma(a0))
-    }
 
     /// core.math.ln
     #[no_mangle]
@@ -13593,11 +13441,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_math_ln_1p(a0))
     }
 
-    /// core.math.log
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_log(a0: f64, a1: f64) -> f64 {
-        guard(|| crate::jet_std_math_log(a0, a1))
-    }
 
     /// core.math.log10
     #[no_mangle]
@@ -13611,11 +13454,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_math_log2(a0))
     }
 
-    /// core.math.logb
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_logb(a0: f64) -> f64 {
-        guard(|| crate::jet_std_math_logb(a0))
-    }
 
     /// core.math.max_float
     #[no_mangle]
@@ -13623,11 +13461,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_math_max_f64(a0, a1))
     }
 
-    /// core.math.midpoint
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_midpoint(a0: f64, a1: f64) -> f64 {
-        guard(|| crate::jet_std_math_midpoint(a0, a1))
-    }
 
     /// core.math.min_float
     #[no_mangle]
@@ -13635,15 +13468,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_math_min_f64(a0, a1))
     }
 
-    /// core.math.modf
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_modf(a0: f64, item0: *mut f64, item1: *mut f64) {
-        guard(|| {
-            let (e0, e1) = crate::jet_std_math_modf(a0);
-            unsafe { item0.write(e0) };
-            unsafe { item1.write(e1) };
-        })
-    }
 
     /// core.math.combinatorics.multinomial
     #[no_mangle]
@@ -13654,23 +13478,8 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.math.next_after, core.math.nextafter
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_next_after(a0: f64, a1: f64) -> f64 {
-        guard(|| crate::jet_std_math_next_after(a0, a1))
-    }
 
-    /// core.math.next_down
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_next_down(a0: f64) -> f64 {
-        guard(|| crate::jet_std_math_next_down(a0))
-    }
 
-    /// core.math.next_up
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_next_up(a0: f64) -> f64 {
-        guard(|| crate::jet_std_math_next_up(a0))
-    }
 
     /// core.math.combinatorics.permutations_count, core.math.combinatorics.npr, core.math.combinatorics.falling_factorial, core.math.perm
     #[no_mangle]
@@ -13714,23 +13523,8 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_math_prod_int_ref(&list_in(a0_0, a0_1, |w| w as i64))))
     }
 
-    /// core.math.radians
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_radians(a0: f64) -> f64 {
-        guard(|| crate::jet_std_math_radians(a0))
-    }
 
-    /// core.math.radix
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_radix(a0: f64) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_math_radix(a0)))
-    }
 
-    /// core.math.remainder
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_remainder(a0: f64, a1: f64) -> f64 {
-        guard(|| crate::jet_std_math_remainder(a0, a1))
-    }
 
     /// core.math.combinatorics.rising_factorial
     #[no_mangle]
@@ -13741,11 +13535,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.math.round
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_round(a0: f64) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_math_round(a0)))
-    }
 
     /// core.math.saturating_add
     #[no_mangle]
@@ -13765,23 +13554,8 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_math_saturating_sub(a0, a1)))
     }
 
-    /// core.math.sign_bit
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_sign_bit(a0: f64) -> bool {
-        guard(|| crate::jet_std_math_sign_bit(a0))
-    }
 
-    /// core.math.significand
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_significand(a0: f64) -> f64 {
-        guard(|| crate::jet_std_math_significand(a0))
-    }
 
-    /// core.math.signum
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_signum(a0: f64) -> f64 {
-        guard(|| crate::jet_std_math_signum(a0))
-    }
 
     /// core.math.sin
     #[no_mangle]
@@ -13841,11 +13615,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_math_to_bits(a0)))
     }
 
-    /// core.math.trailing_ones
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_trailing_ones(a0: i64) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_math_trailing_ones(a0)))
-    }
 
     /// core.math.trunc, core.math.truncate
     #[no_mangle]
@@ -13853,17 +13622,7 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_math_trunc(a0))
     }
 
-    /// core.math.ulp
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_ulp(a0: f64) -> f64 {
-        guard(|| crate::jet_std_math_ulp(a0))
-    }
 
-    /// core.math.xor
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_xor(a0: i64, a1: i64) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_math_xor(a0, a1)))
-    }
 
     /// core.math.zero
     #[no_mangle]
@@ -13871,11 +13630,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_math_zero())
     }
 
-    /// core.math.imag
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_zero_f64(a0: f64) -> f64 {
-        guard(|| crate::jet_std_math_zero_f64(a0))
-    }
 
     /// core.sys.arch
     #[no_mangle]
