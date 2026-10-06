@@ -849,20 +849,6 @@ fn jet_std_os_on_interrupt(handler: std::sync::Arc<dyn Fn() + Send + Sync + 'sta
     jet_os_interrupt::on_interrupt(handler);
 }
 
-fn jet_testing_snap(name: &String, actual: &String) -> bool {
-    let path =
-        std::path::Path::new("__snapshots__").join(format!("{}.snap", sanitize_test_name(name)));
-    let update = std::env::var("JET_UPDATE_SNAPSHOTS").ok().as_deref() == Some("1");
-    if update || !path.is_file() {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        return std::fs::write(&path, actual).is_ok();
-    }
-    std::fs::read_to_string(path)
-        .map(|s| s == *actual)
-        .unwrap_or(false)
-}
 
 fn jet_testing_record_evidence_failure(error: TestEvidenceError) {
     let (message, detail) = error.report_parts();
@@ -904,21 +890,6 @@ fn jet_testing_temp_dir(prefix: &String) -> String {
 }
 
 
-fn sanitize_test_name(name: &str) -> String {
-    let mut out = String::new();
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-            out.push(ch);
-        } else {
-            out.push('_');
-        }
-    }
-    if out.is_empty() {
-        "case".to_string()
-    } else {
-        out
-    }
-}
 
 fn jet_std_process_exit(code: i64) -> ! {
     jet_runtime_explicit_exit(code)

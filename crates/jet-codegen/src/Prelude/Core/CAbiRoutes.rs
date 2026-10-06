@@ -14540,11 +14540,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std::jet_int_from_i64(i64::try_from(crate::jet_testing_history_rng_next_u64(unsafe { &*a0 })).unwrap_or_else(|_| range_stop())))
     }
 
-    /// core.testing.snap
-    #[no_mangle]
-    pub extern "C" fn jet_testing_snap(a0: JetCString, a1: JetCString) -> bool {
-        guard(|| crate::jet_testing_snap(unsafe { &*a0 }, unsafe { &*a1 }))
-    }
 
     /// core.testing.status
     #[no_mangle]

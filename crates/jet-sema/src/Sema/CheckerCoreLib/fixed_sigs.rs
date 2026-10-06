@@ -1824,7 +1824,7 @@ fn core_fixed_sig_impl(
                 io_error_ty(),
             )),
         )),
-        ("core.testing", "snap" | "golden") => Some((
+        ("core.testing", "golden") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(Type::Bool),
         )),
