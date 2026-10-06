@@ -702,7 +702,8 @@ fn sema_core_collect_source_wrapper(function: Func, owner: String, imports: [Sem
 }
 
 // The top-level functions of a Core source module that no other body of the
-// module calls. Self-recursion is not a sibling call. Rust: CoreUsage.rs
+// module calls. Self-recursion is not a sibling call: a wrapper's own
+// `core.ui.gtk_backend()` may resolve to itself. Rust: CoreUsage.rs
 // core_source_sibling_calls.
 pub fn sema_core_source_unshared_functions(registration_module: SemaRegistrationModule, call_facts: [SemaCallSiteFact]) -> [String] Never! {
     unshared := [String]{}
