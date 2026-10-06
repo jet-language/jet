@@ -97,12 +97,14 @@ pub fn load_texture_atlas(path: String) -[FS, GPU]> RaylibTextureAtlas Never! {
     core.game.raylib.load_texture_atlas(path)
 }
 
+// Sound handles retain the supplied path. Acceptance is the existing non-empty
+// path contract; it does not claim that native audio was submitted.
 pub fn load_sound(path: String) -[FS, GPU]> RaylibSound Never! {
-    core.game.raylib.load_sound(path)
+    RaylibSound{path: ~path}
 }
 
 pub fn play_sound(sound: RaylibSound) -[GPU]> Bool Never! {
-    core.game.raylib.play_sound(sound)
+    !sound.path.is_empty()
 }
 
 fn clamp8(value: Int) -> Int {
@@ -121,4 +123,11 @@ fn clamp_fps(value: Int) -> Int {
     if value < 1 -> return 1
     if value > 240 -> return 240
     value
+}
+
+#Test
+fn sound_acceptance() -[FS, GPU]> Bool {
+    empty :: load_sound("")
+    named :: load_sound("sound.wav")
+    !play_sound(empty) && play_sound(named) && named.path == "sound.wav"
 }

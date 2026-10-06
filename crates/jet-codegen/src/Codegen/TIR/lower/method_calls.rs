@@ -8039,25 +8039,6 @@ fn lower_method_call_impl(
     // checked Core rows, never a second receiver dispatch table.  The source
     // receiver is the first Core argument; sema has already supplied the
     // generic element type and result carrier.
-    if recv_type.as_deref() == Some("WebVirtualWindow") && method == "facts_json" && args.is_empty()
-    {
-        return in_own_frame(|| {
-            let Some(result_ty) = resolved_ret.cloned() else {
-                return invariant_method_expr(
-                    method_span,
-                    "virtual window facts has no resolved return type".to_string(),
-                );
-            };
-            TExpr {
-                ty: result_ty,
-                kind: TExprKind::HandleMethod {
-                    recv: Box::new(lower_expr(receiver, cx, env)),
-                    op: THandleOp::WebVirtualWindowFacts,
-                    args: Vec::new(),
-                },
-            }
-        });
-    }
     let web_projection = web_receiver_projection(recv_type.as_deref(), method, args.len());
     if let Some((module, core_method)) = web_projection {
         return in_own_frame(|| {

@@ -52,13 +52,6 @@ function jet_raylib_gamepad_axis(_gamepad, _axis) {
   return 0;
 }
 
-function jet_raylib_load_sound(path) {
-  return { type_name: "RaylibSound", path: String(path) };
-}
-
-function jet_raylib_play_sound(sound) {
-  return Boolean(sound && sound.path);
-}
 
 function jet_raylib_atlas_name(path) {
   const parts = String(path).split(/[\\/]/);
