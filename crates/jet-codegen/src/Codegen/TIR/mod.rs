@@ -4021,14 +4021,14 @@ fn fragment_core_source_cx(
             cx.import_mods.insert(alias.clone(), mangle(&loaded.alias));
         }
     }
-    install_fragment_module_imports(
-        &mut cx,
-        facts,
-        &source.module_imports,
-        &source.imported_functions,
-        &source.import_signatures,
-    );
     if user_module {
+        install_fragment_module_imports(
+            &mut cx,
+            facts,
+            &source.module_imports,
+            &source.imported_functions,
+            &source.import_signatures,
+        );
         cx.foreign_types = fragment_cx.foreign_types.clone();
         cx.local_type_identities
             .extend(source.nominal_identities.clone());
@@ -10151,10 +10151,9 @@ fn core_source_module_indices(bundle: &ProgramBundle) -> std::collections::HashS
                 });
             let private_source = jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS
                 .iter()
-                .map(|part| &part.source)
-                .chain(jet_foundation::CoreSourceParts::CORE_RUNTIME_PARTS)
                 .any(|part| {
-                    part.alias == module.alias && part.path == module.display.as_str()
+                    part.source.alias == module.alias
+                        && part.source.path == module.display.as_str()
                 });
             (public_source || private_source).then_some(index)
         })

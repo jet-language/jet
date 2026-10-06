@@ -115,6 +115,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.math", "ulp")
             | ("core.math", "zero")
             | ("core.math", "scaleb")
+            | ("core.math", "digits")
             | ("core.math.random", "pick")
             | ("core.math.random", "weighted_pick")
             | ("core.math.random", "sample")
