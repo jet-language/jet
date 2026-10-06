@@ -719,7 +719,7 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
                     if sema_expression_view_subrange_type(base_ty) == .Val(window) {
                         zero_start :: sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
                         zero_end :: sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
-                        subrange :: sema_tir_expr(window, TExprKind.Slice{base: checked_base, start: zero_start, end: zero_end, range: Val(checked_index), location: sema_expression_panic_location(environment, span)}, span)
+                        subrange :: sema_tir_expr(window, TExprKind.Slice{base: checked_base, start: zero_start, end: zero_end, range: Val(checked_index), location: sema_expression_panic_location(environment, scopes, span)}, span)
                         return sema_expr_expected(subrange, expected, environment, &diagnostics)
                     }
                 }
