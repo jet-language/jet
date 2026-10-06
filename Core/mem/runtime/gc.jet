@@ -1,0 +1,22 @@
+use core.sys.target.[selected_os]
+
+// Rust: crates/jet-rt/src/__gc.rs:1
+// One collector is assembled with one selected target adapter. Emitted programs
+// and the runtime share gc_core; there is no engine-specific second collector.
+// Rust: crates/jet-rt/src/__gc.rs:7
+// GATE #4483: selected_os must distinguish Rust target_os="none" from Other.
+prep if selected_os() == .None {
+    module __gc_platform {
+        use core.mem.host.gc_portable.*
+    }
+} else {
+    // Rust: crates/jet-rt/src/__gc.rs:12
+    module __gc_platform {
+        use core.mem.host.gc_host.*
+    }
+}
+
+// Rust: crates/jet-rt/src/__gc.rs:17
+use __gc_platform.*
+// Rust: crates/jet-rt/src/__gc.rs:18
+use core.mem.runtime.gc_core.*

@@ -9,8 +9,8 @@ mod common;
 mod tir_support;
 
 use tir_support::{
-    assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, jit_run_traced,
-    jit_run_with_env, jit_run_with_env_args,
+    assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, default_run,
+    default_run_with_env, default_run_with_env_args,
 };
 
 /// A function the checker cannot see through, so its result is a runtime value
@@ -354,7 +354,7 @@ fn run() {{
 }}
 "
         );
-        let (code, out, err) = jit_run_with_env(name, &src, &[("JET_TRAP_DIVISOR", "0")]);
+        let (code, out, err) = default_run_with_env(name, &src, &[("JET_TRAP_DIVISOR", "0")]);
         assert_eq!(
             code, 70,
             "`{op}` by zero must exit 70 under `jet run`: out={out} err={err}"
@@ -386,18 +386,8 @@ fn run() {
     caller()
 }
 "#;
-    let (code, out, err) = jit_run_traced("jit_nested_source_restore", src);
+    let (code, out, err) = default_run("jit_nested_source_restore", src);
     assert_eq!(code, 70, "nested stop must exit 70: out={out} err={err}");
-    assert!(
-        err.lines()
-            .any(|line| line.starts_with("leaf") && line.contains("tier1 native")),
-        "leaf did not run natively: {err}"
-    );
-    assert!(
-        err.lines()
-            .any(|line| line.starts_with("caller") && line.contains("tier1 native")),
-        "caller did not run natively: {err}"
-    );
     assert!(
         err.contains("Stop [E3001]") && err.contains("missing"),
         "{err}"
@@ -427,7 +417,7 @@ fn run() {{
 "
     );
     let (code, out, err) =
-        jit_run_with_env("jit_env_live_divisor", &src, &[("JET_TRAP_DIVISOR", "2")]);
+        default_run_with_env("jit_env_live_divisor", &src, &[("JET_TRAP_DIVISOR", "2")]);
     assert_eq!(code, 0, "live env divisor must run: out={out} err={err}");
     assert_eq!(out, "5\n", "10 /% 2 from live env, got: {out}");
 }
@@ -445,7 +435,7 @@ fn run() {{
 }}
 "
     );
-    let (code, out, err) = jit_run_with_env_args("jit_args_live_divisor", &src, &[], &["5"]);
+    let (code, out, err) = default_run_with_env_args("jit_args_live_divisor", &src, &[], &["5"]);
     assert_eq!(code, 0, "live args divisor must run: out={out} err={err}");
     assert_eq!(out, "2\n", "10 /% 5 from argv, got: {out}");
     assert!(

@@ -1,0 +1,19 @@
+use core.testing.runtime.kernel_test_evidence.[TestEvidenceError]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/TestEvidence.rs:59
+// Behavioral controls; no inline Rust tests exist in the assigned range.
+#Test("test_evidence_report_parts_keep_multiline_golden_details") {
+    error :: TestEvidenceError.GoldenMismatch{path: "case.golden", diff: "- old\n+ new"}
+    (message, detail) :: error.report_parts()
+    assert(message == "golden file differs: case.golden")
+    assert(detail == "path: case.golden\n- old\n+ new")
+    (message, detail) :: TestEvidenceError.EmptyClaimId.report_parts()
+    assert(message == "test evidence claim id must not be empty")
+    assert(detail == "")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TestEvidence.rs:45
+#Test("test_evidence_io_preserves_operation_path_and_message") {
+    error :: TestEvidenceError.io("read", "fixture", "permission denied")
+    assert(error.to_string() == "test evidence read failed for fixture: permission denied")
+    assert(TestEvidenceError.SchemaConflict{expected: U16{1}, found: U16{2}}.to_string() == "test evidence requires jet.evidence/v1, found v2")
+}

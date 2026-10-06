@@ -629,77 +629,32 @@ impl CorpusPolicy {
         self.apply_exceptions(path, all)
     }
 
-    /// A maintained source may suppress one of the seven shipped semantic
-    /// guidance rules only with an exact, occurrence-scoped manifest row. The
-    /// compiler's ordinary statement-local `#allow` remains unchanged for
-    /// user code and for negative diagnostic fixtures.
+    /// D-GATE-LAW1=A: a maintained allowance explains itself at its source
+    /// site. There is no second per-site reason registry in the manifest.
     fn validate_maintained_lint_allows(
         &self,
         path: &str,
         row: &SourceRow,
         program: &Program,
     ) -> Result<(), String> {
-        if !matches!(
-            row.role,
-            SourceRole::CanonicalTeaching | SourceRole::ExpertLesson
-        ) {
+        if !matches!(row.role, SourceRole::CanonicalTeaching | SourceRole::ExpertLesson) {
             return Ok(());
         }
-        let mut occurrences: BTreeMap<(String, String), usize> = BTreeMap::new();
         for application in &program.rule_facts {
             if application.marker.name != jet::Syntax::MARKER_ALLOW {
                 continue;
             }
-            let Some(target) = application.target else {
+            let Some(Expr::Ident(rule, _)) = application.marker.expr_arg(0) else { continue };
+            if !maintained_guidance_lint(rule) {
                 continue;
-            };
-            for argument in application.marker.expr_args() {
-                let Expr::Ident(rule, _) = argument else {
-                    continue;
-                };
-                if !maintained_guidance_lint(rule) {
-                    continue;
-                }
-                let site = format!("allow:{rule}@{}..{}", target.start, target.end);
-                *occurrences.entry((rule.clone(), site)).or_default() += 1;
             }
-        }
-
-        for ((rule, site), count) in &occurrences {
-            let matches = self
-                .manifest
-                .exceptions
-                .iter()
-                .filter(|exception| {
-                    exception.rule == *rule
-                        && exception.selector == format!("file:{path}")
-                        && exception.site == *site
-                })
-                .collect::<Vec<_>>();
-            if matches.len() != 1 {
+            let explained = matches!(application.marker.expr_arg(1),
+                Some(Expr::Str(parts, _)) if !parts.is_empty()
+                    && parts.iter().all(|part| matches!(part, jet::AST::StrPart::Lit(text) if !text.trim().is_empty())));
+            if !explained {
                 return Err(format!(
-                    "file={path}; rule={rule}; site={site}; why=maintained #allow needs one occurrence-scoped manifest reason; replacement=add one exact [exception] row"
-                ));
-            }
-            if matches[0].expected != *count {
-                return Err(format!(
-                    "file={path}; rule={rule}; site={site}; why=manifest expects {} occurrence(s), found {count}; replacement=keep one reviewed #allow occurrence per manifest row",
-                    matches[0].expected
-                ));
-            }
-        }
-
-        for exception in self.manifest.exceptions.iter().filter(|exception| {
-            exception.selector == format!("file:{path}") && exception.site.starts_with("allow:")
-        }) {
-            let count = occurrences
-                .get(&(exception.rule.clone(), exception.site.clone()))
-                .copied()
-                .unwrap_or(0);
-            if count != exception.expected {
-                return Err(format!(
-                    "file={path}; rule={}; site={}; why=manifest expects {} occurrence(s), found {count}; replacement=remove the stale allowance or update its exact reviewed site",
-                    exception.rule, exception.site, exception.expected
+                    "file={path}; rule={rule}; site={}..{}; why=maintained #allow needs a reason at its source site; replacement=write #allow({rule}, \"why this lint does not apply\")",
+                    application.marker.span.start, application.marker.span.end,
                 ));
             }
         }
@@ -1186,8 +1141,7 @@ impl CorpusManifest {
                         exception.rule, exception.selector
                     )),
                     Some(source)
-                        if !exception.site.starts_with("allow:")
-                            && !matches!(
+                        if !matches!(
                                 source.role,
                                 SourceRole::ExpertLesson | SourceRole::NegativeDiagnostic
                             ) =>

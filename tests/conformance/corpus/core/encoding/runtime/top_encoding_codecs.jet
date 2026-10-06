@@ -1,0 +1,21 @@
+use core.encoding.runtime.top_encoding_codecs.[jet_std_base32hex_decode, jet_std_uuid_parse, jet_std_uuid_v5, jet_uuid_sha1]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs:43
+#Test("base32hex alphabet maps to standard base32") {
+    assert(jet_std_base32hex_decode(&"CPNMU===")? == b"foo")
+    assert(jet_std_base32hex_decode(&"cpnmu===").is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs:576
+#Test("uuid parse preserves required hyphen positions and normalizes hex") {
+    assert(jet_std_uuid_parse(&"6BA7B810-9DAD-11D1-80B4-00C04FD430C8")? == "6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+    assert(jet_std_uuid_parse(&"6ba7b8109dad11d180b400c04fd430c8").is_err())
+    assert(jet_std_uuid_parse(&"6ba7b81-09dad-11d1-80b4-00c04fd430c8").is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs:604
+#Test("uuid local sha1 standard digest") {
+    assert(jet_uuid_sha1(b"abc") == [U8{0xa9}, U8{0x99}, U8{0x3e}, U8{0x36}, U8{0x47}, U8{0x06}, U8{0x81}, U8{0x6a}, U8{0xba}, U8{0x3e}, U8{0x25}, U8{0x71}, U8{0x78}, U8{0x50}, U8{0xc2}, U8{0x6c}, U8{0x9c}, U8{0xd0}, U8{0xd8}, U8{0x9d}])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs:661
+#Test("uuid v5 dns namespace vector") {
+    assert(jet_std_uuid_v5(&"6ba7b810-9dad-11d1-80b4-00c04fd430c8", &"www.widgets.com")? == "21f7f8de-8051-5b89-8680-0195ef798b6a")
+}

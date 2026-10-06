@@ -1621,12 +1621,6 @@ pub(crate) fn collect_core_expr(
                     collect_core_type_usage(ty, registry, used, spans, param.ty_span);
                 }
             }
-            if let Some(ty) = &lam.result_type {
-                collect_core_type_usage(ty, registry, used, spans, Some(lam.span));
-            }
-            if let Some(ty) = &lam.error_type {
-                collect_core_type_usage(ty, registry, used, spans, Some(lam.span));
-            }
             match &lam.body {
                 LambdaBody::Expr(e) => collect_core_expr(e, imports, registry, used, spans, ffi_cb),
                 LambdaBody::Block(stmts) => {

@@ -1,0 +1,1800 @@
+// PORT-PENDING 0241 crates-jet-jit-src-enc-stream-mod: crates/jet-jit/src/enc_stream/mod.rs:1-1796
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Encoding stream hosts (#729) — `include!` canonical EncodingStream + HostileIo.
+//RS //! File create/open plus JSON/JSONL/CSV/CBOR/XML reader/writer handles.
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS use super::Encoding::{alloc_datatree, read_datatree};
+//RS use crate::Marshal::{clone_string, result_err_msg, result_ok};
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_module::Module as _;
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS 
+//RS mod fs_ops_kernel {
+//RS     use crate::Collections::authority_semantics::JetFileScope;
+//RS     include!("../../../jet-codegen/src/Prelude/Core/FSOps.rs");
+//RS }
+//RS /// FileStream uses the same checked Prelude IOError carrier as process and
+//RS /// terminal adapters.  Keeping this alias canonical prevents a file read from
+//RS /// becoming an adapter-only string before it reaches the Source cursor.
+//RS pub(crate) type SourceIoError =
+//RS     crate::ProcessPrelude::process_prelude::jet_std::IOError;
+//RS 
+//RS mod stdin_reader {
+//RS     use crate::fault_injection::jet_fault_should_fail;
+//RS 
+//RS     mod jet_std {
+//RS         pub(super) use crate::ProcessPrelude::process_prelude::jet_std::{
+//RS             io_error_at, IOError, IOOperation,
+//RS         };
+//RS     }
+//RS 
+//RS     include!("../../../jet-codegen/src/Prelude/Core/StdinReader.rs");
+//RS }
+//RS 
+//RS pub(crate) use stdin_reader::JetStdinReader as SourceStdinReader;
+//RS 
+//RS pub(crate) fn source_stdin_reader() -> SourceStdinReader {
+//RS     stdin_reader::jet_std_io_stdin()
+//RS }
+//RS 
+//RS pub(crate) fn source_stdin_next_line(
+//RS     reader: &mut SourceStdinReader,
+//RS ) -> Result<Option<String>, SourceIoError> {
+//RS     stdin_reader::jet_std_io_stdin_read_line(reader)
+//RS }
+//RS 
+//RS mod file_stream {
+//RS     use super::runtime::{JetFileReader, JetFileWriter};
+//RS     use crate::fault_injection::jet_fault_should_fail;
+//RS 
+//RS     mod jet_std {
+//RS         pub(super) use crate::ProcessPrelude::process_prelude::jet_std::{
+//RS             io_error_at, IOError, IOOperation,
+//RS         };
+//RS 
+//RS         pub(super) fn jet_std_files_writer_refusal(path: &String) -> Option<IOError> {
+//RS             crate::CoreHost::os_rt::jet_mapped_writer_refusal(path).map(|refusal| {
+//RS                 IOError::other(
+//RS                     IOOperation::Write,
+//RS                     Some(refusal.path),
+//RS                     refusal.reason,
+//RS                 )
+//RS             })
+//RS         }
+//RS     }
+//RS 
+//RS     fn jet_fs_open(path: &String) -> std::io::Result<std::fs::File> {
+//RS         super::fs_ops_kernel::jet_fs_open(path)
+//RS     }
+//RS 
+//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FileStream.rs");
+//RS }
+//RS 
+//RS /// Canonical stream runtime (jet_std types + EncodingStream algorithm).
+//RS #[allow(dead_code, unused_imports, unused_variables, clippy::all)]
+//RS pub(crate) mod runtime {
+//RS     pub(crate) use jet_foundation::CsvKernel as jet_csv_kernel;
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     trait JetShow {
+//RS         fn jet_show(&self) -> String;
+//RS     }
+//RS     trait JetDisplay {
+//RS         fn jet_display(&self) -> String;
+//RS     }
+//RS 
+//RS     pub struct JetFileReader {
+//RS         pub(crate) inner: std::io::BufReader<std::fs::File>,
+//RS         pub(crate) path: String,
+//RS     }
+//RS     pub struct JetFileWriter {
+//RS         pub(crate) inner: std::io::BufWriter<std::fs::File>,
+//RS         pub(crate) path: String,
+//RS     }
+//RS 
+//RS     pub mod jet_std {
+//RS         use super::{JetDisplay, JetShow};
+//RS         #[allow(unused_imports)]
+//RS         pub use jet_foundation::Outcome::*;
+//RS 
+//RS         pub(crate) use crate::Encoding::json_rt::{
+//RS             EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits,
+//RS         };
+//RS 
+//RS         impl EncodingError {
+//RS             pub fn cause(&self) -> JetOutcome<EncodingCause, JetAbsent> {
+//RS                 self.cause.clone()
+//RS             }
+//RS             fn display_text(&self) -> String {
+//RS                 let mut out = format!(
+//RS                     "{:?} {:?} at byte {}",
+//RS                     self.format, self.kind, self.byte_offset
+//RS                 );
+//RS                 if let Ok(line) = self.line {
+//RS                     out.push_str(&format!(", line {line}"));
+//RS                 }
+//RS                 if let Ok(column) = self.column {
+//RS                     out.push_str(&format!(", column {column}"));
+//RS                 }
+//RS                 if !self.path.is_empty() {
+//RS                     out.push_str(&format!(", path {}", self.path));
+//RS                 }
+//RS                 out.push_str(&format!(": {}", self.reason));
+//RS                 out
+//RS             }
+//RS         }
+//RS         impl std::fmt::Display for EncodingError {
+//RS             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS                 f.write_str(&self.display_text())
+//RS             }
+//RS         }
+//RS         impl super::JetShow for EncodingError {
+//RS             fn jet_show(&self) -> String {
+//RS                 self.display_text()
+//RS             }
+//RS         }
+//RS         impl super::JetDisplay for EncodingError {
+//RS             fn jet_display(&self) -> String {
+//RS                 self.display_text()
+//RS             }
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub enum DataEvent {
+//RS             Null,
+//RS             Bool(bool),
+//RS             Int(i64),
+//RS             Float(f64),
+//RS             // D-JSON-EXACTNUM1: internal exact-number carrier, mirrored from
+//RS             // EncodingTypes.rs so the JIT host and AOT agree on the variant set.
+//RS             Number(String),
+//RS             Text(String),
+//RS             Bytes(Vec<u8>),
+//RS             ArrayStart,
+//RS             ArrayEnd,
+//RS             ObjectStart,
+//RS             Key(String),
+//RS             ObjectEnd,
+//RS         }
+//RS 
+//RS         pub(crate) use jet_foundation::DataTree::DataTree;
+//RS         // `EncodingStream.rs` validates exact JSON number tokens through
+//RS         // `jet_std::validate_json_number`; the JIT host reads the same
+//RS         // foundation implementation the AOT Prelude embeds.
+//RS         pub use jet_foundation::JSONNumber::validate_json_number;
+//RS 
+//RS         // #1636: one home for the limb-arithmetic bigint routine.
+//RS         // The Foundation implementation is the canonical compiled routine;
+//RS         // this local name keeps the shared EncodingStream call sites stable.
+//RS         pub use jet_foundation::Numeric::CtBigInt as JetBigInt;
+//RS 
+//RS         include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/XmlOptions.rs");
+//RS 
+//RS         pub struct JSONReader {
+//RS             pub(crate) input: super::JetFileReader,
+//RS             pub(crate) limits: EncodingLimits,
+//RS             pub(crate) total: i64,
+//RS             pub(crate) offset: i64,
+//RS             pub(crate) line: i64,
+//RS             pub(crate) column: i64,
+//RS             pub(crate) lookahead: Option<u8>,
+//RS             pub(super) frames: Vec<super::JetJSONReadFrame>,
+//RS             pub(crate) root_started: bool,
+//RS             pub(crate) root_done: bool,
+//RS             pub(crate) terminal: Option<EncodingError>,
+//RS             pub(crate) eof: bool,
+//RS             pub(crate) record_mode: bool,
+//RS             pub(crate) typed_numbers: bool,
+//RS             pub(super) allocation_budget: Option<super::JetEncodingAllocationBudget>,
+//RS             pub(crate) output_heap: usize,
+//RS         }
+//RS         pub struct JSONWriter {
+//RS             pub(crate) output: super::JetFileWriter,
+//RS             pub(crate) limits: EncodingLimits,
+//RS             pub(super) frames: Vec<super::JetJSONWriteFrame>,
+//RS             pub(crate) root_written: bool,
+//RS             pub(crate) finished: bool,
+//RS             pub(crate) terminal: Option<EncodingError>,
+//RS             pub(crate) total: i64,
+//RS             pub(crate) canonical: bool,
+//RS             pub(super) canonical_frames: Vec<super::JetJSONCanonicalFrame>,
+//RS             pub(crate) canonical_retained: usize,
+//RS         }
+//RS         pub struct JSONLReader {
+//RS             pub(crate) json: JSONReader,
+//RS             pub(crate) terminal: Option<EncodingError>,
+//RS             pub(crate) record_index: i64,
+//RS         }
+//RS         pub struct JSONLWriter {
+//RS             pub(crate) json: JSONWriter,
+//RS             pub(crate) terminal: Option<EncodingError>,
+//RS             pub(crate) record_index: i64,
+//RS             pub(crate) finished: bool,
+//RS             pub(crate) pending_lf: bool,
+//RS         }
+//RS         #[derive(Clone, Debug, PartialEq, Eq)]
+//RS         pub struct CSVRow {
+//RS             pub fields: Vec<String>,
+//RS             pub line: i64,
+//RS         }
+//RS         pub struct CSVReader {
+//RS             pub(crate) input: super::JetFileReader,
+//RS             pub(crate) limits: EncodingLimits,
+//RS             pub(crate) delimiter: char,
+//RS             pub(crate) header: bool,
+//RS             pub(crate) skip_blank: bool,
+//RS             pub(crate) parser: super::jet_csv_kernel::CsvParser,
+//RS             pub(super) allocation: super::JetEncodingAllocationBudget,
+//RS             pub(crate) utf8: [u8; 4],
+//RS             pub(crate) utf8_len: usize,
+//RS             pub(crate) total: i64,
+//RS             pub(crate) offset: i64,
+//RS             pub(crate) line: i64,
+//RS             pub(crate) column: i64,
+//RS             pub(crate) terminal: Option<EncodingError>,
+//RS             pub(crate) eof: bool,
+//RS             pub(crate) record_index: i64,
+//RS         }
+//RS         pub struct CSVWriter {
+//RS             pub(crate) output: super::JetFileWriter,
+//RS             pub(crate) limits: EncodingLimits,
+//RS             pub(crate) terminal: Option<EncodingError>,
+//RS             pub(crate) total: i64,
+//RS             pub(crate) record_index: i64,
+//RS             pub(crate) finished: bool,
+//RS             pub(crate) pending_crlf: bool,
+//RS         }
+//RS         pub struct XMLReader {
+//RS             pub(crate) input: super::JetFileReader,
+//RS             pub(crate) limits: EncodingLimits,
+//RS             pub(crate) scanner: crate::jet_xml_pull::StreamScanner,
+//RS             pub(crate) terminal: Option<EncodingError>,
+//RS             pub(crate) total: i64,
+//RS             pub(crate) eof: bool,
+//RS             pub(super) allocation: super::JetEncodingAllocationBudget,
+//RS         }
+//RS         pub struct XMLWriter {
+//RS             pub(crate) output: super::JetFileWriter,
+//RS             pub(crate) limits: EncodingLimits,
+//RS             pub(crate) renderer: crate::jet_xml_pull::StreamWriter,
+//RS             pub(crate) buffer: Vec<u8>,
+//RS             pub(crate) terminal: Option<EncodingError>,
+//RS             pub(crate) total: i64,
+//RS             pub(crate) finished: bool,
+//RS             pub(super) allocation: super::JetEncodingAllocationBudget,
+//RS         }
+//RS         pub struct CBORReader {
+//RS             pub(crate) input: super::JetFileReader,
+//RS             pub(crate) limits: EncodingLimits,
+//RS             pub(crate) total: i64,
+//RS             pub(crate) terminal: Option<EncodingError>,
+//RS             pub(crate) eof: bool,
+//RS             pub(crate) root_done: bool,
+//RS             pub(crate) lookahead: Option<u8>,
+//RS             pub(super) frames: Vec<super::JetCBORReadFrame>,
+//RS             pub(crate) retained: usize,
+//RS             pub(crate) workspace: usize,
+//RS             pub(super) allocation: super::JetEncodingAllocationBudget,
+//RS         }
+//RS         pub struct CBORWriter {
+//RS             pub(crate) output: super::JetFileWriter,
+//RS             pub(crate) limits: EncodingLimits,
+//RS             pub(crate) terminal: Option<EncodingError>,
+//RS             pub(crate) total: i64,
+//RS             pub(super) frames: Vec<super::JetCBORWriteFrame>,
+//RS             pub(crate) root_written: bool,
+//RS             pub(crate) finished: bool,
+//RS             pub(crate) retained: usize,
+//RS             pub(crate) workspace: usize,
+//RS             pub(super) allocation: super::JetEncodingAllocationBudget,
+//RS         }
+//RS     }
+//RS 
+//RS     // EncodingCodecs helpers EncodingStream calls for XML.
+//RS     fn jet_xml_to_data_tree(value: crate::jet_xml_pull::Value) -> jet_std::DataTree {
+//RS         match value {
+//RS             crate::jet_xml_pull::Value::Null => jet_std::DataTree::Null,
+//RS             crate::jet_xml_pull::Value::Bool(value) => jet_std::DataTree::Bool(value),
+//RS             crate::jet_xml_pull::Value::Int(value) => jet_std::DataTree::Int(value),
+//RS             crate::jet_xml_pull::Value::Text(value) => jet_std::DataTree::Text(value),
+//RS             crate::jet_xml_pull::Value::Array(values) => {
+//RS                 jet_std::DataTree::Array(values.into_iter().map(jet_xml_to_data_tree).collect())
+//RS             }
+//RS             crate::jet_xml_pull::Value::Object(entries) => jet_std::DataTree::Object(
+//RS                 entries
+//RS                     .into_iter()
+//RS                     .map(|(key, value)| (key, jet_xml_to_data_tree(value)))
+//RS                     .collect(),
+//RS             ),
+//RS         }
+//RS     }
+//RS 
+//RS     fn jet_xml_from_data_tree(
+//RS         value: &jet_std::DataTree,
+//RS     ) -> Result<crate::jet_xml_pull::Value, String> {
+//RS         match value {
+//RS             jet_std::DataTree::Null => Ok(crate::jet_xml_pull::Value::Null),
+//RS             jet_std::DataTree::Bool(value) => Ok(crate::jet_xml_pull::Value::Bool(*value)),
+//RS             jet_std::DataTree::Int(value) => Ok(crate::jet_xml_pull::Value::Int(*value)),
+//RS             jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => {
+//RS                 Err("internal JSON carrier escaped typed decode".to_string())
+//RS             }
+//RS             jet_std::DataTree::Text(value) => Ok(crate::jet_xml_pull::Value::Text(value.clone())),
+//RS             jet_std::DataTree::Array(values) => Ok(crate::jet_xml_pull::Value::Array(
+//RS                 values
+//RS                     .iter()
+//RS                     .map(jet_xml_from_data_tree)
+//RS                     .collect::<Result<Vec<_>, _>>()?,
+//RS             )),
+//RS             jet_std::DataTree::Object(entries) => Ok(crate::jet_xml_pull::Value::Object(
+//RS                 entries
+//RS                     .iter()
+//RS                     .map(|(key, value)| Ok((key.clone(), jet_xml_from_data_tree(value)?)))
+//RS                     .collect::<Result<Vec<_>, String>>()?,
+//RS             )),
+//RS             jet_std::DataTree::Float(_) | jet_std::DataTree::Bytes(_) => {
+//RS                 Err("XML tree cannot contain Float or Bytes values".to_string())
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn jet_xml_options(options: &jet_std::XMLParseOptions) -> crate::jet_xml_pull::ParseOptions {
+//RS         let number = |value: i64| usize::try_from(value).unwrap_or(usize::MAX);
+//RS         let entities = match &options.entities {
+//RS             jet_std::XMLEntityPolicy::Preserve => crate::jet_xml_pull::EntityPolicy::Preserve,
+//RS             jet_std::XMLEntityPolicy::Reject => crate::jet_xml_pull::EntityPolicy::Reject,
+//RS             jet_std::XMLEntityPolicy::Resolve(values) => {
+//RS                 crate::jet_xml_pull::EntityPolicy::Resolve(values.clone())
+//RS             }
+//RS         };
+//RS         crate::jet_xml_pull::ParseOptions {
+//RS             entities,
+//RS             limits: crate::jet_xml_pull::Limits {
+//RS                 max_depth: number(options.limits.max_depth),
+//RS                 max_nodes: number(options.limits.max_nodes),
+//RS                 max_attributes_per_element: number(options.limits.max_attributes_per_element),
+//RS                 max_name_bytes: number(options.limits.max_name_bytes),
+//RS                 max_text_bytes: number(options.limits.max_text_bytes),
+//RS                 max_entity_declarations: number(options.limits.max_entity_declarations),
+//RS                 max_entity_depth: number(options.limits.max_entity_depth),
+//RS                 max_entity_replacement_bytes: number(options.limits.max_entity_replacement_bytes),
+//RS             },
+//RS         }
+//RS     }
+//RS 
+//RS     use crate::fault_injection::jet_fault_should_fail;
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs");
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs");
+//RS 
+//RS     pub(crate) fn enc_json_writer(
+//RS         output: JetFileWriter,
+//RS         limits: jet_std::EncodingLimits,
+//RS         canonical: bool,
+//RS     ) -> Result<jet_std::JSONWriter, jet_std::EncodingError> {
+//RS         jet_enc_json_writer(output, limits, canonical)
+//RS     }
+//RS     pub(crate) fn enc_json_canonical(
+//RS         value: &jet_std::DataTree,
+//RS         limits: &jet_std::EncodingLimits,
+//RS     ) -> Result<String, jet_std::EncodingError> {
+//RS         jet_enc_json_canonical(value, limits)
+//RS     }
+//RS     pub(crate) fn enc_json_reader(
+//RS         input: JetFileReader,
+//RS         limits: jet_std::EncodingLimits,
+//RS     ) -> Result<jet_std::JSONReader, jet_std::EncodingError> {
+//RS         jet_enc_json_reader(input, limits)
+//RS     }
+//RS     pub(crate) fn enc_json_writer_write(
+//RS         writer: &mut jet_std::JSONWriter,
+//RS         event: jet_std::DataEvent,
+//RS     ) -> Result<(), jet_std::EncodingError> {
+//RS         jet_enc_json_writer_write(writer, event)
+//RS     }
+//RS     pub(crate) fn enc_json_writer_flush(
+//RS         writer: &mut jet_std::JSONWriter,
+//RS     ) -> Result<(), jet_std::EncodingError> {
+//RS         jet_enc_json_writer_flush(writer)
+//RS     }
+//RS     pub(crate) fn enc_json_writer_finish(
+//RS         writer: &mut jet_std::JSONWriter,
+//RS     ) -> Result<(), jet_std::EncodingError> {
+//RS         jet_enc_json_writer_finish(writer)
+//RS     }
+//RS     pub(crate) fn enc_json_reader_next(
+//RS         reader: &mut jet_std::JSONReader,
+//RS     ) -> Result<Option<jet_std::DataEvent>, jet_std::EncodingError> {
+//RS         jet_enc_json_reader_next(reader).map(|found| found.ok())
+//RS     }
+//RS     pub(crate) fn enc_jsonl_writer(
+//RS         output: JetFileWriter,
+//RS         limits: jet_std::EncodingLimits,
+//RS     ) -> Result<jet_std::JSONLWriter, jet_std::EncodingError> {
+//RS         jet_enc_jsonl_writer(output, limits)
+//RS     }
+//RS     pub(crate) fn enc_jsonl_reader(
+//RS         input: JetFileReader,
+//RS         limits: jet_std::EncodingLimits,
+//RS     ) -> Result<jet_std::JSONLReader, jet_std::EncodingError> {
+//RS         jet_enc_jsonl_reader(input, limits)
+//RS     }
+//RS     pub(crate) fn enc_jsonl_writer_write(
+//RS         writer: &mut jet_std::JSONLWriter,
+//RS         value: jet_std::DataTree,
+//RS     ) -> Result<(), jet_std::EncodingError> {
+//RS         jet_enc_jsonl_writer_write(writer, value)
+//RS     }
+//RS     pub(crate) fn enc_jsonl_writer_flush(
+//RS         writer: &mut jet_std::JSONLWriter,
+//RS     ) -> Result<(), jet_std::EncodingError> {
+//RS         jet_enc_jsonl_writer_flush(writer)
+//RS     }
+//RS     pub(crate) fn enc_jsonl_writer_finish(
+//RS         writer: &mut jet_std::JSONLWriter,
+//RS     ) -> Result<(), jet_std::EncodingError> {
+//RS         jet_enc_jsonl_writer_finish(writer)
+//RS     }
+//RS     pub(crate) fn enc_jsonl_reader_next(
+//RS         reader: &mut jet_std::JSONLReader,
+//RS     ) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
+//RS         jet_enc_jsonl_reader_next(reader).map(|found| found.ok())
+//RS     }
+//RS     pub(crate) fn enc_csv_writer(
+//RS         output: JetFileWriter,
+//RS         limits: jet_std::EncodingLimits,
+//RS     ) -> Result<jet_std::CSVWriter, jet_std::EncodingError> {
+//RS         jet_enc_csv_writer(output, limits)
+//RS     }
+//RS     pub(crate) fn enc_csv_reader(
+//RS         input: JetFileReader,
+//RS         limits: jet_std::EncodingLimits,
+//RS         delimiter: String,
+//RS         header: bool,
+//RS         skip_blank: bool,
+//RS     ) -> Result<jet_std::CSVReader, jet_std::EncodingError> {
+//RS         jet_enc_csv_reader(input, limits, delimiter, header, skip_blank)
+//RS     }
+//RS     pub(crate) fn enc_csv_writer_write(
+//RS         writer: &mut jet_std::CSVWriter,
+//RS         row: Vec<String>,
+//RS     ) -> Result<(), jet_std::EncodingError> {
+//RS         jet_enc_csv_writer_write(writer, row)
+//RS     }
+//RS     pub(crate) fn enc_csv_writer_flush(
+//RS         writer: &mut jet_std::CSVWriter,
+//RS     ) -> Result<(), jet_std::EncodingError> {
+//RS         jet_enc_csv_writer_flush(writer)
+//RS     }
+//RS     pub(crate) fn enc_csv_writer_finish(
+//RS         writer: &mut jet_std::CSVWriter,
+//RS     ) -> Result<(), jet_std::EncodingError> {
+//RS         jet_enc_csv_writer_finish(writer)
+//RS     }
+//RS     pub(crate) fn enc_csv_reader_next(
+//RS         reader: &mut jet_std::CSVReader,
+//RS     ) -> Result<Option<jet_std::CSVRow>, jet_std::EncodingError> {
+//RS         jet_enc_csv_reader_next(reader).map(|found| found.ok())
+//RS     }
+//RS     pub(crate) fn enc_cbor_writer(
+//RS         output: JetFileWriter,
+//RS         limits: jet_std::EncodingLimits,
+//RS     ) -> Result<jet_std::CBORWriter, jet_std::EncodingError> {
+//RS         jet_enc_cbor_writer(output, limits)
+//RS     }
+//RS     pub(crate) fn enc_cbor_reader(
+//RS         input: JetFileReader,
+//RS         limits: jet_std::EncodingLimits,
+//RS     ) -> Result<jet_std::CBORReader, jet_std::EncodingError> {
+//RS 
+//RS         jet_enc_cbor_reader(input, limits)
+//RS     }
+//RS     pub(crate) fn enc_cbor_writer_write(
+//RS         writer: &mut jet_std::CBORWriter,
+//RS         event: jet_std::DataEvent,
+//RS     ) -> Result<(), jet_std::EncodingError> {
+//RS         jet_enc_cbor_writer_write(writer, event)
+//RS     }
+//RS     pub(crate) fn enc_cbor_writer_flush(
+//RS         writer: &mut jet_std::CBORWriter,
+//RS     ) -> Result<(), jet_std::EncodingError> {
+//RS         jet_enc_cbor_writer_flush(writer)
+//RS     }
+//RS     pub(crate) fn enc_cbor_writer_finish(
+//RS         writer: &mut jet_std::CBORWriter,
+//RS     ) -> Result<(), jet_std::EncodingError> {
+//RS         jet_enc_cbor_writer_finish(writer)
+//RS     }
+//RS     pub(crate) fn enc_cbor_reader_next(
+//RS         reader: &mut jet_std::CBORReader,
+//RS     ) -> Result<Option<jet_std::DataEvent>, jet_std::EncodingError> {
+//RS         jet_enc_cbor_reader_next(reader).map(|found| found.ok())
+//RS     }
+//RS     pub(crate) fn enc_xml_writer(
+//RS         output: JetFileWriter,
+//RS         limits: jet_std::EncodingLimits,
+//RS         xml: jet_std::XMLRenderOptions,
+//RS     ) -> Result<jet_std::XMLWriter, jet_std::EncodingError> {
+//RS         jet_enc_xml_writer(output, limits, xml)
+//RS     }
+//RS     pub(crate) fn enc_xml_reader(
+//RS         input: JetFileReader,
+//RS         limits: jet_std::EncodingLimits,
+//RS         xml: jet_std::XMLParseOptions,
+//RS     ) -> Result<jet_std::XMLReader, jet_std::EncodingError> {
+//RS         jet_enc_xml_reader(input, limits, xml)
+//RS     }
+//RS     pub(crate) fn enc_xml_writer_write(
+//RS         writer: &mut jet_std::XMLWriter,
+//RS         event: jet_std::DataTree,
+//RS     ) -> Result<(), jet_std::EncodingError> {
+//RS         jet_enc_xml_writer_write(writer, event)
+//RS     }
+//RS     pub(crate) fn enc_xml_writer_flush(
+//RS         writer: &mut jet_std::XMLWriter,
+//RS     ) -> Result<(), jet_std::EncodingError> {
+//RS         jet_enc_xml_writer_flush(writer)
+//RS     }
+//RS     pub(crate) fn enc_xml_writer_finish(
+//RS         writer: &mut jet_std::XMLWriter,
+//RS     ) -> Result<(), jet_std::EncodingError> {
+//RS         jet_enc_xml_writer_finish(writer)
+//RS     }
+//RS     pub(crate) fn enc_xml_reader_next(
+//RS         reader: &mut jet_std::XMLReader,
+//RS     ) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
+//RS         jet_enc_xml_reader_next(reader).map(|found| found.ok())
+//RS     }
+//RS }
+//RS /// Source resource acquisition and iteration use the same FileStream leaf as
+//RS /// generated Prelude code.  The returned error is the canonical Prelude
+//RS /// `IOError`; SourceResources projects it without rendering or changing its
+//RS /// enum/context shape.
+//RS pub(crate) fn source_file_open(
+//RS     path: &str,
+//RS ) -> Result<runtime::JetFileReader, SourceIoError> {
+//RS     file_stream::jet_std_files_open(&path.to_string())
+//RS }
+//RS 
+//RS pub(crate) fn source_file_create(
+//RS     path: &str,
+//RS ) -> Result<runtime::JetFileWriter, SourceIoError> {
+//RS     file_stream::jet_std_files_create(&path.to_string())
+//RS }
+//RS 
+//RS pub(crate) fn source_file_append(
+//RS     path: &str,
+//RS ) -> Result<runtime::JetFileWriter, SourceIoError> {
+//RS     file_stream::jet_std_files_append(&path.to_string())
+//RS }
+//RS 
+//RS pub(crate) fn source_file_next_line(
+//RS     reader: &mut runtime::JetFileReader,
+//RS ) -> Result<Option<String>, SourceIoError> {
+//RS     file_stream::jet_std_file_reader_read_line(reader)
+//RS }
+//RS 
+//RS pub(crate) fn source_file_writer_write_line(
+//RS     writer: &mut runtime::JetFileWriter,
+//RS     line: &String,
+//RS ) -> Result<(), SourceIoError> {
+//RS     file_stream::jet_std_file_writer_write_line(writer, line)
+//RS }
+//RS 
+//RS pub(crate) fn source_file_writer_flush(
+//RS     writer: &mut runtime::JetFileWriter,
+//RS ) -> Result<(), SourceIoError> {
+//RS     file_stream::jet_std_file_writer_flush(writer)
+//RS }
+//RS 
+//RS pub(crate) fn source_file_writer_path(writer: &runtime::JetFileWriter) -> String {
+//RS     file_stream::jet_std_file_writer_path(writer)
+//RS }
+//RS 
+//RS // ── Handle tables (1-based) ──────────────────────────────────────────────────
+//RS 
+//RS pub(crate) enum FileReaderSlot {
+//RS     Live(runtime::JetFileReader),
+//RS     Taken,
+//RS }
+//RS pub(crate) enum FileWriterSlot {
+//RS     Live(runtime::JetFileWriter),
+//RS     Taken,
+//RS }
+//RS 
+//RS macro_rules! codec_slots {
+//RS     ($($name:ident => $ty:ty),* $(,)?) => {
+//RS         $(
+//RS             pub(crate) enum $name {
+//RS                 Live($ty),
+//RS                 Taken,
+//RS             }
+//RS         )*
+//RS     };
+//RS }
+//RS 
+//RS codec_slots! {
+//RS     JSONReaderSlot => runtime::jet_std::JSONReader,
+//RS     JSONWriterSlot => runtime::jet_std::JSONWriter,
+//RS     JsonlReaderSlot => runtime::jet_std::JSONLReader,
+//RS     JsonlWriterSlot => runtime::jet_std::JSONLWriter,
+//RS     CSVReaderSlot => runtime::jet_std::CSVReader,
+//RS     CSVWriterSlot => runtime::jet_std::CSVWriter,
+//RS     XmlReaderSlot => runtime::jet_std::XMLReader,
+//RS     XmlWriterSlot => runtime::jet_std::XMLWriter,
+//RS     CBORReaderSlot => runtime::jet_std::CBORReader,
+//RS     CBORWriterSlot => runtime::jet_std::CBORWriter,
+//RS }
+//RS 
+//RS fn push_ok_handle(handle: i64) -> i64 {
+//RS     result_ok(handle as u64)
+//RS }
+//RS 
+//RS fn take_file_writer(handle: i64) -> Result<runtime::JetFileWriter, String> {
+//RS     let mut out: Option<Result<runtime::JetFileWriter, String>> = None;
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = match (handle as usize).checked_sub(1) {
+//RS             Some(i) => i,
+//RS             None => {
+//RS                 out = Some(Err("bad FileWriter".into()));
+//RS                 return;
+//RS             }
+//RS         };
+//RS         out = Some(match rt.file_writers.get_mut(idx) {
+//RS             Some(FileWriterSlot::Live(_)) => {
+//RS                 let slot = std::mem::replace(&mut rt.file_writers[idx], FileWriterSlot::Taken);
+//RS                 match slot {
+//RS                     FileWriterSlot::Live(w) => Ok(w),
+//RS                     FileWriterSlot::Taken => Err("FileWriter already moved".into()),
+//RS                 }
+//RS             }
+//RS             _ => Err("bad FileWriter".into()),
+//RS         });
+//RS     });
+//RS     out.unwrap_or_else(|| Err("no active JIT runtime".into()))
+//RS }
+//RS 
+//RS pub(crate) fn take_file_reader(handle: i64) -> Result<runtime::JetFileReader, String> {
+//RS     let mut out: Option<Result<runtime::JetFileReader, String>> = None;
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = match (handle as usize).checked_sub(1) {
+//RS             Some(i) => i,
+//RS             None => {
+//RS                 out = Some(Err("bad FileReader".into()));
+//RS                 return;
+//RS             }
+//RS         };
+//RS         out = Some(match rt.file_readers.get_mut(idx) {
+//RS             Some(FileReaderSlot::Live(_)) => {
+//RS                 let slot = std::mem::replace(&mut rt.file_readers[idx], FileReaderSlot::Taken);
+//RS                 match slot {
+//RS                     FileReaderSlot::Live(r) => Ok(r),
+//RS                     FileReaderSlot::Taken => Err("FileReader already moved".into()),
+//RS                 }
+//RS             }
+//RS             _ => Err("bad FileReader".into()),
+//RS         });
+//RS     });
+//RS     out.unwrap_or_else(|| Err("no active JIT runtime".into()))
+//RS }
+//RS 
+//RS /// Typed adoption boundary for Source: the legacy slot is consumed exactly
+//RS /// once and the concrete writer owner, rather than its integer slot, crosses
+//RS /// into the invocation arena.
+//RS pub(crate) fn source_take_file_writer(
+//RS     handle: i64,
+//RS ) -> Result<runtime::JetFileWriter, String> {
+//RS     take_file_writer(handle)
+//RS }
+//RS 
+//RS /// Typed adoption boundary for Source: the legacy slot is consumed exactly
+//RS /// once and the concrete reader owner, rather than its integer slot, crosses
+//RS /// into the invocation arena.
+//RS pub(crate) fn source_take_file_reader(
+//RS     handle: i64,
+//RS ) -> Result<runtime::JetFileReader, String> {
+//RS     take_file_reader(handle)
+//RS }
+//RS 
+//RS macro_rules! source_take_codec_reader {
+//RS     ($name:ident, $field:ident, $slot:ident, $ty:ty, $label:literal) => {
+//RS         pub(crate) fn $name(handle: i64) -> Result<$ty, String> {
+//RS             let mut out: Option<Result<$ty, String>> = None;
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 let idx = match (handle as usize).checked_sub(1) {
+//RS                     Some(index) => index,
+//RS                     None => {
+//RS                         out = Some(Err(concat!("bad ", $label).to_string()));
+//RS                         return;
+//RS                     }
+//RS                 };
+//RS                 out = Some(match rt.$field.get_mut(idx) {
+//RS                     Some($slot::Live(_)) => {
+//RS                         let slot =
+//RS                             std::mem::replace(&mut rt.$field[idx], $slot::Taken);
+//RS                         match slot {
+//RS                             $slot::Live(reader) => Ok(reader),
+//RS                             $slot::Taken => {
+//RS                                 Err(concat!($label, " already moved").to_string())
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     _ => Err(concat!("bad ", $label).to_string()),
+//RS                 });
+//RS             });
+//RS             out.unwrap_or_else(|| Err("no active JIT runtime".to_string()))
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS source_take_codec_reader!(
+//RS     source_take_json_reader,
+//RS     json_readers,
+//RS     JSONReaderSlot,
+//RS     runtime::jet_std::JSONReader,
+//RS     "JSONReader"
+//RS );
+//RS source_take_codec_reader!(
+//RS     source_take_jsonl_reader,
+//RS     jsonl_readers,
+//RS     JsonlReaderSlot,
+//RS     runtime::jet_std::JSONLReader,
+//RS     "JSONLReader"
+//RS );
+//RS source_take_codec_reader!(
+//RS     source_take_csv_reader,
+//RS     csv_readers,
+//RS     CSVReaderSlot,
+//RS     runtime::jet_std::CSVReader,
+//RS     "CSVReader"
+//RS );
+//RS source_take_codec_reader!(
+//RS     source_take_xml_reader,
+//RS     xml_readers,
+//RS     XmlReaderSlot,
+//RS     runtime::jet_std::XMLReader,
+//RS     "XMLReader"
+//RS );
+//RS source_take_codec_reader!(
+//RS     source_take_cbor_reader,
+//RS     cbor_readers,
+//RS     CBORReaderSlot,
+//RS     runtime::jet_std::CBORReader,
+//RS     "CBORReader"
+//RS );
+//RS 
+//RS /// Drop a FileWriter handle (BufWriter Drop flushes). Used by `close` / resource cleanup.
+//RS pub(crate) fn jet_jit_file_writer_close(handle: i64) {
+//RS     let _ = take_file_writer(handle);
+//RS }
+//RS 
+//RS /// Drop a FileReader handle.
+//RS pub(crate) fn jet_jit_file_reader_close(handle: i64) {
+//RS     let _ = take_file_reader(handle);
+//RS }
+//RS 
+//RS /// Build the checked resident carrier for `EncodingLimits.safe()`.
+//RS pub(crate) fn jet_jit_encoding_limits_safe() -> i64 {
+//RS     let limits = runtime::jet_std::EncodingLimits::safe();
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let max_total_bytes = match limits.max_total_bytes {
+//RS             Ok(value) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
+//RS             Err(JetAbsent) => crate::runtime_host::alloc_jit_result(rt, false, 0),
+//RS         };
+//RS         let handle = rt.heap.alloc_record(6);
+//RS         let fields = [
+//RS             limits.buffer_bytes,
+//RS             limits.max_depth,
+//RS             limits.max_item_bytes,
+//RS             max_total_bytes,
+//RS             limits.max_expansion_depth,
+//RS             limits.max_expansion_bytes,
+//RS         ];
+//RS         for (index, value) in fields.into_iter().enumerate() {
+//RS             let _ = rt.heap.record_set_int(handle, index as i64, value);
+//RS         }
+//RS         handle
+//RS     })
+//RS }
+//RS 
+//RS fn read_limits(handle: i64) -> runtime::jet_std::EncodingLimits {
+//RS     let mut lim = runtime::jet_std::EncodingLimits::safe();
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if handle <= 0 {
+//RS             return;
+//RS         }
+//RS         let max_total_handle = rt.heap.record_get_int(handle, 3).unwrap_or(0);
+//RS         let max_total_bytes = match crate::runtime_host::jit_result(rt, max_total_handle) {
+//RS             Some(result) if result.ok => Ok(result.bits as i64),
+//RS             Some(_) => Err(JetAbsent),
+//RS             None => {
+//RS                 rt.set_host_fault(
+//RS                     "jit EncodingLimits max_total_bytes has an invalid result handle",
+//RS                 );
+//RS                 Err(JetAbsent)
+//RS             }
+//RS         };
+//RS         let get = |i| rt.heap.record_get_int(handle, i).unwrap_or(0);
+//RS         lim = runtime::jet_std::EncodingLimits {
+//RS             buffer_bytes: get(0),
+//RS             max_depth: get(1),
+//RS             max_item_bytes: get(2),
+//RS             max_total_bytes,
+//RS             max_expansion_depth: get(4),
+//RS             max_expansion_bytes: get(5),
+//RS         };
+//RS     });
+//RS     lim
+//RS }
+//RS fn read_xml_parse_options(
+//RS     handle: i64,
+//RS ) -> Result<runtime::jet_std::XMLParseOptions, String> {
+//RS     if handle <= 0 {
+//RS         return Ok(runtime::jet_std::XMLParseOptions::safe());
+//RS     }
+//RS     let options = crate::Encoding::xml_parse_options_from_heap(handle)?;
+//RS     let entities = match options.entities {
+//RS         jet_foundation::XmlPull::EntityPolicy::Preserve => {
+//RS             runtime::jet_std::XMLEntityPolicy::Preserve
+//RS         }
+//RS         jet_foundation::XmlPull::EntityPolicy::Reject => {
+//RS             runtime::jet_std::XMLEntityPolicy::Reject
+//RS         }
+//RS         jet_foundation::XmlPull::EntityPolicy::Resolve(values) => {
+//RS             runtime::jet_std::XMLEntityPolicy::Resolve(values)
+//RS         }
+//RS     };
+//RS     let limits = options.limits;
+//RS     let as_i64 = |value: usize| i64::try_from(value).unwrap_or(i64::MAX);
+//RS     Ok(runtime::jet_std::XMLParseOptions {
+//RS         entities,
+//RS         limits: runtime::jet_std::XMLLimits {
+//RS             max_depth: as_i64(limits.max_depth),
+//RS             max_nodes: as_i64(limits.max_nodes),
+//RS             max_attributes_per_element: as_i64(limits.max_attributes_per_element),
+//RS             max_name_bytes: as_i64(limits.max_name_bytes),
+//RS             max_text_bytes: as_i64(limits.max_text_bytes),
+//RS             max_entity_declarations: as_i64(limits.max_entity_declarations),
+//RS             max_entity_depth: as_i64(limits.max_entity_depth),
+//RS             max_entity_replacement_bytes: as_i64(limits.max_entity_replacement_bytes),
+//RS         },
+//RS     })
+//RS }
+//RS 
+//RS fn read_xml_render_options(
+//RS     handle: i64,
+//RS ) -> Result<runtime::jet_std::XMLRenderOptions, String> {
+//RS     if handle <= 0 {
+//RS         return Ok(runtime::jet_std::XMLRenderOptions::safe());
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         Some((|| {
+//RS             let discriminant = |field: i64, option_name: &str| -> Result<i64, String> {
+//RS                 let raw = rt
+//RS                     .heap
+//RS                     .record_get_int(handle, field)
+//RS                     .ok_or_else(|| format!("invalid XML render option `{option_name}`"))?;
+//RS                 Ok(rt.heap.record_get_int(raw, 0).unwrap_or(raw))
+//RS             };
+//RS             let encoding = match discriminant(0, "encoding")? {
+//RS                 0 => runtime::jet_std::XMLEncoding::UTF8,
+//RS                 1 => runtime::jet_std::XMLEncoding::UTF8BOM,
+//RS                 2 => runtime::jet_std::XMLEncoding::UTF16LE,
+//RS                 3 => runtime::jet_std::XMLEncoding::UTF16BE,
+//RS                 value => return Err(format!("invalid XMLEncoding discriminant {value}")),
+//RS             };
+//RS             let lexical = match discriminant(1, "lexical")? {
+//RS                 0 => runtime::jet_std::XMLLexicalPolicy::PreserveValid,
+//RS                 1 => runtime::jet_std::XMLLexicalPolicy::Deterministic,
+//RS                 value => {
+//RS                     return Err(format!("invalid XMLLexicalPolicy discriminant {value}"))
+//RS                 }
+//RS             };
+//RS             Ok(runtime::jet_std::XMLRenderOptions { encoding, lexical })
+//RS         })())
+//RS     })
+//RS     .unwrap_or_else(|| Err("XML render options require an active runtime".to_string()))
+//RS }
+//RS 
+//RS 
+//RS fn to_stream_tree(tree: &super::Encoding::json_rt::DataTree) -> runtime::jet_std::DataTree {
+//RS     tree.clone()
+//RS }
+//RS 
+//RS fn result_err_encoding(error: &runtime::jet_std::EncodingError) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let format = match error.format {
+//RS             runtime::jet_std::EncodingFormat::JSON => 0,
+//RS             runtime::jet_std::EncodingFormat::JSONL => 1,
+//RS             runtime::jet_std::EncodingFormat::CSV => 2,
+//RS             runtime::jet_std::EncodingFormat::TOML => 3,
+//RS             runtime::jet_std::EncodingFormat::YAML => 4,
+//RS             runtime::jet_std::EncodingFormat::XML => 5,
+//RS             runtime::jet_std::EncodingFormat::CBOR => 6,
+//RS         };
+//RS         let kind = match error.kind {
+//RS             runtime::jet_std::EncodingErrorKind::Syntax => 0,
+//RS             runtime::jet_std::EncodingErrorKind::Truncated => 1,
+//RS             runtime::jet_std::EncodingErrorKind::Unsupported => 2,
+//RS             runtime::jet_std::EncodingErrorKind::Limit => 3,
+//RS             runtime::jet_std::EncodingErrorKind::IO => 4,
+//RS             runtime::jet_std::EncodingErrorKind::State => 5,
+//RS         };
+//RS         let cause = match &error.cause {
+//RS             Ok(cause) => {
+//RS                 let cause_record = rt.heap.alloc_record(3);
+//RS                 let cause_kind = rt.heap.alloc_string(cause.kind.clone());
+//RS                 let cause_message = rt.heap.alloc_string(cause.message.clone());
+//RS                 let _ = rt.heap.record_set_string(cause_record, 0, cause_kind);
+//RS                 let _ = rt.heap.record_set_int(
+//RS                     cause_record,
+//RS                     1,
+//RS                     cause.os_code.map(|code| code.wrapping_add(1)).unwrap_or(0),
+//RS                 );
+//RS                 let _ = rt.heap.record_set_string(cause_record, 2, cause_message);
+//RS                 cause_record.wrapping_add(1)
+//RS             }
+//RS             Err(JetAbsent) => 0,
+//RS         };
+//RS         let h = rt.heap.alloc_record(8);
+//RS         let _ = rt.heap.record_set_int(h, 0, format);
+//RS         let _ = rt.heap.record_set_int(h, 1, kind);
+//RS         let _ = rt.heap.record_set_int(h, 2, error.byte_offset);
+//RS         let _ = rt
+//RS             .heap
+//RS             .record_set_int(h, 3, error.line.map(|line| line + 1).unwrap_or(0));
+//RS         let _ = rt
+//RS             .heap
+//RS             .record_set_int(h, 4, error.column.map(|column| column + 1).unwrap_or(0));
+//RS         let path = rt.heap.alloc_string(error.path.clone());
+//RS         let _ = rt.heap.record_set_string(h, 5, path);
+//RS         let reason = rt.heap.alloc_string(error.reason.clone());
+//RS         let _ = rt.heap.record_set_string(h, 6, reason);
+//RS         let _ = rt.heap.record_set_int(h, 7, cause);
+//RS         rt.results.push(super::JitResultValue {
+//RS             ok: false,
+//RS             bits: h as u64,
+//RS         });
+//RS         rt.results.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS /// D-JSONCANON1=A edition-2027 whole-value JCS — same `jet_enc_json_canonical`.
+//RS pub(crate) fn json_canonical_checked(tree: i64, limits: i64) -> i64 {
+//RS     let Some(tree) = read_datatree(tree) else {
+//RS         return result_err_msg("bad DataTree");
+//RS     };
+//RS     let lim = if limits == 0 {
+//RS         runtime::jet_std::EncodingLimits::safe()
+//RS     } else {
+//RS         read_limits(limits)
+//RS     };
+//RS     match runtime::enc_json_canonical(&to_stream_tree(&tree), &lim) {
+//RS         Ok(text) => {
+//RS             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text));
+//RS             result_ok(sid as u64)
+//RS         }
+//RS         Err(error) => result_err_encoding(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn from_stream_tree(tree: &runtime::jet_std::DataTree) -> super::Encoding::json_rt::DataTree {
+//RS     tree.clone()
+//RS }
+//RS 
+//RS fn data_event_disc(variant: &str) -> Result<i64, String> {
+//RS     crate::types_meta::prelude_enum_variant_index("DataEvent", variant)
+//RS         .ok_or_else(|| format!("unknown DataEvent variant `{variant}`"))
+//RS }
+//RS 
+//RS fn data_event_variant(disc: i64) -> Result<&'static str, String> {
+//RS     crate::types_meta::prelude_enum_variant_at("DataEvent", disc)
+//RS         .ok_or_else(|| format!("bad DataEvent disc {disc}"))
+//RS }
+//RS 
+//RS /// JIT DataEvent ABI (the Prelude declaration order) → stream DataEvent.
+//RS fn read_data_event(packed: i64) -> Result<runtime::jet_std::DataEvent, String> {
+//RS     let float_disc = data_event_disc("Float")?;
+//RS     let text_disc = data_event_disc("Text")?;
+//RS     let bytes_disc = data_event_disc("Bytes")?;
+//RS     let key_disc = data_event_disc("Key")?;
+//RS     // Float payloads are heap records [disc, f64].
+//RS     let (disc, payload_bits, text, bytes, float_val) = Concurrency::with_runtime_mut(|rt| {
+//RS         // Heuristic: if packed looks like a small disc (0..15) or packed scalar,
+//RS         // use packed form. Float always uses heap record (handle >= 1 with 2 fields).
+//RS         if packed >= 1 {
+//RS             if let Some(disc) = rt.heap.record_get_int(packed, 0) {
+//RS                 if disc == float_disc {
+//RS                     let f = rt.heap.record_get_float(packed, 1).unwrap_or(0.0);
+//RS                     return (disc, 0i64, None, None, Some(f));
+//RS                 }
+//RS             }
+//RS         }
+//RS         let disc = packed & 0xff;
+//RS         let payload = packed >> 8;
+//RS         match disc {
+//RS             disc if disc == text_disc || disc == key_disc => {
+//RS                 let s = rt.heap.clone_string(payload).unwrap_or_default();
+//RS                 (disc, payload, Some(s), None, None)
+//RS             }
+//RS             disc if disc == bytes_disc => {
+//RS                 let len = rt.heap.list_len(payload).unwrap_or(0);
+//RS                 let mut out = Vec::with_capacity(len as usize);
+//RS                 for i in 0..len {
+//RS                     out.push(rt.heap.list_get_int(payload, i).unwrap_or(0) as u8);
+//RS                 }
+//RS                 (disc, payload, None, Some(out), None)
+//RS             }
+//RS             _ => (disc, payload, None, None, None),
+//RS         }
+//RS     });
+//RS     let variant = data_event_variant(disc)?;
+//RS     Ok(match variant {
+//RS         "Null" => runtime::jet_std::DataEvent::Null,
+//RS         "ArrayStart" => runtime::jet_std::DataEvent::ArrayStart,
+//RS         "ArrayEnd" => runtime::jet_std::DataEvent::ArrayEnd,
+//RS         "ObjectStart" => runtime::jet_std::DataEvent::ObjectStart,
+//RS         "ObjectEnd" => runtime::jet_std::DataEvent::ObjectEnd,
+//RS         "Bool" => runtime::jet_std::DataEvent::Bool(payload_bits != 0),
+//RS         "Int" => runtime::jet_std::DataEvent::Int(payload_bits),
+//RS         "Float" => runtime::jet_std::DataEvent::Float(float_val.unwrap_or(0.0)),
+//RS         "Text" => runtime::jet_std::DataEvent::Text(text.unwrap_or_default()),
+//RS         "Bytes" => runtime::jet_std::DataEvent::Bytes(bytes.unwrap_or_default()),
+//RS         "Key" => runtime::jet_std::DataEvent::Key(text.unwrap_or_default()),
+//RS         _ => return Err(format!("bad DataEvent variant {variant}")),
+//RS     })
+//RS }
+//RS 
+//RS fn pack_data_event(ev: runtime::jet_std::DataEvent) -> i64 {
+//RS     use runtime::jet_std::DataEvent::*;
+//RS     let disc = |variant| data_event_disc(variant).expect("Prelude DataEvent metadata");
+//RS     match ev {
+//RS         Null => disc("Null"),
+//RS         ArrayStart => disc("ArrayStart"),
+//RS         ArrayEnd => disc("ArrayEnd"),
+//RS         ObjectStart => disc("ObjectStart"),
+//RS         ObjectEnd => disc("ObjectEnd"),
+//RS         Bool(b) => disc("Bool") | ((i64::from(b)) << 8),
+//RS         Int(n) => disc("Int") | (n << 8),
+//RS         Float(f) => Concurrency::with_runtime_mut(|rt| {
+//RS             let h = rt.heap.alloc_record(2);
+//RS             let _ = rt.heap.record_set_int(h, 0, disc("Float"));
+//RS             let _ = rt.heap.record_set_float(h, 1, f);
+//RS             h
+//RS         }),
+//RS         Number(_) => unreachable!("internal JSON number carrier escaped typed decode"),
+//RS         Text(s) => {
+//RS             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
+//RS             disc("Text") | (sid << 8)
+//RS         }
+//RS         Bytes(b) => {
+//RS             let list = Concurrency::with_runtime_mut(|rt| {
+//RS                 let list = rt.heap.alloc_empty_list();
+//RS                 for byte in b {
+//RS                     let _ = rt.heap.list_push_int(list, byte as i64);
+//RS                 }
+//RS                 list
+//RS             });
+//RS             disc("Bytes") | (list << 8)
+//RS         }
+//RS         Key(s) => {
+//RS             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
+//RS             disc("Key") | (sid << 8)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn option_bits(opt: Option<i64>) -> u64 {
+//RS     match opt {
+//RS         None => 0,
+//RS         Some(v) => (v as u64).wrapping_add(1),
+//RS     }
+//RS }
+//RS 
+//RS // ── core.files create / open ─────────────────────────────────────────────────
+//RS 
+//RS pub(crate) fn jet_jit_fs_create(path: i64) -> i64 {
+//RS     let p = crate::CoreHost::clone_path_arg(path);
+//RS     match file_stream::jet_std_files_create(&p) {
+//RS         Ok(writer) => {
+//RS             let h = Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.file_writers.push(FileWriterSlot::Live(writer));
+//RS                 rt.file_writers.len() as i64
+//RS             });
+//RS             push_ok_handle(h)
+//RS         }
+//RS         Err(error) => crate::Process::process_io_error_result(error),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_fs_append(path: i64) -> i64 {
+//RS     let p = crate::CoreHost::clone_path_arg(path);
+//RS     match file_stream::jet_std_files_append(&p) {
+//RS         Ok(writer) => {
+//RS             let handle = Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.file_writers.push(FileWriterSlot::Live(writer));
+//RS                 rt.file_writers.len() as i64
+//RS             });
+//RS             push_ok_handle(handle)
+//RS         }
+//RS         Err(error) => crate::Process::process_io_error_result(error),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_fs_open(path: i64) -> i64 {
+//RS     let p = crate::CoreHost::clone_path_arg(path);
+//RS     match file_stream::jet_std_files_open(&p) {
+//RS         Ok(r) => {
+//RS             let h = Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.file_readers.push(FileReaderSlot::Live(r));
+//RS                 rt.file_readers.len() as i64
+//RS             });
+//RS             push_ok_handle(h)
+//RS         }
+//RS         Err(error) => crate::Process::process_io_error_result(error),
+//RS     }
+//RS }
+//RS 
+//RS // ── writers / readers ────────────────────────────────────────────────────────
+//RS 
+//RS macro_rules! push_codec {
+//RS     ($rt:ident, $field:ident, $slot:ident, $val:expr) => {{
+//RS         $rt.$field.push($slot::Live($val));
+//RS         $rt.$field.len() as i64
+//RS     }};
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_json_writer(file: i64, limits: i64, canonical: i64) -> i64 {
+//RS     let w = match take_file_writer(file) {
+//RS         Ok(w) => w,
+//RS         Err(e) => return result_err_msg(&e),
+//RS     };
+//RS     let lim = if limits == 0 {
+//RS         runtime::jet_std::EncodingLimits::safe()
+//RS     } else {
+//RS         read_limits(limits)
+//RS     };
+//RS     match runtime::enc_json_writer(w, lim, canonical != 0) {
+//RS         Ok(writer) => {
+//RS             let h = Concurrency::with_runtime_mut(|rt| {
+//RS                 push_codec!(rt, json_writers, JSONWriterSlot, writer)
+//RS             });
+//RS             push_ok_handle(h)
+//RS         }
+//RS         Err(e) => result_err_encoding(&e),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_json_reader(file: i64, limits: i64) -> i64 {
+//RS     let r = match take_file_reader(file) {
+//RS         Ok(r) => r,
+//RS         Err(e) => return result_err_msg(&e),
+//RS     };
+//RS     let lim = if limits == 0 {
+//RS         runtime::jet_std::EncodingLimits::safe()
+//RS     } else {
+//RS         read_limits(limits)
+//RS     };
+//RS     match runtime::enc_json_reader(r, lim) {
+//RS         Ok(reader) => {
+//RS             let h = Concurrency::with_runtime_mut(|rt| {
+//RS                 push_codec!(rt, json_readers, JSONReaderSlot, reader)
+//RS             });
+//RS             push_ok_handle(h)
+//RS         }
+//RS         Err(e) => result_err_encoding(&e),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_jsonl_writer(file: i64, limits: i64) -> i64 {
+//RS     let w = match take_file_writer(file) {
+//RS         Ok(w) => w,
+//RS         Err(e) => return result_err_msg(&e),
+//RS     };
+//RS     let lim = if limits == 0 {
+//RS         runtime::jet_std::EncodingLimits::safe()
+//RS     } else {
+//RS         read_limits(limits)
+//RS     };
+//RS     match runtime::enc_jsonl_writer(w, lim) {
+//RS         Ok(writer) => {
+//RS             let h = Concurrency::with_runtime_mut(|rt| {
+//RS                 push_codec!(rt, jsonl_writers, JsonlWriterSlot, writer)
+//RS             });
+//RS             push_ok_handle(h)
+//RS         }
+//RS         Err(e) => result_err_encoding(&e),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_jsonl_reader(file: i64, limits: i64) -> i64 {
+//RS     let r = match take_file_reader(file) {
+//RS         Ok(r) => r,
+//RS         Err(e) => return result_err_msg(&e),
+//RS     };
+//RS     let lim = if limits == 0 {
+//RS         runtime::jet_std::EncodingLimits::safe()
+//RS     } else {
+//RS         read_limits(limits)
+//RS     };
+//RS     match runtime::enc_jsonl_reader(r, lim) {
+//RS         Ok(reader) => {
+//RS             let h = Concurrency::with_runtime_mut(|rt| {
+//RS                 push_codec!(rt, jsonl_readers, JsonlReaderSlot, reader)
+//RS             });
+//RS             push_ok_handle(h)
+//RS         }
+//RS         Err(e) => result_err_encoding(&e),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_csv_writer(file: i64, limits: i64) -> i64 {
+//RS     let w = match take_file_writer(file) {
+//RS         Ok(w) => w,
+//RS         Err(e) => return result_err_msg(&e),
+//RS     };
+//RS     let lim = if limits == 0 {
+//RS         runtime::jet_std::EncodingLimits::safe()
+//RS     } else {
+//RS         read_limits(limits)
+//RS     };
+//RS     match runtime::enc_csv_writer(w, lim) {
+//RS         Ok(writer) => {
+//RS             let h = Concurrency::with_runtime_mut(|rt| {
+//RS                 push_codec!(rt, csv_writers, CSVWriterSlot, writer)
+//RS             });
+//RS             push_ok_handle(h)
+//RS         }
+//RS         Err(e) => result_err_encoding(&e),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_csv_reader(
+//RS     file: i64,
+//RS     limits: i64,
+//RS     delimiter: i64,
+//RS     header: i64,
+//RS     skip_blank: i64,
+//RS ) -> i64 {
+//RS     let r = match take_file_reader(file) {
+//RS         Ok(r) => r,
+//RS         Err(e) => return result_err_msg(&e),
+//RS     };
+//RS     let lim = if limits == 0 {
+//RS         runtime::jet_std::EncodingLimits::safe()
+//RS     } else {
+//RS         read_limits(limits)
+//RS     };
+//RS     match runtime::enc_csv_reader(
+//RS         r,
+//RS         lim,
+//RS         clone_string(delimiter),
+//RS         header != 0,
+//RS         skip_blank != 0,
+//RS     ) {
+//RS         Ok(reader) => {
+//RS             let h = Concurrency::with_runtime_mut(|rt| {
+//RS                 push_codec!(rt, csv_readers, CSVReaderSlot, reader)
+//RS             });
+//RS             push_ok_handle(h)
+//RS         }
+//RS         Err(e) => result_err_encoding(&e),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_cbor_writer(file: i64, limits: i64) -> i64 {
+//RS     let w = match take_file_writer(file) {
+//RS         Ok(w) => w,
+//RS         Err(e) => return result_err_msg(&e),
+//RS     };
+//RS     let lim = if limits == 0 {
+//RS         runtime::jet_std::EncodingLimits::safe()
+//RS     } else {
+//RS         read_limits(limits)
+//RS     };
+//RS     match runtime::enc_cbor_writer(w, lim) {
+//RS         Ok(writer) => {
+//RS             let h = Concurrency::with_runtime_mut(|rt| {
+//RS                 push_codec!(rt, cbor_writers, CBORWriterSlot, writer)
+//RS             });
+//RS             push_ok_handle(h)
+//RS         }
+//RS         Err(e) => result_err_encoding(&e),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_cbor_reader(file: i64, limits: i64) -> i64 {
+//RS     let r = match take_file_reader(file) {
+//RS         Ok(r) => r,
+//RS         Err(e) => return result_err_msg(&e),
+//RS     };
+//RS     let lim = if limits == 0 {
+//RS         runtime::jet_std::EncodingLimits::safe()
+//RS     } else {
+//RS         read_limits(limits)
+//RS     };
+//RS     match runtime::enc_cbor_reader(r, lim) {
+//RS         Ok(reader) => {
+//RS             let h = Concurrency::with_runtime_mut(|rt| {
+//RS                 push_codec!(rt, cbor_readers, CBORReaderSlot, reader)
+//RS             });
+//RS             push_ok_handle(h)
+//RS         }
+//RS         Err(e) => result_err_encoding(&e),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_xml_writer(file: i64, limits: i64, options: i64) -> i64 {
+//RS     let w = match take_file_writer(file) {
+//RS         Ok(w) => w,
+//RS         Err(e) => return result_err_msg(&e),
+//RS     };
+//RS     let lim = if limits == 0 {
+//RS         runtime::jet_std::EncodingLimits::safe()
+//RS     } else {
+//RS         read_limits(limits)
+//RS     };
+//RS     let xml = match read_xml_render_options(options) {
+//RS         Ok(xml) => xml,
+//RS         Err(reason) => return result_err_encoding(&crate::Encoding::xml_shape_error(reason)),
+//RS     };
+//RS     match runtime::enc_xml_writer(w, lim, xml) {
+//RS         Ok(writer) => {
+//RS             let h = Concurrency::with_runtime_mut(|rt| {
+//RS                 push_codec!(rt, xml_writers, XmlWriterSlot, writer)
+//RS             });
+//RS             push_ok_handle(h)
+//RS         }
+//RS         Err(e) => result_err_encoding(&e),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_xml_reader(file: i64, limits: i64, options: i64) -> i64 {
+//RS     let r = match take_file_reader(file) {
+//RS         Ok(r) => r,
+//RS         Err(e) => return result_err_msg(&e),
+//RS     };
+//RS     let lim = if limits == 0 {
+//RS         runtime::jet_std::EncodingLimits::safe()
+//RS     } else {
+//RS         read_limits(limits)
+//RS     };
+//RS     let xml = match read_xml_parse_options(options) {
+//RS         Ok(xml) => xml,
+//RS         Err(reason) => return result_err_encoding(&crate::Encoding::xml_shape_error(reason)),
+//RS     };
+//RS     match runtime::enc_xml_reader(r, lim, xml) {
+//RS         Ok(reader) => {
+//RS             let h = Concurrency::with_runtime_mut(|rt| {
+//RS                 push_codec!(rt, xml_readers, XmlReaderSlot, reader)
+//RS             });
+//RS             push_ok_handle(h)
+//RS         }
+//RS         Err(e) => result_err_encoding(&e),
+//RS     }
+//RS }
+//RS 
+//RS // ── handle methods ───────────────────────────────────────────────────────────
+//RS 
+//RS macro_rules! with_writer {
+//RS     ($field:ident, $slot:ident, $handle:expr, $body:expr) => {{
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             let idx = ($handle as usize).checked_sub(1)?;
+//RS             match rt.$field.get_mut(idx)? {
+//RS                 $slot::Live(w) => Some($body(w)),
+//RS                 $slot::Taken => None,
+//RS             }
+//RS         })
+//RS     }};
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_json_writer_write(handle: i64, event: i64) -> i64 {
+//RS     let ev = match read_data_event(event) {
+//RS         Ok(e) => e,
+//RS         Err(e) => return result_err_msg(&e),
+//RS     };
+//RS     match with_writer!(json_writers, JSONWriterSlot, handle, |w| {
+//RS         runtime::enc_json_writer_write(w, ev.clone())
+//RS     }) {
+//RS         Some(Ok(())) => push_ok_handle(0),
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad JSONWriter"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_json_writer_flush(handle: i64) -> i64 {
+//RS     match with_writer!(json_writers, JSONWriterSlot, handle, |w| {
+//RS         runtime::enc_json_writer_flush(w)
+//RS     }) {
+//RS         Some(Ok(())) => push_ok_handle(0),
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad JSONWriter"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_json_writer_finish(handle: i64) -> i64 {
+//RS     match with_writer!(json_writers, JSONWriterSlot, handle, |w| {
+//RS         runtime::enc_json_writer_finish(w)
+//RS     }) {
+//RS         Some(Ok(())) => push_ok_handle(0),
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad JSONWriter"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_json_reader_next(handle: i64) -> i64 {
+//RS     match with_writer!(json_readers, JSONReaderSlot, handle, |r| {
+//RS         runtime::enc_json_reader_next(r)
+//RS     }) {
+//RS         Some(Ok(None)) => push_ok_handle(0),
+//RS         Some(Ok(Some(ev))) => {
+//RS             let bits = pack_data_event(ev);
+//RS             push_ok_handle(option_bits(Some(bits)) as i64)
+//RS         }
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad JSONReader"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_jsonl_writer_write(handle: i64, tree: i64) -> i64 {
+//RS     let Some(dt) = read_datatree(tree) else {
+//RS         return result_err_msg("bad DataTree");
+//RS     };
+//RS     let st = to_stream_tree(&dt);
+//RS     match with_writer!(jsonl_writers, JsonlWriterSlot, handle, |w| {
+//RS         runtime::enc_jsonl_writer_write(w, st.clone())
+//RS     }) {
+//RS         Some(Ok(())) => push_ok_handle(0),
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad JSONLWriter"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_jsonl_writer_flush(handle: i64) -> i64 {
+//RS     match with_writer!(jsonl_writers, JsonlWriterSlot, handle, |w| {
+//RS         runtime::enc_jsonl_writer_flush(w)
+//RS     }) {
+//RS         Some(Ok(())) => push_ok_handle(0),
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad JSONLWriter"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_jsonl_writer_finish(handle: i64) -> i64 {
+//RS     match with_writer!(jsonl_writers, JsonlWriterSlot, handle, |w| {
+//RS         runtime::enc_jsonl_writer_finish(w)
+//RS     }) {
+//RS         Some(Ok(())) => push_ok_handle(0),
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad JSONLWriter"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_jsonl_reader_next(handle: i64) -> i64 {
+//RS     match with_writer!(jsonl_readers, JsonlReaderSlot, handle, |r| {
+//RS         runtime::enc_jsonl_reader_next(r)
+//RS     }) {
+//RS         Some(Ok(None)) => push_ok_handle(0),
+//RS         Some(Ok(Some(tree))) => {
+//RS             let h = alloc_datatree(&from_stream_tree(&tree));
+//RS             push_ok_handle(option_bits(Some(h)) as i64)
+//RS         }
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad JSONLReader"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_csv_writer_write(handle: i64, row: i64) -> i64 {
+//RS     let cells = Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(row).unwrap_or(0);
+//RS         let mut out = Vec::with_capacity(len as usize);
+//RS         for i in 0..len {
+//RS             let sid = rt.heap.list_get_int(row, i).unwrap_or(0);
+//RS             out.push(rt.heap.clone_string(sid).unwrap_or_default());
+//RS         }
+//RS         out
+//RS     });
+//RS     match with_writer!(csv_writers, CSVWriterSlot, handle, |w| {
+//RS         runtime::enc_csv_writer_write(w, cells.clone())
+//RS     }) {
+//RS         Some(Ok(())) => push_ok_handle(0),
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad CSVWriter"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_csv_writer_flush(handle: i64) -> i64 {
+//RS     match with_writer!(csv_writers, CSVWriterSlot, handle, |w| {
+//RS         runtime::enc_csv_writer_flush(w)
+//RS     }) {
+//RS         Some(Ok(())) => push_ok_handle(0),
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad CSVWriter"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_csv_writer_finish(handle: i64) -> i64 {
+//RS     match with_writer!(csv_writers, CSVWriterSlot, handle, |w| {
+//RS         runtime::enc_csv_writer_finish(w)
+//RS     }) {
+//RS         Some(Ok(())) => push_ok_handle(0),
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad CSVWriter"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_csv_reader_next(handle: i64) -> i64 {
+//RS     match with_writer!(csv_readers, CSVReaderSlot, handle, |r| {
+//RS         runtime::enc_csv_reader_next(r)
+//RS     }) {
+//RS         Some(Ok(None)) => push_ok_handle(0),
+//RS         Some(Ok(Some(row))) => {
+//RS             let row = Concurrency::with_runtime_mut(|rt| {
+//RS                 let fields = rt.heap.alloc_empty_list();
+//RS                 for cell in row.fields {
+//RS                     let sid = rt.heap.alloc_string(cell);
+//RS                     let _ = rt.heap.list_push_int(fields, sid);
+//RS                 }
+//RS                 let record = rt.heap.alloc_record(2);
+//RS                 let _ = rt.heap.record_set_int(record, 0, fields);
+//RS                 let _ = rt.heap.record_set_int(record, 1, row.line);
+//RS                 record
+//RS             });
+//RS             push_ok_handle(option_bits(Some(row)) as i64)
+//RS         }
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad CSVReader"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_cbor_writer_write(handle: i64, event: i64) -> i64 {
+//RS     let ev = match read_data_event(event) {
+//RS         Ok(e) => e,
+//RS         Err(e) => return result_err_msg(&e),
+//RS     };
+//RS     match with_writer!(cbor_writers, CBORWriterSlot, handle, |w| {
+//RS         runtime::enc_cbor_writer_write(w, ev.clone())
+//RS     }) {
+//RS         Some(Ok(())) => push_ok_handle(0),
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad CBORWriter"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_cbor_writer_flush(handle: i64) -> i64 {
+//RS     match with_writer!(cbor_writers, CBORWriterSlot, handle, |w| {
+//RS         runtime::enc_cbor_writer_flush(w)
+//RS     }) {
+//RS         Some(Ok(())) => push_ok_handle(0),
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad CBORWriter"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_cbor_writer_finish(handle: i64) -> i64 {
+//RS     match with_writer!(cbor_writers, CBORWriterSlot, handle, |w| {
+//RS         runtime::enc_cbor_writer_finish(w)
+//RS     }) {
+//RS         Some(Ok(())) => push_ok_handle(0),
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad CBORWriter"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_cbor_reader_next(handle: i64) -> i64 {
+//RS     match with_writer!(cbor_readers, CBORReaderSlot, handle, |r| {
+//RS         runtime::enc_cbor_reader_next(r)
+//RS     }) {
+//RS         Some(Ok(None)) => push_ok_handle(0),
+//RS         Some(Ok(Some(ev))) => {
+//RS             let bits = pack_data_event(ev);
+//RS             push_ok_handle(option_bits(Some(bits)) as i64)
+//RS         }
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad CBORReader"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_xml_writer_write(handle: i64, tree: i64) -> i64 {
+//RS     let Some(dt) = read_datatree(tree) else {
+//RS         return result_err_msg("bad DataTree");
+//RS     };
+//RS     let st = to_stream_tree(&dt);
+//RS     match with_writer!(xml_writers, XmlWriterSlot, handle, |w| {
+//RS         runtime::enc_xml_writer_write(w, st.clone())
+//RS     }) {
+//RS         Some(Ok(())) => push_ok_handle(0),
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad XMLWriter"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_xml_writer_flush(handle: i64) -> i64 {
+//RS     match with_writer!(xml_writers, XmlWriterSlot, handle, |w| {
+//RS         runtime::enc_xml_writer_flush(w)
+//RS     }) {
+//RS         Some(Ok(())) => push_ok_handle(0),
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad XMLWriter"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_xml_writer_finish(handle: i64) -> i64 {
+//RS     match with_writer!(xml_writers, XmlWriterSlot, handle, |w| {
+//RS         runtime::enc_xml_writer_finish(w)
+//RS     }) {
+//RS         Some(Ok(())) => push_ok_handle(0),
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad XMLWriter"),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_xml_reader_next(handle: i64) -> i64 {
+//RS     match with_writer!(xml_readers, XmlReaderSlot, handle, |r| {
+//RS         runtime::enc_xml_reader_next(r)
+//RS     }) {
+//RS         Some(Ok(None)) => push_ok_handle(0),
+//RS         Some(Ok(Some(tree))) => {
+//RS             let h = alloc_datatree(&from_stream_tree(&tree));
+//RS             push_ok_handle(option_bits(Some(h)) as i64)
+//RS         }
+//RS         Some(Err(e)) => result_err_encoding(&e),
+//RS         None => result_err_msg("bad XMLReader"),
+//RS     }
+//RS }
+//RS 
+//RS // ── symbol registration (#1633: one host_fns! listing) ───────────────────────
+//RS 
+//RS host_fns! {
+//RS     struct StreamHostFns;
+//RS     register: register_stream_symbols;
+//RS     declare: declare_stream_host_fns(module) {
+//RS         let cc = module.target_config().default_call_conv;
+//RS         let mut sig_nullary = Signature::new(cc);
+//RS         sig_nullary.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_unary = Signature::new(cc);
+//RS         sig_unary.params.push(AbiParam::new(types::I64));
+//RS         sig_unary.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_binary = Signature::new(cc);
+//RS         sig_binary.params.push(AbiParam::new(types::I64));
+//RS         sig_binary.params.push(AbiParam::new(types::I64));
+//RS         sig_binary.returns.push(AbiParam::new(types::I64));
+//RS         // json.writer(file, limits, canonical) and XML constructors' options use i64 handles.
+//RS         let mut sig_ternary = Signature::new(cc);
+//RS         sig_ternary.params.push(AbiParam::new(types::I64));
+//RS         sig_ternary.params.push(AbiParam::new(types::I64));
+//RS         sig_ternary.params.push(AbiParam::new(types::I64));
+//RS         sig_ternary.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_quinary = Signature::new(cc);
+//RS         for _ in 0..5 {
+//RS             sig_quinary.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         sig_quinary.returns.push(AbiParam::new(types::I64));
+//RS     }
+//RS     encoding_limits_safe: "jet_std::EncodingLimits::safe" => jet_jit_encoding_limits_safe: sig_nullary;
+//RS     fs_create: "jet_jit_fs_create" => jet_jit_fs_create: sig_unary;
+//RS     fs_open: "jet_jit_fs_open" => jet_jit_fs_open: sig_unary;
+//RS     json_writer: "jet_jit_json_writer" => jet_jit_json_writer: sig_ternary;
+//RS     json_reader: "jet_jit_json_reader" => jet_jit_json_reader: sig_binary;
+//RS     jsonl_writer: "jet_jit_jsonl_writer" => jet_jit_jsonl_writer: sig_binary;
+//RS     jsonl_reader: "jet_jit_jsonl_reader" => jet_jit_jsonl_reader: sig_binary;
+//RS     csv_writer: "jet_jit_csv_writer" => jet_jit_csv_writer: sig_binary;
+//RS     csv_reader: "jet_jit_csv_reader" => jet_jit_csv_reader: sig_quinary;
+//RS     cbor_writer: "jet_jit_cbor_writer" => jet_jit_cbor_writer: sig_binary;
+//RS     cbor_reader: "jet_jit_cbor_reader" => jet_jit_cbor_reader: sig_binary;
+//RS     xml_writer: "jet_jit_xml_writer" => jet_jit_xml_writer: sig_ternary;
+//RS     xml_reader: "jet_jit_xml_reader" => jet_jit_xml_reader: sig_ternary;
+//RS     json_writer_write: "jet_jit_json_writer_write" => jet_jit_json_writer_write: sig_binary;
+//RS     json_writer_write_enc: "jet_enc_json_writer_write" => jet_jit_json_writer_write: sig_binary;
+//RS     json_writer_flush: "jet_jit_json_writer_flush" => jet_jit_json_writer_flush: sig_unary;
+//RS     json_writer_flush_enc: "jet_enc_json_writer_flush" => jet_jit_json_writer_flush: sig_unary;
+//RS     json_writer_finish: "jet_jit_json_writer_finish" => jet_jit_json_writer_finish: sig_unary;
+//RS     json_writer_finish_enc: "jet_enc_json_writer_finish" => jet_jit_json_writer_finish: sig_unary;
+//RS     json_reader_next: "jet_jit_json_reader_next" => jet_jit_json_reader_next: sig_unary;
+//RS     json_reader_next_enc: "jet_enc_json_reader_next" => jet_jit_json_reader_next: sig_unary;
+//RS     jsonl_writer_write: "jet_jit_jsonl_writer_write" => jet_jit_jsonl_writer_write: sig_binary;
+//RS     jsonl_writer_write_enc: "jet_enc_jsonl_writer_write" => jet_jit_jsonl_writer_write: sig_binary;
+//RS     jsonl_writer_flush: "jet_jit_jsonl_writer_flush" => jet_jit_jsonl_writer_flush: sig_unary;
+//RS     jsonl_writer_flush_enc: "jet_enc_jsonl_writer_flush" => jet_jit_jsonl_writer_flush: sig_unary;
+//RS     jsonl_writer_finish: "jet_jit_jsonl_writer_finish" => jet_jit_jsonl_writer_finish: sig_unary;
+//RS     jsonl_writer_finish_enc: "jet_enc_jsonl_writer_finish" => jet_jit_jsonl_writer_finish: sig_unary;
+//RS     jsonl_reader_next: "jet_jit_jsonl_reader_next" => jet_jit_jsonl_reader_next: sig_unary;
+//RS     jsonl_reader_next_enc: "jet_enc_jsonl_reader_next" => jet_jit_jsonl_reader_next: sig_unary;
+//RS     csv_writer_write: "jet_jit_csv_writer_write" => jet_jit_csv_writer_write: sig_binary;
+//RS     csv_writer_write_enc: "jet_enc_csv_writer_write" => jet_jit_csv_writer_write: sig_binary;
+//RS     csv_writer_flush: "jet_jit_csv_writer_flush" => jet_jit_csv_writer_flush: sig_unary;
+//RS     csv_writer_flush_enc: "jet_enc_csv_writer_flush" => jet_jit_csv_writer_flush: sig_unary;
+//RS     csv_writer_finish: "jet_jit_csv_writer_finish" => jet_jit_csv_writer_finish: sig_unary;
+//RS     csv_writer_finish_enc: "jet_enc_csv_writer_finish" => jet_jit_csv_writer_finish: sig_unary;
+//RS     csv_reader_next: "jet_jit_csv_reader_next" => jet_jit_csv_reader_next: sig_unary;
+//RS     cbor_writer_write: "jet_jit_cbor_writer_write" => jet_jit_cbor_writer_write: sig_binary;
+//RS     cbor_writer_flush: "jet_jit_cbor_writer_flush" => jet_jit_cbor_writer_flush: sig_unary;
+//RS     cbor_writer_finish: "jet_jit_cbor_writer_finish" => jet_jit_cbor_writer_finish: sig_unary;
+//RS     cbor_reader_next: "jet_jit_cbor_reader_next" => jet_jit_cbor_reader_next: sig_unary;
+//RS     xml_writer_write: "jet_jit_xml_writer_write" => jet_jit_xml_writer_write: sig_binary;
+//RS     xml_writer_flush: "jet_jit_xml_writer_flush" => jet_jit_xml_writer_flush: sig_unary;
+//RS     xml_writer_finish: "jet_jit_xml_writer_finish" => jet_jit_xml_writer_finish: sig_unary;
+//RS     xml_reader_next: "jet_jit_xml_reader_next" => jet_jit_xml_reader_next: sig_unary;
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     struct ErrorReader;
+//RS 
+//RS     impl std::io::Read for ErrorReader {
+//RS         fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+//RS             Err(std::io::Error::new(
+//RS                 std::io::ErrorKind::PermissionDenied,
+//RS                 "stdin denied",
+//RS             ))
+//RS         }
+//RS     }
+//RS 
+//RS     impl std::io::BufRead for ErrorReader {
+//RS         fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+//RS             Err(std::io::Error::new(
+//RS                 std::io::ErrorKind::PermissionDenied,
+//RS                 "stdin denied",
+//RS             ))
+//RS         }
+//RS 
+//RS         fn consume(&mut self, _amount: usize) {}
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn shared_stdin_reader_trims_crlf_and_preserves_eof() {
+//RS         let mut reader = std::io::Cursor::new(b"first\r\nsecond\n".to_vec());
+//RS         assert_eq!(
+//RS             super::stdin_reader::jet_std_io_read_line(&mut reader).expect("first line"),
+//RS             Some("first".to_string())
+//RS         );
+//RS         assert_eq!(
+//RS             super::stdin_reader::jet_std_io_read_line(&mut reader).expect("second line"),
+//RS             Some("second".to_string())
+//RS         );
+//RS         assert_eq!(
+//RS             super::stdin_reader::jet_std_io_read_line(&mut reader).expect("eof"),
+//RS             None
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn shared_stdin_kernel_preserves_following_line_after_sentinel_drop() {
+//RS         let mut reader = std::io::Cursor::new(b"stop\nfollow-up\n".to_vec());
+//RS         {
+//RS             let mut lines = std::iter::from_fn(|| {
+//RS                 super::stdin_reader::jet_std_io_read_line(&mut reader)
+//RS                     .expect("sentinel line")
+//RS             });
+//RS             assert_eq!(lines.next(), Some("stop".to_string()));
+//RS             drop(lines);
+//RS         }
+//RS         assert_eq!(
+//RS             super::stdin_reader::jet_std_io_read_line(&mut reader).expect("follow-up line"),
+//RS             Some("follow-up".to_string())
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn shared_stdin_reader_maps_permission_errors_canonically() {
+//RS         let mut reader = ErrorReader;
+//RS         let error = super::stdin_reader::jet_std_io_read_line(&mut reader)
+//RS             .expect_err("reader must fail");
+//RS         assert!(matches!(
+//RS             error,
+//RS             crate::ProcessPrelude::process_prelude::jet_std::IOError::PermissionDenied(_)
+//RS         ));
+//RS     }
+//RS }
+// END-PORT-PENDING 0241 crates/jet-jit/src/enc_stream/mod.rs:1-1796
+

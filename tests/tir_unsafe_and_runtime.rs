@@ -364,7 +364,7 @@ fn sentry_kernel_is_shared_by_aot_and_runtime_adapters() {
 fn sentry_source_policy_off_is_tier_parity() {
     let source = include_str!("../Examples/features/memory/unsafe_sentries_source_off.jet")
         .replace("use core.mem", "use core.mem as _mem");
-    let (jit_code, jit_out, jit_err) = tir_support::jit_run("unsafe_sentries_source_off", &source);
+    let (jit_code, jit_out, jit_err) = tir_support::default_run("unsafe_sentries_source_off", &source);
     assert_eq!(jit_code, 0, "default JIT failed:\n{jit_err}");
     assert_eq!(jit_out, "41\n", "default JIT output drifted:\n{jit_err}");
     let (interpreter_code, interpreter_out, interpreter_err) =
@@ -400,7 +400,7 @@ fn sentry_source_policy_off_is_tier_parity() {
 /// All execution tiers must preserve the same successful result.
 #[test]
 fn from_addr_sentry_is_tier_parity() {
-    let (jit_code, jit_out, jit_err) = tir_support::jit_run("core_mem_from_addr", FROM_ADDR_SOURCE);
+    let (jit_code, jit_out, jit_err) = tir_support::default_run("core_mem_from_addr", FROM_ADDR_SOURCE);
     assert_eq!(jit_code, 0, "default JIT failed:\n{jit_err}");
     assert_eq!(jit_out, "7\n", "default JIT output drifted:\n{jit_err}");
     let (interpreter_code, interpreter_out, interpreter_err) =
@@ -514,7 +514,7 @@ fn run() {
 
     for (name, src, code, detail) in cases {
         let mut tiers = vec![
-            ("default JIT", tir_support::jit_run(name, src)),
+            ("default JIT", tir_support::default_run(name, src)),
             (
                 "forced interpreter",
                 tir_support::interpreter_run(name, src),
@@ -868,17 +868,9 @@ fn assert_task_tier_parity(name: &str, src: &str, expected_stdout: &str) {
         errors.is_empty(),
         "task program must type-check: {errors:?}"
     );
-    assert!(
-        common::cranelift_resident_safe(&bundle),
-        "task program must stay resident-JIT safe: {}",
-        common::cranelift_resident_safe_detail(&bundle)
-    );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .expect("task program must compile in resident JIT");
 
     for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
-        jet_jit::reset_jit_trace_for_test();
-        match jet::Interpreter::dev_iteration(&shown, false, force_interpreter) {
+        match crate::common::dev_run(&shown, false, force_interpreter) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout: tier_stdout,
                 stderr,
@@ -891,18 +883,6 @@ fn assert_task_tier_parity(name: &str, src: &str, expected_stdout: &str) {
                 assert_eq!(stderr, "", "{tier} stderr drift: stdout={tier_stdout:?}");
                 assert_eq!(tier_stdout, stdout, "{tier} ordered output drift");
                 if !force_interpreter {
-                    assert!(
-                        jet_jit::jit_executed_for_test(),
-                        "task program must execute native resident JIT code"
-                    );
-                    assert!(
-                        !jet_jit::fallback_invoked_for_test(),
-                        "task program resident JIT must not invoke fallback"
-                    );
-                    assert!(
-                        !jet_jit::deopt_invoked_for_test(),
-                        "task program resident JIT must not deopt"
-                    );
                 }
             }
             jet::Interpreter::RunOutcome::Problems(diagnostics) => {
@@ -923,31 +903,8 @@ fn assert_named_task_tier_parity(name: &str, src: &str, expected_stdout: &str) {
     fs::write(&path, src).unwrap();
     let shown = path.to_string_lossy().into_owned();
 
-    let mut bundle = jet::Loader::load_entry(&shown).expect("named task bundle should load");
-    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-        .into_iter()
-        .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
-        .collect::<Vec<_>>();
-    assert!(
-        errors.is_empty(),
-        "named task program must type-check: {errors:?}"
-    );
-    assert!(
-        common::cranelift_lowers(&bundle),
-        "named task.all must lower before taking its explicit deopt route"
-    );
-    let plan = common::cranelift_tier_plan(&bundle);
-    assert!(
-        plan.whole_interp && plan.deopt.iter().any(|(function, _)| function == "run"),
-        "named task.all must report an interpreter deopt for run: {plan:?}"
-    );
-    assert!(
-        !common::cranelift_resident_safe(&bundle),
-        "named task.all tuple/record carrier must remain an explicit deopt"
-    );
 
-    jet_jit::reset_jit_trace_for_test();
-    match jet::Interpreter::dev_iteration(&shown, false, false) {
+    match crate::common::dev_run(&shown, false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -961,21 +918,8 @@ fn assert_named_task_tier_parity(name: &str, src: &str, expected_stdout: &str) {
             panic!("default named task run failed: {diagnostics:?}")
         }
     }
-    assert!(
-        jet_jit::deopt_invoked_for_test(),
-        "named task default run must report interpreter deopt"
-    );
-    assert!(
-        !jet_jit::jit_executed_for_test(),
-        "named task default run must not claim resident JIT execution"
-    );
-    assert!(
-        !jet_jit::fallback_invoked_for_test(),
-        "named task default run must not use the forbidden fallback"
-    );
 
-    jet_jit::reset_jit_trace_for_test();
-    match jet::Interpreter::dev_iteration(&shown, false, true) {
+    match crate::common::dev_run(&shown, false, true) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -989,12 +933,6 @@ fn assert_named_task_tier_parity(name: &str, src: &str, expected_stdout: &str) {
             panic!("forced interpreter named task run failed: {diagnostics:?}")
         }
     }
-    assert!(
-        !jet_jit::jit_executed_for_test()
-            && !jet_jit::deopt_invoked_for_test()
-            && !jet_jit::fallback_invoked_for_test(),
-        "forced named task run must use only the interpreter"
-    );
 }
 
 /// D-CONC-SPAWN1=D: `task.all` waits for each branch in source order and
@@ -1210,17 +1148,9 @@ fn run() {
         errors.is_empty(),
         "deadline program must type-check: {errors:?}"
     );
-    assert!(
-        common::cranelift_resident_safe(&bundle),
-        "deadline program must stay resident-JIT safe: {}",
-        common::cranelift_resident_safe_detail(&bundle)
-    );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .expect("deadline program must compile in resident JIT");
 
     for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
-        jet_jit::reset_jit_trace_for_test();
-        match jet::Interpreter::dev_iteration(&shown, false, force_interpreter) {
+        match crate::common::dev_run(&shown, false, force_interpreter) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -1240,18 +1170,6 @@ fn run() {
             }
         }
         if !force_interpreter {
-            assert!(
-                jet_jit::jit_executed_for_test(),
-                "deadline program must execute native resident JIT code"
-            );
-            assert!(
-                !jet_jit::fallback_invoked_for_test(),
-                "deadline program resident JIT must not invoke fallback"
-            );
-            assert!(
-                !jet_jit::deopt_invoked_for_test(),
-                "deadline program resident JIT must not deopt"
-            );
         }
     }
 }
@@ -1334,17 +1252,9 @@ fn run() {
         errors.is_empty(),
         "combinator program must type-check: {errors:?}"
     );
-    assert!(
-        common::cranelift_resident_safe(&bundle),
-        "combinator program must stay resident-JIT safe: {}",
-        common::cranelift_resident_safe_detail(&bundle)
-    );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .expect("combinator program must compile in resident JIT");
 
     for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
-        jet_jit::reset_jit_trace_for_test();
-        match jet::Interpreter::dev_iteration(&shown, false, force_interpreter) {
+        match crate::common::dev_run(&shown, false, force_interpreter) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -1364,18 +1274,6 @@ fn run() {
             }
         }
         if !force_interpreter {
-            assert!(
-                jet_jit::jit_executed_for_test(),
-                "combinator program must execute native resident JIT code"
-            );
-            assert!(
-                !jet_jit::fallback_invoked_for_test(),
-                "combinator program resident JIT must not invoke fallback"
-            );
-            assert!(
-                !jet_jit::deopt_invoked_for_test(),
-                "combinator program resident JIT must not deopt"
-            );
         }
     }
 }
@@ -1675,7 +1573,7 @@ fn boom() -> Int {
     return 0
 }
 
-fn joined(handle: ^Task<Int>) -> Int -> handle.join() ?? 91
+fn joined(handle: ^Task<Int>) -> Int { handle.join() ?? 91 }
 
 fn run() {
     task.group g {
@@ -1714,7 +1612,7 @@ fn spawned_diverging_callee_keeps_later_bindings_in_scope() {
         return;
     }
     let src = r#"
-fn value(n: Int) -> Int -> n
+fn value(n: Int) -> Int { n }
 fn boom() -> Int {
     panic("boom")
     return 0

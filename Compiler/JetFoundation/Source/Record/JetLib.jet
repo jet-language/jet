@@ -1,0 +1,542 @@
+// `.jetlib` loadable-library artifact identity and header codec
+// (jet-pkg-model JetLib.rs, cards #1421/#1345).
+//
+// A `.jetlib` is a checked stamp followed by the opaque native payload. The
+// stamp carries the exact compiler/build/target/linker/ABI identity, the
+// Library name, the checked export table, the payload digest, and the effects
+// the library's own code declares. The load site parses and checks the whole
+// header before it writes or maps the payload. Moved from PackageModel's
+// Artifacts/JetLibStamp.jet + JetLibTrust.jet; no second wire owner.
+
+JETLIB_MAGIC :: prep { "jet-jetlib-v3" }
+pub JETLIB_ABI_VERSION :: prep { 2 }
+pub JETLIB_ABI_IDENTITY :: prep { "jet.library.abi.v2;call=extern-c;scalar=homogeneous;access=read-write-move;text=jet-text-v1;ptr-len=checked-utf8" }
+JETLIB_MAX_HEADER_ITEMS :: prep { 4096 }
+JETLIB_MAX_HEADER_FIELD_BYTES :: prep { 1048576 }
+JETLIB_MAX_EXPORT_PARAMS :: prep { 4096 }
+JETLIB_NUL :: prep { String.from_bytes([U8]{0}) ?? panic("NUL is valid UTF-8") }
+
+// Actual compiler/host facts are passed by the existing identity provider.
+pub struct JetLibIdentity {
+    pub compiler_version: String
+    pub target: String
+    pub host_max: Int
+}
+
+// Private structured parser failures keep producer and loader wording distinct.
+enum JetLibParseKind { Length Field TooLarge UTF8 }
+struct JetLibParseFailure {
+    kind: JetLibParseKind
+    field: String
+}
+
+// The one scalar vocabulary D-EMBED1 admits for native Library rows.
+pub enum JetLibScalar {
+    Int
+    Float
+    Bool
+    Text
+
+    fn tag(self) -> Int Never! {
+        if self == {
+            .Int -> 0
+            .Float -> 1
+            .Bool -> 2
+            .Text -> 3
+        }
+    }
+
+    fn from_tag(code: Int) -> JetLibScalar Err! {
+        if code == {
+            0 -> Ok(JetLibScalar.Int)
+            1 -> Ok(JetLibScalar.Float)
+            2 -> Ok(JetLibScalar.Bool)
+            3 -> Ok(JetLibScalar.Text)
+            else -> Err("unknown .jetlib scalar tag {code}")
+        }
+    }
+}
+
+// The access convention carried with each native parameter: the C scalar
+// representation stays homogeneous while the Jet ownership contract survives.
+pub enum JetLibAccess {
+    Read
+    Write
+    Move
+
+    fn tag(self) -> Int Never! {
+        if self == {
+            .Read -> 0
+            .Write -> 1
+            .Move -> 2
+        }
+    }
+
+    fn from_tag(code: Int) -> JetLibAccess Err! {
+        if code == {
+            0 -> Ok(JetLibAccess.Read)
+            1 -> Ok(JetLibAccess.Write)
+            2 -> Ok(JetLibAccess.Move)
+            else -> Err("unknown .jetlib access-convention tag {code}")
+        }
+    }
+}
+
+// One exact C ABI row: `symbol` is the emitted foreign name; access
+// conventions stay explicit metadata, never inferred from generated code.
+pub struct JetLibExport {
+    pub name: String
+    pub symbol: String
+    pub scalar: JetLibScalar
+    pub params: U32
+    pub conventions: [JetLibAccess]
+
+    fn new(name: String, scalar: JetLibScalar, params: Int) -> JetLibExport Never! {
+        conventions := [JetLibAccess]{}
+        loop _ in 0..<params -> &conventions.push(JetLibAccess.Read)
+        JetLibExport.with_conventions(name, scalar, conventions)
+    }
+
+    fn with_conventions(name: String, scalar: JetLibScalar, conventions: [JetLibAccess]) -> JetLibExport Never! {
+        assert(conventions.len() <= 4294967295, "a function cannot have more than u32 params")
+        JetLibExport{name: name, symbol: pkg_jetlib_c_symbol(name), scalar: scalar, params: U32{conventions.len()}, conventions: conventions}
+    }
+}
+
+// The load-time identity a `.jetlib` header carries.
+pub struct JetLibStamp {
+    pub compiler_version: String
+    pub compiler_build: String
+    pub library_name: String
+    // The selected manifest output entry, kept for build provenance.
+    pub entry: String?
+    pub target: String
+    pub target_triple: String
+    pub linker_identity: String
+    pub abi_identity: String
+    pub abi_version: U32
+    pub exports: [JetLibExport]
+    // Sorted and duplicate-free (Rust `EffectSet`).
+    pub declared_effects: [String]
+    pub payload_digest: String
+
+    // The all-empty stamp (Rust `Default`).
+    fn empty() -> JetLibStamp Never! {
+        JetLibStamp{
+            compiler_version: "",
+            compiler_build: "",
+            library_name: "",
+            entry: None,
+            target: "",
+            target_triple: "",
+            linker_identity: "",
+            abi_identity: "",
+            abi_version: U32{0},
+            exports: [JetLibExport]{},
+            declared_effects: [String]{},
+            payload_digest: ""
+        }
+    }
+
+    // Rust for_this_compiler/for_library/for_library_with_identity:207–265.
+    fn for_this_compiler(declared_effects: [String], identity: JetLibIdentity) -> JetLibStamp Never! {
+        JetLibStamp.for_library_with_identity("anonymous", [JetLibExport]{}, declared_effects, identity.compiler_version, identity.target, "system", identity)
+    }
+    fn for_library(name: String, exports: [JetLibExport], declared_effects: [String], identity: JetLibIdentity) -> JetLibStamp Never! {
+        JetLibStamp.for_library_with_identity(name, exports, declared_effects, identity.compiler_version, identity.target, "system", identity)
+    }
+    fn for_library_with_identity(name: String, exports: [JetLibExport], declared_effects: [String], compiler_build: String, target_triple: String, linker_identity: String, identity: JetLibIdentity) -> JetLibStamp Never! {
+        JetLibStamp{
+            compiler_version: identity.compiler_version,
+            compiler_build: compiler_build,
+            library_name: name,
+            entry: None,
+            target: identity.target,
+            target_triple: target_triple,
+            linker_identity: linker_identity,
+            abi_identity: JETLIB_ABI_IDENTITY,
+            abi_version: U32{JETLIB_ABI_VERSION},
+            exports: exports,
+            declared_effects: jetlib_effects_canonical(declared_effects),
+            payload_digest: ""
+        }
+    }
+
+    // Seal the native payload identity once the final shared object exists.
+    fn seal_payload(&self, payload: View<U8>) Never! {
+        self.payload_digest = pkg_jetlib_payload_digest(payload)
+    }
+
+    // The header bytes: magic, identities, the checked export table, the
+    // count of length-prefixed effect names (sorted), and the payload digest.
+    fn encode_bytes(self) -> [U8] Never! {
+        out := JetLibWriter.new()
+        loop byte in JETLIB_MAGIC.bytes() -> &out.bytes.push(byte)
+        &out.bytes.push(U8{0})
+        &out.push_text(self.compiler_version)
+        &out.push_text(self.compiler_build)
+        &out.push_text(self.library_name)
+        if self.entry == {
+            .Val(entry) -> {
+                &out.bytes.push(U8{1})
+                &out.push_text(entry)
+            }
+            .None -> &out.bytes.push(U8{0})
+        }
+        &out.push_text(self.target)
+        &out.push_text(self.target_triple)
+        &out.push_text(self.linker_identity)
+        &out.push_text(self.abi_identity)
+        &out.push_u32(Int.from_u32(self.abi_version))
+        assert(self.exports.len() <= 4294967295, "a .jetlib header cannot contain more than u32 exports")
+        &out.push_u32(self.exports.len())
+        loop export in self.exports {
+            &out.push_text(export.name)
+            &out.push_text(export.symbol)
+            &out.bytes.push(U8{export.scalar.tag()})
+            &out.push_u32(Int.from_u32(export.params))
+            loop convention in export.conventions -> &out.bytes.push(U8{convention.tag()})
+        }
+        effects :: jetlib_effects_canonical(self.declared_effects)
+        &out.push_u32(effects.len() & 4294967295)
+        loop effect_name in effects -> &out.push_text(effect_name)
+        &out.push_text(self.payload_digest)
+        out.bytes
+    }
+
+    // Rust decode/decode_prefix:320–415. Ordered wire effects stay intact in
+    // prefix decode; only package entrypoints project the canonical set.
+    fn decode_bytes(bytes: View<U8>) -> JetLibStamp Err! {
+        reader := JetLibReader{bytes: bytes, at: 0, loader: false}
+        stamp := JetLibStamp.decode_prefix(&reader) ?? return Err(err)
+        if reader.at != bytes.len() -> return Err("unexpected payload after .jetlib stamp")
+        stamp.declared_effects = jetlib_effects_canonical(stamp.declared_effects)
+        Ok(stamp)
+    }
+    fn decode_prefix(reader: &JetLibReader) -> JetLibStamp Err! {
+        magic :: JETLIB_MAGIC.bytes()
+        if reader.bytes.len() <= magic.len() -> return Err("not a .jetlib artifact (bad magic)")
+        loop i in 0..<magic.len() {
+            if reader.bytes[i] != magic[i] -> return Err("not a .jetlib artifact (bad magic)")
+        }
+        if reader.bytes[magic.len()] != (U8{0}) -> return Err("not a .jetlib artifact (bad magic)")
+        reader.at = magic.len() + 1
+        compiler_version :: &reader.take_string("compiler version") ?? return Err(err)
+        compiler_build :: &reader.take_string("compiler build") ?? return Err(err)
+        library_name :: &reader.take_string("library name") ?? return Err(err)
+        entry :: &reader.take_optional_string("output entry") ?? return Err(err)
+        target :: &reader.take_string("target") ?? return Err(err)
+        target_triple :: &reader.take_string("target triple") ?? return Err(err)
+        linker_identity :: &reader.take_string("linker identity") ?? return Err(err)
+        abi_identity :: &reader.take_string("ABI identity") ?? return Err(err)
+        abi_version :: &reader.take_u32("ABI version") ?? return Err(err)
+        export_count :: &reader.take_count("export") ?? return Err(err)
+        exports := [JetLibExport]{}
+        loop _ in 0..<export_count {
+            name :: &reader.take_string("export name") ?? return Err(err)
+            symbol :: &reader.take_string("export symbol") ?? return Err(err)
+            scalar_code :: &reader.take_byte() ?? return Err("truncated .jetlib header (export scalar)")
+            scalar :: JetLibScalar.from_tag(scalar_code) ?? return Err(err)
+            params :: &reader.take_u32("export parameter count") ?? return Err(err)
+            if params > JETLIB_MAX_EXPORT_PARAMS -> return Err(".jetlib export has too many parameters")
+            conventions := [JetLibAccess]{}
+            loop _ in 0..<params {
+                convention :: &reader.take_byte() ?? return Err("truncated .jetlib header (access convention)")
+                &conventions.push(JetLibAccess.from_tag(convention) ?? return Err(err))
+            }
+            &exports.push(JetLibExport{name: name, symbol: symbol, scalar: scalar, params: U32{params}, conventions: conventions})
+        }
+        effect_count :: &reader.take_count("effect") ?? return Err(err)
+        effects := [String]{}
+        loop _ in 0..<effect_count {
+            effect_name :: &reader.take_string("effect") ?? return Err(err)
+            &effects.push(effect_name)
+        }
+        payload_digest :: &reader.take_string("payload digest") ?? return Err(err)
+        Ok(JetLibStamp{compiler_version: compiler_version, compiler_build: compiler_build,
+            library_name: library_name, entry: entry, target: target, target_triple: target_triple,
+            linker_identity: linker_identity, abi_identity: abi_identity, abi_version: U32{abi_version},
+            exports: exports, declared_effects: effects, payload_digest: payload_digest})
+    }
+}
+
+// Rust Artifact encode/decode:175–202. Retain original input owner and extent;
+// no payload to_list/to_vec conversion. host_max is actual target usize::MAX.
+// HELD #4392: current host rejects subranges of explicit View<U8> (E0505).
+// The original retained-window tests stay intact; no owning-payload fallback.
+pub struct JetLibArtifact {
+    pub stamp: JetLibStamp
+    pub payload: View<U8>
+
+    fn encode_bytes(self) -> [U8] Never! {
+        out := JetLibWriter{bytes: self.stamp.encode_bytes()}
+        loop i in 0..<8 -> &out.bytes.push(U8{(self.payload.len() >> ((7 - i) * 8)) & 255})
+        &out.push_raw(self.payload)
+        out.bytes
+    }
+    fn decode_bytes(bytes: View<U8>, host_max: Int, loader: Bool) -> JetLibArtifact Err! {
+        reader := JetLibReader{bytes: bytes, at: 0, loader: loader}
+        stamp := JetLibStamp.decode_prefix(&reader) ?? return Err(err)
+        if bytes.len() - reader.at < 8 -> return Err("truncated .jetlib artifact (payload length)")
+        declared := 0
+        loop index in 0..<8 -> declared = (declared << 8) | Int.from_u8(bytes[reader.at + index])
+        if declared > host_max -> return Err("the .jetlib payload is too large for this host")
+        payload :: bytes[reader.at + 8..<bytes.len()]
+        if payload.len() != declared -> return Err("truncated .jetlib artifact (payload declares {declared} bytes, found {payload.len()})")
+        if !loader -> stamp.declared_effects = jetlib_effects_canonical(stamp.declared_effects)
+        Ok(JetLibArtifact{stamp: stamp, payload: payload})
+    }
+}
+
+// Big-endian header writer.
+struct JetLibWriter {
+    bytes: [U8]
+
+    fn new() -> JetLibWriter Never! {
+        JetLibWriter{bytes: [U8]{}}
+    }
+
+    fn push_raw(&self, bytes: View<U8>) Never! {
+        loop byte in bytes -> &self.bytes.push(byte)
+    }
+
+    fn push_u32(&self, value: Int) Never! {
+        assert(value >= 0 && value <= 4294967295, ".jetlib header value exceeds u32")
+        shift_values :: [Int]{24, 16, 8, 0}
+        loop shift in shift_values -> &self.bytes.push(U8{(value >> shift) & 0xFF})
+    }
+
+    // A u32 length prefix, then the bytes.
+    fn push_text(&self, text: String) Never! {
+        raw :: text.bytes()
+        assert(raw.len() <= 4294967295, "a .jetlib header field cannot exceed u32 bytes")
+        &self.push_u32(raw.len())
+        loop byte in raw -> &self.bytes.push(byte)
+    }
+}
+
+// Rust take_bytes/take_string:427–446 and Top/Mod.rs117–139. One structured
+// private failure rail; each consumer's original strings render only here.
+struct JetLibReader {
+    bytes: View<U8>
+    at: Int
+    loader: Bool
+
+    fn take_byte(&self) -> Int? Never! {
+        if self.at >= self.bytes.len() -> return None
+        value :: Int.from_u8(self.bytes[self.at])
+        self.at += 1
+        Val(value)
+    }
+    fn take_u32(&self, what: String) -> Int Err! {
+        if self.bytes.len() - self.at < 4 -> return Err("truncated .jetlib header ({what})")
+        value := 0
+        loop index in 0..<4 -> value = (value << 8) | Int.from_u8(self.bytes[self.at + index])
+        self.at += 4
+        Ok(value)
+    }
+    // HELD #4392: checked returned-view provenance also reports E2305 on the
+    // host. All success extents derive from self.bytes, not temporary storage.
+    fn take_field(&self, what: String) -> View<U8> Err! {
+        if self.bytes.len() - self.at < 4 -> return Err(jetlib_parse_message(JetLibParseFailure{kind: JetLibParseKind.Length, field: what}, self.loader))
+        length :: &self.take_u32(what) ?? return Err(err)
+        if length > JETLIB_MAX_HEADER_FIELD_BYTES -> return Err(jetlib_parse_message(JetLibParseFailure{kind: JetLibParseKind.TooLarge, field: what}, self.loader))
+        if self.bytes.len() - self.at < length -> return Err(jetlib_parse_message(JetLibParseFailure{kind: JetLibParseKind.Field, field: what}, self.loader))
+        start :: self.at
+        self.at += length
+        Ok(self.bytes[start..<self.at])
+    }
+    fn take_string(&self, what: String) -> String Err! {
+        raw := &self.take_field(what) ?? return Err(err)
+        text :: String.from_bytes(raw) ?? return Err(jetlib_parse_message(JetLibParseFailure{kind: JetLibParseKind.UTF8, field: what}, self.loader))
+        Ok(text)
+    }
+    fn take_optional_string(&self, what: String) -> String? Err! {
+        present :: &self.take_byte() ?? return Err("truncated .jetlib header ({what} presence)")
+        if present == {
+            0 -> Ok(None)
+            1 -> Ok(Val(&self.take_string(what) ?? return Err(err)))
+            else -> Err("invalid .jetlib {what} presence tag {present}")
+        }
+    }
+    fn take_count(&self, what: String) -> Int Err! {
+        count :: &self.take_u32("{what} count") ?? return Err(err)
+        if count > JETLIB_MAX_HEADER_ITEMS -> return Err(".jetlib header has too many {what} entries")
+        Ok(count)
+    }
+}
+fn jetlib_parse_message(failure: JetLibParseFailure, loader: Bool) -> String Never! {
+    field :: failure.field
+    if loader {
+        return if failure.kind == {
+            .Length -> "truncated .jetlib header ({field} length)"
+            .Field -> "truncated .jetlib header ({field})"
+            .TooLarge -> ".jetlib header {field} is too large"
+            .UTF8 -> ".jetlib header {field} is not UTF-8"
+        }
+    } else {
+        suffix :: if field == "effect" -> "" else -> " ({field})"
+        return if failure.kind == {
+            .Length -> "truncated .jetlib header (length prefix){suffix}"
+            .Field -> "truncated .jetlib header (field bytes){suffix}"
+            .TooLarge -> ".jetlib header field is too large{suffix}"
+            .UTF8 -> if field == "effect" -> "effect name is not UTF-8" else -> "{field} is not UTF-8"
+        }
+    }
+}
+// Rust current_target:486–488. No sys/PackageModel dependency points outward.
+pub fn pkg_jetlib_current_target(os: String, arch: String) -> String Never! { "{os}-{arch}" }
+// CP-HASH-VIEW / #4465 / #4392: Main owns canonical record_blob_key/SHA256
+// View API migration after stage1. Do not allocate a list to cross that seam.
+pub fn pkg_jetlib_payload_digest(payload: View<U8>) -> String Never! { "sha256-{record_blob_key(payload)}" }
+pub fn jetlib_effects_canonical(effects: [String]) -> [String] Never! {
+    set := [String: Bool]{}
+    loop effect_name in effects -> set[effect_name] = true
+    result := [String]{}
+    loop (effect_name, _) in set -> &result.push(effect_name)
+    result
+}
+
+// The emitted C symbol of an export name: ASCII alphanumerics and `_` kept,
+// everything else `_`, with a leading `_` before an empty or digit start.
+fn pkg_jetlib_c_symbol(name: String) -> String Never! {
+    out := [U8]{}
+    raw :: name.bytes()
+    if raw.len() == 0 -> &out.push(U8{95})
+    else {
+        first :: Int.from_u8(raw[0])
+        if first >= 48 && first <= 57 -> &out.push(U8{95})
+    }
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        keep :: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+        if (code >= 0x80) && (code < 0xC0) {
+            next
+        }
+        &out.push(if keep -> byte else -> U8{95})
+    }
+    String.from_bytes(out) ?? panic("C symbol construction produces only ASCII")
+}
+// The `.jetlib` pre-map trust boundary (jet-pkg-model JetLib.rs).
+//
+// c2, compiler identity (D-LIB-REUSE1=B): both sides of a load share the exact
+// compiler that built them; Jet makes no cross-version layout promise, so a
+// mismatch is a checked refusal (E1338), never a crash.
+// c3, declared-effect grant (D-LIB-DYNTRUST1=A): a library declares its
+// effects like any package and the host states its grant at the load site;
+// asking for more is refused (E1339).
+// Identity is checked first, so a forged or foreign artifact fails the pin
+// before anything about its claimed effects is trusted.
+
+pub fn pkg_jetlib_validate_payload_digest(stamp: JetLibStamp, payload: View<U8>) Err! {
+    if stamp.payload_digest == "" -> return Err("E1341: library `{pkg_jetlib_display_name(stamp)}` has no native payload digest")
+    actual :: pkg_jetlib_payload_digest(payload)
+    if stamp.payload_digest != actual -> return Err("E1341: library `{stamp.library_name}` payload digest is `{stamp.payload_digest}`, but the artifact contains `{actual}`")
+    return
+}
+
+fn pkg_jetlib_display_name(stamp: JetLibStamp) -> String Never! {
+    if stamp.library_name == "" -> return "<unnamed>"
+    stamp.library_name
+}
+
+pub fn pkg_jetlib_valid_payload_digest(digest: String) -> Bool Never! {
+    if !digest.starts_with("sha256-") -> return false
+    hex :: digest.removeprefix("sha256-").bytes()
+    if hex.len() != 64 -> return false
+    loop byte in hex {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
+    }
+    true
+}
+
+// Validate metadata meaningful only at the native load boundary. Compiler
+// identity stays a separate first check so E1338 wins over any untrusted
+// effect or ABI claim.
+// Rust validate_load_metadata:531–626. A structured result also supplies the
+// loader's Invalid/Unsupported classification without a second validation walk.
+pub enum JetLibMetadataKind { Invalid Unsupported }
+pub struct JetLibMetadataFailure {
+    pub kind: JetLibMetadataKind
+    pub reason: String
+}
+fn jetlib_metadata_failure(reason: String, unsupported: Bool) -> JetLibMetadataFailure? Never! {
+    Val(JetLibMetadataFailure{kind: if unsupported -> JetLibMetadataKind.Unsupported else -> JetLibMetadataKind.Invalid, reason: reason})
+}
+pub fn pkg_jetlib_validate_load_metadata(stamp: JetLibStamp, target: String, loader: Bool) -> JetLibMetadataFailure? Never! {
+    name :: if loader -> stamp.library_name else -> pkg_jetlib_display_name(stamp)
+    if stamp.abi_version != (U32{JETLIB_ABI_VERSION}) -> return jetlib_metadata_failure("E1341: library `{name}` uses unsupported .jetlib ABI version {stamp.abi_version}; this loader accepts ABI version {JETLIB_ABI_VERSION}", true)
+    if stamp.library_name == "" || stamp.library_name.contains(JETLIB_NUL) -> return jetlib_metadata_failure("E1341: .jetlib metadata has no valid Library name", false)
+    if stamp.entry == .Val(entry) {
+        if entry == "" || entry.contains(JETLIB_NUL) -> return jetlib_metadata_failure("E1341: .jetlib metadata has an invalid output entry", false)
+    }
+    if stamp.compiler_build == "" || stamp.compiler_build.contains(JETLIB_NUL) -> return jetlib_metadata_failure("E1341: .jetlib metadata has no valid compiler build", false)
+    if stamp.target_triple == "" || stamp.target_triple.contains(JETLIB_NUL) -> return jetlib_metadata_failure("E1341: .jetlib metadata has no valid target triple", false)
+    if stamp.linker_identity == "" || stamp.linker_identity.contains(JETLIB_NUL) -> return jetlib_metadata_failure("E1341: .jetlib metadata has no valid linker identity", false)
+    if stamp.abi_identity != JETLIB_ABI_IDENTITY -> return jetlib_metadata_failure("E1341: library `{stamp.library_name}` uses unsupported native ABI identity `{stamp.abi_identity}`", true)
+    if !pkg_jetlib_valid_payload_digest(stamp.payload_digest) {
+        reason :: if loader -> "E1341: library `{stamp.library_name}` has no valid native payload digest" else -> "E1341: library `{stamp.library_name}` has an invalid payload digest"
+        return jetlib_metadata_failure(reason, false)
+    }
+    if stamp.target != target -> return jetlib_metadata_failure("E1341: library `{stamp.library_name}` targets `{stamp.target}`, but this loader targets `{target}`", true)
+    if stamp.exports.len() == 0 -> return jetlib_metadata_failure("E1341: library `{stamp.library_name}` has no exported functions", false)
+    names := [String: Bool]{}
+    symbols := [String: Bool]{}
+    loop export in stamp.exports {
+        if export.name == "" || export.name.contains(JETLIB_NUL) -> return jetlib_metadata_failure("E1341: .jetlib metadata has an invalid export name", false)
+        if export.symbol == "" || export.symbol.contains(JETLIB_NUL) || export.symbol != pkg_jetlib_c_symbol(export.name) -> return jetlib_metadata_failure("E1341: .jetlib export `{export.name}` has an invalid native symbol `{export.symbol}`", false)
+        if names.has_key(export.name) -> return jetlib_metadata_failure("E1341: .jetlib metadata repeats export `{export.name}`", false)
+        names[export.name] = true
+        if symbols.has_key(export.symbol) -> return jetlib_metadata_failure("E1341: .jetlib metadata repeats native symbol `{export.symbol}`", false)
+        symbols[export.symbol] = true
+        if Int.from_u32(export.params) > JETLIB_MAX_EXPORT_PARAMS || export.conventions.len() != Int.from_u32(export.params) -> return jetlib_metadata_failure("E1341: .jetlib export `{export.name}` has invalid access-convention metadata", false)
+    }
+    None
+}
+
+// Rust e1338/e1339:646–672; canonical Foundation Diagnostic value.
+pub fn pkg_e1338(artifact_version: String, version: String) -> Diagnostic Never! {
+    Diagnostic{severity: DIAGNOSTIC_ERROR, code: "E1338",
+        what: "this loadable library was built by Jet `{artifact_version}`, but the loading program uses Jet `{version}`",
+        why: "a `.jetlib` artifact pins the exact compiler identity that built it (D-LIB-REUSE1=B) — Jet makes no cross-version binary layout promise, so a mismatched artifact is refused before it is mapped",
+        fix: "rebuild the library with the loading program's Jet version, or install a matching Jet toolchain"}
+}
+pub fn pkg_e1339(library: String, effect_name: String) -> Diagnostic Never! {
+    Diagnostic{severity: DIAGNOSTIC_ERROR, code: "E1339",
+        what: "library `{library}` declares the `{effect_name}` effect, which this load site doesn't grant",
+        why: "a loadable Jet library declares its effects like any package (D-LIB-DYNTRUST1=A); the host states what it grants at the load site, and a library asking for more is refused before it is mapped",
+        fix: "widen the grant at the load site to include `{effect_name}`, or remove the effect from the library"}
+}
+// Rust Result<(),Diagnostic/Vec<Diagnostic>> uses the existing result-carrier
+// convention, not a new public #Error identity.
+pub struct JetLibRefusal {
+    pub diagnostics: [Diagnostic]
+}
+pub fn pkg_jetlib_check_compiler_identity(stamp: JetLibStamp, version: String) -> Diagnostic? Never! {
+    if stamp.compiler_version != version -> return Val(pkg_e1338(stamp.compiler_version, version))
+    None
+}
+pub fn pkg_jetlib_check_effect_grant(library: String, stamp: JetLibStamp, grant: [String]) -> JetLibRefusal Never! {
+    diagnostics := [Diagnostic]{}
+    loop effect_name in jetlib_effects_canonical(stamp.declared_effects) {
+        covered := false
+        loop bound in grant {
+            if sema_effect_covers(bound, effect_name) {
+                covered = true
+                break
+            }
+        }
+        if !covered -> &diagnostics.push(pkg_e1339(library, effect_name))
+    }
+    JetLibRefusal{diagnostics: diagnostics}
+}
+pub fn pkg_jetlib_check_before_map(library: String, stamp: JetLibStamp, grant: [String], version: String) -> JetLibRefusal Never! {
+    if pkg_jetlib_check_compiler_identity(stamp, version) == .Val(problem) -> return JetLibRefusal{diagnostics: [Diagnostic]{problem}}
+    pkg_jetlib_check_effect_grant(library, stamp, grant)
+}
+pub fn sema_effect_covers(bound: String, effect_name: String) -> Bool Never! {
+    if bound == effect_name -> return true
+    prefix :: "{bound}."
+    effect_name.starts_with(prefix)
+}

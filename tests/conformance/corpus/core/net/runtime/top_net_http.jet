@@ -1,0 +1,80 @@
+use core.net.runtime.top_net_http.[JetTLSVersion, jet_tls_client_config_default, jet_tls_client_config_with_alpn, jet_tls_client_config_with_version_bounds, jet_tls_client_config_http_parts, jet_net_detail, jet_net_to_io_error, jet_net_tls_result, jet_net_tls_io_result, jet_net_dns_result, jet_net_error_name, jet_net_error_surface_parts, jet_net_tls_peer_identity_from_snapshot, JetNetError, JetNetDnsError]
+use core.prelude.runtime.std_open.IOOperation
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:361-386/434-485
+#Test("tls_config_preserves_defaults_alpn_byte_bounds_and_version_order") {
+    config :: jet_tls_client_config_default()
+    (trust, roots, cert, key, min, max) :: jet_tls_client_config_http_parts(&config)
+    assert_eq(trust, I64{0})
+    assert(roots.is_empty() && cert.is_empty() && key.is_empty())
+    assert_eq(min, I64{12})
+    assert_eq(max, I64{13})
+    valid :: ["h2", "http/1.1"]
+    configured :: jet_tls_client_config_with_alpn(config, &valid)!
+    assert_eq(configured.alpn, valid)
+    loop invalid in [[""], ["x".repeat(256)]] {
+        match jet_tls_client_config_with_alpn(jet_tls_client_config_default(), &invalid) {
+            Err(.InvalidInput(context)) -> {
+                assert_eq(context.operation, IOOperation.Connect)
+                assert_eq(context.resource, Val("tls client configuration"))
+                assert_eq(context.cause, Val("ClientConfig.with_alpn failed: TLS ALPN protocols must contain 1 to 255 bytes"))
+            }
+            _ -> assert(false)
+        }
+    }
+    match jet_tls_client_config_with_version_bounds(jet_tls_client_config_default(), .TLS13, .TLS12) {
+        Err(.InvalidInput(_)) -> {}
+        _ -> assert(false)
+    }
+    assert_eq(JetTLSVersion.TLS12.jet_show(), "TLS12")
+    assert_eq(JetTLSVersion.TLS13.jet_display(), "TLS13")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:43-74/702-776
+#Test("net_error_mapping_preserves_operation_and_tls_error_precedence") {
+    error :: JetNetError.NotConnected(jet_net_detail("tcp send", Val("127.0.0.1:1"), None, "not connected", Val(107)))
+    match jet_net_to_io_error(error) {
+        .Closed(context) -> {
+            assert_eq(context.operation, IOOperation.Write)
+            assert_eq(context.resource, Val("127.0.0.1:1"))
+            assert_eq(context.os_code, Val(I64{107}))
+        }
+        _ -> assert(false)
+    }
+    match jet_net_tls_result<I64>(Err("TLS protocol truncation: closed deadline"), "tls read") {
+        Err(.Protocol(detail)) -> assert_eq(detail.message, "TLS protocol truncation: closed deadline")
+        _ -> assert(false)
+    }
+    match jet_net_tls_io_result<I64>(Err("TLS protocol error: cancelled"), IOOperation.Read) {
+        Err(.Protocol(_)) -> {}
+        _ -> assert(false)
+    }
+    match jet_net_dns_result<I64>(Err("DNS name not found: timeout"), "example.invalid") {
+        Err(error) -> assert_eq(jet_net_error_name(&error), Val("example.invalid"))
+        _ -> assert(false)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:836-875
+#Test("net_error_surface_dns_ordinal_is_independent_of_rust_enum_order") {
+    parts :: jet_net_error_surface_parts(JetNetError.DNS(JetNetDnsError.NotFound("example.invalid")))
+    assert_eq(parts.variant, "DNS")
+    assert_eq(parts.ordinal, I64{14})
+    match parts.payload {
+        .DNS{variant, ordinal, value} -> {
+            assert_eq(variant, "NotFound")
+            assert_eq(ordinal, I64{0})
+            assert_eq(value, "example.invalid")
+        }
+        _ -> assert(false)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1752-1810
+#Test("tls_peer_snapshot_rejects_empty_chain_before_protocol_version") {
+    snapshot :: ("example.invalid", [[U8]]{}, [[U8]]{}, [[String]]{}, [I64]{}, [I64]{}, [String]{}, [String]{}, "cipher", I64{99})
+    match jet_net_tls_peer_identity_from_snapshot(snapshot) {
+        Err(.TLS(detail)) -> {
+            assert_eq(detail.operation, "tls peer identity")
+            assert_eq(detail.message, "verified TLS peer chain is empty")
+        }
+        _ -> assert(false)
+    }
+}

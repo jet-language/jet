@@ -1,0 +1,60 @@
+// Rust: tests/fixtures/vault_key_wrap_runtime.rs:1-12
+use jet_foundation.RuntimeDiagnosticCore.*
+use jet_foundation.Outcome.*
+use jet_codegen.scheduler.*
+use core.crypto.runtime.top_crypto_entropy.*
+use jet_pkg_model.Crypto.*
+use jet_pkg_model.VaultNfc.*
+use jet_pkg_model.SecretsCrypto.*
+use jet_pkg_model.VaultKeyWrap.*
+use std.fs as fs
+use std.env as env
+use std.process as process
+use std.time.[SystemTime, UNIX_EPOCH]
+use std.sync.atomic.[AtomicBool, Ordering]
+// GATE #4494 native filesystem, clocks, atomic test cancellation and scheduler operations.
+
+// Rust: tests/fixtures/vault_key_wrap_runtime.rs:16
+STRESS_CANCEL :: AtomicBool.new(false)
+// Rust: tests/fixtures/vault_key_wrap_runtime.rs:17
+fn stress_cancelled() -> Bool { STRESS_CANCEL.load(Ordering.SeqCst) }
+
+// Rust: tests/fixtures/vault_key_wrap_runtime.rs:19
+fn scratch(tag: String) -> OSPath {
+    path :: env.temp_dir().join("jet-vault-key-wrap-{tag}-{process.id()}-{SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()}")
+    fs.create_dir_all(path.join(".jet")).unwrap()
+    path
+}
+
+// Rust: tests/fixtures/vault_key_wrap_runtime.rs:32
+fn provision(root: OSPath) -> {
+    keys :: root.join("keys")
+    fs.create_dir(keys).unwrap()
+    (identity, recipient) :: jet_vault_keygen_impl()
+    fs.write(keys.join("secrets.identity"), identity).unwrap()
+    fs.write(root.join(".jet/secrets-recipients"), "{recipient}\n").unwrap()
+}
+
+// Rust: tests/fixtures/vault_key_wrap_runtime.rs:40
+fn decoded_store(root: OSPath) -> JetVaultStore {
+    identity :: fs.read_to_string(root.join("keys/secrets.identity")).unwrap()
+    ciphertext :: fs.read(root.join(".jet/secrets.age")).unwrap()
+    plaintext :: jet_vault_decrypt_impl(&identity, &ciphertext).unwrap()
+    jet_vault_decode_v2(&plaintext).unwrap()
+}
+
+// Rust: tests/fixtures/vault_key_wrap_runtime.rs:47
+fn generate<T: JetVaultKey>(root: OSPath, name: String) -> JetVaultKeyRef<T> {
+    jet_vault_set_test_authorizer(|_| -> true)
+    plan :: jet_vault_prepare_generate_at<T>(root, name).unwrap()
+    write :: jet_vault_authorize_write_impl(&plan, "provision test key").unwrap()
+    jet_vault_commit_generate_at(root, ^plan, ^write).unwrap()
+}
+
+// Rust: tests/fixtures/vault_key_wrap_runtime.rs:54
+fn import<T: JetVaultKey>(root: OSPath, name: String, wrapped: JetWrappedVaultKey, unlock: JetVaultKeyUnlock) -> JetVaultKeyRef<T> JetVaultKeyWrapError! {
+    plan :: jet_vault_prepare_import_wrapped_at<T>(root, name, ^wrapped, unlock)?
+    write :: jet_vault_authorize_wrapped_import_impl(&plan, "restore wrapped key")?
+    jet_vault_commit_import_wrapped_at(root, ^write, ^plan)
+}
+// Rust: tests/fixtures/vault_key_wrap_runtime.rs:66-518 — tests live in vault_key_runtimeTests.jet.

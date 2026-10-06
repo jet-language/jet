@@ -1,0 +1,58 @@
+use core.tasks.runtime.local_cell.[JetCell]
+use core.mem.runtime.portable_core.[JetAbsent, JetOutcome]
+use std.panic.[catch_unwind, AssertUnwindSafe]
+
+// Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:74
+// Behavioral controls: the Rust range has no inline tests.
+#Test("cell_identity_replace_and_shared_guard_release") {
+    cell :: JetCell.new((1, 2))
+    alias :: cell.clone()
+    assert(cell == alias)
+    assert(cell != JetCell.new((1, 2)))
+    assert(cell.replace((3, 4)) == (1, 2))
+    {
+        read :: cell.guard_read()
+        other :: alias.guard_read()
+        assert(read.get() == (3, 4))
+        assert(other.get() == (3, 4))
+        (left, right) :: read.split(pair -> (@pair.0, @pair.1))
+        assert(left.get() == 3)
+        assert(right.get() == 4)
+    }
+    cell.set((5, 6))
+    assert(alias.get() == (5, 6))
+}
+// Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:129
+#Test("cell_split_edit_tokens_hold_root_until_last_guard_and_unwind") {
+    cell :: JetCell.new((1, 2))
+    {
+        (left, right) :: cell.guard_edit().split(pair -> (&pair.0, &pair.1))
+        left.set(10)
+        right.set(20)
+        assert(left.get() == 10)
+        assert(right.get() == 20)
+        // GATE #4565: kernel primitive
+        conflict :: #Unsafe("catch actual local borrow-conflict panic without crossing a native unwind boundary") {
+            catch_unwind(AssertUnwindSafe(fn() { _ :: cell.get() }))
+        }
+        assert(conflict.is_err())
+    }
+    assert(cell.get() == (10, 20))
+    // GATE #4565: kernel primitive
+    failure :: #Unsafe("exercise native panic cleanup of callback access and root edit loan") {
+        catch_unwind(AssertUnwindSafe(fn() { cell.edit(pair -> { pair.0 = 30; panic("callback failed") }) }))
+    }
+    assert(failure.is_err())
+    cell.set((40, 50))
+    assert(cell.get() == (40, 50))
+}
+// Rust: crates/jet-codegen/src/Prelude/LocalCell.rs:185
+#Test("cell_optional_initialization_failure_leaves_clean_absence") {
+    empty: JetOutcome<Int, JetAbsent> :: Err(JetAbsent{})
+    cell :: JetCell.new(empty)
+    assert(cell.try_get_or_set(fn() -> Int Err! { Err("initializer failed") }) == Err("initializer failed"))
+    assert(cell.get().is_err())
+    assert(cell.get_or_set(() -> 7) == 7)
+    assert(cell.get_or_set(() -> panic("already populated initializer must not run")) == 7)
+    assert(cell.get() == Ok(7))
+}

@@ -1,0 +1,1056 @@
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1
+// One checked target fact plane for typed MMIO and deterministic replay.
+use core.cell.[Cell, RefCell, ThreadLocal]
+use core.marker.[PhantomData]
+use core.sync.atomic.[AtomicBool, AtomicU16, AtomicUsize, Ordering]
+use core.convert.[From]
+use core.ptr as ptr
+use jet_foundation.TargetMachine as target_facts
+use core.sys.target
+use core.mem
+use std.sync.[LazyLock, Mutex]
+use std.collections.VecDeque
+use core.mem.runtime.kernel_embedded_hardware_02.[JetRegisterReplay, jet_replay_register_read, jet_replay_register_write, JetDmaPayload, JetDmaBuffer, JetDmaRuntime, JetDmaTransfer]
+use core.prelude.runtime.kernel_panic.[jet_panic]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:19
+#Copy
+#Equatable
+#Comparable
+pub enum JetRegisterWidth { U8, U16, U32, U64 }
+impl JetRegisterWidth {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:27
+    pub fn bytes(self: JetRegisterWidth) -> U64 {
+        match self { .U8 -> 1, .U16 -> 2, .U32 -> 4, .U64 -> 8 }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:36
+    pub fn bits(self: JetRegisterWidth) -> U16 { (self.bytes() * 8) as U16 }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:42
+#Copy
+#Equatable
+pub enum JetRegisterAccessMode { ReadOnly, WriteOnly, ReadWrite }
+impl JetRegisterAccessMode {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:49
+    pub fn can_read(self: JetRegisterAccessMode) -> Bool { self == .ReadOnly || self == .ReadWrite }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:53
+    pub fn can_write(self: JetRegisterAccessMode) -> Bool { self == .WriteOnly || self == .ReadWrite }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:62
+pub trait JetRegisterAccess { const MODE: JetRegisterAccessMode }
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:66
+pub struct JetReadOnly {}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:67
+pub struct JetWriteOnly {}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:68
+pub struct JetReadWrite {}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:70
+impl JetRegisterAccess for JetReadOnly { const MODE: JetRegisterAccessMode = .ReadOnly }
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:73
+impl JetRegisterAccess for JetWriteOnly { const MODE: JetRegisterAccessMode = .WriteOnly }
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:76
+impl JetRegisterAccess for JetReadWrite { const MODE: JetRegisterAccessMode = .ReadWrite }
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:80
+pub trait JetRegisterReadable: JetRegisterAccess {}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:81
+pub trait JetRegisterWritable: JetRegisterAccess {}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:83
+impl JetRegisterReadable for JetReadOnly {}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:84
+impl JetRegisterReadable for JetReadWrite {}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:85
+impl JetRegisterWritable for JetWriteOnly {}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:86
+impl JetRegisterWritable for JetReadWrite {}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:91
+pub trait JetRegisterValue: Copy {
+    const WIDTH: JetRegisterWidth
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:94
+    fn from_bits(bits: U64) -> Self
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:95
+    fn into_bits(self: Self) -> U64
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:98
+impl JetRegisterValue for U8 {
+    const WIDTH: JetRegisterWidth = .U8
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:101
+    fn from_bits(bits: U64) -> U8 { bits as U8 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:105
+    fn into_bits(self: U8) -> U64 { self as U64 }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:110
+impl JetRegisterValue for U16 {
+    const WIDTH: JetRegisterWidth = .U16
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:113
+    fn from_bits(bits: U64) -> U16 { bits as U16 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:117
+    fn into_bits(self: U16) -> U64 { self as U64 }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:122
+impl JetRegisterValue for U32 {
+    const WIDTH: JetRegisterWidth = .U32
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:125
+    fn from_bits(bits: U64) -> U32 { bits as U32 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:129
+    fn into_bits(self: U32) -> U64 { self as U64 }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:134
+impl JetRegisterValue for U64 {
+    const WIDTH: JetRegisterWidth = .U64
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:137
+    fn from_bits(bits: U64) -> U64 { bits }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:141
+    fn into_bits(self: U64) -> U64 { self }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:150
+#Copy
+#Equatable
+pub struct JetRegisterSpec {
+    pub name: &String
+    pub offset: U64
+    pub width: JetRegisterWidth
+    pub access: JetRegisterAccessMode
+    pub volatile: Bool
+}
+impl JetRegisterSpec {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:159
+    pub fn new(name: &String, offset: U64, width: JetRegisterWidth, access: JetRegisterAccessMode, volatile: Bool) -> JetRegisterSpec {
+        JetRegisterSpec{name: name, offset: offset, width: width, access: access, volatile: volatile}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:178
+#Copy
+#Equatable
+pub struct JetRegisterBlockSpec {
+    pub name: &String
+    pub base: U64
+    pub size_bytes: U64
+    pub registers: View<JetRegisterSpec>
+}
+impl JetRegisterBlockSpec {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:185
+    pub fn new(name: &String, base: U64, size_bytes: U64, registers: View<JetRegisterSpec>) -> JetRegisterBlockSpec {
+        JetRegisterBlockSpec{name: name, base: base, size_bytes: size_bytes, registers: registers}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:199
+    pub fn register(self: &JetRegisterBlockSpec, name: String) -> (&JetRegisterSpec)? {
+        self.registers.iter().find(fn(register) { register.name == name })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:206
+#Copy
+#Equatable
+pub struct JetInterruptSpec {
+    pub name: &String
+    pub vector: U16
+    pub forbidden_effects: View<&String>
+    pub bounded: Bool
+}
+impl JetInterruptSpec {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:213
+    pub fn new(name: &String, vector: U16, bounded: Bool) -> JetInterruptSpec {
+        JetInterruptSpec{name: name, vector: vector, forbidden_effects: [], bounded: bounded}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:222
+    pub fn with_effects(name: &String, vector: U16, forbidden_effects: View<&String>, bounded: Bool) -> JetInterruptSpec {
+        JetInterruptSpec{name: name, vector: vector, forbidden_effects: forbidden_effects, bounded: bounded}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:238
+#Copy
+#Equatable
+pub enum JetDmaOwnership { Borrowed, Transfer }
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:244
+#Copy
+#Equatable
+pub struct JetDmaChannelSpec {
+    pub name: &String
+    pub channel: U16
+    pub transfer_width: JetRegisterWidth
+    pub ownership: JetDmaOwnership
+    pub max_transfer_bytes: U64?
+}
+impl JetDmaChannelSpec {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:253
+    pub fn new(name: &String, channel: U16) -> JetDmaChannelSpec {
+        JetDmaChannelSpec{name: name, channel: channel, transfer_width: .U8, ownership: .Transfer, max_transfer_bytes: None}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:263
+    pub fn with_transfer(name: &String, channel: U16, transfer_width: JetRegisterWidth, ownership: JetDmaOwnership, max_transfer_bytes: U64?) -> JetDmaChannelSpec {
+        JetDmaChannelSpec{name: name, channel: channel, transfer_width: transfer_width, ownership: ownership, max_transfer_bytes: max_transfer_bytes}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:284
+#Copy
+pub struct JetHardwareFacts {
+    pub profile_id: (&String)?
+    pub capabilities: View<&String>
+    pub svd_source: (&String)?
+    pub svd_sha256: (&String)?
+    pub register_blocks: View<JetRegisterBlockSpec>
+    pub interrupts: View<JetInterruptSpec>
+    pub dma_channels: View<JetDmaChannelSpec>
+}
+impl JetHardwareFacts {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:295
+    pub fn new(register_blocks: View<JetRegisterBlockSpec>, interrupts: View<JetInterruptSpec>, dma_channels: View<JetDmaChannelSpec>) -> JetHardwareFacts {
+        JetHardwareFacts{profile_id: None, capabilities: [], svd_source: None, svd_sha256: None,
+            register_blocks: register_blocks, interrupts: interrupts, dma_channels: dma_channels}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:311
+    pub fn with_svd(svd_source: &String, svd_sha256: &String, register_blocks: View<JetRegisterBlockSpec>, interrupts: View<JetInterruptSpec>, dma_channels: View<JetDmaChannelSpec>) -> JetHardwareFacts {
+        JetHardwareFacts{profile_id: None, capabilities: [], svd_source: Val(svd_source), svd_sha256: Val(svd_sha256),
+            register_blocks: register_blocks, interrupts: interrupts, dma_channels: dma_channels}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:329
+    pub fn with_profile(profile_id: &String, capabilities: View<&String>, svd_source: (&String)?, svd_sha256: (&String)?, register_blocks: View<JetRegisterBlockSpec>, interrupts: View<JetInterruptSpec>, dma_channels: View<JetDmaChannelSpec>) -> JetHardwareFacts {
+        JetHardwareFacts{profile_id: Val(profile_id), capabilities: capabilities, svd_source: svd_source, svd_sha256: svd_sha256,
+            register_blocks: register_blocks, interrupts: interrupts, dma_channels: dma_channels}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:349
+    pub fn register_block(self: &JetHardwareFacts, name: String) -> (&JetRegisterBlockSpec)? {
+        self.register_blocks.iter().find(fn(block) { block.name == name })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:355
+    pub fn interrupt(self: &JetHardwareFacts, selector: String) -> (&JetInterruptSpec)? {
+        vector :: selector.parse<U16>().ok()
+        self.interrupts.iter().find(fn(interrupt) {
+            interrupt.name == selector || vector.is_some_and(fn(value) { value == interrupt.vector })
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:362
+    pub fn interrupt_vector(self: &JetHardwareFacts, vector: U16) -> (&JetInterruptSpec)? {
+        self.interrupts.iter().find(fn(interrupt) { interrupt.vector == vector })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:368
+    pub fn dma_channel(self: &JetHardwareFacts, name: String) -> (&JetDmaChannelSpec)? {
+        self.dma_channels.iter().find(fn(channel) { channel.name == name })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:377
+#Copy
+#Equatable
+pub struct JetHardwareRegisterFact {
+    pub block: &String
+    pub register: &String
+    pub base: U64
+    pub offset: U64
+    pub width: JetRegisterWidth
+    pub access: JetRegisterAccessMode
+    pub volatile: Bool
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:388
+#Copy
+#Equatable
+pub struct JetHardwareInterruptFact {
+    pub name: &String
+    pub vector: U16
+    pub bounded: Bool
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:395
+#Copy
+#Equatable
+pub struct JetHardwareDmaFact {
+    pub name: &String
+    pub channel: U16
+    pub transfer_width: JetRegisterWidth
+    pub ownership: JetDmaOwnership
+    pub max_transfer_bytes: U64?
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:405
+pub trait JetHardwareFactSource {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:406
+    fn profile_id(self: &Self) -> (&String)? { None }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:410
+    fn register_fact(self: &Self, block: String, register: String) -> JetHardwareRegisterFact?
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:416
+    fn interrupt_fact(self: &Self, selector: String) -> JetHardwareInterruptFact?
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:418
+    fn interrupt_vector_fact(self: &Self, vector: U16) -> JetHardwareInterruptFact?
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:420
+    fn dma_fact(self: &Self, channel: String) -> JetHardwareDmaFact?
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:423
+impl JetHardwareFactSource for JetHardwareFacts {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:424
+    fn profile_id(self: &JetHardwareFacts) -> (&String)? { self.profile_id }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:428
+    fn register_fact(self: &JetHardwareFacts, block: String, register: String) -> JetHardwareRegisterFact? {
+        block_fact :: self.register_block(block) ?? return None
+        register_fact :: block_fact.register(register) ?? return None
+        Val(JetHardwareRegisterFact{block: block_fact.name, register: register_fact.name, base: block_fact.base,
+            offset: register_fact.offset, width: register_fact.width, access: register_fact.access, volatile: register_fact.volatile})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:446
+    fn interrupt_fact(self: &JetHardwareFacts, selector: String) -> JetHardwareInterruptFact? {
+        self.interrupt(selector).map(fn(interrupt) {
+            JetHardwareInterruptFact{name: interrupt.name, vector: interrupt.vector, bounded: interrupt.bounded}
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:454
+    fn interrupt_vector_fact(self: &JetHardwareFacts, vector: U16) -> JetHardwareInterruptFact? {
+        self.interrupt_vector(vector).map(fn(interrupt) {
+            JetHardwareInterruptFact{name: interrupt.name, vector: interrupt.vector, bounded: interrupt.bounded}
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:463
+    fn dma_fact(self: &JetHardwareFacts, channel: String) -> JetHardwareDmaFact? {
+        self.dma_channel(channel).map(fn(dma) {
+            JetHardwareDmaFact{name: dma.name, channel: dma.channel, transfer_width: dma.transfer_width,
+                ownership: dma.ownership, max_transfer_bytes: dma.max_transfer_bytes}
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:474
+impl From<target_facts.RegisterWidth> for JetRegisterWidth {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:475
+    fn from(width: target_facts.RegisterWidth) -> JetRegisterWidth {
+        match width { .U8 -> .U8, .U16 -> .U16, .U32 -> .U32, .U64 -> .U64 }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:485
+impl From<target_facts.TargetRegisterAccessMode> for JetRegisterAccessMode {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:486
+    fn from(mode: target_facts.TargetRegisterAccessMode) -> JetRegisterAccessMode {
+        match mode { .ReadOnly -> .ReadOnly, .WriteOnly -> .WriteOnly, .ReadWrite -> .ReadWrite }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:495
+impl From<target_facts.TargetDmaOwnership> for JetDmaOwnership {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:496
+    fn from(ownership: target_facts.TargetDmaOwnership) -> JetDmaOwnership {
+        match ownership { .Borrowed -> .Borrowed, .Transfer -> .Transfer }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:504
+impl JetHardwareFactSource for target_facts.TargetHardwareFacts {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:505
+    fn register_fact(self: &target_facts.TargetHardwareFacts, block: String, register: String) -> JetHardwareRegisterFact? {
+        block_fact :: self.register_block(block) ?? return None
+        register_fact :: block_fact.register(register) ?? return None
+        Val(JetHardwareRegisterFact{block: &block_fact.name, register: &register_fact.name, base: block_fact.base,
+            offset: register_fact.offset, width: register_fact.width.into(), access: register_fact.access.into(),
+            volatile: register_fact.volatile})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:523
+    fn interrupt_fact(self: &target_facts.TargetHardwareFacts, selector: String) -> JetHardwareInterruptFact? {
+        self.interrupt(selector).map(fn(interrupt) {
+            JetHardwareInterruptFact{name: &interrupt.name, vector: interrupt.vector, bounded: interrupt.bounded}
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:531
+    fn interrupt_vector_fact(self: &target_facts.TargetHardwareFacts, vector: U16) -> JetHardwareInterruptFact? {
+        self.interrupts.iter().find(fn(interrupt) { interrupt.vector == vector }).map(fn(interrupt) {
+            JetHardwareInterruptFact{name: &interrupt.name, vector: interrupt.vector, bounded: interrupt.bounded}
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:542
+    fn dma_fact(self: &target_facts.TargetHardwareFacts, channel: String) -> JetHardwareDmaFact? {
+        self.dma_channel(channel).map(fn(dma) {
+            JetHardwareDmaFact{name: &dma.name, channel: dma.channel, transfer_width: dma.transfer_width.into(),
+                ownership: dma.ownership.into(), max_transfer_bytes: dma.max_transfer_bytes}
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:556
+#Copy
+#Equatable
+#Error
+pub enum JetRegisterError {
+    UnknownRegister
+    WidthMismatch(expected: JetRegisterWidth, actual: JetRegisterWidth)
+    AccessMismatch(expected: JetRegisterAccessMode, actual: JetRegisterAccessMode)
+    VolatileMismatch(expected: Bool, actual: Bool)
+    AddressOverflow
+    Misaligned
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:576
+pub trait JetRegisterBackend {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:577
+    fn read(self: &Self, address: U64, width: JetRegisterWidth, volatile_access: Bool) -> U64
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:579
+    fn write(self: &Self, address: U64, width: JetRegisterWidth, value: U64, volatile_access: Bool) ->
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:585
+pub struct JetRegister<W: JetRegisterValue, A: JetRegisterAccess, B: JetRegisterBackend, const VOLATILE: Bool> {
+    backend: &B
+    address: U64
+    marker: PhantomData<fn() -> (W, A)>
+}
+impl<W: JetRegisterValue, A: JetRegisterAccess, B: JetRegisterBackend, const VOLATILE: Bool> JetRegister<W, A, B, VOLATILE> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:602
+    pub fn new(backend: &B, address: U64) -> JetRegister<W, A, B, VOLATILE> {
+        JetRegister{backend: backend, address: address, marker: PhantomData}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:610
+    pub fn from_spec(backend: &B, base: U64, spec: &JetRegisterSpec) -> JetRegister<W, A, B, VOLATILE> JetRegisterError! {
+        if spec.width != W.WIDTH -> return Err(.WidthMismatch(spec.width, W.WIDTH))
+        if spec.access != A.MODE -> return Err(.AccessMismatch(spec.access, A.MODE))
+        if spec.volatile != VOLATILE -> return Err(.VolatileMismatch(spec.volatile, VOLATILE))
+        address :: base.checked_add(spec.offset) ?? return Err(.AddressOverflow)
+        if address % spec.width.bytes() != 0 -> return Err(.Misaligned)
+        Ok(JetRegister<W, A, B, VOLATILE>.new(backend, address))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:642
+    pub fn address(self: &JetRegister<W, A, B, VOLATILE>) -> U64 { self.address }
+}
+impl<W: JetRegisterValue, A: JetRegisterReadable, B: JetRegisterBackend, const VOLATILE: Bool> JetRegister<W, A, B, VOLATILE> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:653
+    pub fn read(self: &JetRegister<W, A, B, VOLATILE>) -> W {
+        W.from_bits(self.backend.read(self.address, W.WIDTH, VOLATILE))
+    }
+}
+impl<W: JetRegisterValue, A: JetRegisterWritable, B: JetRegisterBackend, const VOLATILE: Bool> JetRegister<W, A, B, VOLATILE> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:664
+    pub fn write(self: &JetRegister<W, A, B, VOLATILE>, value: W) -> {
+        self.backend.write(self.address, W.WIDTH, value.into_bits(), VOLATILE)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:672
+pub struct JetRegisterBlock<B: JetRegisterBackend> {
+    backend: &B
+    spec: &JetRegisterBlockSpec
+}
+impl<B: JetRegisterBackend> JetRegisterBlock<B> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:684
+    pub fn new(backend: &B, spec: &JetRegisterBlockSpec) -> JetRegisterBlock<B> {
+        JetRegisterBlock{backend: backend, spec: spec}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:688
+    pub fn name(self: &JetRegisterBlock<B>) -> &String { self.spec.name }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:692
+    pub fn base(self: &JetRegisterBlock<B>) -> U64 { self.spec.base }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:696
+    pub fn register<W: JetRegisterValue, A: JetRegisterAccess, const VOLATILE: Bool>(self: &JetRegisterBlock<B>, name: String) -> JetRegister<W, A, B, VOLATILE> JetRegisterError! {
+        spec :: self.spec.register(name) ?? return Err(.UnknownRegister)
+        JetRegister<W, A, B, VOLATILE>.from_spec(self.backend, self.spec.base, spec)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:716
+#Copy
+pub struct JetVolatileRegisterBackend {}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:718
+impl JetRegisterBackend for JetVolatileRegisterBackend {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:719
+    fn read(self: &JetVolatileRegisterBackend, address: U64, width: JetRegisterWidth, volatile_access: Bool) -> U64 {
+        // GATE #4565: kernel primitive — checked target MMIO load, selected width and volatility.
+        #Unsafe("checked profile owns the MMIO region; generated register validates width and alignment") {
+            match (width, volatile_access) {
+                (.U8, true) -> ptr.read_volatile(ptr.from_addr<U8>(address)) as U64
+                (.U16, true) -> ptr.read_volatile(ptr.from_addr<U16>(address)) as U64
+                (.U32, true) -> ptr.read_volatile(ptr.from_addr<U32>(address)) as U64
+                (.U64, true) -> ptr.read_volatile(ptr.from_addr<U64>(address))
+                (.U8, false) -> ptr.read(ptr.from_addr<U8>(address)) as U64
+                (.U16, false) -> ptr.read(ptr.from_addr<U16>(address)) as U64
+                (.U32, false) -> ptr.read(ptr.from_addr<U32>(address)) as U64
+                (.U64, false) -> ptr.read(ptr.from_addr<U64>(address))
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:741
+    fn write(self: &JetVolatileRegisterBackend, address: U64, width: JetRegisterWidth, value: U64, volatile_access: Bool) -> {
+        // GATE #4565: kernel primitive — checked target MMIO store.
+        #Unsafe("generated profile owns the address and width; operation stays in audited target kernel") {
+            match (width, volatile_access) {
+                (.U8, true) -> ptr.write_volatile(ptr.from_addr<U8>(address), value as U8)
+                (.U16, true) -> ptr.write_volatile(ptr.from_addr<U16>(address), value as U16)
+                (.U32, true) -> ptr.write_volatile(ptr.from_addr<U32>(address), value as U32)
+                (.U64, true) -> ptr.write_volatile(ptr.from_addr<U64>(address), value)
+                (.U8, false) -> ptr.write(ptr.from_addr<U8>(address), value as U8)
+                (.U16, false) -> ptr.write(ptr.from_addr<U16>(address), value as U16)
+                (.U32, false) -> ptr.write(ptr.from_addr<U32>(address), value as U32)
+                (.U64, false) -> ptr.write(ptr.from_addr<U64>(address), value)
+            }
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:770
+// Freestanding interrupt state uses fixed storage, with no allocator dependency.
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:774
+const JET_HARDWARE_INTERRUPT_CAPACITY: USize = 64
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:776
+const JET_HARDWARE_PENDING_CAPACITY: USize = 64
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:780
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1403
+#Copy
+pub struct JetHardwareInterruptHandler {
+    pub fn_ptr: I64
+    pub env: I64
+    pub has_env: Bool
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:788
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1410
+pub struct JetHardwareInterruptRegistry {
+    handlers: [(U16, JetHardwareInterruptHandler)?; JET_HARDWARE_INTERRUPT_CAPACITY]
+    hosted_handlers: [U16:JetHardwareInterruptHandler]
+}
+impl Default for JetHardwareInterruptRegistry {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:794
+    fn default() -> Self { Self.new() }
+}
+impl JetHardwareInterruptRegistry {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:801
+    pub fn new() -> Self {
+        Self{handlers: [(U16, JetHardwareInterruptHandler)?; JET_HARDWARE_INTERRUPT_CAPACITY].filled(None),
+            hosted_handlers: [U16:JetHardwareInterruptHandler]{}}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:807
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1415
+    pub fn clear(self: &Self) -> {
+        if target.selected_os() == .None {
+            self.handlers.fill(None)
+        } else { self.hosted_handlers.clear() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:811
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1419
+    pub fn register(self: &Self, vector: U16, handler: JetHardwareInterruptHandler) -> Bool {
+        if target.selected_os() != .None {
+            // Hosted insertion replaces a prior binding, but reports false.
+            return self.hosted_handlers.insert(vector, handler).is_none()
+        }
+        if self.handlers.iter().flatten().any(fn(entry) { entry.0 == vector }) -> return false
+        slot :: self.handlers.iter_mut().find(fn(slot) { slot.is_none() }) ?? return false
+        *slot = Val((vector, handler))
+        true
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:831
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1427
+    fn handler(self: &Self, vector: U16) -> JetHardwareInterruptHandler? {
+        if target.selected_os() != .None -> return self.hosted_handlers.get(&vector).copied()
+        self.handlers.iter().flatten().find_map(fn(entry) {
+            if entry.0 == vector { Val(entry.1) } else { None }
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:841
+pub struct JetHardwarePendingCallbacks {
+    callbacks: [JetHardwareInterruptHandler?; JET_HARDWARE_PENDING_CAPACITY]
+    len: USize
+    hosted_callbacks: [JetHardwareInterruptHandler]
+}
+impl JetHardwarePendingCallbacks {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:848
+    fn empty() -> Self {
+        Self{callbacks: [JetHardwareInterruptHandler?; JET_HARDWARE_PENDING_CAPACITY].filled(None),
+            len: 0, hosted_callbacks: [JetHardwareInterruptHandler]{}}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:857
+// GATE #4565: kernel primitive
+JET_HARDWARE_PENDING_VECTORS :: #Unsafe("fixed atomic FIFO slots are initialized independently") {
+    [AtomicU16; JET_HARDWARE_PENDING_CAPACITY].from_fn(fn(_) { AtomicU16.new(0) })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:860
+// GATE #4565: kernel primitive
+JET_HARDWARE_PENDING_HEAD :: #Unsafe("freestanding interrupt FIFO begins empty") { AtomicUsize.new(0) }
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:863
+// GATE #4565: kernel primitive
+JET_HARDWARE_PENDING_TAIL :: #Unsafe("freestanding interrupt FIFO begins empty") { AtomicUsize.new(0) }
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:867
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1368
+pub fn jet_hardware_has_pending() -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("acquire observes published interrupt FIFO state") {
+        if target.selected_os() == .None {
+            JET_HARDWARE_PENDING_HEAD.load(Ordering.Acquire) != JET_HARDWARE_PENDING_TAIL.load(Ordering.Acquire)
+        } else { JET_HARDWARE_PENDING_READY.load(Ordering.Acquire) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:873
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1372
+pub fn jet_hardware_enqueue_pending(vector: U16) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("publish a vector only after writing its FIFO slot; hosted queue is mutex protected") {
+        if target.selected_os() == .None {
+            tail :: JET_HARDWARE_PENDING_TAIL.load(Ordering.Relaxed)
+            head :: JET_HARDWARE_PENDING_HEAD.load(Ordering.Acquire)
+            if tail.wrapping_sub(head) >= JET_HARDWARE_PENDING_CAPACITY -> return
+            JET_HARDWARE_PENDING_VECTORS[tail % JET_HARDWARE_PENDING_CAPACITY].store(vector, Ordering.Relaxed)
+            JET_HARDWARE_PENDING_TAIL.store(tail.wrapping_add(1), Ordering.Release)
+        } else {
+            queue := JET_HARDWARE_PENDING_INTERRUPTS.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            queue.push_back(vector)
+            JET_HARDWARE_PENDING_READY.store(true, Ordering.Release)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:885
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1435
+pub fn jet_hardware_dispatch_pending(registry: &JetHardwareInterruptRegistry) -> JetHardwarePendingCallbacks {
+    callbacks := JetHardwarePendingCallbacks.empty()
+    // GATE #4565: kernel primitive
+    #Unsafe("detach checked callbacks from the synchronized queue before invoking any of them") {
+        if target.selected_os() == .None {
+            head := JET_HARDWARE_PENDING_HEAD.load(Ordering.Relaxed)
+            tail :: JET_HARDWARE_PENDING_TAIL.load(Ordering.Acquire)
+            while head != tail && callbacks.len < callbacks.callbacks.len() {
+                vector :: JET_HARDWARE_PENDING_VECTORS[head % JET_HARDWARE_PENDING_CAPACITY].load(Ordering.Acquire)
+                if registry.handler(vector) == .Val(handler) {
+                    callbacks.callbacks[callbacks.len] = Val(handler)
+                    callbacks.len += 1
+                }
+                head = head.wrapping_add(1)
+            }
+            JET_HARDWARE_PENDING_HEAD.store(head, Ordering.Release)
+        } else {
+            if not jet_hardware_has_pending() -> return callbacks
+            queue := JET_HARDWARE_PENDING_INTERRUPTS.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            undelivered := VecDeque<U16>.new()
+            while queue.pop_front() == .Val(vector) {
+                if registry.handler(vector) == .Val(handler) {
+                    callbacks.hosted_callbacks.push(handler)
+                } else { undelivered.push_back(vector) }
+            }
+            *queue = ^undelivered
+            JET_HARDWARE_PENDING_READY.store(not queue.is_empty(), Ordering.Release)
+        }
+    }
+    callbacks
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:905
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1460
+pub fn jet_hardware_invoke_pending(callbacks: JetHardwarePendingCallbacks) -> USize {
+    delivered :: if target.selected_os() == .None { callbacks.len } else { callbacks.hosted_callbacks.len() }
+    loop index in 0..<delivered {
+        callback :: if target.selected_os() == .None {
+            callbacks.callbacks[index] ?? next
+        } else { callbacks.hosted_callbacks[index] }
+        // GATE #4565: kernel primitive
+        #Unsafe("generated code inserts only checked C-ABI zero-argument or captured handlers") {
+            if callback.has_env {
+                invoke :: mem.transmute<USize, fn(I64)>(callback.fn_ptr as USize)
+                invoke(callback.env)
+            } else {
+                invoke :: mem.transmute<USize, fn()>(callback.fn_ptr as USize)
+                invoke()
+            }
+        }
+    }
+    delivered
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:930
+// Typed adapters retain checked metadata strings, unlike the erased handle seam.
+pub trait JetHardwareHost {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:931
+    fn setup(self: &Self, profile_id: &String, setup_kind: &String, item: &String, width_or_vector: I64, ownership_or_handler: &String) -> I64
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:940
+    fn register_read(self: &Self, profile_id: &String, block: &String, register: &String, width: I64) -> I64
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:948
+    fn register_write(self: &Self, profile_id: &String, block: &String, register: &String, width: I64, value: I64) -> I64
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:957
+    fn dma_start(self: &Self, profile_id: &String, channel: &String, address: U64, bytes: U64) -> I64
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:965
+    fn dma_wait(self: &Self, profile_id: &String, channel: &String, token: I64) -> I64
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:967
+    fn trigger_interrupt(self: &Self, _vector: U16) -> I64 { JET_HARDWARE_UNAVAILABLE }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:974
+pub trait JetHardwareErasedHost {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:975
+    fn setup(self: &Self, profile_id: I64, setup_kind: I64, item: I64, width_or_vector: I64, ownership_or_handler: I64) -> I64
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:984
+    fn register_read(self: &Self, profile_id: I64, block: I64, register: I64, width: I64) -> I64
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:986
+    fn register_write(self: &Self, profile_id: I64, block: I64, register: I64, width: I64, value: I64) -> I64
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:995
+    fn dma_start(self: &Self, profile_id: I64, channel: I64, address: I64, bytes: I64) -> I64
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1003
+    fn dma_wait(self: &Self, profile_id: I64, channel: I64, token: I64) -> I64
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1007
+    fn register_string_handle(self: &Self, _handle: I64, _value: &String) -> {}
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1011
+    fn trigger_interrupt(self: &Self, _vector: U16) -> I64 { JET_HARDWARE_UNAVAILABLE }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1017
+pub JET_HARDWARE_SETUP_DMA_CONFIGURE :: I64{0}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1018
+pub JET_HARDWARE_SETUP_INTERRUPT_BIND :: I64{1}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1020
+pub JET_HARDWARE_SETUP_DMA_CONFIGURE_NAME :: "dma-configure"
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1021
+pub JET_HARDWARE_SETUP_INTERRUPT_BIND_NAME :: "interrupt-bind"
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1023
+pub JET_HARDWARE_DMA_BORROWED_NAME :: "borrowed"
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1024
+pub JET_HARDWARE_DMA_TRANSFER_NAME :: "transfer"
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1027
+pub JET_HARDWARE_WIDTH_U8 :: I64{1}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1028
+pub JET_HARDWARE_WIDTH_U16 :: I64{2}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1029
+pub JET_HARDWARE_WIDTH_U32 :: I64{4}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1030
+pub JET_HARDWARE_WIDTH_U64 :: I64{8}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1034
+// Negative unavailable status never invents an adapter value.
+pub JET_HARDWARE_UNAVAILABLE :: I64{-1}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1037
+#Copy
+struct JetReplayDmaConfig { channel: U16, width: JetRegisterWidth, ownership: JetDmaOwnership }
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1044
+#Copy
+struct JetReplayTransfer { handle: I64, channel: U16, address: U64, bytes: U64 }
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1054
+// All tiers share this deterministic fixed-capacity replay policy.
+pub struct JetHardwareReplayHost<F: JetHardwareFactSource> {
+    facts: F
+    registers: JetRegisterReplay<128>
+    configured_dma: [JetReplayDmaConfig?; 64]
+    transfers: [JetReplayTransfer?; 128]
+    interrupt_bindings: [U16?; 64]
+    next_transfer: I64
+}
+impl<F: JetHardwareFactSource> JetHardwareReplayHost<F> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1070
+    pub fn new(facts: F) -> Self {
+        Self{facts: ^facts, registers: JetRegisterReplay<128>.new(),
+            configured_dma: [JetReplayDmaConfig?; 64].filled(None),
+            transfers: [JetReplayTransfer?; 128].filled(None),
+            interrupt_bindings: [U16?; 64].filled(None), next_transfer: 1}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1081
+    fn profile_matches(self: &Self, profile_id: &String) -> Bool {
+        self.facts.profile_id().is_none_or(fn(expected) { expected == profile_id })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1087
+    fn width_tag(width: JetRegisterWidth) -> I64 { width.bytes() as I64 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1091
+    fn width_from_tag(tag: I64) -> JetRegisterWidth? {
+        match tag {
+            JET_HARDWARE_WIDTH_U8 -> Val(.U8)
+            JET_HARDWARE_WIDTH_U16 -> Val(.U16)
+            JET_HARDWARE_WIDTH_U32 -> Val(.U32)
+            JET_HARDWARE_WIDTH_U64 -> Val(.U64)
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1100
+    fn ownership_tag(ownership: JetDmaOwnership) -> &String {
+        match ownership {
+            .Borrowed -> &JET_HARDWARE_DMA_BORROWED_NAME
+            .Transfer -> &JET_HARDWARE_DMA_TRANSFER_NAME
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1107
+    fn ownership_from_tag(tag: &String) -> JetDmaOwnership? {
+        match tag {
+            JET_HARDWARE_DMA_BORROWED_NAME -> Val(.Borrowed)
+            JET_HARDWARE_DMA_TRANSFER_NAME -> Val(.Transfer)
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1115
+    fn ensure_register(registers: &JetRegisterReplay<128>, fact: &JetHardwareRegisterFact) -> U64? {
+        address :: fact.base.checked_add(fact.offset) ?? return None
+        if registers.value(address, fact.width).is_none() {
+            _ :: registers.define(address, fact.width, 0).ok() ?? return None
+        }
+        Val(address)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1126
+    fn dma_configured(self: &Self, channel: U16, width: JetRegisterWidth, ownership: JetDmaOwnership) -> Bool {
+        self.configured_dma.iter().flatten().any(fn(config) {
+            config.channel == channel && config.width == width && config.ownership == ownership
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1139
+    fn interrupt_bound(self: &Self, vector: U16) -> Bool {
+        self.interrupt_bindings.iter().flatten().any(fn(bound) { *bound == vector })
+    }
+}
+impl<F: JetHardwareFactSource> JetHardwareHost for JetHardwareReplayHost<F> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1151
+    fn setup(self: &Self, profile_id: &String, setup_kind: &String, item: &String,
+        width_or_vector: I64, ownership_or_handler: &String) -> I64 {
+        if not self.profile_matches(profile_id) -> return JET_HARDWARE_UNAVAILABLE
+        match setup_kind {
+            JET_HARDWARE_SETUP_DMA_CONFIGURE_NAME -> {
+                width :: Self.width_from_tag(width_or_vector) ?? return JET_HARDWARE_UNAVAILABLE
+                ownership :: Self.ownership_from_tag(ownership_or_handler) ?? return JET_HARDWARE_UNAVAILABLE
+                fact :: self.facts.dma_fact(item) ?? return JET_HARDWARE_UNAVAILABLE
+                if Self.width_tag(fact.transfer_width) != Self.width_tag(width)
+                    || Self.ownership_tag(fact.ownership) != Self.ownership_tag(ownership) {
+                    return JET_HARDWARE_UNAVAILABLE
+                }
+                if self.dma_configured(fact.channel, width, ownership) -> return 0
+                slot :: self.configured_dma.iter_mut().find(fn(slot) { slot.is_none() }) ?? return JET_HARDWARE_UNAVAILABLE
+                *slot = Val(JetReplayDmaConfig{channel: fact.channel, width: width, ownership: ownership})
+                0
+            }
+            JET_HARDWARE_SETUP_INTERRUPT_BIND_NAME -> {
+                vector :: U16.try_from(width_or_vector).ok() ?? return JET_HARDWARE_UNAVAILABLE
+                fact :: self.facts.interrupt_fact(item) ?? return JET_HARDWARE_UNAVAILABLE
+                if not fact.bounded || fact.vector != vector || ownership_or_handler.is_empty() {
+                    return JET_HARDWARE_UNAVAILABLE
+                }
+                if self.interrupt_bound(vector) -> return 0
+                slot :: self.interrupt_bindings.iter_mut().find(fn(slot) { slot.is_none() }) ?? return JET_HARDWARE_UNAVAILABLE
+                *slot = Val(vector)
+                0
+            }
+            _ -> JET_HARDWARE_UNAVAILABLE
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1222
+    fn register_read(self: &Self, profile_id: &String, block: &String, register: &String, width: I64) -> I64 {
+        if not self.profile_matches(profile_id) -> return JET_HARDWARE_UNAVAILABLE
+        fact :: self.facts.register_fact(block, register) ?? return JET_HARDWARE_UNAVAILABLE
+        expected_width :: Self.width_from_tag(width) ?? return JET_HARDWARE_UNAVAILABLE
+        if fact.width != expected_width || not fact.access.can_read() -> return JET_HARDWARE_UNAVAILABLE
+        _ :: Self.ensure_register(&self.registers, &fact) ?? return JET_HARDWARE_UNAVAILABLE
+        spec :: JetRegisterSpec.new(fact.register, fact.offset, fact.width, fact.access, fact.volatile)
+        jet_replay_register_read(&self.registers, fact.base, &spec).map(fn(value) { value as I64 }) ?? JET_HARDWARE_UNAVAILABLE
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1256
+    fn register_write(self: &Self, profile_id: &String, block: &String, register: &String, width: I64, value: I64) -> I64 {
+        if not self.profile_matches(profile_id) -> return JET_HARDWARE_UNAVAILABLE
+        fact :: self.facts.register_fact(block, register) ?? return JET_HARDWARE_UNAVAILABLE
+        expected_width :: Self.width_from_tag(width) ?? return JET_HARDWARE_UNAVAILABLE
+        if fact.width != expected_width || not fact.access.can_write() -> return JET_HARDWARE_UNAVAILABLE
+        _ :: Self.ensure_register(&self.registers, &fact) ?? return JET_HARDWARE_UNAVAILABLE
+        spec :: JetRegisterSpec.new(fact.register, fact.offset, fact.width, fact.access, fact.volatile)
+        if jet_replay_register_write(&self.registers, fact.base, &spec, value as U64).is_some() {
+            0
+        } else { JET_HARDWARE_UNAVAILABLE }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1292
+    fn dma_start(self: &Self, profile_id: &String, channel: &String, address: U64, bytes: U64) -> I64 {
+        if not self.profile_matches(profile_id) || address == 0 || bytes == 0 -> return JET_HARDWARE_UNAVAILABLE
+        fact :: self.facts.dma_fact(channel) ?? return JET_HARDWARE_UNAVAILABLE
+        width :: Self.width_tag(fact.transfer_width) as U64
+        if fact.ownership != .Transfer || address % width != 0 || bytes % width != 0
+            || fact.max_transfer_bytes.is_some_and(fn(limit) { bytes > limit })
+            || not self.dma_configured(fact.channel, fact.transfer_width, fact.ownership) {
+            return JET_HARDWARE_UNAVAILABLE
+        }
+        handle :: self.next_transfer
+        self.next_transfer = self.next_transfer.saturating_add(1).max(1)
+        slot :: self.transfers.iter_mut().find(fn(slot) { slot.is_none() }) ?? return JET_HARDWARE_UNAVAILABLE
+        *slot = Val(JetReplayTransfer{handle: handle, channel: fact.channel, address: address, bytes: bytes})
+        handle
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1330
+    fn dma_wait(self: &Self, profile_id: &String, channel: &String, token: I64) -> I64 {
+        if not self.profile_matches(profile_id) || token <= 0 -> return JET_HARDWARE_UNAVAILABLE
+        fact :: self.facts.dma_fact(channel) ?? return JET_HARDWARE_UNAVAILABLE
+        slot :: self.transfers.iter_mut().find(fn(slot) {
+            slot.is_some_and(fn(entry) { entry.handle == token && entry.channel == fact.channel })
+        }) ?? return JET_HARDWARE_UNAVAILABLE
+        entry :: *slot ?? return JET_HARDWARE_UNAVAILABLE
+        *slot = None
+        _ :: (entry.address, entry.bytes)
+        0
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1350
+    fn trigger_interrupt(self: &Self, vector: U16) -> I64 {
+        fact :: self.facts.interrupt_vector_fact(vector) ?? return JET_HARDWARE_UNAVAILABLE
+        if not fact.bounded || not self.interrupt_bound(vector) -> return JET_HARDWARE_UNAVAILABLE
+        jet_hardware_enqueue_pending(vector)
+        0
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1363
+// GATE #4565: kernel primitive
+JET_HARDWARE_PENDING_INTERRUPTS :: #Unsafe("one hosted process-wide mutex owns the interrupt FIFO") {
+    LazyLock.new(fn() { Mutex.new(VecDeque<U16>.new()) })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1366
+// GATE #4565: kernel primitive
+JET_HARDWARE_PENDING_READY :: #Unsafe("hosted pending flag publishes mutex-owned FIFO readiness") { AtomicBool.new(false) }
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1380
+pub fn jet_hardware_drain_pending() -> [U16] {
+    if not jet_hardware_has_pending() -> return [U16]{}
+    // GATE #4565: kernel primitive
+    #Unsafe("drain the hosted FIFO under its mutex and reset readiness while still locked") {
+        queue := JET_HARDWARE_PENDING_INTERRUPTS.lock().unwrap_or_else(fn(error) { error.into_inner() })
+        drained :: queue.drain(..).collect<[U16]>()
+        JET_HARDWARE_PENDING_READY.store(false, Ordering.Release)
+        drained
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1392
+pub fn jet_hardware_clear_pending() -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("clear the hosted FIFO under its mutex and publish its empty state") {
+        queue := JET_HARDWARE_PENDING_INTERRUPTS.lock().unwrap_or_else(fn(error) { error.into_inner() })
+        queue.clear()
+        JET_HARDWARE_PENDING_READY.store(false, Ordering.Release)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1482
+// The absence of an installed adapter is an explicit unavailable provider.
+pub struct JetHardwareUnavailableHost {}
+impl JetHardwareHost for JetHardwareUnavailableHost {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1485
+    fn setup(self: &Self, _profile_id: &String, _setup_kind: &String, _item: &String,
+        _width_or_vector: I64, _ownership_or_handler: &String) -> I64 { JET_HARDWARE_UNAVAILABLE }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1496
+    fn register_read(self: &Self, _profile_id: &String, _block: &String, _register: &String, _width: I64) -> I64 { JET_HARDWARE_UNAVAILABLE }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1506
+    fn register_write(self: &Self, _profile_id: &String, _block: &String, _register: &String, _width: I64, _value: I64) -> I64 { JET_HARDWARE_UNAVAILABLE }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1517
+    fn dma_start(self: &Self, _profile_id: &String, _channel: &String, _address: U64, _bytes: U64) -> I64 { JET_HARDWARE_UNAVAILABLE }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1527
+    fn dma_wait(self: &Self, _profile_id: &String, _channel: &String, _token: I64) -> I64 { JET_HARDWARE_UNAVAILABLE }
+}
+impl JetHardwareErasedHost for JetHardwareUnavailableHost {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1533
+    fn setup(self: &Self, _profile_id: I64, _setup_kind: I64, _item: I64,
+        _width_or_vector: I64, _ownership_or_handler: I64) -> I64 { JET_HARDWARE_UNAVAILABLE }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1544
+    fn register_read(self: &Self, _profile_id: I64, _block: I64, _register: I64, _width: I64) -> I64 { JET_HARDWARE_UNAVAILABLE }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1554
+    fn register_write(self: &Self, _profile_id: I64, _block: I64, _register: I64, _width: I64, _value: I64) -> I64 { JET_HARDWARE_UNAVAILABLE }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1565
+    fn dma_start(self: &Self, _profile_id: I64, _channel: I64, _address: I64, _bytes: I64) -> I64 { JET_HARDWARE_UNAVAILABLE }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1575
+    fn dma_wait(self: &Self, _profile_id: I64, _channel: I64, _token: I64) -> I64 { JET_HARDWARE_UNAVAILABLE }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1581
+// GATE #4565: kernel primitive
+JET_HARDWARE_CURRENT_HOST :: #Unsafe("ambient adapter pointer belongs only to the executing thread") {
+    ThreadLocal.new(fn() { RefCell.new(None as (*JetHardwareHost)?) })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1584
+// GATE #4565: kernel primitive
+JET_HARDWARE_CURRENT_ERASED_HOST :: #Unsafe("erased ambient adapter pointer belongs only to the executing thread") {
+    ThreadLocal.new(fn() { RefCell.new(None as (*JetHardwareErasedHost)?) })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1587
+// GATE #4565: kernel primitive
+JET_HARDWARE_DEFAULT_HOST :: #Unsafe("each thread owns its unavailable adapter independently") {
+    ThreadLocal.new(fn() { RefCell.new(JetHardwareUnavailableHost{}) })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1590
+// GATE #4565: kernel primitive
+JET_HARDWARE_CURRENT_FACTS :: #Unsafe("immutable static checked hardware facts are retained per thread") {
+    ThreadLocal.new(fn() { RefCell.new(None as (@JetHardwareFacts)?) })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1596
+struct JetHardwareHostScope { previous: (*JetHardwareHost)? }
+impl Drop for JetHardwareHostScope {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1601
+    fn drop(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("restore TLS before the scoped borrowed adapter expires, including unwind") {
+            JET_HARDWARE_CURRENT_HOST.with(fn(slot) { _ :: slot.replace(self.previous) })
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1609
+struct JetHardwareErasedHostScope { previous: (*JetHardwareErasedHost)? }
+impl Drop for JetHardwareErasedHostScope {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1614
+    fn drop(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("restore erased TLS before its scoped borrowed adapter expires, including unwind") {
+            JET_HARDWARE_CURRENT_ERASED_HOST.with(fn(slot) { _ :: slot.replace(self.previous) })
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1621
+pub struct JetHardwareFactsScope { previous: (@JetHardwareFacts)? }
+impl Drop for JetHardwareFactsScope {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1626
+    fn drop(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("restore the thread's preceding immutable static fact plane") {
+            JET_HARDWARE_CURRENT_FACTS.with(fn(slot) { _ :: slot.replace(self.previous) })
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1634
+pub fn jet_hardware_facts_scope(facts: @JetHardwareFacts) -> JetHardwareFactsScope {
+    // GATE #4565: kernel primitive
+    previous :: #Unsafe("scope retains only immutable static checked hardware facts") {
+        JET_HARDWARE_CURRENT_FACTS.with(fn(slot) { slot.replace(Val(facts)) })
+    }
+    JetHardwareFactsScope{previous: previous}
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1641
+pub fn jet_hardware_current_facts() -> (@JetHardwareFacts)? {
+    // GATE #4565: kernel primitive
+    #Unsafe("copy the same-thread immutable static fact reference") {
+        JET_HARDWARE_CURRENT_FACTS.with(fn(slot) { *slot.borrow() })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1645
+pub fn jet_hardware_with_host<R>(host: &JetHardwareHost, body: fn() -> R) -> R {
+    // GATE #4565: kernel primitive
+    #Unsafe("private RAII scope restores TLS before the borrowed adapter can expire, including unwind") {
+        pointer :: ptr.from_mut(host)
+        previous :: JET_HARDWARE_CURRENT_HOST.with(fn(slot) { slot.replace(Val(pointer)) })
+        _scope :: JetHardwareHostScope{previous: previous}
+        body()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1659
+pub fn jet_hardware_with_erased_host<R>(host: &JetHardwareErasedHost, body: fn() -> R) -> R {
+    // GATE #4565: kernel primitive
+    #Unsafe("private RAII scope restores erased TLS before the borrowed adapter expires, including unwind") {
+        pointer :: ptr.from_mut(host)
+        previous :: JET_HARDWARE_CURRENT_ERASED_HOST.with(fn(slot) { slot.replace(Val(pointer)) })
+        _scope :: JetHardwareErasedHostScope{previous: previous}
+        body()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1673
+pub fn jet_hardware_with_current_host<R>(body: fn(&JetHardwareHost) -> R) -> R {
+    // GATE #4565: kernel primitive
+    #Unsafe("scope keeps the host alive; holding TLS mutable borrow excludes reentrant mutable aliases") {
+        JET_HARDWARE_CURRENT_HOST.with(fn(slot) {
+            current :: slot.borrow_mut()
+            if *current == .Val(pointer) {
+                body(pointer.as_mut())
+            } else {
+                JET_HARDWARE_DEFAULT_HOST.with(fn(host) { body(&*host.borrow_mut()) })
+            }
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1688
+pub fn jet_hardware_with_current_erased_host<R>(body: fn(&JetHardwareErasedHost) -> R) -> R {
+    // GATE #4565: kernel primitive
+    #Unsafe("erased scope keeps host alive; TLS mutable borrow excludes reentrant mutable aliases") {
+        JET_HARDWARE_CURRENT_ERASED_HOST.with(fn(slot) {
+            current :: slot.borrow_mut()
+            if *current == .Val(pointer) {
+                body(pointer.as_mut())
+            } else {
+                JET_HARDWARE_DEFAULT_HOST.with(fn(host) { body(&*host.borrow_mut()) })
+            }
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1704
+pub fn jet_hardware_setup_typed(profile_id: &String, setup_kind: &String, item: &String,
+    width_or_vector: I64, ownership_or_handler: &String) -> I64 {
+    jet_hardware_with_current_host(fn(host) { host.setup(profile_id, setup_kind, item, width_or_vector, ownership_or_handler) })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1722
+pub fn jet_hardware_register_read_typed(profile_id: &String, block: &String, register: &String, width: I64) -> I64 {
+    jet_hardware_with_current_host(fn(host) { host.register_read(profile_id, block, register, width) })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1731
+pub fn jet_hardware_register_write_typed(profile_id: &String, block: &String, register: &String, width: I64, value: I64) -> I64 {
+    jet_hardware_with_current_host(fn(host) { host.register_write(profile_id, block, register, width, value) })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1743
+pub fn jet_hardware_dma_start_typed<T: JetDmaPayload>(profile_id: &String, channel: &String, buffer: ^T) -> JetDmaTransfer<T> {
+    facts :: jet_hardware_current_facts() ?? jet_panic("<core.hardware>", 0, "DMA start requires checked static target hardware facts")
+    if facts.profile_id.is_some_and(fn(expected) { expected != profile_id }) {
+        jet_panic("<core.hardware>", 0, "DMA start profile does not match checked target hardware facts")
+    }
+    address :: buffer.dma_address()
+    bytes :: buffer.dma_bytes()
+    runtime := JetDmaRuntime.new(facts)
+    transfer := runtime.start(channel, JetDmaBuffer.new(^buffer, address, bytes)).unwrap_or_else(fn(_) {
+        jet_panic("<core.hardware>", 0, "DMA start payload violates checked channel facts")
+    })
+    host_token :: jet_hardware_with_current_host(fn(host) { host.dma_start(profile_id, channel, address, bytes) })
+    if host_token <= 0 -> jet_panic("<core.hardware>", 0, "DMA start adapter reported unavailable status")
+    transfer.set_host_token(host_token)
+    ^transfer
+}
+

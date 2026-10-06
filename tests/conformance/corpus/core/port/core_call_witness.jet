@@ -1,0 +1,23 @@
+// Rust: tests/core_call_witness.rs:1
+use tests.common as common
+use tests.tir_support as tir_support
+// Rust: tests/core_call_witness.rs:8
+PRINTING_FIXTURE :: `
+fn run() {
+    print("core-call-witness")
+}
+`
+// Rust: tests/core_call_witness.rs:14
+fn assert_not_silent(label: String, code: I32, stdout: String, stderr: String) -> {
+    assert(code != 0 or not stdout.is_empty(), "{label} returned exit 0 with empty stdout; stderr: {stderr}")
+    assert_eq(code, 0, "{label} failed: {stderr}")
+    assert_eq(stdout, "core-call-witness\n", "{label} output: {stderr}")
+}
+// Rust: tests/core_crypto_api.rs:47
+// The body of the first emitted peer-Rust item containing header.
+fn emitted_body(rust: String, header: String) -> String {
+    start :: rust.find(header).unwrap_or_else(|| -> panic("emitted Rust has no `{header}`"))
+    rest := rust[start..] // #4303
+    rest[..rest.find("\n}\n").expect("emitted item closes")]
+}
+// All original tests from the eight mapped Rust files reside in core_call_witnessTests.jet.

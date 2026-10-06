@@ -1,0 +1,34 @@
+use core.game.runtime.top_game_assets_import.GameAssetImportAdapter
+use core.game.runtime.kernel_game_asset_pipeline.[JetGameAssetRootIdentity, JetGameAssetSourceIdentity,
+    JetGameAssetDependencyIdentity, JetGameAssetWatchEvent, JetGameAssetWatchEventKind]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameAssetsImport.rs:38/45/52/104
+#Test("game_import_report_projects_declared_dependencies_and_untouched_skips") {
+    root :: JetGameAssetRootIdentity.new("game", "/assets").unwrap()
+    adapter := GameAssetImportAdapter.with_roots([root.clone()]).unwrap()
+    touched :: JetGameAssetSourceIdentity.new(root.clone(), "texture.png", "hash-texture").unwrap()
+    untouched :: JetGameAssetSourceIdentity.new(root.clone(), "sound.wav", "hash-sound").unwrap()
+    touched_node :: adapter.add_source(touched.clone()).unwrap()
+    untouched_node :: adapter.add_source(untouched.clone()).unwrap()
+    dependency :: JetGameAssetDependencyIdentity.new("game", "source.png").unwrap()
+    adapter.set_dependencies(&touched, [dependency.clone()]).unwrap()
+    event :: JetGameAssetWatchEvent.new(root.clone(), "texture.png", JetGameAssetWatchEventKind.Changed).unwrap()
+    facts :: adapter.watch_facts(&[event]).unwrap()
+    report :: adapter.import_report(&facts)
+    assert_eq(report.imported, [touched_node])
+    assert_eq(report.dependencies, [dependency])
+    assert_eq(report.skipped, [untouched_node])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameAssetsImport.rs:98/104
+#Test("game_import_deleted_registered_sources_are_not_skipped") {
+    root :: JetGameAssetRootIdentity.new("game", "/assets").unwrap()
+    adapter := GameAssetImportAdapter.with_roots([root.clone()]).unwrap()
+    source :: JetGameAssetSourceIdentity.new(root.clone(), "old.png", "old-hash").unwrap()
+    node :: adapter.add_source(source.clone()).unwrap()
+    event :: JetGameAssetWatchEvent.new(root.clone(), "old.png", JetGameAssetWatchEventKind.Deleted).unwrap()
+    facts :: adapter.watch_facts(&[event]).unwrap()
+    report :: adapter.import_report(&facts)
+    assert_eq(report.deleted, [node])
+    assert(report.imported.is_empty())
+    assert(report.skipped.is_empty())
+}

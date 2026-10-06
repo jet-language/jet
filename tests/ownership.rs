@@ -84,7 +84,7 @@ fn run() {
 #[test]
 fn generic_clone_bound_is_usage_sensitive() {
     let src = r#"
-fn inspect<T>(value: T) -> Int -> 1
+fn inspect<T>(value: T) -> Int { 1 }
 fn duplicate<T>(value: T) -[..E]> T { return ~value }
 fn increment(value: Int) -[]> Int { return value + 1 }
 
@@ -3204,7 +3204,7 @@ struct Library {
     books: [Book]
 }
 
-fn book_at(lib: Library, i: Int) -> View<Book> -> lib.books[i..i]
+fn book_at(lib: Library, i: Int) -> View<Book> { lib.books[i..i] }
 
 fn edit_at(lib: &Library, i: Int) -[]> ViewMut<Book> {
     return &lib.books[i..i]
@@ -3268,7 +3268,7 @@ struct Library {
     books: [Book]
 }
 
-fn book_at(lib: Library, i: Int) -> View<Book> -> lib.books[i..i]
+fn book_at(lib: Library, i: Int) -> View<Book> { lib.books[i..i] }
 
 fn run() {
     lib := Library{
@@ -4670,7 +4670,6 @@ fn run() {
 #[test]
 fn mutable_view_bounds_fail_at_construction_in_every_tier() {
     use jet::Interpreter::RunOutcome;
-    use jet::JitBackend::JitBackend;
 
     let src = r#"
 fn run() {
@@ -4705,35 +4704,23 @@ fn run() {
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
 
-    let mut jit_report = None;
-    if jet_jit::cranelift_host_supported() {
-        assert!(
-            common::cranelift_resident_safe(&bundle),
-            "{}",
-            common::cranelift_resident_safe_detail(&bundle)
-        );
-        let policy = common::development_policy();
-        common::compile_cranelift_bundle(&bundle, &policy)
-            .expect("mutable view bounds must lower to JIT");
-        let mut backend = jet_jit::CraneliftBackend::new();
-        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
-            RunOutcome::Ran {
-                stderr, exit_code, ..
-            } => {
-                assert_eq!(exit_code, 70, "resident JIT exit drift: {stderr}");
-                assert!(
-                    stderr.starts_with(stop),
-                    "resident JIT reported the wrong runtime failure: {stderr}"
-                );
-                jit_report = Some(stderr);
-            }
-            RunOutcome::Problems(diags) => {
-                panic!("resident JIT returned diagnostics instead of running: {diags:?}")
-            }
+    let in_process_report = match common::run_interpreted(&bundle, &common::development_policy()) {
+        RunOutcome::Ran {
+            stderr, exit_code, ..
+        } => {
+            assert_eq!(exit_code, 70, "in-process evaluator exit drift: {stderr}");
+            assert!(
+                stderr.starts_with(stop),
+                "in-process evaluator reported the wrong runtime failure: {stderr}"
+            );
+            stderr
         }
-    }
+        RunOutcome::Problems(diags) => {
+            panic!("in-process evaluator returned diagnostics instead of running: {diags:?}")
+        }
+    };
 
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, true) {
         RunOutcome::Ran {
             stderr, exit_code, ..
         } => {
@@ -4749,12 +4736,10 @@ fn run() {
                 stderr.contains("main.jet:4 in run"),
                 "forced interpreter dropped the Jet source location: {stderr}"
             );
-            if let Some(jit) = jit_report {
-                assert_eq!(
-                    jit, stderr,
-                    "the resident JIT and the interpreter must report one failure"
-                );
-            }
+            assert_eq!(
+                in_process_report, stderr,
+                "the in-process evaluator and the forced interpreter must report one failure"
+            );
         }
         RunOutcome::Problems(diags) => {
             panic!("forced interpreter returned diagnostics instead of running: {diags:?}")
@@ -4879,17 +4864,9 @@ fn run() {
         .filter(|diag| diag.severity == jet::Diagnostics::Severity::Error)
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
-    assert!(
-        common::cranelift_resident_safe(&bundle),
-        "{}",
-        common::cranelift_resident_safe_detail(&bundle)
-    );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .expect("disjoint views must lower to resident JIT");
 
-    for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
-        jet_jit::reset_jit_trace_for_test();
-        match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+    for (tier, force_interpreter) in [("default run", false), ("interpreter", true)] {
+        match crate::common::dev_run(path.to_str().unwrap(), false, force_interpreter) {
             RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -4900,16 +4877,6 @@ fn run() {
                 assert_eq!(stdout, expected, "{tier} output drift");
             }
             RunOutcome::Problems(diags) => panic!("{tier} failed: {diags:?}"),
-        }
-        if !force_interpreter {
-            assert!(
-                jet_jit::jit_executed_for_test(),
-                "resident JIT did not execute"
-            );
-            assert!(
-                !jet_jit::fallback_invoked_for_test() && !jet_jit::deopt_invoked_for_test(),
-                "resident JIT used an interpreter fallback"
-            );
         }
     }
 
@@ -6677,7 +6644,7 @@ struct Packet {
 }
 
 impl Packet.Slice {
-    fn head(self) -> View<Int> from self -> self.data[0..1]
+    fn head(self) -> View<Int> from self { self.data[0..1] }
 }
 
 fn first(s: Slice) -[..E]> View<Int> from s {

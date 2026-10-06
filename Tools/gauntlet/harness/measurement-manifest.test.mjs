@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildScoreboard, comparisons, httpProbe, metricApplicability, processTreeRssKb, probeMatches, publicationState, ratioVerdict, validateEntryShape, validateResultShape } from "./run.mjs";
 import { liveReloadInternals } from "./live-reload.mjs";
+import { compileThroughputContractIssues } from "./compile-throughput.mjs";
 
 const gauntletDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoDir = path.resolve(gauntletDir, "../..");
@@ -201,41 +202,6 @@ function repoSourcePath(relative) {
   assert.ok(remainder && !remainder.startsWith("..") && !path.isAbsolute(remainder));
   return resolved;
 }
-
-function passedTierTrace() {
-  const rows = [{ function: "fixture", tier: "native", reason: null, millis: 0.001 }];
-  return {
-    status: "passed",
-    channel: "compiler_owned_sidecar",
-    rows,
-    native_rows: 1,
-    interp_rows: 0,
-    whole_program_deopt: false,
-    invocations: [{
-      command: ["jet", "run", "run.jet", "--"],
-      exit_code: 0,
-      rows,
-      native_rows: 1,
-      interp_rows: 0,
-      whole_program_deopt: false,
-    }],
-  };
-}
-
-test("run-tier validation rejects untrusted or mixed trace evidence", () => {
-  const missing = scoreboardFixture();
-  delete missing.result.jet_tiers.run.trace;
-  assert.ok(validateResultShape(missing.result).some((issue) => issue.includes("native tier trace")));
-
-  const mixed = scoreboardFixture();
-  mixed.result.jet_tiers.run.trace.interp_rows = 1;
-  mixed.result.jet_tiers.run.trace.invocations[0].interp_rows = 1;
-  assert.ok(validateResultShape(mixed.result).some((issue) => issue.includes("native tier trace")));
-
-  const untrusted = scoreboardFixture();
-  untrusted.result.jet_tiers.run.trace.channel = "combined_stderr";
-  assert.ok(validateResultShape(untrusted.result).some((issue) => issue.includes("native tier trace")));
-});
 
 test("scoreboard applies the Rust noise band to every Rust rail", () => {
   assert.equal(ratioVerdict(0.99, "rust"), "win");
@@ -476,7 +442,7 @@ function scoreboardFixture({ lossMetrics = [], missingMetrics = [], includeNode 
   };
   const tiers = {
     aot: { status: "ok", verification: { status: "passed", kind: "byte_exact_stdout" }, metrics: rawMetrics("jet") },
-    run: { status: "ok", verification: { status: "passed", kind: "byte_exact_stdout" }, metrics: rawMetrics("jet"), trace: passedTierTrace() },
+    run: { status: "ok", verification: { status: "passed", kind: "byte_exact_stdout" }, metrics: rawMetrics("jet") },
     dev: { status: "unavailable", metrics: {} },
   };
   const result = {
@@ -499,21 +465,6 @@ function scoreboardFixture({ lossMetrics = [], missingMetrics = [], includeNode 
     manifest: { corpus: { allowed_uncovered_cells: [] }, loss_owners: {} },
   };
 }
-
-test("successful run tiers require compiler-owned native trace evidence", () => {
-  const missing = scoreboardFixture();
-  delete missing.result.jet_tiers.run.trace;
-  assert.ok(validateResultShape(missing.result).some((issue) => issue.includes("native tier trace")));
-
-  const mixed = scoreboardFixture();
-  mixed.result.jet_tiers.run.trace.interp_rows = 1;
-  mixed.result.jet_tiers.run.trace.invocations[0].interp_rows = 1;
-  assert.ok(validateResultShape(mixed.result).some((issue) => issue.includes("native tier trace")));
-
-  const untrusted = scoreboardFixture();
-  untrusted.result.jet_tiers.run.trace.channel = "combined_stderr";
-  assert.ok(validateResultShape(untrusted.result).some((issue) => issue.includes("native tier trace")));
-});
 
 
 function fixturePublication(fixture, scoreboard) {
@@ -699,6 +650,7 @@ test("measurement manifest covers every corpus entry and source pair", async () 
   assert.deepEqual(manifest.report_contract.axis_schemas, {
     live_reload: "gauntlet-axis-live-reload-v1",
     memory_safety_fuzz: "gauntlet-axis-memory-safety-fuzz-v1",
+    compile_throughput: "gauntlet-axis-compile-throughput-v1",
   });
   assert.equal(manifest.report_contract.axis_publication, "required_axes_complete_and_unblocked");
   for (const axis of Object.values(manifest.axes)) assert.equal(axis.status, "required");
@@ -724,6 +676,20 @@ test("measurement manifest covers every corpus entry and source pair", async () 
   for (const runner of memorySafety.runners) {
     for (const file of runner.files) assert.equal(await exists(repoSourcePath(file.source)), true, `${runner.id}: missing ${file.source}`);
   }
+
+  // The compile-throughput cell (#4529): its contract, its harness, and the
+  // bench300k pin shared with Tools/perf/throughput/bench.json.
+  const throughput = manifest.axes.compile_throughput;
+  assert.deepEqual(compileThroughputContractIssues(throughput), []);
+  assert.equal(await exists(repoSourcePath(throughput.harness)), true);
+  const pins = JSON.parse(await fs.readFile(repoSourcePath("Tools/perf/throughput/bench.json"), "utf8"));
+  const bench300k = throughput.programs.find((program) => program.id === "bench300k");
+  assert.equal(bench300k.source_sha256, pins.programs.bench300k.source_sha256);
+  assert.equal(bench300k.expected_output, pins.programs.bench300k.expected_output);
+  assert.equal(bench300k.generator, `node Tools/perf/scaling/generate.mjs mixed --code-lines ${pins.programs.bench300k.code_lines} --seed ${pins.programs.bench300k.seed} {dir}`);
+  assert.ok(pins.programs.bench300k.shape.code_lines >= bench300k.loc_contract.nonblank_noncomment_lines_min);
+  assert.deepEqual(Object.keys(throughput.gates.memory).sort(), ["bench300k_peak_rss_bytes_max", "selfhost_peak_rss_bytes_max"]);
+  assert.ok(pins.phase_budgets.every((row) => row.owners.length > 0));
 
   const matrix = JSON.parse(await fs.readFile(matrixPath, "utf8"));
   assert.equal(matrix.cells.length, manifest.corpus.matrix_cell_count);

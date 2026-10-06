@@ -1242,7 +1242,6 @@ fn files(path: &Path) -> Vec<PathBuf> {
                         | ".jet"
                         | ".tower"
                         | ".agent-worktrees"
-                        | "jit-aot-parity-report"
                         | "node_modules"
                         | "target"
                         | "build"

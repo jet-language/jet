@@ -1,0 +1,69 @@
+use core.encoding.runtime.std_toml.[parse_to_tree, render, MAX_TOML_DEPTH]
+use core.encoding.runtime.std_data_tree.DataTree
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:805
+fn dotted_path(depth: USize) -> String {
+    (0..<depth).map(index -> "key{index}").collect<[String]>().join(".")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:813
+#Test("dotted_key_depth_is_bounded_before_assembly") {
+    assert(parse_to_tree("{dotted_path(MAX_TOML_DEPTH)} = 0").is_ok())
+    assert(parse_to_tree("{dotted_path(MAX_TOML_DEPTH + 1)} = 0").is_err())
+    header :: dotted_path(MAX_TOML_DEPTH - 1)
+    assert(parse_to_tree("[{header}]\nleaf = 0").is_ok())
+    too_deep_header :: dotted_path(MAX_TOML_DEPTH)
+    assert(parse_to_tree("[{too_deep_header}]\nleaf = 0").is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:59
+#Test("toml_assembly_descends_into_latest_array_table_and_replaces_first_key") {
+    tree :: parse_to_tree("name = 'first'\nname = 'last'\n[[products]]\nname = 'one'\n[products.detail]\nid = 1\n[[products]]\nname = 'two'\n").unwrap()
+    assert(tree == DataTree.Object([
+        ("name", DataTree.Text("last")),
+        ("products", DataTree.Array([
+            DataTree.Object([("name", DataTree.Text("one")), ("detail", DataTree.Object([("id", DataTree.Int(1))]))]),
+            DataTree.Object([("name", DataTree.Text("two"))]),
+        ])),
+    ]))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:431-592
+#Test("toml_strings_keep_unicode_escapes_literal_backslashes_and_multiline_folding") {
+    tree :: parse_to_tree("a = \"\\u00E9\\U00010400\\n\"\nb = 'a\\b'\nc = \"\"\"\nhello\\\n  world\"\"\"\nd = '''\nraw\ntext'''\n").unwrap()
+    assert(tree == DataTree.Object([
+        ("a", DataTree.Text("é𐐀\n")),
+        ("b", DataTree.Text("a\\b")),
+        ("c", DataTree.Text("helloworld")),
+        ("d", DataTree.Text("raw\ntext")),
+    ]))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:635-796
+#Test("toml_numbers_dates_arrays_and_inline_dotted_names_match_reference") {
+    tree :: parse_to_tree("hex = 0xFF\noct = 0o17\nbin = 0b101\nwhole = -1_000\nfloat = 1.25e2\ndate = 1979-05-27 07:32:00Z\narr = [true, # comment\n false,]\ninline = {a.b = 2}\n").unwrap()
+    assert(tree == DataTree.Object([
+        ("hex", DataTree.Int(255)), ("oct", DataTree.Int(15)), ("bin", DataTree.Int(5)),
+        ("whole", DataTree.Int(-1000)), ("float", DataTree.Float(125.0)),
+        ("date", DataTree.Text("1979-05-27 07:32:00Z")),
+        ("arr", DataTree.Array([DataTree.Bool(true), DataTree.Bool(false)])),
+        ("inline", DataTree.Object([("a.b", DataTree.Int(2))])),
+    ]))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:164-205
+#Test("toml_render_uses_nested_and_array_table_headers_in_entry_order") {
+    tree :: DataTree.Object([
+        ("title", DataTree.Text("demo")),
+        ("owner", DataTree.Object([("active", DataTree.Bool(true))])),
+        ("products", DataTree.Array([DataTree.Object([("id", DataTree.Int(1))]), DataTree.Object([("id", DataTree.Int(2))])])),
+    ])
+    text :: render(tree)
+    assert(text == "title = \"demo\"\n\n[owner]\nactive = true\n\n[[products]]\nid = 1\n\n[[products]]\nid = 2")
+    assert(parse_to_tree(text).unwrap() == tree)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:286-592
+#Test("toml_errors_retain_line_and_reject_bad_keywords_unicode_and_nested_values") {
+    if parse_to_tree("a = 1\nb = tru\n") is Err(error) { assert(error.line == 2) } else { assert(false) }
+    assert(parse_to_tree("a = \"\\uD800\"").is_err())
+    assert(parse_to_tree("a = 0x").is_err())
+    assert(parse_to_tree("a = [1 2]").is_err())
+    assert(parse_to_tree("a = truex").is_err())
+    nested :: "[".repeat(MAX_TOML_DEPTH) + "0" + "]".repeat(MAX_TOML_DEPTH)
+    assert(parse_to_tree("a = {nested}").is_err())
+}

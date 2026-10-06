@@ -1,0 +1,95 @@
+// Rust Prelude/CoreLib/JetStd/RowPolicy.rs:1–108; the one closed policy grammar.
+// Private kernel: Core/db/db.jet remains the public front door. Consumers keep
+// the compiled enum and lower it here, never reparse the caller's spelling.
+use core.text.runtime.kernel_unicode_string as row_policy_text
+use core.text.runtime.unicode_assets as row_policy_assets
+use core.text.runtime.assets.unicode_general_category as row_policy_category
+
+// Rust JET_ROW_POLICY_MAX_TEXT:15; UTF-8 bytes AFTER canonical Unicode trim.
+pub JET_ROW_POLICY_MAX_TEXT :: 1048576
+
+// Rust JetRowPolicyExpr:17–21. No arbitrary-expression or SQL-string variant.
+pub enum JetRowPolicyExpr {
+    AllowAll
+    OwnerEqualsUser
+}
+impl JetRowPolicyExpr {
+    // Rust canonical:27–32.
+    // Static labels only. String is the existing source projection carrier,
+    // not a claim that Rust's &'static str storage/ABI has been reproduced.
+    // Native cutover must retain immutable static storage without allocation.
+    pub fn canonical(self) -> String Never! {
+        if self == {
+            .AllowAll -> "true"
+            .OwnerEqualsUser -> "owner == user"
+        }
+    }
+
+    // Rust sql_predicate:37–42; the sole bind-safe lowering of this enum.
+    pub fn sql_predicate(self) -> String Never! {
+        if self == {
+            .AllowAll -> "true"
+            .OwnerEqualsUser -> "owner = ?"
+        }
+    }
+
+    // Rust requires_owner_filter:44–46.
+    pub fn requires_owner_filter(self) -> Bool Never! {
+        if self == .OwnerEqualsUser -> return true
+        false
+    }
+}
+
+// Rust jet_db_policy_audit_line:52–62; render facts, not a second parser.
+pub fn jet_db_policy_audit_line(table: String, compiled: JetRowPolicyExpr, user: String) -> String Never! {
+    "DBPolicy(table={table}, user={user}, expr={compiled.canonical()}, predicate={compiled.sql_predicate()})"
+}
+
+fn row_policy_ascii_alpha(cp: Int) -> Bool Never! {
+    (cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122)
+}
+
+// Rust jet_db_policy_validate_table:64–81. Cc anywhere takes precedence over
+// identifier rejection, even when an earlier scalar already invalidated it.
+// Canonical decoder/property assets are reused; no scalar list or new decoder.
+// #4318/#4392: utf8_bytes/trim still copy in the bootstrap owner. They require
+// its retained-byte/trim-view cutover; this module does not add a second seam.
+pub fn jet_db_policy_validate_table(table: String) -> String Err! {
+    normalized := row_policy_text.trim(table) // #4303: String-typed view input.
+    byte_count :: normalized.count_bytes()
+    if byte_count == 0 || byte_count > JET_ROW_POLICY_MAX_TEXT -> return Err("row policy needs a table and expression")
+    raw :: row_policy_text.utf8_bytes(normalized)
+    category :: row_policy_category.UNICODE_GENERAL_CATEGORY
+    at := 0
+    identifier := true
+    loop at < raw.len() {
+        cp :: row_policy_text.scalar_at(raw, at)
+        if row_policy_assets.asset_tag(category, cp, 8) == 0 -> return Err("row policy needs a table and expression")
+        if at == 0 {
+            if !row_policy_ascii_alpha(cp) && cp != 95 -> identifier = false
+        } else {
+            if !row_policy_ascii_alpha(cp) && !(cp >= 48 && cp <= 57) && cp != 95 -> identifier = false
+        }
+        at += row_policy_text.utf8_width_at(raw, at)
+    }
+    if !identifier -> return Err("row policy table must be a simple identifier")
+    normalized
+}
+
+// Rust jet_db_policy_compile:86–108. Table errors precede expression errors.
+// The returned table owns its normalized text; recompiling canonical() is
+// idempotent. Byte counting uses String.count_bytes, not a materialized Vec.
+pub fn jet_db_policy_compile(table: String, expression: String) -> (table: String, compiled: JetRowPolicyExpr) Err! {
+    normalized := row_policy_text.trim(expression) // #4303: String-typed view input.
+    normalized_table :: jet_db_policy_validate_table(table) ?? return Err(err)
+    byte_count :: normalized.count_bytes()
+    if byte_count == 0 || byte_count > JET_ROW_POLICY_MAX_TEXT || !row_policy_text.isprintable(normalized) -> return Err("row policy needs a table and expression")
+    compiled :: if normalized == {
+        "true" -> JetRowPolicyExpr.AllowAll
+        "owner == user" -> JetRowPolicyExpr.OwnerEqualsUser
+        else -> {
+            return Err("unsupported row policy expression `{normalized}`; supported forms are `true` and `owner == user`")
+        }
+    }
+    return (table: normalized_table, compiled: compiled)
+}

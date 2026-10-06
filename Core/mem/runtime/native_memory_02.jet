@@ -1,0 +1,1811 @@
+// PORT-PENDING 0225 crates-jet-jit-src-memory-slice-1784: crates/jet-jit/src/Memory.rs:1784-3590
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn shared_transaction_stage_for_write(
+//RS     shared: &Arc<SharedState>,
+//RS     handle: i64,
+//RS ) -> Result<Option<std::rc::Rc<std::cell::RefCell<i64>>>, String> {
+//RS     if !shared_transaction_active() {
+//RS         return Ok(None);
+//RS     }
+//RS     let owner = shared_transaction_owner(shared, handle)?;
+//RS     let (initial, _) = shared_transaction_capture_raw(shared, handle)?;
+//RS     let source_owned = crate::runtime_host::native_shared_interop(handle).is_some_and(|interop| {
+//RS         !interop.is_resident_root() || shared.portable_value.is_none()
+//RS     });
+//RS     Ok(SHARED_TRANSACTIONS.with(|transactions| {
+//RS         let mut transactions = transactions.borrow_mut();
+//RS         let Some(transaction) = transactions.last_mut() else {
+//RS             return None;
+//RS         };
+//RS         let staged = transaction
+//RS             .transaction
+//RS             .stage_value(owner.clone(), || initial);
+//RS         transaction.transaction.mark_write(owner.clone());
+//RS         let commit_shared = Arc::clone(shared);
+//RS         let stage_staged = staged.clone();
+//RS         let commit_staged = staged.clone();
+//RS         transaction.transaction.record_edit_with_staged_commit(
+//RS             owner,
+//RS             Box::new(|| {}),
+//RS             Box::new(move |permit| {
+//RS                 if source_owned {
+//RS                     permit.stage_value(Box::new(*stage_staged.borrow()))
+//RS                 } else {
+//RS                     Ok(())
+//RS                 }
+//RS             }),
+//RS             Box::new(move |_| {
+//RS                 if source_owned {
+//RS                     return;
+//RS                 }
+//RS                 let value = *commit_staged.borrow();
+//RS                 if let Err(error) = shared_state_commit(&commit_shared, value) {
+//RS                     shared_commit_fault(&error);
+//RS                 }
+//RS             }),
+//RS         );
+//RS         Some(staged)
+//RS     }))
+//RS }
+//RS pub(crate) fn shared_state_has_live_portable_value(state: &SharedState) -> bool {
+//RS     state.has_live_logical_owner()
+//RS         && state
+//RS             .portable_value
+//RS             .as_ref()
+//RS             .and_then(|value| value.lock().ok())
+//RS             .is_some_and(|value| value.is_some())
+//RS }
+//RS 
+//RS 
+//RS fn pool(rt: &crate::JitRuntime, handle: i64) -> Option<Arc<Mutex<PoolState>>> {
+//RS     rt.pools.get((handle as usize).wrapping_sub(1)).cloned()
+//RS }
+//RS 
+//RS fn shared(rt: &crate::JitRuntime, handle: i64) -> Option<Arc<SharedState>> {
+//RS     rt.shareds
+//RS         .get((handle as usize).wrapping_sub(1))?
+//RS         .as_ref()
+//RS         .cloned()
+//RS }
+//RS pub(crate) fn shared_take_slot(
+//RS     rt: &mut crate::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Result<Arc<SharedState>, String> {
+//RS     let index = usize::try_from(handle)
+//RS         .ok()
+//RS         .and_then(|handle| handle.checked_sub(1))
+//RS         .ok_or_else(|| "JIT Shared alias handle is invalid".to_string())?;
+//RS     rt.shareds
+//RS         .get_mut(index)
+//RS         .and_then(Option::take)
+//RS         .ok_or_else(|| "JIT Shared alias handle is no longer live".to_string())
+//RS }
+//RS 
+//RS 
+//RS pub(crate) fn shared_state(
+//RS     rt: &crate::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<Arc<SharedState>> {
+//RS     shared(rt, handle)
+//RS }
+//RS 
+//RS pub(crate) fn shared_state_portable_value(
+//RS     state: &SharedState,
+//RS ) -> Result<jet_foundation::MIR::MirRuntimeValue, String> {
+//RS     if !state.has_live_owner_or_borrow() {
+//RS         return Err("JIT Shared root has no live owner aliases or physical borrows".to_string());
+//RS     }
+//RS     state
+//RS         .portable_value
+//RS         .as_ref()
+//RS         .ok_or_else(|| "external Shared root has no local portable payload".to_string())?
+//RS         .lock()
+//RS         .map_err(|_| "JIT Shared portable payload lock was poisoned".to_string())?
+//RS         .as_ref()
+//RS         .cloned()
+//RS         .ok_or_else(|| "JIT Shared portable payload was released".to_string())
+//RS }
+//RS 
+//RS pub(crate) fn shared_state_type_id(state: &SharedState) -> Option<u64> {
+//RS     state.type_id
+//RS }
+//RS 
+//RS fn shared_state_publish(
+//RS     state: &SharedState,
+//RS     portable_value: jet_foundation::MIR::MirRuntimeValue,
+//RS     projection: Option<i64>,
+//RS ) -> Result<(), String> {
+//RS     if !state.has_live_owner_or_borrow() {
+//RS         return Err("JIT Shared root has no live owner aliases or physical borrows".to_string());
+//RS     }
+//RS     let value = state
+//RS         .portable_value
+//RS         .as_ref()
+//RS         .ok_or_else(|| "external Shared payload must be updated through its owner".to_string())?;
+//RS     let next = shared_next_revision(state)
+//RS         .map_err(|_| "SharedRevisionError.GenerationExhausted".to_string())?;
+//RS     let mut value = value
+//RS         .lock()
+//RS         .map_err(|_| "JIT Shared portable payload lock was poisoned".to_string())?;
+//RS     let current = value
+//RS         .as_mut()
+//RS         .ok_or_else(|| "JIT Shared portable payload was released".to_string())?;
+//RS     *current = portable_value;
+//RS     if let (Some(raw), Some(slot)) = (projection, state.value.as_ref()) {
+//RS         slot.store(raw, Ordering::Release);
+//RS     }
+//RS     shared_store_revision(state, next)
+//RS         .then_some(())
+//RS         .ok_or_else(|| "external Shared revision belongs to its owner".to_string())
+//RS }
+//RS 
+//RS pub(crate) fn shared_state_commit_portable(
+//RS     state: &SharedState,
+//RS     portable_value: jet_foundation::MIR::MirRuntimeValue,
+//RS ) -> Result<(), String> {
+//RS     shared_state_publish(state, portable_value, None)
+//RS }
+//RS 
+//RS pub(crate) fn shared_state_raw(state: &SharedState) -> Option<i64> {
+//RS     state
+//RS         .value
+//RS         .as_ref()
+//RS         .map(|value| value.load(Ordering::Acquire))
+//RS }
+//RS pub(crate) fn shared_state_revision(state: &SharedState) -> Option<u64> {
+//RS     state
+//RS         .revision
+//RS         .as_ref()
+//RS         .map(|revision| revision.load(Ordering::Acquire))
+//RS }
+//RS 
+//RS fn shared_store_revision(state: &SharedState, revision: u64) -> bool {
+//RS     if let Some(slot) = state.revision.as_ref() {
+//RS         slot.store(revision, Ordering::Release);
+//RS         true
+//RS     } else {
+//RS         false
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn shared_state_commit(
+//RS     state: &SharedState,
+//RS     value: i64,
+//RS ) -> Result<(), String> {
+//RS     let type_id = state
+//RS         .type_id
+//RS         .ok_or_else(|| "external Shared payload must be updated through its owner".to_string())?;
+//RS     let portable_value = Concurrency::with_runtime_string(|rt| {
+//RS         crate::runtime_host::decode_jit_shared_payload_raw(rt, value, type_id)
+//RS     })?;
+//RS     shared_state_publish(state, portable_value, Some(value))
+//RS }
+//RS 
+//RS 
+//RS /// Read the current value behind a checked `Shared<T>` handle for a host
+//RS /// marshaller. External owner shells intentionally have no local payload.
+//RS pub(crate) fn shared_value(rt: &crate::JitRuntime, handle: i64) -> Option<i64> {
+//RS     shared(rt, handle).and_then(|state| shared_state_raw(&state))
+//RS }
+//RS 
+//RS fn condition(rt: &crate::JitRuntime, handle: i64) -> Option<Arc<ConditionState>> {
+//RS     rt.conditions
+//RS         .get((handle as usize).wrapping_sub(1))
+//RS         .cloned()
+//RS }
+//RS 
+//RS const GUARD_SHARED: i64 = 0;
+//RS const GUARD_VALUE: i64 = 1;
+//RS const GUARD_DIRTY: i64 = 2;
+//RS fn guard_shared_handle(rt: &crate::JitRuntime, guard: i64) -> Option<i64> {
+//RS     let handle = rt.heap.record_get_int(guard, GUARD_SHARED)?;
+//RS     (handle != 0).then_some(handle)
+//RS }
+//RS 
+//RS fn guard_state(
+//RS     rt: &crate::JitRuntime,
+//RS     guard: i64,
+//RS ) -> Option<Arc<shared_protocol::JetSharedGuardState>> {
+//RS     rt.shared_guard_states.get(&guard).cloned()
+//RS }
+//RS 
+//RS fn guard_projection_slot(rt: &crate::JitRuntime, guard: i64, path: &[i64]) -> Option<(i64, i64)> {
+//RS     if path.is_empty() {
+//RS         return Some((guard, GUARD_VALUE));
+//RS     }
+//RS     let mut record = rt.heap.record_get_int(guard, GUARD_VALUE)?;
+//RS     for field in path.iter().take(path.len().saturating_sub(1)) {
+//RS         record = rt.heap.record_get_int(record, *field)?;
+//RS     }
+//RS     Some((record, *path.last()?))
+//RS }
+//RS 
+//RS fn pack_shared_guard(
+//RS     rt: &mut crate::JitRuntime,
+//RS     shared_handle: i64,
+//RS     value: i64,
+//RS     state: Arc<shared_protocol::JetSharedGuardState>,
+//RS ) -> i64 {
+//RS     let guard = rt.heap.alloc_record(3);
+//RS     let _ = rt.heap.record_set_int(guard, GUARD_SHARED, shared_handle);
+//RS     let _ = rt.heap.record_set_int(guard, GUARD_VALUE, value);
+//RS     let _ = rt.heap.record_set_int(guard, GUARD_DIRTY, 0);
+//RS     rt.shared_guard_states.insert(guard, state);
+//RS     guard
+//RS }
+//RS fn mark_shared_guard_dirty(rt: &mut crate::JitRuntime, guard: i64) {
+//RS     if rt.heap.record_set_int(guard, GUARD_DIRTY, 1).is_none() {
+//RS         rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS     }
+//RS }
+//RS 
+//RS fn take_active_shared_permit(handle: i64) -> Option<Arc<SharedStatePermit>> {
+//RS     SHARED_ACTIVE_PERMITS.with(|permits| {
+//RS         let mut permits = permits.borrow_mut();
+//RS         permits
+//RS             .iter()
+//RS             .rposition(|(active_handle, _)| *active_handle == handle)
+//RS             .map(|index| permits.swap_remove(index).1)
+//RS     })
+//RS }
+//RS fn take_active_native_shared_guard(handle: i64) -> Option<i64> {
+//RS     SHARED_ACTIVE_NATIVE_GUARDS.with(|guards| {
+//RS         let mut guards = guards.borrow_mut();
+//RS         guards
+//RS             .iter()
+//RS             .rposition(|(active_handle, _)| *active_handle == handle)
+//RS             .map(|index| guards.swap_remove(index).1)
+//RS     })
+//RS }
+//RS 
+//RS fn pack_id(index: usize, generation: u32) -> i64 {
+//RS     (i64::from(generation) << 32) | (index as i64 + 1)
+//RS }
+//RS 
+//RS fn unpack_id(id: i64) -> Option<(usize, u32)> {
+//RS     let low = (id as u64 & 0xffff_ffff) as u32;
+//RS     low.checked_sub(1).map(|index| (index as usize, (id as u64 >> 32) as u32))
+//RS }
+//RS 
+//RS const ALLOCATOR_VIEW_TAG: i64 = i64::MIN;
+//RS 
+//RS fn pack_allocator_view(index: usize) -> Option<i64> {
+//RS     (index <= i64::MAX as usize).then_some(ALLOCATOR_VIEW_TAG | index as i64)
+//RS }
+//RS 
+//RS fn unpack_allocator_view(value: i64) -> Option<usize> {
+//RS     (value & ALLOCATOR_VIEW_TAG != 0).then_some((value & i64::MAX) as usize)
+//RS }
+//RS 
+//RS fn allocator_state_mut(
+//RS     rt: &mut crate::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Result<&mut AllocatorState, String> {
+//RS     let state = rt
+//RS         .allocators
+//RS         .get_mut((handle as usize).wrapping_sub(1))
+//RS         .ok_or_else(|| "allocator handle is closed or invalid".to_string())?;
+//RS     if state.closed {
+//RS         return Err("allocator handle is closed or invalid".to_string());
+//RS     }
+//RS     Ok(state)
+//RS }
+//RS 
+//RS /// Store one allocator value through the shared canonical allocator runtime.
+//RS ///
+//RS /// The resident tier keeps only the erased pointer and generation table; the
+//RS /// Prelude allocator owns placement, capacity, destruction, and reset.
+//RS fn allocator_try_store(
+//RS     state: &mut AllocatorState,
+//RS     value: i64,
+//RS     requested: usize,
+//RS     fail: bool,
+//RS ) -> Result<usize, AllocError> {
+//RS     if fail {
+//RS         return Err(jet_foundation::Outcome::jet_alloc_error(
+//RS             requested,
+//RS             state.allocator,
+//RS         ));
+//RS     }
+//RS     let ptr = state
+//RS         .runtime
+//RS         .try_alloc(value)
+//RS         .map_err(|_| jet_foundation::Outcome::jet_alloc_error(requested, state.allocator))?;
+//RS     let index = state.slots.len();
+//RS     state.slots.push(AllocatorSlot {
+//RS         generation: state.generation,
+//RS         ptr,
+//RS     });
+//RS     Ok(index)
+//RS }
+//RS 
+//RS fn allocator_store(
+//RS     rt: &mut crate::JitRuntime,
+//RS     handle: i64,
+//RS     value: i64,
+//RS     requested_bytes: i64,
+//RS ) -> Result<i64, String> {
+//RS     let state = allocator_state_mut(rt, handle)?;
+//RS     let requested = usize::try_from(requested_bytes.max(1)).unwrap_or(usize::MAX);
+//RS     let index = allocator_try_store(state, value, requested, false).map_err(|error| {
+//RS         format!(
+//RS             "{} allocation failed for {} bytes",
+//RS             error.allocator, error.requested_bytes
+//RS         )
+//RS     })?;
+//RS     Ok(pack_id(index, state.generation))
+//RS }
+//RS 
+//RS fn allocator_view(rt: &crate::JitRuntime, view: i64) -> Result<AllocatorView, String> {
+//RS     let index = unpack_allocator_view(view)
+//RS         .ok_or_else(|| "allocator view is invalid or no longer live".to_string())?;
+//RS     rt.allocator_views
+//RS         .get(index)
+//RS         .copied()
+//RS         .ok_or_else(|| "allocator view is invalid or no longer live".to_string())
+//RS }
+//RS 
+//RS fn allocator_slot(rt: &crate::JitRuntime, view: i64) -> Result<(i64, AllocatorSlot), String> {
+//RS     let view = allocator_view(rt, view)?;
+//RS     let state = rt
+//RS         .allocators
+//RS         .get((view.allocator as usize).wrapping_sub(1))
+//RS         .ok_or_else(|| "allocator view is invalid or no longer live".to_string())?;
+//RS     let (index, generation) = unpack_id(view.slot)
+//RS         .ok_or_else(|| "allocator view is invalid or no longer live".to_string())?;
+//RS     let slot = state
+//RS         .slots
+//RS         .get(index)
+//RS         .copied()
+//RS         .filter(|slot| slot.generation == generation && generation == state.generation)
+//RS         .ok_or_else(|| "allocator view is invalid or no longer live".to_string())?;
+//RS     Ok((view.allocator, slot))
+//RS }
+//RS 
+//RS fn jet_jit_allocator_new() -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.allocators.push(AllocatorState::default());
+//RS         rt.allocators.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_allocator_new_named(kind: i64) -> i64 {
+//RS     let allocator = match kind {
+//RS         1 => "Bump",
+//RS         2 => "Pool",
+//RS         _ => "Arena",
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.allocators.push(AllocatorState::named(allocator));
+//RS         rt.allocators.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_allocator_new_capacity(capacity: i64, fixed: i64) -> i64 {
+//RS     let allocator = match fixed {
+//RS         1 => "Fixed",
+//RS         2 => "Bump",
+//RS         3 => "Pool",
+//RS         _ => "Arena",
+//RS     };
+//RS     let capacity = usize::try_from(capacity.max(1)).unwrap_or(usize::MAX);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.allocators
+//RS             .push(AllocatorState::with_capacity(allocator, capacity));
+//RS         rt.allocators.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_allocator_alloc(handle: i64, value: i64, requested_bytes: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let slot = match allocator_store(rt, handle, value, requested_bytes) {
+//RS             Ok(slot) => slot,
+//RS             Err(message) => {
+//RS                 rt.set_trap(&message);
+//RS                 return 0;
+//RS             }
+//RS         };
+//RS         let Some(view) = pack_allocator_view(rt.allocator_views.len()) else {
+//RS             rt.set_trap("allocator view table exhausted");
+//RS             return 0;
+//RS         };
+//RS         rt.allocator_views.push(AllocatorView {
+//RS             allocator: handle,
+//RS             slot,
+//RS         });
+//RS         view
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_allocator_view_read(view: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| match allocator_slot(rt, view) {
+//RS         Ok((_, slot)) => {
+//RS             // SAFETY: the slot is live under its allocator generation.
+//RS             unsafe { slot.ptr.read() }
+//RS         }
+//RS         Err(message) => {
+//RS             rt.set_trap(&message);
+//RS             0
+//RS         }
+//RS     })
+//RS }
+//RS fn jet_jit_view_string(view: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| match crate::runtime_host::view_string(rt, view) {
+//RS         Some(value) => rt.heap.alloc_string(value),
+//RS         None => {
+//RS             rt.set_trap("string view is invalid or not a text view");
+//RS             0
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_allocator_view_write(view: i64, value: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| match allocator_slot(rt, view) {
+//RS         Ok((_, slot)) => {
+//RS             // SAFETY: the slot is live under its allocator generation.
+//RS             unsafe { slot.ptr.write(value) };
+//RS         }
+//RS         Err(message) => rt.set_trap(&message),
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_allocator_try_alloc(handle: i64, value: i64, requested_bytes: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let requested = usize::try_from(requested_bytes.max(1)).unwrap_or(usize::MAX);
+//RS         let (allocator, generation, result) = {
+//RS             let Some(state) = rt.allocators.get_mut((handle as usize).wrapping_sub(1)) else {
+//RS                 rt.set_trap("allocator handle is closed or invalid");
+//RS                 return 0;
+//RS             };
+//RS             if state.closed {
+//RS                 rt.set_trap("allocator handle is closed or invalid");
+//RS                 return 0;
+//RS             }
+//RS             let result = allocator_try_store(
+//RS                 state,
+//RS                 value,
+//RS                 requested,
+//RS                 crate::fault_injection::jet_fault_should_fail_allocation(),
+//RS             );
+//RS             (state.allocator, state.generation, result)
+//RS         };
+//RS         match result {
+//RS             // D-ALLOCFAIL1=A: a successful try result carries the live
+//RS             // allocator view, not a copied scalar payload.
+//RS             Ok(index) => {
+//RS                 let slot = pack_id(index, generation);
+//RS                 let Some(view) = pack_allocator_view(rt.allocator_views.len()) else {
+//RS                     rt.set_trap("allocator view table exhausted");
+//RS                     return 0;
+//RS                 };
+//RS                 rt.allocator_views.push(AllocatorView {
+//RS                     allocator: handle,
+//RS                     slot,
+//RS                 });
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, view as u64)
+//RS             }
+//RS             Err(error) => {
+//RS                 let record = rt.heap.alloc_record(2);
+//RS                 let allocator = rt.heap.alloc_string(error.allocator);
+//RS                 let _ = rt.heap.record_set_int(record, 0, error.requested_bytes);
+//RS                 let _ = rt.heap.record_set_string(record, 1, allocator);
+//RS                 crate::runtime_host::alloc_jit_result(rt, false, record as u64)
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_allocator_reset(handle: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(state) = rt.allocators.get_mut((handle as usize).wrapping_sub(1)) else {
+//RS             rt.set_trap("allocator handle is closed or invalid");
+//RS             return;
+//RS         };
+//RS         if state.closed {
+//RS             rt.set_trap("allocator handle is closed or invalid");
+//RS             return;
+//RS         }
+//RS         state.runtime.reset();
+//RS         state.generation = state.generation.wrapping_add(1);
+//RS         state.slots.clear();
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_allocator_close(handle: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(state) = rt.allocators.get_mut((handle as usize).wrapping_sub(1)) else {
+//RS             rt.set_trap("allocator handle is closed or invalid");
+//RS             return;
+//RS         };
+//RS         if state.closed {
+//RS             rt.set_trap("allocator handle is closed or invalid");
+//RS             return;
+//RS         }
+//RS         state.runtime.reset();
+//RS         state.closed = true;
+//RS         state.slots.clear();
+//RS     });
+//RS }
+//RS 
+//RS const JIT_GC_SITE: jet_rt::__gc::PromotionSite = jet_rt::__gc::PromotionSite {
+//RS     source: "<jit>",
+//RS     span_start: 0,
+//RS     span_end: 0,
+//RS     scope: "#Policy(gc)",
+//RS     policy_provenance: "hosted",
+//RS     reason: "automatic promotion",
+//RS     type_name: "<jit-value>",
+//RS     bytes: 0,
+//RS };
+//RS 
+//RS fn jet_jit_gc_promote(value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let root = match jet_rt::__gc::AutomaticRoot::promote(value, JIT_GC_SITE) {
+//RS             Ok(root) => root,
+//RS             Err(fault) => {
+//RS                 rt.set_trap(&fault.to_string());
+//RS                 return 0;
+//RS             }
+//RS         };
+//RS         rt.gc_roots.push(root);
+//RS         rt.gc_edges.push(Vec::new());
+//RS         rt.gc_roots.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_gc_read(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = match rt.gc_roots.get((handle as usize).wrapping_sub(1)) {
+//RS             Some(root) => root.read(|value| *value).map_err(|fault| fault.to_string()),
+//RS             None => Err("automatic GC root is invalid or closed".to_string()),
+//RS         };
+//RS         match result {
+//RS             Ok(value) => value,
+//RS             Err(message) => {
+//RS                 rt.set_trap(&message);
+//RS                 0
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_gc_edit(handle: i64, value: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = match rt.gc_roots.get((handle as usize).wrapping_sub(1)) {
+//RS             Some(root) => root
+//RS                 .edit(|slot| *slot = value)
+//RS                 .map(|_| ())
+//RS                 .map_err(|fault| fault.to_string()),
+//RS             None => Err("automatic GC root is invalid or closed".to_string()),
+//RS         };
+//RS         if let Err(message) = result {
+//RS             rt.set_trap(&message);
+//RS         }
+//RS     });
+//RS }
+//RS fn gc_callback_value(slot: crate::runtime_host::JitCallableSlot, value: i64) -> i64 {
+//RS     unsafe {
+//RS         if slot.has_env {
+//RS             let callback: unsafe extern "C" fn(i64, i64) -> i64 =
+//RS                 std::mem::transmute(slot.fn_ptr as usize);
+//RS             callback(slot.env, value)
+//RS         } else {
+//RS             let callback: unsafe extern "C" fn(i64) -> i64 =
+//RS                 std::mem::transmute(slot.fn_ptr as usize);
+//RS             callback(value)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS enum GcEditAction {
+//RS     Clear,
+//RS     Pop,
+//RS     RemoveIndex,
+//RS     InsertIndex,
+//RS     Prepend,
+//RS     Additive,
+//RS     Plain,
+//RS     EdgeSlot,
+//RS }
+//RS 
+//RS fn gc_edit(
+//RS     root_handle: i64,
+//RS     edge_list: i64,
+//RS     callback_handle: i64,
+//RS     index: i64,
+//RS     site: i64,
+//RS     action: GcEditAction,
+//RS ) -> i64 {
+//RS     let snapshot = Concurrency::with_runtime_string(|rt| {
+//RS         let root_index = usize::try_from(root_handle)
+//RS             .ok()
+//RS             .and_then(|handle| handle.checked_sub(1))
+//RS             .ok_or_else(|| "automatic GC root handle is invalid".to_string())?;
+//RS         let root = rt
+//RS             .gc_roots
+//RS             .get(root_index)
+//RS             .ok_or_else(|| "automatic GC root handle is invalid".to_string())?
+//RS             .try_clone_root()
+//RS             .map_err(|fault| fault.to_string())?;
+//RS         let callback = crate::runtime_host::jit_callable_parts(rt, callback_handle)
+//RS             .ok_or_else(|| "automatic GC edit callback handle is invalid".to_string())?;
+//RS         let mut edges = Vec::new();
+//RS         if edge_list != 0 {
+//RS             let len = rt
+//RS                 .heap
+//RS                 .list_len(edge_list)
+//RS                 .ok_or_else(|| "automatic GC edge list handle is invalid".to_string())?;
+//RS             for position in 0..len {
+//RS                 let handle = rt
+//RS                     .heap
+//RS                     .list_get_int(edge_list, position)
+//RS                     .ok_or_else(|| "automatic GC edge list contains an invalid handle".to_string())?;
+//RS                 let edge_index = usize::try_from(handle)
+//RS                     .ok()
+//RS                     .and_then(|value| value.checked_sub(1))
+//RS                     .ok_or_else(|| "automatic GC edge handle is invalid".to_string())?;
+//RS                 let edge = rt
+//RS                     .gc_roots
+//RS                     .get(edge_index)
+//RS                     .ok_or_else(|| "automatic GC edge handle is invalid".to_string())?
+//RS                     .id();
+//RS                 edges.push(edge);
+//RS             }
+//RS         }
+//RS         Ok::<_, String>((root, edges, callback))
+//RS     });
+//RS     let (root, edges, callback) = match snapshot {
+//RS         Ok(snapshot) => snapshot,
+//RS         Err(message) => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.set_host_fault(&message));
+//RS             return 0;
+//RS         }
+//RS     };
+//RS     let mut edit = |slot: &mut i64| {
+//RS         let updated = gc_callback_value(callback, *slot);
+//RS         *slot = updated;
+//RS         updated
+//RS     };
+//RS     let result = match action {
+//RS         GcEditAction::Clear => root.edit_clearing_edges(&mut edit),
+//RS         GcEditAction::Pop => root.edit_edge_slot_pop("collection", &mut edit),
+//RS         GcEditAction::RemoveIndex => usize::try_from(index)
+//RS             .map_err(|_| jet_rt::__gc::Fault::UnknownObject(root.id()))
+//RS             .and_then(|index| root.edit_edge_slot_remove("collection", index, &mut edit)),
+//RS         GcEditAction::InsertIndex => usize::try_from(index)
+//RS             .map_err(|_| jet_rt::__gc::Fault::UnknownObject(root.id()))
+//RS             .and_then(|index| root.edit_edge_slot_insert("collection", index, &edges, &mut edit)),
+//RS         GcEditAction::Prepend => root.edit_edge_slot_prepend("collection", &edges, &mut edit),
+//RS         GcEditAction::Additive => root.edit_edge_slot_additive("collection", &edges, &mut edit),
+//RS         GcEditAction::Plain => root.edit(&mut edit),
+//RS         GcEditAction::EdgeSlot => {
+//RS             let slot = format!("method:{site}");
+//RS             root.edit_edge_slot(&slot, &edges, &mut edit)
+//RS         }
+//RS     };
+//RS     match result {
+//RS         Ok(value) => value,
+//RS         Err(fault) => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.set_trap(&fault.to_string()));
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_gc_edit_clear(root: i64, callback: i64) -> i64 {
+//RS     gc_edit(root, 0, callback, 0, 0, GcEditAction::Clear)
+//RS }
+//RS 
+//RS fn jet_jit_gc_edit_pop(root: i64, callback: i64) -> i64 {
+//RS     gc_edit(root, 0, callback, 0, 0, GcEditAction::Pop)
+//RS }
+//RS 
+//RS fn jet_jit_gc_edit_remove_index(root: i64, index: i64, callback: i64) -> i64 {
+//RS     gc_edit(root, 0, callback, index, 0, GcEditAction::RemoveIndex)
+//RS }
+//RS 
+//RS fn jet_jit_gc_edit_insert_index(root: i64, index: i64, edges: i64, callback: i64) -> i64 {
+//RS     gc_edit(root, edges, callback, index, 0, GcEditAction::InsertIndex)
+//RS }
+//RS 
+//RS fn jet_jit_gc_edit_prepend(root: i64, edges: i64, callback: i64) -> i64 {
+//RS     gc_edit(root, edges, callback, 0, 0, GcEditAction::Prepend)
+//RS }
+//RS 
+//RS fn jet_jit_gc_edit_additive(root: i64, edges: i64, callback: i64) -> i64 {
+//RS     gc_edit(root, edges, callback, 0, 0, GcEditAction::Additive)
+//RS }
+//RS 
+//RS fn jet_jit_gc_edit_plain(root: i64, callback: i64) -> i64 {
+//RS     gc_edit(root, 0, callback, 0, 0, GcEditAction::Plain)
+//RS }
+//RS 
+//RS fn jet_jit_gc_edit_edge_slot(root: i64, edges: i64, callback: i64, site: i64) -> i64 {
+//RS     gc_edit(root, edges, callback, 0, site, GcEditAction::EdgeSlot)
+//RS }
+//RS fn jet_jit_gc_clear_edges(handle: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let index = (handle as usize).wrapping_sub(1);
+//RS         let result = match (rt.gc_edges.get_mut(index), rt.gc_roots.get(index)) {
+//RS             (Some(edges), Some(root)) => {
+//RS                 edges.clear();
+//RS                 root.replace_edge_slot("jit", &[])
+//RS                     .map_err(|fault| fault.to_string())
+//RS             }
+//RS             _ => Err("automatic GC root is invalid or closed".to_string()),
+//RS         };
+//RS         if let Err(message) = result {
+//RS             rt.set_trap(&message);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_gc_add_edge(handle: i64, child: i64, edge_slot: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let root_index = (handle as usize).wrapping_sub(1);
+//RS         let child_id = rt
+//RS             .gc_roots
+//RS             .get((child as usize).wrapping_sub(1))
+//RS             .map(|root| root.id());
+//RS         let result = match (child_id, rt.gc_edges.get_mut(root_index)) {
+//RS             (Some(child_id), Some(edges)) if edge_slot >= 0 => {
+//RS                 let slot = edge_slot as usize;
+//RS                 let edge_result = if slot == edges.len() {
+//RS                     edges.push(child_id);
+//RS                     Ok(())
+//RS                 } else if slot < edges.len() {
+//RS                     edges[slot] = child_id;
+//RS                     Ok(())
+//RS                 } else {
+//RS                     Err("automatic GC edge slots must be contiguous".to_string())
+//RS                 };
+//RS                 match edge_result {
+//RS                     Ok(()) => match rt.gc_roots.get(root_index) {
+//RS                         Some(root) => root
+//RS                             .replace_edge_slot("jit", edges)
+//RS                             .map_err(|fault| fault.to_string()),
+//RS                         None => Err("automatic GC root is invalid or closed".to_string()),
+//RS                     },
+//RS                     Err(message) => Err(message),
+//RS                 }
+//RS             }
+//RS             (Some(_), Some(_)) => Err("automatic GC edge slot is invalid".to_string()),
+//RS             _ => Err("automatic GC root is invalid or closed".to_string()),
+//RS         };
+//RS         if let Err(message) = result {
+//RS             rt.set_trap(&message);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_pool_new() -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.pools.push(Arc::new(Mutex::new(PoolState::default())));
+//RS         rt.pools.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_pool_add(handle: i64, value: i64) -> i64 {
+//RS     let Some(pool) = Concurrency::with_runtime_mut(|rt| pool(rt, handle)) else {
+//RS         return 0;
+//RS     };
+//RS     let mut pool = pool.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS     pool.pool.add(value).to_word()
+//RS }
+//RS 
+//RS fn pool_value(handle: i64, id: i64) -> Option<i64> {
+//RS     let pool = Concurrency::with_runtime_mut(|rt| pool(rt, handle))?;
+//RS     let pool = pool.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS     let id = CanonicalPoolId::from_word(id)?;
+//RS     pool.pool.checked_get(id).copied()
+//RS }
+//RS 
+//RS /// `src_line` is the source line captured in the shared PoolSlot TIR node; it
+//RS /// avoids falling back to the enclosing function's prologue when this host's
+//RS /// run-level source text is unavailable.
+//RS fn jet_jit_pool_get(handle: i64, id: i64, line: i64, src_line: i64) -> i64 {
+//RS     match pool_value(handle, id) {
+//RS         Some(value) => value,
+//RS         None => {
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 let source_line = rt.heap.clone_string(src_line).unwrap_or_default();
+//RS                 rt.set_runtime_stop_with_source_line(
+//RS                     "E3001",
+//RS                     line.max(0) as u32,
+//RS                     Some(source_line.as_str()),
+//RS                     jet_foundation::Outcome::jet_pool_stale_message(),
+//RS                 )
+//RS             });
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS /// Checked MIR Pool-index reads carry file/function handles for diagnostics;
+//RS /// this adapter keeps the existing source-line-aware JIT kernel and its
+//RS /// six-word ABI.
+//RS fn jet_jit_pool_get_checked(
+//RS     handle: i64,
+//RS     id: i64,
+//RS     _file: i64,
+//RS     line: i64,
+//RS     _function: i64,
+//RS     source_line: i64,
+//RS ) -> i64 {
+//RS     jet_jit_pool_get(handle, id, line, source_line)
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_pool_set(handle: i64, id: i64, value: i64, line: i64, src_line: i64) {
+//RS     let updated = Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(pool) = pool(rt, handle) else {
+//RS             return false;
+//RS         };
+//RS         let mut pool = pool.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         let Some(id) = CanonicalPoolId::from_word(id) else {
+//RS             return false;
+//RS         };
+//RS         let Some(slot) = pool.pool.checked_get_mut(id) else {
+//RS             return false;
+//RS         };
+//RS         *slot = value;
+//RS         true
+//RS     });
+//RS     if !updated {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             let source_line = rt.heap.clone_string(src_line).unwrap_or_default();
+//RS             rt.set_runtime_stop_with_source_line(
+//RS                 "E3001",
+//RS                 line.max(0) as u32,
+//RS                 Some(source_line.as_str()),
+//RS                 jet_foundation::Outcome::jet_pool_stale_message(),
+//RS             )
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS /// Exact checked MIR pool-index setter route.  The route carries the source
+//RS /// file and function as diagnostic metadata; the pool kernel consumes the
+//RS /// source line and source text just like its getter counterpart.
+//RS fn jet_jit_index_pool_set(
+//RS     handle: i64,
+//RS     id: i64,
+//RS     value: i64,
+//RS     _file: i64,
+//RS     line: i64,
+//RS     _function: i64,
+//RS     source_line: i64,
+//RS ) {
+//RS     jet_jit_pool_set(handle, id, value, line, source_line);
+//RS }
+//RS 
+//RS /// `JetPool::remove` uses the packed optional ABI: zero is absent and a
+//RS /// present payload is offset by one so that zero remains unambiguous.
+//RS fn jet_jit_pool_absent() -> i64 {
+//RS     0
+//RS }
+//RS 
+//RS fn jet_jit_pool_remove(handle: i64, id: i64) -> i64 {
+//RS     let Some(pool) = Concurrency::with_runtime_mut(|rt| pool(rt, handle)) else {
+//RS         return jet_jit_pool_absent();
+//RS     };
+//RS     let mut pool = pool.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS     let Some(id) = CanonicalPoolId::from_word(id) else {
+//RS         return jet_jit_pool_absent();
+//RS     };
+//RS     match pool.pool.remove(id) {
+//RS         Ok(value) => value.wrapping_add(1),
+//RS         Err(_) => jet_jit_pool_absent(),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_pool_ids(handle: i64) -> i64 {
+//RS     let Some(pool) = Concurrency::with_runtime_mut(|rt| pool(rt, handle)) else {
+//RS         return 0;
+//RS     };
+//RS     let ids = {
+//RS         let pool = pool.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         pool.pool
+//RS             .ids()
+//RS             .into_iter()
+//RS             .map(|id| id.to_word())
+//RS             .collect::<Vec<_>>()
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_int_list(ids))
+//RS }
+//RS 
+//RS fn jet_jit_shared_new(value: i64, type_id: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         // Checked type IDs are u64 stable hashes carried bit-for-bit in an
+//RS         // i64 word; a set high bit is a valid identity, not a negative value.
+//RS         match shared_alloc_for_persist(rt, value, type_id as u64) {
+//RS             Ok(handle) => handle,
+//RS             Err(error) => {
+//RS                 rt.set_host_fault(&error);
+//RS                 0
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS /// Allocate a Shared root from one checked payload descriptor. The raw word is
+//RS /// decoded immediately into a portable MIR value; it is only a runtime-local
+//RS /// projection and is never retained as the physical payload.
+//RS pub(crate) fn shared_alloc_for_persist(
+//RS     rt: &mut crate::JitRuntime,
+//RS     value: i64,
+//RS     type_id: u64,
+//RS ) -> Result<i64, String> {
+//RS     let portable_value = crate::runtime_host::decode_jit_shared_payload_raw(rt, value, type_id)?;
+//RS     let handle = i64::try_from(
+//RS         rt.shareds
+//RS             .len()
+//RS             .checked_add(1)
+//RS             .ok_or_else(|| "JIT Shared handle table exhausted".to_string())?,
+//RS     )
+//RS     .map_err(|_| "JIT Shared handle table exhausted".to_string())?;
+//RS     rt.shareds.push(Some(Arc::new(SharedState::new(
+//RS         value,
+//RS         type_id,
+//RS         portable_value,
+//RS     ))));
+//RS     Ok(handle)
+//RS }
+//RS 
+//RS pub(crate) fn shared_alloc_alias_state(
+//RS     rt: &mut crate::JitRuntime,
+//RS     state: Arc<SharedState>,
+//RS ) -> Result<i64, String> {
+//RS     let handle = i64::try_from(
+//RS         rt.shareds
+//RS             .len()
+//RS             .checked_add(1)
+//RS             .ok_or_else(|| "JIT Shared handle table exhausted".to_string())?,
+//RS     )
+//RS     .map_err(|_| "JIT Shared handle table exhausted".to_string())?;
+//RS     rt.shareds.push(Some(state));
+//RS     Ok(handle)
+//RS }
+//RS 
+//RS pub(crate) fn shared_alloc_external_for_persist(
+//RS     rt: &mut crate::JitRuntime,
+//RS     type_id: u64,
+//RS ) -> Result<i64, String> {
+//RS     shared_alloc_alias_state(rt, Arc::new(SharedState::external(type_id)))
+//RS }
+//RS 
+//RS 
+//RS pub(crate) fn shared_cache_value(handle: i64, value: i64) {
+//RS     let _ = Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(shared) = shared(rt, handle) {
+//RS             if let Some(slot) = shared.value.as_ref() {
+//RS                 slot.store(value, Ordering::Release);
+//RS             }
+//RS         }
+//RS     });
+//RS }
+//RS pub(crate) fn shared_cache_capture(handle: i64, value: i64, revision: u64) {
+//RS     let _ = Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(shared) = shared(rt, handle) {
+//RS             if let Some(slot) = shared.value.as_ref() {
+//RS                 slot.store(value, Ordering::Release);
+//RS             }
+//RS             let _ = shared_store_revision(&shared, revision);
+//RS         }
+//RS     });
+//RS }
+//RS pub(crate) fn shared_cache_revision(handle: i64, revision: u64) {
+//RS     let _ = Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(shared) = shared(rt, handle) {
+//RS             let _ = shared_store_revision(&shared, revision);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS 
+//RS 
+//RS /// Scalar Shared compatibility operations stay on the canonical atomic rail.
+//RS /// They must not enter the blocking guard protocol: callback-safe scalar reads
+//RS /// and writes are direct Acquire/Release operations, while guard/aggregate
+//RS /// paths below retain the protocol permits.
+//RS fn jet_jit_shared_get(handle: i64) -> i64 {
+//RS     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+//RS         return 0;
+//RS     };
+//RS     match shared_transaction_staged(&shared, handle) {
+//RS         Ok(Some(staged)) => return *staged.borrow(),
+//RS         Ok(None) => {}
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     }
+//RS     if let Some(result) = crate::runtime_host::native_shared_get_value(handle) {
+//RS         return result.unwrap_or_else(|error| shared_callback_fault(&error));
+//RS     }
+//RS     shared_state_raw(&shared)
+//RS         .unwrap_or_else(|| shared_callback_fault("external Shared read is missing its physical owner"))
+//RS }
+//RS 
+//RS fn jet_jit_shared_set(handle: i64, value: i64) {
+//RS     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+//RS         return;
+//RS     };
+//RS     match shared_transaction_stage_for_write(&shared, handle) {
+//RS         Ok(Some(staged)) => {
+//RS             *staged.borrow_mut() = value;
+//RS             return;
+//RS         }
+//RS         Ok(None) => {}
+//RS         Err(error) => {
+//RS             shared_callback_fault(&error);
+//RS             return;
+//RS         }
+//RS     }
+//RS     if let Some(result) = crate::runtime_host::native_shared_set_value(handle, value) {
+//RS         if let Err(error) = result {
+//RS             shared_callback_fault(&error);
+//RS         }
+//RS         return;
+//RS     }
+//RS     if shared.value.is_none() {
+//RS         shared_callback_fault("external Shared write is missing its physical owner");
+//RS         return;
+//RS     }
+//RS     let Some(permit) = shared.acquire_state_permit(true) else {
+//RS         return;
+//RS     };
+//RS     if let Err(error) = shared_state_commit(&shared, value) {
+//RS         shared_commit_fault(&error);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_shared_replace(handle: i64, value: i64) -> i64 {
+//RS     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+//RS         return 0;
+//RS     };
+//RS     match shared_transaction_stage_for_write(&shared, handle) {
+//RS         Ok(Some(staged)) => {
+//RS             let previous = *staged.borrow();
+//RS             *staged.borrow_mut() = value;
+//RS             return previous;
+//RS         }
+//RS         Ok(None) => {}
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     }
+//RS     if let Some(result) = crate::runtime_host::native_shared_replace_value(handle, value) {
+//RS         return result.unwrap_or_else(|error| shared_callback_fault(&error));
+//RS     }
+//RS     let Some(value_slot) = shared.value.as_ref() else {
+//RS         return shared_callback_fault("external Shared replace is missing its physical owner");
+//RS     };
+//RS     let Some(permit) = shared.acquire_state_permit(true) else {
+//RS         return 0;
+//RS     };
+//RS     let previous = value_slot.load(Ordering::Acquire);
+//RS     if let Err(error) = shared_state_commit(&shared, value) {
+//RS         shared_commit_fault(&error);
+//RS         drop(permit);
+//RS         return 0;
+//RS     }
+//RS     drop(permit);
+//RS     previous
+//RS }
+//RS 
+//RS fn shared_callback_slot(callback: i64) -> Option<crate::runtime_host::JitCallableSlot> {
+//RS     Concurrency::with_runtime_mut(|rt| crate::runtime_host::jit_callable_parts(rt, callback))
+//RS }
+//RS 
+//RS fn shared_callback_fault(message: &str) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.set_host_fault(message);
+//RS         0
+//RS     })
+//RS }
+//RS fn shared_commit_fault(message: &str) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if message == "SharedRevisionError.GenerationExhausted" {
+//RS             rt.set_trap(message);
+//RS         } else {
+//RS             rt.set_host_fault(message);
+//RS         }
+//RS     });
+//RS }
+//RS fn jet_jit_shared_read(handle: i64, callback: i64) -> i64 {
+//RS     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+//RS         return shared_callback_fault("Shared.read received an invalid shared handle");
+//RS     };
+//RS     match shared_transaction_staged(&shared, handle) {
+//RS         Ok(Some(staged)) => {
+//RS             let Some(slot) = shared_callback_slot(callback) else {
+//RS                 return shared_callback_fault("Shared.read callback handle is invalid");
+//RS             };
+//RS             return crate::runtime_host::invoke_universal_unary(slot, *staged.borrow())
+//RS                 .unwrap_or_else(|| {
+//RS                     shared_callback_fault("Shared.read callback has no unary universal thunk")
+//RS                 });
+//RS         }
+//RS         Ok(None) => {}
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     }
+//RS     if let Some(result) = crate::runtime_host::native_shared_read_call(handle, callback) {
+//RS         return result.unwrap_or_else(|error| shared_callback_fault(&error));
+//RS     }
+//RS     let Some(permit) = shared.acquire_state_permit(false) else {
+//RS         return 0;
+//RS     };
+//RS     let Some(value) = shared_state_raw(&shared) else {
+//RS         drop(permit);
+//RS         return shared_callback_fault("external Shared read is missing its physical owner");
+//RS     };
+//RS     let result = shared_callback_slot(callback)
+//RS         .and_then(|slot| crate::runtime_host::invoke_universal_unary(slot, value));
+//RS     let stopped = Concurrency::with_runtime_mut(|rt| {
+//RS         crate::runtime_host::runtime_stop_pending(rt)
+//RS     });
+//RS     drop(permit);
+//RS     if stopped {
+//RS         return 0;
+//RS     }
+//RS     result.unwrap_or_else(|| shared_callback_fault("Shared.read callback is invalid"))
+//RS }
+//RS 
+//RS fn jet_jit_shared_edit(handle: i64, callback: i64) -> i64 {
+//RS     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+//RS         return shared_callback_fault("Shared.edit received an invalid shared handle");
+//RS     };
+//RS     match shared_transaction_stage_for_write(&shared, handle) {
+//RS         Ok(Some(staged)) => {
+//RS             let Some(slot) = shared_callback_slot(callback) else {
+//RS                 return shared_callback_fault("Shared.edit callback handle is invalid");
+//RS             };
+//RS             let mut value = staged.borrow_mut();
+//RS             let address = (&mut *value as *mut i64) as i64;
+//RS             return crate::runtime_host::invoke_universal_unary(slot, address).unwrap_or_else(
+//RS                 || shared_callback_fault("Shared.edit callback has no unary universal thunk"),
+//RS             );
+//RS         }
+//RS         Ok(None) => {}
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     }
+//RS     if let Some(result) = crate::runtime_host::native_shared_edit_call(handle, callback) {
+//RS         return result.unwrap_or_else(|error| shared_callback_fault(&error));
+//RS     }
+//RS     let Some(permit) = shared.acquire_state_permit(true) else {
+//RS         return 0;
+//RS     };
+//RS     let Some(mut value) = shared_state_raw(&shared) else {
+//RS         drop(permit);
+//RS         return shared_callback_fault("external Shared edit is missing its physical owner");
+//RS     };
+//RS     let result = shared_callback_slot(callback).and_then(|slot| {
+//RS         let address = (&mut value as *mut i64) as i64;
+//RS         crate::runtime_host::invoke_universal_unary(slot, address)
+//RS     });
+//RS     let stopped = Concurrency::with_runtime_mut(|rt| {
+//RS         crate::runtime_host::runtime_stop_pending(rt)
+//RS     });
+//RS     if stopped {
+//RS         drop(permit);
+//RS         return 0;
+//RS     }
+//RS     let Some(result) = result else {
+//RS         drop(permit);
+//RS         return shared_callback_fault("Shared.edit callback is invalid");
+//RS     };
+//RS     if let Err(error) = shared_state_commit(&shared, value) {
+//RS         drop(permit);
+//RS         shared_commit_fault(&error);
+//RS         return 0;
+//RS     }
+//RS     drop(permit);
+//RS     result
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_shared_capture(handle: i64, type_id: i64) -> i64 {
+//RS     let type_id = type_id as u64;
+//RS     let Some(shared) = Concurrency::with_runtime_mut(|rt| {
+//RS         shared(rt, handle).filter(|state| shared_state_type_id(state) == Some(type_id))
+//RS     }) else {
+//RS         return shared_callback_fault("Shared.capture received an invalid shared handle or type");
+//RS     };
+//RS     let captured = match crate::runtime_host::native_shared_capture(handle) {
+//RS         Some(Ok((value, revision))) => Some((revision, value)),
+//RS         Some(Err(error)) => return shared_callback_fault(&error),
+//RS         None => shared_capture_parts(&shared),
+//RS     };
+//RS     let Some((revision, value)) = captured else {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
+//RS             0
+//RS         });
+//RS     };
+//RS     match shared_snapshot_store_for_handle(handle, shared, type_id, revision, value) {
+//RS         Ok(ticket) => ticket,
+//RS         Err(error) => shared_callback_fault(&error),
+//RS     }
+//RS }
+//RS fn shared_projected_capture_value(
+//RS     revision: u64,
+//RS     value: i64,
+//RS     callback: i64,
+//RS ) -> Option<(u64, i64)> {
+//RS     let slot = Concurrency::with_runtime_mut(|rt| {
+//RS         crate::runtime_host::jit_callable_parts(rt, callback)
+//RS     })?;
+//RS     let projected = crate::runtime_host::invoke_universal_unary(slot, value)?;
+//RS     Some((revision, projected))
+//RS }
+//RS 
+//RS fn shared_projected_capture(shared: &Arc<SharedState>, callback: i64) -> Option<(u64, i64)> {
+//RS     let permit = shared.acquire_state_permit(false)?;
+//RS     let revision = shared_state_revision(shared)?;
+//RS     let value = shared_state_raw(shared)?;
+//RS     let captured = shared_projected_capture_value(revision, value, callback);
+//RS     drop(permit);
+//RS     captured
+//RS }
+//RS fn shared_projected_capture_staged(
+//RS     shared: &Arc<SharedState>,
+//RS     handle: i64,
+//RS     callback: i64,
+//RS     staged: &std::rc::Rc<std::cell::RefCell<i64>>,
+//RS ) -> Result<Option<(u64, i64)>, String> {
+//RS     let Some(revision) = shared_transaction_snapshot_revision(shared, handle)? else {
+//RS         return Ok(None);
+//RS     };
+//RS     let slot = Concurrency::with_runtime_mut(|rt| {
+//RS         crate::runtime_host::jit_callable_parts(rt, callback)
+//RS     });
+//RS     let Some(slot) = slot else {
+//RS         return Ok(None);
+//RS     };
+//RS     let projected =
+//RS         crate::runtime_host::invoke_universal_unary(slot, *staged.borrow());
+//RS     Ok(projected.map(|projected| (revision, projected)))
+//RS }
+//RS 
+//RS fn jet_jit_shared_capture_with(handle: i64, callback: i64, type_id: i64) -> i64 {
+//RS     let type_id = type_id as u64;
+//RS     let Some(shared) = Concurrency::with_runtime_mut(|rt| {
+//RS         shared(rt, handle).filter(|state| shared_state_type_id(state) == Some(type_id))
+//RS     }) else {
+//RS         return shared_callback_fault("Shared.capture received an invalid shared handle or type");
+//RS     };
+//RS     let captured = match crate::runtime_host::native_shared_capture(handle) {
+//RS         Some(Ok((value, revision))) => shared_projected_capture_value(revision, value, callback),
+//RS         Some(Err(error)) => return shared_callback_fault(&error),
+//RS         None => shared_projected_capture(&shared, callback),
+//RS     };
+//RS     let Some((revision, value)) = captured else {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_trap("Shared.capture projection callback is invalid");
+//RS             0
+//RS         });
+//RS     };
+//RS     match shared_snapshot_store_for_handle(handle, shared, type_id, revision, value) {
+//RS         Ok(ticket) => ticket,
+//RS         Err(error) => shared_callback_fault(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn shared_transaction_register_snapshot(
+//RS     snapshot: Arc<SharedSnapshot>,
+//RS     owner: Arc<dyn shared_protocol::JetSharedCanonicalOwner>,
+//RS ) -> bool {
+//RS     SHARED_TRANSACTIONS.with(|transactions| {
+//RS         let mut transactions = transactions.borrow_mut();
+//RS         let Some(transaction) = transactions.last_mut() else {
+//RS             return false;
+//RS         };
+//RS         transaction
+//RS             .transaction
+//RS             .record_snapshot(owner, snapshot.valid.clone());
+//RS         true
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_shared_capture_txn_plain(handle: i64, _stm: i64, type_id: i64) -> i64 {
+//RS     let type_id = type_id as u64;
+//RS     let Some(shared) = Concurrency::with_runtime_mut(|rt| {
+//RS         shared(rt, handle).filter(|state| shared_state_type_id(state) == Some(type_id))
+//RS     }) else {
+//RS         return shared_callback_fault("Shared.capture_txn received an invalid shared handle or type");
+//RS     };
+//RS     match shared_transaction_touch(&shared, handle) {
+//RS         Ok(true) => {}
+//RS         Ok(false) => {
+//RS             return Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.set_trap("Shared.capture_txn requires an active transaction");
+//RS                 0
+//RS             });
+//RS         }
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     }
+//RS     let staged = match shared_transaction_staged(&shared, handle) {
+//RS         Ok(staged) => staged,
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     };
+//RS     let captured = if let Some(staged) = staged {
+//RS         match shared_transaction_snapshot_revision(&shared, handle) {
+//RS             Ok(Some(revision)) => Some((revision, *staged.borrow())),
+//RS             Ok(None) => None,
+//RS             Err(error) => return shared_callback_fault(&error),
+//RS         }
+//RS     } else {
+//RS         match crate::runtime_host::native_shared_capture(handle) {
+//RS             Some(Ok((value, revision))) => Some((revision, value)),
+//RS             Some(Err(error)) => return shared_callback_fault(&error),
+//RS             None => shared_capture_parts(&shared),
+//RS         }
+//RS     };
+//RS     let Some((revision, value)) = captured else {
+//RS         return shared_callback_fault("Shared.capture_txn could not capture its physical owner");
+//RS     };
+//RS     let owner = match shared_transaction_owner(&shared, handle) {
+//RS         Ok(owner) => owner,
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     };
+//RS     let token = match shared_snapshot_store_for_handle(handle, shared, type_id, revision, value) {
+//RS         Ok(token) => token,
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     };
+//RS     let snapshot = match Concurrency::with_runtime_string(|rt| {
+//RS         shared_snapshot_load(rt, token, type_id)
+//RS     }) {
+//RS         Ok(snapshot) => snapshot,
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     };
+//RS     if !shared_transaction_register_snapshot(snapshot, owner) {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_trap("Shared.capture_txn requires an active transaction");
+//RS             0
+//RS         });
+//RS     }
+//RS     token
+//RS }
+//RS 
+//RS fn jet_jit_shared_capture_txn(handle: i64, _stm: i64, callback: i64, type_id: i64) -> i64 {
+//RS     let type_id = type_id as u64;
+//RS     let Some(shared) = Concurrency::with_runtime_mut(|rt| {
+//RS         shared(rt, handle).filter(|state| shared_state_type_id(state) == Some(type_id))
+//RS     }) else {
+//RS         return shared_callback_fault("Shared.capture_txn received an invalid shared handle or type");
+//RS     };
+//RS     match shared_transaction_touch(&shared, handle) {
+//RS         Ok(true) => {}
+//RS         Ok(false) => {
+//RS             return Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.set_trap("Shared.capture_txn requires an active transaction");
+//RS                 0
+//RS             });
+//RS         }
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     }
+//RS     let staged = match shared_transaction_staged(&shared, handle) {
+//RS         Ok(staged) => staged,
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     };
+//RS     let captured = if let Some(staged) = staged {
+//RS         match shared_projected_capture_staged(&shared, handle, callback, &staged) {
+//RS             Ok(captured) => captured,
+//RS             Err(error) => return shared_callback_fault(&error),
+//RS         }
+//RS     } else {
+//RS         match crate::runtime_host::native_shared_capture(handle) {
+//RS             Some(Ok((value, revision))) => {
+//RS                 shared_projected_capture_value(revision, value, callback)
+//RS             }
+//RS             Some(Err(error)) => return shared_callback_fault(&error),
+//RS             None => shared_projected_capture(&shared, callback),
+//RS         }
+//RS     };
+//RS     let Some((revision, value)) = captured else {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_trap("Shared.capture projection callback is invalid");
+//RS             0
+//RS         });
+//RS     };
+//RS     let owner = match shared_transaction_owner(&shared, handle) {
+//RS         Ok(owner) => owner,
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     };
+//RS     let token = match shared_snapshot_store_for_handle(handle, shared, type_id, revision, value) {
+//RS         Ok(token) => token,
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     };
+//RS     let snapshot = match Concurrency::with_runtime_string(|rt| {
+//RS         shared_snapshot_load(rt, token, type_id)
+//RS     }) {
+//RS         Ok(snapshot) => snapshot,
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     };
+//RS     if !shared_transaction_register_snapshot(snapshot, owner) {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_trap("Shared.capture_txn requires an active transaction");
+//RS             0
+//RS         });
+//RS     }
+//RS     token
+//RS }
+//RS 
+//RS fn jet_jit_shared_try_replace(
+//RS     handle: i64,
+//RS     snapshot_handle: i64,
+//RS     value: i64,
+//RS     type_id: i64,
+//RS ) -> i64 {
+//RS     let type_id = type_id as u64;
+//RS     let Some(shared) = Concurrency::with_runtime_mut(|rt| {
+//RS         shared(rt, handle).filter(|state| shared_state_type_id(state) == Some(type_id))
+//RS     }) else {
+//RS         return Concurrency::with_runtime_mut(|rt| shared_revision_error_result(rt, 0));
+//RS     };
+//RS     let interop = match crate::runtime_host::native_shared_interop_for_type(handle, type_id) {
+//RS         Ok(interop) => interop,
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     };
+//RS     let snapshot = match Concurrency::with_runtime_string(|rt| {
+//RS         shared_snapshot_load(rt, snapshot_handle, type_id)
+//RS     }) {
+//RS         Ok(snapshot) => snapshot,
+//RS         Err(_) => return Concurrency::with_runtime_mut(|rt| shared_revision_error_result(rt, 0)),
+//RS     };
+//RS     if snapshot.root_identity != interop.identity() {
+//RS         return Concurrency::with_runtime_mut(|rt| shared_revision_error_result(rt, 0));
+//RS     }
+//RS     if !snapshot
+//RS         .valid
+//RS         .load(std::sync::atomic::Ordering::Acquire)
+//RS         || snapshot
+//RS             .consumed
+//RS             .load(std::sync::atomic::Ordering::Acquire)
+//RS     {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             crate::runtime_host::alloc_jit_result(rt, true, 0)
+//RS         });
+//RS     }
+//RS 
+//RS 
+//RS     if let Some(result) = crate::runtime_host::native_shared_replace_if_revision(
+//RS         handle,
+//RS         snapshot.revision,
+//RS         value,
+//RS     ) {
+//RS         return match result {
+//RS             Ok((false, _)) => Concurrency::with_runtime_mut(|rt| {
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, 0)
+//RS             }),
+//RS             Ok((true, _)) => {
+//RS                 if snapshot
+//RS                     .consumed
+//RS                     .swap(true, std::sync::atomic::Ordering::AcqRel)
+//RS                 {
+//RS                     return Concurrency::with_runtime_mut(|rt| {
+//RS                         rt.set_host_fault("Shared snapshot was consumed during physical replacement");
+//RS                         crate::runtime_host::alloc_jit_result(rt, false, 0)
+//RS                     });
+//RS                 }
+//RS                 snapshot
+//RS                     .valid
+//RS                     .store(false, std::sync::atomic::Ordering::Release);
+//RS                 Concurrency::with_runtime_mut(|rt| {
+//RS                     crate::runtime_host::alloc_jit_result(rt, true, 1)
+//RS                 })
+//RS             }
+//RS             Err(error) => Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.set_host_fault(&error);
+//RS                 crate::runtime_host::alloc_jit_result(rt, false, 0)
+//RS             }),
+//RS         };
+//RS     }
+//RS 
+//RS     if shared.value.is_none() {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_host_fault("external Shared conditional replace is missing its physical owner");
+//RS             crate::runtime_host::alloc_jit_result(rt, false, 0)
+//RS         });
+//RS     }
+//RS     let Some(permit) = shared.acquire_state_permit(true) else {
+//RS         return 0;
+//RS     };
+//RS     if shared_state_revision(&shared) != Some(snapshot.revision) {
+//RS         let result = Concurrency::with_runtime_mut(|rt| {
+//RS             crate::runtime_host::alloc_jit_result(rt, true, 0)
+//RS         });
+//RS         drop(permit);
+//RS         return result;
+//RS     }
+//RS     if snapshot
+//RS         .consumed
+//RS         .swap(true, std::sync::atomic::Ordering::AcqRel)
+//RS     {
+//RS         let result = Concurrency::with_runtime_mut(|rt| {
+//RS             crate::runtime_host::alloc_jit_result(rt, true, 0)
+//RS         });
+//RS         drop(permit);
+//RS         return result;
+//RS     }
+//RS     if let Err(error) = shared_state_commit(&shared, value) {
+//RS         snapshot
+//RS             .consumed
+//RS             .store(false, std::sync::atomic::Ordering::Release);
+//RS         let result = Concurrency::with_runtime_mut(|rt| {
+//RS             if error == "SharedRevisionError.GenerationExhausted" {
+//RS                 shared_revision_error_result(rt, 1)
+//RS             } else {
+//RS                 rt.set_host_fault(&error);
+//RS                 crate::runtime_host::alloc_jit_result(rt, false, 0)
+//RS             }
+//RS         });
+//RS         drop(permit);
+//RS         return result;
+//RS     }
+//RS     snapshot
+//RS         .valid
+//RS         .store(false, std::sync::atomic::Ordering::Release);
+//RS     let result = Concurrency::with_runtime_mut(|rt| {
+//RS         crate::runtime_host::alloc_jit_result(rt, true, 1)
+//RS     });
+//RS     drop(permit);
+//RS     result
+//RS }
+//RS 
+//RS fn jet_jit_shared_snapshot_value(snapshot_handle: i64, type_id: i64) -> i64 {
+//RS     let type_id = type_id as u64;
+//RS     match Concurrency::with_runtime_string(|rt| shared_snapshot_load(rt, snapshot_handle, type_id)) {
+//RS         Ok(snapshot) => snapshot.value,
+//RS         Err(error) => shared_callback_fault(&error),
+//RS     }
+//RS }
+//RS fn jet_jit_shared_snapshot_clone(ticket: i64, type_id: i64) -> i64 {
+//RS     let type_id = type_id as u64;
+//RS     match shared_snapshot_clone_ticket(ticket, type_id) {
+//RS         Ok(ticket) => ticket,
+//RS         Err(error) => shared_callback_fault(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_shared_snapshot_release(ticket: i64, type_id: i64) {
+//RS     let type_id = type_id as u64;
+//RS     if let Err(error) = shared_snapshot_release_ticket(ticket, type_id) {
+//RS         shared_callback_fault(&error);
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_shared_begin(handle: i64, editable: i64) -> i64 {
+//RS     if let Some(result) =
+//RS         crate::runtime_host::native_shared_guard_begin(handle, editable != 0)
+//RS     {
+//RS         let (token, value) = match result {
+//RS             Ok(result) => result,
+//RS             Err(error) => return shared_callback_fault(&error),
+//RS         };
+//RS         SHARED_ACTIVE_NATIVE_GUARDS.with(|guards| guards.borrow_mut().push((handle, token)));
+//RS         return value;
+//RS     }
+//RS     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+//RS         return 0;
+//RS     };
+//RS     let Some(permit) = shared.acquire_state_permit(editable != 0) else {
+//RS         return 0;
+//RS     };
+//RS     let Some(value) = shared_state_raw(&shared) else {
+//RS         drop(permit);
+//RS         return shared_callback_fault("external Shared guard is missing its physical owner");
+//RS     };
+//RS     SHARED_ACTIVE_PERMITS.with(|permits| permits.borrow_mut().push((handle, permit)));
+//RS     value
+//RS }
+//RS 
+//RS fn jet_jit_shared_end_read(handle: i64) {
+//RS     if let Some(token) = take_active_native_shared_guard(handle) {
+//RS         match crate::runtime_host::native_shared_guard_end(token, handle, 0, false) {
+//RS             Some(Ok(())) => {}
+//RS             Some(Err(error)) => {
+//RS                 shared_callback_fault(&error);
+//RS             }
+//RS             None => {
+//RS                 shared_callback_fault("Source Shared guard lease disappeared before read end");
+//RS             }
+//RS         }
+//RS         return;
+//RS     }
+//RS     drop(take_active_shared_permit(handle));
+//RS }
+//RS 
+//RS fn jet_jit_shared_end_write(handle: i64, value: i64) {
+//RS     if let Some(token) = take_active_native_shared_guard(handle) {
+//RS         match crate::runtime_host::native_shared_guard_end(token, handle, value, true) {
+//RS             Some(Ok(())) => {}
+//RS             Some(Err(error)) => {
+//RS                 shared_callback_fault(&error);
+//RS             }
+//RS             None => {
+//RS                 shared_callback_fault("Source Shared guard lease disappeared before write end");
+//RS             }
+//RS         }
+//RS         return;
+//RS     }
+//RS     let permit = take_active_shared_permit(handle);
+//RS     if let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) {
+//RS         if shared.value.is_none() {
+//RS             shared_callback_fault("external Shared guard is missing its physical owner");
+//RS             drop(permit);
+//RS             return;
+//RS         }
+//RS         if let Err(error) = shared_state_commit(&shared, value) {
+//RS             shared_commit_fault(&error);
+//RS         }
+//RS     }
+//RS     drop(permit);
+//RS }
+//RS 
+//RS fn jet_jit_shared_retain(handle: i64, type_id: i64) -> i64 {
+//RS     let type_id = type_id as u64;
+//RS     match crate::runtime_host::native_shared_alias_retain(handle, type_id) {
+//RS         Ok(handle) => handle,
+//RS         Err(error) => shared_callback_fault(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_shared_release(handle: i64, type_id: i64) {
+//RS     let type_id = type_id as u64;
+//RS     if let Err(error) = crate::runtime_host::native_shared_alias_release(handle, type_id) {
+//RS         shared_callback_fault(&error);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_shared_downgrade(handle: i64, type_id: i64) -> i64 {
+//RS     let type_id = type_id as u64;
+//RS     let owner = match crate::runtime_host::native_shared_owner_downgrade(handle, type_id) {
+//RS         Ok(owner) => owner,
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     };
+//RS     match Concurrency::with_runtime_string(|rt| shared_weak_owner_store(rt, type_id, owner)) {
+//RS         Ok(ticket) => ticket,
+//RS         Err(error) => shared_callback_fault(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_shared_strong_count(handle: i64, type_id: i64) -> i64 {
+//RS     let type_id = type_id as u64;
+//RS     match crate::runtime_host::native_shared_owner_strong_count(handle, type_id) {
+//RS         Ok(count) => i64::try_from(count)
+//RS             .unwrap_or_else(|_| shared_callback_fault("Shared strong count overflow")),
+//RS         Err(error) => shared_callback_fault(&error),
+//RS     }
+//RS }
+//RS 
+//RS /// Identity only, like `Rc::ptr_eq`: both handles name one physical cell.
+//RS fn jet_jit_shared_same(handle: i64, other: i64, type_id: i64) -> i64 {
+//RS     let type_id = type_id as u64;
+//RS     let identity = |handle| {
+//RS         crate::runtime_host::native_shared_interop_for_type(handle, type_id)
+//RS             .map(|interop| interop.identity())
+//RS     };
+//RS     match (identity(handle), identity(other)) {
+//RS         (Ok(left), Ok(right)) => i64::from(left == right),
+//RS         (Err(error), _) | (_, Err(error)) => shared_callback_fault(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_shared_weak_clone(ticket: i64, type_id: i64) -> i64 {
+//RS     let type_id = type_id as u64;
+//RS     match shared_weak_clone_ticket(ticket, type_id) {
+//RS         Ok(ticket) => ticket,
+//RS         Err(error) => shared_callback_fault(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_shared_weak_release(ticket: i64, type_id: i64) {
+//RS     let type_id = type_id as u64;
+//RS     if let Err(error) = shared_weak_release_ticket(ticket, type_id) {
+//RS         shared_callback_fault(&error);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_shared_weak_upgrade(ticket: i64, type_id: i64) -> i64 {
+//RS     let type_id = type_id as u64;
+//RS     let owner = match Concurrency::with_runtime_string(|rt| {
+//RS         shared_weak_owner_load(rt, ticket, type_id)
+//RS     }) {
+//RS         Ok(owner) => owner,
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     };
+//RS     match owner.upgrade() {
+//RS         Ok(Some(upgrade)) => match upgrade.into_carrier() {
+//RS             Ok(carrier) => match crate::runtime_host::native_shared_export_owner(carrier) {
+//RS                 Ok(handle) => handle
+//RS                     .checked_add(1)
+//RS                     .unwrap_or_else(|| shared_callback_fault("Shared handle overflow")),
+//RS                 Err(error) => shared_callback_fault(&error),
+//RS             },
+//RS             Err(error) => shared_callback_fault(&error),
+//RS         },
+//RS         Ok(None) => 0,
+//RS         Err(error) => shared_callback_fault(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_condition_new() -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.conditions.push(Arc::new(ConditionState::new()));
+//RS         rt.conditions.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_condition_notify_one(handle: i64) {
+//RS     if let Some(condition) = Concurrency::with_runtime_mut(|rt| condition(rt, handle)) {
+//RS         shared_protocol::jet_shared_condition_notify_one(&condition.protocol);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_condition_notify_all(handle: i64) {
+//RS     if let Some(condition) = Concurrency::with_runtime_mut(|rt| condition(rt, handle)) {
+//RS         shared_protocol::jet_shared_condition_notify_all(&condition.protocol);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_shared_guard_begin(handle: i64, editable: i64) -> i64 {
+//RS     if let Some(result) =
+//RS         crate::runtime_host::native_shared_guard_begin(handle, editable != 0)
+//RS     {
+//RS         let (token, value) = match result {
+//RS             Ok(result) => result,
+//RS             Err(error) => return shared_callback_fault(&error),
+//RS         };
+//RS         let view = match crate::runtime_host::native_shared_guard_entry_view(token) {
+//RS             Some(Ok(view)) => view,
+//RS             Some(Err(error)) => {
+//RS                 crate::runtime_host::native_shared_guard_abort(token);
+//RS                 return shared_callback_fault(&error);
+//RS             }
+//RS             None => {
+//RS                 crate::runtime_host::native_shared_guard_abort(token);
+//RS                 return shared_callback_fault(
+//RS                     "Source Shared guard view disappeared before binding",
+//RS                 );
+//RS             }
+//RS         };
+//RS         let state = Arc::clone(&view.state);
+//RS         drop(view);
+//RS         let Some(guard) = Concurrency::with_runtime_mut(|rt| {
+//RS             shared(rt, handle)?;
+//RS             Some(pack_shared_guard(rt, handle, value, state))
+//RS         }) else {
+//RS             crate::runtime_host::native_shared_guard_abort(token);
+//RS             return shared_callback_fault("Source Shared guard could not bind a JIT guard");
+//RS         };
+//RS         if let Err(error) = crate::runtime_host::native_shared_guard_bind(guard, token) {
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.shared_guard_states.remove(&guard);
+//RS             });
+//RS             crate::runtime_host::native_shared_guard_abort(token);
+//RS             return shared_callback_fault(&error);
+//RS         }
+//RS         return guard;
+//RS     }
+//RS     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
+//RS             0
+//RS         });
+//RS     };
+//RS     let Some(permit) = shared.acquire_state_permit(editable != 0) else {
+//RS         return 0;
+//RS     };
+//RS     let Some(state) =
+//RS         shared_protocol::jet_shared_guard_state_from_permit(permit, editable != 0).ok()
+//RS     else {
+//RS         return 0;
+//RS     };
+//RS     let Some(value) = shared_state_raw(&shared) else {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_host_fault("external Shared guard is missing its physical owner");
+//RS             0
+//RS         });
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| pack_shared_guard(rt, handle, value, state))
+//RS }
+//RS 
+// END-PORT-PENDING 0225 crates/jet-jit/src/Memory.rs:1784-3590
+

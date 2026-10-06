@@ -1,0 +1,22 @@
+// D-SHARED-CYCLE1=C: Shared.Weak cycles — parity and free-or-leak proof.
+use tests.common as common
+use std.fs as fs
+use std.thread
+// GATE #4494: compiler-stack thread and native filesystem.
+// Rust: tests/shared_weak.rs:11
+EXAMPLE :: include_str("../Examples/features/memory/shared_weak_cycle.jet")
+// Rust: tests/shared_weak.rs:12
+EXPECTED :: include_str("../Examples/features/expected/memory/shared_weak_cycle.out")
+// Rust: tests/shared_weak.rs:14
+fn fixture(tag: String, source: String) -> (OSPath, OSPath) {
+    root :: common.unique_tmp(tag)
+    fs.create_dir_all(root).unwrap()
+    path :: root.join("main.jet")
+    fs.write(path, source).unwrap()
+    (root, path)
+}
+// Rust: tests/shared_weak.rs:22
+fn with_compiler_stack(test: fn() -> Unit) -> {
+    thread.Builder.new().name("shared-weak-parity").stack_size(32 * 1024 * 1024)
+        .spawn(test).unwrap().join().unwrap()
+}

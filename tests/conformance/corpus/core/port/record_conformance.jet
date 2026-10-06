@@ -1,0 +1,184 @@
+use jet_foundation.RecordCodec.[decode_record, encode_record, RecordSection, RecordValue]
+use jet_foundation.PackageIdentity.[package_check_key, source_digest, target_facts_digest]
+use jet_foundation.SHA256.sha256
+// Rust: tests/record_conformance.rs:25
+JET_SOURCES :: ["Compiler/JetFoundation/Source/Hash/SHA256.jet", "Compiler/JetFoundation/Source/Record/RecordCodec.jet", "Compiler/JetFoundation/Source/Record/PackageIdentity.jet"]
+// Rust: tests/record_conformance.rs:32
+JET_HARNESS :: `fn conformance_encode(schema: String, sections: [RecordSection]) {
+    encoded :: record_encode(schema, sections)
+    bytes :: encoded.bytes ?? {
+        print("encode problem: {encoded.problem ?? ""}")
+        return
+    }
+    print("encode {mir_sha256_hex_bytes(bytes)}")
+}
+fn conformance_decode(bytes: [U8]) {
+    decoded :: record_decode(bytes)
+    record :: decoded.record ?? {
+        print("decode {decoded.problem ?? ""}")
+        return
+    }
+    again :: record_encode(record.schema, record.sections).bytes ?? [U8]{}
+    print("decode ok {mir_sha256_hex_bytes(again)} {mir_sha256_hex_bytes(record.digest)}")
+}`
+
+// Rust: tests/record_conformance.rs:53
+fn hex(bytes: [UInt8]) -> String {
+    out := ""
+    loop byte in bytes { out.push_str(byte.format("02x")) }
+    out
+}
+
+// Rust: tests/record_conformance.rs:60
+fn jet_string(value: String) -> String {
+    out := "\""
+    loop ch in value.chars() {
+        if ch == {
+            '"' -> out.push_str("\\\"")
+            '\\' -> out.push_str("\\\\")
+            '\n' -> out.push_str("\\n")
+            '{' -> out.push_str("{{")
+            '}' -> out.push_str("}}")
+            _ -> out.push(ch)
+        }
+    }
+    out.push('"')
+    out
+}
+
+// Rust: tests/record_conformance.rs:76
+fn jet_bytes(bytes: [UInt8]) -> String {
+    items :: bytes.iter().map(|byte| -> byte.to_string()).collect()
+    "[U8]{{{items.join(", ")}}}"
+}
+// Rust: tests/record_conformance.rs:81
+fn jet_int(value: Int64) -> String {
+    if value >= 0 { value.to_string() } else { "(0 - {value.unsigned_abs()})" }
+}
+// Rust: tests/record_conformance.rs:91
+fn jet_value(value: RecordValue) -> String {
+    if value == {
+        .Null -> "RecordValue.Null"
+        .Bool(flag) -> "RecordValue.Bool{{value: {flag}}}"
+        .Int(number) -> "RecordValue.Int{{value: {jet_int(number)}}}"
+        .Str(text) -> "RecordValue.Str{{value: {jet_string(text)}}}"
+        .Bytes(bytes) -> "RecordValue.Bytes{{value: {jet_bytes(bytes)}}}"
+        .List(values) -> "RecordValue.List{{values: [RecordValue]{{{values.iter().map(jet_value).collect().join(", ")}}}}}"
+        .Map(fields) -> {
+            // Rust BTreeMap iterates sorted keys; reverse once for sort coverage.
+            keys := fields.keys().collect()
+            keys.sort()
+            rendered :: keys.iter().rev().map(|name| -> "RecordField{{name: {jet_string(name)}, value: {jet_value(fields[name])}}}").collect().join(", ")
+            "RecordValue.Map{{fields: [RecordField]{{{rendered}}}}}"
+        }
+        .Digest(digest) -> "RecordValue.Digest{{value: {jet_bytes(digest)}}}"
+    }
+}
+// Rust: tests/record_conformance.rs:115
+fn jet_sections(sections: [RecordSection]) -> String {
+    rendered :: sections.iter().map(|section| -> "RecordSection{{id: {section.tag}, elements: [RecordValue]{{{section.elements.iter().map(jet_value).collect().join(", ")}}}}}").collect()
+    "[RecordSection]{{{rendered.join(", ")}}}"
+}
+// Rust: tests/record_conformance.rs:129
+fn map(fields: [(String, RecordValue)]) -> RecordValue {
+    values := [:] as [String:RecordValue]
+    loop (name, value) in fields { values[name.to_string()] = value.clone() }
+    RecordValue.Map(^values)
+}
+
+// Rust: tests/record_conformance.rs:140
+fn record_fixtures() -> [(String, [RecordSection])] {
+    digest :: (0..32).map(|index| -> UInt8(index * 7)).collect()
+    long_text :: "é".repeat(90)
+    [
+        ("jet.program/v1", []),
+        ("jet.iface/v1", [
+            RecordSection.new(9, [RecordValue.Digest(digest), RecordValue.Bytes([0, 255, 128]), RecordValue.Bytes([])]),
+            RecordSection.new(1, [
+                map([("zeta", RecordValue.Int(-1)), ("alpha", RecordValue.Str("héllo")), ("mid", RecordValue.List([RecordValue.Null, RecordValue.Bool(true), RecordValue.Bool(false), RecordValue.Str("alpha")]))]),
+                RecordValue.Int(Int64.MAX), RecordValue.Int(Int64.MIN), RecordValue.Int(300), RecordValue.Int(0)
+            ])
+        ]),
+        ("jet.diags/v1", [
+            RecordSection.new(300, (0..130).map(|index| -> RecordValue.Int(index - 65)).collect()),
+            RecordSection.new(2, [
+                map([("b", RecordValue.Null), ("ab", RecordValue.List([])), ("a", map([])), ("B", RecordValue.Str("")), ("é", RecordValue.Str(long_text.clone())), ("", RecordValue.Str("{{braces}} \"quoted\" \\slash"))]),
+                RecordValue.Str(long_text),
+                RecordValue.List([map([("k", map([("k", RecordValue.Str("k"))]))])])
+            ])
+        ])
+    ]
+}
+// Rust: tests/record_conformance.rs:206
+fn sealed(body: [UInt8]) -> [UInt8] {
+    bytes := body.to_vec()
+    bytes.extend_from_slice(sha256(body))
+    bytes
+}
+// Rust: tests/record_conformance.rs:214
+fn body_with(strings: [String], elements: [[UInt8]]) -> [UInt8] {
+    body := [0x4a, 0x45, 0x54, 0x52, 1, 1, 0x73] as [UInt8]
+    body.push(UInt8(strings.len()))
+    loop text in strings {
+        body.push(UInt8(text.len()))
+        body.extend_from_slice(text.as_bytes())
+    }
+    body.extend_from_slice([1, 1, UInt8(elements.len())])
+    loop element in elements { body.push(UInt8(element.len())) }
+    loop element in elements { body.extend_from_slice(element) }
+    body
+}
+// Rust: tests/record_conformance.rs:233
+fn decode_fixtures() -> [[UInt8]] {
+    valid :: encode_record("jet.items/v1", &record_fixtures()[1].1).expect("fixture encodes")
+    flipped := valid.clone()
+    flipped[flipped.len() - 1] ^= 1
+    bad_magic := valid.clone()
+    bad_magic[3] = 0x58
+    trailing := body_with(["a"], [[4, 0]])
+    trailing.push(0)
+    [
+        valid.clone(), encode_record("jet.program/v1", []).expect("empty record encodes"), valid[..20].to_vec(), flipped, bad_magic,
+        sealed([0x4a, 0x45, 0x54, 0x52, 2, 1, 0x73, 0, 0]),
+        sealed([0x4a, 0x45, 0x54, 0x52, 0x81, 0, 1, 0x73, 0, 0]),
+        sealed([0x4a, 0x45, 0x54, 0x52, 1, 1, 0x73, 0, 2, 1, 0, 1, 0]),
+        sealed([0x4a, 0x45, 0x54, 0x52, 1, 1, 0x73, 1, 1, 0xff, 0]),
+        sealed(body_with(["b", "a"], [[7, 2, 0, 0, 1, 0]])),
+        sealed(body_with(["a"], [[7, 2, 0, 0, 0, 0]])),
+        sealed(body_with([], [[4, 5]])), sealed(body_with([], [[9]])), sealed(body_with([], [[0, 0]])), sealed(body_with([], [[5, 3, 1]])),
+        sealed(body_with([], [[3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x02]])), sealed(trailing)
+    ]
+}
+// Rust: tests/record_conformance.rs:262
+fn rust_decode_line(bytes: [UInt8]) -> String {
+    if decode_record(bytes) == {
+        .Ok(record) -> {
+            again :: encode_record(&record.schema, &record.sections).expect("decoded record re-encodes")
+            "decode ok {hex(again)} {hex(record.digest)}"
+        }
+        .Err(error) -> "decode {error}"
+    }
+}
+// Rust: tests/record_conformance.rs:272
+struct KeyFixture {
+    files: [(String, String)]
+    manifest: String?
+    facts: [(String, String)]
+    compiler: String
+    package: String
+    dependencies: [(String, String)]
+}
+// Rust: tests/record_conformance.rs:281
+fn key_fixtures() -> [KeyFixture] {
+    [
+        KeyFixture{files: [], manifest: None, facts: [], compiler: "", package: "single-file:main.jet", dependencies: []},
+        KeyFixture{
+            files: [("Source/b.jet", "fn b() {}\n"), ("Source/A.jet", "// é\nfn a() {}\n"), ("Source/a/z.jet", "")],
+            manifest: Some("package jet_sema {\n    version: \"0.1.0\"\n}\n"),
+            facts: [("web", "false"), ("active_os", "linux"), ("edition", "2026")],
+            compiler: "jet-dev-3f2a", package: "jet_sema@0.1.0",
+            dependencies: [("jet_parser@0.1.0", "b1946ac92492d2347c6235b4d2611184e6b1b3f7c4b5c1f8b1946ac92492d234"), ("core", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")]
+        }
+    ]
+}
+// Rust: tests/record_conformance.rs:310-404 — path_durabilityTests.jet.

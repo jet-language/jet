@@ -15,8 +15,8 @@ The Rust-hosted compiler under `Source/` and `crates/` remains the production
 and reference compiler. The default CLI continues to use that reference path.
 The staged Jet-authored compiler under `Compiler/` may implement the same
 contracts in bootstrap scopes, but this document does not claim that Jet is
-self-hosted. Rust emission, rustc/LLVM, and Cranelift remain supported target
-and execution seams. No Core contract is defined as permanently owned by a
+self-hosted. Rust emission and rustc/LLVM remain supported target and
+execution seams. No Core contract is defined as permanently owned by a
 particular compiler implementation.
 
 ## Purpose and scope
@@ -99,7 +99,7 @@ make the change at the contract boundary and migrate its users in one cutover.
 
 ## One meaning across execution tiers
 
-AOT, resident JIT, interpreter/comptime evaluation, and web execution are
+AOT, interpreter/comptime evaluation, and web execution are
 points on one semantic continuum. Preparation and runtime cost may differ, but
 the following observable contract does not:
 
@@ -114,7 +114,7 @@ Every applicable tier consumes one semantic Core call record and one provider
 contract. The tier adapter supplies representation and execution mechanics; it
 does not reimplement Core policy. The shared call record names the signature,
 fallibility, effect, capability, provider route, pure/interpreter route, and
-AOT/JIT adapter facts so that a tier cannot quietly invent a second meaning.
+AOT adapter facts so that a tier cannot quietly invent a second meaning.
 
 A portable fallback is valid only when it preserves the same contract. A web or
 test provider is explicit when it changes the host resource, and its typed

@@ -616,7 +616,7 @@ fn ui_snapshots() {
         } else if cost_cli {
             run_cost_cli_snapshot(&path)
         } else if dev_interpreter {
-            match jet::Interpreter::dev_iteration(&file_arg, runtime_ffi, true) {
+            match crate::common::dev_run(&file_arg, runtime_ffi, true) {
                 jet::Interpreter::RunOutcome::Problems(diags) => {
                     jet::render_diagnostics(&shown_path, &src, &diags)
                 }

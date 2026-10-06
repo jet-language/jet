@@ -808,6 +808,8 @@ pub const TEST_EXPECTED_FAIL_PARAM: &str = "expected_fail";
 /// `.measure` selects measurement, and `.cases(rows)` supplies per-row claims.
 pub const SCOPE_TEST_SETUP: &str = "setup";
 pub const SCOPE_TEST_EXPECT_FAIL: &str = "expect_fail";
+/// D-TEST-STOPMSG1=A: non-empty literal substring of the region's raw stop text.
+pub const SCOPE_TEST_EXPECT_MESSAGE: &str = "message";
 pub const SCOPE_TEST_TIMEOUT: &str = "timeout";
 pub const SCOPE_TEST_SKIP: &str = "skip";
 /// D-CLAIM-BENCH1=A (ratified 2026-08-07, card #1641): measurement is a
@@ -826,12 +828,6 @@ pub const KW_JOB: &str = "Job";
 /// D-JOB-SUBCMD1=C: the closed scope menu accepted by `#Job(<scope>)`.
 pub const JOB_SCOPE_VARIANTS: &[&str] = &["Dev", "Ship", "Internal"];
 
-/// D-JOB-NAMES1=A (amends D-JOB-SUBCMD1=C): the only names a `#Job fn` cannot
-/// take. `run`, `dev`, `build`, and `test` are Jet's lifecycle entries
-/// (D-JPK-TASKRUN1=A); a built program's own argument parser answers `help`
-/// and `version`. Jobs run under `jet jobs <name>` (D-JOB-ARGV1=A), so every
-/// other Jet command word is an ordinary job name. Sema rejects these as E0928.
-pub const JOB_RESERVED_NAMES: &[&str] = &["run", "dev", "build", "test", "help", "version"];
 
 /// D-SCHEDULE1: `#Every(…)` — a declarative schedule marker on a `#Job fn`.
 /// Legal only alongside `#Job` (E0925 otherwise).

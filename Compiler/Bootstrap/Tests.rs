@@ -31,8 +31,8 @@ const BACKEND_DEV_HOST_PROFILE: &str = "\n[profile.dev.package.jet-foundation]\n
 /// Parallel rustc jobs (and codegen tokens) of a backend build. The
 /// stage-zero backend build runs inside the bootstrap test's memory cap, so
 /// at most this many unit or repository crates compile at once. Measured
-/// peaks: sharded unit crates <= 2.1 GB each, jet_jit 5.7 GB, so six jobs
-/// stay well inside a 22 GB cap.
+/// peaks: sharded unit crates <= 2.1 GB each, jet_evalhost <= 5.7 GB, so six
+/// jobs stay well inside a 22 GB cap.
 const BACKEND_BUILD_JOBS: &str = "6";
 /// Stack for the backend build's rustc threads (`RUST_MIN_STACK`): the
 /// emitted units' deeply nested blocks overflow rustc's default 8 MiB in
@@ -62,8 +62,8 @@ const BACKEND_COLD_TRAITS: [&str; 3] = ["__jet_Decode", "__jet_Encode", "__jet_C
 const BACKEND_COLD_PROFILE: &str = "opt-level = 0\ndebug = false\n";
 /// `BACKEND_BUILD_JOBS` of a release-profile backend build. Measured peaks:
 /// 12 MB hot shards about 3 GB (opt-level 2), the runtime 2 GB, the largest
-/// cold shard 4.6 GB (opt-level 0); with jet_jit (5.7 GB in dev) five jobs
-/// stay under a 22 GB cap.
+/// cold shard 4.6 GB (opt-level 0); with jet_evalhost (<= 5.7 GB in dev) five
+/// jobs stay under a 22 GB cap.
 const BACKEND_RELEASE_BUILD_JOBS: &str = "5";
 /// `JET_STAGE_ZERO_PROFILE=release` builds this test run's backend artifacts
 /// (jetc0 above all) with this Cargo profile instead of dev: stage one is
@@ -85,7 +85,6 @@ fn backend_release_profile() -> Option<&'static str> {
 }
 const BOOTSTRAP_ENTRY_RELATIVE: &str = "src/compiler.jet";
 const SMALL_ENTRY_RELATIVE: &str = "main.jet";
-const TASK_ROOTS_FIXTURE_SOURCE: &str = include_str!("../JetEval/Tests/TaskRoots.jet");
 const CORE_FILES_PARTIAL_MOVE_SIBLINGS_SOURCE: &str =
     include_str!("../../tests/fixtures/core_files_partial_move_siblings.jet");
 const UNINIT_FIXED_PARTIAL_EXIT_SOURCE: &str =
@@ -252,12 +251,12 @@ impl Drop for BootstrapTaskRootsCursorState {
 }
 // bootstrap:task-roots-end
 fn assert_source_completion_retired(
-    completion: ::jet_jit::SourceExecutionCompletion,
+    completion: ::jet_evalhost::SourceExecutionCompletion,
 ) {
     match completion.disposition {
-        ::jet_jit::SourceExecutionCompletionDisposition::Invoked {
+        ::jet_evalhost::SourceExecutionCompletionDisposition::Invoked {
             retirement: Some(
-                ::jet_jit::SourceExecutionCompletionRetirement::Completed(retirement),
+                ::jet_evalhost::SourceExecutionCompletionRetirement::Completed(retirement),
             ),
             ..
         } => {
@@ -549,7 +548,7 @@ fn __jet_bootstrap_harness_entry(
         let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(
             compiler_image.artifact,
         );
-        let completion_scope = ::jet_jit::SourceExecutionCompletionScope::new();
+        let completion_scope = ::jet_evalhost::SourceExecutionCompletionScope::new();
         let mut completion_owner =
             crate::compiler_bootstrap_runner::BootstrapRunCompletionOwner::new(
                 completion_scope.clone(),
@@ -603,7 +602,7 @@ fn __jet_bootstrap_harness_entry(
         let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(
             compiler_image.header.artifact,
         );
-        let completion_scope = ::jet_jit::SourceExecutionCompletionScope::new();
+        let completion_scope = ::jet_evalhost::SourceExecutionCompletionScope::new();
         let mut completion_owner =
             crate::compiler_bootstrap_runner::BootstrapRunCompletionOwner::new(
                 completion_scope.clone(),
@@ -689,7 +688,7 @@ fn __jet_bootstrap_harness_entry(
         );
 
         let close_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let cursor_handle = ::jet_jit::SourceResources::loop_cursor_handle_id();
+        let cursor_handle = ::jet_evalhost::SourceResources::loop_cursor_handle_id();
         let cursor_state = BootstrapTaskRootsCursorState {
             close_count: close_count.clone(),
         };
@@ -726,16 +725,16 @@ fn __jet_bootstrap_harness_entry(
         let shared_finalizer = finalizer.id;
         let shared_finalizer_return_type = finalizer.return_type.clone();
         fn assert_shared_finalizer_completed(
-            completion: ::jet_jit::SourceExecutionCompletion,
+            completion: ::jet_evalhost::SourceExecutionCompletion,
             helper: ::jet_foundation::MIR::MirFunctionId,
             mir: &::jet_foundation::MIR::MirProgram,
             return_type: &::jet_foundation::MIR::MirType,
         ) {
             assert_eq!(completion.function, Some(helper));
             match completion.disposition {
-                ::jet_jit::SourceExecutionCompletionDisposition::Invoked {
+                ::jet_evalhost::SourceExecutionCompletionDisposition::Invoked {
                     retirement: Some(
-                        ::jet_jit::SourceExecutionCompletionRetirement::Completed(retirement),
+                        ::jet_evalhost::SourceExecutionCompletionRetirement::Completed(retirement),
                     ),
                     writebacks,
                     ..
@@ -832,7 +831,7 @@ fn __jet_bootstrap_harness_entry(
                 .unwrap_or_else(|error| panic!("task-root Source resource retirement failed: {error:?}"))
             {
                 if let Err(completion) =
-                    ::jet_jit::SourceExecutionCompletionScope::record_current(completion)
+                    ::jet_evalhost::SourceExecutionCompletionScope::record_current(completion)
                 {
                     panic!("task-root parent produced an unrouted completion: {completion:?}");
                 }
@@ -972,7 +971,7 @@ fn __jet_bootstrap_harness_entry(
             let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(
                 compiler_image.artifact,
             );
-            let completion_scope = ::jet_jit::SourceExecutionCompletionScope::new();
+            let completion_scope = ::jet_evalhost::SourceExecutionCompletionScope::new();
             let mut completion_owner =
                 crate::compiler_bootstrap_runner::BootstrapRunCompletionOwner::new(
                     completion_scope.clone(),
@@ -1030,12 +1029,12 @@ fn __jet_bootstrap_harness_entry(
                 execution,
             };
             fn assert_source_completion_retired(
-                completion: ::jet_jit::SourceExecutionCompletion,
+                completion: ::jet_evalhost::SourceExecutionCompletion,
             ) {
                 match completion.disposition {
-                    ::jet_jit::SourceExecutionCompletionDisposition::Invoked {
+                    ::jet_evalhost::SourceExecutionCompletionDisposition::Invoked {
                         retirement: Some(
-                            ::jet_jit::SourceExecutionCompletionRetirement::Completed(retirement),
+                            ::jet_evalhost::SourceExecutionCompletionRetirement::Completed(retirement),
                         ),
                         ..
                     } => {
@@ -1792,6 +1791,50 @@ fn bootstrap_private_self_compile_harness() {
     assert_optional_codec_roundtrip(&stage_two_binary, &small_project, &session, "stage-two");
     assert_mir_optimizer_compiler_source(&stage_two_binary, &compiler_project, &session);
     assert_mir_optimizer_fixtures(&stage_two_binary, repo, &session);
+    // D-PATTERN-HOLE-NAME1=A: both checkers publish the same hole refusal,
+    // source span, and contextual repair, before choosing an execution tier.
+    for position in ["if", "value", "route", "bytes", "or", "and", "optional", "constant", "typed"] {
+        let source = fs::read_to_string(repo.join(format!(
+            "tests/ui/pattern_hole_reuse_{position}.jet"
+        ))).unwrap();
+        let project = session.join(format!("pattern-hole-reuse-{position}"));
+        let entry = write_source_fixture_project(&project, SOURCE_FIXTURE_MANIFEST, &source);
+        let output = session.join(format!("pattern-hole-reuse-{position}.rs"));
+        let receipt = session.join(format!("pattern-hole-reuse-{position}.receipt"));
+        run_generated_artifact(
+            &stage_two_binary,
+            "runner",
+            &project,
+            SMALL_ENTRY_RELATIVE,
+            &output,
+            &receipt,
+        );
+        assert!(!output.exists(), "a reused hole must not produce backend source");
+        let generated = receipt_reports(&receipt)
+            .into_iter()
+            .filter(|report| report.contains("\"code\":\"E0118\""))
+            .collect::<Vec<_>>();
+        let reference = rust_reference_reports(&entry, &source, &[(entry.clone(), source.clone())])
+            .into_iter()
+            .filter(|report| report.contains("\"code\":\"E0118\""))
+            .collect::<Vec<_>>();
+        assert_eq!(reference.len(), 1, "{position}: {reference:?}");
+        assert_eq!(generated, reference, "{position}: checker report parity");
+    }
+    let pattern_project = session.join("pattern-hole-new-names");
+    write_source_fixture_project(
+        &pattern_project,
+        SOURCE_FIXTURE_MANIFEST,
+        include_str!("../../Examples/features/basics/pattern_matching.jet"),
+    );
+    compile_and_run_source_fixture(
+        &stage_two_binary,
+        repo,
+        &session,
+        "pattern_hole_new_names",
+        &pattern_project,
+        include_str!("../../Examples/features/expected/basics/pattern_matching.out"),
+    );
 
     let invalid_project = session.join("invalid-imported-source");
     let (invalid_entry, invalid_entry_source, imported_source_path, imported_source) =
@@ -2035,6 +2078,26 @@ fn bootstrap_private_self_compile_harness() {
             REGISTRY_ROWS_FIXTURE_SOURCE,
             REGISTRY_ROWS_FIXTURE_EXPECTED,
         ),
+        (
+            "annotated_tuple_empty_list",
+            include_str!("../../Examples/features/basics/tuple_empty_list.jet"),
+            include_str!("../../Examples/features/expected/basics/tuple_empty_list.out"),
+        ),
+        (
+            "prelude_assert_eq_shadow",
+            include_str!("../../Examples/features/traits/prelude_assert_eq_shadow.jet"),
+            include_str!("../../Examples/features/expected/traits/prelude_assert_eq_shadow.out"),
+        ),
+        (
+            "user_read_dir",
+            include_str!("../../Examples/features/traits/user_read_dir.jet"),
+            include_str!("../../Examples/features/expected/traits/user_read_dir.out"),
+        ),
+        (
+            "math_copy",
+            include_str!("../../Examples/features/math/copy.jet"),
+            include_str!("../../Examples/features/expected/math/copy.out"),
+        ),
     ] {
         let project = session.join(label);
         write_source_fixture_project(&project, SOURCE_FIXTURE_MANIFEST, source);
@@ -2046,6 +2109,78 @@ fn bootstrap_private_self_compile_harness() {
             &project,
             expected,
         );
+    }
+    let scoped_files_project = session.join("scoped-mapped-files");
+    let scoped_files_path = scoped_files_project.join("inside.txt");
+    let scoped_files_source = format!(r#"
+use core.files as files
+fn scoped_read(scope: files.FileScope) -> String {{
+    scope.read("inside.txt") ?? panic("scope")
+}}
+fn run() {{
+    scope :: files.scope(Authority.from_rights(["FS.Read:{}"]))
+    print(scoped_read(scope))
+    mapped :: files.map(Path.from("{}")) ?? panic("map")
+    window :: mapped.window_len(0, 1) ?? panic("window")
+    print(Int.from_u8(window[0]))
+    loop line in mapped.lines() {{
+        print(Int.from_u8(line[0]))
+        print(String.from_bytes(~line) ?? panic("utf8"))
+    }}
+}}
+"#, scoped_files_project.display(), scoped_files_path.display());
+    write_source_fixture_project(&scoped_files_project, SOURCE_FIXTURE_MANIFEST, &scoped_files_source);
+    fs::write(&scoped_files_path, "mapped\n").expect("write scoped mapped fixture");
+    compile_and_run_source_fixture(
+        &stage_two_binary,
+        repo,
+        &session,
+        "scoped-mapped-files",
+        &scoped_files_project,
+        "mapped\n\n109\n109\nmapped\n",
+    );
+    for (label, source, code) in [
+        (
+            "generic-concrete-bound-report",
+            "trait Shape { fn area(self) -> Int }\nstruct Token {}\nfn area<T: Shape>(value: T) -> Int { value.area() }\nfn run() { _ :: area<Token>(Token{}) }\n",
+            "E0905",
+        ),
+        (
+            "generic-forward-bound-report",
+            include_str!("../../tests/ui/generic_bound_forward_missing.jet"),
+            "E0905",
+        ),
+        (
+            "retired-raw-directory-report",
+            include_str!("../../tests/ui/path_raw_string_error.jet"),
+            "E0340",
+        ),
+    ] {
+        let code_field = format!("\"code\":\"{code}\"");
+        let project = session.join(label);
+        let entry = write_source_fixture_project(&project, SOURCE_FIXTURE_MANIFEST, source);
+        let output = session.join(format!("{label}.rs"));
+        let receipt = session.join(format!("{label}.receipt"));
+        run_generated_artifact(
+            &stage_two_binary,
+            "runner",
+            &project,
+            SMALL_ENTRY_RELATIVE,
+            &output,
+            &receipt,
+        );
+        assert!(!output.exists(), "invalid fixture reached Rust emission");
+        let generated = receipt_reports(&receipt)
+            .into_iter()
+            .filter(|report| report.contains(&code_field))
+            .collect::<Vec<_>>();
+        let source_closure = vec![(entry.clone(), source.to_string())];
+        let reference = rust_reference_reports(&entry, source, &source_closure)
+            .into_iter()
+            .filter(|report| report.contains(&code_field))
+            .collect::<Vec<_>>();
+        assert_eq!(reference.len(), 1, "{code} fixture must fail in sema");
+        assert_eq!(generated, reference, "{code} registry reports must agree");
     }
     for receiver in ["^self", "&self"] {
         for inline in [false, true] {
@@ -2193,33 +2328,18 @@ fn bootstrap_session_root() -> PathBuf {
 fn assemble_compiler_sources(repo: &Path, task_roots: bool) {
     // The assembler runs only node; the test's own CARGO_TARGET_DIR may lie
     // outside `repo`, which jet-env rejects for cargo commands.
-    let output = Command::new(repo.join("Tools/agent/jet-env"))
+    let mut command = Command::new(repo.join("Tools/agent/jet-env"));
+    command
         .current_dir(repo)
         .env_remove("CARGO_TARGET_DIR")
-        .args(["node", "Compiler/Bootstrap/assemble.mjs"])
+        .args(["node", "Compiler/Bootstrap/assemble.mjs"]);
+    if task_roots {
+        command.arg("--task-roots");
+    }
+    let output = command
         .output()
         .unwrap_or_else(|error| panic!("cannot run bootstrap assembler: {error}"));
     assert_command_success("bootstrap assembler", &output);
-    if !task_roots {
-        return;
-    }
-    let compiler_entry = home_path()
-        .join(BOOTSTRAP_PROJECT_RELATIVE)
-        .join(BOOTSTRAP_ENTRY_RELATIVE);
-    let mut compiler_source = fs::read_to_string(&compiler_entry).unwrap_or_else(|error| {
-        panic!(
-            "cannot read assembled compiler fixture `{}`: {error}",
-            compiler_entry.display()
-        )
-    });
-    compiler_source.push_str("\n\n");
-    compiler_source.push_str(TASK_ROOTS_FIXTURE_SOURCE);
-    fs::write(&compiler_entry, compiler_source).unwrap_or_else(|error| {
-        panic!(
-            "cannot add task-root fixture to the private compiler unit `{}`: {error}",
-            compiler_entry.display()
-        )
-    });
 }
 
 fn write_small_program(project: &Path) -> PathBuf {
@@ -2694,7 +2814,7 @@ fn backend_identity_build_script(
     });
     // The identity code is inlined (the root build.rs `#[path]`-includes the
     // same two files) rather than taken from a `jet` build-dependency: that
-    // dependency compiled the `jet` and `jet-jit` crates a second time for the
+    // dependency compiled the `jet` and `jet-evalhost` crates a second time for the
     // host, doubling the largest repository crates' share of the build.
     let inline_module = |relative: &str| {
         let path = repo.join(relative);
@@ -2749,17 +2869,11 @@ fn main() {{
     fs::write(manifest_dir.join(".bootstrap-artifact-id"), &identity)
         .expect("generated compiler identity receipt must be writable");
     println!("cargo:rustc-env=JET_COMPILER_BUILD_ID={{identity}}");
-    // The identity of the compiler *sources* (the root build.rs formula, no
-    // generated extras): every stage built from one source tree reports it as
-    // its compiler identity to the programs it compiles, so the compiler image
-    // a self-compile archives does not change from stage to stage.
-    let source_identity = BuildIdentity::semantic_id(
-        root,
-        BuildIdentity::COMPILER_DOMAIN,
-        BuildIdentity::COMPILER_SOURCES,
-        &facts,
-    )
-    .expect("generated compiler source identity must be computable");
+    // Compiler-authored MIR records the source identity, not this binary's
+    // backend profile, rustc flags, or generated extras. BUILD_ID above keeps
+    // all of those facts for artifact receipts and build/cache invalidation.
+    let source_identity = BuildIdentity::compiler_source_id(root)
+        .expect("generated compiler source identity must be computable");
     println!("cargo:rustc-env=JET_COMPILER_SOURCE_ID={{source_identity}}");
     println!("cargo::rustc-check-cfg=cfg(jet_bootstrap_compiler_artifact)");
     println!("cargo:rustc-cfg=jet_bootstrap_compiler_artifact");
@@ -3609,13 +3723,14 @@ fn replace_self_tokens(text: &str, self_type: &str) -> String {
 
 /// The compiler-image envelope reader checks the archive prefix exactly as
 /// full restore does, without decoding the MIR payload or hashing the
-/// archive: it accepts a well-formed prefix in front of a payload and
-/// checksum that full restore rejects.
+/// archive: it accepts a well-formed prefix in front of a payload that
+/// restore rejects and a checksum that the per-file verification rejects.
+/// Restore itself never hashes the archive.
 #[test]
 fn compiler_image_envelope_reads_only_the_checked_prefix() {
     use crate::compiler_bootstrap_compiler_image::{
-        read_compiler_image_envelope, restore_compiler_image, CompilerImageMetadataWriter,
-        FORMAT_VERSION, MAGIC,
+        read_compiler_image_envelope, restore_compiler_image, verify_compiler_image_checksum,
+        CompilerImageMetadataWriter, FORMAT_VERSION, MAGIC,
     };
     use ::jet_foundation::MIR::{MirArtifactId, MirFunctionId, MIR_SCHEMA_VERSION};
     let digest = [7u8; 32];
@@ -3627,9 +3742,9 @@ fn compiler_image_envelope_reads_only_the_checked_prefix() {
         writer.write_u64(11);
         writer.write_u64(13);
         writer.write_raw(&digest);
+        writer.write_raw(&[0u8; 32]);
         writer.write_bytes(b"identity").unwrap();
         writer.write_bytes(b"not a MIR payload").unwrap();
-        writer.write_raw(&[0u8; 32]);
         writer.finish()
     };
     let bytes = archive(MIR_SCHEMA_VERSION);
@@ -3642,6 +3757,10 @@ fn compiler_image_envelope_reads_only_the_checked_prefix() {
     let restored = restore_compiler_image(&bytes, digest, MirArtifactId(11), MirFunctionId(13));
     assert_eq!(
         restored.err().map(|error| error.0).as_deref(),
+        Some("truncated native MIR image"),
+    );
+    assert_eq!(
+        verify_compiler_image_checksum(&bytes).err().map(|error| error.0).as_deref(),
         Some("compiler-image archive checksum mismatch"),
     );
     let envelope_error = |bytes: &[u8], expected_digest: [u8; 32], artifact: u64, entry: u64| {
@@ -3881,34 +4000,40 @@ fn write_backend_project(
     });
     let image_path = source_dir.join("compiler.image");
     match compiler_image {
-        Some(image) => fs::write(&image_path, image).unwrap_or_else(|error| {
-            panic!("cannot write backend compiler image `{}`: {error}", image_path.display())
-        }),
+        // The compiler restores this image from its own executable without
+        // hashing it, so the archive checksum is verified here, once per file.
+        Some(image) => {
+            crate::compiler_bootstrap_compiler_image::verify_compiler_image_checksum(image)
+                .unwrap_or_else(|error| {
+                    panic!("backend compiler image for `{}` is corrupt: {error}", image_path.display())
+                });
+            fs::write(&image_path, image).unwrap_or_else(|error| {
+                panic!("cannot write backend compiler image `{}`: {error}", image_path.display())
+            })
+        }
         None => match fs::remove_file(&image_path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => panic!("cannot remove stale backend compiler image `{}`: {error}", image_path.display()),
         },
     }
-    // The backend project is its own workspace root, so it repeats the
-    // repository's `[patch.crates-io]` (the vendored cranelift-jit that
-    // jet-jit needs) and starts from the repository lockfile, keeping every
-    // dependency at the version the repository builds with.
+    // The backend project is its own workspace root, so it starts from the
+    // repository lockfile, keeping every dependency at the version the
+    // repository builds with.
     let manifest = format!(
-        "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2021\"\nbuild = \"build.rs\"\n\n[dependencies]\njet = {{ path = {:?} }}\njet-codegen = {{ path = {:?} }}\njet-driver = {{ path = {:?} }}\njet-foundation = {{ path = {:?} }}\njet-jit = {{ path = {:?} }}\njet-net = {{ path = {:?} }}\njet-pkg-model = {{ path = {:?} }}\njet-rt = {{ path = {:?} }}\njet-store = {{ path = {:?} }}\n{ffi_dependency}{unit_dependencies}\n[patch.crates-io]\ncranelift-jit = {{ path = {:?} }}\n{unit_profiles}{build_profile}",
+        "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2021\"\nbuild = \"build.rs\"\n\n[dependencies]\njet = {{ path = {:?} }}\njet-codegen = {{ path = {:?} }}\njet-driver = {{ path = {:?} }}\njet-evalhost = {{ path = {:?} }}\njet-foundation = {{ path = {:?} }}\njet-net = {{ path = {:?} }}\njet-pkg-model = {{ path = {:?} }}\njet-rt = {{ path = {:?} }}\njet-store = {{ path = {:?} }}\n{ffi_dependency}{unit_dependencies}\n{unit_profiles}{build_profile}",
         package_name,
         repo.display().to_string(),
         // The linked Host modules name these crates directly (codegen's native
         // loop cursor key, the package model's devtools policy, the record store).
         repo.join("crates/jet-codegen").display().to_string(),
         repo.join("crates/jet-driver").display().to_string(),
+        repo.join("crates/jet-evalhost").display().to_string(),
         repo.join("crates/jet-foundation").display().to_string(),
-        repo.join("crates/jet-jit").display().to_string(),
         repo.join("crates/jet-net").display().to_string(),
         repo.join("crates/jet-pkg-model").display().to_string(),
         repo.join("crates/jet-rt").display().to_string(),
         repo.join("crates/jet-store").display().to_string(),
-        repo.join("crates/vendor/cranelift-jit-0.112.3").display().to_string(),
         ffi_dependency = ffi_dependency,
         unit_dependencies = unit_dependencies,
         unit_profiles = unit_profiles,

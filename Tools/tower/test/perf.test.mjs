@@ -64,12 +64,16 @@ test('board state is slim, closed content is lazy, and HTTP responses cache safe
   const closed = await closedResponse.json();
   assert.equal(closedResponse.status, 200, JSON.stringify(closed));
   const closedCard = closed.cards.find(c => c.num === added.json.result.num);
-  assert.equal(typeof closedCard.body, 'string');
   assert.equal(closedCard.phase, 'done');
+  assert.equal(closedCard.title, 'Closed through API');
+  assert.equal(Object.hasOwn(closedCard, 'body'), false, 'closed list rows are summaries; bodies load per card');
+  assert.equal(Object.hasOwn(closedCard, 'log'), false);
 
   const detail = await (await fetch(url(`/api/card?id=${encodeURIComponent(ref)}`))).json();
   assert.equal(detail.card.phase, 'done');
   assert.equal(detail.card.title, 'Closed through API');
+  assert.equal(typeof detail.card.body, 'string');
+  assert.equal(detail.card.criteria[0].status, 'met');
   // The active board must not touch the closed-card store. A broken archive
   // may break /api/closed, but it cannot make the default board unavailable.
   writeFileSync(historyFile(dir), '{broken');

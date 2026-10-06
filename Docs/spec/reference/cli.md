@@ -9,12 +9,32 @@ target/debug/jet help
 ```
 
 and the command table in
-[`Compiler/JetCli/Source/Cli/Commands.jet`](../../../Compiler/JetCli/Source/Cli/Commands.jet).
-The Rust host's copy in
-[`crates/jet-cli/src/CLI.rs`](../../../crates/jet-cli/src/CLI.rs) is held
-equal to it by `node Compiler/Bootstrap/check-command-table.mjs`. Run
-`jet help <command>` for the complete options for one command; do not infer an
+[`Compiler/JetFoundation/Source/Registry/CLICommands.jet`](../../../Compiler/JetFoundation/Source/Registry/CLICommands.jet).
+The Rust host keeps commands in
+[`crates/jet-foundation/src/CLICommands.rs`](../../../crates/jet-foundation/src/CLICommands.rs)
+and flags in `crates/jet-cli/src/CLI.rs`; `node Compiler/Bootstrap/check-command-table.mjs` compares the assembled tables.
+Run `jet help <command>` for the complete options for one command; do not infer an
 option from an older guide.
+
+## Project jobs
+
+Write a named chore as `#Job fn deploy(region: String) { … }`, then run
+`jet deploy --region eu`. Jet flags come before the job name:
+`jet --interpret deploy --region eu`. Every word after the name belongs to
+the job; a separator immediately after the name is optional.
+
+Lookup is commands, visible project jobs, retired/moved spelling diagnostics,
+source paths, then `jet-X` on PATH. Jobs cannot reuse any command in the
+shared command table (E0928); retired words are not reserved. A job wins over
+a same-named folder, matching `.jet` file, or PATH program. A word ending in
+`.jet` always names a file, and `jet run deploy` explicitly runs a path.
+`.Internal` jobs cannot be selected from argv. Outside a project the job
+lookup is skipped. Unknown words report E2101 and suggest commands and jobs.
+
+`jet jobs` lists jobs; its `--graph`, `--status`, `--explain`, and `--watch`
+views remain available. `jet jobs deploy` is an error teaching `jet deploy`,
+not an alias. `jet run <entry> -- deploy` and `<built-program> deploy` use
+the same checked job dispatch.
 
 ## Root command index
 
@@ -48,7 +68,7 @@ jet image [args]                     Build a declared container image
 jet eval <file.jet|expression>       Evaluate pure Jet and print the value (`--json` for JSON)
 jet init [args]                      Create package settings in this directory
 jet repl [<file.jet>] [--project <dir>] [--console] [--sandbox data] [--console-ttl <milliseconds>] [--allow=<RIGHTS>] [--deny=<RIGHTS>] Try Jet code interactively
-jet jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name> [<job args>...]] List, inspect, watch, or run named project jobs
+jet jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name>] List, inspect, or watch named project jobs
 jet budget [args]                    check performance limits or update baselines
 jet audit [args]                     Inspect implicit copies, exercised memory witnesses, or dependencies
 jet package --kind <desktop|game> --target <linux-appimage|macos-app|windows-msix> [--executable <path>|<source.jet>] [--output <path>] [--profile <dev|release|name>] [--phase <build,cook,stage,package,export,deploy,run>] [--backend <aot>] [--renderer <headless|raylib>] [--cook-mode <fast|reproducible|scripts-only>] [--export-preset <default|store|headless>] [--deploy-to <path>] [--crash-reporter <off|on|opt-in>] [--crash-consent <not-requested|granted|denied>] [--dry-run] [--explain] [--resume|--cancel] [--clean|--scripts-only] [--run-now] [--package <id>] [--name <name>] [--version <version>] [--icon <path>] [--icon-format <png|icns|ico|svg>] [--icon-size <pixels>] [--publisher <name>] [--description <text>] [--update-channel <channel>] [--update-url <url>] Create a desktop or game application bundle
@@ -137,6 +157,13 @@ The options below are intentionally named exactly as in `target/debug/jet help`:
   control test or development execution; `--browser` selects browser engines.
 - `--explain-partition` is the web-target build option that shows JavaScript or
   WebAssembly assignment.
+- `--threads N` caps the compiler at N threads on `build`, `run`, `check`,
+  `test`, `dev`, and `inspect` (D-JOBS1=A); without it the compiler admits
+  threads automatically up to the reported cores. It never limits the threads
+  of the program jet builds or runs, every value gives the same diagnostics
+  and output bytes, and `build --verbose` reports the cap it used. No
+  environment variable sets it. `--jobs` and `-j` are usage errors (E2102)
+  that point to `--threads`, because `jobs` names project jobs.
 
 For C and C++, the driver-specific options are `--project-root`, `--build-root`,
 `-c`, `-o`, `-MMD`, `-MD`, `-MF`, `-MT`, reserved `--sysroot`, `-I`, `-D`, `-L`,
@@ -144,13 +171,13 @@ For C and C++, the driver-specific options are `--project-root`, `--build-root`,
 `--target`. The exact acceptance and forwarding behavior is documented in
 [CC driver hosts](cc-driver.md).
 
-## Jet-hosted `check` and `build`
+## Jet-hosted `check`, `build`, and `run`
 
 The Jet-hosted CLI ([`Compiler/JetCli`](../../../Compiler/JetCli)) runs
-`jet check <file>` and `jet build <file>` through the Jet compiler
-(`jet_driver_compile`). It gives the compiler one authorized source root: the
-nearest directory at or above the file that holds `package.jet`, or the file's
-own directory for a loose file, with every `.jet` file under it (dot names,
+`jet check <file>`, `jet build <file>`, and `jet run <file>` through the Jet
+compiler (`jet_driver_compile`). It gives the compiler one authorized source
+root: the nearest directory at or above the file that holds `package.jet`, or
+the file's own directory for a loose file, with every `.jet` file under it (dot names,
 `target`, `build`, `node_modules`, `bin`, and nested projects stay out) and the
 generated C/C++ binding caches. The Core library bodies are read from the Jet
 toolchain source tree named by `JET_TOOLCHAIN_ROOT` (the directory that holds
@@ -161,8 +188,20 @@ by `node Compiler/Bootstrap/generate-core-sources.mjs`, which
 holds current.
 
 `jet build` writes `.jet/build/<stem>` in that source root. The default and
-`--profile debug` builds use the Jet-native backend (`lir_lower_program` and a
-static x86-64 executable); a program that backend cannot lower yet is refused
+`--profile debug` builds use the Jet-native backend: `lir_lower_entry` lowers
+the functions `fn run` reaches to a relocatable object, and the in-process
+linker binds it to the runtime pack shipped beside `jet` into a static x86-64
+executable. A program that backend cannot lower yet is refused
 with E2104. `--release` (or `--profile release`) compiles the emitted Rust with
 rustc and the release profile flags. Other build flags and profiles are
 refused with E2104 until they are ported.
+
+`jet run <file>` (and the `jet <file>` shorthand) builds the same executable
+with the same profile rules, then runs it on the caller's stdin, stdout, and
+stderr and exits with its status (1 when a signal ended it). The program's
+arguments are the words after the first standalone `--`, or else the
+positional words after the file. Advisory lints stay hidden unless `--verbose`
+or `-v` comes before `--`; a verbose run reports them before the program
+starts. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
+`--color`, and `--threads` are refused with E2104 until they are ported, and so
+is `jet test`.

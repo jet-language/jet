@@ -1,0 +1,132 @@
+// Private test continuation of core.crypto.vault; Main wires shared helper visibility.
+use core.crypto.vault as vault
+use core.crypto.vault.[SecretComposePlan, JetVaultKeyWrapError, JetWrappedVaultKey]
+use std.cell.[RefCell, Cell]
+use std.sync.[Arc, Mutex, Barrier]
+use std.sync.atomic.Ordering
+// GATE #4494: native per-thread state and barrier; no production mock/provider.
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2022
+#ThreadLocal
+static VAULT_AUTHORIZER: RefCell<(fn(String) -> Bool)?> = RefCell.new(None)
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2024
+pub fn jet_vault_set_test_authorizer(callback: fn(String) -> Bool) -> { VAULT_AUTHORIZER.with((slot) -> slot.borrow_mut().replace(Val(^callback))) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2028
+pub fn jet_vault_clear_test_authorizer() -> { VAULT_AUTHORIZER.with((slot) -> slot.borrow_mut().replace(None)) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2053
+#ThreadLocal
+static VAULT_TEST_TRUST_PATH: RefCell<OSPath?> = RefCell.new(None)
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2055
+pub fn jet_vault_set_test_trust_path(path: ^OSPath?) -> { VAULT_TEST_TRUST_PATH.with((slot) -> slot.borrow_mut().replace(^path)) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2872
+#ThreadLocal
+static VAULT_TEST_FAULT: RefCell<String?> = RefCell.new(None)
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2874
+pub fn jet_vault_set_test_fault(fault: String?) -> { VAULT_TEST_FAULT.with((slot) -> slot.borrow_mut().replace(^fault)) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2889
+static VAULT_TEST_BACKUP_BARRIER: Mutex<(OSPath, Arc<Barrier>, Arc<Barrier>)?> = Mutex.new(None)
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2898
+pub fn jet_vault_set_test_backup_barrier(barriers: ^(OSPath, Arc<Barrier>, Arc<Barrier>)?) -> {
+    guard :: VAULT_TEST_BACKUP_BARRIER.lock().unwrap()
+    guard.replace(^barriers)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:203
+#ThreadLocal
+static JVKW_TEST_TIME: Cell<U64?> = Cell.new(None)
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:204
+#ThreadLocal
+static JVKW_RECIPIENT_OPEN_COUNT: Cell<USize> = Cell.new(0)
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:205
+#ThreadLocal
+static JVKW_PASSPHRASE_OPEN_COUNT: Cell<USize> = Cell.new(0)
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:206
+#ThreadLocal
+static JVKW_X25519_COUNT: Cell<USize> = Cell.new(0)
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:207
+#ThreadLocal
+static JVKW_HKDF_COUNT: Cell<USize> = Cell.new(0)
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:208
+#ThreadLocal
+static JVKW_AEAD_COUNT: Cell<USize> = Cell.new(0)
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:210
+pub fn jet_vault_keywrap_set_test_time(value: U64?) -> { JVKW_TEST_TIME.with((slot) -> slot.set(value)) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:211
+pub fn jet_vault_keywrap_test_recipient_open_count() -> USize { JVKW_RECIPIENT_OPEN_COUNT.with((slot) -> slot.get()) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:212
+pub fn jet_vault_keywrap_test_passphrase_open_count() -> USize { JVKW_PASSPHRASE_OPEN_COUNT.with((slot) -> slot.get()) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:213
+pub fn jet_vault_keywrap_test_x25519_count() -> USize { JVKW_X25519_COUNT.with((slot) -> slot.get()) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:214
+pub fn jet_vault_keywrap_test_hkdf_count() -> USize { JVKW_HKDF_COUNT.with((slot) -> slot.get()) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:215
+pub fn jet_vault_keywrap_test_aead_count() -> USize { JVKW_AEAD_COUNT.with((slot) -> slot.get()) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:216
+pub fn jet_vault_keywrap_reset_test_crypto_counts() -> {
+    JVKW_RECIPIENT_OPEN_COUNT.with((slot) -> slot.set(0)); JVKW_PASSPHRASE_OPEN_COUNT.with((slot) -> slot.set(0))
+    JVKW_X25519_COUNT.with((slot) -> slot.set(0)); JVKW_HKDF_COUNT.with((slot) -> slot.set(0)); JVKW_AEAD_COUNT.with((slot) -> slot.set(0))
+    JET_PWHASH_TEST_RUNS.store(0, Ordering.SeqCst)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:484
+fn jvkw_provider_platform_supported(os: String, env: String, width: String, arch: String) -> Bool {
+    os == "linux" && env == "gnu" && width == "64" && (arch == "x86_64" || arch == "aarch64")
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3171
+#Test("keygen_encrypt_decrypt_round_trips") {
+    (identity, recipient) :: vault.jet_vault_keygen_impl()
+    plaintext :: "hunter2".into_bytes()
+    ciphertext :: vault.jet_vault_encrypt_impl([recipient], plaintext).unwrap()
+    assert(ciphertext != plaintext, "ciphertext must not equal plaintext")
+    decrypted :: vault.jet_vault_decrypt_impl(identity, ciphertext).unwrap()
+    assert(decrypted == plaintext)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3181
+#Test("wrong_identity_fails_to_decrypt") {
+    (_, recipient) :: vault.jet_vault_keygen_impl()
+    (other_identity, _) :: vault.jet_vault_keygen_impl()
+    ciphertext :: vault.jet_vault_encrypt_impl([recipient], "secret".into_bytes()).unwrap()
+    assert(vault.jet_vault_decrypt_impl(other_identity, ciphertext).is_err())
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3189
+#Test("pairs_wire_round_trips") {
+    pairs :: [("db_password", "hunter2"), ("api_key", "abc123")]
+    bytes :: vault.jet_vault_encode_pairs(pairs)
+    assert(vault.jet_vault_decode_pairs(bytes) == Val(pairs))
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3199
+#Test("pairs_wire_rejects_truncated_input") {
+    pairs :: [("k", "v")]
+    bytes := vault.jet_vault_encode_pairs(pairs)
+    &bytes.truncate(bytes.len() - 1)
+    assert(vault.jet_vault_decode_pairs(bytes) == None)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3207
+#Test("composed_reads_recompute_and_audit_names_only") {
+    source := [String:String]{"DB_HOST": "host-value", "DB_PASSWORD": "password-value", "DB_USER": "user-value"}
+    plans :: [SecretComposePlan{output: "DB_URL", from: ["DB_HOST", "DB_PASSWORD", "DB_USER"], template: "postgres://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/app"}]
+    stack1 := [String]{}
+    first :: vault.resolve_secret_read("DB_URL", source, plans, &stack1)
+    source["DB_HOST"] = "rotated-host"
+    stack2 := [String]{}
+    second :: vault.resolve_secret_read("DB_URL", source, plans, &stack2)
+    assert(first != None && second != None)
+    assert(first != second)
+    _ :: &source.remove("DB_PASSWORD")
+    stack3 := [String]{}
+    assert(vault.resolve_secret_read("DB_URL", source, plans, &stack3) == None)
+    audit :: vault.secret_read_audit_line("DB_URL", ["DB_USER", "DB_HOST", "DB_PASSWORD", "DB_HOST"]).unwrap()
+    assert(audit == "read output=DB_URL from=[DB_HOST,DB_PASSWORD,DB_USER]\n")
+    assert(!audit.contains("host-value"))
+    assert(!audit.contains("password-value"))
+    assert(!audit.contains("user-value"))
+}
+// Faithful negative parser controls for VaultKeyWrap.rs125; no inline originals.
+#Test("wrapped_key_fixed_header_error_precedence") {
+    assert(JetWrappedVaultKey.from_bytes([U8]{}) == .Err(JetVaultKeyWrapError.InvalidLength))
+    bytes := [U8].repeat(0, 16)
+    &bytes[..<4].copy_from_slice("JVKW".as_bytes())
+    bytes[4] = 2
+    assert(JetWrappedVaultKey.from_bytes(~bytes) == .Err(JetVaultKeyWrapError.UnsupportedVersion))
+    bytes[4] = 1
+    assert(JetWrappedVaultKey.from_bytes(~bytes) == .Err(JetVaultKeyWrapError.UnsupportedMode))
+    bytes[5] = 1
+    assert(JetWrappedVaultKey.from_bytes(^bytes) == .Err(JetVaultKeyWrapError.UnsupportedKeyType))
+}

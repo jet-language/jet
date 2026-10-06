@@ -1,0 +1,75 @@
+use core.compute.runtime.top_compute.JetComputeError
+use core.compute.runtime.top_compute_02.[available, copy, binary, unary, matmul, sum,
+    scale, stream_new, u32_value]
+use core.sys.target
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:1841
+#Test("cuda_kernel_parameters_retain_checked_u32_limit") {
+    assert(u32_value(0, "count") == Ok(U32{0}))
+    assert(u32_value(U32.MAX as USize, "count") == Ok(U32.MAX))
+    if USize.MAX > U32.MAX as USize {
+        match u32_value((U32.MAX as USize) + 1, "launch count") {
+            Err(.InvalidShape(message)) -> assert(message == "CUDA launch count exceeds the u32 kernel limit")
+            _ -> assert(false)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:1847
+#Test("cuda_zero_length_copy_does_not_load_the_driver") {
+    if target.selected_os() == .Linux { assert(copy([]) == Ok([])) }
+    else {
+        match copy([]) {
+            Err(.Unsupported(message)) -> assert(message == "CUDA backend is unavailable on this target")
+            _ -> assert(false)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:1940
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:1977
+#Test("cuda_shape_failures_precede_native_launch") {
+    if target.selected_os() == .Linux {
+        assert(binary(0, [F32{1.0}], []) == Err(JetComputeError.InvalidShape("CUDA binary inputs have different lengths")))
+        assert(matmul([], [], USize.MAX, 1, 2) == Err(JetComputeError.InvalidShape("CUDA matmul output size overflow")))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:2176
+#Test("cuda_non_linux_dispatch_fails_closed_without_cpu_fallback") {
+    if target.selected_os() != .Linux {
+        assert(not available())
+        expected :: Err(JetComputeError.Unsupported("CUDA backend is unavailable on this target"))
+        assert(copy([]) == expected)
+        assert(binary(0, [], []) == expected)
+        assert(unary(0, []) == expected)
+        assert(matmul([], [], 0, 0, 0) == expected)
+        assert(sum([]) == expected)
+        assert(scale([], F32{2.0}) == expected)
+        match stream_new() {
+            Err(.Unsupported(message)) -> assert(message == "CUDA backend is unavailable on this target")
+            _ -> assert(false)
+        }
+    }
+}
+
+use core.compute.runtime.top_compute.jet_compute_vulkan.[Params, check, run]
+use std.mem as mem
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:2882
+#Test("vulkan_result_preserves_operation_and_native_status") {
+    assert(check(0, "buffer creation") == Ok(()))
+    assert(check(-3, "buffer creation") ==
+        Err(JetComputeError.Device("Vulkan buffer creation failed with VkResult -3")))
+    assert(check(2, "queue completion") ==
+        Err(JetComputeError.Device("Vulkan queue completion failed with VkResult 2")))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:2869
+#Test("vulkan_shader_parameters_are_six_scalar_words") {
+    assert(mem.size_of<Params>() == 6 * mem.size_of<U32>())
+    assert(mem.align_of<Params>() == mem.align_of<U32>())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:3453
+#Test("vulkan_empty_result_precedes_input_limit_and_native_loader") {
+    parameters :: Params { count: 0, rows: 0, inner: 0, cols: 0, op: 0, scalar: F32{0.0} }
+    assert(run(0, [[], [], [], [], [], []], 0, parameters) == Ok([]))
+    assert(run(0, [[], [], [], [], [], []], 1, parameters) ==
+        Err(JetComputeError.InvalidShape("Vulkan kernels accept at most five input buffers")))
+}

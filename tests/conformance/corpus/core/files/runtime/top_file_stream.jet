@@ -1,0 +1,34 @@
+use core.files.runtime.top_fs_runtime_ops.[jet_std_fs_temp_file, jet_std_fs_read_bytes]
+use core.files.runtime.top_fs_write_ops.jet_std_fs_write_bytes
+use core.files.runtime.top_file_stream.[jet_std_files_open, jet_std_files_create, jet_std_files_append,
+    jet_std_file_reader_path, jet_std_file_reader_read_line, jet_std_file_writer_write_line,
+    jet_std_file_writer_flush, jet_std_file_writer_path]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FileStream.rs:69
+#Test("native_stream_read_strips_all_terminal_cr_lf_and_distinguishes_eof") {
+    owner :: jet_std_fs_temp_file(&"stream-read-control").unwrap()
+    path :: owner.path.to_string_lossy().to_string()
+    bytes :: "one\r\r\n\nlast\r".bytes()
+    assert(jet_std_fs_write_bytes(&path, &bytes) == Ok(()))
+    reader := jet_std_files_open(&path).unwrap()
+    assert(jet_std_file_reader_path(&reader) == path)
+    assert(jet_std_file_reader_read_line(&reader) == Ok(Val("one")))
+    assert(jet_std_file_reader_read_line(&reader) == Ok(Val("")))
+    assert(jet_std_file_reader_read_line(&reader) == Ok(Val("last")))
+    assert(jet_std_file_reader_read_line(&reader) == Ok(None))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FileStream.rs:24,43,98,120
+#Test("native_buffered_writer_create_append_and_flush_preserve_exact_newlines") {
+    owner :: jet_std_fs_temp_file(&"stream-write-control").unwrap()
+    path :: owner.path.to_string_lossy().to_string()
+    writer := jet_std_files_create(&path).unwrap()
+    assert(jet_std_file_writer_path(&writer) == path)
+    assert(jet_std_file_writer_write_line(&writer, &"first") == Ok(()))
+    assert(jet_std_file_writer_flush(&writer) == Ok(()))
+    drop(^writer)
+    writer := jet_std_files_append(&path).unwrap()
+    assert(jet_std_file_writer_write_line(&writer, &"second") == Ok(()))
+    assert(jet_std_file_writer_flush(&writer) == Ok(()))
+    drop(^writer)
+    assert(jet_std_fs_read_bytes(&path) == Ok("first\nsecond\n".bytes()))
+}

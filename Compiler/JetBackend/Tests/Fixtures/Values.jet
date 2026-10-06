@@ -1,0 +1,251 @@
+// Inline aggregates (Lower/Values.jet): natural field offsets, by-pointer
+// parameters, hidden result pointers, frame storage for loop-carried values,
+// and inline values held in box payloads and list elements.
+use jet_foundation.[
+    MIRAccess, MIRBinaryOp, MIRCallArg, MIRCallee, MIRConstant, MIRCopyFact,
+    MIRDropKind, MIREnumArg, MIRField, MIRFieldID, MIRFieldValue, MIRFunction,
+    MIRFunctionID, MIROperation, MIRPhiIncoming, MIRProgram, MIRTerminator,
+    MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeKind, MIRVariant,
+    MIRVariantPayload, mir_field_id, mir_function_id, mir_owned_ownership,
+    mir_type_from_kind, mir_type_id,
+]
+
+fn fx_values_struct(b: &FxBuilder, name: String, fields: [MIRFieldValue]) -> MIRValueID Never! {
+    fx_owned(&b, fx_named(name), MIROperation.Struct{type_id: mir_type_id(name), fields: fields})
+}
+
+fn fx_values_field(b: &FxBuilder, base: MIRValueID, owner: String, name: String, ty: MIRType) -> MIRValueID Never! {
+    fx_value(&b, ty, fx_borrow(), MIROperation.Field{base: base, field: mir_field_id("{owner}.{name}")})
+}
+
+fn fx_values_set(owner: String, name: String, value: MIRValueID) -> MIRFieldValue Never! {
+    MIRFieldValue{field: mir_field_id("{owner}.{name}"), value: value}
+}
+
+fn fx_values_show(b: &FxBuilder, base: MIRValueID, owner: String, name: String, ty: MIRType) Never! {
+    value :: fx_values_field(&b, base, owner, name, ty)
+    fx_print(&b, value)
+}
+
+// struct Flags { on: Bool, off: Bool, count: Int, label: String }
+// struct Wrap { inner: Flags, tag: Bool }
+// fn make(n: Int) -> Wrap { Wrap{inner: Flags{on: true, off: false, count: n, label: "wrapped"}, tag: true} }
+// fn total(w: Wrap) -> Int { w.inner.count + 1 }
+// fn run() {
+//     w :: make(41)
+//     print(w.inner.on); print(w.inner.off); print(w.inner.count)
+//     print(w.inner.label); print(w.tag); print(total(w))
+//     c :: w.clone(); drop(w); print(c.inner.label); drop(c)
+// }
+// expect-stdout values-inline: "true\nfalse\n41\nwrapped\ntrue\n42\nwrapped\n"
+fn fx_values_inline() -> MIRProgram Never! {
+    flags :: fx_named("Flags")
+    wrap :: fx_named("Wrap")
+    types :: [MIRTypeDef]{
+        fx_type_def("Flags", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Flags", "on", fx_bool()), fx_field("Flags", "off", fx_bool()), fx_field("Flags", "count", fx_int()), fx_field("Flags", "label", fx_string())}, methods: [MIRFunctionID]{}}),
+        fx_type_def("Wrap", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Wrap", "inner", flags), fx_field("Wrap", "tag", fx_bool())}, methods: [MIRFunctionID]{}}),
+    }
+    make := fx_builder()
+    n :: fx_param(&make, "n", fx_int(), mir_copy_ownership())
+    on :: fx_copy(&make, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: true}})
+    off :: fx_copy(&make, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: false}})
+    label :: fx_owned(&make, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "wrapped"}})
+    inner :: fx_values_struct(&make, "Flags", [MIRFieldValue]{fx_values_set("Flags", "on", on), fx_values_set("Flags", "off", off), fx_values_set("Flags", "count", n), fx_values_set("Flags", "label", label)})
+    marked :: fx_copy(&make, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: true}})
+    built :: fx_values_struct(&make, "Wrap", [MIRFieldValue]{fx_values_set("Wrap", "inner", inner), fx_values_set("Wrap", "tag", marked)})
+    fx_block(&make, 0, MIRTerminator.Return{value: Val(built)})
+
+    total := fx_builder()
+    w_param :: fx_param(&total, "w", wrap, fx_borrow())
+    w_inner :: fx_values_field(&total, w_param, "Wrap", "inner", flags)
+    count :: fx_values_field(&total, w_inner, "Flags", "count", fx_int())
+    one :: fx_int_const(&total, 1)
+    sum :: fx_int_op(&total, MIRBinaryOp.Add, "add", count, one)
+    fx_block(&total, 0, MIRTerminator.Return{value: Val(sum)})
+
+    r := fx_builder()
+    forty_one :: fx_int_const(&r, 41)
+    w :: fx_owned(&r, wrap, MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("make")}, args: [MIRCallArg]{fx_arg(forty_one, MIRAccess.Read)}, type_args: [MIRType]{}})
+    w_flags :: fx_values_field(&r, w, "Wrap", "inner", flags)
+    fx_values_show(&r, w_flags, "Flags", "on", fx_bool())
+    fx_values_show(&r, w_flags, "Flags", "off", fx_bool())
+    fx_values_show(&r, w_flags, "Flags", "count", fx_int())
+    fx_values_show(&r, w_flags, "Flags", "label", fx_string())
+    fx_values_show(&r, w, "Wrap", "tag", fx_bool())
+    summed :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("total")}, args: [MIRCallArg]{fx_arg(w, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_print(&r, summed)
+    c :: fx_owned(&r, wrap, MIROperation.Copy{value: w, fact: MIRCopyFact.Explicit})
+    fx_do(&r, MIROperation.Drop{value: w, kind: MIRDropKind.Value})
+    c_flags :: fx_values_field(&r, c, "Wrap", "inner", flags)
+    fx_values_show(&r, c_flags, "Flags", "label", fx_string())
+    fx_do(&r, MIROperation.Drop{value: c, kind: MIRDropKind.Value})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("make", make, wrap), fx_function("total", total, fx_int()), fx_function("run", r, fx_unit())}, ^types)
+}
+
+// struct Acc { sum: Int, last: Int }
+// fn run() {
+//     acc := Acc{sum: 0, last: 0}
+//     i := 0
+//     loop i < 4 { i += 1; acc = Acc{sum: acc.sum + i, last: i} }
+//     print(acc.sum); print(acc.last)
+//     pick :: if acc.sum > 5 -> Acc{sum: 1, last: 2} else -> Acc{sum: 3, last: 4}
+//     print(pick.sum); print(pick.last)
+// }
+// expect-stdout values-loop: "10\n4\n1\n2\n"
+fn fx_values_loop() -> MIRProgram Never! {
+    acc_ty :: fx_named("Acc")
+    types :: [MIRTypeDef]{fx_type_def("Acc", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Acc", "sum", fx_int()), fx_field("Acc", "last", fx_int())}, methods: [MIRFunctionID]{}})}
+    r := fx_builder()
+    acc :: fx_local(&r, "acc", acc_ty, mir_owned_ownership())
+    i :: fx_local(&r, "i", fx_int(), mir_copy_ownership())
+    zero :: fx_int_const(&r, 0)
+    start :: fx_values_struct(&r, "Acc", [MIRFieldValue]{fx_values_set("Acc", "sum", zero), fx_values_set("Acc", "last", zero)})
+    fx_do(&r, MIROperation.WritePlace{place: acc, value: start})
+    fx_do(&r, MIROperation.WritePlace{place: i, value: zero})
+    fx_block(&r, 0, MIRTerminator.Jump{target: MIRBlockID{value: 1}})
+    i_now :: fx_copy(&r, fx_int(), MIROperation.ReadPlace{place: i})
+    four :: fx_int_const(&r, 4)
+    more :: fx_compare(&r, MIRBinaryOp.Lt, i_now, four)
+    fx_block(&r, 1, MIRTerminator.Branch{condition: more, then_target: MIRBlockID{value: 2}, else_target: MIRBlockID{value: 3}})
+    i_old :: fx_copy(&r, fx_int(), MIROperation.ReadPlace{place: i})
+    one :: fx_int_const(&r, 1)
+    i_next :: fx_int_op(&r, MIRBinaryOp.Add, "add", i_old, one)
+    fx_do(&r, MIROperation.WritePlace{place: i, value: i_next})
+    acc_old :: fx_value(&r, acc_ty, fx_borrow(), MIROperation.ReadPlace{place: acc})
+    old_sum :: fx_values_field(&r, acc_old, "Acc", "sum", fx_int())
+    new_sum :: fx_int_op(&r, MIRBinaryOp.Add, "add", old_sum, i_next)
+    next :: fx_values_struct(&r, "Acc", [MIRFieldValue]{fx_values_set("Acc", "sum", new_sum), fx_values_set("Acc", "last", i_next)})
+    fx_do(&r, MIROperation.ReplacePlace{place: acc, value: next})
+    fx_block(&r, 2, MIRTerminator.Jump{target: MIRBlockID{value: 1}})
+    acc_end :: fx_value(&r, acc_ty, fx_borrow(), MIROperation.ReadPlace{place: acc})
+    end_sum :: fx_values_field(&r, acc_end, "Acc", "sum", fx_int())
+    fx_print(&r, end_sum)
+    fx_values_show(&r, acc_end, "Acc", "last", fx_int())
+    five :: fx_int_const(&r, 5)
+    large :: fx_compare(&r, MIRBinaryOp.Gt, end_sum, five)
+    fx_block(&r, 3, MIRTerminator.Branch{condition: large, then_target: MIRBlockID{value: 4}, else_target: MIRBlockID{value: 5}})
+    one_a :: fx_int_const(&r, 1)
+    two_a :: fx_int_const(&r, 2)
+    picked_large :: fx_values_struct(&r, "Acc", [MIRFieldValue]{fx_values_set("Acc", "sum", one_a), fx_values_set("Acc", "last", two_a)})
+    fx_block(&r, 4, MIRTerminator.Jump{target: MIRBlockID{value: 6}})
+    three_b :: fx_int_const(&r, 3)
+    four_b :: fx_int_const(&r, 4)
+    picked_small :: fx_values_struct(&r, "Acc", [MIRFieldValue]{fx_values_set("Acc", "sum", three_b), fx_values_set("Acc", "last", four_b)})
+    fx_block(&r, 5, MIRTerminator.Jump{target: MIRBlockID{value: 6}})
+    pick :: fx_owned(&r, acc_ty, MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: MIRBlockID{value: 4}, value: picked_large}, MIRPhiIncoming{block: MIRBlockID{value: 5}, value: picked_small}}})
+    fx_values_show(&r, pick, "Acc", "sum", fx_int())
+    fx_values_show(&r, pick, "Acc", "last", fx_int())
+    fx_block(&r, 6, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, ^types)
+}
+
+// Loop-carried phis that swap: every iteration's new Acc is built in the same
+// frame storage, and `a` takes `b`'s value while `b` takes the new one.
+// fn run() {
+//     (a, b, n) := (Acc{sum: 1, last: 10}, Acc{sum: 2, last: 20}, 0)
+//     loop n < 3 { (a, b, n) = (b, Acc{sum: a.sum + b.sum, last: a.last}, n + 1) }
+//     print(a.sum); print(a.last); print(b.sum); print(b.last)
+// }
+// expect-stdout values-phi: "5\n20\n8\n10\n"
+fn fx_values_phi() -> MIRProgram Never! {
+    acc_ty :: fx_named("Acc")
+    types :: [MIRTypeDef]{fx_type_def("Acc", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Acc", "sum", fx_int()), fx_field("Acc", "last", fx_int())}, methods: [MIRFunctionID]{}})}
+    r := fx_builder()
+    one :: fx_int_const(&r, 1)
+    ten :: fx_int_const(&r, 10)
+    a0 :: fx_values_struct(&r, "Acc", [MIRFieldValue]{fx_values_set("Acc", "sum", one), fx_values_set("Acc", "last", ten)})
+    two :: fx_int_const(&r, 2)
+    twenty :: fx_int_const(&r, 20)
+    b0 :: fx_values_struct(&r, "Acc", [MIRFieldValue]{fx_values_set("Acc", "sum", two), fx_values_set("Acc", "last", twenty)})
+    n0 :: fx_int_const(&r, 0)
+    fx_block(&r, 0, MIRTerminator.Jump{target: MIRBlockID{value: 1}})
+    // Phi operands from block 2 are defined below; their ids are fixed by
+    // creation order: b2's `c` and `n1` follow the three phis and `more`.
+    a_ids :: r.next
+    a :: fx_owned(&r, acc_ty, MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: MIRBlockID{value: 0}, value: a0}, MIRPhiIncoming{block: MIRBlockID{value: 2}, value: MIRValueID{value: 100 + a_ids + 2}}}})
+    b :: fx_owned(&r, acc_ty, MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: MIRBlockID{value: 0}, value: b0}, MIRPhiIncoming{block: MIRBlockID{value: 2}, value: MIRValueID{value: 100 + a_ids + 10}}}})
+    n :: fx_copy(&r, fx_int(), MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: MIRBlockID{value: 0}, value: n0}, MIRPhiIncoming{block: MIRBlockID{value: 2}, value: MIRValueID{value: 100 + a_ids + 12}}}})
+    three :: fx_int_const(&r, 3)
+    more :: fx_compare(&r, MIRBinaryOp.Lt, n, three)
+    fx_block(&r, 1, MIRTerminator.Branch{condition: more, then_target: MIRBlockID{value: 2}, else_target: MIRBlockID{value: 3}})
+    a_sum :: fx_values_field(&r, a, "Acc", "sum", fx_int())
+    b_sum :: fx_values_field(&r, b, "Acc", "sum", fx_int())
+    a_last :: fx_values_field(&r, a, "Acc", "last", fx_int())
+    new_sum :: fx_int_op(&r, MIRBinaryOp.Add, "add", a_sum, b_sum)
+    c :: fx_values_struct(&r, "Acc", [MIRFieldValue]{fx_values_set("Acc", "sum", new_sum), fx_values_set("Acc", "last", a_last)})
+    step :: fx_int_const(&r, 1)
+    n1 :: fx_int_op(&r, MIRBinaryOp.Add, "add", n, step)
+    if b.value != 100 + a_ids + 2 || c.value != 100 + a_ids + 10 || n1.value != 100 + a_ids + 12 -> panic("fx_values_phi: phi operand ids drifted")
+    fx_block(&r, 2, MIRTerminator.Jump{target: MIRBlockID{value: 1}})
+    fx_values_show(&r, a, "Acc", "sum", fx_int())
+    fx_values_show(&r, a, "Acc", "last", fx_int())
+    fx_values_show(&r, b, "Acc", "sum", fx_int())
+    fx_values_show(&r, b, "Acc", "last", fx_int())
+    fx_block(&r, 3, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, ^types)
+}
+
+// struct Pt { x: Int, on: Bool, name: String }
+// enum Holder { Empty, Has(Pt) }
+// fn run() {
+//     o :: Val(Pt{x: 7, on: true, name: "opt"}); print(o!.name); print(o!.x)
+//     h :: Holder.Has(Pt{x: 9, on: false, name: "enum"})
+//     if h == .Has(p) { print(p.name); print(p.on) }
+//     l :: [Pt{x: 1, on: true, name: "a"}, Pt{x: 2, on: false, name: "b"}]
+//     print(l[1].name); print(l[0].x)
+//     drop(o); drop(h); drop(l)
+// }
+// expect-stdout values-payload: "opt\n7\nenum\nfalse\nb\n1\n"
+fn fx_values_payload() -> MIRProgram Never! {
+    pt :: fx_named("Pt")
+    holder :: fx_named("Holder")
+    maybe :: mir_type_from_kind(MIRTypeKind.Option{inner: pt})
+    list :: mir_type_from_kind(MIRTypeKind.List{inner: pt})
+    types :: [MIRTypeDef]{
+        fx_type_def("Pt", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Pt", "x", fx_int()), fx_field("Pt", "on", fx_bool()), fx_field("Pt", "name", fx_string())}, methods: [MIRFunctionID]{}}),
+        fx_type_def("Holder", MIRTypeDefKind.Enum{variants: [MIRVariant]{fx_variant("Empty", MIRVariantPayload.Unit), fx_variant("Has", MIRVariantPayload.Single{value: pt})}, methods: [MIRFunctionID]{}}),
+    }
+    r := fx_builder()
+    o_pt :: fx_values_pt(&r, 7, true, "opt")
+    o :: fx_owned(&r, maybe, MIROperation.Present{value: o_pt})
+    o_value :: fx_value(&r, pt, fx_borrow(), MIROperation.OptionValue{subject: o})
+    fx_values_show(&r, o_value, "Pt", "name", fx_string())
+    fx_values_show(&r, o_value, "Pt", "x", fx_int())
+    h_pt :: fx_values_pt(&r, 9, false, "enum")
+    h :: fx_owned(&r, holder, MIROperation.Enum{type_id: mir_type_id("Holder"), variant: "Has", args: [MIREnumArg]{MIREnumArg{field: None, value: h_pt, boxed: false}}})
+    has :: fx_copy(&r, fx_bool(), MIROperation.EnumIs{subject: h, owner: mir_type_id("Holder"), variant: "Has"})
+    fx_block(&r, 0, MIRTerminator.Branch{condition: has, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+    p :: fx_value(&r, pt, fx_borrow(), MIROperation.EnumPayload{subject: h, owner: mir_type_id("Holder"), variant: "Has", index: 0})
+    fx_values_show(&r, p, "Pt", "name", fx_string())
+    fx_values_show(&r, p, "Pt", "on", fx_bool())
+    fx_block(&r, 1, MIRTerminator.Jump{target: MIRBlockID{value: 2}})
+    first :: fx_values_pt(&r, 1, true, "a")
+    second :: fx_values_pt(&r, 2, false, "b")
+    l :: fx_owned(&r, list, MIROperation.BuildList{values: [MIRValueID]{first, second}, trait_coercion: None})
+    index_one :: fx_int_const(&r, 1)
+    second_read :: fx_list_index(&r, l, index_one, pt, false)
+    fx_values_show(&r, second_read, "Pt", "name", fx_string())
+    index_zero :: fx_int_const(&r, 0)
+    first_read :: fx_list_index(&r, l, index_zero, pt, false)
+    fx_values_show(&r, first_read, "Pt", "x", fx_int())
+    fx_do(&r, MIROperation.Drop{value: o, kind: MIRDropKind.Value})
+    fx_do(&r, MIROperation.Drop{value: h, kind: MIRDropKind.Value})
+    fx_do(&r, MIROperation.Drop{value: l, kind: MIRDropKind.Value})
+    fx_block(&r, 2, MIRTerminator.Return{value: None})
+    fx_list_program_with(fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, ^types))
+}
+
+fn fx_values_pt(b: &FxBuilder, x: Int, on: Bool, name: String) -> MIRValueID Never! {
+    x_value :: fx_int_const(&b, x)
+    on_value :: fx_copy(&b, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: on}})
+    name_value :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: name}})
+    fx_values_struct(&b, "Pt", [MIRFieldValue]{fx_values_set("Pt", "x", x_value), fx_values_set("Pt", "on", on_value), fx_values_set("Pt", "name", name_value)})
+}
+
+// The List Prelude rows of fx_list_program, added to any program.
+fn fx_list_program_with(program: MIRProgram) -> MIRProgram Never! {
+    p := program
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.list", "get", "jet_list_get", 4, MIRPreludeABI.Value))
+    p
+}

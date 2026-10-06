@@ -162,11 +162,13 @@ fn sema_user_template_function_info(function: Func) -> CtValue? {
 // Root `prep loop` declarations (Rust `expand_item_template_loops`). They
 // expand before registration in the module's known-time constant scope.
 
-pub fn sema_derive_expand_template_loops(items: [Item], diagnostics: &[Diagnostic]) -> [Item] {
+// Expands the root `prep loop` items of `items` in place; a list without one
+// is left untouched (not copied).
+pub fn sema_derive_expand_template_loops(items: &[Item], diagnostics: &[Diagnostic]) {
     has_loop :: loop item in items {
         if item == .TemplateLoop(_) -> break true
     } ?? false
-    if !has_loop -> return ~items
+    if !has_loop -> return
     scope := [NamedCtValue]{}
     loop item in items {
         if item == .Const(definition) {
@@ -186,7 +188,7 @@ pub fn sema_derive_expand_template_loops(items: [Item], diagnostics: &[Diagnosti
         }
         &expanded.push(item)
     }
-    expanded
+    items = expanded
 }
 
 // ---------------------------------------------------------------------------

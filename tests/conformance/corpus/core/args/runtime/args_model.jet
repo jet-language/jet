@@ -1,0 +1,314 @@
+// RUNTIME-ARGS-MODEL-1: real owned Core/args carriers and source builders.
+// Formatting takes an explicit normalized program-name fact; these fixtures
+// prove neither Path::file_name nor native argv capture/env/TTY/callbacks.
+// Original tests/core_args_foundations.rs (dynamic aliases/defaults),
+// tests/corelib_parts/compile.rs:303–404,478–498, args_spec/args_audit examples
+// and goldens, and tests/comptime_cli_parity.rs:773–915 remain unmodified.
+// Borrowed subcommand/target references (#4390/#4392) and guided validation
+// through the original store_option retain their native originals; no fake
+// parse, numeric validation, option storage or guided callback is introduced.
+use core.args.runtime.top_args as args_model
+// Nested filtering is value-policy coverage only: the original Rust in-place
+// Vec::retain at Args.rs:496–500 remains a canonical-storage reuse gate.
+
+fn model_fixture() -> args_model.JetArgsSpec Never! {
+    owned := args_model.JetArgsSpec{
+        entries: [args_model.JetArgKind]{}, inherited_entries: [args_model.JetArgKind]{},
+        prog: "", description: None, version: None, inherited_version: false
+    }
+    args_model.jet_args_program(^owned, "tool")
+}
+fn parsed_fixture() -> args_model.JetParsedArgs Never! {
+    args_model.JetParsedArgs{
+        flags: [String: Bool]{}, options: [String: [String]]{},
+        positionals: [String]{}, subcommand: None,
+        explicit_flags: Set.from([String]{}), explicit_options: Set.from([String]{})
+    }
+}
+
+#Test("program is explicit owned fact; empty and positional-only help keep original options quirk") {
+    empty :: model_fixture()
+    assert_eq(empty.prog, "tool")
+    assert_eq(args_model.jet_args_help(empty, "tool"), "Usage: tool [options]\n")
+    assert_eq(args_model.jet_args_completion(empty, "bash"), "bash completion: --help")
+    assert_eq(args_model.jet_args_show(empty), "ArgsSpec(0)")
+    described := args_model.jet_args_description(model_fixture(), "")
+    described = args_model.jet_args_positional(^described, "FILE", "input file")
+    described = args_model.jet_args_version(^described, "1.0")
+    expected :: "Usage: tool FILE [options]\n\n\n\nArguments:\n  FILE                   input file\n"
+    assert_eq(args_model.jet_args_help(described, "tool"), expected)
+    assert_eq(args_model.jet_args_completion(described, "fish"), "fish completion: --help --version FILE")
+}
+
+#Test("portable program suffix consumes actual filename fact, without native pathname policy") {
+    assert_eq(args_model.jet_args_normalize_source_name("tool.jet", "serve"), "tool serve")
+    assert_eq(args_model.jet_args_normalize_source_name("tool.jet", ""), "tool")
+    assert_eq(args_model.jet_args_normalize_source_name("tool.jet.jet", "nested command"), "tool.jet nested command")
+    assert_eq(args_model.jet_args_normalize_source_name("tool", " serve"), "tool  serve")
+    assert_eq(args_model.jet_args_normalize_source_name(".jet", ""), "")
+}
+
+#Test("help byte exact positional-first layout, note precedence, declaration order and standard spellings") {
+    spec := args_model.jet_args_description(model_fixture(), "builder fixture")
+    spec = args_model.jet_args_flag_short(^spec, "verbose", "v", "detail")
+    spec = args_model.jet_args_positional(^spec, "FILE", "input")
+    spec = args_model.jet_args_option_base(^spec, "mode", Val("m"), "run mode", "MODE", Val("fast"), Val("MODE_ENV"), true, true, args_model.JetArgValueKind.Choice([String]{"fast", "safe"}))
+    spec = args_model.jet_args_version(^spec, "tool 1.0")
+    expected :: "Usage: tool FILE [options]\n\nbuilder fixture\n\nArguments:\n  FILE                   input\n\nOptions:\n  -v, --verbose            detail\n  -m, --mode MODE          run mode (required) (repeatable) [default: fast] [precedence: flag > env > default] [env: MODE_ENV] [choices: fast, safe]\n  --help                   show this help\n  --version                show version\n"
+    assert_eq(args_model.jet_args_help(spec, "tool"), expected)
+    assert_eq(args_model.jet_args_completion(spec, "zsh"), "zsh completion: --help --version --verbose -v FILE --mode -m")
+    assert_eq(args_model.jet_args_show(spec), "ArgsSpec(3)")
+    assert_eq(args_model.jet_args_label("value", Val(""), Val("")), "-, --value ")
+    assert_eq(args_model.jet_args_label("flag", None, None), "--flag")
+}
+
+#Test("every option builder preserves exact kind, short/default/env/required/repeat and choices trimming") {
+    spec := args_model.jet_args_flag(model_fixture(), "plain", "plain flag")
+    spec = args_model.jet_args_option(^spec, "text", "text", "TEXT")
+    spec = args_model.jet_args_option_short(^spec, "short", "s", "short", "S")
+    spec = args_model.jet_args_option_default(^spec, "default", "default", "D", "")
+    spec = args_model.jet_args_option_env(^spec, "env", "env", "E", "ENV")
+    spec = args_model.jet_args_option_int(^spec, "jobs", "worker count", "N")
+    spec = args_model.jet_args_option_float(^spec, "ratio", "ratio", "F")
+    spec = args_model.jet_args_option_choice(^spec, "choice", "choice", "C", " , fast,\t safe ,fast,, ")
+    spec = args_model.jet_args_repeat(^spec, "tag", "classification", "TAG")
+    spec = args_model.jet_args_required_option(^spec, "required", "needed", "R")
+    fields :: args_model.jet_args_guided_fields(spec)
+    assert_eq(fields.len(), 10)
+    assert(fields[0].flag)
+    assert_eq(fields[1].meta, "TEXT")
+    assert_eq(fields[3].default ?? "missing", "")
+    assert_eq(fields[4].env ?? "", "ENV")
+    assert(fields[5].value == .Int)
+    assert(fields[6].value == .Float)
+    if fields[7].value == {
+        .Choice(values) -> assert_eq(values, [String]{"fast", "safe", "fast"})
+        else -> panic("choice kind lost")
+    }
+    assert(fields[8].repeat)
+    assert(fields[9].required)
+    assert_eq(fields[3].page, 0)
+    assert_eq(fields[4].page, 1)
+    assert_eq(fields[8].page, 2)
+    help :: args_model.jet_args_help(spec, "tool")
+    assert(help.contains("[default: ]"))
+    assert(!help.contains("[precedence:"))
+    short :: args_model.jet_args_find_short(spec, "s") ?? panic("short missing")
+    assert_eq(short.name, "short")
+    assert(short.option)
+    assert(args_model.jet_args_find_short(spec, "absent") == None)
+    flag_view :: args_model.jet_args_find_flag(spec, "plain") ?? panic("flag missing")
+    option_view :: args_model.jet_args_find_option(spec, "jobs") ?? panic("option missing")
+    assert_eq(flag_view.len(), 1)
+    assert_eq(option_view.len(), 1)
+    assert(args_model.jet_args_find_option(spec, "plain") == None)
+}
+
+#Test("parent inheritance excludes root help/completion, shadows only same kind and carries version fact") {
+    parent := args_model.jet_args_flag_short(model_fixture(), "verbose", "v", "root detail")
+    parent = args_model.jet_args_option_default(^parent, "config", "root config", "CONFIG", "default")
+    parent = args_model.jet_args_positional(^parent, "ROOT", "root positional")
+    parent = args_model.jet_args_version(^parent, "root 1.0")
+    child := args_model.jet_args_program(model_fixture(), "tool serve")
+    child = args_model.jet_args_description(^child, "Start the service and listen for requests")
+    child = args_model.jet_args_option_default(^child, "port", "value for --port", "PORT", "3000")
+    child = args_model.jet_args_flag(^child, "verbose", "shadowed child")
+    child = args_model.jet_args_option(^child, "verbose", "different kind remains", "V")
+    child = args_model.jet_args_version(^child, "child 2.0")
+    root :: args_model.jet_args_subcommand(^parent, "serve", "server", ^child)
+    assert_eq(root.entries.len(), 4)
+    if root.entries[3] == {
+        .Subcommand { name, spec, .. } -> {
+            assert_eq(name, "serve")
+            assert_eq(spec.prog, "tool serve")
+            assert_eq(spec.entries.len(), 2)
+            assert_eq(spec.inherited_entries.len(), 3)
+            assert(spec.inherited_version)
+            assert(spec.version == None)
+            expected :: "Usage: tool serve [options]\n\nStart the service and listen for requests\n\nOptions:\n  --port PORT              value for --port [default: 3000]\n  --verbose V              different kind remains\n  --help                   show this help\n"
+            assert_eq(args_model.jet_args_help(spec, "tool serve"), expected)
+            assert_eq(args_model.jet_args_completion(spec, "bash"), "bash completion: --help --port --verbose")
+            found :: args_model.jet_args_find_short(spec, "v") ?? panic("inherited short lost")
+            assert_eq(found.name, "verbose")
+            assert(!found.option)
+            fields :: args_model.jet_args_guided_fields(spec)
+            assert_eq(fields[0].name, "config")
+            assert_eq(fields[1].name, "ROOT")
+            assert_eq(fields[2].name, "port")
+            assert_eq(fields.len(), 3)
+        }
+        else -> panic("whole subcommand carrier lost")
+    }
+}
+
+#Test("nested inherited version and prior inherited same input win; subcommands never inherit") {
+    ancestor := args_model.jet_args_flag(model_fixture(), "shared", "ancestor")
+    ancestor.inherited_version = true
+    prior := args_model.jet_args_flag(model_fixture(), "shared", "prior")
+    child := model_fixture()
+    child.inherited_entries = ^prior.entries
+    grand := args_model.jet_args_flag(model_fixture(), "grand", "grand")
+    child = args_model.jet_args_subcommand(^child, "grand", "grand command", ^grand)
+    root :: args_model.jet_args_subcommand(^ancestor, "child", "child command", ^child)
+    if root.entries[1] == {
+        .Subcommand { spec, .. } -> {
+            assert(spec.inherited_version)
+            assert_eq(spec.inherited_entries.len(), 1)
+            if spec.inherited_entries[0] == {
+                .Flag { help, .. } -> assert_eq(help, "prior")
+                else -> panic("prior inherited flag lost")
+            }
+            assert_eq(args_model.jet_args_completion(spec, "fish"), "fish completion: --help grand")
+        }
+        else -> panic("child missing")
+    }
+}
+
+#Test("unknown suggestions use first eligible <=2 in inherited-first order, not nearest or standards") {
+    spec := args_model.jet_args_flag(model_fixture(), "cat", "first")
+    spec = args_model.jet_args_flag(^spec, "bat", "exact later")
+    expected :: "unknown option `--bat`\ndid you mean `--cat`?\n\n{args_model.jet_args_help(spec, "tool")}"
+    assert_eq(args_model.jet_args_unknown("bat", spec, "tool"), expected)
+    far :: "unknown option `--unrelated`\n\n{args_model.jet_args_help(spec, "tool")}"
+    assert_eq(args_model.jet_args_unknown("unrelated", spec, "tool"), far)
+    parent := args_model.jet_args_flag(model_fixture(), "cat", "inherited")
+    local := args_model.jet_args_flag(model_fixture(), "bat", "local")
+    local.inherited_entries = ^parent.entries
+    assert(args_model.jet_args_unknown("bat", local, "tool").contains("did you mean `--cat`?"))
+    empty :: model_fixture()
+    standards :: "unknown option `--help`\n\nUsage: tool [options]\n"
+    assert_eq(args_model.jet_args_unknown("help", empty, "tool"), standards)
+}
+
+#Test("scalar edit distance preserves ASCII behavior and fixes reported Rust byte-column discrepancy") {
+    assert_eq(args_model.jet_args_edit_distance("", ""), 0)
+    assert_eq(args_model.jet_args_edit_distance("", "abc"), 3)
+    assert_eq(args_model.jet_args_edit_distance("abc", ""), 3)
+    assert_eq(args_model.jet_args_edit_distance("verbose", "verbse"), 1)
+    assert_eq(args_model.jet_args_edit_distance("kitten", "sitting"), 3)
+    assert_eq(args_model.jet_args_edit_distance("ab", "ba"), 2)
+    // Main's explicit ruling: identical non-ASCII must be zero. The original
+    // Rust prev[b.len()] erroneously returns a stale byte-indexed column.
+    assert_eq(args_model.jet_args_edit_distance("é", "é"), 0)
+    assert_eq(args_model.jet_args_edit_distance("界", "界"), 0)
+    assert_eq(args_model.jet_args_edit_distance("😀", "😀"), 0)
+    assert_eq(args_model.jet_args_edit_distance("café", "cafe"), 1)
+    assert_eq(args_model.jet_args_edit_distance("", "é"), 1)
+}
+
+#Test("guided skips standards, coalesces ordered fields, retains metadata and uses four-field pages") {
+    spec := model_fixture()
+    standards :: [String]{"verbose", "quiet", "color", "help", "version"}
+    loop name in standards {
+        assert(args_model.jet_args_guided_skip_name(name))
+    }
+    spec = args_model.jet_args_flag(^spec, "verbose", "standard")
+    spec = args_model.jet_args_flag(^spec, "quiet", "standard")
+    spec = args_model.jet_args_flag(^spec, "color", "standard")
+    spec = args_model.jet_args_flag(^spec, "help", "standard")
+    spec = args_model.jet_args_flag(^spec, "version", "standard")
+    spec = args_model.jet_args_flag(^spec, "force", "old flag")
+    spec = args_model.jet_args_option_default(^spec, "force", "replacement", "WHEN", "no")
+    spec = args_model.jet_args_positional(^spec, "force", "does not replace help")
+    spec = args_model.jet_args_positional(^spec, "INPUT", "input")
+    spec = args_model.jet_args_option(^spec, "INPUT", "updated", "FILE")
+    spec = args_model.jet_args_flag(^spec, "INPUT", "ignored")
+    spec = args_model.jet_args_flag(^spec, "first", "first")
+    spec = args_model.jet_args_flag(^spec, "second", "second")
+    spec = args_model.jet_args_flag(^spec, "third", "third")
+    fields :: args_model.jet_args_guided_fields(spec)
+    assert_eq(fields.len(), 5)
+    assert_eq(fields[0].name, "force")
+    assert_eq(fields[0].help, "replacement")
+    assert_eq(fields[0].meta, "WHEN")
+    assert_eq(fields[0].default ?? "", "no")
+    assert(fields[0].positional)
+    assert(!fields[0].required)
+    assert(!fields[0].flag)
+    assert_eq(fields[0].positional_index ?? -1, 0)
+    assert_eq(fields[1].name, "INPUT")
+    assert_eq(fields[1].help, "updated")
+    assert_eq(fields[1].meta, "FILE")
+    assert(fields[1].positional)
+    assert(!fields[1].required)
+    assert_eq(fields[1].positional_index ?? -1, 1)
+    assert_eq(fields[3].page, 0)
+    assert_eq(fields[4].page, 1)
+}
+
+#Test("parsed show counts keys; guided explicit and initial use owned parsed facts, not env/default") {
+    spec := args_model.jet_args_flag(model_fixture(), "force", "force")
+    spec = args_model.jet_args_option_default(^spec, "mode", "mode", "MODE", "default")
+    spec = args_model.jet_args_positional(^spec, "FILE", "file")
+    fields :: args_model.jet_args_guided_fields(spec)
+    parsed := parsed_fixture()
+    assert_eq(args_model.jet_parsed_args_show(parsed), "ParsedArgs(flags=0, options=0, positionals=0)")
+    assert_eq(args_model.jet_args_guided_initial(fields[1], parsed), "")
+    _ :: &parsed.flags.add("force", false)
+    _ :: &parsed.flags.add("quiet", true)
+    _ :: &parsed.options.add("mode", [String]{"first", "last"})
+    &parsed.positionals.push("input")
+    parsed.subcommand = Val("serve")
+    &parsed.explicit_flags.add("force")
+    &parsed.explicit_options.add("mode")
+    assert_eq(args_model.jet_parsed_args_show(parsed), "ParsedArgs(flags=2, options=1, positionals=1)")
+    assert(args_model.jet_args_guided_field_explicit(fields[0], parsed))
+    assert(args_model.jet_args_guided_field_explicit(fields[1], parsed))
+    assert(args_model.jet_args_guided_field_explicit(fields[2], parsed))
+    assert_eq(args_model.jet_args_guided_initial(fields[0], parsed), "")
+    assert_eq(args_model.jet_args_guided_initial(fields[1], parsed), "last")
+    assert_eq(args_model.jet_args_guided_initial(fields[2], parsed), "")
+    _ :: &parsed.flags.add("force", true)
+    assert_eq(args_model.jet_args_guided_initial(fields[0], parsed), "true")
+}
+
+#Test("help alignment counts Unicode scalars, preserves long labels, and never reorders declarations") {
+    spec := args_model.jet_args_flag(model_fixture(), "é", "accent")
+    spec = args_model.jet_args_flag(^spec, "abcdefghijklmnopqrstuvwxy", "long")
+    expected :: "Usage: tool [options]\n\nOptions:\n  --é                      accent\n  --abcdefghijklmnopqrstuvwxy long\n  --help                   show this help\n"
+    assert_eq(args_model.jet_args_help(spec, "tool"), expected)
+    assert_eq(args_model.jet_args_completion(spec, "custom"), "custom completion: --help --é --abcdefghijklmnopqrstuvwxy")
+    left :: args_model.JetArgKind.Flag{name: "same", short: Val("x"), help: "a"}
+    right :: args_model.JetArgKind.Flag{name: "same", short: Val("y"), help: "b"}
+    different :: args_model.JetArgKind.Positional{name: "same", help: ""}
+    assert(args_model.jet_args_same_input(left, right))
+    assert(!args_model.jet_args_same_input(left, different))
+}
+
+#Test("guided positional coalescing retains flag state and skipped standards consume no index") {
+    spec := args_model.jet_args_positional(model_fixture(), "help", "standard skip")
+    spec = args_model.jet_args_flag(^spec, "toggle", "toggle help")
+    spec = args_model.jet_args_positional(^spec, "toggle", "positional help")
+    spec = args_model.jet_args_positional(^spec, "FILE", "file")
+    fields :: args_model.jet_args_guided_fields(spec)
+    assert_eq(fields.len(), 2)
+    assert(fields[0].flag)
+    assert(fields[0].positional)
+    assert(fields[0].required)
+    assert_eq(fields[0].help, "toggle help")
+    assert_eq(fields[0].meta, "")
+    assert_eq(fields[0].positional_index ?? -1, 0)
+    assert_eq(fields[1].positional_index ?? -1, 1)
+    parsed := parsed_fixture()
+    &parsed.positionals.push("bare")
+    assert(!args_model.jet_args_guided_field_explicit(fields[0], parsed))
+    assert(!args_model.jet_args_guided_field_explicit(fields[1], parsed))
+}
+
+#Test("unknown never suggests subcommands or positional names, completion still lists them") {
+    spec := args_model.jet_args_positional(model_fixture(), "path", "path")
+    sub := model_fixture()
+    spec = args_model.jet_args_subcommand(^spec, "serve", "server", ^sub)
+    expected :: "unknown option `--path`\n\n{args_model.jet_args_help(spec, "tool")}"
+    assert_eq(args_model.jet_args_unknown("path", spec, "tool"), expected)
+    other :: "unknown option `--serve`\n\n{args_model.jet_args_help(spec, "tool")}"
+    assert_eq(args_model.jet_args_unknown("serve", spec, "tool"), other)
+    assert_eq(args_model.jet_args_completion(spec, "bash"), "bash completion: --help path serve")
+}
+
+#Test("Unicode positional and combining-mark metavar padding uses scalars rather than bytes or cells") {
+    spec := args_model.jet_args_positional(model_fixture(), "界", "wide positional")
+    spec = args_model.jet_args_option(^spec, "界", "combining meta", "é")
+    expected :: "Usage: tool 界 [options]\n\nArguments:\n  界                      wide positional\n\nOptions:\n  --界 é                   combining meta\n  --help                   show this help\n"
+    assert_eq(args_model.jet_args_help(spec, "tool"), expected)
+}

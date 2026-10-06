@@ -233,7 +233,7 @@ fn retired_origin_method_is_rejected_for_every_tracked_value_type() {
 #[test]
 fn retired_origin_method_preempts_root_dispatch() {
     let diags = diagnostics(
-        "fn origin(#Root value: Int) -> Int -> value\n\nfn run() {\n    #Track speed :: 3\n    print(speed.origin())\n}\n",
+        "fn origin(#Root value: Int) -> Int { value }\n\nfn run() {\n    #Track speed :: 3\n    print(speed.origin())\n}\n",
     );
     assert_eq!(
         diags.iter().filter(|diagnostic| diagnostic.code == "E0311").count(),
@@ -328,7 +328,7 @@ fn typed_fact_fixture_is_accepted_by_comptime_repl_and_web() {
 #[test]
 fn derive_bodies_read_the_same_typed_fact() {
     let output = jet::compile(
-        "derive T.Debug {\n    states :: T.$states\n    fn derived_fact_read() -> String -> \"ok\"\n}\n\n#Debug\nstruct Report {\n    state { Draft, Published }\n    value: Int\n}\n\nfn run() {}\n",
+        "derive T.Debug {\n    states :: T.$states\n    fn derived_fact_read() -> String { \"ok\" }\n}\n\n#Debug\nstruct Report {\n    state { Draft, Published }\n    value: Int\n}\n\nfn run() {}\n",
     )
     .expect("derive fact read should compile");
     assert!(output.rust.contains("derived_fact_read"));
@@ -423,14 +423,14 @@ fn aot_default_and_interpreter_fold_the_same_build_facts() {
     assert!(aot.rust.contains("0.0.0"));
     assert!(aot.rust.contains("dev"));
 
-    let jit = stdout(jet::Interpreter::run_jit_once(path), "default");
+    let default_run = stdout(common::dev_run(path, false, false), "default");
     let interpreter = stdout(
         jet::Interpreter::run_interpreter_once_with_args(path, &[]),
         "interpreter",
     );
-    assert_eq!(jit, interpreter);
+    assert_eq!(default_run, interpreter);
     assert_eq!(
-        jit,
+        default_run,
         format!(
             "main\n0.0.0\n{}\ndev\n",
             jet_foundation::OSTarget::OSTarget::host().name()
@@ -485,7 +485,7 @@ fn registered_build_stamp_facts_fold_from_the_lock() {
 
     let path = entry.to_str().unwrap();
     let expected = "abc123-dirty\ntrue\n1.0.0\n2026-08-13T12:34:56.000000000Z\n";
-    let default = stdout(jet::Interpreter::run_jit_once(path), "default");
+    let default = stdout(common::dev_run(path, false, false), "default");
     let interpreter = stdout(
         jet::Interpreter::run_interpreter_once_with_args(path, &[]),
         "interpreter",

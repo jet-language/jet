@@ -206,7 +206,7 @@ struct Resource { name: String }
 impl Resource.Close {
     fn close(^self) { print("auto {self.name}") }
 }
-fn missing() -> Int -> #Todo
+fn missing() -> Int { #Todo }
 fn run() {
     resource := Resource{ name: "todo" }
     print("body")
@@ -475,9 +475,8 @@ fn run() {
 }
 
 #[test]
-fn default_dev_runs_deferred_close_with_native_parity() {
+fn deferred_close_agrees_on_interpreter_and_native() {
     use jet::Interpreter::RunOutcome;
-    use jet::JitBackend::JitBackend;
 
     let root = common::unique_tmp("jet_resource_close_dev");
     fs::create_dir_all(&root).unwrap();
@@ -490,32 +489,17 @@ fn default_dev_runs_deferred_close_with_native_parity() {
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
 
-    if jet_jit::cranelift_host_supported() {
-        let policy = common::development_policy();
-        let result = common::compile_cranelift_bundle(&bundle, &policy);
-        assert!(
-            result.is_ok(),
-            "JIT must compile typed deferred cleanup: {result:?}"
-        );
-    }
-
     let native = compile_and_run(SIMPLE, "jet_resource_close_native_parity");
     assert!(native.status.success());
     assert_eq!(native.stdout, b"body\nclose dev\n");
 
     let policy = common::development_policy();
-    let mut dev = jet_jit::CraneliftBackend::new();
-    jet_jit::reset_jit_trace_for_test();
-    match common::run_cranelift_bundle(&mut dev, &bundle, false, &policy) {
+    match common::run_interpreted(&bundle, &policy) {
         RunOutcome::Ran { stdout, .. } => {
-            assert!(
-                !jet_jit::deopt_invoked_for_test(),
-                "typed deferred cleanup must stay on the JIT tier"
-            );
             assert_eq!(stdout, "body\nclose dev\n");
         }
         RunOutcome::Problems(diags) => {
-            panic!("typed deferred cleanup failed on the JIT tier: {diags:?}");
+            panic!("typed deferred cleanup failed on the interpreter: {diags:?}");
         }
     }
 }

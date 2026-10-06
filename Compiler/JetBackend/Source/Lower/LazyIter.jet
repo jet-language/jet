@@ -1,0 +1,886 @@
+// Iter<T> is an owned shared-runtime JetIter handle, distinct from the
+// native List loop cursor. Adapters transfer this handle; next borrows it
+// so subsequent pulls observe the same remainder. Native callbacks only
+// marshal typed slots: the Prelude JetIter kernels own adapter semantics.
+use jet_foundation.[
+    MIRAccess, MIRCallArg, MIRFunction, MIRFunctionSignature, MIRInstruction,
+    MIRLoopSourceKind, MIROperation, MIRPlaceID, MIRPreludeCall, MIRPreludeCallID,
+    MIRProgram, MIRType, MIRValueID, mir_type_display_name,
+]
+
+fn lower_lazy_element(ty: MIRType) -> MIRType? {
+    if ty.kind == {
+        .Apply(name, args) -> {
+            if name.name == "Iter" && args.len() == 1 -> return Val(args[0])
+            None
+        }
+        .Tagged(_, inner) -> lower_lazy_element(inner)
+        .InlineRange(inner, _, _) -> lower_lazy_element(inner)
+        else -> None
+    }
+}
+
+fn lower_lazy_repr(p: MIRProgram, ty: MIRType, elem: MIRType) -> LowerRepr Never! {
+    if lower_repr(p, elem) == .Unsupported(reason) -> return LowerRepr.Unsupported{reason: "Iter element {reason}"}
+    LowerRepr.Handle{drop: "jet_rt_native_iter_drop", clone: ""}
+}
+
+fn lower_lazy_helper_address(m: &LowerModule, f: &LowerFunction, name: String, ty: MIRType) -> LIRValueID Never! {
+    address :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.FunctionAddress{dst: address, function: lower_helper_id(&m, name, ty)})
+    address
+}
+
+// Clone/drop callback parameters are addresses of native stored values,
+// not handles themselves. Bool remains byte-sized and Unit has no bytes.
+fn lower_lazy_slot_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    clones :: glue.helper == "lazy.clone"
+    params :: if clones -> [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()} else -> [LIRLayout]{lir_layout_pointer()}
+    f := lower_helper_start(&m, glue, params, None)
+    source :: ~f.open_params[0]
+    if clones {
+        target :: ~f.open_params[1]
+        if lower_is_inline(p, glue.ty) {
+            lower_inline_clone(p, &m, &f, source, target, glue.ty)
+        } else if lower_read_at(p, &f, source, 0, glue.ty) == .Val(value) {
+            layout :: lower_value_layout(f, value)
+            copied :: lower_new_value(&f, layout, LIRDrop.Trivial, glue.ty.identity)
+            lower_clone_into(p, &m, &f, value, copied, glue.ty)
+            lower_write_at(p, &f, target, 0, copied, glue.ty)
+        }
+    } else {
+        lower_drop_stored(p, &m, &f, source, 0, glue.ty)
+    }
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_lazy_equal_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_bool()))
+    left_slot :: ~f.open_params[0]
+    right_slot :: ~f.open_params[1]
+    left :: lower_read_at(p, &f, left_slot, 0, glue.ty)
+    right :: lower_read_at(p, &f, right_slot, 0, glue.ty)
+    result :: lower_equal_values(p, &m, &f, glue.ty, left, right)
+    lower_seal(&f, LIRTerminator.Return{value: result})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_lazy_show_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    result :: lower_pointer(&f)
+    slot :: ~f.open_params[0]
+    value :: lower_read_at(p, &f, slot, 0, glue.ty)
+    if value == .Val(operand) {
+        lower_call_helper(&m, &f, "show", glue.ty, [LIRValueID]{operand}, Val(result))
+    } else {
+        builder :: lower_pointer(&f)
+        lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
+        lower_render_push(p, &m, &f, builder, glue.ty, None, LowerRenderMode.Show)
+        lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(result))
+    }
+    lower_seal(&f, LIRTerminator.Return{value: Val(result)})
+    lir_builder_finish(f.builder)
+}
+
+// Env, one native slot per checked argument, then the result slot. The
+// return mask transfers owned zip inputs; borrowed kernels retain theirs.
+// Function conventions, including mutable-cell arguments, come from MIR.
+fn lower_lazy_callback_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    signature :: if glue.ty.kind == {
+        .Fn(row) -> row
+        else -> panic("lazy callback helper has no function type")
+    }
+    params := [LIRLayout]{lir_layout_pointer()}
+    loop _ in signature.params -> &params.push(lir_layout_pointer())
+    &params.push(lir_layout_pointer())
+    f := lower_helper_start(&m, glue, params, Val(lir_layout_word()))
+    env :: ~f.open_params[0]
+    target :: ~f.open_params[f.open_params.len() - 1]
+    args := [LIRValueID]{}
+    owned_inputs :: glue.helper == "lazy.callback.owned"
+    consumed := 0
+    loop (index, ty) in signature.params {
+        source :: ~f.open_params[index + 1]
+        access :: lower_lazy_callback_access(signature, index)
+        // MIRRust host_callback borrows these kernel inputs as &T; it
+        // provides neither a mutable reference nor a clone-local Write
+        // adaptation. Do not expose Rust shared slots as mutable cells.
+        if access == .Write && !owned_inputs {
+            lower_fail(&m, &f, "Iter borrowed callback argument {index} requires a mutable host input")
+            lower_seal(&f, LIRTerminator.Unreachable)
+            return lir_builder_finish(f.builder)
+        }
+        if owned_inputs && access == .Move -> consumed += 1 << index
+        if lower_repr_layout(lower_repr(p, ty)) == None -> next
+        if access == .Write {
+            &args.push(source)
+            next
+        }
+        arg :: lower_read_at(p, &f, source, 0, ty) ?? next
+        if access == .Move && !owned_inputs && (lower_is_inline(p, ty) || lower_needs_drop(p, ty)) {
+            layout :: lower_value_layout(f, arg)
+            copied :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
+            lower_clone_into(p, &m, &f, arg, copied, ty)
+            &args.push(copied)
+        } else {
+            &args.push(arg)
+        }
+    }
+    if signature.ret == .Val(ty) {
+        if lower_call_closure_box(p, &m, &f, env, args, ty) == .Val(result) -> lower_write_at(p, &f, target, 0, result, ty)
+    } else {
+        code :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Load{dst: code, base: env, offset: 8})
+        call_args := [LIRValueID]{env}
+        loop arg in args -> &call_args.push(arg)
+        layouts := [LIRLayout]{}
+        loop arg in call_args -> &layouts.push(lower_value_layout(f, arg))
+        abi :: lower_signature(&m, layouts, None)
+        lower_emit(&f, LIRInst.Call{dst: None, signature: abi, callee: LIRCallee.Value{value: code}, args: call_args})
+    }
+    mask :: lower_const(&f, consumed)
+    lower_seal(&f, LIRTerminator.Return{value: Val(mask)})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_lazy_callback_drop_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
+    env :: ~f.open_params[0]
+    lower_map_drop_value(p, &m, &f, env, glue.ty)
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_lazy_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if glue.helper == "lazy.clone" || glue.helper == "lazy.drop" -> return lower_lazy_slot_helper(p, &m, glue)
+    if glue.helper == "lazy.equal" -> return lower_lazy_equal_helper(p, &m, glue)
+    if glue.helper == "lazy.show" -> return lower_lazy_show_helper(p, &m, glue)
+    if glue.helper == "lazy.compare" -> return lower_lazy_compare_helper(p, &m, glue)
+    if glue.helper == "lazy.callback" || glue.helper == "lazy.callback.owned" -> return lower_lazy_callback_helper(p, &m, glue)
+    if glue.helper == "lazy.callback.drop" -> return lower_lazy_callback_drop_helper(p, &m, glue)
+    panic("unknown lazy helper {glue.helper}")
+}
+
+fn lower_lazy_kind(p: MIRProgram, ty: MIRType) -> Int Never! {
+    if lower_size(p, ty).size == 0 -> return 11
+    if lower_is_exact_int(ty) -> return 1
+    if ty.kind == {
+        .IntN(signed, bits) -> (if signed -> 2 else -> 3) + bits * 4294967296
+        .Float -> 4
+        .String -> 5
+        .List(_) -> 6
+        .Option(_) -> 7
+        .Result(_, _) -> 8
+        .Bool -> 9
+        .Char -> 10
+        .Tagged(_, inner) -> lower_lazy_kind(p, inner)
+        .InlineRange(inner, _, _) -> lower_lazy_kind(p, inner)
+        .Quantity(inner, _) -> lower_lazy_kind(p, inner)
+        else -> {
+            if lower_type_def(p, ty) == .Val(definition) {
+                if definition.kind == {
+                    .Distinct(base, _) -> return lower_lazy_kind(p, base)
+                    .Alias(base) -> return lower_lazy_kind(p, base)
+                    else -> {}
+                }
+            }
+            0
+        }
+    }
+}
+
+// Nine words: stride, clone, drop, show, eq, cmp, kind, child0, child1.
+// Runtime copies the descriptor tree before the lowering frame goes away.
+// Fixed kind 2/3 carries its bit width in the high 32 bits; kind 11 records
+// zero physical payload size even though collection stride is at least 8.
+fn lower_lazy_meta(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType) -> LIRValueID Never! {
+    descriptor :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: descriptor, size: 72, align: 8})
+    zero :: lower_const(&f, 0)
+    lower_store_word(&f, descriptor, 0, lower_list_stride(p, ty))
+    clone :: if lower_lazy_can_clone(p, ty, [String]{}) -> lower_lazy_helper_address(&m, &f, "lazy.clone", ty) else -> zero
+    drop :: if lower_needs_drop(p, ty) -> lower_lazy_helper_address(&m, &f, "lazy.drop", ty) else -> zero
+    lower_emit(&f, LIRInst.Store{base: descriptor, offset: 8, value: clone})
+    lower_emit(&f, LIRInst.Store{base: descriptor, offset: 16, value: drop})
+    lower_emit(&f, LIRInst.Store{base: descriptor, offset: 24, value: zero})
+    lower_emit(&f, LIRInst.Store{base: descriptor, offset: 32, value: zero})
+    lower_emit(&f, LIRInst.Store{base: descriptor, offset: 40, value: zero})
+    lower_store_word(&f, descriptor, 48, lower_lazy_kind(p, ty))
+    lower_emit(&f, LIRInst.Store{base: descriptor, offset: 56, value: zero})
+    lower_emit(&f, LIRInst.Store{base: descriptor, offset: 64, value: zero})
+    storage :: lower_lazy_storage_type(p, ty)
+    if storage.kind == {
+        .List(inner) | .Option(inner) -> {
+            child :: lower_lazy_meta(p, &m, &f, inner)
+            lower_emit(&f, LIRInst.Store{base: descriptor, offset: 56, value: child})
+        }
+        .Result(ok, err) -> {
+            ok_meta :: lower_lazy_meta(p, &m, &f, ok)
+            err_meta :: lower_lazy_meta(p, &m, &f, err)
+            lower_emit(&f, LIRInst.Store{base: descriptor, offset: 56, value: ok_meta})
+            lower_emit(&f, LIRInst.Store{base: descriptor, offset: 64, value: err_meta})
+        }
+        else -> {}
+    }
+    descriptor
+}
+
+// Trait bridges are registered only by a checked operation requiring them.
+// An Iter source need not make unrelated element traits reachable.
+fn lower_lazy_meta_trait(m: &LowerModule, f: &LowerFunction, meta: LIRValueID, ty: MIRType, role: String) Never! {
+    offset :: if role == "show" -> 24 else if role == "equal" -> 32 else -> 40
+    callback :: lower_lazy_helper_address(&m, &f, "lazy.{role}", ty)
+    lower_emit(&f, LIRInst.Store{base: meta, offset: offset, value: callback})
+}
+
+fn lower_lazy_compare_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_word()))
+    left_slot :: ~f.open_params[0]
+    right_slot :: ~f.open_params[1]
+    a :: lower_read_at(p, &f, left_slot, 0, glue.ty) ?? {
+        result :: lower_const(&f, 0)
+        lower_seal(&f, LIRTerminator.Return{value: Val(result)})
+        return lir_builder_finish(f.builder)
+    }
+    if lower_value_layout(f, a) == lir_layout_pointer() && !lower_text_type(glue.ty) {
+        lower_fail(&m, &f, "ordering of {mir_type_display_name(glue.ty)} is not lowered at O0 yet")
+        lower_seal(&f, LIRTerminator.Unreachable)
+        return lir_builder_finish(f.builder)
+    }
+    b :: lower_read_at(p, &f, right_slot, 0, glue.ty) ?? panic("comparison operands have different layouts")
+    less :: lower_flag(&f)
+    greater :: lower_flag(&f)
+    if lower_is_exact_int(glue.ty) {
+        lower_exact_compare(&m, &f, less, LIRCondition.Lt, a, b)
+        lower_exact_compare(&m, &f, greater, LIRCondition.Gt, a, b)
+    } else if lower_text_type(glue.ty) {
+        lower_string_compare(&m, &f, less, LIRCondition.Lt, a, b)
+        lower_string_compare(&m, &f, greater, LIRCondition.Gt, a, b)
+    } else {
+        lower_emit(&f, LIRInst.Compare{dst: less, condition: if lower_is_unsigned_word(glue.ty) -> LIRCondition.ULt else -> LIRCondition.Lt, left: a, right: b})
+        lower_emit(&f, LIRInst.Compare{dst: greater, condition: if lower_is_unsigned_word(glue.ty) -> LIRCondition.UGt else -> LIRCondition.Gt, left: a, right: b})
+    }
+    below :: lower_new_block(&f)
+    above_or_equal :: lower_new_block(&f)
+    above :: lower_new_block(&f)
+    equal :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: less, then_target: lower_target(below, [LIRValueID]{}), else_target: lower_target(above_or_equal, [LIRValueID]{})})
+    lower_start(&f, below, [LIRValueID]{})
+    minus :: lower_const(&f, -1)
+    lower_seal(&f, LIRTerminator.Return{value: Val(minus)})
+    lower_start(&f, above_or_equal, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Branch{condition: greater, then_target: lower_target(above, [LIRValueID]{}), else_target: lower_target(equal, [LIRValueID]{})})
+    lower_start(&f, above, [LIRValueID]{})
+    plus :: lower_const(&f, 1)
+    lower_seal(&f, LIRTerminator.Return{value: Val(plus)})
+    lower_start(&f, equal, [LIRValueID]{})
+    zero :: lower_const(&f, 0)
+    lower_seal(&f, LIRTerminator.Return{value: Val(zero)})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_lazy_native_int(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID) -> LIRValueID? {
+    ty :: lower_value_type(c, value) ?? return None
+    source :: lower_use(&m, &f, value) ?? return None
+    if !lower_is_exact_int(ty) -> return Val(source)
+    native :: lower_word(&f)
+    lower_convert_exact(&m, &f, native, source, "jet_int_owned_to_i64", false)
+    Val(native)
+}
+
+fn lower_lazy_value_slot(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value: LIRValueID, ty: MIRType) -> LIRValueID Never! {
+    if lower_is_inline(p, ty) -> return ~value
+    slot :: lower_new_storage(p, &f, ty)
+    lower_write_at(p, &f, slot, 0, value, ty)
+    slot
+}
+
+fn lower_lazy_runtime_symbol(symbol: String) -> String Never! {
+    bytes :: symbol.bytes()
+    tail :: String.from_bytes(bytes.slice(4, bytes.len())) ?? panic("runtime symbol is not UTF-8")
+    "jet_rt_native_{tail}"
+}
+
+// Common entry for the checked BuiltinMethod and static CoreCall routes.
+// Checked MIR ownership chooses transfer versus snapshot at the boundary.
+fn lower_lazy_route(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, values: [MIRValueID]) -> Bool Never! {
+    symbol :: lower_runtime_symbol(row)
+    if lower_lazy_source_route(p, c, &m, &f, instruction, symbol, values) -> return true
+    source_routes :: symbol == "jet_iter_from_vec" || symbol == "jet_iter_string_split" || symbol == "jet_iter_string_rsplit"
+    plain :: symbol == "jet_iter_to_list" || symbol == "jet_iter_collect" || symbol == "jet_iter_first" || symbol == "jet_iter_next" || symbol == "jet_iter_len" || symbol == "jet_iter_is_empty" || symbol == "jet_iter_shuffle" || symbol == "jet_iter_average_int" || symbol == "jet_iter_average_float"
+    counted :: symbol == "jet_iter_take" || symbol == "jet_iter_skip" || symbol == "jet_iter_step_by" || symbol == "jet_iter_drop_last" || symbol == "jet_iter_repeat" || symbol == "jet_iter_cycle"
+    nested :: symbol == "jet_iter_chunks" || symbol == "jet_iter_windows" || symbol == "jet_iter_flatten" || symbol == "jet_iter_some"
+    compared :: symbol == "jet_iter_dedup" || symbol == "jet_iter_is_sorted" || symbol == "jet_iter_join" || symbol == "jet_iter_compare" || symbol == "jet_iter_last_index_of" || symbol == "jet_iter_intersperse"
+    progress :: symbol == "jet_std_io_progress_iter"
+    collects :: symbol == "jet_list_try_collect"
+    splits :: symbol == "jet_iter_split_at"
+    if !source_routes && !plain && !counted && !nested && !compared && !progress && !collects && !splits -> return false
+    if values.len() == 0 {
+        lower_fail(&m, &f, "Iter route {symbol} has no checked source")
+        return true
+    }
+    source_ty :: lower_value_type(c, values[0]) ?? {
+        lower_fail(&m, &f, "Iter route {symbol} has no checked source type")
+        return true
+    }
+    if !source_routes && lower_lazy_element(source_ty) == None -> return false
+    result_ty :: lower_checked_type(c, instruction) ?? {
+        lower_fail(&m, &f, "Iter route {symbol} has no checked result type")
+        return true
+    }
+    source :: lower_use(&m, &f, values[0]) ?? return true
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    if symbol == "jet_iter_from_vec" {
+        elem :: lower_list_element(source_ty) ?? {
+            lower_fail(&m, &f, "Iter source {mir_type_display_name(source_ty)} is not a List")
+            return true
+        }
+        meta :: lower_lazy_meta(p, &m, &f, elem)
+        moved :: lower_const_flag(&f, if lower_value_owned(c, values[0]) -> 1 else -> 0)
+        lower_call_runtime(&m, &f, "jet_rt_native_iter_from_list", [LIRValueID]{source, meta, moved}, Val(dst))
+        return true
+    }
+    if symbol == "jet_iter_string_split" || symbol == "jet_iter_string_rsplit" {
+        if values.len() != 2 {
+            lower_fail(&m, &f, "String Iter source {symbol} has no checked separator")
+            return true
+        }
+        separator :: lower_use(&m, &f, values[1]) ?? return true
+        elem :: lower_lazy_element(result_ty) ?? {
+            lower_fail(&m, &f, "String Iter source {symbol} has no checked element type")
+            return true
+        }
+        meta :: lower_lazy_meta(p, &m, &f, elem)
+        lower_call_runtime(&m, &f, lower_lazy_runtime_symbol(symbol), [LIRValueID]{source, separator, meta}, Val(dst))
+        return true
+    }
+    elem :: lower_lazy_element(source_ty) ?? return true
+    if symbol == "jet_iter_to_list" || symbol == "jet_iter_collect" {
+        lower_storage_into(p, &f, dst, result_ty)
+        lower_call_runtime(&m, &f, "jet_rt_native_iter_to_list", [LIRValueID]{source, dst}, None)
+        return true
+    }
+    call_args := [LIRValueID]{source}
+    if counted || symbol == "jet_iter_chunks" || symbol == "jet_iter_windows" || splits {
+        if values.len() != 2 {
+            lower_fail(&m, &f, "Iter route {symbol} has no checked count")
+            return true
+        }
+        count :: lower_lazy_native_int(p, c, &m, &f, values[1]) ?? return true
+        &call_args.push(count)
+    } else {
+        loop (index, value) in values {
+            if index == 0 -> next
+            arg :: lower_use(&m, &f, value) ?? return true
+            if symbol == "jet_iter_intersperse" || symbol == "jet_iter_last_index_of" {
+                &call_args.push(lower_lazy_value_slot(p, &m, &f, arg, elem))
+            } else {
+                &call_args.push(arg)
+            }
+        }
+    }
+    if nested {
+        output :: lower_lazy_element(result_ty) ?? {
+            lower_fail(&m, &f, "Iter adapter {symbol} has no checked output element")
+            return true
+        }
+        &call_args.push(lower_lazy_meta(p, &m, &f, output))
+    } else if compared {
+        meta :: lower_lazy_meta(p, &m, &f, elem)
+        if symbol == "jet_iter_join" -> lower_lazy_meta_trait(&m, &f, meta, elem, "show")
+        if symbol == "jet_iter_dedup" || symbol == "jet_iter_last_index_of" -> lower_lazy_meta_trait(&m, &f, meta, elem, "equal")
+        if symbol == "jet_iter_is_sorted" || symbol == "jet_iter_compare" -> lower_lazy_meta_trait(&m, &f, meta, elem, "compare")
+        &call_args.push(meta)
+        if symbol == "jet_iter_compare" || symbol == "jet_iter_intersperse" || symbol == "jet_iter_last_index_of" {
+            &call_args.push(lower_const_flag(&f, if lower_value_owned(c, values[1]) -> 1 else -> 0))
+        }
+    } else if collects {
+        if result_ty.kind == .Result(ok, err) {
+            &call_args.push(lower_lazy_meta(p, &m, &f, ok))
+            &call_args.push(lower_lazy_meta(p, &m, &f, err))
+        } else if lower_option_inner(result_ty) == .Val(ok) {
+            &call_args.push(lower_lazy_meta(p, &m, &f, ok))
+            &call_args.push(lower_const(&f, 0))
+        } else {
+            lower_fail(&m, &f, "Iter try_collect has no checked failure carrier output")
+            return true
+        }
+    } else if splits {
+        members :: lower_inline_members(p, result_ty)
+        if members.len() != 2 {
+            lower_fail(&m, &f, "Iter split_at has no checked pair of Lists")
+            return true
+        }
+        lower_storage_into(p, &f, dst, result_ty)
+        &call_args.push(dst)
+        &call_args.push(lower_const(&f, members[0].offset))
+        &call_args.push(lower_const(&f, members[1].offset))
+        lower_call_runtime(&m, &f, "jet_rt_native_iter_split_at", call_args, None)
+        return true
+    }
+    runtime :: if progress -> "jet_rt_native_iter_progress" else if collects -> "jet_rt_native_iter_try_collect" else -> lower_lazy_runtime_symbol(symbol)
+    if symbol == "jet_iter_len" || symbol == "jet_iter_compare" {
+        native :: lower_word(&f)
+        lower_call_runtime(&m, &f, runtime, call_args, Val(native))
+        lower_convert_exact(&m, &f, dst, native, "jet_int_owned_from_i64", true)
+    } else {
+        lower_call_runtime(&m, &f, runtime, call_args, Val(dst))
+    }
+    true
+}
+
+fn lower_lazy_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, receiver: MIRValueID, receiver_place: MIRPlaceID?, args: [MIRValueID]) -> Bool Never! {
+    values := [MIRValueID]{receiver}
+    loop arg in args -> &values.push(arg)
+    lower_lazy_route(p, c, &m, &f, instruction, row, values)
+}
+
+fn lower_lazy_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, args: [MIRCallArg], row: MIRPreludeCall) -> Bool Never! {
+    if lower_lazy_zip(p, c, &m, &f, instruction, receiver, args, row) -> return true
+    if lower_lazy_scan(p, c, &m, &f, instruction, receiver, args, row) -> return true
+    symbol :: lower_runtime_symbol(row)
+    supported :: symbol == "jet_iter_map" || symbol == "jet_iter_map_mut" || symbol == "jet_iter_try_map" || symbol == "jet_iter_try_filter" || symbol == "jet_iter_filter" || symbol == "jet_iter_take_while" || symbol == "jet_iter_skip_while" || symbol == "jet_iter_flat_map" || symbol == "jet_iter_filter_map" || symbol == "jet_iter_dedup_by" || symbol == "jet_iter_chunk_while" || symbol == "jet_iter_is_sorted_by"
+    list_source :: symbol == "jet_list_take_while_iter" || symbol == "jet_list_skip_while_iter" || symbol == "jet_list_filter_map_iter"
+    if !supported && !list_source -> return false
+    receiver_ty :: lower_value_type(c, receiver) ?? return false
+    if !list_source && lower_lazy_element(receiver_ty) == None -> return false
+    if args.len() != 1 {
+        lower_fail(&m, &f, "Iter closure adapter {symbol} has no single checked callback")
+        return true
+    }
+    closure_arg :: args[0]
+    closure_ty :: lower_value_type(c, closure_arg.value) ?? return true
+    returned :: if closure_ty.kind == {
+        .Fn(signature) -> signature.ret
+        else -> None
+    }
+    result_ty :: lower_checked_type(c, instruction) ?? return true
+    output_ty :: returned ?? (lower_lazy_element(result_ty) ?? {
+        lower_fail(&m, &f, "Iter closure adapter {symbol} has no checked callback result")
+        return true
+    })
+    source := lower_use(&m, &f, receiver) ?? return true
+    if list_source {
+        elem :: lower_list_element(receiver_ty) ?? return true
+        meta :: lower_lazy_meta(p, &m, &f, elem)
+        handle :: lower_pointer(&f)
+        moved :: lower_const_flag(&f, if lower_value_owned(c, receiver) -> 1 else -> 0)
+        lower_call_runtime(&m, &f, "jet_rt_native_iter_from_list", [LIRValueID]{source, meta, moved}, Val(handle))
+        source = handle
+    }
+    closure := lower_use(&m, &f, closure_arg.value) ?? return true
+    if closure_arg.access != .Move {
+        held :: lower_pointer(&f)
+        lower_clone_into(p, &m, &f, closure, held, closure_ty)
+        closure = held
+    }
+    callback :: lower_lazy_helper_address(&m, &f, "lazy.callback", closure_ty)
+    release :: lower_lazy_helper_address(&m, &f, "lazy.callback.drop", closure_ty)
+    meta :: lower_lazy_meta(p, &m, &f, output_ty)
+    if symbol == "jet_iter_dedup_by" -> lower_lazy_meta_trait(&m, &f, meta, output_ty, "equal")
+    if symbol == "jet_iter_is_sorted_by" -> lower_lazy_meta_trait(&m, &f, meta, output_ty, "compare")
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    runtime :: if symbol == "jet_list_take_while_iter" -> "jet_rt_native_iter_take_while" else if symbol == "jet_list_skip_while_iter" -> "jet_rt_native_iter_skip_while" else if symbol == "jet_list_filter_map_iter" -> "jet_rt_native_iter_filter_map" else -> lower_lazy_runtime_symbol(symbol)
+    call_args := [LIRValueID]{source, closure, callback, release, meta}
+    if symbol == "jet_iter_chunk_while" {
+        chunks_ty :: lower_checked_type(c, instruction) ?? return true
+        output :: lower_lazy_element(chunks_ty) ?? return true
+        &call_args.push(lower_lazy_meta(p, &m, &f, output))
+    }
+    lower_call_runtime(&m, &f, runtime, call_args, Val(dst))
+    true
+}
+
+fn lower_lazy_zip(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, args: [MIRCallArg], row: MIRPreludeCall) -> Bool Never! {
+    symbol :: lower_runtime_symbol(row)
+    padded :: symbol == "jet_iter_zip_pad"
+    strict :: symbol == "jet_iter_zip_strict"
+    if symbol != "jet_iter_zip" && !padded && !strict -> return false
+    callback_index :: if padded -> 3 else -> 1
+    expected :: if strict -> 9 else if padded -> 4 else -> 2
+    if args.len() != expected {
+        lower_fail(&m, &f, "Iter zip has inconsistent checked operands")
+        return true
+    }
+    left_ty :: lower_value_type(c, receiver) ?? return true
+    right_ty :: lower_value_type(c, args[0].value) ?? return true
+    left_elem :: lower_lazy_element(left_ty) ?? return true
+    right_elem :: lower_lazy_element(right_ty) ?? return true
+    source :: lower_use(&m, &f, receiver) ?? return true
+    other :: lower_use(&m, &f, args[0].value) ?? return true
+    closure_arg :: args[callback_index]
+    closure_ty :: lower_value_type(c, closure_arg.value) ?? return true
+    closure := lower_use(&m, &f, closure_arg.value) ?? return true
+    if closure_arg.access != .Move {
+        held :: lower_pointer(&f)
+        lower_clone_into(p, &m, &f, closure, held, closure_ty)
+        closure = held
+    }
+    callback :: lower_lazy_helper_address(&m, &f, "lazy.callback.owned", closure_ty)
+    release :: lower_lazy_helper_address(&m, &f, "lazy.callback.drop", closure_ty)
+    result_ty :: lower_checked_type(c, instruction) ?? return true
+    elem :: lower_lazy_element(result_ty) ?? return true
+    meta :: lower_lazy_meta(p, &m, &f, elem)
+    call_args := [LIRValueID]{source, other}
+    if padded {
+        fill_a :: lower_use(&m, &f, args[1].value) ?? return true
+        fill_b :: lower_use(&m, &f, args[2].value) ?? return true
+        &call_args.push(lower_lazy_value_slot(p, &m, &f, fill_a, left_elem))
+        &call_args.push(lower_lazy_value_slot(p, &m, &f, fill_b, right_elem))
+    }
+    &call_args.push(closure)
+    &call_args.push(callback)
+    &call_args.push(release)
+    &call_args.push(meta)
+    if padded {
+        &call_args.push(lower_lazy_meta(p, &m, &f, left_elem))
+        &call_args.push(lower_lazy_meta(p, &m, &f, right_elem))
+        &call_args.push(lower_const_flag(&f, if args[1].access == .Move && lower_value_owned(c, args[1].value) -> 1 else -> 0))
+        &call_args.push(lower_const_flag(&f, if args[2].access == .Move && lower_value_owned(c, args[2].value) -> 1 else -> 0))
+    }
+    if strict {
+        loop (index, arg) in args {
+            if index < 2 -> next
+            value :: lower_use(&m, &f, arg.value) ?? return true
+            &call_args.push(value)
+        }
+    }
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_call_runtime(&m, &f, lower_lazy_runtime_symbol(symbol), call_args, Val(dst))
+    true
+}
+
+// Use the existing native cursor wrapper and typed release dispatch. The
+// index -1 marks a shared-runtime LoopCursor; List indices are non-negative.
+fn lower_lazy_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, collection: MIRValueID, step: MIRValueID?, by_value: Bool, source_kind: MIRLoopSourceKind) -> Bool Never! {
+    ty :: lower_value_type(c, collection) ?? return false
+    if lower_lazy_element(ty) == None -> return false
+    if source_kind != .Plain {
+        lower_fail(&m, &f, "Iter source has a non-plain checked loop route")
+        return true
+    }
+    if !lower_iter_route(p, &m, &f, call, "jet_loop_iter_init", 5) -> return true
+    source :: lower_use(&m, &f, collection) ?? return true
+    stride := lower_const(&f, 1)
+    if step == .Val(value) -> stride = lower_lazy_native_int(p, c, &m, &f, value) ?? return true
+    has_step :: lower_const_flag(&f, if step != None -> 1 else -> 0)
+    handle :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_native_iter_cursor_init", [LIRValueID]{source, stride, has_step}, Val(handle))
+    release :: lower_helper_id(&m, "iter.release", ty)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_alloc(&m, &f, dst, 48)
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: handle})
+    lower_store_word(&f, dst, 8, -1)
+    lower_store_word(&f, dst, 16, 0)
+    lower_store_word(&f, dst, 24, release.value)
+    lower_store_word(&f, dst, 32, 0)
+    lower_store_word(&f, dst, 40, 0)
+    true
+}
+
+fn lower_lazy_cursor_test(f: &LowerFunction, cursor: LIRValueID) -> LIRValueID Never! {
+    marker :: lower_list_word(&f, cursor, 8)
+    lazy :: lower_flag(&f)
+    minus :: lower_const(&f, -1)
+    lower_emit(&f, LIRInst.Compare{dst: lazy, condition: LIRCondition.Eq, left: marker, right: minus})
+    lazy
+}
+
+fn lower_lazy_cursor_more(m: &LowerModule, f: &LowerFunction, cursor: LIRValueID) -> LIRValueID Never! {
+    lazy :: lower_lazy_cursor_test(&f, cursor)
+    runtime :: lower_new_block(&f)
+    list :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: lazy, then_target: lower_target(runtime, [LIRValueID]{}), else_target: lower_target(list, [LIRValueID]{})})
+    lower_start(&f, runtime, [LIRValueID]{})
+    handle :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: handle, base: cursor, offset: 0})
+    more :: lower_flag(&f)
+    lower_call_runtime(&m, &f, "jet_rt_native_iter_cursor_test", [LIRValueID]{handle}, Val(more))
+    taken :: lower_list_word(&f, cursor, 32)
+    zero :: lower_const(&f, 0)
+    ready :: lower_flag(&f)
+    available :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: ready, condition: LIRCondition.Eq, left: taken, right: zero})
+    lower_logic(&f, available, true, more, ready)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{available})})
+    lower_start(&f, list, [LIRValueID]{})
+    list_more :: lower_iter_more(&f, cursor)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{list_more})})
+    result :: lower_flag(&f)
+    lower_start(&f, done, [LIRValueID]{result})
+    result
+}
+
+fn lower_lazy_cursor_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, cursor: LIRValueID, ty: MIRType) Never! {
+    lazy :: lower_lazy_cursor_test(&f, cursor)
+    runtime :: lower_new_block(&f)
+    list :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    slot :: lower_new_storage(p, &f, ty)
+    lower_seal(&f, LIRTerminator.Branch{condition: lazy, then_target: lower_target(runtime, [LIRValueID]{}), else_target: lower_target(list, [LIRValueID]{})})
+    lower_start(&f, runtime, [LIRValueID]{})
+    handle :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: handle, base: cursor, offset: 0})
+    owned :: lower_const_flag(&f, if lower_value_owned(c, instruction.result ?? MIRValueID{value: U64.MAX}) -> 1 else -> 0)
+    lower_call_runtime(&m, &f, "jet_rt_native_iter_cursor_value", [LIRValueID]{handle, slot, owned}, None)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, list, [LIRValueID]{})
+    source :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: source, base: cursor, offset: 0})
+    data :: lower_list_data(&f, source)
+    at :: lower_list_word(&f, cursor, 8)
+    address :: lower_list_address(&f, data, at, lower_list_stride(p, ty))
+    if lower_read_at(p, &f, address, 0, ty) == .Val(value) -> lower_write_at(p, &f, slot, 0, value, ty)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+    if lower_repr(p, ty) == .Absent {
+        lower_alias_absent(&f, instruction)
+    } else {
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return
+        lower_read_into(p, &f, dst, slot, 0, ty)
+    }
+}
+
+fn lower_lazy_cursor_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue, advance: Bool) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
+    cursor :: ~f.open_params[0]
+    handle :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: handle, base: cursor, offset: 0})
+    lower_call_runtime(&m, &f, if advance -> "jet_rt_native_iter_cursor_advance" else -> "jet_rt_native_iter_cursor_drop", [LIRValueID]{handle}, None)
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_lazy_source_route(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, symbol: String, values: [MIRValueID]) -> Bool Never! {
+    empty :: symbol == "jet_iter_empty"
+    indexes :: symbol == "jet_iter_indexes"
+    enumerates :: symbol == "jet_iter_enumerate"
+    if !empty && !indexes && !enumerates -> return false
+    result_ty :: lower_checked_type(c, instruction) ?? return true
+    elem :: lower_lazy_element(result_ty) ?? return true
+    meta :: lower_lazy_meta(p, &m, &f, elem)
+    call_args := [LIRValueID]{}
+    if indexes {
+        if values.len() != 1 {
+            lower_fail(&m, &f, "Iter indexes has no checked count")
+            return true
+        }
+        count :: lower_lazy_native_int(p, c, &m, &f, values[0]) ?? return true
+        &call_args.push(count)
+    } else if enumerates {
+        if values.len() != 2 {
+            lower_fail(&m, &f, "Iter enumerate has no checked callback")
+            return true
+        }
+        source :: lower_use(&m, &f, values[0]) ?? return true
+        closure :: lower_use(&m, &f, values[1]) ?? return true
+        closure_ty :: lower_value_type(c, values[1]) ?? return true
+        &call_args.push(source)
+        &call_args.push(closure)
+        &call_args.push(lower_lazy_helper_address(&m, &f, "lazy.callback", closure_ty))
+        &call_args.push(lower_lazy_helper_address(&m, &f, "lazy.callback.drop", closure_ty))
+    }
+    &call_args.push(meta)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_call_runtime(&m, &f, lower_lazy_runtime_symbol(symbol), call_args, Val(dst))
+    true
+}
+
+fn lower_lazy_scan(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, args: [MIRCallArg], row: MIRPreludeCall) -> Bool Never! {
+    if lower_runtime_symbol(row) != "jet_iter_scan" -> return false
+    if args.len() != 2 {
+        lower_fail(&m, &f, "Iter scan has no checked seed and callback")
+        return true
+    }
+    seed_ty :: lower_value_type(c, args[0].value) ?? return true
+    seed :: lower_use(&m, &f, args[0].value) ?? return true
+    seed_slot :: lower_lazy_value_slot(p, &m, &f, seed, seed_ty)
+    seed_meta :: lower_lazy_meta(p, &m, &f, seed_ty)
+    moved :: lower_const_flag(&f, if args[0].access == .Move -> 1 else -> 0)
+    source :: lower_use(&m, &f, receiver) ?? return true
+    closure_arg :: args[1]
+    closure_ty :: lower_value_type(c, closure_arg.value) ?? return true
+    closure := lower_use(&m, &f, closure_arg.value) ?? return true
+    if closure_arg.access != .Move {
+        held :: lower_pointer(&f)
+        lower_clone_into(p, &m, &f, closure, held, closure_ty)
+        closure = held
+    }
+    callback :: lower_lazy_helper_address(&m, &f, "lazy.callback", closure_ty)
+    release :: lower_lazy_helper_address(&m, &f, "lazy.callback.drop", closure_ty)
+    result_ty :: lower_checked_type(c, instruction) ?? return true
+    elem :: lower_lazy_element(result_ty) ?? return true
+    output_meta :: lower_lazy_meta(p, &m, &f, elem)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_call_runtime(&m, &f, "jet_rt_native_iter_scan", [LIRValueID]{source, seed_slot, seed_meta, moved, closure, callback, release, output_meta}, Val(dst))
+    true
+}
+
+fn lower_lazy_storage_type(p: MIRProgram, ty: MIRType) -> MIRType Never! {
+    if ty.kind == {
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_lazy_storage_type(p, inner)
+        else -> {}
+    }
+    if lower_type_def(p, ty) == .Val(definition) {
+        if definition.kind == {
+            .Distinct(base, _) | .Alias(base) -> return lower_lazy_storage_type(p, base)
+            else -> {}
+        }
+    }
+    ~ty
+}
+
+// The checked declaration fact suppresses clone even when the physical
+// representation has clone glue. A recursive owning edge is a cloneable
+// fixed point unless some field in that cycle is explicitly single-use.
+fn lower_lazy_can_clone(p: MIRProgram, ty: MIRType, seen: [String]) -> Bool Never! {
+    if lower_type_def(p, ty) == .Val(definition) {
+        if definition.single_use -> return false
+        if definition.kind == {
+            .Distinct(base, _) | .Alias(base) -> return lower_lazy_can_clone(p, base, seen)
+            else -> {}
+        }
+    }
+    if ty.kind == {
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_lazy_can_clone(p, inner, seen)
+        else -> {}
+    }
+    if lower_is_iter_cursor(ty) || lower_lazy_element(ty) != None -> return false
+    if lower_repr(p, ty) == .Handle(_, clone) -> return clone != ""
+    key :: lower_mono_fingerprint(ty)
+    loop previous in seen {
+        if previous == key -> return true
+    }
+    visited := ~seen
+    &visited.push(key)
+    storage :: lower_lazy_storage_type(p, ty)
+    if storage.kind == {
+        .List(inner) | .Option(inner) -> return lower_lazy_can_clone(p, inner, visited)
+        .Map(key_ty, value_ty) | .Result(key_ty, value_ty) -> return lower_lazy_can_clone(p, key_ty, visited) && lower_lazy_can_clone(p, value_ty, visited)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if !lower_lazy_can_clone(p, field.ty, visited) -> return false
+            }
+        }
+        else -> {}
+    }
+    if lower_type_def(p, storage) == .Val(definition) {
+        if definition.kind == {
+            .Struct(fields, _) -> {
+                loop field in lower_stored_fields(fields) {
+                    if !lower_lazy_can_clone(p, field.ty, visited) -> return false
+                }
+            }
+            .Enum(variants, _) -> {
+                loop variant in variants {
+                    if variant.payload == {
+                        .Single(inner) -> { if !lower_lazy_can_clone(p, inner, visited) -> return false }
+                        .Named(fields) -> {
+                            loop field in lower_stored_fields(fields) {
+                                if !lower_lazy_can_clone(p, field.ty, visited) -> return false
+                            }
+                        }
+                        .Unit -> {}
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+    true
+}
+
+fn lower_lazy_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
+    row :: lower_prelude_row(p, call) ?? return false
+    if lower_runtime_symbol(row) == "jet_iter_next" && args.len() == 1 && args[0].access == .Write {
+        ty :: lower_value_type(c, args[0].value) ?? return false
+        if lower_lazy_element(ty) == None -> return false
+        writeback :: lower_write_arg(p, c, &m, &f, args[0]) ?? return true
+        handle :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Load{dst: handle, base: writeback.cell, offset: 0})
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+        lower_call_runtime(&m, &f, "jet_rt_native_iter_next", [LIRValueID]{handle}, Val(dst))
+        // Pull mutates the shared handle's state, not the owner's pointer;
+        // the lent cell has no replacement value to write back.
+        return true
+    }
+    values := [MIRValueID]{}
+    loop arg in args {
+        if arg.access == .Write -> return false
+        &values.push(arg.value)
+    }
+    lower_lazy_route(p, c, &m, &f, instruction, row, values)
+}
+
+fn lower_lazy_reach_value(q: &LowerPrepared, function: MIRFunction, facts: [U64:Int], receiver: MIRValueID, parent: Int) Never! {
+    index :: facts.get(receiver.value) ?? return
+    elem :: lower_lazy_element(function.values[index].ty) ?? return
+    lower_reach_render_child(&q, elem, true, parent)
+}
+
+fn lower_lazy_reach_call(p: MIRProgram, q: &LowerPrepared, function: MIRFunction, facts: [U64:Int], call: MIRPreludeCallID, args: [MIRCallArg], parent: Int) Never! {
+    row :: lower_prelude_row(p, call) ?? return
+    if lower_runtime_symbol(row) != "jet_iter_join" || args.len() == 0 -> return
+    lower_lazy_reach_value(&q, function, facts, args[0].value, parent)
+}
+
+fn lower_lazy_callback_access(signature: MIRFunctionSignature, index: Int) -> MIRAccess Never! {
+    if signature.call_metadata == .Val(metadata) {
+        if index < metadata.conventions.len() -> return metadata.conventions[index]
+    }
+    // MIR.rs callable_parameter_access uses Read when no convention is set.
+    MIRAccess.Read
+}
+
+// Owned read operands must be materialized as independent holders before a
+// consuming runtime call. This is the same sink fact that native aggregate
+// construction and Map insertion use to clone a borrowed place read.
+fn lower_lazy_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRValueID] Never! {
+    if operation == {
+        .CoreCall(_, call, args, _, _, _) | .Call(.Prelude(call), args, _) -> return lower_lazy_stored_args(p, call, args)
+        .Semantic(semantic) -> {
+            if semantic == {
+                .StaticPreludeCall(call, args, _, _) -> return lower_lazy_stored_args(p, call, args)
+                .BuiltinMethod(call, receiver, _, args, _) -> {
+                    row :: lower_prelude_row(p, call) ?? return [MIRValueID]{}
+                    if !lower_lazy_owns_route(lower_runtime_symbol(row)) -> return [MIRValueID]{}
+                    stored := [MIRValueID]{}
+                    if row.signature.borrow_mask.len() > 0 && !row.signature.borrow_mask[0] -> &stored.push(receiver)
+                    loop (index, arg) in args {
+                        if index + 1 < row.signature.borrow_mask.len() && !row.signature.borrow_mask[index + 1] -> &stored.push(arg)
+                    }
+                    return stored
+                }
+                .ClosureMethod(receiver, args, call) -> {
+                    row :: lower_prelude_row(p, call) ?? return [MIRValueID]{}
+                    if !lower_lazy_owns_route(lower_runtime_symbol(row)) -> return [MIRValueID]{}
+                    stored := [MIRValueID]{}
+                    if row.signature.borrow_mask.len() > 0 && !row.signature.borrow_mask[0] -> &stored.push(receiver)
+                    loop (index, arg) in args {
+                        if arg.access == .Move && index + 1 < row.signature.borrow_mask.len() && !row.signature.borrow_mask[index + 1] -> &stored.push(arg.value)
+                    }
+                    return stored
+                }
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    [MIRValueID]{}
+}
+
+fn lower_lazy_stored_args(p: MIRProgram, call: MIRPreludeCallID, args: [MIRCallArg]) -> [MIRValueID] Never! {
+    row :: lower_prelude_row(p, call) ?? return [MIRValueID]{}
+    if !lower_lazy_owns_route(lower_runtime_symbol(row)) -> return [MIRValueID]{}
+    stored := [MIRValueID]{}
+    loop (index, arg) in args {
+        if arg.access != .Write && index < row.signature.borrow_mask.len() && !row.signature.borrow_mask[index] -> &stored.push(arg.value)
+    }
+    stored
+}
+
+fn lower_lazy_owns_route(symbol: String) -> Bool Never! {
+    symbol.starts_with("jet_iter_") || symbol == "jet_std_io_progress_iter" || symbol == "jet_list_take_while_iter" || symbol == "jet_list_skip_while_iter" || symbol == "jet_list_filter_map_iter"
+}

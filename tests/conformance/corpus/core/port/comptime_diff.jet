@@ -1,0 +1,242 @@
+// Rust: tests/comptime_diff.rs:1
+// Permanent comptime/runtime differential battery. Divergence is a P0 miscompile.
+use tests.common as common
+use jet.[Lexer, Loader, Sema, render_diagnostics]
+use std.thread as thread
+use std.sync.atomic.[AtomicUsize, Ordering]
+
+// Rust: tests/comptime_diff.rs:21
+CASES :: [
+    "2 + 3 * 4", "100 / 7", "100 % 7", "7 / 2", "(0 - 17) % 5", "(0 - 17) / 5",
+    "1 << 10", "255 & 15", "12 | 10", "6 ^ 3", "1000000 * 1000000",
+    "Float{3.0} / Float{2.0}", "Float{10.0} / Float{4.0}", "Float{1.0} / Float{3.0}",
+    "Float{5.0}", "Float{2.0} * Float{2.0}", "Float{0.1} + Float{0.2}",
+    "3 < 5 && 2 == 2", "10 >= 10 || false",
+    "\"Hello\".to_upper()", "\"WORLD\".to_lower()", "\"héllo\".len()",
+    "\"  trim me  \".trim()", "\"  trim me  \".trim_start()", "\"  trim me  \".trim_end()",
+    "\"jet\".pad_start(5, \".\")", "\"jet\".pad_end(5, \".\")", "\"hello jet\".index_of(\"jet\")",
+    "\"banana\".count(\"an\")", "\"Hello\".is_alphabetic()", "\"123\".is_numeric()",
+    "\" \t\".is_whitespace()", "\"jet lang\".is_ascii()", "\"hELLO jet\".to_title()",
+    "(\"left:right\".split_once(\":\") ?? panic(\"split\")).before", "\"ab\".repeat(3)",
+    "\"a,b,c\".split(\",\").to_list()", "\"hello world\".replace(\"o\", \"0\")",
+    "[1, 2, 3]", "[3, 1, 2]", "[10, 20, 30][1]", "[\"x\", \"y\", \"z\"]",
+    "loop value in [1, 2, 3] -> value * 2",
+    "[\"b\": 2, \"a\": 1, \"c\": 3].keys().to_list()",
+    "[\"b\": 2, \"a\": 1, \"c\": 3].values().to_list()",
+    "\"a,b,c\".split(\",\").skip(1).first()", "[2: \"two\", 1: \"one\"].keys().to_list()",
+    "Rank.from([1, 2, 3]).intersection(Rank.from([2, 3, 4])).to_list()",
+    "Rank.from([1, 2, 3]).difference(Rank.from([2, 3, 4])).to_list()",
+    "Rank.from([1, 2, 3]).symmetric_difference(Rank.from([2, 3, 4])).to_list()",
+    "Rank.from([1, 2]).is_subset(Rank.from([1, 2, 3]))",
+    "Rank.from([1, 2, 3]).is_superset(Rank.from([1, 2]))",
+    "Rank.from([1, 2]).is_disjoint(Rank.from([3, 4]))",
+    "Set.from([1, 2, 3]).intersection(Set.from([2, 3, 4])).len()",
+    "Set.from([1, 2, 3]).difference(Set.from([2, 3, 4])).len()",
+    "Set.from([1, 2, 3]).symmetric_difference(Set.from([2, 3, 4])).len()",
+    "Set.from([1, 2]).is_subset(Set.from([1, 2, 3]))",
+    "Set.from([1, 2, 3]).is_superset(Set.from([1, 2]))",
+    "Set.from([1, 2]).is_disjoint(Set.from([3, 4]))",
+    "(9223372036854775807 + 1).to_string()",
+    "(999999999999999999999999999999 + 999999999999999999999999999999).to_string()",
+    "(100 - 1).to_string()", "(7 * 6).to_string()", "(2 ^ 200).to_string()", "(0 - 3).to_string()"
+]
+
+// Rust: tests/comptime_diff.rs:101
+F32_VALUE_FLOW :: """
+fn pass_f32(value: F32) -> F32 { return value }
+fn apply_f32(transform: fn(F32) -> F32, value: F32) -> F32 { return transform(value) }
+fn f32_value_flow() -> String {
+    literal :: F32{ 16777217.0 }
+    one :: F32{ 1.0 }
+    two :: F32{ 2.0 }
+    three :: F32{ 3.0 }
+    threshold :: F32{ 16777215.0 }
+    immutable :: F32{ literal + one }
+    mutable := F32{ literal }
+    mutable += one
+    mutable -= two
+    mutable *= three
+    mutable /= two
+    transform :: (value: F32) -> value + one
+    same :: pass_f32(literal)
+    wide :: Float.from_f32(literal)
+    narrowed :: F32.from_float(wide) ?? one
+    nested :: [["values": [literal, apply_f32(transform, literal), narrowed]]]
+    option_left :: [[[literal].get(0)]]
+    option_right :: [[[same].get(0)]]
+    result_left :: [[F32.from_float(wide)]]
+    result_right :: [[F32.from_float(Float.from_f32(same))]]
+    negative :: F32{ -literal }
+    difference :: F32{ literal - one }
+    product :: F32{ literal * two }
+    quotient :: F32{ literal / two }
+    return "{literal}|{immutable}|{mutable}|{negative}|{difference}|{product}|{quotient}|{literal == same}|{literal > threshold}|{nested[0]["values"]}|{option_left == option_right}|{result_left == result_right}"
+}
+EXPECTED :: prep { f32_value_flow() }
+fn run() -> {
+    actual :: f32_value_flow()
+    print("{EXPECTED}")
+    print("{actual}")
+}
+"""
+
+// Rust: tests/comptime_diff.rs:150
+MODULE_CASES :: [
+    "use core.math.[abs, min]\nCOMPTIME_VALUE :: prep { abs(-8) + min(9, 4) }\n\nfn run() -> {\n    r :: abs(-8) + min(9, 4)\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.text as text\nCOMPTIME_VALUE :: prep { text.trim(\" hi \") }\n\nfn run() -> {\n    r :: text.trim(\" hi \")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.text as text\nCOMPTIME_VALUE :: prep { text.upper(\"abc\") }\n\nfn run() -> {\n    r :: text.upper(\"abc\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.text as text\nCOMPTIME_VALUE :: prep { text.words(\"hello world's foo\")[0] }\n\nfn run() -> {\n    r :: text.words(\"hello world's foo\")[0]\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.text as text\nCOMPTIME_VALUE :: prep { text.pad_start(\"7\", 3, \"0\") }\n\nfn run() -> {\n    r :: text.pad_start(\"7\", 3, \"0\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.math as math\nCOMPTIME_VALUE :: prep { math.sin(0.0) }\n\nfn run() -> {\n    r :: math.sin(0.0)\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.math as math\nCOMPTIME_VALUE :: prep { math.gcd(12, 18) }\n\nfn run() -> {\n    r :: math.gcd(12, 18)\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.math as math\nCOMPTIME_VALUE :: prep { math.saturating_add(9223372036854775807, 1) }\n\nfn run() -> {\n    r :: math.saturating_add(9223372036854775807, 1)\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.net.url as url\nCOMPTIME_VALUE :: prep { url.percent_encode(\"a b/c?d#e\") }\n\nfn run() -> {\n    r :: url.percent_encode(\"a b/c?d#e\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.net.url as url\nCOMPTIME_VALUE :: prep { url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\") }\n\nfn run() -> {\n    r :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.net.url as url\nCOMPTIME_VALUE :: prep { url.percent_decode(\"bad%\") ?? \"fallback\" }\n\nfn run() -> {\n    r :: url.percent_decode(\"bad%\") ?? \"fallback\"\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.net.url as url\nCOMPTIME_VALUE :: prep { url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]]) }\n\nfn run() -> {\n    r :: url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\nCOMPTIME_VALUE :: prep { data.sum([Float]{ 1.0, 2.0, 3.5 }) ?? panic(\"data\") }\n\nfn run() -> {\n    r :: data.sum([Float]{ 1.0, 2.0, 3.5 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\nCOMPTIME_VALUE :: prep { data.mean([Float]{ 1.0, 2.0, 3.0, 4.0 }) ?? panic(\"data\") }\n\nfn run() -> {\n    r :: data.mean([Float]{ 1.0, 2.0, 3.0, 4.0 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\nCOMPTIME_VALUE :: prep { data.median([Float]{ 5.0, 1.0, 3.0, 2.0 }) ?? panic(\"data\") }\n\nfn run() -> {\n    r :: data.median([Float]{ 5.0, 1.0, 3.0, 2.0 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\nCOMPTIME_VALUE :: prep { data.variance([Float]{ 2.0, 4.0, 4.0, 5.0 }) ?? panic(\"data\") }\n\nfn run() -> {\n    r :: data.variance([Float]{ 2.0, 4.0, 4.0, 5.0 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\nCOMPTIME_VALUE :: prep { data.quantile([Float]{ 1.0, 2.0, 3.0, 4.0, 5.0 }, Float{0.25}) ?? panic(\"data\") }\n\nfn run() -> {\n    r :: data.quantile([Float]{ 1.0, 2.0, 3.0, 4.0, 5.0 }, Float{0.25}) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\nCOMPTIME_VALUE :: prep { data.min([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\") }\n\nfn run() -> {\n    r :: data.min([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\nCOMPTIME_VALUE :: prep { data.max([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\") }\n\nfn run() -> {\n    r :: data.max([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\nCOMPTIME_VALUE :: prep { data.sum([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\") }\n\nfn run() -> {\n    r :: data.sum([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\nCOMPTIME_VALUE :: prep { data.mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\") }\n\nfn run() -> {\n    r :: data.mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\nCOMPTIME_VALUE :: prep { data.variance([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\") }\n\nfn run() -> {\n    r :: data.variance([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.csv as csv\nCOMPTIME_VALUE :: prep { csv.to_string(csv.parse(\"a,\\\"b,c\\\",\\\"e\\\"\\\"f\\\"\\n\") ?? panic(\"bad\")) }\n\nfn run() -> {\n    r :: csv.to_string(csv.parse(\"a,\\\"b,c\\\",\\\"e\\\"\\\"f\\\"\\n\") ?? panic(\"bad\"))\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.csv as csv\nCOMPTIME_VALUE :: prep { csv.parse(\"a,b,c\\n1,2\\n\") ?? panic(\"bad\") }\n\nfn run() -> {\n    r :: csv.parse(\"a,b,c\\n1,2\\n\") ?? panic(\"bad\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.csv as csv\nCOMPTIME_VALUE :: prep { csv.to_string(csv.parse(\"name,note\\nAda,\\\"line1\\nline2\\\"\\nLin,\\\"said \\\"\\\"hi\\\"\\\"\\\"\\n\") ?? panic(\"bad\")) }\n\nfn run() -> {\n    r :: csv.to_string(csv.parse(\"name,note\\nAda,\\\"line1\\nline2\\\"\\nLin,\\\"said \\\"\\\"hi\\\"\\\"\\\"\\n\") ?? panic(\"bad\"))\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.toml as toml\nCOMPTIME_VALUE :: prep { toml.to_string(toml.parse(\"[a]\\nx = 1\\n\\n[[a.b]]\\ny = 2\\n\\n[[a.b]]\\ny = 3\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\") }\n\nfn run() -> {\n    r :: toml.to_string(toml.parse(\"[a]\\nx = 1\\n\\n[[a.b]]\\ny = 2\\n\\n[[a.b]]\\ny = 3\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.toml as toml\nCOMPTIME_VALUE :: prep { toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\") }\n\nfn run() -> {\n    r :: toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.yaml as yaml\nCOMPTIME_VALUE :: prep { yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\") }\n\nfn run() -> {\n    r :: yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.xml as xml\nCOMPTIME_VALUE :: prep { xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\")) }\n\nfn run() -> {\n    r :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\nCOMPTIME_VALUE :: prep { hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) }\n\nfn run() -> {\n    r :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nCOMPTIME_VALUE :: prep { json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\")) }\n\nfn run() -> {\n    r :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.jsonl as jsonl\nCOMPTIME_VALUE :: prep { jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\") }\n\nfn run() -> {\n    r :: jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\nCOMPTIME_VALUE :: prep { json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\")) ?? panic(\"value is not canonical JSON\") }\n\nfn run() -> {\n    r :: json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\")) ?? panic(\"value is not canonical JSON\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\nCOMPTIME_VALUE :: prep { json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\") }\n\nfn run() -> {\n    r :: json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n"
+]
+
+// Rust: tests/comptime_diff.rs:228
+LOADABLE_CASES :: [
+    "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.idle() }\n\nfn run() -> {\n    r :: loadable.idle()\n    print(\"{COMPTIME_VALUE.is_idle()}\")\n    print(\"{r.is_idle()}\")\n}\n",
+    "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.loading() }\n\nfn run() -> {\n    r :: loadable.loading()\n    print(\"{COMPTIME_VALUE.is_loading()}\")\n    print(\"{r.is_loading()}\")\n}\n",
+    "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.loaded(7) }\n\nfn run() -> {\n    r :: loadable.loaded(7)\n    print(\"{COMPTIME_VALUE.loaded() ?? 0}\")\n    print(\"{r.loaded() ?? 0}\")\n}\n",
+    "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.failed(\"offline\") }\n\nfn run() -> {\n    r :: loadable.failed(\"offline\")\n    print(\"{COMPTIME_VALUE.is_failed()}\")\n    print(\"{r.is_failed()}\")\n}\n",
+    "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.idle().is_idle() }\n\nfn run() -> {\n    r :: loadable.idle().is_idle()\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.loading().is_loading() }\n\nfn run() -> {\n    r :: loadable.loading().is_loading()\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.loaded(7).is_loaded() }\n\nfn run() -> {\n    r :: loadable.loaded(7).is_loaded()\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.failed(\"offline\").is_failed() }\n\nfn run() -> {\n    r :: loadable.failed(\"offline\").is_failed()\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.loaded(7).loaded() ?? 0 }\n\nfn run() -> {\n    r :: loadable.loaded(7).loaded() ?? 0\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.loaded(7).or_else(0) }\n\nfn run() -> {\n    r :: loadable.loaded(7).or_else(0)\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n"
+]
+
+// Rust: tests/comptime_diff.rs:503
+fn check_comptime_case(i: USize, expr: String) -> {
+    src :: "COMPTIME_VALUE :: prep {{ {expr} }}\n\nfn run() -> {{\n    r :: {expr}\n    print(\"{{COMPTIME_VALUE}}\")\n    print(\"{{r}}\")\n}}\n"
+    check_comptime_src(i, expr, src)
+}
+
+// Rust: tests/comptime_diff.rs:583
+// GATE #4494: scoped native thread with compiler stack headroom.
+fn check_comptime_src(i: USize, label: String, src: String) -> {
+    (_, user_diags) :: Lexer.lex(src)
+    assert(user_diags.is_empty(), "invalid differential fixture: {user_diags.debug()}")
+    framed :: framed_comptime_src(src)
+    thread.scope(|scope| -> {
+        thread.Builder.new().stack_size(64 * 1024 * 1024).spawn_scoped(scope, || -> {
+            bundle := Loader.load_source_program(framed, "comptime_diff.jet")
+                .unwrap_or_else(|diags| -> panic("case {i} `{label}` failed the front end:\n{render_diagnostics("comptime_diff.jet", framed, diags)}"))
+            diags :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+            assert(diags.is_empty(), "case {i} `{label}` failed the front end:\n{render_diagnostics("comptime_diff.jet", framed, diags)}")
+        }).expect("spawn comptime differential compiler").join().expect("comptime differential compiler panicked")
+    })
+    // Retired generated-Rust inspection is replaced by the canonical native build/run boundary.
+    (code, stdout, stderr) :: common.build_and_run("jet_ctdiff", "case_{i}", framed)
+    assert(code == 0, "case `{label}` failed compilation or panicked at runtime:\n{stderr}")
+    assert_parity_output(label, stdout.bytes())
+}
+
+// Rust: tests/comptime_diff.rs:677
+fn framed_comptime_src(src: String) -> String {
+    lines := src.lines().map(|line| -> line.to_string()).to_list()
+    second :: lines.iter().rposition(|line| -> line.trim_start().starts_with("print(")).expect("comptime differential source needs a runtime print")
+    first :: lines[..second].iter().rposition(|line| -> line.trim_start().starts_with("print(")).expect("comptime differential source needs a comptime print")
+    comptime :: print_argument(lines[first])
+    runtime :: print_argument(lines[second])
+    // #4303: trim views are materialized before String operations.
+    trimmed := lines[first].trim_start()
+    indent :: lines[first][..lines[first].len() - trimmed.len()].to_string()
+    lines[first] = "{indent}__comptime_diff_frame({comptime}, {runtime})"
+    lines[second] = ""
+    framed := "use core.encoding.hex as __comptime_diff_hex\n{lines.join("\n")}"
+    &framed.push_str("\n\nfn __comptime_diff_frame(expected_text: String, actual_text: String) -> {{\n    print(\"{{__comptime_diff_hex.encode(expected_text.bytes())}}\")\n    print(\"{{__comptime_diff_hex.encode(actual_text.bytes())}}\")\n}}\n")
+    framed
+}
+
+// Rust: tests/comptime_diff.rs:705
+fn print_argument(line: String) -> String {
+    trimmed := line.trim() // #4303
+    trimmed.strip_prefix("print(").and_then(|value| -> value.strip_suffix(")"))
+        .expect("comptime differential parity print must occupy one complete line").to_string()
+}
+
+// Rust: tests/comptime_diff.rs:712
+fn assert_parity_output(label: String, stdout: [U8]) -> {
+    (comptime, runtime) :: parse_parity_output(stdout).unwrap_or_else(|reason| -> panic("case `{label}` emitted an invalid parity frame: {reason}"))
+    assert_eq(comptime, runtime, "DIVERGENCE for `{label}`: comptime gave {String.from_utf8_lossy(comptime).debug()}, runtime gave {String.from_utf8_lossy(runtime).debug()} — this is a P0 miscompile")
+}
+
+// Rust: tests/comptime_diff.rs:726
+fn parse_parity_output(stdout: [U8]) -> ([U8], [U8]) Err! {
+    if stdout.is_empty() || stdout[stdout.len() - 1] != 10 { return .Err("frame has no final newline") }
+    framed :: stdout[..stdout.len() - 1]
+    lines := framed.split(|byte| -> byte == 10)
+    comptime :: lines.next().unwrap()
+    runtime :: lines.next() ?? return .Err("frame has no runtime value")
+    if lines.next().is_some() { return .Err("frame has trailing lines") }
+    .Ok((decode_parity_hex(comptime, "comptime")?, decode_parity_hex(runtime, "runtime")?))
+}
+
+// Rust: tests/comptime_diff.rs:744
+fn decode_parity_hex(encoded: [U8], label: String) -> [U8] Err! {
+    if encoded.len() % 2 != 0 { return .Err("{label} hex has odd length") }
+    decoded := [U8].with_capacity(encoded.len() / 2)
+    loop pair in encoded.chunks_exact(2) {
+        high :: hex_nibble(pair[0]) ?? return .Err("{label} hex is invalid")
+        low :: hex_nibble(pair[1]) ?? return .Err("{label} hex is invalid")
+        &decoded.push(high << 4 | low)
+    }
+    .Ok(decoded)
+}
+
+// Rust: tests/comptime_diff.rs:758
+fn hex_nibble(byte: U8) -> U8? {
+    if byte >= 48 && byte <= 57 { return byte - 48 }
+    if byte >= 97 && byte <= 102 { return byte - 97 + 10 }
+    if byte >= 65 && byte <= 70 { return byte - 65 + 10 }
+    none
+}
+
+// Rust: tests/comptime_diff.rs:767
+fn test_parity_frame(comptime: [U8], runtime: [U8]) -> [U8] {
+    frame := [U8].with_capacity((comptime.len() + runtime.len()) * 2 + 2)
+    digits :: "0123456789abcdef".bytes()
+    loop value in [comptime, runtime] {
+        loop byte in value {
+            &frame.push(digits[(byte >> 4).to_usize()])
+            &frame.push(digits[(byte & 15).to_usize()])
+        }
+        &frame.push(10)
+    }
+    frame
+}
+
+// Rust: tests/comptime_diff.rs:1187
+// GATE #4494: canonical native compiler/process boundary, not a Rust bridge.
+fn compile_and_run(src: String) -> String {
+    (code, stdout, stderr) :: common.build_and_run("jet_ct_fixture", "fixture", src)
+    assert(code == 0, "fixture failed compilation or panicked at runtime:\n{stderr}")
+    stdout
+}

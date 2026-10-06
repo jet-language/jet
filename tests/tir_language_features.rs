@@ -9,7 +9,7 @@ use std::fs;
 
 use tir_support::{
     build_and_run, build_and_run_full, build_and_run_full_with_cfg, build_and_run_multi, compile,
-    have_rustc, interpreter_run, jit_run,
+    have_rustc, interpreter_run, default_run,
 };
 
 /// D-BOUND-HEAD1=A: one typed-head hole law across AOT, `jet run`, and the
@@ -289,7 +289,7 @@ fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) -> Str
 fn identity<T>(value: T, *, note: String{\"unused\"}) -> T {
     return value
 }
-fn force(*, force: Bool) -> Int -> 1
+fn force(*, force: Bool) -> Int { 1 }
 fn apply(action: fn(*, force: Bool) -> Int) -> Int {
     return action(force: true)
 }
@@ -354,7 +354,7 @@ fn function_value_arguments_preserve_public_callable_contracts() {
     let src = "\
 fn factory(action: fn(*, force: Bool) -> Int) -> Int { return action(force: true) }
 fn invoke(callback: fn(fn(*, force: Bool) -> Int) -> Int) -> Int { return callback(plain) }
-fn plain(value: Bool) -> Int -> 1
+fn plain(value: Bool) -> Int { 1 }
 fn run() { _ :: invoke(factory) }
 ";
     let diagnostics = jet::compile(src)
@@ -574,7 +574,7 @@ fn generated_run_function<'a>(rust: &'a str) -> &'a str {
 
 fn assert_contract_breach_tiers(name: &str, src: &str, marker: &str, line: u32) {
     let (aot_code, aot_stdout, aot_stderr) = build_and_run_full("jet_contract_tiers", name, src);
-    let (jit_code, jit_stdout, jit_stderr) = jit_run(name, src);
+    let (jit_code, jit_stdout, jit_stderr) = default_run(name, src);
     let (interpreter_code, interpreter_stdout, interpreter_stderr) = interpreter_run(name, src);
     let (release_code, release_stdout, release_stderr) =
         build_and_run_full_with_cfg("jet_contract_release", name, src, "jet_release");

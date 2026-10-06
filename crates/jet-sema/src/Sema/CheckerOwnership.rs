@@ -3943,6 +3943,37 @@ impl<'a> Checker<'a> {
         ));
     }
 
+    /// #4392: a `^` parameter (or `^self`) moves into this function and is
+    /// freed when it returns, so it cannot own a returned view. A consumed
+    /// view carrier differs: its windows still borrow the caller's owner.
+    fn consumed_view_owner(&self, owner: &ViewOwnerId) -> bool {
+        self.lookup(&owner.name).is_some_and(|info| {
+            info.def_span == owner.def_span
+                && info.param_conv == Some(AccessConvention::Move)
+                && !matches!(
+                    &info.ty,
+                    Type::Apply { name, args }
+                        if (name == "View" || name == "ViewMut") && args.len() == 1
+                )
+        })
+    }
+
+    /// E2305 (#4392): a returned view into a consumed parameter.
+    fn report_view_consumed_owner_return(&mut self, place: &ViewPlace, span: Span) {
+        let owner = &place.owner.name;
+        self.diags.push(Diagnostic::error(
+            "E2305",
+            format!("this view points into `{owner}`, which this function consumes"),
+            format!(
+                "`^{owner}` moves the value into this function, which frees it when it returns, so a returned window into it would outlive its owner"
+            ),
+            format!(
+                "take `{owner}` as a read or `&` parameter so the caller keeps owning it, or return an owned copy with `~`"
+            ),
+            Some(span),
+        ));
+    }
+
     /// D-MEM-VIEWRET1=B: accept a returned named view only when its source is
     /// stable at the public boundary. Parameter position, never spelling, is
     /// the canonical identity. Compatible return paths form a source union.
@@ -3954,6 +3985,12 @@ impl<'a> Checker<'a> {
         span: Span,
     ) {
         let source = match place.owner.origin {
+            ViewOwnerOrigin::Receiver | ViewOwnerOrigin::Parameter(_)
+                if self.consumed_view_owner(&place.owner) =>
+            {
+                self.report_view_consumed_owner_return(place, span);
+                return;
+            }
             ViewOwnerOrigin::Receiver => crate::AST::ViewSource::Receiver,
             ViewOwnerOrigin::Parameter(index) => crate::AST::ViewSource::Parameter(index),
             _ => {

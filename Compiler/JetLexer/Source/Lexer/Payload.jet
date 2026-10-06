@@ -7,6 +7,7 @@ use jet_foundation.[
     Span,
     TextEdit,
     diagnostic_from_registry,
+    diagnostic_registry_row,
     diagnostic_with_edit,
 ]
 use core.text as unicode
@@ -695,6 +696,19 @@ fn decode_raw_string(text: String, source_start: Int) -> (decoded: String, parts
     (decoded: decoded, parts: parts)
 }
 
+// D-TRIPLE-DELIM1=A: use the same first offending run and byte span as Native.
+fn check_triple_delimiter_text(source: [U8], begin: Int, end: Int, position: String, diagnostics: &[Diagnostic]) {
+    finish := end
+    if byte_at(source, end) == 10 && finish > begin && byte_at(source, finish - 1) == 13 -> finish -= 1
+    first := begin
+    loop first < finish && (byte_at(source, first) == 32 || byte_at(source, first) == 9) -> first += 1
+    if first == finish -> return
+    last := first
+    loop last < finish && byte_at(source, last) != 32 && byte_at(source, last) != 9 -> last += utf8_width(source, last)
+    row :: diagnostic_registry_row("E0084") ?? panic("E0084 has no registry row")
+    add_diagnostic(&diagnostics, row.code, first, last, row.what.replace("{{position}}", position), row.why, row.fix)
+}
+
 fn decode_string(source: [U8], facts: [Int], index: Int, start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, diagnostics: &[Diagnostic]) -> (decoded: String, interpolations: Int, parts: [StringPart], valid: Bool) {
     triple := byte_at(source, start) == 34 && byte_at(source, start + 1) == 34 && byte_at(source, start + 2) == 34
     if triple && raw_foreign_body_at(source, facts, index) {
@@ -722,6 +736,8 @@ fn decode_string(source: [U8], facts: [Int], index: Int, start: Int, end: Int, c
         content_start = open_end
         cursor := open_end
         loop cursor < close && byte_at(source, cursor) != 10 -> cursor += utf8_width(source, cursor)
+        check_triple_delimiter_text(source, open_end, cursor, "after the opening", &diagnostics)
+        check_triple_delimiter_text(source, close_line_start, close, "before the closing", &diagnostics)
         if cursor < close && byte_at(source, cursor) == 10 -> content_start = cursor + 1
         content_end = close_line_start
         if content_end > content_start && byte_at(source, content_end - 1) == 10 -> content_end -= 1

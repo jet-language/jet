@@ -5,7 +5,7 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use jet::Interpreter::{dev_iteration, RunOutcome};
+use jet::Interpreter::RunOutcome;
 use tir_support::{
     assert_release_error_tiers_agree, assert_release_tiers_agree, assert_tiers_agree, build_and_run,
     compile, have_rustc,
@@ -802,7 +802,7 @@ struct Pair {
     a: Int
     b: Int
 }
-fn align(left: D, right: D) -> Pair -> Pair{a: left.value, b: right.value}
+fn align(left: D, right: D) -> Pair { Pair{a: left.value, b: right.value} }
 impl D.Add {
     fn add(self, rhs: D) -> D {
         pair :: align(self, rhs)
@@ -1299,6 +1299,36 @@ fn run() {
     assert_tiers_agree("tir_copied_string_slice", src, "é🙂\n");
 }
 
+/// `List.slice(start, end)` (`core.builtin.list_slice`) clamps both bounds into
+/// the list, and an inverted window is empty. The lists are built at run time,
+/// so the forced interpreter executes the route itself (the self-hosted parser
+/// slices its `[U8]` source this way); `[U8]` covers the byte carrier.
+#[test]
+fn list_slice_clamps_on_every_tier() {
+    let src = "\
+fn window(values: [Int], start: Int, end: Int) {
+    print(values.slice(start, end))
+}
+fn run() {
+    values := [Int]{}
+    loop index in 0..<6 -> &values.push(index * 10)
+    window(values, 1, 4)
+    window(values, -3, 2)
+    window(values, 4, 99)
+    window(values, 5, 2)
+    bytes :: \"jet {values.len()} lang\".bytes()
+    print(String.from_bytes(bytes.slice(6, 99)) ?? \"\")
+    print(bytes.slice(-1, 3).len())
+    print(bytes.slice(7, 2).len())
+}
+";
+    assert_tiers_agree(
+        "tir_list_slice_clamps",
+        src,
+        "[10, 20, 30]\n[0, 10]\n[40, 50]\n[]\nlang\n3\n0\n",
+    );
+}
+
 /// E3 breadth: String owns the common search, trim, padding, classification,
 /// title, and single-split operations. The test runs through the TIR lowering
 /// path and proves the tuple-shaped `split_once` result is usable by name.
@@ -1588,7 +1618,7 @@ fn list_surface_forced_interpreter() {
         "{}/Examples/features/collections/list_surface.jet",
         env!("CARGO_MANIFEST_DIR")
     );
-    match dev_iteration(&path, false, true) {
+    match crate::common::dev_run(&path, false, true) {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -1618,7 +1648,7 @@ fn bare_member_shorthand_forced_interpreter() {
         "{}/Examples/features/basics/method_chain.jet",
         env!("CARGO_MANIFEST_DIR")
     );
-    match dev_iteration(&path, false, true) {
+    match crate::common::dev_run(&path, false, true) {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -1656,7 +1686,7 @@ fn subject_shorthand_nesting_lint_and_allow() {
 fn run() {
     words := [["a", "bb"]]
     print(words.map(.map(.len())))
-    #allow(subject_shorthand_nesting) print(words.map(.map(.len())))
+    #allow(subject_shorthand_nesting, "the second occurrence exercises local suppression") print(words.map(.map(.len())))
 }
 "#;
     let compiled = jet::compile(source).expect("nested subject shorthand should remain legal");
@@ -1681,7 +1711,7 @@ fn redundant_fixed_cleanup_lint_has_exact_fix_and_allow() {
 fn run() {
     value :: Float{1234.5}
     print("{value:Fixed(2)}".replace(",", ""))
-    #allow(redundant_fixed_cleanup) print("{value:Fixed(2)}".replace(",", ""))
+    #allow(redundant_fixed_cleanup, "the second occurrence exercises local suppression") print("{value:Fixed(2)}".replace(",", ""))
     print("{value:Grouped(2)}".replace(",", ""))
     print("1,234".replace(",", ""))
     print("{value:Fixed(2)}".replace(",", ","))

@@ -128,14 +128,14 @@ authority: {
     .unwrap();
 
     for args in [
-        vec!["run", "--trace-tiers", "main.jet"],
-        vec!["dev", "--watch=off", "--trace-tiers", "main.jet"],
+        vec!["run", "main.jet"],
+        vec!["dev", "--watch=off", "main.jet"],
     ] {
         let output = Command::new(jet())
             .args(&args)
             .current_dir(&scratch.path)
             .env("JET_STORE_DIR", scratch.join("store"))
-            .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+            .env("JET_STORE_DIR", scratch.join("run-cache"))
             .env("NO_COLOR", "1")
             .output()
             .unwrap();
@@ -148,16 +148,6 @@ authority: {
             String::from_utf8_lossy(&output.stdout)
         );
         assert_eq!(output.stdout, b"default-profile\n", "{} output", args[0]);
-        assert!(
-            trace.lines().any(|line| line.contains("tier1 native")),
-            "{} did not use the default fast production lens:\n{trace}",
-            args[0]
-        );
-        assert!(
-            !trace.contains("tier0 interp"),
-            "{} default route deoptimized:\n{trace}",
-            args[0]
-        );
     }
 }
 
@@ -283,7 +273,7 @@ fn run() {}
         ])
         .current_dir(&scratch.path)
         .env("JET_STORE_DIR", scratch.join("store"))
-        .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+        .env("JET_STORE_DIR", scratch.join("run-cache"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
@@ -311,7 +301,7 @@ fn run() {}
             .arg(&record_arg)
             .current_dir(&scratch.path)
             .env("JET_STORE_DIR", scratch.join("store"))
-            .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+            .env("JET_STORE_DIR", scratch.join("run-cache"))
             .env("NO_COLOR", "1");
         if let Some(filter) = filter {
             command.arg("--filter").arg(filter);
@@ -380,7 +370,7 @@ fn run() {}
         ])
         .current_dir(&scratch.path)
         .env("JET_STORE_DIR", scratch.join("store"))
-        .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+        .env("JET_STORE_DIR", scratch.join("run-cache"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
@@ -1189,7 +1179,7 @@ fn plugin_text_export_allows_guest_memory_allocation() {
     let dir = isolated_cwd("plugin_text_memory_allowed");
     fs::write(
         dir.join("main.jet"),
-        "pub fn echo(value: String) -> String -> ~value\n\nfn run() {}\n",
+        "pub fn echo(value: String) -> String { ~value }\n\nfn run() {}\n",
     )
     .unwrap();
     let out = Command::new(jet())

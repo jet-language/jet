@@ -434,7 +434,8 @@ fn collect_effects_for_key(
     };
     out.extend(set.iter().cloned());
     for effect in set {
-        let site = effect_site(&key, effect, solved, summaries, &mut HashSet::new());
+        let site = effect_site(&key, effect, solved, summaries, &mut HashSet::new())
+            .unwrap_or_else(|| key.clone());
         effect_sites.entry(effect.clone()).or_insert(site);
     }
     if let Some(site) = panic_site(&key, summaries, &mut HashSet::new()) {
@@ -442,18 +443,22 @@ fn collect_effects_for_key(
     }
 }
 
+/// The function where `effect` enters the graph below `key`: the first one
+/// that performs it directly or is maximal. A call cycle is never a site:
+/// revisiting a function on the current walk tries the next callee instead,
+/// so a recursive caller is not blamed for an effect one of its callees adds.
 fn effect_site(
     key: &str,
     effect: &str,
     solved: &HashMap<String, EffectSet>,
     summaries: &HashMap<String, EffectSummary>,
     seen: &mut HashSet<String>,
-) -> String {
+) -> Option<String> {
     if !seen.insert(key.to_string()) {
-        return key.to_string();
+        return None;
     }
     let Some(summary) = summaries.get(key) else {
-        return key.to_string();
+        return Some(key.to_string());
     };
     if summary.maximal
         || summary
@@ -461,19 +466,19 @@ fn effect_site(
             .iter()
             .any(|direct| effect_covers(direct, effect))
     {
-        return key.to_string();
+        return Some(key.to_string());
     }
-    for callee in &summary.edges {
-        let reaches = solved.get(callee).is_some_and(|effects| {
-            effects
-                .iter()
-                .any(|candidate| effect_covers(candidate, effect))
-        });
-        if reaches {
-            return effect_site(callee, effect, solved, summaries, seen);
-        }
-    }
-    key.to_string()
+    summary
+        .edges
+        .iter()
+        .filter(|callee| {
+            solved.get(*callee).is_some_and(|effects| {
+                effects
+                    .iter()
+                    .any(|candidate| effect_covers(candidate, effect))
+            })
+        })
+        .find_map(|callee| effect_site(callee, effect, solved, summaries, seen))
 }
 
 fn panic_site(

@@ -1,0 +1,234 @@
+// EnvConfig.rs:1–144, EnvProjection.rs:1–46 and EnvInit.rs:9–21,38–42,59–66
+// policy expectations. True portable source proof only: the native snapshot
+// table, Dotenv.file read, DataTree/Decode adapters and tiers remain held.
+// Native EnvConfig.rs:13–19 target path cases (Unix/Windows, including `//?/`
+// and `\\?\C:foo`) remain held for the real private path-classification leaf;
+// no Windows path parser is substituted by this corpus.
+use core.sys.runtime.kernel_env_config as env_config_kernel
+use core.sys.runtime.kernel_env_projection as env_projection_kernel
+use core.sys.runtime.env_init as env_init_kernel
+
+fn env_var(name: String, value: String) -> env_config_kernel.JetEnvConfigVar Never! {
+    env_config_kernel.JetEnvConfigVar{name: name, value: value}
+}
+
+fn env_none() -> [env_config_kernel.JetEnvConfigVar] Never! {
+    [env_config_kernel.JetEnvConfigVar]{}
+}
+
+fn env_no_allow() -> [String] Never! { [String]{} }
+
+fn env_entries(prefix: String, dotenv: String?, allow: [String], process: ^[env_config_kernel.JetEnvConfigVar]) -> [env_config_kernel.JetEnvConfigEntry] Never! {
+    env_config_kernel.jet_env_config_entries(prefix, dotenv, allow, ^process) ?? panic("env config entries: {err.message}")
+}
+
+fn env_expect_entry(entry: env_config_kernel.JetEnvConfigEntry, name: String, value: String, segments: [String]) Never! {
+    assert_eq(entry.name, name)
+    assert_eq(entry.value, value)
+    assert_eq(entry.segments, segments)
+}
+
+fn env_expect_error(dotenv: String, expected: String) Never! {
+    _ :: env_config_kernel.jet_env_config_entries("APP_", Val(dotenv), env_no_allow(), env_none()) ?? {
+        assert_eq(err.message, expected)
+        return
+    }
+    panic("expected dotenv error")
+}
+
+fn env_shape(env_name: String, decode_name: String) -> env_projection_kernel.JetEnvShapeName Never! {
+    env_projection_kernel.JetEnvShapeName{env_name: env_name, decode_name: decode_name}
+}
+
+fn env_expect_shape_error(names: [env_projection_kernel.JetEnvShapeName], dotenv: String?, expected: String) Never! {
+    _ :: env_projection_kernel.jet_env_config_entries_for_names("APP_", dotenv, env_no_allow(), names, env_none()) ?? {
+        assert_eq(err.message, expected)
+        return
+    }
+    panic("expected environment shape error")
+}
+
+fn env_origin(name: String, path: String) -> env_config_kernel.JetEnvConfigOrigin Never! {
+    env_config_kernel.JetEnvConfigOrigin{name: name, path: path}
+}
+
+fn env_entry_bytes(name: String, value: String) -> env_init_kernel.JetEnvEntry Never! {
+    env_init_kernel.JetEnvEntry{name: name.bytes(), value: value.bytes()}
+}
+
+#Test("process replaces dotenv by ASCII-folded name and keeps its spelling in key order") {
+    dotenv :: "APP_PORT=8080\napp_port=9090\nAPP_HOST=h\nOTHER=x"
+    entries :: env_entries("app_", Val(dotenv), env_no_allow(), [env_config_kernel.JetEnvConfigVar]{env_var("App_Port", "7000"), env_var("APP_ZONE", "z")})
+    assert_eq(entries.len(), 3)
+    _ :: env_expect_entry(entries[0], "APP_HOST", "h", [String]{"host"})
+    _ :: env_expect_entry(entries[1], "App_Port", "7000", [String]{"port"})
+    _ :: env_expect_entry(entries[2], "APP_ZONE", "z", [String]{"zone"})
+}
+
+#Test("later dotenv line replaces earlier one with its own spelling") {
+    entries :: env_entries("APP_", Val("APP_PORT=1\napp_port=2"), env_no_allow(), env_none())
+    assert_eq(entries.len(), 1)
+    _ :: env_expect_entry(entries[0], "app_port", "2", [String]{"port"})
+}
+
+#Test("allow list is ASCII case-insensitive for dotenv and process names") {
+    dotenv :: "APP_HOST=h\nAPP_PORT=1"
+    entries :: env_entries("APP_", Val(dotenv), [String]{"app_port", "Missing"}, [env_config_kernel.JetEnvConfigVar]{env_var("APP_USER", "u"), env_var("App_Port", "2")})
+    assert_eq(entries.len(), 1)
+    _ :: env_expect_entry(entries[0], "App_Port", "2", [String]{"port"})
+}
+
+#Test("dotenv trims White_Space strips quotes export and inline comments") {
+    carriage :: String.from_bytes([U8]{13}) ?? panic("carriage return")
+    dotenv :: "  # comment\n\n export APP_A = \"quoted # kept\" \nAPP_B='single'\nAPP_C=value # comment\nAPP_D=x#y\n　APP_E　=　wide　{carriage}\nAPP_F=\"\nAPP_G=a  # c\nAPP_H=\"mixed'\nAPP_I=\nexport=raw"
+    entries :: env_entries("", Val(dotenv), env_no_allow(), env_none())
+    assert_eq(entries.len(), 10)
+    _ :: env_expect_entry(entries[0], "APP_A", "quoted # kept", [String]{"app_a"})
+    _ :: env_expect_entry(entries[1], "APP_B", "single", [String]{"app_b"})
+    _ :: env_expect_entry(entries[2], "APP_C", "value", [String]{"app_c"})
+    _ :: env_expect_entry(entries[3], "APP_D", "x#y", [String]{"app_d"})
+    _ :: env_expect_entry(entries[4], "APP_E", "wide", [String]{"app_e"})
+    _ :: env_expect_entry(entries[5], "APP_F", "\"", [String]{"app_f"})
+    _ :: env_expect_entry(entries[6], "APP_G", "a", [String]{"app_g"})
+    _ :: env_expect_entry(entries[7], "APP_H", "\"mixed'", [String]{"app_h"})
+    _ :: env_expect_entry(entries[8], "APP_I", "", [String]{"app_i"})
+    _ :: env_expect_entry(entries[9], "export", "raw", [String]{"export"})
+}
+
+#Test("dotenv error names the one-based physical line") {
+    _ :: env_expect_error("APP_A=1\n# c\n\nNOEQUALS\nAPP_B=2", "invalid .env line 4")
+    carriage :: String.from_bytes([U8]{13}) ?? panic("carriage return")
+    _ :: env_expect_error("{carriage}\nexport APP_A", "invalid .env line 2")
+    _ :: env_expect_error("  \n\n\nAPP_A=1\n=\nbad", "invalid .env line 6")
+}
+
+#Test("invalid names are skipped and never trusted") {
+    nul :: String.from_bytes([U8]{65, 80, 80, 95, 78, 0}) ?? panic("nul name")
+    entries :: env_entries("APP_", Val("APP_=x\n = y"), env_no_allow(), [env_config_kernel.JetEnvConfigVar]{env_var("", "e"), env_var("APP_A=B", "eq"), env_var(nul, "nul"), env_var("APP_OK", "ok")})
+    assert_eq(entries.len(), 1)
+    _ :: env_expect_entry(entries[0], "APP_OK", "ok", [String]{"ok"})
+}
+
+#Test("double underscore splits lowercase segments and drops empties") {
+    // Uppercased keys sort by bytes: `A` < `C` < `D` < `_` < `Ä`.
+    process :: [env_config_kernel.JetEnvConfigVar]{
+        env_var("APP_DB__HOST", "1"), env_var("APP___X", "2"), env_var("APP_A____B", "3"),
+        env_var("APP_", "4"), env_var("APP_____", "5"), env_var("APP_C___D", "6"), env_var("APP_ÄX", "7"),
+    }
+    entries :: env_entries("APP_", None, env_no_allow(), ^process)
+    assert_eq(entries.len(), 5)
+    _ :: env_expect_entry(entries[0], "APP_A____B", "3", [String]{"a", "b"})
+    _ :: env_expect_entry(entries[1], "APP_C___D", "6", [String]{"c", "_d"})
+    _ :: env_expect_entry(entries[2], "APP_DB__HOST", "1", [String]{"db", "host"})
+    _ :: env_expect_entry(entries[3], "APP___X", "2", [String]{"x"})
+    _ :: env_expect_entry(entries[4], "APP_ÄX", "7", [String]{"Äx"})
+}
+
+#Test("prefix folds ASCII only on UTF-8 bytes") {
+    process :: [env_config_kernel.JetEnvConfigVar]{env_var("äPP_X", "lower"), env_var("ÄPP_Y", "upper"), env_var("ÄpP_Z", "mixed")}
+    entries :: env_entries("ÄPP_", None, env_no_allow(), ^process)
+    assert_eq(entries.len(), 2)
+    _ :: env_expect_entry(entries[0], "ÄPP_Y", "upper", [String]{"y"})
+    _ :: env_expect_entry(entries[1], "ÄpP_Z", "mixed", [String]{"z"})
+}
+
+#Test("short mismatched and non-boundary prefixes do not enter the namespace") {
+    process :: [env_config_kernel.JetEnvConfigVar]{env_var("A", "short"), env_var("Ä_X", "boundary"), env_var("OTHER_X", "other")}
+    assert_eq(env_entries("APP_", None, env_no_allow(), ~process).len(), 0)
+    // Prefix byte length 1 cuts inside Ä (two UTF-8 bytes), not a scalar slice.
+    assert_eq(env_entries("A", None, env_no_allow(), ^process).len(), 0)
+}
+
+#Test("allow and provenance fold ASCII not Unicode") {
+    entries :: env_entries("", None, [String]{"ÄKEY"}, [env_config_kernel.JetEnvConfigVar]{env_var("äkey", "no"), env_var("Äkey", "yes")})
+    assert_eq(entries.len(), 1)
+    _ :: env_expect_entry(entries[0], "Äkey", "yes", [String]{"Äkey"})
+    origins :: [env_config_kernel.JetEnvConfigOrigin]{env_origin("LOWER", "äfield"), env_origin("UPPER", "ÄFIELD")}
+    assert_eq(env_config_kernel.jet_env_config_error_reason("Äfield", "bad", origins), "E2416: env var UPPER -> Äfield: bad")
+}
+
+#Test("error framing redacts secret segments and names the first origin") {
+    origins :: [env_config_kernel.JetEnvConfigOrigin]{
+        env_origin("APP_PORT_OLD", "PORT"), env_origin("APP_PORT", "port"), env_origin("APP_DB__PASSWORD", "db.password"),
+    }
+    assert_eq(env_config_kernel.jet_env_config_error_reason("port", "expected Int", origins), "E2416: env var APP_PORT_OLD -> port: expected Int")
+    assert_eq(env_config_kernel.jet_env_config_error_reason("db.password", "expected Int, got plaintext", origins), "E2416: env var APP_DB__PASSWORD -> db.password: secret value rejected")
+    assert_eq(env_config_kernel.jet_env_config_error_reason("items[0].Token", "bad", origins), "E2416: config field items[0].Token: secret value rejected")
+    assert_eq(env_config_kernel.jet_env_config_error_reason("api.KEY", "bad", origins), "E2416: config field api.KEY: secret value rejected")
+    assert_eq(env_config_kernel.jet_env_config_error_reason("Secret", "bad", origins), "E2416: config field Secret: secret value rejected")
+    assert_eq(env_config_kernel.jet_env_config_error_reason("keyring.passwords", "missing", origins), "E2416: config field keyring.passwords: missing")
+}
+
+
+#Test("shape names project matched fields then sort by segments and name") {
+    names :: [env_projection_kernel.JetEnvShapeName]{env_shape("ZED", "alpha"), env_shape("PORT", "port")}
+    process :: [env_config_kernel.JetEnvConfigVar]{
+        env_var("APP_BETA", "b"), env_var("APP_ZED", "z"), env_var("APP_port", "lower"), env_var("APP_PORT__", "tail"),
+    }
+    entries :: env_projection_kernel.jet_env_config_entries_for_names("APP_", None, env_no_allow(), names, ^process) ?? panic("projection: {err.message}")
+    assert_eq(entries.len(), 4)
+    _ :: env_expect_entry(entries[0], "APP_ZED", "z", [String]{"alpha"})
+    _ :: env_expect_entry(entries[1], "APP_BETA", "b", [String]{"beta"})
+    _ :: env_expect_entry(entries[2], "APP_PORT__", "tail", [String]{"port"})
+    _ :: env_expect_entry(entries[3], "APP_port", "lower", [String]{"port"})
+}
+
+#Test("shape match accepts bare full and suffix spellings") {
+    names :: [env_projection_kernel.JetEnvShapeName]{env_shape("DATABASE_URL", "database_url")}
+    entries :: env_projection_kernel.jet_env_config_entries_for_names("", None, env_no_allow(), names, [env_config_kernel.JetEnvConfigVar]{env_var("database_url", "u")}) ?? panic("projection: {err.message}")
+    assert_eq(entries.len(), 1)
+    _ :: env_expect_entry(entries[0], "database_url", "u", [String]{"database_url"})
+    nested :: [env_config_kernel.JetEnvConfigVar]{env_var("APP_DATABASE_URL", "p"), env_var("APP_DATABASE__URL", "n")}
+    prefixed :: env_projection_kernel.jet_env_config_entries_for_names("app_", None, env_no_allow(), names, ^nested) ?? panic("projection: {err.message}")
+    assert_eq(prefixed.len(), 2)
+    _ :: env_expect_entry(prefixed[0], "APP_DATABASE__URL", "n", [String]{"database", "url"})
+    _ :: env_expect_entry(prefixed[1], "APP_DATABASE_URL", "p", [String]{"database_url"})
+}
+
+#Test("shape validation runs in field order before any source") {
+    _ :: env_expect_shape_error([env_projection_kernel.JetEnvShapeName]{env_shape("  ", "x")}, None, "invalid environment shape field")
+    _ :: env_expect_shape_error([env_projection_kernel.JetEnvShapeName]{env_shape("X", "　")}, None, "invalid environment shape field")
+    ambiguous :: [env_projection_kernel.JetEnvShapeName]{env_shape("A", "port"), env_shape("B", "PORT"), env_shape("", "z")}
+    _ :: env_expect_shape_error(ambiguous, Val("bad"), "ambiguous environment shape field `PORT`")
+    _ :: env_expect_shape_error([env_projection_kernel.JetEnvShapeName]{env_shape("A", "a")}, Val("bad"), "invalid .env line 1")
+}
+
+#Test("shape first matching name wins without trimming nonblank field spelling") {
+    names :: [env_projection_kernel.JetEnvShapeName]{env_shape("Z", " z "), env_shape("z", "later"), env_shape("Y", "Ä"), env_shape("X", "ä")}
+    process :: [env_config_kernel.JetEnvConfigVar]{env_var("APP_Z", "z"), env_var("APP_Y", "y"), env_var("APP_X", "x")}
+    entries :: env_projection_kernel.jet_env_config_entries_for_names("APP_", None, env_no_allow(), names, ^process) ?? panic("projection: {err.message}")
+    assert_eq(entries.len(), 3)
+    _ :: env_expect_entry(entries[0], "APP_Z", "z", [String]{" z "})
+    _ :: env_expect_entry(entries[1], "APP_Y", "y", [String]{"Ä"})
+    _ :: env_expect_entry(entries[2], "APP_X", "x", [String]{"ä"})
+}
+
+#Test("segment order puts a proper prefix before its longer path") {
+    names :: [env_projection_kernel.JetEnvShapeName]{env_shape("Z", "a")}
+    process :: [env_config_kernel.JetEnvConfigVar]{env_var("APP_A__B", "long"), env_var("APP_Z", "short")}
+    entries :: env_projection_kernel.jet_env_config_entries_for_names("APP_", None, env_no_allow(), names, ^process) ?? panic("projection: {err.message}")
+    // Source name Z follows A; the projected segment prefix reverses that order.
+    assert_eq(entries.len(), 2)
+    _ :: env_expect_entry(entries[0], "APP_Z", "short", [String]{"a"})
+    _ :: env_expect_entry(entries[1], "APP_A__B", "long", [String]{"a", "b"})
+}
+
+// #4460: original exact-Int remove remains a rebuilt-host gate.
+#Test("#4460 snapshot keeps the last host pair per key at its last position") {
+    vars :: [env_init_kernel.JetEnvEntry]{env_entry_bytes("PATH", "a"), env_entry_bytes("HOME", "h"), env_entry_bytes("Path", "p"), env_entry_bytes("PATH", "b")}
+    table :: env_init_kernel.jet_env_snapshot(^vars, (left: [U8], right: [U8]) -> env_init_kernel.jet_env_key_eq_bytes(left, right))
+    assert_eq(table.len(), 3)
+    assert_eq(table[0].name, "HOME".bytes())
+    assert_eq(table[1].name, "Path".bytes())
+    assert_eq(table[1].value, "p".bytes())
+    assert_eq(table[2].name, "PATH".bytes())
+    assert_eq(table[2].value, "b".bytes())
+}
+
+#Test("unix key order compares raw bytes") {
+    assert(env_init_kernel.jet_env_key_cmp_bytes("A".bytes(), "AB".bytes()) == Ordering.Less)
+    assert(env_init_kernel.jet_env_key_cmp_bytes("B".bytes(), "AB".bytes()) == Ordering.Greater)
+    assert(env_init_kernel.jet_env_key_cmp_bytes("PATH".bytes(), "Path".bytes()) == Ordering.Less)
+    assert(env_init_kernel.jet_env_key_cmp_bytes([U8]{255}, [U8]{127}) == Ordering.Greater)
+    assert(env_init_kernel.jet_env_key_eq_bytes([U8]{0, 200}, [U8]{0, 200}))
+}

@@ -1,0 +1,282 @@
+use core.mem.runtime.gc_core as gc_facts
+use core.mem.host.gc_host as gc_native
+use core.mem.host.gc_host.[GCTraceReadVisitor, GCTraceMutVisitor]
+
+GC_TRACE_VERSION :: prep { 1 }
+GC_TRACE_MAX_BYTES :: prep { 4194304 }
+GC_TRACE_MAX_FIELD_BYTES :: prep { 4096 }
+GC_TRACE_MAX_IDENTITIES :: prep { 65536 }
+GC_TRACE_MAX_SITES :: prep { 4096 }
+
+// Rust gc_write_failure (__gc_core.rs:90–105); same bytes on hosted/no-OS.
+pub fn gc_failure_text(fault: gc_facts.GCFault) -> String Never! {
+    "Error [E2110]: Automatic memory management failed\n Why: The private garbage collector could not complete an operation: {gc_facts.gc_fault_text(fault)}\n Fix: Check the GC trace path and retry with a smaller workload\n"
+}
+
+// Rust trace_escape (__gc_host.rs:454–468). Rust char::is_control is exactly
+// U+0000..001F,007F..009F. Byte traversal preserves non-control UTF8 verbatim.
+fn gc_trace_put(out: &[U8], text: String) Never! {
+    loop byte in text.bytes() -> &out.push(byte)
+}
+fn gc_trace_hex(out: &[U8], value: Int) Never! {
+    digits :: "0123456789abcdef".bytes()
+    &out.push(digits[value /% 16])
+    &out.push(digits[value % 16])
+}
+pub fn gc_trace_escape(value: String) -> String Never! {
+    out := [U8]{}
+    raw :: value.bytes()
+    i := 0
+    loop i < raw.len() {
+        b :: raw[i]
+        if b == (U8{34}) -> gc_trace_put(&out, "\\\"")
+        if b == (U8{92}) -> gc_trace_put(&out, "\\\\")
+        if b == (U8{10}) -> gc_trace_put(&out, "\\n")
+        if b == (U8{13}) -> gc_trace_put(&out, "\\r")
+        if b == (U8{9}) -> gc_trace_put(&out, "\\t")
+        if b < (U8{32}) && b != (U8{10}) && b != (U8{13}) && b != (U8{9}) {
+            gc_trace_put(&out, "\\u00")
+            gc_trace_hex(&out, Int.from_u8(b))
+        }
+        if b == (U8{127}) -> gc_trace_put(&out, "\\u007f")
+        if b == (U8{194}) && i + 1 < raw.len() && raw[i + 1] >= (U8{128}) && raw[i + 1] <= (U8{159}) {
+            gc_trace_put(&out, "\\u00")
+            gc_trace_hex(&out, Int.from_u8(raw[i + 1]))
+            i += 1
+        } else {
+            if b >= (U8{32}) && b != (U8{127}) && b != (U8{34}) && b != (U8{92}) -> &out.push(b)
+        }
+        i += 1
+    }
+    String.from_bytes(out) ?? panic("GC trace encoder produced invalid UTF-8")
+}
+pub fn gc_trace_valid_field(value: String) -> Bool Never! {
+    raw :: value.bytes()
+    if raw.len() == 0 || raw.len() > GC_TRACE_MAX_FIELD_BYTES -> return false
+    loop i in 0..<raw.len() {
+        if raw[i] < (U8{32}) || raw[i] == (U8{127}) -> return false
+        if raw[i] == (U8{194}) && i + 1 < raw.len() && raw[i + 1] >= (U8{128}) && raw[i + 1] <= (U8{159}) -> return false
+    }
+    true
+}
+pub fn gc_trace_sat(value: U64) -> U64 Never! {
+    if value == (U64{18446744073709551615}) -> return value
+    value + (U64{1})
+}
+
+// Rust TraceState::render (:399–435). Storage traversal is native; schema,
+// framing/counts/escaping are Jet policy. Visitor borrows its output buffer.
+pub struct GCTraceRenderer {
+    pub bytes: [U8]
+    impl GCTraceReadVisitor {
+        fn site(&self, site: gc_facts.GCPromotionSite, identities: View<gc_native.GCTraceIdentity>) Never! {
+            if self.bytes.len() > 0 -> &self.bytes.push(U8{44})
+            retained := 0
+            loop identity in identities {
+                if identity.retained -> retained += 1
+            }
+            gc_trace_put(&self.bytes, "{{\"source\":\"{gc_trace_escape(site.source)}\",\"span_start\":{site.span_start},\"span_end\":{site.span_end},\"scope\":\"{gc_trace_escape(site.scope)}\",\"policy_provenance\":\"{gc_trace_escape(site.policy_provenance)}\",\"reason\":\"{gc_trace_escape(site.reason)}\",\"type_name\":\"{gc_trace_escape(site.type_name)}\",\"bytes\":{site.bytes},\"allocations\":{identities.len()},\"retained\":{retained},\"identities\":[")
+            index := 0
+            loop identity in identities {
+                if index != 0 -> &self.bytes.push(U8{44})
+                gc_trace_put(&self.bytes, "{{\"identity\":{identity.id.value},\"retained\":{identity.retained}}}")
+                index += 1
+            }
+            gc_trace_put(&self.bytes, "]}}")
+        }
+    }
+}
+pub struct GCTraceReclaimer {
+    impl GCTraceMutVisitor {
+        fn identities(self, identities: &ViewMut<gc_native.GCTraceIdentity>, reclaimed: View<gc_facts.GCObjectID>) Never! {
+            // Native caller builds sorted unique BTreeSet-equivalent extent.
+            loop index in 0..<identities.len() {
+                if identities[index].retained {
+                    lo := 0
+                    hi := reclaimed.len()
+                    loop lo < hi {
+                        mid :: (lo + hi) /% 2
+                        if reclaimed[mid].value < identities[index].id.value -> lo = mid + 1
+                        else -> hi = mid
+                    }
+                    if lo < reclaimed.len() && reclaimed[lo].value == identities[index].id.value -> identities[index].retained = false
+                }
+            }
+        }
+    }
+}
+
+// Rust render frame (:428–433), independent of storage/provider availability.
+pub fn gc_trace_frame(project: String, pid: U32, started: Int, updated: Int, complete: Bool, dropped: U64, collections: U64, sites: View<U8>) -> String Never! {
+    out := [U8]{}
+    gc_trace_put(&out, "{{\"schema\":\"jet.gc.trace\",\"version\":{GC_TRACE_VERSION},\"project\":\"{gc_trace_escape(project)}\",\"pid\":{pid},\"started_unix_ms\":{started},\"updated_unix_ms\":{updated},\"complete\":{complete},\"dropped_promotions\":{dropped},\"collections\":{collections},\"sites\":[")
+    loop byte in sites -> &out.push(byte)
+    gc_trace_put(&out, "]}}\n")
+    String.from_bytes(out) ?? panic("GC trace encoder produced invalid UTF-8")
+}
+
+pub module gc_trace_policy<P, F, S> {
+module gc_trace_leaves :: gc_native.gc_trace_seam<P, F, S, GCTraceRenderer, GCTraceReclaimer>
+use gc_trace_leaves.[GCTraceStorage, GCTraceProvider]
+
+pub struct GCTraceState {
+    pub path: P
+    pub store: S
+    pub project: String
+    pub pid: U32
+    pub started_unix_ms: Int
+    pub updated_unix_ms: Int
+    pub complete: Bool
+    pub dropped_promotions: U64
+    pub collections: U64
+    pub identity_count: Int
+}
+// Rust TraceState::from_env (:156–177). Startup initializes once and persists
+// zero promotions; collection does not initialize a previously unused singleton.
+pub fn gc_trace_from_env<H: GCTraceProvider>(host: H, store: ^S) -> GCTraceState? Never! {
+    if !host.hosted() -> return None
+    path :: host.env_trace() ?? return None
+    if host.path_empty(path) -> return None
+    project :: host.env_project() ?? (host.cwd() ?? "")
+    now :: host.unix_ms()
+    Val(GCTraceState{path: path, store: store, project: project, pid: host.pid(), started_unix_ms: now, updated_unix_ms: now, complete: true, dropped_promotions: U64{0}, collections: U64{0}, identity_count: 0})
+}
+pub fn gc_trace_render<N: GCTraceStorage>(state: GCTraceState, storage: N) -> String Never! {
+    renderer := GCTraceRenderer{bytes: [U8]{}}
+    storage.visit(state.store, &renderer)
+    sites :: renderer.bytes[0..<renderer.bytes.len()]
+    gc_trace_frame(state.project, state.pid, state.started_unix_ms, state.updated_unix_ms, state.complete, state.dropped_promotions, state.collections, sites)
+}
+
+// Rust persist (:262–397). Only OS facts/operations remain native. Early
+// failure leaves destination unchanged; parent sync can fail AFTER rename.
+pub fn gc_trace_persist<N: GCTraceStorage, H: GCTraceProvider>(state: &GCTraceState, storage: N, host: H) gc_facts.GCFault! {
+    state.updated_unix_ms = host.unix_ms()
+    json :: gc_trace_render(state, storage)
+    if json.bytes().len() > GC_TRACE_MAX_BYTES -> return Err(gc_facts.GCFault.TraceIO("GC trace exceeds its 4 MiB safety limit"))
+    parent := host.parent(state.path) ?? host.path_from_utf8(".")
+    if host.path_empty(parent) -> parent = host.path_from_utf8(".")
+    parent_metadata :: if host.metadata(parent) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(gc_facts.GCFault.TraceIO("cannot inspect GC trace directory: {error.detail}")) }
+    }
+    if parent_metadata.kind != gc_native.GCTraceKind.Missing && parent_metadata.kind != gc_native.GCTraceKind.Directory -> return Err(gc_facts.GCFault.TraceIO("GC trace directory path is not a directory"))
+    if host.mkdir(parent) == {
+        .Ok(_) -> {}
+        .Err(error) -> { return Err(gc_facts.GCFault.TraceIO("cannot create GC trace directory: {error.detail}")) }
+    }
+    if host.unix() && parent_metadata.kind == gc_native.GCTraceKind.Missing {
+        if host.chmod_path(parent, 448) == {
+            .Ok(_) -> {}
+            .Err(error) -> { return Err(gc_facts.GCFault.TraceIO("cannot secure GC trace directory: {error.detail}")) }
+        }
+    }
+    existing :: if host.metadata(state.path) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(gc_facts.GCFault.TraceIO("cannot inspect GC trace: {error.detail}")) }
+    }
+    if existing.kind != gc_native.GCTraceKind.Missing && existing.kind != gc_native.GCTraceKind.Regular -> return Err(gc_facts.GCFault.TraceIO("GC trace path is not a regular file"))
+    name :: host.name(state.path) ?? return Err(gc_facts.GCFault.TraceIO("GC trace path has no file name"))
+    loop _ in 0..<64 {
+        sequence :: host.next_temp()
+        temp_path :: host.join(parent, ".{name}.tmp.{host.pid()}.{sequence}")
+        opened :: if host.open_new(temp_path) == {
+            .Ok(value) -> value
+            .Err(error) -> { return Err(gc_facts.GCFault.TraceIO("cannot create GC trace temporary file: {error.detail}")) }
+        }
+        if opened == .Val(file) {
+            if host.unix() && existing.kind != gc_native.GCTraceKind.Missing {
+                created :: if host.file_metadata(file) == {
+                    .Ok(value) -> value
+                    .Err(error) -> {
+                        host.close_file(^file)
+                        host.unlink(temp_path)
+                        return Err(gc_facts.GCFault.TraceIO("cannot inspect GC trace temporary file: {error.detail}"))
+                    }
+                }
+                if existing.uid != created.uid {
+                    host.close_file(^file)
+                    host.unlink(temp_path)
+                    return Err(gc_facts.GCFault.TraceIO("GC trace path is owned by a different user"))
+                }
+            }
+            if host.unix() {
+                if host.chmod_file(file, 384) == {
+                    .Ok(_) -> {}
+                    .Err(error) -> {
+                        host.close_file(^file)
+                        host.unlink(temp_path)
+                        return Err(gc_facts.GCFault.TraceIO("cannot secure GC trace: {error.detail}"))
+                    }
+                }
+            }
+            if host.write_sync(file, json) == {
+                .Ok(_) -> {}
+                .Err(error) -> {
+                    host.close_file(^file)
+                    host.unlink(temp_path)
+                    return Err(gc_facts.GCFault.TraceIO("cannot persist GC trace: {error.detail}"))
+                }
+            }
+            host.close_file(^file)
+            if host.rename(temp_path, state.path) == {
+                .Ok(_) -> {}
+                .Err(error) -> {
+                    host.unlink(temp_path)
+                    return Err(gc_facts.GCFault.TraceIO("cannot persist GC trace: {error.detail}"))
+                }
+            }
+            if host.sync_parent(parent) == {
+                .Ok(_) -> {}
+                .Err(error) -> {
+                    host.unlink(temp_path)
+                    return Err(gc_facts.GCFault.TraceIO("cannot persist GC trace: {error.detail}"))
+                }
+            }
+            return Ok(())
+        }
+    }
+    return Err(gc_facts.GCFault.TraceIO("cannot reserve a GC trace temporary file"))
+}
+// Rust record/remove_last/drop_promotion (:179–260). IO rollback removes only
+// the last appended identity; timestamps/dropped flags have Rust's semantics.
+pub fn gc_trace_record<N: GCTraceStorage, H: GCTraceProvider>(state: &GCTraceState, storage: N, host: H, id: gc_facts.GCObjectID, site: gc_facts.GCPromotionSite) gc_facts.GCFault! {
+    valid :: site.span_start <= site.span_end && gc_trace_valid_field(site.source) && gc_trace_valid_field(site.scope) && gc_trace_valid_field(site.policy_provenance) && gc_trace_valid_field(site.reason) && gc_trace_valid_field(site.type_name)
+    if !valid || state.identity_count >= GC_TRACE_MAX_IDENTITIES || (!storage.contains(state.store, site) && storage.count(state.store) >= GC_TRACE_MAX_SITES) {
+        state.complete = false
+        state.dropped_promotions = gc_trace_sat(state.dropped_promotions)
+        return gc_trace_persist(&state, storage, host)
+    }
+    storage.append(&state.store, site, id)
+    state.identity_count += 1
+    if gc_trace_render(state, storage).bytes().len() > GC_TRACE_MAX_BYTES {
+        storage.remove_last(&state.store, site)
+        state.identity_count -= 1
+        state.complete = false
+        state.dropped_promotions = gc_trace_sat(state.dropped_promotions)
+        return gc_trace_persist(&state, storage, host)
+    }
+    if gc_trace_persist(&state, storage, host) == {
+        .Ok(_) -> {}
+        .Err(fault) -> {
+            storage.remove_last(&state.store, site)
+            state.identity_count -= 1
+            return Err(fault)
+        }
+    }
+    return Ok(())
+}
+// Rust record_collection (:244–255): mutation remains committed on IO failure.
+pub fn gc_trace_collection<N: GCTraceStorage, H: GCTraceProvider>(state: &GCTraceState, storage: N, host: H, reclaimed: View<gc_facts.GCObjectID>) gc_facts.GCFault! {
+    state.collections = gc_trace_sat(state.collections)
+    storage.visit_mut(&state.store, GCTraceReclaimer{}, reclaimed)
+    gc_trace_persist(&state, storage, host)
+}
+// Rust gc_record_memory_ledger (:80–98). Native errors remain best effort.
+pub fn gc_trace_ledger<H: GCTraceProvider>(host: H, site: gc_facts.GCPromotionSite) Never! {
+    if !host.hosted() -> return
+    raw :: site.source.bytes()
+    byte_spans :: raw.len() == 0 || raw[0] != (U8{60})
+    host.ledger("gc", "gc", site, byte_spans, None, "own the value directly", "represent identity-bearing links as ID<T>", "use Pool<T> when the lifetime is bounded")
+}
+}

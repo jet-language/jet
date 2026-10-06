@@ -90,7 +90,7 @@ const NUMBER_GRID_EXAMPLE: &str = include_str!("../Examples/features/types/range
 const NUMBER_GRID_EXPECTED: &str =
     include_str!("../Examples/features/expected/types/range_types.out");
 const NUMBER_GRID_WEB_SOURCE: &str = r#"#Target(Web)
-fn set_brightness(level: Int(0..100)) -> Int(0..100) -> level
+fn set_brightness(level: Int(0..100)) -> Int(0..100) { level }
 
 fn run() {
     print(set_brightness(42))
@@ -304,9 +304,11 @@ authority = { holds: { allow: [IO], deny: [Exec] }, grants: { "image-codec": [FS
     )
     .unwrap();
 
+    // D-CLI-ONE1=A retired `jet inspect authority`; package and lock
+    // authority rows are entries of the one gate ledger.
     let json = stdout(&run(
         &scratch.path,
-        &["inspect", "authority", "--json", "run.jet"],
+        &["inspect", "gates", "--json", "run.jet"],
     ));
     for subject in [
         "authority.holds.allow",
@@ -757,8 +759,8 @@ fn i9_number_grid_comptime_keeps_the_exact_inline_value() {
 fn i9_number_grid_repl_keeps_the_inline_range_behavior() {
     let transcript = jet::REPL::run_transcript(
         &[
-            "fn set_brightness(level: Int(0..100)) -> Int(0..100) -> level",
-            "fn checked_inline(raw: Int) -> Int(0..100) String! -> Int(0..100).from_int(raw)",
+            "fn set_brightness(level: Int(0..100)) -> Int(0..100) { level }",
+            "fn checked_inline(raw: Int) -> Int(0..100) String! { Int(0..100).from_int(raw) }",
             "print(set_brightness(42))",
             "print(checked_inline(3) ?? Int(0..100).from_int(0))",
         ],

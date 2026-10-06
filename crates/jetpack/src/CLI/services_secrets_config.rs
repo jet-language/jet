@@ -1487,7 +1487,10 @@ pub(super) fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
                 );
                 return 2;
             };
-            let added = Trust::add_pattern(&store, pattern);
+            let added = match Trust::add_pattern(&store, std::path::Path::new("."), pattern) {
+                Ok(added) => added,
+                Err(diagnostics) => return Trust::report_gate_failure(theme, diagnostics),
+            };
             theme.status(&if added {
                 format!("trusted: {pattern}")
             } else {

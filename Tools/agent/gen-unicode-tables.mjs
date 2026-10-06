@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Card #298: offline, checksum-verified Unicode 17.0.0 UCD table generator.
 // No network at build/compile time — this script is run by hand (or by a
-// maintainer script) against a local UCD snapshot dir, and its Rust output is
-// committed to the repo. No external crates (I6): plain Node + plain Rust.
+// maintainer script) against a local UCD snapshot dir. Rust bootstrap output and
+// independently retained Jet assets share these exact parsed tables and pins.
 //
 // Usage:
-//   node Tools/agent/gen-unicode-tables.mjs [--check] [ucd-dir]
+//   node Tools/agent/gen-unicode-tables.mjs [--check] [--core-only] [ucd-dir]
 //
 // <ucd-dir> must contain (fetched from https://www.unicode.org/Public/17.0.0/ucd/):
 //   UnicodeData.txt, CaseFolding.txt, SpecialCasing.txt, PropList.txt,
@@ -41,12 +41,15 @@ const PINNED_SHA256 = {
   "PropList.txt": "130dcddcaadaf071008bdfce1e7743e04fdfbc910886f017d9f9ac931d8c64dd",
 };
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import assert from "node:assert/strict";
 
-const checkOnly = process.argv[2] === "--check";
-const ucdDir = process.argv[checkOnly ? 3 : 2] ?? "tests/data/unicode/ucd";
+const args = process.argv.slice(2);
+const checkOnly = args.includes("--check");
+const coreOnly = args.includes("--core-only");
+const ucdDir = args.find(arg => !arg.startsWith("--")) ?? "tests/data/unicode/ucd";
 
 function readChecked(rel) {
   const p = path.join(ucdDir, rel);
@@ -259,6 +262,8 @@ const derivedCoreProp = parseBreakProperty(derivedCoreProperties);
 const alphabeticRanges = derivedCoreProp.filter(([, , p]) => p === "Alphabetic").map(([a, b]) => [a, b]);
 const casedRanges = derivedCoreProp.filter(([, , p]) => p === "Cased").map(([a, b]) => [a, b]);
 const caseIgnorableRanges = derivedCoreProp.filter(([, , p]) => p === "Case_Ignorable").map(([a, b]) => [a, b]);
+const lowercaseRanges = derivedCoreProp.filter(([, , p]) => p === "Lowercase").map(([a, b]) => [a, b]);
+const uppercaseRanges = derivedCoreProp.filter(([, , p]) => p === "Uppercase").map(([a, b]) => [a, b]);
 const defaultIgnorableRanges = derivedCoreProp.filter(([, , p]) => p === "Default_Ignorable_Code_Point").map(([a, b]) => [a, b]);
 const whiteSpaceRanges = parseBreakProperty(readChecked("PropList.txt"))
   .filter(([, , p]) => p === "White_Space")
@@ -448,6 +453,8 @@ pub static UNICODE_TITLE_INDEX: &[(u32,u32,u32)] = &[${title.index
   .map(([cp, s, l]) => `(0x${cp.toString(16).toUpperCase()},${s},${l})`)
   .join(",")}];
 pub static UNICODE_WHITE_SPACE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(whiteSpaceRanges))}];
+pub static UNICODE_LOWERCASE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(lowercaseRanges))}];
+pub static UNICODE_UPPERCASE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(uppercaseRanges))}];
 pub static UNICODE_CASED: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(casedRanges))}];
 pub static UNICODE_CASE_IGNORABLE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(caseIgnorableRanges))}];
 
@@ -658,7 +665,7 @@ const outPaths = [
   ["crates/jet-codegen/src/Prelude/Core/UnicodeString.rs", stringFlatOut],
   ["crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs", tablesFlatOut],
 ];
-for (const [rel, text] of outPaths) {
+for (const [rel, text] of coreOnly ? [] : outPaths) {
   const full = path.join(process.cwd(), rel);
   if (checkOnly) {
     const current = readFileSync(full, "utf8");
@@ -669,4 +676,126 @@ for (const [rel, text] of outPaths) {
     console.log(`wrote ${rel} (${text.length} bytes)`);
   }
 }
+
+// Shared immutable assets: explicit little-endian fields, never native tuples.
+// Header (40 bytes): JUCD, schema:u16, reserved:u16, version:3*u8, reserved:u8,
+// kind:u32, count:u32, stride:u32, records_offset:u32, pool_offset:u32,
+// pool_bytes:u32, total_bytes:u32. Offsets are byte offsets from the asset start.
+// Kinds: 1 scalar pool; 2 ranges; 3 tagged ranges; 4 mapping index;
+// 5 decomposition index; 6 composition; 7 simple fold; 8 UTF-8 names.
+const assetRoot = "Core/text/runtime/assets";
+function le(value, width) {
+  if (!Number.isSafeInteger(value) || value < 0 || value >= 2 ** (width * 8))
+    throw new Error(`asset field overflow: ${value}/${width}`);
+  return Array.from({length: width}, (_, i) => Math.floor(value / 2 ** (i * 8)) & 255);
+}
+function bytesLiteral(bytes) {
+  return `[U8]{"${Array.from(bytes, b => `\\x${b.toString(16).padStart(2, "0").toUpperCase()}`).join("")}"}`;
+}
+const assets = [];
+const oracleTables = readFileSync("crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs", "utf8");
+const oracleString = readFileSync("crates/jet-codegen/src/Prelude/Core/UnicodeString.rs", "utf8");
+function asset(symbol, kind, rows, widths, namePool = []) {
+  // These two exact derived properties have no frozen bootstrap Rust table yet.
+  // Their oracle is the checksum-pinned UCD parsed above; all preexisting tables
+  // continue to compare against the unchanged Rust sources during --core-only.
+  const oracle = symbol === "UNICODE_LOWERCASE" || symbol === "UNICODE_UPPERCASE"
+    ? stringBody
+    : /^UNICODE_(LOWER|UPPER|TITLE|WHITE_SPACE|CASED|CASE_IGNORABLE)/.test(symbol) ? oracleString : oracleTables;
+  const body = oracle.match(new RegExp(`pub static ${symbol}: [^=]+ = &\\[([^;]+)\\];`))?.[1];
+  assert(body, `missing Rust table: ${symbol}`);
+  if (kind === 8) {
+    const original = [...body.matchAll(/\(0x([0-9A-F]+),("(?:[^"\\]|\\.)*")\)/g)]
+      .map(([, cp, name]) => [parseInt(cp, 16), JSON.parse(name)]);
+    const decoded = rows.map(([cp, offset, length]) => [cp, Buffer.from(namePool.slice(offset, offset + length)).toString("utf8")]);
+    assert.deepEqual(decoded, original, `Rust names drift: ${symbol}`);
+  } else {
+    const original = [...body.matchAll(/0x[0-9A-F]+|\d+/g)].map(n => Number(n[0]));
+    assert.deepEqual(rows.flat(), original, `Rust table drift: ${symbol}`);
+  }
+  const stride = widths.reduce((a, b) => a + b, 0);
+  const records = rows.flatMap(row => row.flatMap((field, i) => le(field, widths[i])));
+  const poolOffset = 40 + records.length;
+  const size = poolOffset + namePool.length;
+  const bytes = Buffer.from([
+    74, 85, 67, 68, ...le(1, 2), 0, 0, 17, 0, 0, 0,
+    ...[kind, rows.length, stride, 40, poolOffset, namePool.length, size].flatMap(n => le(n, 4)),
+    ...records, ...namePool,
+  ]);
+  // Decode all records offline, not at startup or per runtime lookup.
+  if (bytes.length !== size || bytes.readUInt32LE(36) !== size) throw new Error("asset extent");
+  for (let row = 0; row < rows.length; row++) {
+    let at = 40 + row * stride;
+    for (let field = 0; field < widths.length; field++) {
+      if (bytes.readUIntLE(at, widths[field]) !== rows[row][field]) throw new Error("asset round trip");
+      at += widths[field];
+    }
+  }
+  const module = symbol.toLowerCase();
+  const source = `${HEADER_COMMENT}// JUCD schema 1; little-endian; ${rows.length} records of ${stride} bytes.\npub ${symbol} :: ${bytesLiteral(bytes)}\n`;
+  assets.push({symbol, module, kind, count: rows.length, stride, bytes: size,
+    sha256: createHash("sha256").update(bytes).digest("hex"), source});
+}
+asset("UNICODE_DECOMP_POOL", 1, pool.map(n => [n]), [3]);
+asset("UNICODE_DECOMP_INDEX", 5, decompIndex, [3, 2, 1, 1]);
+asset("UNICODE_CCC", 3, cccRanges, [3, 3, 1]);
+asset("UNICODE_COMPOSE_PAIRS", 6, composePairs, [3, 3, 3]);
+for (const [name, mapping] of [["FOLD", {pool: foldPool, index: foldIndex}],
+  ["LOWER", lower], ["UPPER", upper], ["TITLE", title]]) {
+  asset(`UNICODE_${name}_POOL`, 1, mapping.pool.map(n => [n]), [3]);
+  asset(`UNICODE_${name}_INDEX`, 4, mapping.index, [3, 4, 4]);
+  for (const [cp, start, length] of mapping.index) {
+    if (start + length > mapping.pool.length || length === 0) throw new Error(`mapping extent: ${cp}`);
+  }
+}
+asset("UNICODE_SIMPLE_FOLD", 7, [...simpleCaseFold.entries()].sort((a,b) => a[0]-b[0]), [3,3]);
+for (const [name, rows] of [
+  ["WHITE_SPACE", mergePairRanges(whiteSpaceRanges)], ["CASED", mergePairRanges(casedRanges)],
+  ["CASE_IGNORABLE", mergePairRanges(caseIgnorableRanges)], ["LETTER", mergePairRanges(letterRanges)],
+  ["LOWERCASE", mergePairRanges(lowercaseRanges)], ["UPPERCASE", mergePairRanges(uppercaseRanges)],
+  ["NUMERIC", mergePairRanges(numericRanges)], ["ALPHABETIC", mergePairRanges(alphabeticRanges)],
+  ["DEFAULT_IGNORABLE", mergePairRanges(defaultIgnorableRanges)],
+  ["COMPOSITION_EXCLUSIONS", fullCompositionExclusion], ["EXTENDED_PICTOGRAPHIC", extPictographic],
+  ["EMOJI_PRESENTATION", emojiPresentation], ["EMOJI", emoji],
+]) asset(`UNICODE_${name}`, 2, rows, [3,3]);
+for (const [name, rows] of [
+  ["GENERAL_CATEGORY", gcRanges], ["EAST_ASIAN_WIDTH", eawMerged],
+  ["GRAPHEME_BREAK", graphemeRanges], ["WORD_BREAK", wordRanges],
+  ["SENTENCE_BREAK", sentenceRanges], ["INCB", incbRanges],
+]) asset(`UNICODE_${name}`, 3, rows, [3,3,1]);
+const namesPool = [];
+const namesIndex = unicodeNameIndex.map(([cp, name]) => {
+  const bytes = [...Buffer.from(name, "utf8")];
+  const row = [cp, namesPool.length, bytes.length];
+  namesPool.push(...bytes);
+  return row;
+});
+asset("UNICODE_NAME_INDEX", 8, namesIndex, [3,4,4], namesPool);
+if (!checkOnly) mkdirSync(assetRoot, {recursive: true});
+const coreOutputs = assets.map(a => [`${assetRoot}/${a.module}.jet`, a.source]);
+coreOutputs.push([`${assetRoot}/assets.jet`,
+  `${HEADER_COMMENT}${assets.map(a => `module ${a.module}`).join("\n")}\n`]);
+coreOutputs.push([`${assetRoot}/manifest.json`, JSON.stringify({
+  schema: 1, unicode: "17.0.0", byteOrder: "little", inputs: PINNED_SHA256,
+  assets: assets.map(({source, ...facts}) => facts),
+}, null, 2) + "\n"]);
+const stringModules = assets.filter(a => /^UNICODE_(LOWER|UPPER|WHITE_SPACE|CASED|CASE_IGNORABLE)/.test(a.symbol));
+function declarations(list) {
+  return list.map(a => `use core.text.runtime.assets.${a.module} as text_${a.module}`).join("\n");
+}
+// String asset modules are attached to their canonical kernel, not normalization.
+const stringPath = "Core/text/runtime/kernel_unicode_string.jet";
+const stringSource = readFileSync(stringPath, "utf8");
+const begin = "// BEGIN GENERATED STRING ASSETS";
+const end = "// END GENERATED STRING ASSETS";
+const start = stringSource.indexOf(begin);
+const stop = stringSource.indexOf(end, start);
+if (start < 0 || stop < start) throw new Error("string asset markers missing");
+coreOutputs.push([stringPath, stringSource.slice(0, start) + `${begin}\n${declarations(stringModules)}\n${end}` + stringSource.slice(stop + end.length)]);
+for (const [rel, text] of coreOutputs) {
+  if (checkOnly) {
+    if (readFileSync(rel, "utf8") !== text) throw new Error(`${rel} is stale`);
+  } else writeFileSync(rel, text);
+}
+console.log(`${checkOnly ? "checked" : "generated"} ${assets.length} JUCD schema-1 Unicode 17.0.0 assets; all records round-trip`);
 console.log(checkOnly ? "Unicode tables are byte-identical." : "done.");

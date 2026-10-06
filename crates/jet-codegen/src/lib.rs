@@ -120,7 +120,7 @@ mod development_receipt_tests {
     #[test]
     fn development_receipt_is_one_shared_source_across_tiers() {
         let codegen = include_str!("Codegen/mod.rs");
-        let jit = include_str!("../../jet-jit/src/lib.rs");
+        let evalhost = include_str!("../../jet-evalhost/src/lib.rs");
         assert_eq!(
             codegen
                 .matches("include_str!(\"../Prelude/DevelopmentReceipt.rs\")")
@@ -128,7 +128,8 @@ mod development_receipt_tests {
             1
         );
         assert_eq!(
-            jit.matches("include!(\"../../jet-codegen/src/Prelude/DevelopmentReceipt.rs\")")
+            evalhost
+                .matches("include!(\"../../jet-codegen/src/Prelude/DevelopmentReceipt.rs\")")
                 .count(),
             1
         );
@@ -183,7 +184,7 @@ pub mod scheduler {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::{
         jet_render_runtime_stop, jet_stream_record_failure_report,
-        jet_stream_take_failure_report, JetOutcome, JetRuntimeDiagnostic, JetTaskFailure,
+        jet_stream_take_failure_report, JetStreamFailure, JetOutcome, JetRuntimeDiagnostic, JetTaskFailure,
     };
     include!("Prelude/Deadline.rs");
     include!("Prelude/WorkflowWait.rs");

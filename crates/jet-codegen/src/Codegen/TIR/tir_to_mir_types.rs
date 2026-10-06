@@ -2320,6 +2320,8 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
         ],
     ),
     ("XMLCanonicalMode", &["Inclusive11", "Exclusive10"]),
+    ("PluginLimit", &["Fuel", "Memory", "Table", "Time", "Wire"]),
+    ("PluginError", &["Guest", "Denied", "Budget", "Defect"]),
     (
         "EmailError",
         &[
@@ -2391,6 +2393,8 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
 // Core oracle's vocabulary; field types are read below through
 // `core_struct_field_type`, never guessed from a folded value.
 const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
+    ("PluginFrame", &["function", "component", "offset"]),
+    ("PluginFault", &["export", "message", "frames"]),
     (
         crate::Syntax::TYPE_IO_CONTEXT,
         crate::Syntax::IO_CONTEXT_FIELDS,
@@ -3545,6 +3549,23 @@ fn compiler_owned_type_defs<'a>(
                                 "Char" | "Ctrl" => TirVariantPayload::Single(Type::Char),
                                 "F" => TirVariantPayload::Single(Type::Int),
                                 _ => TirVariantPayload::Unit,
+                            }
+                        } else if *name == "PluginError" {
+                            if *variant == "Budget" {
+                                TirVariantPayload::Named(["limit", "fault"].into_iter().zip(["PluginLimit", "PluginFault"]).map(|(field, ty)| TirField {
+                                    name: field.to_string(),
+                                    shape_names: ShapeFieldNames::from_source(field),
+                                    skip: false,
+                                    ty: Type::Named(ty.to_string()),
+                                    span,
+                                    public: true,
+                                    package_public: false,
+                                    computed: false,
+                                    has_default: false,
+                                    redact: false,
+                                }).collect())
+                            } else {
+                                TirVariantPayload::Single(Type::Named("PluginFault".to_string()))
                             }
                         } else if *name == "EmailError" {
                             TirVariantPayload::Named(vec![

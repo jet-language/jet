@@ -1,0 +1,818 @@
+// PORT-PENDING 0229 crates-jet-jit-src-plugin: crates/jet-jit/src/Plugin.rs:1-814
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Resident JIT adapter for the checked `core.plugin` Component Model surface.
+//RS //!
+//RS //! The included Prelude owns sandbox policy, wasmtime calls, and the wire
+//RS //! protocol. This module only marshals checked MIR carriers across Cranelift.
+//RS 
+//RS use crate::ambient_interp::InterpreterAmbientContext;
+//RS use crate::runtime_host::{alloc_jit_result, jit_result_parts, JitRuntime};
+//RS use crate::Concurrency;
+//RS use jet_codegen::Comptime::AmbientMirHandleResult;
+//RS use jet_foundation::Diagnostics::{Diagnostic, Span};
+//RS use jet_foundation::MIR::{MirNominalRef, MirRuntimeValue, MirType, MirTypeKind};
+//RS use jet_foundation::PluginWire as plugin_wire;
+//RS use jet_rt::JetVal;
+//RS 
+//RS pub(crate) mod runtime {
+//RS     include!("../../jet-pkg-model/src/Prelude/Plugin.rs");
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS enum ParsedType {
+//RS     Int,
+//RS     Float,
+//RS     Bool,
+//RS     String,
+//RS     List(Box<Self>),
+//RS     Option(Box<Self>),
+//RS     Result {
+//RS         ok: Box<Self>,
+//RS         err: Box<Self>,
+//RS     },
+//RS     Record {
+//RS         name: String,
+//RS         fields: Vec<(usize, String, Self)>,
+//RS     },
+//RS }
+//RS 
+//RS fn parse_decimal(bytes: &[u8], pos: &mut usize) -> Result<usize, String> {
+//RS     let start = *pos;
+//RS     while bytes.get(*pos).is_some_and(|byte| byte.is_ascii_digit()) {
+//RS         *pos += 1;
+//RS     }
+//RS     if *pos == start {
+//RS         return Err("plugin component descriptor is missing a decimal length".to_string());
+//RS     }
+//RS     std::str::from_utf8(&bytes[start..*pos])
+//RS         .ok()
+//RS         .and_then(|text| text.parse().ok())
+//RS         .ok_or_else(|| "plugin component descriptor has an invalid decimal length".to_string())
+//RS }
+//RS 
+//RS fn parse_text(bytes: &[u8], pos: &mut usize) -> Result<String, String> {
+//RS     let length = parse_decimal(bytes, pos)?;
+//RS     if bytes.get(*pos) != Some(&b':') {
+//RS         return Err("plugin component descriptor is missing a text separator".to_string());
+//RS     }
+//RS     *pos += 1;
+//RS     let end = (*pos)
+//RS         .checked_add(length)
+//RS         .ok_or_else(|| "plugin component descriptor text length overflowed".to_string())?;
+//RS     let value = bytes
+//RS         .get(*pos..end)
+//RS         .ok_or_else(|| "plugin component descriptor text is truncated".to_string())?;
+//RS     *pos = end;
+//RS     String::from_utf8(value.to_vec())
+//RS         .map_err(|_| "plugin component descriptor contains invalid UTF-8".to_string())
+//RS }
+//RS 
+//RS fn parse_type(bytes: &[u8], pos: &mut usize) -> Result<ParsedType, String> {
+//RS     let tag = *bytes
+//RS         .get(*pos)
+//RS         .ok_or_else(|| "plugin component descriptor is truncated".to_string())?;
+//RS     *pos += 1;
+//RS     match tag {
+//RS         b'i' => Ok(ParsedType::Int),
+//RS         b'f' => Ok(ParsedType::Float),
+//RS         b'b' => Ok(ParsedType::Bool),
+//RS         b's' => Ok(ParsedType::String),
+//RS         b'l' => Ok(ParsedType::List(Box::new(parse_type(bytes, pos)?))),
+//RS         b'o' => Ok(ParsedType::Option(Box::new(parse_type(bytes, pos)?))),
+//RS         b'q' => Ok(ParsedType::Result {
+//RS             ok: Box::new(parse_type(bytes, pos)?),
+//RS             err: Box::new(parse_type(bytes, pos)?),
+//RS         }),
+//RS         b'r' => {
+//RS             let name = parse_text(bytes, pos)?;
+//RS             let count = parse_decimal(bytes, pos)?;
+//RS             if bytes.get(*pos) != Some(&b':') {
+//RS                 return Err("plugin component descriptor is missing a field separator".to_string());
+//RS             }
+//RS             *pos += 1;
+//RS             let mut fields = Vec::with_capacity(count);
+//RS             for _ in 0..count {
+//RS                 let index = parse_decimal(bytes, pos)?;
+//RS                 if bytes.get(*pos) != Some(&b':') {
+//RS                     return Err("plugin component descriptor is missing a field index separator".to_string());
+//RS                 }
+//RS                 *pos += 1;
+//RS                 let field = parse_text(bytes, pos)?;
+//RS                 let ty = parse_type(bytes, pos)?;
+//RS                 fields.push((index, field, ty));
+//RS             }
+//RS             Ok(ParsedType::Record { name, fields })
+//RS         }
+//RS         _ => Err("plugin component descriptor has an unknown type tag".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct ParsedSignature {
+//RS     params: Vec<ParsedType>,
+//RS     result: ParsedType,
+//RS }
+//RS 
+//RS fn parse_signature(wire: &str) -> Result<ParsedSignature, String> {
+//RS     let bytes = wire.as_bytes();
+//RS     let mut pos = 0;
+//RS     if bytes.get(pos) != Some(&b'C') {
+//RS         return Err("plugin component signature is missing its `C` prefix".to_string());
+//RS     }
+//RS     pos += 1;
+//RS     let count = parse_decimal(bytes, &mut pos)?;
+//RS     if bytes.get(pos) != Some(&b':') {
+//RS         return Err("plugin component signature is missing its parameter separator".to_string());
+//RS     }
+//RS     pos += 1;
+//RS     let mut params = Vec::with_capacity(count);
+//RS     for _ in 0..count {
+//RS         params.push(parse_type(bytes, &mut pos)?);
+//RS     }
+//RS     if bytes.get(pos) != Some(&b'r') {
+//RS         return Err("plugin component signature is missing its result separator".to_string());
+//RS     }
+//RS     pos += 1;
+//RS     let result = parse_type(bytes, &mut pos)?;
+//RS     if pos != bytes.len() {
+//RS         return Err("plugin component signature has trailing bytes".to_string());
+//RS     }
+//RS     Ok(ParsedSignature { params, result })
+//RS }
+//RS fn plugin_ambient_diag(message: impl Into<String>, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0956",
+//RS         message.into(),
+//RS         "the interpreter plugin adapter rejected the checked operation".to_string(),
+//RS         "report this as a compiler bug".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS fn mir_type_for_descriptor(ty: &ParsedType) -> MirType {
+//RS     let kind = match ty {
+//RS         ParsedType::Int => MirTypeKind::Int,
+//RS         ParsedType::Float => MirTypeKind::Float,
+//RS         ParsedType::Bool => MirTypeKind::Bool,
+//RS         ParsedType::String => MirTypeKind::String,
+//RS         ParsedType::List(inner) => MirTypeKind::List(Box::new(mir_type_for_descriptor(inner))),
+//RS         ParsedType::Option(inner) => MirTypeKind::Option(Box::new(mir_type_for_descriptor(inner))),
+//RS         ParsedType::Result { ok, err } => MirTypeKind::Result {
+//RS             ok: Box::new(mir_type_for_descriptor(ok)),
+//RS             err: Box::new(mir_type_for_descriptor(err)),
+//RS         },
+//RS         ParsedType::Record { name, .. } => {
+//RS             MirTypeKind::Apply { name: MirNominalRef::from_name(name.clone()), args: Vec::new() }
+//RS         }
+//RS     };
+//RS     MirType::from_kind(kind)
+//RS }
+//RS 
+//RS fn mir_to_plugin(
+//RS     value: &MirRuntimeValue,
+//RS     ty: &ParsedType,
+//RS ) -> Result<plugin_wire::PluginValue, String> {
+//RS     match (ty, value) {
+//RS         (ParsedType::Int, MirRuntimeValue::Int(value)) => {
+//RS             Ok(plugin_wire::PluginValue::Int(*value))
+//RS         }
+//RS         (ParsedType::Int, MirRuntimeValue::BigInt(value)) => value
+//RS             .parse::<i64>()
+//RS             .map(plugin_wire::PluginValue::Int)
+//RS             .map_err(|_| "plugin integer value exceeds the Component Model i64 range".to_string()),
+//RS         (ParsedType::Float, MirRuntimeValue::Float { value, .. }) => {
+//RS             Ok(plugin_wire::PluginValue::Float(*value))
+//RS         }
+//RS         (ParsedType::Bool, MirRuntimeValue::Bool(value)) => {
+//RS             Ok(plugin_wire::PluginValue::Bool(*value))
+//RS         }
+//RS         (ParsedType::String, MirRuntimeValue::String(value)) => {
+//RS             Ok(plugin_wire::PluginValue::Text(value.clone()))
+//RS         }
+//RS         (ParsedType::List(inner), MirRuntimeValue::List(values)) => values
+//RS             .iter()
+//RS             .map(|value| mir_to_plugin(value, inner))
+//RS             .collect::<Result<Vec<_>, _>>()
+//RS             .map(plugin_wire::PluginValue::List),
+//RS         (ParsedType::Option(_), MirRuntimeValue::Absent { .. }) => {
+//RS             Ok(plugin_wire::PluginValue::Option(None))
+//RS         }
+//RS         (ParsedType::Option(inner), MirRuntimeValue::Present(value)) => Ok(
+//RS             plugin_wire::PluginValue::Option(Some(Box::new(mir_to_plugin(value, inner)?))),
+//RS         ),
+//RS         (ParsedType::Result { ok, .. }, MirRuntimeValue::Present(value)) => Ok(
+//RS             plugin_wire::PluginValue::ResultOk(Some(Box::new(mir_to_plugin(value, ok)?))),
+//RS         ),
+//RS         (ParsedType::Result { err, .. }, MirRuntimeValue::FailedTold(value)) => Ok(
+//RS             plugin_wire::PluginValue::ResultErr(Some(Box::new(mir_to_plugin(value, err)?))),
+//RS         ),
+//RS         (
+//RS             ParsedType::Record { name, fields, .. },
+//RS             MirRuntimeValue::Struct {
+//RS                 type_name,
+//RS                 fields: values,
+//RS             },
+//RS         ) => {
+//RS             if type_name != name {
+//RS                 return Err(format!(
+//RS                     "plugin record carrier has type `{type_name}`, expected `{name}`"
+//RS                 ));
+//RS             }
+//RS             if values.len() != fields.len()
+//RS                 || values
+//RS                     .iter()
+//RS                     .any(|(field, _)| !fields.iter().any(|(_, name, _)| name == field))
+//RS             {
+//RS                 return Err("plugin record carrier has the wrong checked field set".to_string());
+//RS             }
+//RS             fields
+//RS                 .iter()
+//RS                 .map(|(_, field, field_ty)| {
+//RS                     let value = values
+//RS                         .iter()
+//RS                         .find(|(name, _)| name == field)
+//RS                         .map(|(_, value)| value)
+//RS                         .ok_or_else(|| format!("plugin record is missing field `{field}`"))?;
+//RS                     Ok((field.clone(), mir_to_plugin(value, field_ty)?))
+//RS                 })
+//RS                 .collect::<Result<Vec<_>, String>>()
+//RS                 .map(plugin_wire::PluginValue::Record)
+//RS         }
+//RS         _ => Err("plugin parameter does not match the checked component descriptor".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_to_mir(
+//RS     value: &plugin_wire::PluginValue,
+//RS     ty: &ParsedType,
+//RS ) -> Result<MirRuntimeValue, String> {
+//RS     match (ty, value) {
+//RS         (ParsedType::Int, plugin_wire::PluginValue::Int(value)) => Ok(MirRuntimeValue::Int(*value)),
+//RS         (ParsedType::Float, plugin_wire::PluginValue::Float(value)) => {
+//RS             Ok(MirRuntimeValue::Float {
+//RS                 value: *value,
+//RS                 f32: false,
+//RS             })
+//RS         }
+//RS         (ParsedType::Bool, plugin_wire::PluginValue::Bool(value)) => {
+//RS             Ok(MirRuntimeValue::Bool(*value))
+//RS         }
+//RS         (ParsedType::String, plugin_wire::PluginValue::Text(value)) => {
+//RS             Ok(MirRuntimeValue::String(value.clone()))
+//RS         }
+//RS         (ParsedType::List(inner), plugin_wire::PluginValue::List(values)) => values
+//RS             .iter()
+//RS             .map(|value| plugin_to_mir(value, inner))
+//RS             .collect::<Result<Vec<_>, _>>()
+//RS             .map(MirRuntimeValue::List),
+//RS         (ParsedType::Option(inner), plugin_wire::PluginValue::Option(value)) => match value {
+//RS             Some(value) => Ok(MirRuntimeValue::Present(Box::new(plugin_to_mir(
+//RS                 value, inner,
+//RS             )?))),
+//RS             None => Ok(MirRuntimeValue::Absent {
+//RS                 element: mir_type_for_descriptor(inner),
+//RS             }),
+//RS         },
+//RS         (ParsedType::Result { ok, .. }, plugin_wire::PluginValue::ResultOk(Some(value))) => {
+//RS             Ok(MirRuntimeValue::Present(Box::new(plugin_to_mir(value, ok)?)))
+//RS         }
+//RS         (ParsedType::Result { err, .. }, plugin_wire::PluginValue::ResultErr(Some(value))) => {
+//RS             Ok(MirRuntimeValue::FailedTold(Box::new(plugin_to_mir(value, err)?)))
+//RS         }
+//RS         (ParsedType::Result { .. }, plugin_wire::PluginValue::ResultOk(None))
+//RS         | (ParsedType::Result { .. }, plugin_wire::PluginValue::ResultErr(None)) => Err(
+//RS             "plugin returned a result arm without the checked payload".to_string(),
+//RS         ),
+//RS         (
+//RS             ParsedType::Record { name, fields, .. },
+//RS             plugin_wire::PluginValue::Record(values),
+//RS         ) => {
+//RS             if values.len() != fields.len()
+//RS                 || values
+//RS                     .iter()
+//RS                     .any(|(field, _)| !fields.iter().any(|(_, name, _)| name == field))
+//RS             {
+//RS                 return Err("plugin result has the wrong checked record field set".to_string());
+//RS             }
+//RS             fields
+//RS                 .iter()
+//RS                 .map(|(_, field, field_ty)| {
+//RS                     let value = values
+//RS                         .iter()
+//RS                         .find(|(name, _)| name == field)
+//RS                         .map(|(_, value)| value)
+//RS                         .ok_or_else(|| format!("plugin result is missing record field `{field}`"))?;
+//RS                     Ok((field.clone(), plugin_to_mir(value, field_ty)?))
+//RS                 })
+//RS                 .collect::<Result<Vec<_>, String>>()
+//RS                 .map(|fields| MirRuntimeValue::Struct {
+//RS                     type_name: name.clone(),
+//RS                     fields,
+//RS                 })
+//RS         }
+//RS         _ => Err("plugin result does not match the checked component descriptor".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn slot_handle(slot: &JetVal) -> Option<i64> {
+//RS     match slot {
+//RS         JetVal::Int(value) | JetVal::RecordRef(value) => Some(*value),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn list_slots(rt: &JitRuntime, slot: &JetVal) -> Result<Vec<JetVal>, String> {
+//RS     match slot {
+//RS         JetVal::List(values) => Ok(values.clone()),
+//RS         JetVal::IntList(values) => Ok(values.iter().copied().map(JetVal::Int).collect()),
+//RS         JetVal::UninitList { .. } => Err("plugin list carrier is uninitialized".to_string()),
+//RS         _ => slot_handle(slot)
+//RS             .and_then(|handle| rt.heap.clone_list_values(handle))
+//RS             .ok_or_else(|| "plugin list handle is invalid".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn record_slots(rt: &JitRuntime, slot: &JetVal) -> Result<Vec<JetVal>, String> {
+//RS     match slot {
+//RS         JetVal::Record(values) => Ok(values.clone()),
+//RS         JetVal::RecordRef(handle) | JetVal::Int(handle) => rt
+//RS             .heap
+//RS             .clone_record_values(*handle)
+//RS             .ok_or_else(|| "plugin record handle is invalid".to_string()),
+//RS         _ => Err("plugin record carrier is invalid".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn string_slot(rt: &JitRuntime, slot: &JetVal) -> Result<String, String> {
+//RS     match slot {
+//RS         JetVal::String(value) => Ok(value.clone()),
+//RS         JetVal::StringView { owner, start, end } => rt
+//RS             .heap
+//RS             .get_string(*owner)
+//RS             .and_then(|value| value.get(*start..*end))
+//RS             .map(str::to_string)
+//RS             .ok_or_else(|| "plugin string view is invalid".to_string()),
+//RS         JetVal::Int(handle) => rt
+//RS             .heap
+//RS             .clone_string(*handle)
+//RS             .ok_or_else(|| "plugin string handle is invalid".to_string()),
+//RS         _ => Err("plugin string carrier is invalid".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn raw_slot(bits: u64, ty: &ParsedType) -> JetVal {
+//RS     match ty {
+//RS         ParsedType::Int => JetVal::Int(bits as i64),
+//RS         ParsedType::Float => JetVal::Float(f64::from_bits(bits)),
+//RS         ParsedType::Bool => JetVal::Bool(bits != 0),
+//RS         ParsedType::String
+//RS         | ParsedType::List(_)
+//RS         | ParsedType::Option(_)
+//RS         | ParsedType::Result { .. }
+//RS         | ParsedType::Record { .. } => JetVal::Int(bits as i64),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn slot_to_plugin(rt: &JitRuntime, slot: &JetVal, ty: &ParsedType) -> Result<plugin_wire::PluginValue, String> {
+//RS     match ty {
+//RS         ParsedType::Int => match slot {
+//RS             JetVal::Int(value) => Ok(plugin_wire::PluginValue::Int(*value)),
+//RS             _ => Err("plugin integer carrier is invalid".to_string()),
+//RS         },
+//RS         ParsedType::Float => match slot {
+//RS             JetVal::Float(value) => Ok(plugin_wire::PluginValue::Float(*value)),
+//RS             JetVal::Int(value) => Ok(plugin_wire::PluginValue::Float(f64::from_bits(*value as u64))),
+//RS             _ => Err("plugin float carrier is invalid".to_string()),
+//RS         },
+//RS         ParsedType::Bool => match slot {
+//RS             JetVal::Bool(value) => Ok(plugin_wire::PluginValue::Bool(*value)),
+//RS             JetVal::Int(0) => Ok(plugin_wire::PluginValue::Bool(false)),
+//RS             JetVal::Int(1) => Ok(plugin_wire::PluginValue::Bool(true)),
+//RS             _ => Err("plugin bool carrier is invalid".to_string()),
+//RS         },
+//RS         ParsedType::String => Ok(plugin_wire::PluginValue::Text(string_slot(rt, slot)?)),
+//RS         ParsedType::List(inner) => list_slots(rt, slot)?
+//RS             .iter()
+//RS             .map(|value| slot_to_plugin(rt, value, inner))
+//RS             .collect::<Result<Vec<_>, _>>()
+//RS             .map(plugin_wire::PluginValue::List),
+//RS         ParsedType::Option(inner) => {
+//RS             let handle = slot_handle(slot).ok_or_else(|| "plugin option carrier is invalid".to_string())?;
+//RS             let (present, bits) = jit_result_parts(rt, handle)
+//RS                 .ok_or_else(|| "plugin option result handle is invalid".to_string())?;
+//RS             if present {
+//RS                 let value = raw_slot(bits, inner);
+//RS                 Ok(plugin_wire::PluginValue::Option(Some(Box::new(slot_to_plugin(
+//RS                     rt, &value, inner,
+//RS                 )?))))
+//RS             } else {
+//RS                 Ok(plugin_wire::PluginValue::Option(None))
+//RS             }
+//RS         }
+//RS         ParsedType::Result { ok, err } => {
+//RS             let handle = slot_handle(slot).ok_or_else(|| "plugin result carrier is invalid".to_string())?;
+//RS             let (success, bits) = jit_result_parts(rt, handle)
+//RS                 .ok_or_else(|| "plugin result handle is invalid".to_string())?;
+//RS             if success {
+//RS                 let value = raw_slot(bits, ok);
+//RS                 Ok(plugin_wire::PluginValue::ResultOk(Some(Box::new(slot_to_plugin(
+//RS                     rt, &value, ok,
+//RS                 )?))))
+//RS             } else {
+//RS                 let value = raw_slot(bits, err);
+//RS                 Ok(plugin_wire::PluginValue::ResultErr(Some(Box::new(slot_to_plugin(
+//RS                     rt, &value, err,
+//RS                 )?))))
+//RS             }
+//RS         }
+//RS         ParsedType::Record { fields, .. } => {
+//RS             let slots = record_slots(rt, slot)?;
+//RS             fields
+//RS                 .iter()
+//RS                 .map(|(index, name, field_ty)| {
+//RS                     let value = slots
+//RS                         .get(*index)
+//RS                         .ok_or_else(|| "plugin record field index is invalid".to_string())?;
+//RS                     Ok((name.clone(), slot_to_plugin(rt, value, field_ty)?))
+//RS                 })
+//RS                 .collect::<Result<Vec<_>, String>>()
+//RS                 .map(plugin_wire::PluginValue::Record)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_value_to_slot(
+//RS     rt: &mut JitRuntime,
+//RS     value: &plugin_wire::PluginValue,
+//RS     ty: &ParsedType,
+//RS ) -> Result<JetVal, String> {
+//RS     match (ty, value) {
+//RS         (ParsedType::Int, plugin_wire::PluginValue::Int(value)) => Ok(JetVal::Int(*value)),
+//RS         (ParsedType::Float, plugin_wire::PluginValue::Float(value)) => Ok(JetVal::Float(*value)),
+//RS         (ParsedType::Bool, plugin_wire::PluginValue::Bool(value)) => Ok(JetVal::Bool(*value)),
+//RS         (ParsedType::String, plugin_wire::PluginValue::Text(value)) => Ok(JetVal::String(value.clone())),
+//RS         (ParsedType::List(inner), plugin_wire::PluginValue::List(values)) => {
+//RS             let slots = values
+//RS                 .iter()
+//RS                 .map(|value| plugin_value_to_slot(rt, value, inner))
+//RS                 .collect::<Result<Vec<_>, _>>()?;
+//RS             Ok(JetVal::Int(rt.heap.alloc_list_values(slots)))
+//RS         }
+//RS         (ParsedType::Record { fields, .. }, plugin_wire::PluginValue::Record(values)) => {
+//RS             let mut slots = vec![JetVal::Int(0); fields.iter().map(|(index, _, _)| *index + 1).max().unwrap_or(0)];
+//RS             for (index, name, field_ty) in fields {
+//RS                 let value = values
+//RS                     .iter()
+//RS                     .find(|(field, _)| field == name)
+//RS                     .map(|(_, value)| value)
+//RS                     .ok_or_else(|| format!("plugin result is missing record field `{name}`"))?;
+//RS                 slots[*index] = plugin_value_to_slot(rt, value, field_ty)?;
+//RS             }
+//RS             Ok(JetVal::RecordRef(rt.heap.alloc_record_values(slots)))
+//RS         }
+//RS         (ParsedType::Option(inner), plugin_wire::PluginValue::Option(value)) => {
+//RS             let bits = value
+//RS                 .as_deref()
+//RS                 .map(|value| plugin_value_to_raw(rt, value, inner))
+//RS                 .transpose()?
+//RS                 .unwrap_or(0);
+//RS             Ok(JetVal::Int(alloc_jit_result(rt, value.is_some(), bits as u64)))
+//RS         }
+//RS         (ParsedType::Result { ok, .. }, plugin_wire::PluginValue::ResultOk(value)) => {
+//RS             let bits = value
+//RS                 .as_deref()
+//RS                 .map(|value| plugin_value_to_raw(rt, value, ok))
+//RS                 .transpose()?
+//RS                 .unwrap_or(0);
+//RS             Ok(JetVal::Int(alloc_jit_result(rt, true, bits as u64)))
+//RS         }
+//RS         (ParsedType::Result { err, .. }, plugin_wire::PluginValue::ResultErr(value)) => {
+//RS             let bits = value
+//RS                 .as_deref()
+//RS                 .map(|value| plugin_value_to_raw(rt, value, err))
+//RS                 .transpose()?
+//RS                 .unwrap_or(0);
+//RS             Ok(JetVal::Int(alloc_jit_result(rt, false, bits as u64)))
+//RS         }
+//RS         _ => Err("plugin result does not match the checked component descriptor".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_value_to_raw(
+//RS     rt: &mut JitRuntime,
+//RS     value: &plugin_wire::PluginValue,
+//RS     ty: &ParsedType,
+//RS ) -> Result<i64, String> {
+//RS     match (ty, value) {
+//RS         (ParsedType::Int, plugin_wire::PluginValue::Int(value)) => Ok(*value),
+//RS         (ParsedType::Float, plugin_wire::PluginValue::Float(value)) => Ok(value.to_bits() as i64),
+//RS         (ParsedType::Bool, plugin_wire::PluginValue::Bool(value)) => Ok(i64::from(*value)),
+//RS         (ParsedType::String, plugin_wire::PluginValue::Text(value)) => Ok(rt.heap.alloc_string(value.clone())),
+//RS         (ParsedType::List(inner), plugin_wire::PluginValue::List(values)) => {
+//RS             let slots = values
+//RS                 .iter()
+//RS                 .map(|value| plugin_value_to_slot(rt, value, inner))
+//RS                 .collect::<Result<Vec<_>, _>>()?;
+//RS             Ok(rt.heap.alloc_list_values(slots))
+//RS         }
+//RS         (ParsedType::Record { fields, .. }, plugin_wire::PluginValue::Record(values)) => {
+//RS             let mut slots = vec![JetVal::Int(0); fields.iter().map(|(index, _, _)| *index + 1).max().unwrap_or(0)];
+//RS             for (index, name, field_ty) in fields {
+//RS                 let value = values
+//RS                     .iter()
+//RS                     .find(|(field, _)| field == name)
+//RS                     .map(|(_, value)| value)
+//RS                     .ok_or_else(|| format!("plugin result is missing record field `{name}`"))?;
+//RS                 slots[*index] = plugin_value_to_slot(rt, value, field_ty)?;
+//RS             }
+//RS             Ok(rt.heap.alloc_record_values(slots))
+//RS         }
+//RS         (ParsedType::Option(inner), plugin_wire::PluginValue::Option(value)) => {
+//RS             let bits = value
+//RS                 .as_deref()
+//RS                 .map(|value| plugin_value_to_raw(rt, value, inner))
+//RS                 .transpose()?
+//RS                 .unwrap_or(0);
+//RS             Ok(alloc_jit_result(rt, value.is_some(), bits as u64))
+//RS         }
+//RS         (ParsedType::Result { ok, .. }, plugin_wire::PluginValue::ResultOk(value)) => {
+//RS             let bits = value
+//RS                 .as_deref()
+//RS                 .map(|value| plugin_value_to_raw(rt, value, ok))
+//RS                 .transpose()?
+//RS                 .unwrap_or(0);
+//RS             Ok(alloc_jit_result(rt, true, bits as u64))
+//RS         }
+//RS         (ParsedType::Result { err, .. }, plugin_wire::PluginValue::ResultErr(value)) => {
+//RS             let bits = value
+//RS                 .as_deref()
+//RS                 .map(|value| plugin_value_to_raw(rt, value, err))
+//RS                 .transpose()?
+//RS                 .unwrap_or(0);
+//RS             Ok(alloc_jit_result(rt, false, bits as u64))
+//RS         }
+//RS         _ => Err("plugin result does not match the checked component descriptor".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_error(rt: &mut JitRuntime, message: impl Into<String>) -> i64 {
+//RS     let error = rt.heap.alloc_string(message.into());
+//RS     alloc_jit_result(rt, false, error as u64)
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_plugin_load(path: i64, authority: i64, declared_needs: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(path) = rt.heap.clone_string(path) else {
+//RS             rt.set_host_fault("MIR plugin path handle is invalid");
+//RS             return 0;
+//RS         };
+//RS         let authority = rt
+//RS             .heap
+//RS             .clone_string(authority)
+//RS             .unwrap_or_else(|| crate::Collections::authority_wire(rt, authority));
+//RS         let Some(needs_wire) = rt.heap.clone_string(declared_needs) else {
+//RS             rt.set_host_fault("MIR plugin authority-needs handle is invalid");
+//RS             return 0;
+//RS         };
+//RS         let declared_needs = needs_wire
+//RS             .split('\n')
+//RS             .filter(|need| !need.is_empty())
+//RS             .map(str::to_string)
+//RS             .collect::<Vec<_>>();
+//RS         let wire = runtime::jet_plugin_load_declared(&path, &authority, &declared_needs);
+//RS         match wire.strip_prefix("O:").and_then(|value| value.parse::<u64>().ok()) {
+//RS             Some(handle) if handle > 0 => handle as i64,
+//RS             _ => {
+//RS                 rt.set_host_fault(wire.strip_prefix("E:").unwrap_or(&wire));
+//RS                 0
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_plugin_call(
+//RS     handle: i64,
+//RS     name: i64,
+//RS     params: i64,
+//RS     descriptor: i64,
+//RS ) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(name) = rt.heap.clone_string(name) else {
+//RS             rt.set_host_fault("MIR plugin export name handle is invalid");
+//RS             return 0;
+//RS         };
+//RS         let Some(signature_wire) = rt.heap.clone_string(descriptor) else {
+//RS             rt.set_host_fault("MIR plugin component signature handle is invalid");
+//RS             return 0;
+//RS         };
+//RS         let signature = match parse_signature(&signature_wire) {
+//RS             Ok(signature) => signature,
+//RS             Err(error) => {
+//RS                 rt.set_host_fault(&error);
+//RS                 return 0;
+//RS             }
+//RS         };
+//RS         let slots = match rt.heap.clone_list_values(params) {
+//RS             Some(slots) => slots,
+//RS             None => {
+//RS                 rt.set_host_fault("MIR plugin parameter list handle is invalid");
+//RS                 return 0;
+//RS             }
+//RS         };
+//RS         if slots.len() != signature.params.len() {
+//RS             rt.set_host_fault(&format!(
+//RS                 "MIR plugin export `{name}` expects {} parameter(s), got {}",
+//RS                 signature.params.len(),
+//RS                 slots.len()
+//RS             ));
+//RS             return 0;
+//RS         }
+//RS         let values = match slots
+//RS             .iter()
+//RS             .zip(&signature.params)
+//RS             .map(|(slot, ty)| slot_to_plugin(rt, slot, ty))
+//RS             .collect::<Result<Vec<_>, _>>()
+//RS         {
+//RS             Ok(values) => values,
+//RS             Err(error) => {
+//RS                 rt.set_host_fault(&error);
+//RS                 return 0;
+//RS             }
+//RS         };
+//RS         let params_wire = plugin_wire::plugin_encode_params(&values);
+//RS         let wire = runtime::jet_plugin_call(handle as u64, &name, &params_wire);
+//RS         let value = match plugin_wire::plugin_decode_result(&wire) {
+//RS             Ok(value) => value,
+//RS             Err(error) => return plugin_error(rt, error),
+//RS         };
+//RS         match plugin_value_to_raw(rt, &value, &signature.result) {
+//RS             Ok(bits) => alloc_jit_result(rt, true, bits as u64),
+//RS             Err(error) => plugin_error(rt, error),
+//RS         }
+//RS     })
+//RS }
+//RS fn plugin_interpreter_error(
+//RS     message: impl Into<String>,
+//RS ) -> Result<AmbientMirHandleResult, Diagnostic> {
+//RS     Ok(AmbientMirHandleResult::Value(MirRuntimeValue::FailedTold(
+//RS         Box::new(MirRuntimeValue::String(message.into())),
+//RS     )))
+//RS }
+//RS 
+//RS fn plugin_interpreter_string(
+//RS     value: &MirRuntimeValue,
+//RS     label: &str,
+//RS     span: Span,
+//RS ) -> Result<String, Diagnostic> {
+//RS     match value {
+//RS         MirRuntimeValue::String(value) => Ok(value.clone()),
+//RS         _ => Err(plugin_ambient_diag(
+//RS             format!("MIR plugin {label} carrier is not a checked String"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS /// Dispatch the checked interpreter/deopt plugin operations through the same
+//RS /// Prelude and descriptor kernel used by the resident JIT ABI.
+//RS pub(crate) fn ambient_mir_handle(
+//RS     operation: &str,
+//RS     handle: Option<i64>,
+//RS     args: Vec<MirRuntimeValue>,
+//RS     span: Span,
+//RS ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
+//RS     match operation {
+//RS         "jet_plugin_load" => {
+//RS             if handle.is_some() || args.len() != 3 {
+//RS                 return Some(Err(plugin_ambient_diag(
+//RS                     "MIR plugin load received the wrong checked handle or argument shape",
+//RS                     span,
+//RS                 )));
+//RS             }
+//RS             let path = match plugin_interpreter_string(&args[0], "path", span) {
+//RS                 Ok(path) => path,
+//RS                 Err(error) => return Some(Err(error)),
+//RS             };
+//RS             let authority = match plugin_interpreter_string(&args[1], "authority", span) {
+//RS                 Ok(authority) => authority,
+//RS                 Err(error) => return Some(Err(error)),
+//RS             };
+//RS             let needs_wire =
+//RS                 match plugin_interpreter_string(&args[2], "declared authority-needs", span) {
+//RS                     Ok(needs) => needs,
+//RS                     Err(error) => return Some(Err(error)),
+//RS                 };
+//RS             let declared_needs = needs_wire
+//RS                 .split('\n')
+//RS                 .filter(|need| !need.is_empty())
+//RS                 .map(str::to_string)
+//RS                 .collect::<Vec<_>>();
+//RS             let wire = runtime::jet_plugin_load_declared(&path, &authority, &declared_needs);
+//RS             match wire.strip_prefix("O:").and_then(|value| value.parse::<u64>().ok()) {
+//RS                 Some(plugin) if plugin > 0 => {
+//RS                     Some(Ok(AmbientMirHandleResult::Handle(plugin as i64)))
+//RS                 }
+//RS                 _ => Some(Err(plugin_ambient_diag(
+//RS                     wire.strip_prefix("E:").unwrap_or(&wire),
+//RS                     span,
+//RS                 ))),
+//RS             }
+//RS         }
+//RS         "jet_plugin_call" => {
+//RS             let Some(handle) = handle else {
+//RS                 return Some(Err(plugin_ambient_diag(
+//RS                     "MIR plugin call has no checked receiver handle",
+//RS                     span,
+//RS                 )));
+//RS             };
+//RS             if args.len() != 3 {
+//RS                 return Some(Err(plugin_ambient_diag(
+//RS                     "MIR plugin call received the wrong checked argument shape",
+//RS                     span,
+//RS                 )));
+//RS             }
+//RS             let name = match plugin_interpreter_string(&args[0], "export name", span) {
+//RS                 Ok(name) => name,
+//RS                 Err(error) => return Some(Err(error)),
+//RS             };
+//RS             let signature_wire =
+//RS                 match plugin_interpreter_string(&args[2], "component signature", span) {
+//RS                     Ok(signature) => signature,
+//RS                     Err(error) => return Some(Err(error)),
+//RS                 };
+//RS             let signature = match parse_signature(&signature_wire) {
+//RS                 Ok(signature) => signature,
+//RS                 Err(error) => return Some(Err(plugin_ambient_diag(error, span))),
+//RS             };
+//RS             let MirRuntimeValue::List(params) = &args[1] else {
+//RS                 return Some(Err(plugin_ambient_diag(
+//RS                     "MIR plugin call parameters are not a checked value list",
+//RS                     span,
+//RS                 )));
+//RS             };
+//RS             if params.len() != signature.params.len() {
+//RS                 return Some(Err(plugin_ambient_diag(
+//RS                     format!(
+//RS                         "MIR plugin export `{name}` expects {} parameter(s), got {}",
+//RS                         signature.params.len(),
+//RS                         params.len()
+//RS                     ),
+//RS                     span,
+//RS                 )));
+//RS             }
+//RS             let values = match params
+//RS                 .iter()
+//RS                 .zip(&signature.params)
+//RS                 .map(|(value, ty)| mir_to_plugin(value, ty))
+//RS                 .collect::<Result<Vec<_>, _>>()
+//RS             {
+//RS                 Ok(values) => values,
+//RS                 Err(error) => return Some(Err(plugin_ambient_diag(error, span))),
+//RS             };
+//RS             let params_wire = plugin_wire::plugin_encode_params(&values);
+//RS             let wire = runtime::jet_plugin_call(handle as u64, &name, &params_wire);
+//RS             let value = match plugin_wire::plugin_decode_result(&wire) {
+//RS                 Ok(value) => value,
+//RS                 Err(error) => return Some(plugin_interpreter_error(error)),
+//RS             };
+//RS             match plugin_to_mir(&value, &signature.result) {
+//RS                 Ok(value) => Some(Ok(AmbientMirHandleResult::Value(
+//RS                     MirRuntimeValue::Present(Box::new(value)),
+//RS                 ))),
+//RS                 Err(error) => Some(plugin_interpreter_error(error)),
+//RS             }
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn register_interpreter_ambient(context: &mut InterpreterAmbientContext) {
+//RS     context.register_mir_handle(ambient_mir_handle);
+//RS }
+//RS 
+//RS // The rows carry the exact Prelude symbol the checked MIR route names
+//RS // (`jet_plugin_load` / `jet_plugin_call`): lowering resolves a Prelude call by
+//RS // `MirSymbol::name()`, so a `jet_jit_`-prefixed spelling would be unreachable.
+//RS host_fns! {
+//RS     struct PluginHostFns;
+//RS     register: register_plugin_symbols;
+//RS     declare: declare_plugin_host_fns(module) {
+//RS         use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS         use cranelift_module::Module;
+//RS         let cc = module.target_config().default_call_conv;
+//RS         // (path, authority wire, compiler-supplied declared needs) -> handle | Result
+//RS         let mut sig_load = Signature::new(cc);
+//RS         sig_load.params.extend([AbiParam::new(types::I64); 3]);
+//RS         sig_load.returns.push(AbiParam::new(types::I64));
+//RS         // (handle, export name, checked value list, component descriptor) -> Result
+//RS         let mut sig_call = Signature::new(cc);
+//RS         sig_call.params.extend([AbiParam::new(types::I64); 4]);
+//RS         sig_call.returns.push(AbiParam::new(types::I64));
+//RS     }
+//RS     load: "jet_plugin_load" => jet_jit_plugin_load: sig_load;
+//RS     call: "jet_plugin_call" => jet_jit_plugin_call: sig_call;
+//RS }
+// END-PORT-PENDING 0229 crates/jet-jit/src/Plugin.rs:1-814
+

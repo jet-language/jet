@@ -1,0 +1,427 @@
+// Rust: tests/comptime_cli_parity.rs:1
+use tests.conformance.corpus.core.port.comptime_cli_parity.[TIER_PARITY_STEMS, copy_comptime_fixture, copy_build_stamp_fixture, run_jet, assert_tier_parity_case, ENUM_DISCRIMINANT_SOURCE, ENUM_DISCRIMINANT_SOURCE_IMPLICIT_FIRST, ENUM_DISCRIMINANTS, ENUM_DISCRIMINANTS_IMPLICIT_FIRST, DUPLICATE_ENUM_DISCRIMINANT_SOURCE, ENUM_DISCRIMINANT_DIAGNOSTICS, assert_enum_discriminants, assert_enum_discriminant_error, assert_cli_rejection, help_body]
+use tests.common as common
+use std.fs as fs
+use std.env as env
+use std.process.[Command]
+use jet.[compile_with_path]
+// GATE #4494: actual native fixture IO/subprocesses; no Rust bridge.
+
+// Rust: tests/comptime_cli_parity.rs:183
+#Test("tier_parity_examples_run_through_aot_jit_and_interpreter") {
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    scratch :: common.Scratch.new("comptime_effect_parity")
+    loop stem in TIER_PARITY_STEMS { assert_tier_parity_case(root, scratch, stem) }
+}
+// Rust: tests/comptime_cli_parity.rs:193
+#Test("build_entry_workspace_matches_release_default_and_dev_interpreter") {
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    source :: root.join("Examples/features/tooling/build_entry_discovery")
+    scratch :: common.Scratch.new("build_entry_discovery_parity")
+    loop relative in ["workspace.jet", "package.jet", "run.jet", "tools/build_entry.jet", "packages/foundation/package.jet", "packages/foundation/run.jet", "packages/foundation/tools/build.jet", "packages/app/package.jet", "packages/app/run.jet"] {
+        destination :: scratch.join(relative)
+        fs.create_dir_all(destination.parent().unwrap()).expect("create build-entry fixture directory")
+        fs.copy(source.join(relative), destination).unwrap_or_else(|error| -> panic("copy build-entry fixture `{relative}`: {error}"))
+    }
+    expected :: fs.read(root.join("Examples/features/expected/tooling/build_entry_discovery.out")).expect("read build-entry golden")
+    named :: run_jet(["build", "foundation"], scratch.path, scratch.join("cache/named"))
+    assert(named.status.success(), "`jet build foundation` failed:\n{String.from_utf8_lossy(named.stderr)}")
+    assert(scratch.join("packages/foundation/.jet/generated/foundation/foundation_marker.jet").is_file(), "the named depth-one member build did not run")
+    workspace :: run_jet(["build"], scratch.path, scratch.join("cache/workspace"))
+    assert(workspace.status.success(), "workspace build failed:\n{String.from_utf8_lossy(workspace.stderr)}")
+    release :: run_jet(["run", "--release", "run.jet"], scratch.path, scratch.join("cache/release"))
+    default :: run_jet(["run", "run.jet"], scratch.path, scratch.join("cache/default"))
+    interpreted :: run_jet(["dev", "run.jet", "--interpret", "--watch=off"], scratch.path, scratch.join("cache/interpreted"))
+    loop (tier, output) in [("release", &release), ("default", &default), ("dev interpreter", &interpreted)] {
+        assert_eq(output.status.code(), Val(0), "{tier} build-entry example failed:\n{String.from_utf8_lossy(output.stderr)}")
+        assert_eq(output.stdout, expected, "{tier} build-entry output differs from the checked-in golden")
+    }
+}
+// Rust: tests/comptime_cli_parity.rs:276
+#Test("fact_plane_runs_through_aot_jit_and_interpreter") {
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    scratch :: common.Scratch.new("fact_plane_parity")
+    assert_tier_parity_case(root, scratch, "comptime/fact_plane")
+}
+// Rust: tests/comptime_cli_parity.rs:284
+#Test("build_fact_precedence_example_matches_release_default_and_dev") {
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    scratch :: common.Scratch.new("build_fact_precedence_parity")
+    fs.copy(root.join("Examples/features/comptime/build_fact_precedence.jet"), scratch.path.join("build_fact_precedence.jet")).expect("copy build fact precedence example")
+    expected :: fs.read(root.join("Examples/features/expected/comptime/build_fact_precedence.out")).expect("read build fact precedence golden")
+    release :: run_jet(["run", "--release", "build_fact_precedence.jet"], scratch.path, scratch.join("cache/release"))
+    default :: run_jet(["run", "build_fact_precedence.jet"], scratch.path, scratch.join("cache/default"))
+    dev :: run_jet(["dev", "build_fact_precedence.jet", "--interpret", "--watch=off"], scratch.path, scratch.join("cache/dev"))
+    loop (tier, output) in [("release", &release), ("default", &default), ("dev", &dev)] {
+        assert_eq(output.status.code(), Val(0), "{tier} build-fact example failed:\n{String.from_utf8_lossy(output.stderr)}")
+        assert_eq(output.stdout, expected, "{tier} build-fact output differs")
+    }
+    assert_eq(release.status.code(), default.status.code())
+    assert_eq(release.status.code(), dev.status.code())
+}
+// Rust: tests/comptime_cli_parity.rs:331
+#Test("computed_constants_match_aot_default_and_interpreter") {
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    scratch :: common.Scratch.new("computed_constants_parity")
+    source :: scratch.join("computed_constants.jet")
+    fs.copy(root.join("Examples/features/comptime/computed_constants.jet"), source).expect("copy computed constants example")
+    source_text :: fs.read_to_string(source).expect("read computed constants source")
+    _ :: compile_with_path(source_text, source.to_string_lossy()).unwrap_or_else(|diags| -> panic("computed constants front end rejected: {diags.debug()}"))
+    assert_enum_discriminants(source, "Code", [("First", Val(41i64)), ("Second", None)])
+    expected :: fs.read(root.join("Examples/features/expected/comptime/computed_constants.out")).expect("read computed constants golden")
+    cache :: scratch.join("cache")
+    build :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["build", "computed_constants.jet"]).current_dir(scratch.path).env("JET_STORE_DIR", cache.join("build")).env("NO_COLOR", "1").output().expect("build computed constants example")
+    assert(build.status.success(), "AOT computed constants build failed:\n{String.from_utf8_lossy(build.stderr)}")
+    aot :: Command.new(scratch.join(".jet/build/computed_constants")).current_dir(scratch.path).output().expect("run AOT computed constants example")
+    assert(aot.status.success(), "AOT computed constants run failed:\n{String.from_utf8_lossy(aot.stderr)}")
+    default :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", "computed_constants.jet"]).current_dir(scratch.path).env("JET_RUN_CACHE_DIR", cache.join("run")).env("JET_STORE_DIR", cache.join("default")).env("NO_COLOR", "1").output().expect("run computed constants through default jet run")
+    assert(default.status.success(), "default computed constants run failed:\n{String.from_utf8_lossy(default.stderr)}")
+    interpreted :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", "--interpret", "computed_constants.jet"]).current_dir(scratch.path).env("JET_RUN_CACHE_DIR", cache.join("interpret-run")).env("JET_STORE_DIR", cache.join("interpret-build")).env("NO_COLOR", "1").output().expect("run computed constants through the interpreter")
+    assert(interpreted.status.success(), "interpreter computed constants run failed:\n{String.from_utf8_lossy(interpreted.stderr)}")
+    assert_eq(aot.stdout, expected, "AOT output differs from the golden")
+    assert_eq(default.stdout, expected, "default `jet run` output differs from the golden")
+    assert_eq(interpreted.stdout, expected, "interpreter output differs from the golden")
+}
+// Rust: tests/comptime_cli_parity.rs:602
+#Test("comptime_enum_discriminants_keep_explicit_codes_when_implicit_case_moves") {
+    scratch :: common.Scratch.new("enum_discriminant_codes")
+    loop (stem, source, expected) in [("wire_code", ENUM_DISCRIMINANT_SOURCE, ENUM_DISCRIMINANTS), ("wire_code_implicit_first", ENUM_DISCRIMINANT_SOURCE_IMPLICIT_FIRST, ENUM_DISCRIMINANTS_IMPLICIT_FIRST)] {
+        filename :: "{stem}.jet"
+        path :: scratch.join(filename)
+        fs.write(path, source).expect("write enum discriminant fixture")
+        shown :: path.to_string_lossy()
+        _ :: compile_with_path(source, shown).unwrap_or_else(|diagnostics| -> panic("enum discriminant codegen failed: {diagnostics.debug()}"))
+        assert_enum_discriminants(path, "WireCode", expected)
+    }
+}
+// Rust: tests/comptime_cli_parity.rs:627
+#Test("comptime_enum_discriminants_keep_duplicates_and_report_invalid_expressions") {
+    duplicate_scratch :: common.Scratch.new("enum_discriminant_duplicates")
+    duplicate_path :: duplicate_scratch.join("duplicate_codes.jet")
+    fs.write(duplicate_path, DUPLICATE_ENUM_DISCRIMINANT_SOURCE).expect("write duplicate enum discriminant fixture")
+    shown :: duplicate_path.to_string_lossy()
+    _ :: compile_with_path(DUPLICATE_ENUM_DISCRIMINANT_SOURCE, shown).unwrap_or_else(|diagnostics| -> panic("duplicate enum codes failed to compile: {diagnostics.debug()}"))
+    assert_enum_discriminants(duplicate_path, "DuplicateCode", [("First", Val(7i64)), ("Second", Val(7i64))])
+    loop (name, source, expression, expected_what) in ENUM_DISCRIMINANT_DIAGNOSTICS {
+        scratch :: common.Scratch.new("enum_discriminant_{name}")
+        path :: scratch.join("invalid.jet")
+        fs.write(path, source).expect("write enum diagnostic fixture")
+        assert_enum_discriminant_error(path, source, expression, expected_what)
+    }
+}
+// Rust: tests/comptime_cli_parity.rs:650
+#Test("job_runner_help_and_named_jobs_match_default_run_aot_and_goldens") {
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    scratch :: common.Scratch.new("job_runner_cli_parity")
+    source :: scratch.join("job_runner.jet")
+    fs.write(scratch.join("package.jet"), "name: \"job_runner\"\nversion: \"0.1.0\"\n").expect("write job runner package manifest")
+    fs.copy(root.join("Examples/features/devloop/job_runner.jet"), source).expect("copy job runner example")
+    help_expected :: fs.read(root.join("Examples/features/expected/devloop/job_runner.out")).expect("read job runner help golden")
+    cache :: scratch.join("cache")
+    default_help :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", "job_runner.jet"]).current_dir(scratch.path).env("JET_RUN_CACHE_DIR", cache.join("default-run")).env("JET_STORE_DIR", cache.join("default-build")).env("NO_COLOR", "1").output().expect("run job runner through default jet run")
+    assert(default_help.status.success(), "default job runner help failed:\n{String.from_utf8_lossy(default_help.stderr)}")
+    assert_eq(default_help.stdout, help_expected)
+    build :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["build", "job_runner.jet"]).current_dir(scratch.path).env("JET_STORE_DIR", cache.join("aot-build")).env("NO_COLOR", "1").output().expect("build job runner example")
+    assert(build.status.success(), "AOT job runner build failed:\n{String.from_utf8_lossy(build.stderr)}")
+    aot_help :: Command.new(scratch.join(".jet/build/job_runner")).current_dir(scratch.path).output().expect("run AOT job runner help")
+    assert(aot_help.status.success(), "AOT job runner help failed:\n{String.from_utf8_lossy(aot_help.stderr)}")
+    assert_eq(aot_help.stdout, help_expected)
+    assert_eq(default_help.stdout, aot_help.stdout)
+    default_jobs_help :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", "job_runner.jet", "--", "--help"]).current_dir(scratch.path).env("JET_RUN_CACHE_DIR", cache.join("job-help-run")).env("JET_STORE_DIR", cache.join("job-help-build")).env("NO_COLOR", "1").output().expect("show default job subcommand help")
+    aot_jobs_help :: Command.new(scratch.join(".jet/build/job_runner")).arg("--help").current_dir(scratch.path).output().expect("show AOT job subcommand help")
+    assert(default_jobs_help.status.success())
+    assert(aot_jobs_help.status.success())
+    assert(String.from_utf8_lossy(default_jobs_help.stdout).contains("greet"))
+    assert(String.from_utf8_lossy(aot_jobs_help.stdout).contains("greet"))
+    assert(!String.from_utf8_lossy(default_jobs_help.stdout).contains("inspect"))
+    assert(!String.from_utf8_lossy(aot_jobs_help.stdout).contains("inspect"))
+    loop (job, golden_name) in [("greet", "job_runner.greet.out"), ("seed_data", "job_runner.seed_data.out")] {
+        expected :: fs.read(root.join("Examples/features/expected/devloop").join(golden_name)).unwrap_or_else(|error| -> panic("read named job golden `{golden_name}`: {error}"))
+        default_job :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", "job_runner.jet", "--", job]).current_dir(scratch.path).env("JET_RUN_CACHE_DIR", cache.join("{job}-run")).env("JET_STORE_DIR", cache.join("{job}-build")).env("NO_COLOR", "1").output().unwrap_or_else(|error| -> panic("run named job `{job}`: {error}"))
+        assert(default_job.status.success(), "default named job `{job}` failed:\n{String.from_utf8_lossy(default_job.stderr)}")
+        assert_eq(default_job.stdout, expected, "default job `{job}` differs from golden")
+        aot_job :: Command.new(scratch.join(".jet/build/job_runner")).arg(job).current_dir(scratch.path).output().unwrap_or_else(|error| -> panic("run AOT named job `{job}`: {error}"))
+        assert(aot_job.status.success(), "AOT named job `{job}` failed:\n{String.from_utf8_lossy(aot_job.stderr)}")
+        assert_eq(aot_job.stdout, expected, "AOT job `{job}` differs from golden")
+        assert_eq(default_job.stdout, aot_job.stdout)
+    }
+}
+// Rust: tests/comptime_cli_parity.rs:773
+#Test("documented_cli_program_matches_aot_default_interpreter_and_goldens") {
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    scratch :: common.Scratch.new("cli_docs_parity")
+    source :: scratch.join("subcommands.jet")
+    fs.copy(root.join("Examples/features/cli/subcommands.jet"), source).expect("copy CLI example")
+    cache :: scratch.join("cache")
+    build :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["build", "subcommands.jet"]).current_dir(scratch.path).output().expect("build CLI example")
+    assert(build.status.success(), "AOT CLI build failed:\n{String.from_utf8_lossy(build.stderr)}")
+    binary :: scratch.join(".jet/build/subcommands")
+    loop args in [["--help"], ["serve", "--help"]] {
+        aot :: Command.new(binary).args(args).current_dir(scratch.path).output().expect("run AOT CLI help")
+        run_args := ["run", "subcommands.jet", "--"]
+        &run_args.extend_from_slice(args)
+        jit :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(run_args).current_dir(scratch.path).output().expect("run default CLI help")
+        assert(aot.status.success(), "AOT help failed: {String.from_utf8_lossy(aot.stderr)}")
+        assert(jit.status.success(), "default `jet run` help failed: {String.from_utf8_lossy(jit.stderr)}")
+        assert_eq(aot.stdout, jit.stdout, "AOT and default `jet run` help differ for {args.debug()}")
+        help :: String.from_utf8_lossy(aot.stdout)
+        if args == ["--help"] {
+            loop fact in ["-v, --verbose", "--config CONFIG", "plan                     preview changes", "serve                    Start the service and listen for requests", "import                   Import one data file"] {
+                assert(help.contains(fact), "root help omitted {fact}: {help}")
+            }
+            assert_eq(help.matches("--config").count(), 1, "root help repeated shared config: {help}")
+        } else {
+            // #3733: command help contains command options, not root options.
+            expected :: fs.read_to_string(root.join("Examples/features/expected/cli/subcommands.serve_help.out")).expect("read command help golden")
+            assert_eq(help, expected, "command help differs from golden")
+            assert(help.contains("--port PORT") && help.contains("[default: 3000]"), "command help omitted serve's --port: {help}")
+            assert(!help.contains("--config"), "command help repeated the shared config: {help}")
+        }
+    }
+    loop (args, golden_name) in [(["--config", "prod", "serve", "--port", "8080"], "subcommands.serve.out"), (["plan", "--config", "prod"], "subcommands.plan.out")] {
+        expected :: fs.read(root.join("Examples/features/expected/cli").join(golden_name)).unwrap_or_else(|error| -> panic("read CLI command golden `{golden_name}`: {error}"))
+        aot :: Command.new(binary).args(args).current_dir(scratch.path).output().expect("run AOT CLI command")
+        run_args := ["run", "subcommands.jet", "--"]
+        &run_args.extend_from_slice(args)
+        default :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(run_args).current_dir(scratch.path).env("JET_RUN_CACHE_DIR", cache.join("{golden_name}-run")).env("JET_STORE_DIR", cache.join("{golden_name}-build")).env("NO_COLOR", "1").output().expect("run default CLI command")
+        loop (label, output) in [("AOT", &aot), ("default `jet run`", &default)] {
+            assert(output.status.success(), "{label} CLI command {args.debug()} failed:\n{String.from_utf8_lossy(output.stderr)}")
+            assert_eq(output.stdout, expected, "{label} CLI command {args.debug()} differs from golden")
+        }
+    }
+    unknown :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", "subcommands.jet", "--", "--confg", "prod"]).current_dir(scratch.path).env("JET_RUN_CACHE_DIR", cache.join("unknown-run")).env("JET_STORE_DIR", cache.join("unknown-build")).env("NO_COLOR", "1").output().expect("run CLI with an unknown flag")
+    assert(!unknown.status.success(), "unknown CLI flag was accepted")
+    unknown_stderr :: String.from_utf8_lossy(unknown.stderr)
+    assert(unknown_stderr.contains("--config"), "unknown CLI flag lost its suggestion:\n{unknown_stderr}")
+}
+// Rust: tests/comptime_cli_parity.rs:920
+// #3729: optional String flags share the compiled carrier.
+#Test("typed_entry_optional_value_flag_matches_aot_and_default_run") {
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    scratch :: common.Scratch.new("typed_entry_optional_flag")
+    fs.copy(root.join("Examples/features/cli/typed_entry_args.jet"), scratch.join("typed_entry_args.jet")).expect("copy typed entry example")
+    cache :: scratch.join("cache")
+    build :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["build", "typed_entry_args.jet"]).current_dir(scratch.path).output().expect("build typed entry example")
+    assert(build.status.success(), "AOT typed entry build failed:\n{String.from_utf8_lossy(build.stderr)}")
+    binary :: scratch.join(".jet/build/typed_entry_args")
+    loop (argv, expected) in [(["-v", "--config", "prod.toml"], "3000\ntrue\nprod.toml\n"), ([], "3000\nfalse\n(none)\n")] {
+        aot :: Command.new(binary).args(argv).current_dir(scratch.path).env_remove("PORT").output().expect("run AOT typed entry")
+        run_args := ["run", "typed_entry_args.jet", "--"]
+        &run_args.extend_from_slice(argv)
+        default :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(run_args).current_dir(scratch.path).env_remove("PORT").env("JET_RUN_CACHE_DIR", cache.join("run")).env("JET_STORE_DIR", cache.join("run-build")).env("NO_COLOR", "1").output().expect("run default typed entry")
+        loop (label, output) in [("AOT", &aot), ("default `jet run`", &default)] {
+            assert(output.status.success(), "{label} typed entry {argv.debug()} failed:\n{String.from_utf8_lossy(output.stderr)}")
+            assert_eq(String.from_utf8_lossy(output.stdout), expected, "{label} typed entry {argv.debug()} decoded the wrong values")
+        }
+    }
+}
+// Rust: tests/comptime_cli_parity.rs:990
+#Test("canonical_cli_recipe_rejects_bad_argv_and_matches_native_tiers") {
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    scratch :: common.Scratch.new("canonical_cli_recipe")
+    fixtures :: [("Examples/features/cli/typed_entry_args.jet", "typed.jet"), ("Examples/features/io/args_spec.jet", "builder.jet"), ("Examples/features/cli/positionals.jet", "positionals.jet")]
+    loop (source, name) in fixtures {
+        fs.copy(root.join(source), scratch.join(name)).unwrap_or_else(|error| -> panic("copy `{source}`: {error}"))
+    }
+    binaries := [(String, OSPath)]{}
+    loop (_, name) in fixtures {
+        build :: run_jet(["build", name], scratch.path, scratch.join("cache/build-{name}"))
+        assert(build.status.success(), "AOT build of `{name}` failed:\n{String.from_utf8_lossy(build.stderr)}")
+        stem :: name.strip_suffix(".jet").expect("fixture extension")
+        &binaries.push((name, scratch.join(".jet").join("build").join(stem)))
+    }
+    loop (name, binary) in binaries {
+        aot_help :: Command.new(binary).arg("--help").current_dir(scratch.path).output().unwrap_or_else(|error| -> panic("run AOT `{name} --help`: {error}"))
+        default_help :: run_jet(["run", name, "--", "--help"], scratch.path, scratch.join("cache/help-default-{name}"))
+        interpreted_help :: run_jet(["run", "--interpret", name, "--", "--help"], scratch.path, scratch.join("cache/help-interpreter-{name}"))
+        loop (tier, output) in [("AOT", &aot_help), ("default `jet run`", &default_help), ("interpreter", &interpreted_help)] {
+            assert_eq(output.status.code(), Val(0), "{tier} `{name} --help` failed:\n{String.from_utf8_lossy(output.stderr)}")
+            assert(String.from_utf8_lossy(output.stdout).contains("Usage:"), "{tier} `{name} --help` omitted Usage")
+        }
+        assert_eq(help_body(aot_help.stdout), help_body(default_help.stdout), "AOT and default help body differs for `{name}`")
+        assert_eq(help_body(aot_help.stdout), help_body(interpreted_help.stdout), "AOT and interpreter help body differs for `{name}`")
+        bad_cases :: if name == "positionals.jet" {
+            [("unknown", ["add", "--not-a-real-option"], ["unknown option", "Usage:"]), ("surplus", ["add", "accepted", "surplus-a", "surplus-b"], ["unexpected arguments", "`surplus-a`", "`surplus-b`", "Usage:"])]
+        } else {
+            [("unknown", ["--not-a-real-option"], ["unknown option", "Usage:"]), ("surplus", ["surplus-a", "surplus-b"], ["unexpected arguments", "`surplus-a`", "`surplus-b`", "Usage:"])]
+        }
+        loop (case, args, expected) in bad_cases {
+            aot :: Command.new(binary).args(args).current_dir(scratch.path).output().unwrap_or_else(|error| -> panic("run AOT `{name}` {case}: {error}"))
+            assert_cli_rejection(aot, "AOT `{name}` {case}", expected)
+            run_args := ["run", name, "--"]
+            &run_args.extend(args.iter().copied())
+            default :: run_jet(run_args, scratch.path, scratch.join("cache/{case}-default-{name}"))
+            assert_cli_rejection(default, "default `jet run` `{name}` {case}", expected)
+            interpreted_args := ["run", "--interpret", name, "--"]
+            &interpreted_args.extend(args.iter().copied())
+            interpreted :: run_jet(interpreted_args, scratch.path, scratch.join("cache/{case}-interpreter-{name}"))
+            assert_cli_rejection(interpreted, "interpreter `{name}` {case}", expected)
+        }
+    }
+    (_, positionals) :: binaries.iter().find(|(name, _)| -> name == "positionals.jet").expect("positionals fixture binary")
+    args :: ["add", "bare-loses", "--text", "named-wins"]
+    aot :: Command.new(positionals).args(args).current_dir(scratch.path).output().expect("run AOT named-over-positional CLI")
+    default :: run_jet(["run", "positionals.jet", "--", "add", "bare-loses", "--text", "named-wins"], scratch.path, scratch.join("cache/named-default"))
+    interpreted :: run_jet(["run", "--interpret", "positionals.jet", "--", "add", "bare-loses", "--text", "named-wins"], scratch.path, scratch.join("cache/named-interpreter"))
+    loop (tier, output) in [("AOT", &aot), ("default `jet run`", &default), ("interpreter", &interpreted)] {
+        assert(output.status.success(), "{tier} named-over-positional CLI failed:\n{String.from_utf8_lossy(output.stderr)}")
+        stdout :: String.from_utf8_lossy(output.stdout)
+        assert(stdout.contains("named-wins"), "{tier} lost named value: {stdout}")
+        assert(!stdout.contains("bare-loses"), "{tier} kept bare value: {stdout}")
+    }
+    assert_eq(aot.stdout, default.stdout)
+    assert_eq(aot.stdout, interpreted.stdout)
+}
+// Rust: tests/comptime_cli_parity.rs:1200
+#Test("builder_cli_named_value_overrides_positional_on_all_native_tiers") {
+    scratch :: common.Scratch.new("builder_cli_named_precedence")
+    fs.write(scratch.join("builder_named.jet"), """
+use core.args as args
+use core.process as process
+
+fn run() {
+    spec :: args.spec()
+        .option("name", "display name", "NAME")
+        .positional("name", "display name")
+    parsed :: spec.parse_or_exit(process.argv())
+    print(parsed.option("name") ?? "none")
+}
+""").expect("write builder precedence fixture")
+    build :: run_jet(["build", "builder_named.jet"], scratch.path, scratch.join("cache/build"))
+    assert(build.status.success(), "AOT build failed:\n{String.from_utf8_lossy(build.stderr)}")
+    binary :: scratch.join(".jet/build/builder_named")
+    args :: ["bare-loses", "--name", "named-wins"]
+    aot :: Command.new(binary).args(args).current_dir(scratch.path).output().expect("run AOT builder precedence fixture")
+    default :: run_jet(["run", "builder_named.jet", "--", "bare-loses", "--name", "named-wins"], scratch.path, scratch.join("cache/named-default"))
+    interpreted :: run_jet(["run", "--interpret", "builder_named.jet", "--", "bare-loses", "--name", "named-wins"], scratch.path, scratch.join("cache/named-interpreter"))
+    loop (tier, output) in [("AOT", &aot), ("default `jet run`", &default), ("interpreter", &interpreted)] {
+        assert_eq(output.status.code(), Val(0), "{tier} builder precedence failed:\n{String.from_utf8_lossy(output.stderr)}")
+        assert_eq(String.from_utf8_lossy(output.stdout), "named-wins\n", "{tier} did not prefer the named value")
+    }
+    assert_eq(aot.stdout, default.stdout)
+    assert_eq(aot.stdout, interpreted.stdout)
+}
+// Rust: tests/comptime_cli_parity.rs:1283
+#Test("measured_test_cli_and_selected_claim_keep_aot_golden_contract") {
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    source :: root.join("Examples/features/tooling/test_target/run.jet")
+    golden :: fs.read(root.join("Examples/features/expected/tooling/test_target.out")).expect("read measured test target golden")
+    scratch :: common.Scratch.new("test_cli_parity")
+    fs.copy(source, scratch.join("main.jet")).expect("copy measured test target source")
+    fs.copy(root.join("Examples/features/tooling/test_target/package.jet"), scratch.join("package.jet")).expect("copy measured test target package")
+    fs.copy(root.join("Examples/features/tooling/test_target/test_perf.jet"), scratch.join("test_perf.jet")).expect("copy measured test target module")
+    build :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["build", "main.jet"]).current_dir(scratch.path).env("NO_COLOR", "1").output().expect("build measured test target")
+    assert(build.status.success(), "AOT measured test target build failed: {String.from_utf8_lossy(build.stderr)}")
+    aot :: Command.new(scratch.join(".jet/build/main")).current_dir(scratch.path).output().expect("run AOT measured test target")
+    assert(aot.status.success(), "AOT measured test target failed: {String.from_utf8_lossy(aot.stderr)}")
+    assert_eq(aot.stdout, golden, "AOT measured test target changed its named golden")
+    help :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["test", "--help"]).env("NO_COLOR", "1").output().expect("show test help")
+    assert(help.status.success(), "test help failed: {String.from_utf8_lossy(help.stderr)}")
+    help_text :: String.from_utf8_lossy(help.stdout)
+    assert(help_text.contains("--filter"))
+    assert(help_text.contains("--measure"))
+    measured :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["test", "main.jet", "--measure", "--filter=sum_to(1000)"]).current_dir(scratch.path).env("NO_COLOR", "1").output().expect("run selected measured claim")
+    assert(measured.status.success(), "selected measured claim failed: {String.from_utf8_lossy(measured.stderr)}")
+    selected :: String.from_utf8_lossy(measured.stdout)
+    assert(selected.contains("sum_to(1000)"), "selected measurement lost claim name: {selected}")
+    assert(selected.contains("ns"), "selected measurement lost timing: {selected}")
+    bench :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["test", "Examples/features/tooling/bench.jet", "--measure", "--json"]).current_dir(root).env("JET_STORE_DIR", scratch.join("bench-cache")).env("JET_RUN_CACHE_DIR", scratch.join("bench-run-cache")).env("NO_COLOR", "1").output().expect("measure keep sink benchmark")
+    assert(bench.status.success(), "keep sink benchmark failed: {String.from_utf8_lossy(bench.stderr)}")
+    bench_stdout :: String.from_utf8_lossy(bench.stdout)
+    // Rust: tests/comptime_cli_parity.rs:1380
+    mean_ns :: |name: String| -> f64 {
+        needle :: "\"name\":\"{name}\""
+        row :: bench_stdout.lines().find(|line| -> line.contains(needle)).unwrap_or_else(|| -> panic("missing measured benchmark `{name}`: {bench_stdout}"))
+        row.split_once("\"mean_ns\":").and_then(|(_, rest)| -> rest.split(|character| -> character == ',' || character == '}').next())
+            .and_then(|value| -> value.parse<f64>().ok()).unwrap_or_else(|| -> panic("missing mean for measured benchmark `{name}`: {row}"))
+    }
+    elided_ns :: mean_ns("elided baseline")
+    kept_ns :: mean_ns("keep loop")
+    // Same-run control avoids an absolute wall-clock threshold.
+    assert(kept_ns > elided_ns, "keep loop must remain slower than the elided control: keep={kept_ns:.3} ns/iter, elided={elided_ns:.3} ns/iter")
+}
+// Rust: tests/comptime_cli_parity.rs:1405
+#Test("command_override_examples_match_aot_default_run_and_interpreter") {
+    if !common.have_rustc() { return }
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    scratch :: common.Scratch.new("command_override_parity")
+    cases :: [("test_override", "test_override.jet"), ("bench_override", "bench_override.jet")]
+    loop (stem, file_name) in cases {
+        fs.copy(root.join("Examples/features/devloop").join(file_name), scratch.join(file_name)).unwrap_or_else(|error| -> panic("copy command override `{file_name}`: {error}"))
+        expected :: fs.read(root.join("Examples/features/expected/devloop").join("{stem}.out")).unwrap_or_else(|error| -> panic("read command override golden `{stem}`: {error}"))
+        release :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", "--release", file_name]).current_dir(scratch.path).env("NO_COLOR", "1").output().unwrap_or_else(|error| -> panic("run release command override `{stem}`: {error}"))
+        assert(release.status.success(), "release `{stem}` failed: {String.from_utf8_lossy(release.stderr)}")
+        assert_eq(release.stdout, expected, "release `{stem}` differs from golden")
+        default_run :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", file_name]).current_dir(scratch.path).env("NO_COLOR", "1").output().unwrap_or_else(|error| -> panic("run default command override `{stem}`: {error}"))
+        assert(default_run.status.success(), "default run `{stem}` failed: {String.from_utf8_lossy(default_run.stderr)}")
+        assert_eq(default_run.stdout, expected, "default run `{stem}` differs from golden")
+        interpreted :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["dev", file_name, "--interpret", "--watch=off"]).current_dir(scratch.path).env("NO_COLOR", "1").output().unwrap_or_else(|error| -> panic("run interpreted command override `{stem}`: {error}"))
+        assert(interpreted.status.success(), "interpreted `{stem}` failed: {String.from_utf8_lossy(interpreted.stderr)}")
+        assert_eq(interpreted.stdout, expected, "interpreted `{stem}` differs from golden")
+    }
+    override_run :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["test", "test_override.jet", "--serial"]).current_dir(scratch.path).env("NO_COLOR", "1").output().expect("run test command override")
+    assert(override_run.status.success(), "test override failed: {String.from_utf8_lossy(override_run.stderr)}")
+    assert(String.from_utf8_lossy(override_run.stderr).contains("jet test: using fn test override"))
+    loop command in ["test"] {
+        help :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args([command, "--help"]).env("NO_COLOR", "1").output().unwrap_or_else(|error| -> panic("show `{command}` help: {error}"))
+        assert(help.status.success(), "{command} help failed: {String.from_utf8_lossy(help.stderr)}")
+        assert(String.from_utf8_lossy(help.stdout).contains("--show-default"), "{command} help omitted --show-default")
+    }
+}
+// Rust: tests/comptime_cli_parity.rs:1511
+#Test("package_build_entry_discovery_matches_committed_golden_across_tiers") {
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    example :: root.join("Examples/features/tooling/build_entry_discovery")
+    entry :: example.join("run.jet")
+    expected :: fs.read(root.join("Examples/features/expected/tooling/build_entry_discovery.out")).expect("read build-entry discovery golden")
+    scratch :: common.Scratch.new("package_build_entry_discovery_parity")
+    release :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", "--release", entry.to_str().expect("entry path is utf8")]).current_dir(example).env("JET_RUN_CACHE_DIR", scratch.join("cache/release-run")).env("JET_STORE_DIR", scratch.join("cache/release-build")).env("NO_COLOR", "1").output().expect("run committed package entry through release jet run")
+    assert(release.status.success(), "release jet run failed:\n{String.from_utf8_lossy(release.stderr)}")
+    assert_eq(release.stdout, expected)
+    default :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", entry.to_str().expect("entry path is utf8")]).current_dir(example).env("JET_RUN_CACHE_DIR", scratch.join("cache/run")).env("JET_STORE_DIR", scratch.join("cache/default")).env("NO_COLOR", "1").output().expect("run committed package entry through default jet run")
+    assert(default.status.success(), "default jet run failed:\n{String.from_utf8_lossy(default.stderr)}")
+    assert_eq(default.stdout, expected)
+    dev :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["dev", entry.to_str().expect("entry path is utf8"), "--interpret", "--watch=off"]).current_dir(example).env("JET_RUN_CACHE_DIR", scratch.join("cache/dev-run")).env("JET_STORE_DIR", scratch.join("cache/dev-build")).env("NO_COLOR", "1").output().expect("run committed package entry through interpreted jet dev")
+    assert(dev.status.success(), "interpreted jet dev failed:\n{String.from_utf8_lossy(dev.stderr)}")
+    assert_eq(dev.stdout, expected)
+    assert_eq(release.status.code(), default.status.code())
+    assert_eq(release.status.code(), dev.status.code())
+}
+// Rust: tests/comptime_cli_parity.rs:1578
+#Test("build_stamp_release_rebuilds_have_identical_binary_bytes") {
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    scratch :: common.Scratch.new("build_stamp_reproducibility")
+    project :: scratch.join("project")
+    fs.create_dir_all(project).expect("create build stamp project")
+    copy_build_stamp_fixture(root, project)
+    lock_path :: project.join(".jet/lock")
+    lock_bytes :: fs.read(lock_path).expect("read build stamp lock fixture")
+    // Rust: tests/comptime_cli_parity.rs:1587
+    build_clean :: |cache: OSPath| -> {
+        output :: run_jet(["build", "--release", "--locked", "build_stamp.jet"], project, cache)
+        assert_eq(output.status.code(), Val(0), "clean release build failed:\n{String.from_utf8_lossy(output.stderr)}")
+        binary :: fs.read(project.join(".jet/build/build_stamp")).expect("clean release build must publish .jet/build/build_stamp")
+        assert_eq(fs.read(lock_path).expect("read lock after clean release build"), lock_bytes, "locked release build changed the checked-in lock bytes")
+        fs.remove_dir_all(project.join(".jet/build")).expect("remove first clean build output")
+        binary
+    }
+    first :: build_clean(scratch.join("cache/first"))
+    second :: build_clean(scratch.join("cache/second"))
+    assert_eq(first, second, "clean release rebuild binary bytes differ")
+}
+// Rust: tests/comptime_cli_parity.rs:1616
+#Test("build_stamp_example_matches_release_jit_and_interpreter_tiers") {
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    scratch :: common.Scratch.new("build_stamp_tier_parity")
+    copy_build_stamp_fixture(root, scratch.path)
+    expected :: fs.read(root.join("Examples/features/expected/comptime/build_stamp.out")).expect("read build stamp golden")
+    release :: run_jet(["run", "--release", "build_stamp.jet"], scratch.path, scratch.join("cache/release"))
+    default :: run_jet(["run", "build_stamp.jet"], scratch.path, scratch.join("cache/default"))
+    interpreter :: run_jet(["dev", "build_stamp.jet", "--interpret", "--watch=off"], scratch.path, scratch.join("cache/interpreter"))
+    loop (tier, output) in [("AOT release", &release), ("default JIT", &default), ("interpreter", &interpreter)] {
+        assert_eq(output.status.code(), Val(0), "{tier} build stamp run failed:\nstderr:\n{String.from_utf8_lossy(output.stderr)}")
+        assert_eq(output.stdout, expected, "{tier} build stamp stdout differs from the committed golden")
+    }
+    assert_eq(release.status.code(), default.status.code())
+    assert_eq(release.status.code(), interpreter.status.code())
+}

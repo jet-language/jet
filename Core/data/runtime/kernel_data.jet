@@ -1,0 +1,1812 @@
+// PORT-PENDING 0212 crates-jet-jit-src-data-slice-1: crates/jet-jit/src/Data.rs:1-1808
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! `core.data` host shims — same checked analytics rules as DataFlow.rs.
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS 
+//RS #[allow(unused_imports)]
+//RS use jet_foundation::Outcome::*;
+//RS 
+//RS // #1657 / I9: the one `core.data` statistics, bar-plot and bridge-status
+//RS // kernel, included from the exact Prelude source AOT embeds and comptime
+//RS // includes. Only the `jet_std` value types are declared here; every rule lives
+//RS // in the included file. A second copy of this math in the JIT host is an I9
+//RS // violation.
+//RS #[allow(dead_code)]
+//RS mod data_kernel {
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS 
+//RS     pub(crate) mod jet_std {
+//RS         #[allow(unused_imports)]
+//RS         pub use jet_foundation::Outcome::*;
+//RS 
+//RS         #[allow(dead_code)]
+//RS         #[derive(Clone, Debug, PartialEq, Eq)]
+//RS         pub(crate) enum DataErrorKind {
+//RS             Decode,
+//RS             Limit,
+//RS             IO,
+//RS             Empty,
+//RS             InvalidArgument,
+//RS             NonFinite,
+//RS             Overflow,
+//RS             State,
+//RS             Bridge,
+//RS         }
+//RS 
+//RS         /// `DataError.cause` stays optional; when present it uses the shared
+//RS         /// canonical encoding error carrier.
+//RS         pub(crate) use crate::Encoding::json_rt::EncodingError;
+//RS 
+//RS         #[derive(Clone, Debug)]
+//RS         pub(crate) struct DataError {
+//RS             pub(crate) kind: DataErrorKind,
+//RS             pub(crate) operation: String,
+//RS             pub(crate) row: JetOutcome<i64, JetAbsent>,
+//RS             pub(crate) column: JetOutcome<i64, JetAbsent>,
+//RS             pub(crate) index: JetOutcome<i64, JetAbsent>,
+//RS             pub(crate) reason: String,
+//RS             pub(crate) cause: JetOutcome<EncodingError, JetAbsent>,
+//RS         }
+//RS 
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub(crate) struct GroupValue<K, V> {
+//RS             pub(crate) key: K,
+//RS             pub(crate) value: V,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug)]
+//RS         pub(crate) struct DataSummary {
+//RS             pub(crate) count: i64,
+//RS             pub(crate) sum: f64,
+//RS             pub(crate) mean: f64,
+//RS             pub(crate) min: f64,
+//RS             pub(crate) max: f64,
+//RS             pub(crate) median: f64,
+//RS             pub(crate) variance: f64,
+//RS             pub(crate) stddev: f64,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug)]
+//RS         pub(crate) struct DataStatus {
+//RS             pub(crate) step: String,
+//RS             pub(crate) path: String,
+//RS             pub(crate) clone_value: String,
+//RS             pub(crate) ownership: String,
+//RS             pub(crate) trust: String,
+//RS             pub(crate) fallback: String,
+//RS             pub(crate) replacement: String,
+//RS         }
+//RS         pub(crate) use crate::Encoding::data_query_rt::{
+//RS             jet_table_plan_from_descriptors, JetTableCallable, JetTablePlan, JetTableStreamMode,
+//RS             JetTableTypeId,
+//RS         };
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq, Eq)]
+//RS         pub(crate) struct DataLimits {
+//RS             pub(crate) max_groups: i64,
+//RS             pub(crate) max_sort_rows: i64,
+//RS             pub(crate) max_join_rows: i64,
+//RS             pub(crate) max_output_rows: i64,
+//RS         }
+//RS         impl DataLimits {
+//RS             pub(crate) fn safe() -> Self {
+//RS                 Self {
+//RS                     max_groups: 100_000,
+//RS                     max_sort_rows: 1_000_000,
+//RS                     max_join_rows: 1_000_000,
+//RS                     max_output_rows: 1_000_000,
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS 
+//RS         /// D-DATA-PLOT1=A: shared options for the deterministic line renderers.
+//RS         /// `Default` by hand: an empty reference line is a clean absence, which
+//RS         /// the carrier spells rather than derives.
+//RS         #[derive(Clone, Debug)]
+//RS         pub(crate) struct DataLineOptions {
+//RS             pub(crate) title: String,
+//RS             pub(crate) x_label: String,
+//RS             pub(crate) y_label: String,
+//RS             pub(crate) markers: bool,
+//RS             pub(crate) reference: JetOutcome<f64, JetAbsent>,
+//RS             pub(crate) style: String,
+//RS             pub(crate) color: String,
+//RS             pub(crate) legend: String,
+//RS         }
+//RS         impl Default for DataLineOptions {
+//RS             fn default() -> Self {
+//RS                 Self {
+//RS                     title: String::new(),
+//RS                     x_label: String::new(),
+//RS                     y_label: String::new(),
+//RS                     markers: false,
+//RS                     reference: Err(JetAbsent),
+//RS                     style: String::new(),
+//RS                     color: String::new(),
+//RS                     legend: String::new(),
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs");
+//RS }
+//RS impl crate::JetShow for String {
+//RS     fn jet_show(&self) -> String {
+//RS         self.clone()
+//RS     }
+//RS }
+//RS 
+//RS mod data_plot_rt {
+//RS     pub(crate) use super::data_kernel::jet_std;
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs");
+//RS }
+//RS 
+//RS /// Erased row word passed to the checked universal column callback.
+//RS #[derive(Clone, Copy, Debug)]
+//RS pub(crate) struct DataPlotRow(i64);
+//RS 
+//RS #[derive(Clone)]
+//RS struct DataPlotColumnSlot {
+//RS     field: data_plot_rt::JetDataPlotField,
+//RS     callback: crate::runtime_host::JitCallableSlot,
+//RS }
+//RS 
+//RS /// Runtime-owned typed plot carrier. `plot` is always the canonical Prelude
+//RS /// plot; `columns` retains checked callback pairs for future transformations.
+//RS #[derive(Clone)]
+//RS pub(crate) struct DataPlotSlot {
+//RS     pub(crate) plot: data_plot_rt::JetDataPlot<DataPlotRow>,
+//RS     columns: Vec<DataPlotColumnSlot>,
+//RS }
+//RS 
+//RS fn data_error(operation: &str, reason: impl Into<String>) -> DataError {
+//RS     err(DataErrorKind::InvalidArgument, operation, reason)
+//RS }
+//RS 
+//RS fn data_decode_error(operation: &str, reason: impl Into<String>) -> DataError {
+//RS     err(DataErrorKind::Decode, operation, reason)
+//RS }
+//RS 
+//RS fn plan_index(handle: i64) -> Option<usize> {
+//RS     usize::try_from(handle.checked_sub(1)?).ok()
+//RS }
+//RS 
+//RS 
+//RS 
+//RS fn row_word(
+//RS     rt: &mut crate::JitRuntime,
+//RS     value: jet_rt::JetVal,
+//RS     operation: &str,
+//RS ) -> Result<i64, DataError> {
+//RS     match value {
+//RS         jet_rt::JetVal::Int(value) | jet_rt::JetVal::Word { value, .. } | jet_rt::JetVal::RecordRef(value) => Ok(value),
+//RS         jet_rt::JetVal::Float(value) => Ok(value.to_bits() as i64),
+//RS         jet_rt::JetVal::Bool(value) => Ok(i64::from(value)),
+//RS         jet_rt::JetVal::Char(value) => Ok(i64::from(u32::from(value))),
+//RS         jet_rt::JetVal::String(value) => Ok(rt.heap.alloc_string(value)),
+//RS         jet_rt::JetVal::StringView { owner, start, end } => {
+//RS             let text = rt
+//RS                 .heap
+//RS                 .get_string(owner)
+//RS                 .and_then(|text| text.get(start..end))
+//RS                 .ok_or_else(|| {
+//RS                     data_decode_error(operation, "table row contains an invalid string view")
+//RS                 })?
+//RS                 .to_string();
+//RS             Ok(rt.heap.alloc_string(text))
+//RS         }
+//RS         _ => Err(data_decode_error(
+//RS             operation,
+//RS             "table row has no checked scalar ABI",
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS fn store_plot(rt: &mut crate::JitRuntime, slot: DataPlotSlot) -> Result<i64, DataError> {
+//RS     rt.data_plots.push(slot);
+//RS     i64::try_from(rt.data_plots.len())
+//RS         .map_err(|_| data_error("data.plot", "too many JetDataPlot values"))
+//RS }
+//RS 
+//RS fn plot_slot(
+//RS     rt: &mut crate::JitRuntime,
+//RS     handle: i64,
+//RS     operation: &str,
+//RS ) -> Result<DataPlotSlot, DataError> {
+//RS     let Some(index) = plan_index(handle) else {
+//RS         return Err(data_error(operation, "invalid JetDataPlot handle"));
+//RS     };
+//RS     rt.data_plots
+//RS         .get(index)
+//RS         .cloned()
+//RS         .ok_or_else(|| data_error(operation, "unknown JetDataPlot handle"))
+//RS }
+//RS 
+//RS use data_kernel::jet_std::{DataError, DataErrorKind, DataLineOptions, DataStatus, GroupValue};
+//RS 
+//RS impl std::fmt::Display for DataError {
+//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS         let mut out = format!("{:?} {}", self.kind, self.operation);
+//RS         if let Ok(index) = self.index {
+//RS             out.push_str(&format!(", index {index}"));
+//RS         }
+//RS         out.push_str(&format!(": {}", self.reason));
+//RS         f.write_str(&out)
+//RS     }
+//RS }
+//RS 
+//RS fn err(kind: DataErrorKind, operation: &str, reason: impl Into<String>) -> DataError {
+//RS     data_kernel::jet_data_error(kind, operation, reason)
+//RS }
+//RS 
+//RS fn float_list(handle: i64) -> Vec<f64> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(handle).unwrap_or(0);
+//RS         (0..len)
+//RS             .filter_map(|i| rt.heap.list_get_float(handle, i))
+//RS             .collect()
+//RS     })
+//RS }
+//RS 
+//RS fn result_f64(r: Result<f64, DataError>) -> i64 {
+//RS     match r {
+//RS         Ok(v) => Concurrency::with_runtime_mut(|rt| {
+//RS             crate::runtime_host::alloc_jit_result(rt, true, v.to_bits())
+//RS         }),
+//RS         Err(e) => result_data_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn pack_data_error(rt: &mut crate::runtime_host::JitRuntime, e: DataError) -> i64 {
+//RS     let h = rt.heap.alloc_record(7);
+//RS     let kind = rt.heap.alloc_string(format!("{:?}", e.kind));
+//RS     let _ = rt.heap.record_set_string(h, 0, kind);
+//RS     let op = rt.heap.alloc_string(e.operation.clone());
+//RS     let _ = rt.heap.record_set_string(h, 1, op);
+//RS     let absent = crate::runtime_host::alloc_jit_result(rt, false, 0);
+//RS     let _ = rt.heap.record_set_int(h, 2, absent);
+//RS     let _ = rt.heap.record_set_int(h, 3, absent);
+//RS     let index = match e.index {
+//RS         Ok(value) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
+//RS         Err(_) => absent,
+//RS     };
+//RS     let _ = rt.heap.record_set_int(h, 4, index);
+//RS     let reason = rt.heap.alloc_string(e.reason.clone());
+//RS     let _ = rt.heap.record_set_string(h, 5, reason);
+//RS     let _ = rt.heap.record_set_int(h, 6, absent);
+//RS     crate::runtime_host::alloc_jit_result(rt, false, h as u64)
+//RS }
+//RS 
+//RS fn result_data_err(e: DataError) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| pack_data_error(rt, e))
+//RS }
+//RS 
+//RS fn jet_jit_data_error_show(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let kind = rt
+//RS             .heap
+//RS             .record_get_string(handle, 0)
+//RS             .and_then(|s| rt.heap.clone_string(s))
+//RS             .unwrap_or_default();
+//RS         let op = rt
+//RS             .heap
+//RS             .record_get_string(handle, 1)
+//RS             .and_then(|s| rt.heap.clone_string(s))
+//RS             .unwrap_or_default();
+//RS         let reason = rt
+//RS             .heap
+//RS             .record_get_string(handle, 5)
+//RS             .and_then(|s| rt.heap.clone_string(s))
+//RS             .unwrap_or_default();
+//RS         let index = rt
+//RS             .heap
+//RS             .record_get_int(handle, 4)
+//RS             .and_then(|raw| crate::runtime_host::jit_result_parts(rt, raw))
+//RS             .and_then(|(ok, bits)| ok.then_some(bits as i64));
+//RS         let text = if let Some(index) = index {
+//RS             format!("{kind} {op}, index {index}: {reason}")
+//RS         } else {
+//RS             format!("{kind} {op}: {reason}")
+//RS         };
+//RS         rt.heap.alloc_string(text)
+//RS     })
+//RS }
+//RS 
+//RS fn result_unit(r: Result<(), DataError>) -> i64 {
+//RS     match r {
+//RS         Ok(()) => {
+//RS             Concurrency::with_runtime_mut(|rt| crate::runtime_host::alloc_jit_result(rt, true, 0))
+//RS         }
+//RS         Err(e) => result_data_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn pack_status(rows: Vec<DataStatus>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let mut handles = Vec::new();
+//RS         for row in rows {
+//RS             let h = rt.heap.alloc_record(7);
+//RS             let fields = [
+//RS                 row.step,
+//RS                 row.path,
+//RS                 row.clone_value,
+//RS                 row.ownership,
+//RS                 row.trust,
+//RS                 row.fallback,
+//RS                 row.replacement,
+//RS             ];
+//RS             for (i, s) in fields.into_iter().enumerate() {
+//RS                 let sid = rt.heap.alloc_string(s);
+//RS                 let _ = rt.heap.record_set_string(h, i as i64, sid);
+//RS             }
+//RS             handles.push(h);
+//RS         }
+//RS         rt.heap.alloc_int_list(handles)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_status() -> i64 {
+//RS     pack_status(data_kernel::jet_data_status())
+//RS }
+//RS 
+//RS fn jet_jit_data_require_bridge(provider: i64) -> i64 {
+//RS     let name =
+//RS         Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(provider).unwrap_or_default());
+//RS     result_unit(data_kernel::jet_data_require_bridge(&name))
+//RS }
+//RS 
+//RS fn jet_jit_data_stat(values: i64, op: i64) -> i64 {
+//RS     let vals = float_list(values);
+//RS     let r = match op {
+//RS         0 => data_kernel::jet_data_mean_checked(&vals),
+//RS         1 => data_kernel::jet_data_sum_checked(&vals),
+//RS         2 => data_kernel::jet_data_min_checked(&vals),
+//RS         3 => data_kernel::jet_data_max_checked(&vals),
+//RS         4 => data_kernel::jet_data_median_checked(&vals),
+//RS         5 => data_kernel::jet_data_variance_checked(&vals),
+//RS         _ => data_kernel::jet_data_stddev_checked(&vals),
+//RS     };
+//RS     result_f64(r)
+//RS }
+//RS 
+//RS fn jet_jit_data_mean(values: i64) -> i64 {
+//RS     jet_jit_data_stat(values, 0)
+//RS }
+//RS 
+//RS fn jet_jit_data_variance(values: i64) -> i64 {
+//RS     jet_jit_data_stat(values, 5)
+//RS }
+//RS 
+//RS fn jet_jit_data_sum(values: i64) -> i64 {
+//RS     jet_jit_data_stat(values, 1)
+//RS }
+//RS 
+//RS fn jet_jit_data_quantile(values: i64, q_bits: i64) -> i64 {
+//RS     let vals = float_list(values);
+//RS     let q = f64::from_bits(q_bits as u64);
+//RS     result_f64(data_kernel::jet_data_quantile_checked(&vals, q))
+//RS }
+//RS 
+//RS fn jet_jit_data_describe(values: i64) -> i64 {
+//RS     let vals = float_list(values);
+//RS     Concurrency::with_runtime_mut(|rt| match data_kernel::jet_data_describe_checked(&vals) {
+//RS         Ok(s) => {
+//RS             let h = rt.heap.alloc_record(8);
+//RS             let _ = rt.heap.record_set_int(h, 0, s.count);
+//RS             let _ = rt.heap.record_set_float(h, 1, s.sum);
+//RS             let _ = rt.heap.record_set_float(h, 2, s.mean);
+//RS             let _ = rt.heap.record_set_float(h, 3, s.min);
+//RS             let _ = rt.heap.record_set_float(h, 4, s.max);
+//RS             let _ = rt.heap.record_set_float(h, 5, s.median);
+//RS             let _ = rt.heap.record_set_float(h, 6, s.variance);
+//RS             let _ = rt.heap.record_set_float(h, 7, s.stddev);
+//RS             crate::runtime_host::alloc_jit_result(rt, true, h as u64)
+//RS         }
+//RS         Err(e) => {
+//RS             let sid = rt.heap.alloc_string(e.to_string());
+//RS             crate::runtime_host::alloc_jit_result(rt, false, sid as u64)
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn load_count_groups(groups: i64) -> Vec<GroupValue<String, i64>> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(groups).unwrap_or(0);
+//RS         let mut out = Vec::new();
+//RS         for i in 0..len {
+//RS             let h = rt.heap.list_get_int(groups, i).unwrap_or(0);
+//RS             let key = rt
+//RS                 .heap
+//RS                 .record_get_string(h, 0)
+//RS                 .and_then(|sid| rt.heap.clone_string(sid))
+//RS                 .unwrap_or_default();
+//RS             out.push(GroupValue {
+//RS                 key,
+//RS                 value: rt.heap.record_get_int(h, 1).unwrap_or(0),
+//RS             });
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS fn load_value_groups(groups: i64) -> Vec<GroupValue<String, f64>> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(groups).unwrap_or(0);
+//RS         let mut out = Vec::new();
+//RS         for i in 0..len {
+//RS             let h = rt.heap.list_get_int(groups, i).unwrap_or(0);
+//RS             let key = rt
+//RS                 .heap
+//RS                 .record_get_string(h, 0)
+//RS                 .and_then(|sid| rt.heap.clone_string(sid))
+//RS                 .unwrap_or_default();
+//RS             out.push(GroupValue {
+//RS                 key,
+//RS                 value: rt.heap.record_get_float(h, 1).unwrap_or(0.0),
+//RS             });
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_bar_text(groups: i64) -> i64 {
+//RS     let groups = load_count_groups(groups);
+//RS     Concurrency::with_runtime_mut(|rt| match data_kernel::jet_data_bar_text_checked(&groups) {
+//RS         Ok(s) => {
+//RS             let sid = rt.heap.alloc_string(s);
+//RS             crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
+//RS         }
+//RS         Err(e) => {
+//RS             let sid = rt.heap.alloc_string(e.to_string());
+//RS             crate::runtime_host::alloc_jit_result(rt, false, sid as u64)
+//RS         }
+//RS     })
+//RS }
+//RS fn jet_jit_data_bar_svg(groups: i64) -> i64 {
+//RS     let groups = load_count_groups(groups);
+//RS     Concurrency::with_runtime_mut(|rt| match data_kernel::jet_data_bar_svg_checked(&groups) {
+//RS         Ok(s) => {
+//RS             let sid = rt.heap.alloc_string(s);
+//RS             crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
+//RS         }
+//RS         Err(e) => {
+//RS             let sid = rt.heap.alloc_string(e.to_string());
+//RS             crate::runtime_host::alloc_jit_result(rt, false, sid as u64)
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn load_line_options(options: i64) -> DataLineOptions {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let title = rt
+//RS             .heap
+//RS             .record_get_string(options, 0)
+//RS             .and_then(|sid| rt.heap.clone_string(sid))
+//RS             .unwrap_or_default();
+//RS         let x_label = rt
+//RS             .heap
+//RS             .record_get_string(options, 1)
+//RS             .and_then(|sid| rt.heap.clone_string(sid))
+//RS             .unwrap_or_default();
+//RS         let y_label = rt
+//RS             .heap
+//RS             .record_get_string(options, 2)
+//RS             .and_then(|sid| rt.heap.clone_string(sid))
+//RS             .unwrap_or_default();
+//RS         let style = rt
+//RS             .heap
+//RS             .record_get_string(options, 5)
+//RS             .and_then(|sid| rt.heap.clone_string(sid))
+//RS             .unwrap_or_default();
+//RS         let color = rt
+//RS             .heap
+//RS             .record_get_string(options, 6)
+//RS             .and_then(|sid| rt.heap.clone_string(sid))
+//RS             .unwrap_or_default();
+//RS         let legend = rt
+//RS             .heap
+//RS             .record_get_string(options, 7)
+//RS             .and_then(|sid| rt.heap.clone_string(sid))
+//RS             .unwrap_or_default();
+//RS         let reference = jet_outcome_of(rt.heap.record_get_int(options, 4).and_then(|raw| {
+//RS             if raw == 0 {
+//RS                 return None;
+//RS             }
+//RS             if let Some((ok, bits)) = crate::runtime_host::jit_result_parts(rt, raw) {
+//RS                 return ok.then(|| f64::from_bits(bits));
+//RS             }
+//RS             Some(f64::from_bits(raw.wrapping_sub(1) as u64))
+//RS         }));
+//RS         let markers = rt.heap.record_get_bool(options, 3).unwrap_or(false);
+//RS         DataLineOptions {
+//RS             title,
+//RS             x_label,
+//RS             y_label,
+//RS             markers,
+//RS             reference,
+//RS             style,
+//RS             color,
+//RS             legend,
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn result_data_plot_err(error: data_plot_rt::DataPlotError) -> i64 {
+//RS     let kind = match error.kind {
+//RS         "NonFinite" => DataErrorKind::NonFinite,
+//RS         _ => DataErrorKind::InvalidArgument,
+//RS     };
+//RS     result_data_err(err_at(kind, error.operation, error.index, error.reason))
+//RS }
+//RS 
+//RS fn jet_jit_data_line_text(groups: i64, options: i64) -> i64 {
+//RS     let groups = load_value_groups(groups);
+//RS     let options = load_line_options(options);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         match data_plot_rt::jet_data_line_text_plot_checked(&groups, &options) {
+//RS             Ok(s) => {
+//RS                 let sid = rt.heap.alloc_string(s);
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
+//RS             }
+//RS             Err(e) => result_data_plot_err(e),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_line_svg(groups: i64, options: i64) -> i64 {
+//RS     let groups = load_value_groups(groups);
+//RS     let options = load_line_options(options);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         match data_plot_rt::jet_data_line_svg_plot_checked(&groups, &options) {
+//RS             Ok(s) => {
+//RS                 let sid = rt.heap.alloc_string(s);
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
+//RS             }
+//RS             Err(e) => result_data_plot_err(e),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS fn data_kernel_limits() -> data_kernel::JetDataKernelLimits {
+//RS     let limits = data_kernel::jet_std::DataLimits::safe();
+//RS     data_kernel::jet_data_kernel_limits(
+//RS         limits.max_groups,
+//RS         limits.max_sort_rows,
+//RS         limits.max_join_rows,
+//RS         limits.max_output_rows,
+//RS     )
+//RS }
+//RS /// Build the resident carrier for the checked `DataLimits.safe()` Prelude call.
+//RS fn jet_jit_data_limits_safe() -> i64 {
+//RS     let encoding = crate::enc_stream::jet_jit_encoding_limits_safe();
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let handle = rt.heap.alloc_record(5);
+//RS         let fields = [encoding, 100_000, 1_000_000, 1_000_000, 1_000_000];
+//RS         for (index, value) in fields.into_iter().enumerate() {
+//RS             let _ = rt.heap.record_set_int(handle, index as i64, value);
+//RS         }
+//RS         handle
+//RS     })
+//RS }
+//RS 
+//RS fn data_row_words(rows: i64, operation: &str) -> Result<Vec<i64>, DataError> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         Some(
+//RS             rt.heap
+//RS                 .clone_list_values(rows)
+//RS                 .ok_or_else(|| data_decode_error(operation, "data source is not a list"))
+//RS                 .and_then(|values| {
+//RS                     values
+//RS                         .into_iter()
+//RS                         .map(|value| row_word(rt, value, operation))
+//RS                         .collect()
+//RS                 }),
+//RS         )
+//RS     })
+//RS     .ok_or_else(|| data_decode_error(operation, "resident runtime is unavailable"))?
+//RS }
+//RS 
+//RS fn validate_data_callback(callback: i64, operation: &str) -> Result<(), DataError> {
+//RS     let Some(slot) =
+//RS         Concurrency::with_runtime_mut(|rt| crate::runtime_host::jit_callable_parts(rt, callback))
+//RS     else {
+//RS         return Err(data_decode_error(
+//RS             operation,
+//RS             "data callback handle is unknown",
+//RS         ));
+//RS     };
+//RS     if callback >= 0
+//RS         || slot.raw_unary.is_none()
+//RS         || slot.raw_pair.is_some()
+//RS         || slot.raw_many.is_some()
+//RS     {
+//RS         return Err(data_decode_error(
+//RS             operation,
+//RS             "data callback is not a unary callable",
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn data_callback_key(callback: i64, row: i64, operation: &str) -> Result<String, DataError> {
+//RS     let value = query_callback(callback, row, operation)?;
+//RS     query_callback_string(value, operation)
+//RS }
+//RS 
+//RS fn data_callback_float(callback: i64, row: i64, operation: &str) -> Result<f64, DataError> {
+//RS     let value = query_callback(callback, row, operation)?;
+//RS     Ok(f64::from_bits(value as u64))
+//RS }
+//RS 
+//RS fn jet_jit_data_inner_join(
+//RS     left: i64,
+//RS     right: i64,
+//RS     left_key_callback: i64,
+//RS     right_key_callback: i64,
+//RS ) -> i64 {
+//RS     let operation = "inner_join";
+//RS     let left_rows = match data_row_words(left, operation) {
+//RS         Ok(rows) => rows,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     let right_rows = match data_row_words(right, operation) {
+//RS         Ok(rows) => rows,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     for callback in [left_key_callback, right_key_callback] {
+//RS         if let Err(error) = validate_data_callback(callback, operation) {
+//RS             return result_data_err(error);
+//RS         }
+//RS     }
+//RS     let left_keys = match left_rows
+//RS         .iter()
+//RS         .copied()
+//RS         .map(|row| data_callback_key(left_key_callback, row, operation))
+//RS         .collect::<Result<Vec<_>, _>>()
+//RS     {
+//RS         Ok(keys) => keys,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     let right_keys = match right_rows
+//RS         .iter()
+//RS         .copied()
+//RS         .map(|row| data_callback_key(right_key_callback, row, operation))
+//RS         .collect::<Result<Vec<_>, _>>()
+//RS     {
+//RS         Ok(keys) => keys,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     let indices = match data_kernel::jet_data_join_indices(
+//RS         &left_keys,
+//RS         &right_keys,
+//RS         false,
+//RS         &data_kernel_limits(),
+//RS     ) {
+//RS         Ok(indices) => indices,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     let rows = indices
+//RS         .into_iter()
+//RS         .map(|index| {
+//RS             let right_index = index.right.ok_or_else(|| {
+//RS                 data_decode_error(
+//RS                     operation,
+//RS                     "inner join kernel returned an absent right row",
+//RS                 )
+//RS             })?;
+//RS             Ok((left_rows[index.left], right_rows[right_index]))
+//RS         })
+//RS         .collect::<Result<Vec<_>, DataError>>();
+//RS     let rows = match rows {
+//RS         Ok(rows) => rows,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let mut out = Vec::with_capacity(rows.len());
+//RS         for (left_row, right_row) in rows {
+//RS             let h = rt.heap.alloc_record(2);
+//RS             let _ = rt.heap.record_set_int(h, 0, left_row);
+//RS             let _ = rt.heap.record_set_int(h, 1, right_row);
+//RS             out.push(h);
+//RS         }
+//RS         let list = rt.heap.alloc_int_list(out);
+//RS         crate::runtime_host::alloc_jit_result(rt, true, list as u64)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_left_join(
+//RS     left: i64,
+//RS     right: i64,
+//RS     left_key_callback: i64,
+//RS     right_key_callback: i64,
+//RS ) -> i64 {
+//RS     let operation = "left_join";
+//RS     let left_rows = match data_row_words(left, operation) {
+//RS         Ok(rows) => rows,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     let right_rows = match data_row_words(right, operation) {
+//RS         Ok(rows) => rows,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     for callback in [left_key_callback, right_key_callback] {
+//RS         if let Err(error) = validate_data_callback(callback, operation) {
+//RS             return result_data_err(error);
+//RS         }
+//RS     }
+//RS     let left_keys = match left_rows
+//RS         .iter()
+//RS         .copied()
+//RS         .map(|row| data_callback_key(left_key_callback, row, operation))
+//RS         .collect::<Result<Vec<_>, _>>()
+//RS     {
+//RS         Ok(keys) => keys,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     let right_keys = match right_rows
+//RS         .iter()
+//RS         .copied()
+//RS         .map(|row| data_callback_key(right_key_callback, row, operation))
+//RS         .collect::<Result<Vec<_>, _>>()
+//RS     {
+//RS         Ok(keys) => keys,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     let indices = match data_kernel::jet_data_join_indices(
+//RS         &left_keys,
+//RS         &right_keys,
+//RS         true,
+//RS         &data_kernel_limits(),
+//RS     ) {
+//RS         Ok(indices) => indices,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     let rows = indices
+//RS         .into_iter()
+//RS         .map(|index| Ok((left_rows[index.left], index.right.map(|right_index| right_rows[right_index]))))
+//RS         .collect::<Result<Vec<_>, DataError>>();
+//RS     let rows = match rows {
+//RS         Ok(rows) => rows,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let mut out = Vec::with_capacity(rows.len());
+//RS         for (left_row, right_row) in rows {
+//RS             let h = rt.heap.alloc_record(2);
+//RS             let _ = rt.heap.record_set_int(h, 0, left_row);
+//RS             let right = right_row
+//RS                 .map(|value| crate::runtime_host::alloc_jit_result(rt, true, value as u64))
+//RS                 .unwrap_or_else(|| crate::runtime_host::alloc_jit_result(rt, false, 0));
+//RS             let _ = rt.heap.record_set_int(h, 1, right);
+//RS             out.push(h);
+//RS         }
+//RS         let list = rt.heap.alloc_int_list(out);
+//RS         crate::runtime_host::alloc_jit_result(rt, true, list as u64)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_pivot_sum(
+//RS     rows: i64,
+//RS     row_key_callback: i64,
+//RS     col_key_callback: i64,
+//RS     value_callback: i64,
+//RS ) -> i64 {
+//RS     let operation = "pivot_sum";
+//RS     let rows = match data_row_words(rows, operation) {
+//RS         Ok(rows) => rows,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     for callback in [row_key_callback, col_key_callback, value_callback] {
+//RS         if let Err(error) = validate_data_callback(callback, operation) {
+//RS             return result_data_err(error);
+//RS         }
+//RS     }
+//RS     let mut values = Vec::with_capacity(rows.len());
+//RS     for row in rows.iter().copied() {
+//RS         let row_key = match data_callback_key(row_key_callback, row, operation) {
+//RS             Ok(key) => key,
+//RS             Err(error) => return result_data_err(error),
+//RS         };
+//RS         let column_key = match data_callback_key(col_key_callback, row, operation) {
+//RS             Ok(key) => key,
+//RS             Err(error) => return result_data_err(error),
+//RS         };
+//RS         let value = match data_callback_float(value_callback, row, operation) {
+//RS             Ok(value) => value,
+//RS             Err(error) => return result_data_err(error),
+//RS         };
+//RS         values.push((row_key, column_key, value));
+//RS     }
+//RS     let cells = match data_kernel::jet_data_pivot_sum_values(&values, &data_kernel_limits()) {
+//RS         Ok(cells) => cells,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let mut out = Vec::with_capacity(cells.len());
+//RS         for cell in cells {
+//RS             let h = rt.heap.alloc_record(5);
+//RS             let row_key = rt.heap.alloc_string(cell.row_key);
+//RS             let column_key = rt.heap.alloc_string(cell.column_key);
+//RS             let _ = rt.heap.record_set_string(h, 0, row_key);
+//RS             let _ = rt.heap.record_set_string(h, 1, column_key);
+//RS             let _ = rt.heap.record_set_int(h, 2, cell.count);
+//RS             let _ = rt.heap.record_set_float(h, 3, cell.sum);
+//RS             let _ = rt.heap.record_set_float(h, 4, cell.mean);
+//RS             out.push(h);
+//RS         }
+//RS         let list = rt.heap.alloc_int_list(out);
+//RS         crate::runtime_host::alloc_jit_result(rt, true, list as u64)
+//RS     })
+//RS }
+//RS fn jet_jit_data_rolling_mean(values: i64, width: i64) -> i64 {
+//RS     let vals = float_list(values);
+//RS     let out = match data_kernel::jet_data_rolling_mean_checked(&vals, width) {
+//RS         Ok(out) => out,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for v in out {
+//RS             let _ = rt.heap.list_push_float(list, v);
+//RS         }
+//RS         crate::runtime_host::alloc_jit_result(rt, true, list as u64)
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS /// Resident owner for a typed `DataLoader<T>`.  The heap carrier is only the
+//RS /// checked public projection; lifecycle state and the row type remain here so
+//RS /// mutable calls cannot manufacture a second cache or lifetime registry.
+//RS #[derive(Clone)]
+//RS pub(crate) struct DataLoaderSlot {
+//RS     pub(crate) state: jet_foundation::PreludeDataFlow::LoaderState,
+//RS     pub(crate) type_key: String,
+//RS }
+//RS 
+//RS type LoaderTree = crate::Encoding::json_rt::DataTree;
+//RS type LoaderFormat = crate::Encoding::data_query_rt::jet_std::DataFormat;
+//RS 
+//RS fn loader_error(error: jet_foundation::PreludeDataFlow::KernelError) -> DataError {
+//RS     let kind = match error.kind {
+//RS         jet_foundation::PreludeDataFlow::ErrorKind::Limit => DataErrorKind::Limit,
+//RS         jet_foundation::PreludeDataFlow::ErrorKind::State => DataErrorKind::State,
+//RS         jet_foundation::PreludeDataFlow::ErrorKind::Bridge => DataErrorKind::Bridge,
+//RS         jet_foundation::PreludeDataFlow::ErrorKind::InvalidArgument => {
+//RS             DataErrorKind::InvalidArgument
+//RS         }
+//RS     };
+//RS     err(kind, &error.operation, error.reason)
+//RS }
+//RS 
+//RS fn loader_string(rt: &crate::JitRuntime, handle: i64, operation: &str) -> Result<String, DataError> {
+//RS     rt.heap
+//RS         .clone_string(handle)
+//RS         .ok_or_else(|| data_decode_error(operation, "expected a String handle"))
+//RS }
+//RS 
+//RS fn loader_string_list(
+//RS     rt: &mut crate::JitRuntime,
+//RS     handle: i64,
+//RS     operation: &str,
+//RS ) -> Result<Vec<String>, DataError> {
+//RS     let Some(length) = rt.heap.list_len(handle) else {
+//RS         return Err(data_decode_error(operation, "expected a String list"));
+//RS     };
+//RS     (0..length)
+//RS         .map(|index| {
+//RS             rt.heap
+//RS                 .list_get_string(handle, index)
+//RS                 .ok_or_else(|| data_decode_error(operation, "String list contains an invalid item"))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn loader_type_key(
+//RS     rt: &crate::JitRuntime,
+//RS     handle: i64,
+//RS     operation: &str,
+//RS ) -> Result<String, DataError> {
+//RS     loader_string(rt, handle, operation)
+//RS }
+//RS 
+//RS fn loader_descriptor(
+//RS     rt: &crate::JitRuntime,
+//RS     key: &str,
+//RS ) -> Option<crate::runtime_host::RuntimeTypeDescriptor> {
+//RS     key.strip_prefix("id:")
+//RS         .and_then(|value| value.parse::<u64>().ok())
+//RS         .and_then(|id| rt.runtime_type_descriptor(id).cloned())
+//RS         .or_else(|| rt.runtime_type_descriptor_by_name(key).cloned())
+//RS }
+//RS 
+//RS fn loader_limits(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<jet_foundation::PreludeDataFlow::Limits, DataError> {
+//RS     let encoding = rt
+//RS         .heap
+//RS         .record_get_record(record, 0)
+//RS         .or_else(|| rt.heap.record_get_int(record, 0))
+//RS         .ok_or_else(|| data_decode_error(operation, "DataLimits has no EncodingLimits"))?;
+//RS     let get = |index| {
+//RS         rt.heap
+//RS             .record_get_int(encoding, index)
+//RS             .ok_or_else(|| data_decode_error(operation, "EncodingLimits has an invalid field"))
+//RS     };
+//RS     let max_total_handle = get(3)?;
+//RS     let max_total = crate::runtime_host::jit_result(rt, max_total_handle)
+//RS         .ok_or_else(|| data_decode_error(operation, "EncodingLimits max_total_bytes is invalid"))?;
+//RS     let max_total_bytes = max_total.ok.then_some(max_total.bits as i64);
+//RS     let limits = jet_foundation::PreludeDataFlow::Limits {
+//RS         buffer_bytes: get(0)?,
+//RS         max_depth: get(1)?,
+//RS         max_item_bytes: get(2)?,
+//RS         max_total_bytes,
+//RS         max_expansion_depth: get(4)?,
+//RS         max_expansion_bytes: get(5)?,
+//RS         max_groups: rt
+//RS             .heap
+//RS             .record_get_int(record, 1)
+//RS             .ok_or_else(|| data_decode_error(operation, "DataLimits max_groups is invalid"))?,
+//RS         max_sort_rows: rt
+//RS             .heap
+//RS             .record_get_int(record, 2)
+//RS             .ok_or_else(|| data_decode_error(operation, "DataLimits max_sort_rows is invalid"))?,
+//RS         max_join_rows: rt
+//RS             .heap
+//RS             .record_get_int(record, 3)
+//RS             .ok_or_else(|| data_decode_error(operation, "DataLimits max_join_rows is invalid"))?,
+//RS         max_output_rows: rt
+//RS             .heap
+//RS             .record_get_int(record, 4)
+//RS             .ok_or_else(|| data_decode_error(operation, "DataLimits max_output_rows is invalid"))?,
+//RS     };
+//RS     jet_foundation::PreludeDataFlow::validate_limits(&limits).map_err(loader_error)?;
+//RS     Ok(limits)
+//RS }
+//RS 
+//RS fn loader_kind_disc(kind: jet_foundation::PreludeDataFlow::LoaderKind) -> i64 {
+//RS     match kind {
+//RS         jet_foundation::PreludeDataFlow::LoaderKind::File => 0,
+//RS         jet_foundation::PreludeDataFlow::LoaderKind::URL => 1,
+//RS         jet_foundation::PreludeDataFlow::LoaderKind::Database => 2,
+//RS         jet_foundation::PreludeDataFlow::LoaderKind::Value => 3,
+//RS     }
+//RS }
+//RS 
+//RS fn loader_format_disc(format: &str) -> i64 {
+//RS     match format {
+//RS         "csv" => 0,
+//RS         "json" => 1,
+//RS         "jsonl" => 2,
+//RS         "parquet" => 3,
+//RS         "arrow" => 4,
+//RS         _ => 0,
+//RS     }
+//RS }
+//RS 
+//RS fn loader_freshness_disc(
+//RS     freshness: jet_foundation::PreludeDataFlow::Freshness,
+//RS ) -> i64 {
+//RS     match freshness {
+//RS         jet_foundation::PreludeDataFlow::Freshness::Pending => 0,
+//RS         jet_foundation::PreludeDataFlow::Freshness::Fresh => 1,
+//RS         jet_foundation::PreludeDataFlow::Freshness::Stale => 2,
+//RS         jet_foundation::PreludeDataFlow::Freshness::Error => 3,
+//RS         jet_foundation::PreludeDataFlow::Freshness::Offline => 4,
+//RS         jet_foundation::PreludeDataFlow::Freshness::Cancelled => 5,
+//RS     }
+//RS }
+//RS 
+//RS fn loader_invalidation_disc(
+//RS     cause: jet_foundation::PreludeDataFlow::InvalidationCause,
+//RS ) -> i64 {
+//RS     match cause {
+//RS         jet_foundation::PreludeDataFlow::InvalidationCause::NoCause => 0,
+//RS         jet_foundation::PreludeDataFlow::InvalidationCause::Loader => 1,
+//RS         jet_foundation::PreludeDataFlow::InvalidationCause::Input => 2,
+//RS         jet_foundation::PreludeDataFlow::InvalidationCause::ArchiveMember => 3,
+//RS         jet_foundation::PreludeDataFlow::InvalidationCause::Parameters => 4,
+//RS         jet_foundation::PreludeDataFlow::InvalidationCause::Credential => 5,
+//RS         jet_foundation::PreludeDataFlow::InvalidationCause::Capability => 6,
+//RS         jet_foundation::PreludeDataFlow::InvalidationCause::Manual => 7,
+//RS     }
+//RS }
+//RS 
+//RS fn loader_enum(rt: &mut crate::JitRuntime, discriminant: i64) -> i64 {
+//RS     let value = rt.heap.alloc_record(1);
+//RS     let _ = rt.heap.record_set_int(value, 0, discriminant);
+//RS     value
+//RS }
+//RS 
+//RS fn loader_source_carrier(
+//RS     rt: &mut crate::JitRuntime,
+//RS     source: &jet_foundation::PreludeDataFlow::SourceIdentity,
+//RS ) -> i64 {
+//RS     let value = rt.heap.alloc_record(4);
+//RS     let kind = loader_enum(rt, loader_kind_disc(source.kind));
+//RS     let _ = rt.heap.record_set_record(value, 0, kind);
+//RS     let locator = rt.heap.alloc_string(source.locator.clone());
+//RS     let _ = rt.heap.record_set_string(value, 1, locator);
+//RS     let member = rt.heap.alloc_string(source.member.clone());
+//RS     let _ = rt.heap.record_set_string(value, 2, member);
+//RS     let parameter_ids = source
+//RS         .parameters
+//RS         .iter()
+//RS         .map(|value| rt.heap.alloc_string(value.clone()))
+//RS         .collect();
+//RS     let parameters = rt.heap.alloc_int_list(parameter_ids);
+//RS     let _ = rt.heap.record_set_int(value, 3, parameters);
+//RS     value
+//RS }
+//RS 
+//RS fn loader_authority_carrier(
+//RS     rt: &mut crate::JitRuntime,
+//RS     authority: &jet_foundation::PreludeDataFlow::Authority,
+//RS ) -> i64 {
+//RS     let value = rt.heap.alloc_record(2);
+//RS     let scope = rt.heap.alloc_string(authority.scope.clone());
+//RS     let revision = rt.heap.alloc_string(authority.revision.clone());
+//RS     let _ = rt.heap.record_set_string(value, 0, scope);
+//RS     let _ = rt.heap.record_set_string(value, 1, revision);
+//RS     value
+//RS }
+//RS 
+//RS fn loader_limits_carrier(
+//RS     rt: &mut crate::JitRuntime,
+//RS     limits: &jet_foundation::PreludeDataFlow::Limits,
+//RS ) -> i64 {
+//RS     let encoding = rt.heap.alloc_record(6);
+//RS     let _ = rt.heap.record_set_int(encoding, 0, limits.buffer_bytes);
+//RS     let _ = rt.heap.record_set_int(encoding, 1, limits.max_depth);
+//RS     let _ = rt.heap.record_set_int(encoding, 2, limits.max_item_bytes);
+//RS     let max_total = match limits.max_total_bytes {
+//RS         Some(value) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
+//RS         None => crate::runtime_host::alloc_jit_result(rt, false, 0),
+//RS     };
+//RS     let _ = rt.heap.record_set_int(encoding, 3, max_total);
+//RS     let _ = rt.heap.record_set_int(encoding, 4, limits.max_expansion_depth);
+//RS     let _ = rt.heap.record_set_int(encoding, 5, limits.max_expansion_bytes);
+//RS     let value = rt.heap.alloc_record(5);
+//RS     let _ = rt.heap.record_set_record(value, 0, encoding);
+//RS     let _ = rt.heap.record_set_int(value, 1, limits.max_groups);
+//RS     let _ = rt.heap.record_set_int(value, 2, limits.max_sort_rows);
+//RS     let _ = rt.heap.record_set_int(value, 3, limits.max_join_rows);
+//RS     let _ = rt.heap.record_set_int(value, 4, limits.max_output_rows);
+//RS     value
+//RS }
+//RS 
+//RS fn loader_status_carrier(
+//RS     rt: &mut crate::JitRuntime,
+//RS     status: &jet_foundation::PreludeDataFlow::Status,
+//RS ) -> i64 {
+//RS     let value = rt.heap.alloc_record(8);
+//RS     let identity = rt.heap.alloc_string(status.identity.clone());
+//RS     let error = rt.heap.alloc_string(status.error.clone());
+//RS     let cleanup = rt.heap.alloc_string(status.cleanup.clone());
+//RS     let _ = rt.heap.record_set_string(value, 0, identity);
+//RS     let freshness = loader_enum(rt, loader_freshness_disc(status.freshness));
+//RS     let invalidation = loader_enum(rt, loader_invalidation_disc(status.invalidated_by));
+//RS     let _ = rt.heap.record_set_record(value, 1, freshness);
+//RS     let _ = rt.heap.record_set_record(value, 2, invalidation);
+//RS     let _ = rt.heap.record_set_string(value, 3, error);
+//RS     let _ = rt.heap.record_set_string(value, 4, cleanup);
+//RS     let _ = rt.heap.record_set_int(value, 5, status.buffered_bytes);
+//RS     let _ = rt.heap.record_set_bool(value, 6, status.backpressure);
+//RS     let _ = rt.heap.record_set_bool(value, 7, status.last_good);
+//RS     value
+//RS }
+//RS 
+//RS fn loader_bytes_carrier(rt: &mut crate::JitRuntime, bytes: Option<&[u8]>) -> i64 {
+//RS     let list = match bytes {
+//RS         Some(bytes) => rt
+//RS             .heap
+//RS             .alloc_int_list(bytes.iter().map(|value| i64::from(*value)).collect()),
+//RS         None => rt.heap.alloc_int_list(Vec::new()),
+//RS     };
+//RS     crate::runtime_host::alloc_jit_result(rt, bytes.is_some(), list as u64)
+//RS }
+//RS 
+//RS fn fill_loader_carrier(
+//RS     rt: &mut crate::JitRuntime,
+//RS     carrier: i64,
+//RS     slot: usize,
+//RS     state: &jet_foundation::PreludeDataFlow::LoaderState,
+//RS ) {
+//RS     let source = loader_source_carrier(rt, &state.source);
+//RS     let authority = loader_authority_carrier(rt, &state.authority);
+//RS     let limits = loader_limits_carrier(rt, &state.limits);
+//RS     let status = loader_status_carrier(rt, &state.status);
+//RS     let format = loader_enum(rt, loader_format_disc(&state.format));
+//RS     let payload = loader_bytes_carrier(rt, state.payload.as_deref());
+//RS     let last_good = loader_bytes_carrier(rt, state.last_good.as_deref());
+//RS     let raw_locator = rt.heap.alloc_string(state.raw_locator.clone());
+//RS     let _ = rt.heap.record_set_record(carrier, 0, source);
+//RS     let _ = rt.heap.record_set_record(carrier, 1, format);
+//RS     let _ = rt.heap.record_set_record(carrier, 2, authority);
+//RS     let _ = rt.heap.record_set_record(carrier, 3, limits);
+//RS     let _ = rt.heap.record_set_int(carrier, 4, payload);
+//RS     let _ = rt.heap.record_set_int(carrier, 5, last_good);
+//RS     let _ = rt.heap.record_set_bool(carrier, 6, state.cancelled);
+//RS     let _ = rt.heap.record_set_bool(carrier, 7, state.offline);
+//RS     let _ = rt.heap.record_set_record(carrier, 8, status);
+//RS     let _ = rt.heap.record_set_string(carrier, 9, raw_locator);
+//RS     let _ = rt.heap.record_set_int(carrier, 10, (slot.saturating_add(1)) as i64);
+//RS }
+//RS 
+//RS fn loader_slot_index(
+//RS     rt: &crate::JitRuntime,
+//RS     carrier: i64,
+//RS     operation: &str,
+//RS ) -> Result<usize, DataError> {
+//RS     let slot = rt
+//RS         .heap
+//RS         .record_get_int(carrier, 10)
+//RS         .and_then(|value| value.checked_sub(1))
+//RS         .and_then(|value| usize::try_from(value).ok())
+//RS         .ok_or_else(|| data_error(operation, "invalid DataLoader carrier"))?;
+//RS     if rt.data_loaders.get(slot).is_none() {
+//RS         return Err(data_error(operation, "unknown DataLoader owner"));
+//RS     }
+//RS     Ok(slot)
+//RS }
+//RS 
+//RS fn loader_place_handle(
+//RS     _rt: &crate::JitRuntime,
+//RS     place: i64,
+//RS     operation: &str,
+//RS ) -> Result<i64, DataError> {
+//RS     if place == 0 {
+//RS         return Err(data_error(operation, "null resident DataLoader handle"));
+//RS     }
+//RS     // Core data hosts receive the resident carrier itself.  Mutable
+//RS     // operations update runtime state keyed by that carrier; they never
+//RS     // dereference an untrusted integer as a native pointer.
+//RS     Ok(place)
+//RS }
+//RS 
+//RS fn loader_format(format: &str, operation: &str) -> Result<LoaderFormat, DataError> {
+//RS     LoaderFormat::from_str(format)
+//RS         .ok_or_else(|| err(DataErrorKind::Bridge, operation, format!("format `{format}` is provider-owned")))
+//RS }
+//RS 
+//RS fn loader_format_for_locator(locator: &str) -> Result<LoaderFormat, DataError> {
+//RS     let path = locator
+//RS         .split(|character| character == '?' || character == '#')
+//RS         .next()
+//RS         .unwrap_or(locator);
+//RS     let path = path.rsplit_once('/').map_or(path, |(_, value)| value);
+//RS     let extension = path
+//RS         .rsplit_once('.')
+//RS         .map(|(_, value)| value)
+//RS         .ok_or_else(|| err(DataErrorKind::Bridge, "data.load", "source has no core format"))?;
+//RS     loader_format(extension, "data.load")
+//RS }
+//RS 
+//RS fn loader_new(
+//RS     rt: &mut crate::JitRuntime,
+//RS     kind: jet_foundation::PreludeDataFlow::LoaderKind,
+//RS     locator: String,
+//RS     member: String,
+//RS     parameters: Vec<String>,
+//RS     format: LoaderFormat,
+//RS     limits: jet_foundation::PreludeDataFlow::Limits,
+//RS     authority: jet_foundation::PreludeDataFlow::Authority,
+//RS     type_key: String,
+//RS ) -> Result<i64, DataError> {
+//RS     let state = jet_foundation::PreludeDataFlow::new_loader(
+//RS         kind,
+//RS         locator,
+//RS         member,
+//RS         parameters,
+//RS         format.as_str().to_string(),
+//RS         limits,
+//RS         authority,
+//RS     )
+//RS     .map_err(loader_error)?;
+//RS     let slot = rt.data_loaders.len();
+//RS     rt.data_loaders.push(DataLoaderSlot {
+//RS         state,
+//RS         type_key,
+//RS     });
+//RS     let carrier = rt.heap.alloc_record(11);
+//RS     let state = rt.data_loaders[slot].state.clone();
+//RS     fill_loader_carrier(rt, carrier, slot, &state);
+//RS     Ok(carrier)
+//RS }
+//RS 
+//RS fn loader_payload(
+//RS     state: &jet_foundation::PreludeDataFlow::LoaderState,
+//RS ) -> Result<(Vec<u8>, bool), DataError> {
+//RS     if let Some(payload) =
+//RS         jet_foundation::PreludeDataFlow::payload(state).map_err(loader_error)?
+//RS     {
+//RS         return Ok(payload);
+//RS     }
+//RS     if state.source.kind == jet_foundation::PreludeDataFlow::LoaderKind::File
+//RS         && state.source.member.is_empty()
+//RS     {
+//RS         let bytes = std::fs::read(&state.raw_locator)
+//RS             .map_err(|error| err(DataErrorKind::IO, "data.loader", error.to_string()))?;
+//RS         jet_foundation::PreludeDataFlow::check_payload(&state.limits, bytes.len(), "data.loader")
+//RS             .map_err(loader_error)?;
+//RS         return Ok((bytes, false));
+//RS     }
+//RS     Err(err(
+//RS         DataErrorKind::Bridge,
+//RS         "data.loader",
+//RS         "provider payload is not bound",
+//RS     ))
+//RS }
+//RS 
+//RS fn loader_tree(
+//RS     payload: &[u8],
+//RS     format: LoaderFormat,
+//RS     limits: &jet_foundation::PreludeDataFlow::Limits,
+//RS ) -> Result<LoaderTree, DataError> {
+//RS     let text = || {
+//RS         std::str::from_utf8(payload)
+//RS             .map_err(|error| err(DataErrorKind::Decode, "data.loader", error.to_string()))
+//RS     };
+//RS     let tree = match format {
+//RS         LoaderFormat::JSON => crate::Encoding::json_rt::parse_datatree_typed_ordered(text()?)
+//RS             .map_err(|error| err(DataErrorKind::Decode, "data.loader.json", error.to_string()))?,
+//RS         LoaderFormat::JSONL => {
+//RS             let mut rows = Vec::new();
+//RS             for (line, value) in text()?.lines().enumerate() {
+//RS                 if value.trim().is_empty() {
+//RS                     continue;
+//RS                 }
+//RS                 let row = crate::Encoding::json_rt::parse_datatree_typed_ordered(value)
+//RS                     .map_err(|error| {
+//RS                         err(
+//RS                             DataErrorKind::Decode,
+//RS                             "data.loader.jsonl",
+//RS                             format!("line {}: {}", line + 1, error),
+//RS                         )
+//RS                     })?;
+//RS                 rows.push(row);
+//RS             }
+//RS             LoaderTree::Array(rows)
+//RS         }
+//RS         LoaderFormat::CSV => {
+//RS             let records = crate::Encoding::csv_parse(text()?, ",", false, false)
+//RS                 .map_err(|reason| err(DataErrorKind::Decode, "data.loader.csv", reason))?;
+//RS             let mut records = records.into_iter();
+//RS             let Some(header) = records.next() else {
+//RS                 return Ok(LoaderTree::Array(Vec::new()));
+//RS             };
+//RS             let mut header_names = std::collections::BTreeSet::new();
+//RS             for name in &header.fields {
+//RS                 jet_foundation::PreludeDataFlow::validate_public_text("CSV header", name, false)
+//RS                     .map_err(loader_error)?;
+//RS                 if !header_names.insert(name.clone()) {
+//RS                     return Err(err(
+//RS                         DataErrorKind::Decode,
+//RS                         "data.loader.csv",
+//RS                         format!("duplicate CSV header `{name}`"),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             let headers = header.fields;
+//RS             let mut rows = Vec::new();
+//RS             for record in records {
+//RS                 if rows.len() as i64 >= limits.max_output_rows {
+//RS                     return Err(err(
+//RS                         DataErrorKind::Limit,
+//RS                         "data.loader.csv",
+//RS                         format!("max_output_rows {} exceeded", limits.max_output_rows),
+//RS                     ));
+//RS                 }
+//RS                 if record.fields.len() > headers.len() {
+//RS                     return Err(err(
+//RS                         DataErrorKind::Decode,
+//RS                         "data.loader.csv",
+//RS                         format!(
+//RS                             "CSV row has {} fields; header has {}",
+//RS                             record.fields.len(),
+//RS                             headers.len()
+//RS                         ),
+//RS                     ));
+//RS                 }
+//RS                 rows.push(LoaderTree::Object(
+//RS                     headers
+//RS                         .iter()
+//RS                         .enumerate()
+//RS                         .map(|(index, name)| {
+//RS                             (
+//RS                                 name.clone(),
+//RS                                 record
+//RS                                     .fields
+//RS                                     .get(index)
+//RS                                     .cloned()
+//RS                                     .map(LoaderTree::Text)
+//RS                                     .unwrap_or(LoaderTree::Null),
+//RS                             )
+//RS                         })
+//RS                         .collect(),
+//RS                 ));
+//RS             }
+//RS             LoaderTree::Array(rows)
+//RS         }
+//RS         LoaderFormat::Parquet => {
+//RS             let max_total = limits
+//RS                 .max_total_bytes
+//RS                 .unwrap_or_else(|| limits.max_item_bytes.max(limits.max_expansion_bytes));
+//RS             let arrow_limits = jet_foundation::ArrowData::ArrowLimits {
+//RS                 max_rows: limits.max_output_rows,
+//RS                 max_columns: 1024,
+//RS                 max_children: limits.max_depth,
+//RS                 max_dictionary_values: limits.max_output_rows,
+//RS                 max_buffer_bytes: usize::try_from(limits.max_expansion_bytes).unwrap_or(usize::MAX),
+//RS                 max_total_bytes: usize::try_from(max_total).unwrap_or(usize::MAX),
+//RS             };
+//RS             jet_foundation::ArrowFileReader::read_tree(
+//RS                 jet_foundation::ArrowFileReader::FORMAT_PARQUET,
+//RS                 payload,
+//RS                 &arrow_limits,
+//RS             )
+//RS             .map_err(|error| err(DataErrorKind::Decode, "data.loader.parquet", error.to_string()))?
+//RS         }
+//RS         LoaderFormat::Arrow => {
+//RS             return Err(err(
+//RS                 DataErrorKind::Bridge,
+//RS                 "data.loader.arrow",
+//RS                 "Arrow IPC requires a distinct provider",
+//RS             ))
+//RS         }
+//RS     };
+//RS     if let LoaderTree::Array(rows) = &tree {
+//RS         if rows.len() as i64 > limits.max_output_rows {
+//RS             return Err(err(
+//RS                 DataErrorKind::Limit,
+//RS                 "data.loader",
+//RS                 format!("max_output_rows {} exceeded", limits.max_output_rows),
+//RS             ));
+//RS         }
+//RS     }
+//RS     Ok(tree)
+//RS }
+//RS fn loader_safe_limits() -> jet_foundation::PreludeDataFlow::Limits {
+//RS     jet_foundation::PreludeDataFlow::Limits {
+//RS         buffer_bytes: 65_536,
+//RS         max_depth: 256,
+//RS         max_item_bytes: 16_777_216,
+//RS         max_total_bytes: None,
+//RS         max_expansion_depth: 32,
+//RS         max_expansion_bytes: 8_388_608,
+//RS         max_groups: 100_000,
+//RS         max_sort_rows: 1_000_000,
+//RS         max_join_rows: 1_000_000,
+//RS         max_output_rows: 1_000_000,
+//RS     }
+//RS }
+//RS 
+//RS fn loader_rows(tree: LoaderTree) -> Vec<LoaderTree> {
+//RS     match tree {
+//RS         LoaderTree::Array(rows) => rows,
+//RS         value => vec![value],
+//RS     }
+//RS }
+//RS 
+//RS fn loader_decode_error(
+//RS     operation: &str,
+//RS     errors: Vec<crate::Encoding::json_rt::FieldError>,
+//RS     row: Option<i64>,
+//RS ) -> DataError {
+//RS     let mut error = err(
+//RS         DataErrorKind::Decode,
+//RS         operation,
+//RS         errors
+//RS             .into_iter()
+//RS             .map(|value| {
+//RS                 if value.path.is_empty() {
+//RS                     value.reason
+//RS                 } else {
+//RS                     format!("{}: {}", value.path, value.reason)
+//RS                 }
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join("; "),
+//RS     );
+//RS     error.row = row.ok_or(JetAbsent);
+//RS     error
+//RS }
+//RS 
+//RS fn loader_decode_rows(
+//RS     tree: LoaderTree,
+//RS     type_key: &str,
+//RS     operation: &str,
+//RS ) -> Result<Vec<i64>, DataError> {
+//RS     loader_rows(tree)
+//RS         .into_iter()
+//RS         .enumerate()
+//RS         .map(|(index, row)| {
+//RS             crate::Encoding::decode_datatree_for_type(&row, type_key)
+//RS                 .map_err(|errors| loader_decode_error(operation, errors, Some(index as i64)))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn loader_snapshot_carrier(
+//RS     rt: &mut crate::JitRuntime,
+//RS     value: i64,
+//RS     state: &jet_foundation::PreludeDataFlow::LoaderState,
+//RS     facts: &jet_foundation::PreludeDataFlow::SnapshotFacts,
+//RS     schema: &crate::Encoding::data_query_rt::jet_std::DataSchema,
+//RS     canonical: &[u8],
+//RS ) -> i64 {
+//RS     let identity = rt.heap.alloc_record(5);
+//RS     let id = rt
+//RS         .heap
+//RS         .alloc_string(format!("snapshot-{}", facts.snapshot_id));
+//RS     let source = rt.heap.alloc_string(format!("source-{}", facts.source_id));
+//RS     let content = rt.heap.alloc_string(facts.content_id.clone());
+//RS     let schema_id = rt.heap.alloc_string(facts.schema_id.clone());
+//RS     let identity_format = loader_enum(rt, loader_format_disc(schema.format.as_str()));
+//RS     let _ = rt.heap.record_set_string(identity, 0, id);
+//RS     let _ = rt.heap.record_set_string(identity, 1, source);
+//RS     let _ = rt.heap.record_set_string(identity, 2, content);
+//RS     let _ = rt.heap.record_set_string(identity, 3, schema_id);
+//RS     let _ = rt.heap.record_set_record(identity, 4, identity_format);
+//RS 
+//RS     let provenance = rt.heap.alloc_record(3);
+//RS     let provenance_source = loader_source_carrier(rt, &state.source);
+//RS     let provenance_format = loader_enum(rt, loader_format_disc(schema.format.as_str()));
+//RS     let provenance_authority = loader_authority_carrier(rt, &state.authority);
+//RS     let _ = rt.heap.record_set_record(provenance, 0, provenance_source);
+//RS     let _ = rt.heap.record_set_record(provenance, 1, provenance_format);
+//RS     let _ = rt.heap.record_set_record(provenance, 2, provenance_authority);
+//RS 
+//RS     let mut column_ids = Vec::with_capacity(schema.columns.len());
+//RS     for column in &schema.columns {
+//RS         let field = rt.heap.alloc_record(4);
+//RS         let id = rt.heap.alloc_string(column.id.clone());
+//RS         let name = rt.heap.alloc_string(column.name.clone());
+//RS         let ty = rt.heap.alloc_string(column.type_name.clone());
+//RS         let _ = rt.heap.record_set_string(field, 0, id);
+//RS         let _ = rt.heap.record_set_string(field, 1, name);
+//RS         let _ = rt.heap.record_set_string(field, 2, ty);
+//RS         let _ = rt.heap.record_set_bool(field, 3, column.nullable);
+//RS         column_ids.push(field);
+//RS     }
+//RS     let columns = rt.heap.alloc_int_list(column_ids);
+//RS     let schema_carrier = rt.heap.alloc_record(4);
+//RS     let schema_identity = rt.heap.alloc_string(schema.identity.clone());
+//RS     let schema_format = loader_enum(rt, loader_format_disc(schema.format.as_str()));
+//RS     let projection = crate::runtime_host::alloc_jit_result(rt, false, 0);
+//RS     let _ = rt.heap.record_set_string(schema_carrier, 0, schema_identity);
+//RS     let _ = rt.heap.record_set_record(schema_carrier, 1, schema_format);
+//RS     let _ = rt.heap.record_set_int(schema_carrier, 2, columns);
+//RS     let _ = rt.heap.record_set_int(schema_carrier, 3, projection);
+//RS 
+//RS     let status = loader_status_carrier(rt, &facts.status);
+//RS     let content = rt
+//RS         .heap
+//RS         .alloc_int_list(canonical.iter().map(|value| i64::from(*value)).collect());
+//RS     let snapshot = rt.heap.alloc_record(6);
+//RS     let _ = rt.heap.record_set_int(snapshot, 0, value);
+//RS     let _ = rt.heap.record_set_record(snapshot, 1, identity);
+//RS     let _ = rt.heap.record_set_record(snapshot, 2, provenance);
+//RS     let _ = rt.heap.record_set_record(snapshot, 3, schema_carrier);
+//RS     let _ = rt.heap.record_set_record(snapshot, 4, status);
+//RS     let _ = rt.heap.record_set_int(snapshot, 5, content);
+//RS     snapshot
+//RS }
+//RS 
+//RS fn loader_result(value: Result<i64, DataError>) -> i64 {
+//RS     match value {
+//RS         Ok(value) => Concurrency::with_runtime_mut(|rt| {
+//RS             crate::runtime_host::alloc_jit_result(rt, true, value as u64)
+//RS         }),
+//RS         Err(error) => result_data_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn loader_make(
+//RS     kind: jet_foundation::PreludeDataFlow::LoaderKind,
+//RS     locator: i64,
+//RS     member: Option<i64>,
+//RS     format: i64,
+//RS     parameters: Option<i64>,
+//RS     authority: Option<i64>,
+//RS     limits: i64,
+//RS     type_key: i64,
+//RS ) -> i64 {
+//RS     let result = Concurrency::with_runtime_result(
+//RS         data_error("data.loader", "no resident runtime"),
+//RS         |rt| {
+//RS             let locator = loader_string(rt, locator, "data.loader")?;
+//RS             let member = member
+//RS                 .map(|value| loader_string(rt, value, "data.loader"))
+//RS                 .transpose()?
+//RS                 .unwrap_or_default();
+//RS             let format = if kind == jet_foundation::PreludeDataFlow::LoaderKind::Database {
+//RS                 loader_format("json", "data.loader")?
+//RS             } else {
+//RS                 let format = loader_string(rt, format, "data.loader")?;
+//RS                 loader_format(&format, "data.loader")?
+//RS             };
+//RS             let parameters = parameters
+//RS                 .map(|value| loader_string_list(rt, value, "data.loader"))
+//RS                 .transpose()?
+//RS                 .unwrap_or_default();
+//RS             let authority = authority
+//RS                 .map(|value| loader_string(rt, value, "data.loader"))
+//RS                 .transpose()?
+//RS                 .unwrap_or_else(|| if kind == jet_foundation::PreludeDataFlow::LoaderKind::URL {
+//RS                     "network".to_string()
+//RS                 } else {
+//RS                     "local".to_string()
+//RS                 });
+//RS             let authority = jet_foundation::PreludeDataFlow::authority(&authority, "")
+//RS                 .map_err(loader_error)?;
+//RS             let limits = loader_limits(rt, limits, "data.loader")?;
+//RS             let type_key = loader_type_key(rt, type_key, "data.loader")?;
+//RS             loader_new(rt, kind, locator, member, parameters, format, limits, authority, type_key)
+//RS         },
+//RS     );
+//RS     loader_result(result)
+//RS }
+//RS 
+//RS fn jet_data_loader_load(locator: i64, limits: i64, type_key: i64) -> i64 {
+//RS     let result = Concurrency::with_runtime_result(
+//RS         data_error("data.load", "no resident runtime"),
+//RS         |rt| {
+//RS             let locator_text = loader_string(rt, locator, "data.load")?;
+//RS             let format = loader_format_for_locator(&locator_text)?;
+//RS             let kind = if locator_text.starts_with("http://") || locator_text.starts_with("https://") {
+//RS                 jet_foundation::PreludeDataFlow::LoaderKind::URL
+//RS             } else {
+//RS                 jet_foundation::PreludeDataFlow::LoaderKind::File
+//RS             };
+//RS             let limits = loader_limits(rt, limits, "data.load")?;
+//RS             let type_key = loader_type_key(rt, type_key, "data.load")?;
+//RS             let authority = if kind == jet_foundation::PreludeDataFlow::LoaderKind::URL {
+//RS                 "network"
+//RS             } else {
+//RS                 "local"
+//RS             };
+//RS             let authority = jet_foundation::PreludeDataFlow::authority(authority, "")
+//RS                 .map_err(loader_error)?;
+//RS             loader_new(
+//RS                 rt,
+//RS                 kind,
+//RS                 locator_text,
+//RS                 String::new(),
+//RS                 Vec::new(),
+//RS                 format,
+//RS                 limits,
+//RS                 authority,
+//RS                 type_key,
+//RS             )
+//RS         },
+//RS     );
+//RS     loader_result(result)
+//RS }
+//RS 
+//RS fn jet_data_loader_load_default(locator: i64, type_key: i64) -> i64 {
+//RS     let result = Concurrency::with_runtime_result(
+//RS         data_error("data.load_default", "no resident runtime"),
+//RS         |rt| {
+//RS             let locator_text = loader_string(rt, locator, "data.load_default")?;
+//RS             let format = loader_format_for_locator(&locator_text)?;
+//RS             let limits = loader_safe_limits();
+//RS             let type_key = loader_type_key(rt, type_key, "data.load_default")?;
+//RS             let kind = if locator_text.starts_with("http://")
+//RS                 || locator_text.starts_with("https://")
+//RS             {
+//RS                 jet_foundation::PreludeDataFlow::LoaderKind::URL
+//RS             } else {
+//RS                 jet_foundation::PreludeDataFlow::LoaderKind::File
+//RS             };
+//RS             let authority = if kind == jet_foundation::PreludeDataFlow::LoaderKind::URL {
+//RS                 "network"
+//RS             } else {
+//RS                 "local"
+//RS             };
+//RS             let authority = jet_foundation::PreludeDataFlow::authority(authority, "")
+//RS                 .map_err(loader_error)?;
+//RS             loader_new(
+//RS                 rt,
+//RS                 kind,
+//RS                 locator_text,
+//RS                 String::new(),
+//RS                 Vec::new(),
+//RS                 format,
+//RS                 limits,
+//RS                 authority,
+//RS                 type_key,
+//RS             )
+//RS         },
+//RS     );
+//RS     loader_result(result)
+//RS }
+//RS 
+//RS fn jet_data_loader_file(path: i64, format: i64, limits: i64, type_key: i64) -> i64 {
+//RS     jet_data_loader_file_member(path, 0, format, limits, type_key)
+//RS }
+//RS 
+//RS fn jet_data_loader_file_member(
+//RS     path: i64,
+//RS     member: i64,
+//RS     format: i64,
+//RS     limits: i64,
+//RS     type_key: i64,
+//RS ) -> i64 {
+//RS     loader_make(
+//RS         jet_foundation::PreludeDataFlow::LoaderKind::File,
+//RS         path,
+//RS         (member != 0).then_some(member),
+//RS         format,
+//RS         None,
+//RS         None,
+//RS         limits,
+//RS         type_key,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_data_loader_url(url: i64, format: i64, authority: i64, limits: i64, type_key: i64) -> i64 {
+//RS     loader_make(
+//RS         jet_foundation::PreludeDataFlow::LoaderKind::URL,
+//RS         url,
+//RS         None,
+//RS         format,
+//RS         None,
+//RS         Some(authority),
+//RS         limits,
+//RS         type_key,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_data_loader_database(
+//RS     query: i64,
+//RS     parameters: i64,
+//RS     authority: i64,
+//RS     limits: i64,
+//RS     type_key: i64,
+//RS ) -> i64 {
+//RS     loader_make(
+//RS         jet_foundation::PreludeDataFlow::LoaderKind::Database,
+//RS         query,
+//RS         None,
+//RS         0,
+//RS         Some(parameters),
+//RS         Some(authority),
+//RS         limits,
+//RS         type_key,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_data_loader_value(value: i64, limits: i64, type_key: i64) -> i64 {
+//RS     let result = Concurrency::with_runtime_result(
+//RS         data_error("data.value", "no resident runtime"),
+//RS         |rt| {
+//RS             let limits = loader_limits(rt, limits, "data.value")?;
+//RS             let type_key = loader_type_key(rt, type_key, "data.value")?;
+//RS             let descriptor = loader_descriptor(rt, &type_key)
+//RS                 .ok_or_else(|| data_error("data.value", "unknown checked value type"))?;
+//RS             let tree = crate::Receipt::encode_jit_value(rt, value, &descriptor)
+//RS                 .map_err(|reason| data_decode_error("data.value", reason))?;
+//RS             let format = loader_format("json", "data.value")?;
+//RS             let authority = jet_foundation::PreludeDataFlow::authority("local", "")
+//RS                 .map_err(loader_error)?;
+//RS             let mut state = jet_foundation::PreludeDataFlow::new_loader(
+//RS                 jet_foundation::PreludeDataFlow::LoaderKind::Value,
+//RS                 "value".to_string(),
+//RS                 String::new(),
+//RS                 Vec::new(),
+//RS                 format.as_str().to_string(),
+//RS                 limits,
+//RS                 authority,
+//RS             )
+//RS             .map_err(loader_error)?;
+//RS             let bytes = crate::Encoding::json_rt::render_datatree_json(&tree, false, 0).into_bytes();
+//RS             jet_foundation::PreludeDataFlow::check_payload(&state.limits, bytes.len(), "data.value")
+//RS                 .map_err(loader_error)?;
+//RS             state.payload = Some(bytes);
+//RS             let slot = rt.data_loaders.len();
+//RS             rt.data_loaders.push(DataLoaderSlot { state, type_key });
+//RS             let carrier = rt.heap.alloc_record(11);
+//RS             let state = rt.data_loaders[slot].state.clone();
+//RS             fill_loader_carrier(rt, carrier, slot, &state);
+//RS             Ok(carrier)
+//RS         },
+//RS     );
+//RS     loader_result(result)
+//RS }
+//RS 
+//RS fn jet_data_loader_snapshot(place: i64, type_key: i64) -> i64 {
+//RS     let extracted = Concurrency::with_runtime_result(
+//RS         data_error("data.snapshot", "no resident runtime"),
+//RS         |rt| {
+//RS             let carrier = loader_place_handle(rt, place, "data.snapshot")?;
+//RS             let slot = loader_slot_index(rt, carrier, "data.snapshot")?;
+//RS             let slot = rt.data_loaders[slot].clone();
+//RS             let metadata = loader_type_key(rt, type_key, "data.snapshot")?;
+//RS             if metadata != slot.type_key {
+//RS                 return Err(data_error("data.snapshot", "DataLoader type metadata does not match owner"));
+//RS             }
+//RS             if slot.state.cancelled {
+//RS                 return Err(err(
+//RS                     DataErrorKind::State,
+//RS                     "data.snapshot",
+//RS                     "loader was cancelled before snapshot",
+//RS                 ));
+//RS             }
+//RS             Ok((carrier, slot))
+//RS         },
+//RS     );
+//RS     let (carrier, mut slot) = match extracted {
+//RS         Ok(value) => value,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     let (payload, offline) = match loader_payload(&slot.state) {
+//RS         Ok(value) => value,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     let format = match loader_format(&slot.state.format, "data.snapshot") {
+//RS         Ok(value) => value,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     let tree = match loader_tree(&payload, format, &slot.state.limits) {
+//RS         Ok(value) => value,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     let value = match crate::Encoding::decode_datatree_for_type(&tree, &slot.type_key) {
+//RS         Ok(value) => value,
+//RS         Err(errors) => return result_data_err(loader_decode_error("data.snapshot", errors, None)),
+//RS     };
+//RS     let result = Concurrency::with_runtime_result(
+//RS         data_error("data.snapshot", "no resident runtime"),
+//RS         |rt| {
+//RS             let descriptor = loader_descriptor(rt, &slot.type_key)
+//RS                 .ok_or_else(|| data_error("data.snapshot", "unknown checked snapshot type"))?;
+//RS             let encoded = crate::Receipt::encode_jit_value(rt, value, &descriptor)
+//RS                 .map_err(|reason| data_decode_error("data.snapshot", reason))?;
+//RS             let canonical = crate::Encoding::json_rt::render_datatree_json(&encoded, false, 0);
+//RS             let mut schema = crate::Encoding::data_query_rt::jet_std::DataSchema::infer(&tree, format);
+//RS             schema.identity = jet_foundation::PreludeDataFlow::digest(schema.identity.as_bytes());
+//RS             let facts = jet_foundation::PreludeDataFlow::commit_snapshot(
+//RS                 &mut slot.state,
+//RS                 payload,
+//RS                 canonical.as_bytes(),
+//RS                 &schema.identity,
+//RS                 offline,
+//RS             )
+//RS             .map_err(loader_error)?;
+//RS             let slot_index = loader_slot_index(rt, carrier, "data.snapshot")?;
+//RS             rt.data_loaders[slot_index] = slot.clone();
+//RS             fill_loader_carrier(rt, carrier, slot_index, &slot.state);
+//RS             Ok(loader_snapshot_carrier(
+//RS                 rt,
+//RS                 value,
+//RS                 &slot.state,
+//RS                 &facts,
+//RS                 &schema,
+//RS                 canonical.as_bytes(),
+//RS             ))
+//RS         },
+//RS     );
+//RS     loader_result(result)
+//RS }
+//RS 
+// END-PORT-PENDING 0212 crates/jet-jit/src/Data.rs:1-1808
+

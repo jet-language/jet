@@ -21,6 +21,7 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | `::` | immutable binding | `D-BIND1` |
 | `:=` | mutable binding | `D-BIND1` |
 | `#` | attached marker; #[A, B] stacks | `D-VERDICT-732-1; D-MARK-STACK1` |
+| `.expect_fail(message: "text")` | test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring | `D-TEST-STOPMSG1=A` |
 | `marker Name = #[A, B]` | fixed named marker-group declaration; expands at each use without hiding gates or refusals | `D-MARKER-GROUP1=A` |
 | `#module.Marker / #[module.Marker, Other]` | library marker through the import's local name; pub exports its declaration | `D-MARKER-MODULE1=A` |
 | `#Inline / #Scalar / #Kernel / #Static` | separate callable promise, scalar hint, kernel proof and constant storage rules | `D-CODEGEN-HINTS1=A` |
@@ -56,6 +57,7 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | `Name{"…"}` | checked text head | `S8; D-CHECKED-TEXT1` |
 | `.{ … }` | typed anonymous value | `D-POLICY-WORD1` |
 | <code>`</code> | raw ordinary String fence | `D-RAWSTR1` |
+| `"""` | multi-line string; only spaces or tabs on the delimiter lines (raw foreign bodies excepted) | `D-SG5; D-TRIPLE-DELIM1=A; D-FFI-RAWBODY1=A` |
 | `,` | separator with optional trailing item in every comma list | `D-TRAILCOMMA1` |
 | `r"…", raw"…", $"…"` | unclaimed raw-string prefixes | — |
 | `;` | retired explicit statement terminator | `D-SEMI1` |
@@ -206,8 +208,14 @@ D-DOTCTOR3 whole-value reading, so `evens: [Int] :: xs.map(f)` becomes
 Never on a local binding. Never `Type name`.
 
 **S17 — Compound assignment**: `+=` `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=`
-`>>=`. Arithmetic four on Int/Float; the rest Int-only. LHS must be a mutable
-binding or `&` parameter.
+`>>=`. Arithmetic four on Int/Float; the rest Int-only. `String += piece`
+appends text (a String or a borrowed text view); ordinary text construction
+still uses interpolation, not binary `+`. The append preserves explicitly
+copied values. The place must be mutable or reached through an `&` parameter.
+Fields, including fields reached through list elements, support text append;
+direct indexed compound updates remain E0164 (copy, update, then store).
+User-record compound arithmetic requires the same operator hook as its binary
+form; without that hook sema reports E0360, before any execution tier runs.
 
 **D-INCR1 — Increment/decrement** *(retired 2026-09-28, owner decision, card
 #3727)*: `++` and `--` are not Jet operators. `x += 1` / `x -= 1` (S17) is the
@@ -230,14 +238,16 @@ dispatch arm, loop body, and lambda uses `->`. An explicit effect ceiling uses
 `-[Effects]>`, with `-[]>` for an empty row and `-[..E]>` for an open row.
 Braces group multiline bodies. They do not imply a result.
 
-Named functions, methods, function types, lambdas, computed fields, conversion
-implementations, and migration converters use the callable arrow. A concise
-named callable uses `-> expression` after its result type:
+Function types, lambdas, computed fields, conversion implementations, and
+migration converters use the callable arrow as a body arrow. A named function
+or method has exactly one arrow after its inputs (`->` or `-[Effects]>`), then
+its optional result type, then a braced body (D-SIG-AFTER1=A, card #4512); a
+second body arrow is E0080:
 
 ```jet
 fn double(value: Int) -> Int { value * 2 }
 
-fn load(path: String) String -[FS]> {
+fn load(path: String) -[FS]> String {
     text :: core.files.read(path)
     text.trim()
 }
@@ -379,6 +389,16 @@ a single bare param may ALSO drop the parens — `xs.filter(m -> m.hp > 0)` —
 wherever the expected type fixes it (same E0801/one-directional rule); no
 explicit capture prefix exists. The parenthesized and typed forms stay
 available where the type cannot be inferred.
+
+**D-LAMBDA-IFACE2=A**: a lambda writes parameters and, optionally, an effect
+row: `params -> body`, `params -[IO]> body`, or `params -[]> body`. It never
+writes a return or error type. Its arrow always starts the body, so
+`x -> Point{x}` and `x -> Point{x: x}` are struct values, not signatures.
+Return and error types come from the expected callable parameter or slot.
+For an explicit full interface, use a named `fn`; typed local bindings are
+not an escape hatch (D-BIND-BARE1/D-BIND-TYPE2). E0399 teaches this boundary.
+
+See the executable [lambda interface example](../../Examples/features/callable/lambda_interface.jet).
 
 **S47 — Function types & captures**: fn type `fn(T1, T2) -> R`; each unmarked
 parameter has plain read access (D-MEM-PARAM1). Named `fn`s coerce to function
@@ -589,6 +609,8 @@ is the one live range-place surface. A bare place projection such as
 `window :: values[range]` is a no-copy `View`; `&values[range]` is a
 write-through `ViewMut`. Write `~values[range]` when an independent list copy
 must outlive or detach from the owner.
+The parser keeps a retired `.view(range)` as an ordinary call for the E0214
+teaching diagnostic; it must not split the range into constructor arguments.
 
 **D-RANGE-EXCL1=C — Exclusive range + index idioms**: half-open `a..<b` runs
 `a` through `b-1` and is empty when `a >= b`. Inclusive `..` (S22) is unchanged.
@@ -784,11 +806,17 @@ leading-dot patterns.
 destructure structs, tuples, and lists:
 
 ```jet
-.{ id, severity: sev } :: incident      // struct: bind id, rename severity
-.{ kind, .. } :: event                  // partial needs mandatory `..` (E0326)
-(x, y) :: point                         // named tuple, canonical order
+{ id, severity: sev } :: incident       // struct: bind id, rename severity
+{ kind, .. } :: event                   // partial needs mandatory `..` (E0326)
+(y, x) :: point                         // tuple: bind members by name, in any order
+{ x: a, y: b } :: point                 // tuple: rename members explicitly
 [a, b] :: xs                            // list, runtime length check (E0315)
 ```
+
+Tuple parentheses bind only member names, never positions. A name that is not
+a member (including `_`) is E0314; use a dotless `{ member: local }` pattern
+to rename. A partial tuple record pattern requires `..` (E0326). Two-binding
+loops, such as `loop (i, item) in xs`, are unchanged.
 
 Redundant `..` on a full pattern is E0327. Nesting one level. Refutable
 statement tests use subject-first `subject == pattern ?? route` (D-CHOOSE-TEST1=A);
@@ -1420,6 +1448,23 @@ using longer suffixes (`inch` becomes `in`; `farad` stays spelled out).
 **S70 — Multi-line strings**: `"""…"""`, Swift-style trimming (newline after
 opening and before closing dropped; closing-quote column sets stripped
 indent); escapes and `{interp}` stay active; unterminated is E0002.
+Only spaces or tabs may follow the opening quotes or precede the closing quotes
+on their line; CRLF is a line break, and raw foreign bodies are exempt
+(D-TRIPLE-DELIM1=A, ratified 2026-10-04, card #4241; E0084).
+
+**D-PATTERN-HOLE-NAME1=A — Pattern holes introduce names** *(ratified
+2026-10-04, card #4358)*: text and byte pattern holes cannot reuse a local,
+parameter, or module constant. E0118 explains that a hole captures new text,
+not the existing value, and offers a structured parenthesis fix for comparison
+or a new name for capture. The rule applies in conditions, `&&`/`||`, value
+positions, and test-bind routes; Optional locals do not turn holes into flow
+refinements. Write `symbol == ("{root}jet")` to compare interpolated text.
+Dotted or called interpolation expressions already compare; fresh holes such
+as `"v{major}.{minor}"` still bind.
+Plain text comparisons carry the parenthesis edit. Typed holes, byte holes,
+and test-bind routes carry advisory guidance only: their type/spec is not an
+interpolation selector, and a `Bool ?? route` is not a fallible value. A fix
+must not invent a type-stripping or whole-statement rewrite.
 
 **D-PARSESTR1 — Interpolation literal as pattern**: the same `"…{hole}…"`
 literal that formats a string may sit in pattern position (if-table arm
@@ -1707,6 +1752,9 @@ or one real diverging tail: `return`, `return expr`, `next`, `break`, or
 `panic(...)`. The tail `return expr` is a function return; it is no longer
 reinterpreted as the block's value. A value-bearing block keeps the success
 payload type, while a diverging block types the binding at that payload type.
+For a call that returns nothing, run the call as a statement and put `()` last
+to continue, or put `return` last to leave the enclosing function. Braces alone
+do not turn that call into a value.
 Fallible blocks retain the ambient `err` from D-FAIL-BIND1; optional blocks do
 not gain it. Direct `?? return`/`?? next`/`?? break` routes and `?` propagation
 are unchanged. D-CHOOSE-TEST1 routes may use the block form only when its tail
@@ -2594,9 +2642,10 @@ combinators. The current surface is one `task` word with nested
 borrowed view is a compile error; **D-ASYNCRT1** M:N green threads, no
 `async`/`await` coloring (gated on scheduler work). **D-TUPLE-DESTRUCT1**
 *(ratified/implemented 2026-07-04)*: `channel<T>()` returns
-`(Sender<T>, Receiver<T>)` directly — no combined "Channel" handle, no
-`.sender()` method. Destructure with the existing tuple form:
-`(tx, rx) :: channel<T>()`; a second sender is `~tx`. A
+`(sender: Sender<T>, receiver: Receiver<T>)` directly — no combined "Channel"
+handle, no `.sender()` method. Bind by member name with
+`(sender, receiver) :: channel<T>()`, or rename with
+`{ sender: tx, receiver: rx } :: channel<T>()`; a second sender is `~tx`. A
 `Receiver<T>` is a plain endpoint for a readiness arm table.
 
 **D-CONC-UNIT1=A — one substrate for state, duty, and reach** *(ratified
@@ -3300,14 +3349,17 @@ Prelude-backed mechanism on every applicable tier. Reductions keep their
 left-to-right scalar fold order for bit-identical results; raw target
 intrinsics remain behind `#Unsafe`.
 
-**D-JIT1 / D-JIT2 / D-JITDEP1 — JIT tier**: production is AOT; the Cranelift
-JIT is the dev-loop tier-1 over the interpreter tier-0, behind the
-`JitBackend` seam, in its own `jet-jit/` crate (`Source/` stays std-only).
-**D-DEVMODE1 hard rule**: dev-runtime output must be byte-identical to the
-release build — divergence is a release blocker.
+**D-EXEC2=A — JIT retired** *(ratified, card #4134; supersedes D-JIT1 /
+D-JIT2 / D-JITDEP1)*: the Cranelift JIT and its crate are removed. `jet run`
+and `jet dev` use the normal build path and execute the result; `jet dev`
+rebuilds and restarts on every save. The comptime evaluator stays and also
+serves `--interpret`. Native in-memory O0 replaces the build-and-execute
+loop when it lands. **D-DEVMODE1 hard rule**: dev-runtime output must be
+byte-identical to the release build — divergence is a release blocker.
 
-**D-PLUGIN1 / D-DEP-WASM1**: `target: plugin` compiles to a sandboxed WASM
-module (wasmtime + Component Model, typed `.wit` contract), safe by default.
+**D-PLUGIN1 / D-DEP-WASM1**, naming amended by **D-ONCE-SANDBOX1=A**:
+`target: sandbox` compiles to a sandboxed WASM module (wasmtime + Component
+Model, typed `.wit` contract), safe by default.
 Plugin target support is shipped for the v1 scope: homogeneous `Int`, `Float`,
 `Bool`, or `Text`
 exported functions, deny-by-default plugin effects, `.wit` emission, component
@@ -3334,7 +3386,7 @@ semantic authority (I2/I3). Later parse or codegen capabilities extend the
 same negotiated protocol — they do not invent a second plugin system (I8).
 Exact user-facing registration spelling remains a later ballot if new syntax
 is needed. Distinct from PATH `jet-*` helpers (D-DX5) and application
-`target: plugin` / `core.plugin` (D-PLUGIN1).
+`target: sandbox` / `core.plugin` (D-PLUGIN1, D-ONCE-SANDBOX1).
 **Wire contract (Tower #549 C3):** deterministic JSON snapshot/response
 (`protocol=1`, `stage=typed`, capability negotiation, exact
 types/symbols/effects/spans/provenance fields, validated findings/edits,
@@ -5242,51 +5294,10 @@ a difference in supported features/functionality between JIT and AOT.” D-AOT-C
 (below) decided the remaining AOT mechanism; it does not create a third
 product lens or a feature/functionality split.
 
-**D-AOT-CRANELIFT1=B — Cranelift emits the fast AOT debug profile** *(ratified
-2026-07-16, card #666)*: on supported targets, `jet build --profile=debug`
-lowers the same sema-approved executable TIR through Cranelift to object code
-and links, with no generated Rust and no rustc. Unsupported targets fall back
-to rustc opt-level 0 and report that fallback in `jet explain build`; they
-never lose features or silently change optimization intent. Optimized AOT
-(`jet build`, `--release`) keeps the rustc backend. Both backends face R12
-differential tests; behavior and diagnostics are identical, only wait time
-differs.
-
-```text
-$ jet run hello.jet    # fast: opt-level 0         ~150 ms (illustrative)
-$ jet dev  hello.jet   # fast: opt-level 0         ~150 ms (illustrative)
-$ jet build hello.jet  # optimized: -O + thin-LTO  ~450 ms (illustrative)
-
-$ jet build --profile=debug hello.jet   # fast build of a build artifact
-$ jet run   --release       hello.jet   # optimized one-off run
-```
-
-*Owner ruling 2026-09-30 (card #3953):* every non-release native `jet build`
-(the default, `fast` and `debug` profiles) takes the Cranelift backend;
-`--release`, `hardened`, `ci`, `small`, no-OS and named profiles keep
-rustc/LLVM. The dev executable is a copy of the prebuilt `jet-aot-rt` runner
-with the program's Cranelift image appended (the same lowering and warm-module
-format `jet run` uses), so no rustc, C compiler or linker runs. The runner
-verifies the image's checksum and runtime build identity before running it and
-maps code writable, then read+execute, never both. A program the image cannot
-carry (native FFI, C links, CLI-decoded entries, interpreter-tier functions,
-compile-time state beyond strings, the checked type registry and closure
-targets, or code whose function numbering a reload cannot reproduce) builds
-with rustc and prints `[build] note: building with rustc because <cause>`,
-naming the one rule the program broke. The backend is part of the native
-cache key. A Cranelift build generates no Rust (`.jet/build/<stem>.rs` is
-written only when rustc runs), probes no rustc or linker for its key, and
-caches only the image: a cache hit appends the stored image to a copy of the
-runner, and an unchanged rebuild recognizes the existing executable by its
-length and image trailer (the image's SHA-256) instead of hashing it. The
-rustc executable built after a refusal is cached under the Cranelift key
-extended with the rustc and linker identity. Once lowered, functions compile
-to machine code on all host threads (`jet run` too) and are defined in
-lowering order, so the image is byte-identical to a one-thread compile. Each
-compiled function is also stored by its Cranelift incremental-cache key (the
-function's IR with callee names abstracted, the target and its flags) and the
-`jet` build identity; a later build of any program reuses it for a function
-with the same key, so an edit recompiles only the functions whose IR changed.
+**D-AOT-CRANELIFT1=B** *(ratified 2026-07-16, card #666; retired by
+D-EXEC2=A)*: the Cranelift debug-AOT backend and its card #3953 dev-image
+runner are removed with the JIT. Every native `jet build`, including the
+default, `fast`, and `debug` profiles, emits Rust and builds with rustc/LLVM.
 
 **Migrations** *(D-MIGRATE1, D-MIGRATE2A–F)*: `#PublishedSchema` types
 snapshot field layout; a breaking change without a migration is E0910.
@@ -5966,7 +5977,7 @@ is the D-WD2 umbrella over those facts; `jet inspect codemod` starts with named 
 rename objects (`<plan.json> --dry-run`, `apply <plan.json>`, `undo <log.json>`) and replay logs. **D-DX5**: PATH `jet-*`
 helper discovery (cargo/git-style external commands). **D-DX5-HOOK1=A**:
 compiler-extension WASM components (typed post-sema snapshot; see above) —
-not PATH helpers and not `target: plugin`. **D-REF3**: borrowed-return +
+not PATH helpers and not `target: sandbox`. **D-REF3**: borrowed-return +
 cleanup-scope inlay hints on by default. **D-JPK-DISCOVER1**: `jet search`/`jet info` + LSP completion and hover
 for package names and typed option fields from a local offline index. **D-JPK-BUILDDBG1**: failed builds keep the scratch
 dir; `--shell-on-fail`; `jet explain <ref>` reports Store identity, provider
@@ -6676,15 +6687,14 @@ man pages, and completions advertise only canonical grouped spellings.
 **D-JPK-TASKRUN1=A — named entries are `#Job fn`**: a job is an ordinary Jet
 function marked `#Job`, living beside `fn run()`. Reuses typed-argument CLI
 parsing (D-CLIFLAG1) and `?` fallibility; a cross-job dependency is a plain
-function call, no separate DAG syntax. Invoked canonically with
-`jet run <entry> -- <name>`; Jetpack has no code-execution bridge for named jobs;
-environment commands use `jetpack use`.
-`run`, `dev`, `build`, and `test` remain reserved lifecycle verb names a job
-cannot reuse.
+function call, no separate DAG syntax. Invoke with `jet <name>` in a project
+or `jet run <entry> -- <name>` for an explicit entry. Jetpack has no
+code-execution bridge for named jobs; environment commands use `jetpack use`.
+Every registered Jet command name is reserved against jobs (D-JET-VERBS1=A).
 
 **D-JOB-NAME1=A — one word for named auxiliary entries** *(ratified
 2026-08-05, card #1448)*: the marker and every command use `job`. The
-canonical CLI is `jet run <entry> -- <name>` and `jet jobs`; retired spellings
+canonical CLI is `jet <name>`, `jet run <entry> -- <name>`, and `jet jobs` for listing; retired spellings
 have no alias or fallback. Help, completions, diagnostics, docs, examples, and
 tests use the same vocabulary.
 
@@ -6694,29 +6704,35 @@ its `#Job` functions through one canonical subcommand table. Bare `#Job` and
 available in dev and release binaries; `#Job(.Internal)` jobs are dev-only.
 The first program word selects a job before the ordinary `fn run` CLI parser;
 `jet run <entry> -- <name> [args…]` uses the same selection. Job names are
-reserved only as D-JOB-NAMES1=A lists, and two jobs may not collide at one scope.
+reserved by the shared command registry (D-JET-VERBS1=A), and two jobs may not collide at one scope.
 `.Internal` jobs remain callable from code and schedulers, never from argv.
 There are no flag aliases, and a release binary reports non-shipped jobs as
 unknown commands.
 
-**D-JOB-ARGV1=A — the job owns every word after its name** *(ratified
-2026-09-28, card #3684; amends D-DX-JOBS-UX1=E)*: in `jet jobs [jet flags]
-<name> [job args…]` the first positional word after `jobs` is the job name,
-and every later word goes to the job unchanged, flags included. Jet's own
-flags (`--interpret`, `--release`, `--explain`, `-p <member>`) come before the
-name. A `--` written right after the name is the same separator and is
-accepted; any later `--` reaches the job verbatim. `jet run <entry> -- <name>
-…` is unchanged. The owner's note to spell the command `job` is an open
-question on card #3684; the command word is the one `JOBS_COMMAND` row in
-`crates/jet-cli/src/CLI.rs`.
+**D-JET-VERBS1=A — project jobs are top-level CLI verbs** *(ratified
+2026-10-04, card #4140; amends D-DX-JOBS-UX1=E, D-JOB-ARGV1=A, and
+D-JOB-NAMES1=A)*: `jet X` resolves a registered command, then a visible job
+from parsed project source, then a retired/moved spelling's teaching error,
+then a source path, then `jet-X` on PATH. An unknown word reports E2101
+with did-you-mean over commands and jobs. Outside a project the job step is
+skipped. A job beats a same-named folder or matching `X.jet`; `jet run X`
+still selects the path, and a word ending in `.jet` always selects a file.
+`.Internal` jobs never reach argv.
 
-**D-JOB-NAMES1=A — reserve only real collisions** *(ratified 2026-09-28, card
-#3684; amends D-JOB-SUBCMD1=C)*: a `#Job fn` may not be named `run`, `dev`,
-`build`, or `test` (the lifecycle entries) or `help` and `version` (answered
-by a built program's own parser). Every other name, including Jet command
-words such as `serve`, `lint`, `seed`, `fmt`, `clean`, `watch`, and `release`,
-is an ordinary job name. E0928 reports a reserved name and two jobs with one
-name in one scope.
+In `jet [jet flags] <name> [job args…]`, every word after the job name is
+forwarded unchanged, including flags. Jet flags such as `--interpret`,
+`--release`, and `-p <member>` precede the name. A `--` immediately after
+the name is the optional separator; a later `--` reaches the job verbatim.
+`jet run <entry> -- <name> …` and built-program job dispatch use the same
+checked namespace and arguments.
+
+`jet jobs` lists jobs. Its `--graph`, `--status`, `--explain`, and `--watch`
+views remain; `jet jobs <name>` without a view is a teaching error naming
+`jet <name>`, never an alias. E0928 rejects a job named like any registered
+Jet command or a duplicate job name in one scope. Sema reads the same
+command table as help; adding a command therefore diagnoses an existing
+same-named job on the next build. Retired words are not reserved.
+
 
 **D-JOB-ENV1=A — environment is set on each launched command** *(ratified
 2026-09-28, card #3684)*: no new syntax. A job sets a variable on the command
@@ -7205,12 +7221,13 @@ finite-source finding form above. This section records the other outcomes.
   parameter and field declaration defaults use `{…}`.
 
 **D-ONELINE-BODY1=B — one body rule** *(ratified 2026-08-13, cards #1453 and
-#1454; reconciles D-CHOOSE-FNBODY1=A; amended by D-CALLABLE-ONE1=A)*: ordinary
-and multi-head function one-liners use `->` after a non-unit return type.
-Callable heads use `->`. An
+#1454; reconciles D-CHOOSE-FNBODY1=A; amended by D-CALLABLE-ONE1=A and
+D-SIG-AFTER1=A)*: named function and method bodies, including multi-head
+functions, always use braces after the one arrow and result
+(`fn f() -> T { expr }`); a body `->` is E0080 (card #4512). An
 effect-only `if` or `loop` may put `->` before one adjacent statement; braces
 are required for multiple statements and scoped marker blocks. Function-body
-`=` retires with a teaching fix to `->`; `=` remains for slot-filling forms
+`=` retires with a teaching fix to braces; `=` remains for slot-filling forms
 such as extern bindings, reassignment, and enum discriminants. Declaration
 defaults ride the type as `{…}`. Marker-scoped blocks retain their own braces.
 
@@ -7818,10 +7835,9 @@ Bare type after the parameter list is a teaching diagnostic (E0068). This
 amends D-SIG-SHAPE1=B and D-CALLABLE-ONE1=A. D-EFFECT-ROW2=B,
 D-FAIL-UNIT1=A, and D-FAILURE-FOUNDATION1=A stay.
 
-**2026-08-21 — D-LAMBDA-IFACE1=A** *(card #2144)*: a lambda may write any
-suffix of the callable interface — return type, error, effect row — in the
-same shape as a named function. Inference law (D-LAMBDA-INFER1) is untouched:
-annotations stay optional wherever an expected type exists.
+**2026-09-18 — D-LAMBDA-IFACE2=A**: lambdas keep parameters and their optional
+effect row, never a return or error type. The arrow starts the body, keeping
+struct-literal bodies unambiguous. D-LAMBDA-INFER1 is unchanged.
 
 **2026-08-21 — D-ERRSUFFIX1=B** *(; reading-first
 slate card #2144; superseded by D-FAILURE-FOUNDATION1=A)*: the failure surface
@@ -8854,6 +8870,9 @@ layout.
   file reports once and parsing resumes at the next statement. Explicit and
   inserted terminators share `TokKind::Semi`; the diagnostic dispatches on a
   non-empty source span, and the E0373 row carries `fix_edits`.
+  The Jet parser contract fixtures in
+  `Compiler/JetParser/Tests/ContractFixtures.jet` pin both edits and statement
+  recovery through the production parser.
 - **D-MARKERSHAPE1=B —** One bare rule, one list for several, E0999 with the
   rewrite otherwise. The audit found no new evidence; the surface does not
   change.

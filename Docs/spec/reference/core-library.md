@@ -670,6 +670,8 @@ Core registry.
 and filesystem metadata. Path-taking calls accept `String` and the checked
 `Path` value. Filesystem calls carry the `FS` effect; current-directory and
 environment-derived helpers also carry `Env` (D-FILES-WRITE1).
+`read_bytes` also borrows a String view (for example, `path.trim()`); the
+runtime does not materialize an owned path just to perform the read.
 
 A relative path is resolved from the process working directory. An entry-local
 file can be opened directly with `fs.read("input.txt")`; do not read the
@@ -728,6 +730,15 @@ Whole-file and metadata functions:
 `is_dir`, `is_symlink`, `kind`, and `mode`. `WalkEntry` exposes `path`,
 `relative`, `is_dir`, and `depth` through the checked type projection.
 
+The retired raw-String `read_dir` helper is not a reserved method name:
+user struct and trait methods named `read_dir` participate in normal resolution.
+
+Mapped windows have byte element type `View<U8>`: `window` and `window_len`
+return `View<U8> !IOError`, and `lines()` yields `ViewIter<View<U8>>`.
+Copying a line with `~line` produces `[U8]`, not `[[U8]]`. A `FileScope`
+parameter imported as `files.FileScope` retains its checked `read` method;
+source qualification does not change its capability dispatch.
+
 Streaming constructors keep memory bounded:
 
 ```jet
@@ -779,6 +790,31 @@ filesystem. `read_text`, `read_bytes`, `read_lines`, `write_text`,
 convenience surface. `is_relative_to` is a lexical comparison; it does not
 resolve symlinks. Use `canonicalize` when the policy requires physical,
 existing-path containment.
+
+The compiler and native consumers use the private `Core/files` OS-byte component
+owner rather than the portable textual `Path.parts`/`collapse` operations.
+Its Unix paths retain arbitrary bytes; Windows paths retain WTF-8, including
+unpaired UTF-16 surrogates. Display is the only lossy boundary. Component cursors
+and prefix stripping retain byte extents into the original owner and preserve
+interior remainder spelling; equality compares parsed prefixes and whole
+components, not string prefixes. A Windows drive-relative `C:foo` and a rooted
+but prefix-free `\\foo` are not absolute; UNC and verbatim namespaces follow
+their platform prefix/root laws. These are lexical operations, not filesystem
+authority or symlink resolution.
+
+Native basename/stem/extension operations use that same component owner. A
+leading-only dot does not introduce an extension, while a trailing dot has an
+empty extension. Setting an extension removes ignored trailing separators and
+dot components with the old suffix, leaves paths without a normal basename
+unchanged, and rejects platform separators even on verbatim Windows paths.
+The retained stem bytes are never decoded or rewritten.
+
+The existing user `Path.normalize`/`collapse` law preserves unmatched leading
+`..`. Package identity normalization is deliberately different: it omits current
+directory components and pops its output for **every** parent component, even
+when that output is empty. Thus `../../a` has package identity path `a`, without
+changing the user normalization of `../../a`. Its labels use lossy OS display,
+then replace output backslashes with `/`, and spell an empty result as `.`.
 
 ### `core.net.url` — RFC 3986 URL values
 
@@ -928,6 +964,9 @@ The source-facing carriers include `HTTPError`, `Method`, `Version`, `Status`,
 `Header`, `Headers`, and `Body`. The default limits are one MiB for a body,
 32 KiB for headers, 8 KiB for a header line and request line, 100 headers, and
 8 KiB for a URL.
+The source parsers check the remaining body length before projecting its bytes.
+Accepted bodies use one owned byte-slice projection; oversized bodies are
+rejected without a body allocation.
 
 | API | Result | Description |
 | --- | --- | --- |
@@ -1748,6 +1787,7 @@ fn run() {
 | --- | --- | --- |
 | `math.acos(x)`, `acosh(x)`, `asin(x)`, `asinh(x)`, `atan(x)`, `atan2(y, x)`, `atanh(x)` | `Float` | Inverse trigonometric and hyperbolic functions. The extended float family is part of the shared math surface (D-CORESURFACE1). |
 | `math.abs(value: Int)` / `math.abs_float(value: Float)` | `Int` / `Float` | Absolute value for integer or floating-point input. |
+| `math.copy(value: Float)` | `Float` | Return the floating-point value unchanged, including its IEEE representation. |
 | `math.min(a: Int, b: Int)` / `math.max(a: Int, b: Int)` | `Int` | Integer extrema. |
 | `math.clamp(value, lo, hi)` | `Int` | Clamp an integer; reversed bounds are accepted by swapping the bounds. |
 | `math.is_even(value)` / `math.is_odd(value)` | `Bool` | Test integer parity. |
@@ -1845,7 +1885,7 @@ fn run() {
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `units.from(magnitude, unit)` | `Measurement<Float>` | Build a measured quantity from a magnitude and a scalar unit. |
+| `units.from(magnitude, unit)` | `Measurement<Float>` | Jet-owned construction of SI value `magnitude * unit` with zero uncertainty; the host only represents the measurement. |
 | `units.si(value)` | `Measurement<Float>` | Construct a value in the SI base scale. |
 | `units.scale(value, factor)` | `Measurement<Float>` | Scale a measured value. |
 | `units.add(a, b)` / `units.sub(a, b)` | `Measurement<Float>` | Add or subtract measured values with propagated uncertainty. |
@@ -2025,6 +2065,7 @@ resulting parts (D-TEXTUNICODE1=A).
 | `text.display_width(value)` | `Int` | Compute terminal display width under the portable text-width policy (D-TEXTWIDTH1=B). |
 | `text.grapheme_views(value)` / `word_views(value)` / `line_views(value)` / `byte_views(value)` | `[String]` | Produce views or segments for the requested boundaries. |
 | `text.is_alphabetic(value)` / `is_numeric(value)` / `is_whitespace(value)` | `Bool` | Test the corresponding scalar property. |
+| `text.has_control(value)` | `Bool Never!` | True iff any scalar is Unicode 17 Cc (`U+0000..U+001F` or `U+007F..U+009F`); empty text is false. One UTF-8 byte scan stops at the first match without creating per-character strings or a decoded-scalar list. |
 | `text.trim(value)` / `trim_start(value)` / `trim_end(value)` | `String` | Remove supported whitespace at both or one end. |
 | `text.pad_start(value, width, fill)` / `pad_end(value, width, fill)` | `String` | Pad to a requested display width. |
 | `text.center(value, width, fill)` | `String` | Center a value in a requested width. |
@@ -2572,20 +2613,20 @@ values, not bytes; binary-size formatting uses binary units.
 | `hex(value: Int, width: Int) -> String` | text | Format lower-case hexadecimal with the requested width. |
 | `ordinal(value: Int) -> String` | text | Add an English ordinal suffix. |
 | `plural(value: Int, singular: String, many: String) -> String` | text | Choose a singular or plural word from the value. |
-| `pad_left(text: String, width: Int, fill: String) -> String` | text | Pad on the left. |
-| `pad_right(text: String, width: Int, fill: String) -> String` | text | Pad on the right. |
-| `pad_center(text: String, width: Int, fill: String) -> String` | text | Pad on both sides. |
+| `pad_left(text: String, width: Int, fill: String) -> String` | text | Pad on the left; an empty `fill` pads with spaces. |
+| `pad_right(text: String, width: Int, fill: String) -> String` | text | Pad on the right; an empty `fill` pads with spaces. |
+| `pad_center(text: String, width: Int, fill: String) -> String` | text | Pad on both sides; the left side gets the smaller half and the fill pattern restarts on each side (`pad_center("x", 4, "ab")` is `axab`). |
 | `pad(text: String, width: Int, fill: String) -> String` | text | Apply the module's default padding direction. |
 | `grouped(value: Float, frac: Int) -> String` | text | Add grouping separators and keep `frac` fractional digits. |
-| `decimal(value: Float, frac: Int) -> String` | text | Format fixed-point decimal output. |
-| `percent(value: Float, frac: Int) -> String` | text | Format a percentage with `frac` fractional digits. |
-| `sci(value: Float, frac: Int) -> String` | text | Format scientific notation. |
-| `pretty(value: String) -> String` | text | Expand braces, brackets, and commas into an indented display. |
-| `bytes(value: Int) -> String` | text | Format bytes with `B`, `KiB`, `MiB`, `GiB`, or `TiB`. |
+| `decimal(value: Float, frac: Int) -> String` | text | Format fixed-point decimal output, rounding half away from zero with no negative zero (`decimal(0.125, 2)` is `0.13`, `decimal(-0.0001, 2)` is `0.00`). |
+| `percent(value: Float, frac: Int) -> String` | text | Format a grouped percentage with `frac` fractional digits (`percent(12345.6, 0)` is `1,234,560%`). |
+| `sci(value: Float, frac: Int) -> String` | text | Format normalized scientific notation with a plain exponent (`1.23e3`, `1.23e-3`, `1.00e1` for `9.999`). |
+| `pretty(value: String) -> String` | text | Lay out Debug text one item per line with commas between items; empty collections stay on one line, and `[:]` and `[redacted]` are unchanged. |
+| `bytes(value: Int) -> String` | text | Format bytes in SI units `B`, `KB`, `MB`, `GB`, `TB`, `PB`, or `EB`, with one decimal below 10 (`1536` is `1.5 KB`). |
 | `duration(milliseconds: Int) -> String` | text | Format a duration using at most three nonzero units. |
 
-The implementation is in [`Core/text/fmt.jet`](../../../Core/text/fmt.jet).
-`bytes` deliberately uses powers-of-two units, and `duration` does not emit
+The implementation is in [`Core/text/fmt.jet`](../../../Core/text/fmt.jet); the
+runtime formatting entry points delegate to it. `duration` does not emit
 unbounded trailing zero units.
 The library-call boundary is deliberate: ordinary human formatting remains explicit (`D-HUMANFMT1`), and `pretty` follows the expanded deterministic Debug shape (`D-FMT-PRETTY1`).
 
@@ -2765,6 +2806,9 @@ metadata. It provides portable node construction and backend adapters; it does
 not pretend that a desktop, phone, or terminal backend has the same input or
 rendering capabilities. The source is [`Core/ui/ui.jet`](../../../Core/ui/ui.jet).
 
+The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
+`UI.Pointer`; capability checks and runtime support use the same spelling.
+
 | Signature | Result | Description |
 |---|---|---|
 | `point(x: Float, y: Float) -> Point` | point | Construct a point. |
@@ -2793,6 +2837,9 @@ handle. The provider/catalog may add interactive node and mount operations,
 but those operations remain typed provider boundaries. Build a portable tree
 first, then use backend-specific capabilities; do not infer that a node tree
 supplies a platform-native callback API.
+The native GTK `present` call runs its application loop until a window
+close request quits that loop. GTK's default close handler still owns window
+teardown; a signal-owned loop reference keeps its callback data live.
 
 ### `core.reactive` — explicit signals and dependency tracking
 
@@ -3588,8 +3635,8 @@ The Rust-hosted compiler remains Jet's production and reference compiler. Jet
 source packages under [`Core/`](../../../Core/) are compiled by that normal
 frontend; they are not evidence that the compiler is self-hosted. The staged
 Jet-authored compiler in [`Compiler/`](../../../Compiler/) is a separate
-bootstrap project, while Rust emission, rustc/LLVM, and Cranelift remain part
-of the host implementation.
+bootstrap project, while Rust emission and rustc/LLVM remain part of the host
+implementation.
 
 `Core.jet` is the declaration registry, `Core/**/*.jet` is the source for the
 Jet-owned package surface, and provider code supplies operations that require

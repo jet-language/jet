@@ -27,7 +27,7 @@ build: {
     let source = r#"
 module cache<K>(capacity: Int) {
     pub struct Buffer { items: [K#capacity] }
-    pub fn slots() -> Int -> capacity
+    pub fn slots() -> Int { capacity }
 }
 PROFILE_SLOTS :: prep { $build.settings.cache_slots }
 module tuned :: cache<Int>($build.settings.cache_slots)
@@ -250,13 +250,13 @@ BASE :: prep { 40 }
 module cache<K>(capacity: Int) {
     COMPUTED_SIZE :: prep { BASE + capacity }
     pub struct Entry { items: [K#capacity] }
-    pub fn size() -> Int -> COMPUTED_SIZE
+    pub fn size() -> Int { COMPUTED_SIZE }
 }
 
 module x :: cache<Int>(64)
 
 module plain_template<K> {
-    pub fn identity(value: K) -> K -> value
+    pub fn identity(value: K) -> K { value }
 }
 module plain :: plain_template<Int>
 
@@ -984,10 +984,7 @@ fn run() {
             .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
         "generic-free test source should type-check: {diagnostics:?}"
     );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .expect("generic free calls should compile in resident JIT");
-    jet_jit::reset_jit_trace_for_test();
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -999,10 +996,6 @@ fn run() {
         }
         other => panic!("generic free call JIT run did not complete: {other:?}"),
     }
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "generic free call test did not execute resident JIT"
-    );
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -1060,10 +1053,7 @@ fn run() {
             .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
         "generic-method test source should type-check: {diagnostics:?}"
     );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .expect("generic methods should compile in resident JIT");
-    jet_jit::reset_jit_trace_for_test();
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -1075,9 +1065,5 @@ fn run() {
         }
         other => panic!("generic method JIT run did not complete: {other:?}"),
     }
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "generic method test did not execute resident JIT"
-    );
     let _ = std::fs::remove_dir_all(root);
 }

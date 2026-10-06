@@ -158,7 +158,7 @@ mod jet_std {
     pub struct JetMIME {
         pub top: String,
         pub sub: String,
-        pub params: Vec<(String, String)>,
+        pub parameters: Vec<Vec<String>>,
     }
 
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
@@ -849,7 +849,7 @@ include!("kept/Ws.rs");
     assert_eq!(
         consumers,
         [
-            std::path::PathBuf::from("crates/jet-jit/src/net_http_rt.rs"),
+            std::path::PathBuf::from("crates/jet-evalhost/src/net_http_rt.rs"),
             std::path::PathBuf::from("tests/http_server_lifecycle.rs"),
             std::path::PathBuf::from("tests/ws_law.rs"),
         ]

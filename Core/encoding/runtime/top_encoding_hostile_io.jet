@@ -1,0 +1,231 @@
+use core.cell.[RefCell, ThreadLocal]
+use std.env
+use std.io
+
+// D-ENCSTREAM-SURFACE1 hostile streaming law seam (#711 / #715 C6).
+// Active only when JET_ENC_HOSTILE_IO exists and is not "0".
+// READ_PLAN/WRITE_PLAN are comma-separated caps; their final entry repeats.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:11
+JET_ENCODING_IO_CHUNK :: 64 * 1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:13
+struct JetEncodingHostileIoPlan {
+    read_one_byte: Bool = false
+    write_chunk: Int = 0
+    interrupt_reads: U8 = U8{0}
+    interrupt_writes: U8 = U8{0}
+    fail_read_after: U64? = None
+    fail_write_after: U64? = None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:23
+struct JetEncodingHostileIoStats {
+    read_calls: U64 = U64{0}
+    write_calls: U64 = U64{0}
+    flush_calls: U64 = U64{0}
+    bytes_read: U64 = U64{0}
+    bytes_written: U64 = U64{0}
+    interrupts: U64 = U64{0}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:32
+struct JetEncodingHostileIoState {
+    plan: JetEncodingHostileIoPlan?
+    stats: JetEncodingHostileIoStats
+    read_total: U64
+    write_total: U64
+    read_plan: [Int]
+    read_plan_idx: Int
+    write_plan: [Int]
+    write_plan_idx: Int
+}
+impl JetEncodingHostileIoState {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:44
+    fn fresh() -> JetEncodingHostileIoState {
+        JetEncodingHostileIoState{plan: None, stats: JetEncodingHostileIoStats{}, read_total: U64{0},
+            write_total: U64{0}, read_plan: [], read_plan_idx: 0, write_plan: [], write_plan_idx: 0}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:57
+    fn active_plan(self) -> JetEncodingHostileIoPlan? { self.plan }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:61
+    fn next_read_cap(self: &JetEncodingHostileIoState, plan: JetEncodingHostileIoPlan, buf_len: Int) -> Int {
+        if not self.read_plan.is_empty() {
+            i :: self.read_plan_idx.min(self.read_plan.len() - 1)
+            cap :: self.read_plan[i].max(1)
+            if self.read_plan_idx < self.read_plan.len() { self.read_plan_idx += 1 }
+            return cap.min(buf_len).min(JET_ENCODING_IO_CHUNK)
+        }
+        if plan.read_one_byte { 1.min(buf_len) } else { buf_len.min(JET_ENCODING_IO_CHUNK) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:77
+    fn next_write_chunk(self: &JetEncodingHostileIoState, plan: JetEncodingHostileIoPlan, remaining: Int) -> Int {
+        if not self.write_plan.is_empty() {
+            i :: self.write_plan_idx.min(self.write_plan.len() - 1)
+            cap :: self.write_plan[i].max(1)
+            if self.write_plan_idx < self.write_plan.len() { self.write_plan_idx += 1 }
+            return cap.min(remaining).min(JET_ENCODING_IO_CHUNK)
+        }
+        if plan.write_chunk == 0 { remaining.min(JET_ENCODING_IO_CHUNK) } else { plan.write_chunk.min(remaining) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:94
+// GATE #4565: kernel primitive — thread-local ownership of the I/O seam.
+JET_ENCODING_HOSTILE_IO :: ThreadLocal<RefCell<JetEncodingHostileIoState>>.new(fn() {
+    RefCell.new(JetEncodingHostileIoState.fresh())
+})
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:99
+fn jet_encoding_hostile_io_enabled() -> Bool {
+    // GATE #4565: kernel primitive — native process environment.
+    #Unsafe("read only the native environment flag for this test seam") {
+        env.var_os("JET_ENC_HOSTILE_IO").is_some_and(v -> v != "0")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:103
+fn jet_encoding_hostile_parse_plan(raw: &String) -> [Int] {
+    output := []
+    loop part in raw.split(',') {
+        trimmed := part.trim() // #4303
+        if not trimmed.is_empty() {
+            if trimmed.parse<USize>().ok().filter(n -> n > USize{0}) is Val(n) { output.push(Int{n}) }
+        }
+    }
+    output
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:116
+fn jet_encoding_hostile_io_plan_from_env() -> (JetEncodingHostileIoPlan, [Int], [Int])? {
+    if not jet_encoding_hostile_io_enabled() -> return None
+    // GATE #4565: kernel primitive — native process environment.
+    #Unsafe("read native hostile schedules without modifying the environment") {
+        read_one_byte :: env.var_os("JET_ENC_HOSTILE_READ_ONE").is_some_and(v -> v != "0")
+        write_chunk :: env.var("JET_ENC_HOSTILE_WRITE_MAX").ok().and_then(v -> v.parse<USize>().ok()).unwrap_or(USize{0})
+        interrupt_reads :: env.var("JET_ENC_HOSTILE_INTERRUPT_READS").ok().and_then(v -> v.parse<U8>().ok()).unwrap_or(U8{0})
+        interrupt_writes :: env.var("JET_ENC_HOSTILE_INTERRUPT_WRITES").ok().and_then(v -> v.parse<U8>().ok()).unwrap_or(U8{0})
+        fail_read_after :: env.var("JET_ENC_HOSTILE_FAIL_READ_AFTER").ok().and_then(v -> v.parse<U64>().ok())
+        fail_write_after :: env.var("JET_ENC_HOSTILE_FAIL_WRITE_AFTER").ok().and_then(v -> v.parse<U64>().ok())
+        read_plan :: env.var("JET_ENC_HOSTILE_READ_PLAN").ok().map(v -> jet_encoding_hostile_parse_plan(&v)).unwrap_or([])
+        write_plan :: env.var("JET_ENC_HOSTILE_WRITE_PLAN").ok().map(v -> jet_encoding_hostile_parse_plan(&v)).unwrap_or([])
+        Val((JetEncodingHostileIoPlan{read_one_byte: read_one_byte, write_chunk: Int{write_chunk},
+            interrupt_reads: interrupt_reads, interrupt_writes: interrupt_writes,
+            fail_read_after: fail_read_after, fail_write_after: fail_write_after}, read_plan, write_plan))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:161
+fn jet_encoding_hostile_io_with<R>(f: fn(&JetEncodingHostileIoState) -> R) -> R {
+    // GATE #4565: kernel primitive — only the owning thread accesses its cell.
+    #Unsafe("thread-local state remains borrowed only for the callback") {
+        JET_ENCODING_HOSTILE_IO.with(cell -> f(&cell.borrow_mut()))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:168
+fn jet_encoding_hostile_io_plan() -> JetEncodingHostileIoPlan? {
+    jet_encoding_hostile_io_with(state -> {
+        if state.active_plan() == .Val(plan) -> return Val(plan)
+        (plan, read_plan, write_plan) :: jet_encoding_hostile_io_plan_from_env()?
+        state.plan = Val(plan)
+        state.read_plan = ^read_plan
+        state.write_plan = ^write_plan
+        state.read_plan_idx = 0
+        state.write_plan_idx = 0
+        Val(plan)
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:183
+fn jet_encoding_hostile_io_reset() -> {
+    jet_encoding_hostile_io_with(state -> { state = JetEncodingHostileIoState.fresh() })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:189
+fn jet_encoding_hostile_io_stats() -> JetEncodingHostileIoStats { jet_encoding_hostile_io_with(state -> state.stats) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:193
+fn jet_encoding_hostile_io_fail_io() -> io.Error { io.Error.new(io.ErrorKind.Other, "hostile encoding I/O failure") }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:197
+fn jet_encoding_hostile_io_apply_interrupt(state: &JetEncodingHostileIoState, plan: JetEncodingHostileIoPlan, reads: Bool) -> io.Error! {
+    count :: if reads { plan.interrupt_reads } else { plan.interrupt_writes }
+    if count == U8{0} -> return
+    state.stats.interrupts += U64{1}
+    updated := plan
+    if reads { updated.interrupt_reads = count - U8{1} } else { updated.interrupt_writes = count - U8{1} }
+    state.plan = Val(updated)
+    Err(io.ErrorKind.Interrupted.into())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:225
+fn jet_encoding_file_read(reader: &JetFileReader, buf: &[U8]) -> Int io.Error! {
+    if jet_fault_should_fail("FS.Read") -> return Err(io.Error.other("fault injected: FS.Read"))
+    if jet_encoding_hostile_io_plan() is not Val(plan) {
+        cap :: buf.len().min(JET_ENCODING_IO_CHUNK)
+        // GATE #4565: kernel primitive — bounded buffered descriptor read.
+        return #Unsafe("reader owns the descriptor and borrows the bounded output span") { reader.inner.read(&buf[0..<cap]) }
+    }
+    jet_encoding_hostile_io_with(state -> {
+        state.stats.read_calls += U64{1}
+        jet_encoding_hostile_io_apply_interrupt(state, plan, true)?
+        if plan.fail_read_after == .Val(limit) {
+            if state.read_total >= limit -> return Err(jet_encoding_hostile_io_fail_io())
+        }
+        want :: state.next_read_cap(plan, buf.len())
+        // GATE #4565: kernel primitive — unbuffered descriptor read for hostile scheduling.
+        count :: #Unsafe("read the owned descriptor into the scheduled borrowed output span") {
+            reader.inner.get_mut().read(&buf[0..<want])?
+        }
+        if count == 0 -> return 0
+        state.read_total += U64{count}
+        state.stats.bytes_read += U64{count}
+        if plan.fail_read_after == .Val(limit) {
+            if state.read_total > limit -> return Err(jet_encoding_hostile_io_fail_io())
+        }
+        count
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:262
+fn jet_encoding_file_write_all(writer: &JetFileWriter, bytes: &[U8]) -> io.Error! {
+    if jet_fault_should_fail("FS.Write") -> return Err(io.Error.other("fault injected: FS.Write"))
+    if jet_encoding_hostile_io_plan() is not Val(plan) {
+        for chunk in bytes.chunks(JET_ENCODING_IO_CHUNK) {
+            // GATE #4565: kernel primitive — bounded buffered descriptor write.
+            #Unsafe("writer owns the descriptor; chunk is borrowed until write completes") { writer.inner.write_all(chunk)? }
+        }
+        return
+    }
+    jet_encoding_hostile_io_with(state -> {
+        state.stats.write_calls += U64{1}
+        jet_encoding_hostile_io_apply_interrupt(state, plan, false)?
+        if plan.fail_write_after == .Val(limit) {
+            if state.write_total >= limit -> return Err(jet_encoding_hostile_io_fail_io())
+        }
+        offset := 0
+        while offset < bytes.len() {
+            chunk :: state.next_write_chunk(plan, bytes.len() - offset)
+            end :: offset + chunk
+            slice :: &bytes[offset..<end]
+            if plan.fail_write_after == .Val(limit) {
+                next :: state.write_total.saturating_add(U64{slice.len()})
+                if next > limit {
+                    allowed :: Int{limit.saturating_sub(state.write_total)}
+                    if allowed == 0 -> return Err(jet_encoding_hostile_io_fail_io())
+                    // GATE #4565: kernel primitive — partial native descriptor write.
+                    #Unsafe("write only the allowed prefix to the owned unbuffered descriptor") {
+                        writer.inner.get_mut().write_all(&slice[0..<allowed])?
+                    }
+                    state.write_total += U64{allowed}
+                    state.stats.bytes_written += U64{allowed}
+                    return Err(jet_encoding_hostile_io_fail_io())
+                }
+            }
+            // GATE #4565: kernel primitive — scheduled native descriptor write.
+            #Unsafe("write borrowed scheduled bytes to the owned unbuffered descriptor") { writer.inner.get_mut().write_all(slice)? }
+            state.write_total += U64{slice.len()}
+            state.stats.bytes_written += U64{slice.len()}
+            offset = end
+        }
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs:312
+fn jet_encoding_file_flush(writer: &JetFileWriter) -> io.Error! {
+    if jet_fault_should_fail("FS.Write") -> return Err(io.Error.other("fault injected: FS.Write"))
+    if jet_encoding_hostile_io_plan() is not Val(plan) {
+        // GATE #4565: kernel primitive — buffered descriptor flush.
+        return #Unsafe("flush only the writer-owned descriptor") { writer.inner.flush() }
+    }
+    jet_encoding_hostile_io_with(state -> {
+        state.stats.flush_calls += U64{1}
+        jet_encoding_hostile_io_apply_interrupt(state, plan, false)?
+        // GATE #4565: kernel primitive — unbuffered descriptor flush.
+        #Unsafe("flush only the writer-owned unbuffered descriptor") { writer.inner.get_mut().flush() }
+    })
+}

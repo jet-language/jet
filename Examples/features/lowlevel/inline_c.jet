@@ -4,14 +4,14 @@ package {
     authority: { holds: { allow: [Exec, FFI, IO, Mem.Alloc] } }
 }
 #[Unsafe("the scalar ABI contract matches the C definition"), FFI(c)]
-fn add(a: Int, b: Int) -> Int -> {
+fn add(a: Int, b: Int) -> Int {
     """int64_t add(int64_t a, int64_t b) { return a + b; }"""
 }
 
 fn jet_add(a: Int, b: Int) -> Int { (a + b) }
 
 #[Unsafe("the scalar ABI contract deliberately returns a mismatched result"), FFI(c)]
-fn wrong_add(a: Int, b: Int) -> Int -> {
+fn wrong_add(a: Int, b: Int) -> Int {
     """int64_t wrong_add(int64_t a, int64_t b) { return a + b + 1; }"""
 }
 

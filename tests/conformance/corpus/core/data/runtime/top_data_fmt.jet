@@ -1,0 +1,41 @@
+use core.data.runtime.top_data_fmt.[jet_data_pivot_sum, jet_enc_csv_to_string,
+    jet_std_toml_parse, jet_std_toml_render, jet_enc_toml_decode,
+    jet_std_yaml_parse, jet_std_yaml_render, jet_enc_yaml_decode, jet_data_query_rows]
+use core.encoding.runtime.std_data_tree.DataTree
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs:1
+#Test("pivot_keys_are_tuples_and_output_is_lexicographically_sorted") {
+    rows :: [("b", "a", F64{2.0}), ("a", "z", F64{3.0}), ("b", "a", F64{4.0}),
+        ("ab", "c", F64{5.0}), ("a", "bc", F64{7.0})]
+    cells :: jet_data_pivot_sum(&rows, fn(row) { row.0 }, fn(row) { row.1 }, fn(row) { row.2 })
+    assert(cells.len() == 4)
+    assert(cells[0].row_key == "a" and cells[0].column_key == "bc")
+    assert(cells[1].row_key == "a" and cells[1].column_key == "z")
+    assert(cells[2].row_key == "ab" and cells[2].column_key == "c")
+    assert(cells[3].row_key == "b" and cells[3].column_key == "a")
+    assert(cells[3].count == 2 and cells[3].sum == F64{6.0} and cells[3].mean == F64{3.0})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs:36
+#Test("typed_csv_uses_first_record_header_and_empty_missing_cells") {
+    rows :: [DataTree.Object([("z", .Int(2)), ("a", .Text("x,y"))]),
+        DataTree.Object([("a", .Null), ("extra", .Bool(true))])]
+    assert(jet_enc_csv_to_string(&rows) == "z,a\n2,\"x,y\"\n,")
+    assert(jet_enc_csv_to_string<DataTree>(&[]) == "")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs:95
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs:124
+#Test("rich_toml_and_yaml_typed_adapters_share_the_dynamic_tree") {
+    toml_text :: "count = 2\n[child]\nname = \"jet\"\n"
+    toml_tree :: jet_std_toml_parse(&toml_text).unwrap()
+    assert(jet_enc_toml_decode<DataTree>(&toml_text) == Ok(toml_tree))
+    assert(jet_std_toml_parse(&jet_std_toml_render(toml_tree)) == Ok(toml_tree))
+    yaml_text :: "count: 2\nchild:\n  name: jet\n"
+    yaml_tree :: jet_std_yaml_parse(&yaml_text).unwrap()
+    assert(jet_enc_yaml_decode<DataTree>(&yaml_text) == Ok(yaml_tree))
+    assert(jet_std_yaml_parse(&jet_std_yaml_render(yaml_tree)) == Ok(yaml_tree))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs:159
+#Test("typed_sql_maps_selected_positions_back_to_original_rows") {
+    rows :: [DataTree.Object([("n", .Int(1))]), DataTree.Object([("n", .Int(3))]), DataTree.Object([("n", .Int(2))])]
+    assert(jet_data_query_rows(&rows, &"SELECT * FROM rows WHERE n > 1") == Ok([rows[1], rows[2]]))
+}

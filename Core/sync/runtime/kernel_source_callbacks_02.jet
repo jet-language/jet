@@ -1,0 +1,1058 @@
+// PORT-PENDING 2075 crates-jet-jit-src-sourcecallbacks-slice-1801: crates/jet-jit/src/SourceCallbacks.rs:1801-2854
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         let entry = state
+//RS             .callbacks
+//RS             .get_mut(&self.callback)
+//RS             .expect("Source callback lease cloned after release");
+//RS         assert!(
+//RS             !entry.release_requested,
+//RS             "Source callback lease cloned after release was queued"
+//RS         );
+//RS         entry.leases += 1;
+//RS         drop(state);
+//RS         Self {
+//RS             state: self.state.clone(),
+//RS             callback: self.callback,
+//RS             _types: std::marker::PhantomData,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<P, C, X, R> SourceCallbackLease<P, C, X, R>
+//RS where
+//RS     P: Send + 'static,
+//RS     C: Send + 'static,
+//RS     X: Send + 'static,
+//RS     R: Send + 'static,
+//RS {
+//RS     /// Session-local payload identity for owner-side payload access.
+//RS     pub fn callback_id(&self) -> SourceCallbackId {
+//RS         self.callback
+//RS     }
+//RS 
+//RS     /// Queue one invocation using this counted producer lease. Rejection
+//RS     /// returns the original command/context to the caller.
+//RS     pub fn enqueue(
+//RS         &self,
+//RS         command: C,
+//RS         context: X,
+//RS     ) -> Result<SourceCallbackReply<R>, SourceCallbackEnqueueError<C, X>> {
+//RS         let mut state = self
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         let error = match state.phase {
+//RS             SessionPhase::Open => None,
+//RS             SessionPhase::Retiring => Some(SourceCallbackError::Retiring),
+//RS             SessionPhase::Retired => Some(SourceCallbackError::Closed),
+//RS         };
+//RS         if let Some(error) = error {
+//RS             return Err(SourceCallbackEnqueueError {
+//RS                 error,
+//RS                 command,
+//RS                 context,
+//RS             });
+//RS         }
+//RS         let request = match state.next_request_id() {
+//RS             Ok(request) => request,
+//RS             Err(error) => {
+//RS                 return Err(SourceCallbackEnqueueError {
+//RS                     error,
+//RS                     command,
+//RS                     context,
+//RS                 })
+//RS             }
+//RS         };
+//RS         let Some(entry) = state.callbacks.get_mut(&self.callback) else {
+//RS             return Err(SourceCallbackEnqueueError {
+//RS                 error: SourceCallbackError::UnknownCallback,
+//RS                 command,
+//RS                 context,
+//RS             });
+//RS         };
+//RS         if entry.release_requested {
+//RS             return Err(SourceCallbackEnqueueError {
+//RS                 error: SourceCallbackError::UnknownCallback,
+//RS                 command,
+//RS                 context,
+//RS             });
+//RS         }
+//RS         let callback = self.callback;
+//RS         let completion_state = Arc::downgrade(&self.state);
+//RS         let completion = Arc::new(InvocationCompletion {
+//RS             inputs_done: std::sync::atomic::AtomicBool::new(false),
+//RS             reply_done: std::sync::atomic::AtomicBool::new(false),
+//RS             finished: std::sync::atomic::AtomicBool::new(false),
+//RS             finish: Box::new(move || {
+//RS                 if let Some(completion_state) = completion_state.upgrade() {
+//RS                     let queued = {
+//RS                         let mut state = completion_state
+//RS                             .lock()
+//RS                             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS                         state.finish_invocation(callback)
+//RS                     };
+//RS                     if queued {
+//RS                         notify_ready(&completion_state);
+//RS                     }
+//RS                 }
+//RS             }),
+//RS         });
+//RS         let lost_state = Arc::downgrade(&self.state);
+//RS         let lost_completion = completion.clone();
+//RS         let lost_callback = self.callback;
+//RS         let lost_request = request;
+//RS         let on_lost: Arc<dyn Fn(Result<R, SourceCallbackError>) + Send + Sync> =
+//RS             Arc::new(move |result| {
+//RS                 if let Some(lost_state) = lost_state.upgrade() {
+//RS                     let queued = {
+//RS                         let mut state = lost_state
+//RS                             .lock()
+//RS                             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS                         state.queue_reply_cleanup(
+//RS                             lost_callback,
+//RS                             lost_request,
+//RS                             result,
+//RS                             lost_completion.clone(),
+//RS                         )
+//RS                     };
+//RS                     if queued {
+//RS                         notify_ready(&lost_state);
+//RS                     }
+//RS                 }
+//RS             });
+//RS         let publish_state = Arc::downgrade(&self.state);
+//RS         let on_publish: Arc<
+//RS             dyn Fn() -> Option<Arc<dyn std::any::Any + Send + Sync>> + Send + Sync,
+//RS         > = Arc::new(move || {
+//RS             publish_state
+//RS                 .upgrade()
+//RS                 .map(|state| state as Arc<dyn std::any::Any + Send + Sync>)
+//RS         });
+//RS         let cell = Arc::new(ReplyCell {
+//RS             state: Mutex::new(ReplyCellState::Pending),
+//RS             wake: Condvar::new(),
+//RS             completion: completion.clone(),
+//RS             state_anchor: Mutex::new(None),
+//RS             on_publish,
+//RS             on_lost,
+//RS         });
+//RS         entry.inflight += 1;
+//RS         state.queue.push_back(PendingEvent::Invoke {
+//RS             callback: self.callback,
+//RS             request,
+//RS             command,
+//RS             context,
+//RS             responder: SourceCallbackResponder {
+//RS                 reply: Some(cell.clone()),
+//RS                 completion,
+//RS                 state_anchor: None,
+//RS             },
+//RS         });
+//RS         state.wake.notify_one();
+//RS         drop(state);
+//RS         notify_ready(&self.state);
+//RS         Ok(SourceCallbackReply { cell })
+//RS     }
+//RS 
+//RS     /// Queue an already-owned command/context for owner-side cleanup after a
+//RS     /// producer rejected an invocation. This route intentionally works while
+//RS     /// the session is retiring and does not consume the invocation request-ID
+//RS     /// space; request ID zero marks this cleanup-only obligation.
+//RS     pub fn queue_rejected_cleanup(
+//RS         &self,
+//RS         command: C,
+//RS         context: X,
+//RS     ) -> Result<(), SourceCallbackEnqueueError<C, X>> {
+//RS         let mut state = self
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         let error = match state.phase {
+//RS             SessionPhase::Retired => Some(SourceCallbackError::Closed),
+//RS             SessionPhase::Open | SessionPhase::Retiring => None,
+//RS         };
+//RS         if let Some(error) = error {
+//RS             return Err(SourceCallbackEnqueueError {
+//RS                 error,
+//RS                 command,
+//RS                 context,
+//RS             });
+//RS         }
+//RS         let Some(entry) = state.callbacks.get_mut(&self.callback) else {
+//RS             return Err(SourceCallbackEnqueueError {
+//RS                 error: SourceCallbackError::UnknownCallback,
+//RS                 command,
+//RS                 context,
+//RS             });
+//RS         };
+//RS         if entry.release_requested {
+//RS             return Err(SourceCallbackEnqueueError {
+//RS                 error: SourceCallbackError::UnknownCallback,
+//RS                 command,
+//RS                 context,
+//RS             });
+//RS         }
+//RS         let callback = self.callback;
+//RS         let completion_state = Arc::downgrade(&self.state);
+//RS         let completion = Arc::new(InvocationCompletion {
+//RS             inputs_done: std::sync::atomic::AtomicBool::new(false),
+//RS             reply_done: std::sync::atomic::AtomicBool::new(true),
+//RS             finished: std::sync::atomic::AtomicBool::new(false),
+//RS             finish: Box::new(move || {
+//RS                 if let Some(completion_state) = completion_state.upgrade() {
+//RS                     let queued = {
+//RS                         let mut state = completion_state
+//RS                             .lock()
+//RS                             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS                         state.finish_invocation(callback)
+//RS                     };
+//RS                     if queued {
+//RS                         notify_ready(&completion_state);
+//RS                     }
+//RS                 }
+//RS             }),
+//RS         });
+//RS         entry.inflight += 1;
+//RS         state.queue.push_back(PendingEvent::Cleanup {
+//RS             callback,
+//RS             request: SourceCallbackRequestId(0),
+//RS             command: Some(command),
+//RS             context: Some(context),
+//RS             completion,
+//RS         });
+//RS         state.wake.notify_one();
+//RS         drop(state);
+//RS         notify_ready(&self.state);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Read the retained payload without keeping the session mutex held while
+//RS     /// the callback runs.
+//RS     pub fn with_payload<T>(
+//RS         &self,
+//RS         body: impl FnOnce(&P) -> T,
+//RS     ) -> Result<T, SourceCallbackError> {
+//RS         let mut root = self.take_payload_root()?;
+//RS         let result = body(root.payload.as_ref().expect("payload root is present"));
+//RS         drop(root);
+//RS         Ok(result)
+//RS     }
+//RS 
+//RS     /// Mutably borrow the retained payload without holding the session mutex
+//RS     /// across Source/Eval work.
+//RS     pub fn with_payload_mut<T>(
+//RS         &self,
+//RS         body: impl FnOnce(&mut P) -> T,
+//RS     ) -> Result<T, SourceCallbackError> {
+//RS         let mut root = self.take_payload_root()?;
+//RS         let result = body(root.payload.as_mut().expect("payload root is present"));
+//RS         drop(root);
+//RS         Ok(result)
+//RS     }
+//RS 
+//RS     fn take_payload_root(&self) -> Result<PayloadRoot<P, C, X, R>, SourceCallbackError> {
+//RS         let mut state = self
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         let entry = state
+//RS             .callbacks
+//RS             .get_mut(&self.callback)
+//RS             .ok_or(SourceCallbackError::UnknownCallback)?;
+//RS         let payload = entry.payload.take().ok_or(SourceCallbackError::PayloadBusy)?;
+//RS         entry.borrows += 1;
+//RS         drop(state);
+//RS         Ok(PayloadRoot {
+//RS             state: self.state.clone(),
+//RS             callback: self.callback,
+//RS             payload: Some(payload),
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS impl<P, C, X, R> Drop for SourceCallbackLease<P, C, X, R> {
+//RS     fn drop(&mut self) {
+//RS         let queued = {
+//RS             let mut state = self
+//RS                 .state
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             let Some(entry) = state.callbacks.get_mut(&self.callback) else {
+//RS                 return;
+//RS             };
+//RS             if entry.leases != 0 {
+//RS                 entry.leases -= 1;
+//RS             }
+//RS             let should_release = entry.leases == 0 && entry.inflight == 0 && entry.borrows == 0;
+//RS             let queued = should_release && state.queue_release(self.callback);
+//RS             state.wake.notify_all();
+//RS             queued
+//RS         };
+//RS         if queued {
+//RS             notify_ready(&self.state);
+//RS         }
+//RS     }
+//RS }
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     use std::sync::atomic::{AtomicUsize, Ordering};
+//RS     use std::sync::Arc;
+//RS 
+//RS     struct DropProbe {
+//RS         drops: Arc<AtomicUsize>,
+//RS         on_drop: Option<Arc<dyn Fn() + Send + Sync>>,
+//RS     }
+//RS 
+//RS     impl Drop for DropProbe {
+//RS         fn drop(&mut self) {
+//RS             self.drops.fetch_add(1, Ordering::SeqCst);
+//RS             if let Some(on_drop) = self.on_drop.take() {
+//RS                 on_drop();
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn take_event<P, C, X, R>(
+//RS         session: &SourceCallbackSession<P, C, X, R>,
+//RS     ) -> SourceCallbackEvent<P, C, X, R>
+//RS     where
+//RS         P: Send + 'static,
+//RS         C: Send + 'static,
+//RS         X: Send + 'static,
+//RS         R: Send + 'static,
+//RS     {
+//RS         match session.try_next() {
+//RS             Some(event) => event,
+//RS             None => panic!("expected a Source callback event"),
+//RS         }
+//RS     }
+//RS 
+//RS     fn test_session<P, C, X, R>() -> SourceCallbackSession<P, C, X, R>
+//RS     where
+//RS         P: Send + 'static,
+//RS         C: Send + 'static,
+//RS         X: Send + 'static,
+//RS         R: Send + 'static,
+//RS     {
+//RS         SourceCallbackSession::new(
+//RS             |mut abandoned| {
+//RS                 let mut had_values = false;
+//RS                 while abandoned.next_event().is_some() {
+//RS                     had_values = true;
+//RS                 }
+//RS                 while let Some((_, payload)) = abandoned.next_payload() {
+//RS                     had_values = true;
+//RS                     drop(payload);
+//RS                 }
+//RS                 assert!(!had_values, "test left callback ownership abandoned");
+//RS             },
+//RS             |_| {},
+//RS         )
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn ready_hook_notifies_new_invocation_cleanup_and_release_events() {
+//RS         let notifications = Arc::new(AtomicUsize::new(0));
+//RS         let sink = notifications.clone();
+//RS         let session: SourceCallbackSession<(), (), (), ()> = SourceCallbackSession::new(
+//RS             |mut abandoned| {
+//RS                 assert!(abandoned.next_event().is_none());
+//RS                 assert!(abandoned.next_payload().is_none());
+//RS             },
+//RS             move |_ready| {
+//RS                 sink.fetch_add(1, Ordering::SeqCst);
+//RS             },
+//RS         );
+//RS         let lease = session.register(()).expect("register callback payload");
+//RS         let reply = lease.enqueue((), ()).expect("enqueue callback");
+//RS         assert_eq!(notifications.load(Ordering::SeqCst), 1);
+//RS         let mut invocation = match take_event(&session) {
+//RS             SourceCallbackEvent::Invoke(invocation) => invocation,
+//RS             _ => panic!("expected queued invocation"),
+//RS         };
+//RS         invocation.respond(Ok(())).expect("publish callback result");
+//RS         drop(invocation);
+//RS         assert_eq!(notifications.load(Ordering::SeqCst), 2);
+//RS         reply.recv().expect("receive callback result");
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Cleanup(cleanup) => cleanup.complete(),
+//RS             _ => panic!("dropping invocation must queue its input cleanup"),
+//RS         }
+//RS         drop(lease);
+//RS         assert_eq!(notifications.load(Ordering::SeqCst), 3);
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Release(release) => {
+//RS                 release.complete().expect("complete payload release");
+//RS             }
+//RS             _ => panic!("final lease drop must queue payload release"),
+//RS         }
+//RS         session.begin_retire();
+//RS         session.retire().expect("retire drained callback session");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn helper_execution_failure_reply_preserves_detail_and_drains_inputs() {
+//RS         let session: SourceCallbackSession<(), (), (), String> = test_session();
+//RS         let lease = session.register(()).expect("register callback");
+//RS         let reply = lease.enqueue((), ()).expect("enqueue callback");
+//RS         let mut invocation = match take_event(&session) {
+//RS             SourceCallbackEvent::Invoke(invocation) => invocation,
+//RS             _ => panic!("expected queued invocation"),
+//RS         };
+//RS         let failure = SourceCallbackError::ExecutionFailed {
+//RS             detail: "helper result decode failed".to_string(),
+//RS         };
+//RS         invocation
+//RS             .respond(Err(failure.clone()))
+//RS             .expect("publish helper execution failure");
+//RS         assert_eq!(reply.recv(), Err(failure.clone()));
+//RS         assert_eq!(session.drain_status().inflight, 1);
+//RS         drop(invocation);
+//RS 
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Cleanup(mut cleanup) => cleanup.complete(),
+//RS             _ => panic!("invocation inputs require Source cleanup"),
+//RS         }
+//RS         assert_eq!(session.drain_status().inflight, 0);
+//RS         drop(lease);
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Release(release) => {
+//RS                 release.complete().expect("release callback payload");
+//RS             }
+//RS             _ => panic!("final lease drop must queue payload release"),
+//RS         }
+//RS         session.begin_retire();
+//RS         session.retire().expect("retire drained callback session");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn contended_invocation_defers_until_payload_release_without_blocking_other_callbacks() {
+//RS         let notifications = Arc::new(AtomicUsize::new(0));
+//RS         let ready_handles = Arc::new(Mutex::new(VecDeque::new()));
+//RS         let count_sink = notifications.clone();
+//RS         let ready_sink = ready_handles.clone();
+//RS         let session: SourceCallbackSession<String, String, String, String> =
+//RS             SourceCallbackSession::new(
+//RS                 |mut abandoned| {
+//RS                     assert!(abandoned.next_event().is_none());
+//RS                     assert!(abandoned.next_payload().is_none());
+//RS                 },
+//RS                 move |ready| {
+//RS                     count_sink.fetch_add(1, Ordering::SeqCst);
+//RS                     ready_sink
+//RS                         .lock()
+//RS                         .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                         .push_back(ready);
+//RS                 },
+//RS             );
+//RS         let next_ready = || {
+//RS             let ready = ready_handles
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                 .pop_front()
+//RS                 .expect("one ready notification per event");
+//RS             ready.try_next().expect("ready handle owns a queued event")
+//RS         };
+//RS         let lease_a = session.register("callback-a".to_string()).expect("register A");
+//RS         let callback_a = lease_a.callback_id();
+//RS         let lease_b = session.register("callback-b".to_string()).expect("register B");
+//RS         let reply_a1 = lease_a
+//RS             .enqueue("a-first".to_string(), "scope".to_string())
+//RS             .expect("enqueue first A invocation");
+//RS         let reply_a2 = lease_a
+//RS             .enqueue("a-second".to_string(), "scope".to_string())
+//RS             .expect("enqueue second A invocation");
+//RS         let reply_b = lease_b
+//RS             .enqueue("b-only".to_string(), "scope".to_string())
+//RS             .expect("enqueue B invocation");
+//RS         assert_eq!(notifications.load(Ordering::SeqCst), 3);
+//RS 
+//RS         let invocation_a1 = match next_ready() {
+//RS             SourceCallbackEvent::Invoke(invocation) => invocation,
+//RS             _ => panic!("expected first A invocation"),
+//RS         };
+//RS         let invocation_a2 = match next_ready() {
+//RS             SourceCallbackEvent::Invoke(invocation) => invocation,
+//RS             _ => panic!("expected second A invocation"),
+//RS         };
+//RS         let invocation_b = match next_ready() {
+//RS             SourceCallbackEvent::Invoke(invocation) => invocation,
+//RS             _ => panic!("expected B invocation"),
+//RS         };
+//RS 
+//RS         session
+//RS             .with_payload_mut(callback_a, |payload| {
+//RS                 assert_eq!(payload, "callback-a");
+//RS                 assert_eq!(
+//RS                     invocation_a1.try_with_payload_mut::<()>(|_, _| panic!("busy callback ran")),
+//RS                     Err(SourceCallbackError::PayloadBusy)
+//RS                 );
+//RS                 assert_eq!(notifications.load(Ordering::SeqCst), 3);
+//RS                 assert_eq!(session.drain_status().pending, 1);
+//RS 
+//RS                 invocation_b
+//RS                     .try_with_payload_mut(|payload, invocation| {
+//RS                         assert_eq!(payload, "callback-b");
+//RS                         invocation
+//RS                             .respond(Ok("b-result".to_string()))
+//RS                             .expect("respond through independent callback");
+//RS                     })
+//RS                     .expect("different callback payload remains available");
+//RS                 assert_eq!(reply_b.recv().expect("receive B result"), "b-result");
+//RS                 match next_ready() {
+//RS                     SourceCallbackEvent::Cleanup(mut cleanup) => cleanup.complete(),
+//RS                     _ => panic!("B invocation requires input cleanup"),
+//RS                 }
+//RS 
+//RS                 assert_eq!(
+//RS                     invocation_a2.try_with_payload_mut::<()>(|_, _| panic!("busy callback ran")),
+//RS                     Err(SourceCallbackError::PayloadBusy)
+//RS                 );
+//RS                 assert_eq!(notifications.load(Ordering::SeqCst), 4);
+//RS                 assert_eq!(session.drain_status().pending, 2);
+//RS             })
+//RS             .expect("borrow A payload");
+//RS         assert_eq!(notifications.load(Ordering::SeqCst), 6);
+//RS         assert_eq!(
+//RS             ready_handles
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                 .len(),
+//RS             2
+//RS         );
+//RS 
+//RS         let invocation_a1 = match next_ready() {
+//RS             SourceCallbackEvent::Invoke(invocation) => invocation,
+//RS             _ => panic!("payload release must requeue first A invocation"),
+//RS         };
+//RS         invocation_a1
+//RS             .try_with_payload_mut(|payload, invocation| {
+//RS                 assert_eq!(payload, "callback-a");
+//RS                 invocation
+//RS                     .respond(Ok(invocation.command().clone()))
+//RS                     .expect("respond through first A invocation");
+//RS             })
+//RS             .expect("first deferred A invocation");
+//RS         assert_eq!(reply_a1.recv().expect("receive first A result"), "a-first");
+//RS 
+//RS         let invocation_a2 = match next_ready() {
+//RS             SourceCallbackEvent::Invoke(invocation) => invocation,
+//RS             _ => panic!("payload release must requeue second A invocation"),
+//RS         };
+//RS         invocation_a2
+//RS             .try_with_payload_mut(|payload, invocation| {
+//RS                 assert_eq!(payload, "callback-a");
+//RS                 invocation
+//RS                     .respond(Ok(invocation.command().clone()))
+//RS                     .expect("respond through second A invocation");
+//RS             })
+//RS             .expect("second deferred A invocation");
+//RS         assert_eq!(reply_a2.recv().expect("receive second A result"), "a-second");
+//RS 
+//RS         for _ in 0..2 {
+//RS             match next_ready() {
+//RS                 SourceCallbackEvent::Cleanup(mut cleanup) => cleanup.complete(),
+//RS                 _ => panic!("A invocations require input cleanup"),
+//RS             }
+//RS         }
+//RS         drop(lease_a);
+//RS         drop(lease_b);
+//RS         for _ in 0..2 {
+//RS             match next_ready() {
+//RS                 SourceCallbackEvent::Release(release) => {
+//RS                     release.complete().expect("release callback payload");
+//RS                 }
+//RS                 _ => panic!("final callback lease drop must queue release"),
+//RS             }
+//RS         }
+//RS         session.begin_retire();
+//RS         session.retire().expect("retire drained callback session");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn never_invoked_lease_releases_original_payload_once() {
+//RS         let drops = Arc::new(AtomicUsize::new(0));
+//RS         let session: SourceCallbackSession<DropProbe, (), (), ()> =
+//RS             test_session();
+//RS         let lease = match session.register(DropProbe {
+//RS             drops: drops.clone(),
+//RS             on_drop: None,
+//RS         }) {
+//RS             Ok(lease) => lease,
+//RS             Err(_) => panic!("registration unexpectedly failed"),
+//RS         };
+//RS         let callback = lease.callback_id();
+//RS 
+//RS         session.begin_retire();
+//RS         drop(lease);
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Release(mut release) => {
+//RS                 assert_eq!(release.callback_id(), callback);
+//RS                 assert_eq!(release.payload().drops.load(Ordering::SeqCst), 0);
+//RS                 assert!(release.complete().is_ok());
+//RS             }
+//RS             _ => panic!("lease drop must enqueue a release event"),
+//RS         }
+//RS 
+//RS         assert_eq!(drops.load(Ordering::SeqCst), 1);
+//RS         assert!(session.retire().is_ok());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn queued_invocation_and_payload_root_defer_release_and_retirement() {
+//RS         let drops = Arc::new(AtomicUsize::new(0));
+//RS         let session: SourceCallbackSession<DropProbe, i32, String, ()> =
+//RS             test_session();
+//RS         let lease = match session.register(DropProbe {
+//RS             drops: drops.clone(),
+//RS             on_drop: None,
+//RS         }) {
+//RS             Ok(lease) => lease,
+//RS             Err(_) => panic!("registration unexpectedly failed"),
+//RS         };
+//RS         let callback = lease.callback_id();
+//RS         let reply = match lease.enqueue(7, "task".to_string()) {
+//RS             Ok(reply) => reply,
+//RS             Err(_) => panic!("enqueue unexpectedly failed"),
+//RS         };
+//RS 
+//RS         session.begin_retire();
+//RS         drop(lease);
+//RS         assert_eq!(session.drain_status().inflight, 1);
+//RS         session
+//RS             .with_payload(callback, |_payload| {
+//RS                 assert_eq!(session.drain_status().borrows, 1);
+//RS                 assert!(session.retire().is_err());
+//RS 
+//RS                 match take_event(&session) {
+//RS                     SourceCallbackEvent::Invoke(invocation) => drop(invocation),
+//RS                     _ => panic!("queued invocation must be pumped first"),
+//RS                 }
+//RS                 match take_event(&session) {
+//RS                     SourceCallbackEvent::Cleanup(mut cleanup) => cleanup.complete(),
+//RS                     _ => panic!("dropped invocation must enqueue cleanup"),
+//RS                 }
+//RS                 assert_eq!(reply.try_recv(), Err(SourceCallbackError::ReplyClosed));
+//RS                 assert_eq!(session.drain_status().inflight, 0);
+//RS                 assert_eq!(session.drain_status().borrows, 1);
+//RS             })
+//RS             .expect("payload root borrow unexpectedly failed");
+//RS 
+//RS         assert_eq!(session.drain_status().releases, 1);
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Release(release) => {
+//RS                 assert!(release.complete().is_ok());
+//RS             }
+//RS             _ => panic!("payload/root drain must enqueue release"),
+//RS         }
+//RS         assert_eq!(drops.load(Ordering::SeqCst), 1);
+//RS         assert!(session.retire().is_ok());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dropped_invocation_queues_owned_command_and_context_cleanup() {
+//RS         let session: SourceCallbackSession<(), String, String, ()> =
+//RS             test_session();
+//RS         let lease = match session.register(()) {
+//RS             Ok(lease) => lease,
+//RS             Err(_) => panic!("registration unexpectedly failed"),
+//RS         };
+//RS         let reply = match lease.enqueue("command".to_string(), "scope".to_string()) {
+//RS             Ok(reply) => reply,
+//RS             Err(_) => panic!("enqueue unexpectedly failed"),
+//RS         };
+//RS         let invocation = match take_event(&session) {
+//RS             SourceCallbackEvent::Invoke(invocation) => invocation,
+//RS             _ => panic!("expected queued invocation"),
+//RS         };
+//RS         drop(reply);
+//RS         drop(invocation);
+//RS 
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Cleanup(mut cleanup) => {
+//RS                 assert_eq!(cleanup.take_command(), Some("command".to_string()));
+//RS                 assert_eq!(cleanup.take_context(), Some("scope".to_string()));
+//RS                 cleanup.complete();
+//RS             }
+//RS             _ => panic!("dropped invocation must preserve cleanup ownership"),
+//RS         }
+//RS         drop(lease);
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Release(release) => assert!(release.complete().is_ok()),
+//RS             _ => panic!("final lease must enqueue release"),
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn delivered_reply_receiver_drop_queues_owned_result_cleanup() {
+//RS         let session: SourceCallbackSession<(), String, String, String> =
+//RS             test_session();
+//RS         let lease = session.register(()).expect("register callback");
+//RS         let reply = lease
+//RS             .enqueue("command".to_string(), "scope".to_string())
+//RS             .expect("enqueue callback");
+//RS         let mut invocation = match take_event(&session) {
+//RS             SourceCallbackEvent::Invoke(invocation) => invocation,
+//RS             _ => panic!("expected invocation"),
+//RS         };
+//RS         invocation
+//RS             .respond(Ok("return".to_string()))
+//RS             .expect("publish callback result");
+//RS         drop(invocation);
+//RS         drop(reply);
+//RS 
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Cleanup(mut cleanup) => {
+//RS                 assert_eq!(cleanup.take_command(), Some("command".to_string()));
+//RS                 assert_eq!(cleanup.take_context(), Some("scope".to_string()));
+//RS                 cleanup.complete();
+//RS             }
+//RS             _ => panic!("reply must preserve invocation input cleanup"),
+//RS         }
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::ReplyCleanup(mut cleanup) => {
+//RS                 assert_eq!(cleanup.take_result(), Ok("return".to_string()));
+//RS                 cleanup.complete().expect("complete reply cleanup");
+//RS             }
+//RS             _ => panic!("dropped reply must enqueue result cleanup"),
+//RS         }
+//RS         drop(lease);
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Release(release) => {
+//RS                 release.complete().expect("complete callback release");
+//RS             }
+//RS             _ => panic!("callback release must wait for reply cleanup"),
+//RS         }
+//RS         assert!(session.retire().is_ok());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn detached_responder_retains_invocation_until_reply_is_received() {
+//RS         let session: SourceCallbackSession<(), String, String, String> =
+//RS             test_session();
+//RS         let lease = session.register(()).expect("register callback");
+//RS         let reply = lease
+//RS             .enqueue("command".to_string(), "scope".to_string())
+//RS             .expect("enqueue callback");
+//RS         let mut invocation = match take_event(&session) {
+//RS             SourceCallbackEvent::Invoke(invocation) => invocation,
+//RS             _ => panic!("expected invocation"),
+//RS         };
+//RS         let mut responder = invocation.take_responder().expect("detach responder");
+//RS         drop(invocation);
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Cleanup(mut cleanup) => cleanup.complete(),
+//RS             _ => panic!("detached invocation must preserve input cleanup"),
+//RS         }
+//RS         assert_eq!(session.drain_status().inflight, 1);
+//RS         responder.reply("return".to_string()).expect("send detached reply");
+//RS         assert_eq!(reply.recv().expect("receive detached reply"), "return");
+//RS         assert_eq!(session.drain_status().inflight, 0);
+//RS         drop(lease);
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Release(release) => {
+//RS                 release.complete().expect("complete callback release");
+//RS             }
+//RS             _ => panic!("release must wait for detached responder"),
+//RS         }
+//RS         assert!(session.retire().is_ok());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn registration_enqueue_and_reply_failures_return_owned_values() {
+//RS         let session: SourceCallbackSession<String, String, String, String> =
+//RS             test_session();
+//RS         session.begin_retire();
+//RS         match session.register("payload".to_string()) {
+//RS             Err(error) => {
+//RS                 assert_eq!(error.error, SourceCallbackError::Retiring);
+//RS                 assert_eq!(error.payload, "payload");
+//RS             }
+//RS             Ok(_) => panic!("retiring session accepted a payload"),
+//RS         }
+//RS 
+//RS         let session: SourceCallbackSession<(), String, String, String> =
+//RS             test_session();
+//RS         let lease = match session.register(()) {
+//RS             Ok(lease) => lease,
+//RS             Err(_) => panic!("registration unexpectedly failed"),
+//RS         };
+//RS         session.begin_retire();
+//RS         match lease.enqueue("command".to_string(), "scope".to_string()) {
+//RS             Err(error) => {
+//RS                 assert_eq!(error.error, SourceCallbackError::Retiring);
+//RS                 assert_eq!(error.command, "command");
+//RS                 assert_eq!(error.context, "scope");
+//RS             }
+//RS             Ok(_) => panic!("retiring session accepted an invocation"),
+//RS         }
+//RS         drop(lease);
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Release(release) => assert!(release.complete().is_ok()),
+//RS             _ => panic!("lease drop must enqueue release"),
+//RS         }
+//RS 
+//RS         assert!(session.retire().is_ok());
+//RS 
+//RS         let session: SourceCallbackSession<(), String, String, String> =
+//RS             test_session();
+//RS         let lease = match session.register(()) {
+//RS             Ok(lease) => lease,
+//RS             Err(_) => panic!("registration unexpectedly failed"),
+//RS         };
+//RS         let reply = match lease.enqueue("command".to_string(), "scope".to_string()) {
+//RS             Ok(reply) => reply,
+//RS             Err(_) => panic!("enqueue unexpectedly failed"),
+//RS         };
+//RS         let mut invocation = match take_event(&session) {
+//RS             SourceCallbackEvent::Invoke(invocation) => invocation,
+//RS             _ => panic!("expected queued invocation"),
+//RS         };
+//RS         drop(reply);
+//RS         assert!(matches!(
+//RS             invocation.respond(Ok("return".to_string())),
+//RS             Err(SourceCallbackReplyError::Disconnected)
+//RS         ));
+//RS         drop(invocation.take_command());
+//RS         drop(invocation.take_context());
+//RS         drop(invocation);
+//RS         drop(lease);
+//RS         assert_eq!(session.drain_status().inflight, 1);
+//RS         assert_eq!(session.drain_status().releases, 0);
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::ReplyCleanup(mut cleanup) => {
+//RS                 assert_eq!(cleanup.take_result(), Ok("return".to_string()));
+//RS                 cleanup.complete().expect("complete disconnected reply cleanup");
+//RS             }
+//RS             _ => panic!("disconnected reply must queue owner cleanup"),
+//RS         }
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Release(release) => {
+//RS                 release.complete().expect("complete callback release");
+//RS             }
+//RS             _ => panic!("reply cleanup must precede final callback release"),
+//RS         }
+//RS         assert!(session.retire().is_ok());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn already_sent_response_returns_the_rejected_owned_value() {
+//RS         let session: SourceCallbackSession<(), String, String, String> = test_session();
+//RS         let lease = session.register(()).expect("register callback");
+//RS         let reply = lease
+//RS             .enqueue("command".to_string(), "scope".to_string())
+//RS             .expect("enqueue callback");
+//RS         let mut invocation = match take_event(&session) {
+//RS             SourceCallbackEvent::Invoke(invocation) => invocation,
+//RS             _ => panic!("expected invocation"),
+//RS         };
+//RS         invocation
+//RS             .respond(Ok("accepted".to_string()))
+//RS             .expect("publish first response");
+//RS         let rejected = match invocation.respond(Ok("rejected".to_string())) {
+//RS             Err(SourceCallbackReplyError::AlreadySent(Ok(value))) => value,
+//RS             _ => panic!("already-sent response did not return its value"),
+//RS         };
+//RS         assert_eq!(rejected, "rejected");
+//RS         drop(rejected);
+//RS         drop(invocation.take_command());
+//RS         drop(invocation.take_context());
+//RS         drop(invocation);
+//RS         drop(lease);
+//RS         assert_eq!(session.drain_status().inflight, 1);
+//RS         assert_eq!(reply.recv().expect("receive first response"), "accepted");
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Release(release) => {
+//RS                 release.complete().expect("complete callback release");
+//RS             }
+//RS             _ => panic!("reply completion must precede final callback release"),
+//RS         }
+//RS         assert!(session.retire().is_ok());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn abandoned_session_hands_off_unpumped_values_without_a_state_cycle() {
+//RS         let handed_off = Arc::new(std::sync::Mutex::new(Vec::new()));
+//RS         let sink = handed_off.clone();
+//RS         let session = SourceCallbackSession::<String, String, String, String>::new(
+//RS             move |mut abandoned| {
+//RS                 let mut packets = Vec::new();
+//RS                 while let Some(event) = abandoned.next_event() {
+//RS                     match event {
+//RS                         SourceCallbackAbandonedEvent::Invoke {
+//RS                             callback,
+//RS                             request,
+//RS                             command,
+//RS                             context,
+//RS                         } => {
+//RS                             let payload = abandoned
+//RS                                 .with_payload(callback, |payload| payload.clone())
+//RS                                 .expect("invocation payload");
+//RS                             packets.push(format!(
+//RS                                 "invoke:{}:{}:{command}:{context}:{payload}",
+//RS                                 callback.get(),
+//RS                                 request.get()
+//RS                             ));
+//RS                         }
+//RS                         SourceCallbackAbandonedEvent::Cleanup {
+//RS                             command, context, ..
+//RS                         } => packets.push(format!("cleanup:{command:?}:{context:?}")),
+//RS                         SourceCallbackAbandonedEvent::ReplyCleanup { result, .. } => {
+//RS                             packets.push(format!("reply:{result:?}"));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 while let Some((callback, payload)) = abandoned.next_payload() {
+//RS                     packets.push(format!("payload:{}:{payload}", callback.get()));
+//RS                 }
+//RS                 *sink.lock().expect("abandonment sink lock") = packets;
+//RS             },
+//RS             |_| {},
+//RS         );
+//RS         let lease = session.register("payload".to_string()).expect("register callback");
+//RS         let reply = lease
+//RS             .enqueue("command".to_string(), "scope".to_string())
+//RS             .expect("enqueue invocation");
+//RS 
+//RS         drop(reply);
+//RS         drop(lease);
+//RS         drop(session);
+//RS 
+//RS         assert_eq!(
+//RS             *handed_off.lock().expect("abandonment sink lock"),
+//RS             vec!["invoke:1:1:command:scope:payload", "payload:1:payload"]
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn rejected_enqueue_can_be_handed_to_owner_cleanup_while_retiring() {
+//RS         let session: SourceCallbackSession<(), String, String, ()> =
+//RS             test_session();
+//RS         let lease = session.register(()).expect("register callback");
+//RS         session.begin_retire();
+//RS         lease
+//RS             .queue_rejected_cleanup("command".to_string(), "scope".to_string())
+//RS             .expect("queue rejected owned invocation");
+//RS         drop(lease);
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Cleanup(mut cleanup) => {
+//RS                 assert_eq!(cleanup.request_id().get(), 0);
+//RS                 assert_eq!(cleanup.take_command(), Some("command".to_string()));
+//RS                 assert_eq!(cleanup.take_context(), Some("scope".to_string()));
+//RS                 cleanup.complete();
+//RS             }
+//RS             _ => panic!("rejected invocation must preserve cleanup ownership"),
+//RS         }
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Release(release) => {
+//RS                 release.complete().expect("complete callback release");
+//RS             }
+//RS             _ => panic!("cleanup must drain before callback release"),
+//RS         }
+//RS         assert!(session.retire().is_ok());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn payload_and_release_cleanup_reenter_without_session_mutex() {
+//RS         let drops = Arc::new(AtomicUsize::new(0));
+//RS         let reentered = Arc::new(AtomicUsize::new(0));
+//RS         let session: SourceCallbackSession<DropProbe, (), (), ()> =
+//RS             test_session();
+//RS         let callback_session = session.clone();
+//RS         let callback_reentered = reentered.clone();
+//RS         let on_drop: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+//RS             let _ = callback_session.drain_status();
+//RS             callback_reentered.fetch_add(1, Ordering::SeqCst);
+//RS         });
+//RS         let lease = match session.register(DropProbe {
+//RS             drops: drops.clone(),
+//RS             on_drop: Some(on_drop),
+//RS         }) {
+//RS             Ok(lease) => lease,
+//RS             Err(_) => panic!("registration unexpectedly failed"),
+//RS         };
+//RS         let callback = lease.callback_id();
+//RS 
+//RS         let borrows = session
+//RS             .with_payload_mut(callback, |_payload| session.drain_status().borrows)
+//RS             .expect("reentrant payload callback unexpectedly failed");
+//RS         assert_eq!(borrows, 1);
+//RS 
+//RS         session.begin_retire();
+//RS         drop(lease);
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Release(release) => assert!(release.complete().is_ok()),
+//RS             _ => panic!("final lease must enqueue release"),
+//RS         }
+//RS         assert_eq!(drops.load(Ordering::SeqCst), 1);
+//RS         assert_eq!(reentered.load(Ordering::SeqCst), 1);
+//RS         assert!(session.retire().is_ok());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn callback_and_request_ids_fail_instead_of_wrapping() {
+//RS         let session: SourceCallbackSession<(), (), (), ()> =
+//RS             test_session();
+//RS         {
+//RS             let mut state = session.lock_state();
+//RS             state.next_callback = Some(u64::MAX);
+//RS         }
+//RS         let lease = match session.register(()) {
+//RS             Ok(lease) => lease,
+//RS             Err(_) => panic!("maximum callback identity should still be usable"),
+//RS         };
+//RS         assert_eq!(lease.callback_id().get(), u64::MAX);
+//RS         match session.register(()) {
+//RS             Err(error) => assert_eq!(error.error, SourceCallbackError::IdExhausted),
+//RS             Ok(_) => panic!("callback identity wrapped after exhaustion"),
+//RS         }
+//RS         drop(lease);
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Release(release) => assert!(release.complete().is_ok()),
+//RS             _ => panic!("lease drop must enqueue release"),
+//RS         }
+//RS 
+//RS         let session: SourceCallbackSession<(), (), (), ()> =
+//RS             test_session();
+//RS         let lease = match session.register(()) {
+//RS             Ok(lease) => lease,
+//RS             Err(_) => panic!("registration unexpectedly failed"),
+//RS         };
+//RS         {
+//RS             let mut state = session.lock_state();
+//RS             state.next_request = Some(u64::MAX);
+//RS         }
+//RS         let reply = match lease.enqueue((), ()) {
+//RS             Ok(reply) => reply,
+//RS             Err(_) => panic!("maximum request identity should still be usable"),
+//RS         };
+//RS         let mut invocation = match take_event(&session) {
+//RS             SourceCallbackEvent::Invoke(invocation) => invocation,
+//RS             _ => panic!("expected queued invocation"),
+//RS         };
+//RS         assert_eq!(invocation.request_id().get(), u64::MAX);
+//RS         match lease.enqueue((), ()) {
+//RS             Err(error) => {
+//RS                 assert_eq!(error.error, SourceCallbackError::IdExhausted);
+//RS                 assert_eq!(error.command, ());
+//RS                 assert_eq!(error.context, ());
+//RS             }
+//RS             Ok(_) => panic!("request identity wrapped after exhaustion"),
+//RS         }
+//RS         assert!(invocation.respond(Ok(())).is_ok());
+//RS         drop(invocation);
+//RS         drop(reply);
+//RS         drop(lease);
+//RS         match take_event(&session) {
+//RS             SourceCallbackEvent::Release(release) => assert!(release.complete().is_ok()),
+//RS             _ => panic!("lease drop must enqueue release"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2075 crates/jet-jit/src/SourceCallbacks.rs:1801-2854
+

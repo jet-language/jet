@@ -1,0 +1,14 @@
+use core.prelude.runtime.kernel_runtime_stack.[jet_runtime_stack_enter, jet_runtime_stack_leave]
+use jet_foundation.Outcome.[JET_RUNTIME_STACK_LIMIT]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/RuntimeStack.rs:12
+#Test("runtime stack limit traps only after limit and leave restores depth") {
+    for _ in 0..<JET_RUNTIME_STACK_LIMIT { assert(not jet_runtime_stack_enter()) }
+    assert(jet_runtime_stack_enter())
+    jet_runtime_stack_leave()
+    assert(jet_runtime_stack_enter())
+    for _ in 0..<(JET_RUNTIME_STACK_LIMIT + 1) { jet_runtime_stack_leave() }
+    jet_runtime_stack_leave()
+    assert(not jet_runtime_stack_enter())
+    jet_runtime_stack_leave()
+}

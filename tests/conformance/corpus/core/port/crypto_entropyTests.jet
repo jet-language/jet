@@ -1,0 +1,476 @@
+// Rust: tests/crypto_entropy.rs:1-20
+use tests.common as common
+use tests.conformance.corpus.core.port.crypto_entropy.[without_os_entropy, auth_session_regression]
+use core.crypto.runtime.top_crypto_entropy.*
+use core.auth.runtime.top_auth_session.*
+use std.fs as fs
+use std.env as env
+use std.process.[Command, Stdio, id]
+use std.sync.[Arc, Barrier]
+use std.sync.atomic.Ordering
+use std.rc.Rc
+use std.cell.RefCell
+use std.thread as thread
+use std.time.[Duration, Instant]
+use core.sys.target as target
+use jet as jet
+use tests.tir_support as tiers
+// GATE #4494 native providers, TLS test hooks, threads and retained processes.
+// GATE #4483 selected Linux/CPU dispatch. #4499 is not used in this scope.
+
+// Rust: tests/crypto_entropy.rs:22
+#Test("crypto_error_display_contract_is_exact_and_redacted") {
+    cases :: [
+        (JetCryptoEntropyError.InvalidLength{operation: "seal", parameter: "key", expected: "exactly 32", actual: 31}, "seal: key must be exactly 32; got 31"),
+        (JetCryptoEntropyError.InvalidEncoding{operation: "PasswordHash.parse", value_kind: "PHC string"}, "PasswordHash.parse: PHC string is not canonical"),
+        (JetCryptoEntropyError.UnsupportedVersion{operation: "PasswordHash.parse", version: 16}, "PasswordHash.parse: version 16 is not supported"),
+        (JetCryptoEntropyError.UnsupportedAlgorithm{operation: "PasswordHash.parse", algorithm: "argon2i"}, "PasswordHash.parse: algorithm argon2i is not supported"),
+        (JetCryptoEntropyError.OpenFailed, "encrypted data could not be opened"),
+        (JetCryptoEntropyError.NonContributoryKey, "X25519 peer key does not contribute to a shared secret"),
+        (JetCryptoEntropyError.OutputLength{operation: "hkdf_sha256", minimum: 0, maximum: 8160, actual: 8161}, "hkdf_sha256: output length must be 0..8160; got 8161"),
+        (JetCryptoEntropyError.PasswordPolicy{reason: "public-policy-id"}, "password hash is outside Jet's accepted policy"),
+        (JetCryptoEntropyError.EntropyUnavailable, "the operating system could not provide cryptographic randomness"),
+        (JetCryptoEntropyError.ResourceUnavailable{resource: "Argon2 worker pool"}, "Argon2 worker pool is unavailable for this cryptographic operation"),
+        (JetCryptoEntropyError.Internal{incident_id: "crypto-17"}, "Jet could not preserve a cryptographic invariant; incident crypto-17"),
+    ]
+    loop (error, expected) in cases {
+        assert_eq(error.to_string(), expected)
+        rendered :: "{error.debug()} {error}"
+        loop forbidden in ["hunter2", "plaintext sentinel", "ciphertext sentinel", "/home/nate"] {
+            assert(not rendered.contains(forbidden), "error leaked `{forbidden}`: {rendered}")
+        }
+    }
+}
+
+// Rust: tests/crypto_entropy.rs:113
+#Test("actual_bridge_fixture_compiles_and_runs") {
+    root :: env.current_dir().unwrap()
+    dir :: env.temp_dir().join("jet-crypto-bridge-entropy-{id()}")
+    // #4409 preserves NotFound versus all other pre-cleanup errors.
+    if fs.remove_dir_all(dir) == {
+        .Ok(()) -> {}
+        .Err(error) -> {
+            if error.kind() != .NotFound { panic("crypto bridge fixture pre-cleanup failed for {dir.display()}: {error}") }
+        }
+    }
+    fs.create_dir_all(dir.join("src")).unwrap()
+    fs.write(dir.join("Cargo.toml"), `
+[package]
+name = "jet-crypto-entropy-proof"
+version = "0.0.0"
+edition = "2021"
+[workspace]
+[dependencies]
+aes-gcm = "0.10"
+argon2 = { version = "=0.5.3", default-features = false, features = ["alloc", "password-hash"] }
+blake3 = "1"
+chacha20poly1305 = "0.10"
+ed25519-dalek = "2"
+hkdf = "0.12"
+sha2 = "0.10"
+subtle = "2"
+x25519-dalek = "2"
+`).unwrap()
+    fixture :: root.join("tests/fixtures/crypto_bridge_entropy.rs")
+    // Exact backend bridge projection remains a test comparator, not a product provider.
+    fs.write(dir.join("src/lib.rs"), "#![allow(non_snake_case, dead_code)]\n" + jet_pkg_model.FFI.crypto_bridge_root_modules() + "\n" + jet_pkg_model.FFI.crypto_bridge_entropy_runtime() + "\ninclude!(" + fixture.debug() + ");\n").unwrap()
+    output :: Command.new("cargo").args(["test", "--offline", "--quiet", "--manifest-path"]).arg(dir.join("Cargo.toml")).env("CARGO_TARGET_DIR", dir.join("target")).output().unwrap()
+    cleanup :: fs.remove_dir_all(dir)
+    assert(cleanup.is_ok(), "bridge proof left temporary artifacts")
+    assert(output.status.success(), "bridge proof failed:\nstdout:\n{String.from_utf8_lossy(output.stdout)}\nstderr:\n{String.from_utf8_lossy(output.stderr)}")
+}
+
+// Rust: tests/crypto_entropy.rs:178
+#Test("scripted_provider_fills_suffix_and_retries_interruption") {
+    out := [U8]{0}.repeat(7)
+    calls := 0
+    jet_crypto_entropy_fill_with(&out, |suffix| -> {
+        calls += 1
+        if calls == {
+            1 -> {
+                suffix[0..2].copy_from_slice([U8]{1, 2})
+                JetCryptoEntropyStep.Filled(2)
+            }
+            2 -> JetCryptoEntropyStep.Interrupted
+            3 -> {
+                suffix.copy_from_slice([U8]{3, 4, 5, 6, 7})
+                JetCryptoEntropyStep.Filled(5)
+            }
+            _ -> unreachable()
+        }
+    }).unwrap()
+    assert_eq(out, [U8]{1, 2, 3, 4, 5, 6, 7})
+    assert_eq(calls, 3)
+}
+
+// Rust: tests/crypto_entropy.rs:202
+#Test("failure_and_zero_fill_clear_the_entire_attempt") {
+    loop terminal in [JetCryptoEntropyStep.Filled(0), JetCryptoEntropyStep.Failed] {
+        out := [U8]{0xa5}.repeat(32)
+        err :: jet_crypto_entropy_fill_with(&out, |suffix| -> {
+            suffix[0..8].fill(0x5a)
+            terminal
+        }).unwrap_err()
+        assert_eq(err, JetCryptoEntropyError.EntropyUnavailable)
+        assert_eq(out, [U8]{0}.repeat(32), "tainted attempt must be zeroized")
+    }
+}
+
+// Rust: tests/crypto_entropy.rs:219
+#Test("injected_partial_failure_returns_no_bytes") {
+    first := true
+    jet_crypto_entropy_set_test_provider(move |suffix| -> {
+        if first {
+            first = false
+            suffix[0..4].copy_from_slice([U8]{1, 2, 3, 4})
+            JetCryptoEntropyStep.Filled(4)
+        } else { JetCryptoEntropyStep.Failed }
+    })
+    assert_eq(jet_crypto_entropy_bytes(16), .Err(JetCryptoEntropyError.EntropyUnavailable))
+    jet_crypto_entropy_clear_test_provider()
+}
+
+// Rust: tests/crypto_entropy.rs:238
+#Test("wasi_interrupt_retries_zeroize_each_exact_count_buffer") {
+    lifecycle :: Rc.new(RefCell.new([]))
+    observed_lifecycle :: Rc.clone(lifecycle)
+    jet_crypto_entropy_set_wasi_attempt_test_observer(move |event, generation, bytes| -> {
+        observed_lifecycle.borrow_mut().push((event, generation, bytes.to_vec()))
+    })
+    zeroized :: Rc.new(RefCell.new([[U8]]{}))
+    observed :: Rc.clone(zeroized)
+    jet_crypto_entropy_set_zeroize_test_observer(move |bytes| -> { observed.borrow_mut().push(bytes.to_vec()) })
+    calls := 0
+    bytes :: jet_crypto_entropy_wasi_with_for_test(32, |out| -> {
+        assert_eq(out.len(), 32)
+        calls += 1
+        if calls < 3 { out[0..4].fill(0xa5); 27 } else { out.fill(7); 0 }
+    }).unwrap()
+    assert_eq(bytes, [U8]{7}.repeat(32))
+    assert_eq(calls, 3)
+    jet_crypto_entropy_clear_zeroize_test_observer()
+    jet_crypto_entropy_clear_wasi_attempt_test_observer()
+    assert_eq(zeroized.borrow(), [[U8]{0}.repeat(32), [U8]{0}.repeat(32)])
+    events :: lifecycle.borrow()
+    live_attempt := None
+    generations := []
+    loop (event, generation, snapshot) in events.iter() {
+        if event == {
+            .Created -> {
+                assert(live_attempt.replace(generation).is_none())
+                assert_eq(snapshot, [U8]{0}.repeat(32))
+                generations.push(generation)
+            }
+            .ProviderReturned(27) -> {
+                assert_eq(live_attempt, Val(generation))
+                assert_eq(snapshot[0..4], [U8]{0xa5}.repeat(4))
+            }
+            .ProviderReturned(0) -> {
+                assert_eq(live_attempt, Val(generation))
+                assert_eq(snapshot, [U8]{7}.repeat(32))
+            }
+            .Zeroized -> {
+                assert_eq(live_attempt, Val(generation))
+                assert_eq(snapshot, [U8]{0}.repeat(32))
+            }
+            .Released | .Returned -> { assert_eq(live_attempt.take(), Val(generation)) }
+            .ProviderReturned(errno) -> { panic("unexpected WASI errno {errno}") }
+        }
+    }
+    assert_eq(generations, [0, 1, 2])
+    assert(live_attempt.is_none())
+    assert(not bytes.contains(0xa5))
+}
+
+// Rust: tests/crypto_entropy.rs:306
+#Test("wasi_stops_after_seventeen_interrupts") {
+    generations :: Rc.new(RefCell.new([]))
+    observed :: Rc.clone(generations)
+    jet_crypto_entropy_set_wasi_attempt_test_observer(move |event, generation, bytes| -> {
+        if event == JetCryptoWasiAttemptEvent.Released {
+            assert(bytes.is_empty())
+            observed.borrow_mut().push(generation)
+        }
+    })
+    calls := 0
+    result :: jet_crypto_entropy_wasi_with_for_test(8, |out| -> { calls += 1; out.fill(0xa5); 27 })
+    assert_eq(result, .Err(JetCryptoEntropyError.EntropyUnavailable))
+    assert_eq(calls, 17)
+    jet_crypto_entropy_clear_wasi_attempt_test_observer()
+    assert_eq(generations.borrow(), (0..17).collect())
+}
+
+// Rust: tests/crypto_entropy.rs:328
+#Test("unsupported_provider_zeroizes_and_fails_closed") {
+    out := [U8]{0xa5}.repeat(16)
+    assert_eq(jet_crypto_entropy_unsupported_for_test(&out), .Err(JetCryptoEntropyError.EntropyUnavailable))
+    assert_eq(out, [U8]{0}.repeat(16))
+}
+
+// Rust: tests/crypto_entropy.rs:338
+#Test("live_provider_obeys_bounds_zero_and_concurrency") {
+    assert_eq(jet_crypto_entropy_bytes(0).unwrap(), [U8]{})
+    filled := [U8]{0}.repeat(32)
+    jet_crypto_entropy_fill(&filled).unwrap()
+    assert_ne(filled, [U8]{0}.repeat(32))
+    assert_eq(jet_crypto_entropy_bytes(-1), .Err(JetCryptoEntropyError.InvalidLength{operation: "core.crypto.random.bytes", parameter: "count", expected: "non-negative", actual: 1}))
+    assert_eq(jet_crypto_entropy_bytes(1_048_577), .Err(JetCryptoEntropyError.OutputLength{operation: "core.crypto.random.bytes", minimum: 0, maximum: 1_048_576, actual: 1_048_577}))
+    workers :: 8
+    barrier :: Arc.new(Barrier.new(workers))
+    joins :: (0..workers).map(|_| -> {
+        worker_barrier :: Arc.clone(barrier)
+        thread.spawn(move || -> {
+            worker_barrier.wait()
+            jet_crypto_entropy_bytes(64).unwrap()
+        })
+    }).collect()
+    outputs :: joins.into_iter().map(|j| -> j.join().unwrap()).collect()
+    assert(outputs.iter().all(|bytes| -> bytes.len() == 64))
+    loop i in 0..outputs.len() {
+        loop j in (i + 1)..outputs.len() { assert_ne(outputs[i], outputs[j]) }
+    }
+}
+
+// Rust: tests/crypto_entropy.rs:383
+#Test("live_provider_subprocess_child") {
+    if env.var_os("JET_CRYPTO_ENTROPY_SUBPROCESS").is_none() { return }
+    bytes :: jet_crypto_entropy_bytes(64).unwrap()
+    encoded :: bytes.iter().map(|byte| -> byte.to_string_radix(16).pad_start(2, "0")).collect().join("")
+    println("JET_CRYPTO_ENTROPY={encoded}")
+}
+
+// Rust: tests/crypto_entropy.rs:394
+#Test("live_provider_remains_independent_across_process_exec") {
+    if target.selected_os() != .Linux { return }
+    parent_bytes :: jet_crypto_entropy_bytes(64).unwrap()
+    child := Command.new(env.current_exe().unwrap()).args(["--exact", "live_provider_subprocess_child", "--nocapture"]).env("JET_CRYPTO_ENTROPY_SUBPROCESS", "1").stdout(Stdio.piped()).spawn().unwrap()
+    deadline :: Instant.now() + Duration.from_secs(5)
+    status :: loop {
+        maybe_status :: child.try_wait().unwrap()
+        if maybe_status == Val(status) { break status }
+        if Instant.now() >= deadline {
+            _ :: child.kill()
+            _ :: child.wait()
+            panic("entropy subprocess exceeded five-second deadline")
+        }
+        thread.sleep(Duration.from_millis(10))
+    }
+    assert(status.success(), "entropy subprocess failed: {status}")
+    stdout := ""
+    child.stdout.take().unwrap().read_to_string(&stdout).unwrap()
+    encoded :: stdout.lines().find_map(|line| -> line.split_once("JET_CRYPTO_ENTROPY=").map(|(_, hex)| -> hex)).expect("child emitted entropy marker")
+    assert_eq(encoded.len(), 128)
+    assert(encoded.bytes().all(|byte| -> byte.is_ascii_hexdigit()))
+    parent_encoded :: parent_bytes.iter().map(|byte| -> byte.to_string_radix(16).pad_start(2, "0")).collect().join("")
+    assert_ne(encoded, parent_encoded)
+}
+
+// Rust: tests/crypto_entropy.rs:442
+#Test("crypto_runtime_sources_contain_no_predictable_fallback") {
+    sources :: [
+        fs.read_to_string("crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs").unwrap(),
+        fs.read_to_string("crates/jet-foundation/src/Syntax/core_calls.rs").unwrap(),
+        fs.read_to_string("crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs").unwrap(),
+        fs.read_to_string("crates/jet-pkg-model/src/Prelude/Crypto.rs").unwrap(),
+    ].join("\n")
+    loop forbidden in ["SplitMix", "xorshift", "SystemTime", "UNIX_EPOCH", "/dev/urandom", "/dev/random", "Math.random", "jet_uuid_fill_random"] {
+        assert(not sources.contains(forbidden), "cryptographic runtime contains forbidden fallback marker {forbidden}")
+    }
+    // Retiring JIT adapters are still peer-comparator sources for this audit.
+    host_sources :: [
+        fs.read_to_string("crates/jet-jit/src/Crypto.rs").unwrap(),
+        fs.read_to_string("crates/jet-jit/src/Encoding.rs").unwrap(),
+        fs.read_to_string("crates/jet-jit/src/net_http_rt.rs").unwrap(),
+    ].join("\n")
+    loop forbidden in ["SplitMix", "xorshift", "/dev/urandom", "/dev/random", "Math.random", "uuid_fill_random"] {
+        assert(not host_sources.contains(forbidden), "JIT/runtime adapter contains forbidden fallback marker {forbidden}")
+    }
+}
+
+// Rust: tests/crypto_entropy.rs:507
+#Test("auth_tokens_are_opaque_and_fail_closed_without_entropy") {
+    auth_session_regression.FAIL_ENTROPY.store(false, Ordering.Relaxed)
+    // Canonical provider injection replaces Rust include-time name shadowing.
+    jet_crypto_entropy_set_test_provider(|suffix| -> {
+        if auth_session_regression.jet_crypto_entropy_bytes(suffix.len() as I64) == {
+            .Ok(bytes) -> { suffix.copy_from_slice(bytes); JetCryptoEntropyStep.Filled(suffix.len()) }
+            .Err(_) -> JetCryptoEntropyStep.Failed
+        }
+    })
+    user :: "auth-regression-{id()}@example.com"
+    jet_auth_register_user(user, "password-hash").unwrap()
+    first :: jet_auth_password_login(user, "password-hash", 0, 1_000).unwrap()
+    second :: jet_auth_password_login(user, "password-hash", 0, 1_000).unwrap()
+    assert(first.id.starts_with("sess-"))
+    assert(second.id.starts_with("sess-"))
+    assert_ne(first.id, second.id)
+    magic :: jet_auth_magic_link_issue(user, 0, 1_000).unwrap()
+    assert(magic.starts_with("magic-"))
+    assert_ne(magic, "magic-" + "00".repeat(32))
+    assert(jet_auth_magic_link_consume(magic, 0, 1_000).is_ok())
+    auth_session_regression.FAIL_ENTROPY.store(true, Ordering.Relaxed)
+    assert(jet_auth_password_login(user, "password-hash", 0, 1_000).is_err())
+    assert(jet_auth_magic_link_issue(user, 0, 1_000).is_err())
+    jet_crypto_entropy_clear_test_provider()
+}
+
+// Rust: tests/crypto_entropy.rs:532
+#Test("uuid_entropy_shared_seam_is_live_and_fail_closed") {
+    first :: jet_crypto_uuid_v4_result().expect("live entropy should produce UUID v4")
+    second :: jet_crypto_uuid_v4_result().expect("live entropy should produce UUID v4")
+    assert_ne(first, second, "UUID v4 must use live entropy for each call")
+    ordered :: jet_crypto_uuid_v7_result(1_700_000_000_000).expect("live entropy should produce UUID v7")
+    assert_eq(ordered[14..15], "7")
+    jet_crypto_entropy_set_test_provider(|out| -> { out.fill(0xa5); JetCryptoEntropyStep.Failed })
+    v4 :: jet_crypto_uuid_v4_result()
+    v7 :: jet_crypto_uuid_v7_result(1_700_000_000_000)
+    jet_crypto_entropy_clear_test_provider()
+    assert_eq(v4, .Err(JetCryptoEntropyError.EntropyUnavailable))
+    assert_eq(v7, .Err(JetCryptoEntropyError.EntropyUnavailable))
+}
+
+// Rust: tests/crypto_entropy.rs:553
+// Retired Cranelift representation/trace checks become O0/O1/O2 behavior parity.
+#Test("live_crypto_entropy_and_uuid_match_interpreter_resident_jit_and_aot") {
+    assert(common.have_rustc(), "AOT parity requires rustc")
+    SOURCE :: `
+use core.crypto.random as crypto
+use core.time as time
+use core.crypto.uuid as uuid
+fn run() -> {
+    first :: crypto.bytes(32) ?? return
+    second :: crypto.bytes(32) ?? return
+    print(first.len() == 32)
+    print(first != second)
+    v4a :: uuid.v4() ?? return
+    v4b :: uuid.v4() ?? return
+    print(v4a.len() == 36)
+    print(v4a != v4b)
+    clk := Clock.new(1_700_000_000_000)
+    v7 :: uuid.v7(&clk) ?? return
+    print(v7.len() == 36)
+    print(v7.slice(14, 15) == "7")
+}
+`
+    expected :: "true\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+    dir :: common.unique_tmp("jet_crypto_entropy_parity")
+    result :: std.panic.catch_unwind(std.panic.AssertUnwindSafe(|| -> {
+        fs.create_dir_all(dir).unwrap()
+        path :: dir.join("parity.jet")
+        fs.write(path, SOURCE).unwrap()
+        shown :: path.to_string_lossy().to_string()
+        bundle := jet.Loader.load_entry(shown).expect("parity bundle should load")
+        diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+        assert(diagnostics.iter().all(|diagnostic| -> diagnostic.severity != jet.Diagnostics.Severity.Error), "parity source must type-check: {diagnostics.debug()}")
+        // No backend-identity assertion remains: require actual execution at each tier.
+        tiers.assert_tiers_agree("jet_crypto_entropy_parity", SOURCE, expected)
+        aot :: common.build_and_run("jet_crypto_entropy_parity", "parity", SOURCE)
+        assert_eq(aot, (0, expected, ""))
+    }))
+    if (result, fs.remove_dir_all(dir)) == {
+        (.Ok(()), .Ok(())) -> {}
+        (.Ok(()), .Err(error)) -> { panic("crypto entropy parity artifact cleanup failed for {dir.display()}: {error}") }
+        (.Err(payload), .Ok(())) -> { std.panic.resume_unwind(payload) }
+        (.Err(payload), .Err(error)) -> {
+            eprintln("crypto entropy parity artifact cleanup failed for {dir.display()}: {error}")
+            std.panic.resume_unwind(payload)
+        }
+    }
+}
+
+// Rust: tests/crypto_entropy.rs:665-686
+#Test("golden_i1_scan_strips_only_the_vetted_entropy_module") {
+    source :: `use core.crypto.random as random
+fn run() -> {
+    drawn :: random.bytes(16) ?? return
+    print("i1-user-marker {drawn.len()}")
+}
+`
+    dir :: common.unique_tmp("jet_crypto_entropy_i1")
+    fs.create_dir_all(dir).unwrap()
+    path :: dir.join("i1.jet")
+    fs.write(path, source).unwrap()
+    shown :: path.to_string_lossy().to_string()
+    compiled :: jet.compile_with_path(source, shown).unwrap_or_else(|diagnostics| -> { panic(jet.render_diagnostics(shown, source, diagnostics)) })
+    _ :: fs.remove_dir_all(dir)
+    assert(compiled.rust.contains("fn getrandom("), "a crypto program must embed the OS entropy provider")
+    user :: common.strip_vetted_prelude_modules(compiled.rust)
+    assert(not user.contains("fn getrandom("), "the audited provider survived the I1 scan")
+    assert(not user.contains("mod jet_crypto_entropy"), "the provider module survived the I1 scan")
+    assert(user.contains("i1-user-marker"), "the I1 scan removed user code")
+}
+
+// Rust: tests/crypto_entropy.rs:689
+#Test("keygen_entropy_failure_uses_closed_silent_helper_status") {
+    ffi :: fs.read_to_string("crates/jet-pkg-model/src/FFI.rs").unwrap()
+    keygen :: ffi.split("\"keygen\" => {{").nth(1).expect("crypto helper keygen branch exists").split("\"sign\" => {{").next().unwrap()
+    assert(keygen.contains("Err(_) => exit(ENTROPY_UNAVAILABLE)"))
+    assert(ffi.contains("const ENTROPY_UNAVAILABLE: i32 = 75;"))
+    assert(not keygen.contains("fail(&e"))
+    assert(not keygen.contains("eprintln!"))
+}
+
+// Rust: tests/crypto_entropy.rs:767-861
+#Test("entropy_unavailable_propagates_through_every_consumer_on_all_tiers") {
+    if target.selected_os() != .Linux { return }
+    arch :: target.selected_arch()
+    if arch != "x86_64" && arch != "aarch64" { return }
+    assert(common.have_rustc(), "AOT parity requires rustc")
+    consumers :: [
+        ("bytes", `use core.crypto.random as random
+fn run() -> {
+    print("before")
+    secret :: random.bytes(32) ?? {
+        print("typed failure")
+        return
+    }
+    print("drew {secret.len()} bytes")
+}
+`),
+        ("uuid", `use core.crypto.uuid as uuid
+fn run() -> {
+    print("before")
+    id :: uuid.v4() ?? {
+        print("typed failure")
+        return
+    }
+    print("drew {id}")
+}
+`),
+        ("keygen", `use core.crypto as crypto
+fn run() -> {
+    print("before")
+    key :: crypto.generatekey() ?? {
+        print("typed failure")
+        return
+    }
+    print("drew a key: {key.public_key().bytes.len()} public bytes")
+}
+`),
+    ]
+    scratch :: common.Scratch.new("crypto-entropy-unavailable")
+    fs.write(scratch.join("package.jet"), "name: \"entropy-unavailable\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Rand] } }\n").unwrap()
+    jet_bin :: env.var("CARGO_BIN_EXE_jet").unwrap()
+    normalize :: |bytes: [U8]| -> String.from_utf8_lossy(bytes).replace(scratch.path.display().to_string(), "$CASE")
+    loop (name, source) in consumers {
+        file :: "{name}.jet"
+        fs.write(scratch.join(file), source).unwrap()
+        cache :: scratch.join("cache-{name}")
+        build :: Command.new(jet_bin).args(["build", file]).current_dir(scratch.path).env("JET_STORE_DIR", cache.join("aot")).env("NO_COLOR", "1").output().unwrap()
+        assert(build.status.success(), "{name}: AOT build failed:\n{String.from_utf8_lossy(build.stderr)}")
+        observed_tiers := []
+        loop (tier, command) in [
+            ("aot", Command.new(scratch.join(".jet").join("build").join(name))),
+            ("default run", Command.new(jet_bin).args(["run", file])),
+            ("interpreter", Command.new(jet_bin).args(["run", "--interpret", file])),
+        ] {
+            output :: without_os_entropy(&command).current_dir(scratch.path).env("JET_RUN_CACHE_DIR", cache.join("run")).env("JET_STORE_DIR", cache.join("build")).env("NO_COLOR", "1").output().unwrap()
+            observed :: (output.status.code(), normalize(output.stdout), normalize(output.stderr))
+            assert(observed.1.starts_with("before\n") && not observed.1.contains("drew"), "{name} on {tier} produced a value without entropy: {observed.debug()}")
+            assert(observed.1.contains("typed failure") || (observed.0 != Val(0) && observed.2.contains("could not provide cryptographic randomness")), "{name} on {tier} did not report the entropy failure: {observed.debug()}")
+            observed_tiers.push((tier, observed))
+        }
+        (first_tier, first) :: observed_tiers[0]
+        loop (tier, observed) in observed_tiers[1..] { assert_eq(observed, first, "{name}: {tier} differs from {first_tier} without entropy") }
+    }
+}

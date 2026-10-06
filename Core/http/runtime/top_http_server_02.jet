@@ -1,0 +1,1180 @@
+use core.http.HTTPError
+use core.http.runtime.top_http_message.HTTPOperation
+use std.net.[TcpListener, TcpStream, IpAddr, Shutdown]
+use std.sync.[Arc, Mutex, Condvar, OnceLock]
+use std.sync.atomic.[AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering]
+use std.sync.mpsc as mpsc
+use std.time.[Duration, Instant, SystemTime, UNIX_EPOCH]
+use std.thread as thread
+use std.io.[Read, Write, Cursor, ErrorKind]
+use std.io.Error as IOError
+use std.collections.VecDeque
+use core.sys.target
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1808
+fn jet_http_error_page_response(request: &JetHTTPRequest, status: Int, failure_id: &String, report: &JetErrorReport, correlation_links: &[String], local: Bool) -> JetHTTPResponse {
+    request_id :: match request.headers.get("x-request-id") {
+        .Val(value) if jet_http_request_id_valid(value) -> value.clone(),
+        _ -> jet_http_new_request_id(),
+    }
+    jet_http_devtools_publish_exception_report(&request_id, report)
+    projection :: jet_error_page_projection(status, failure_id, &request_id, report, correlation_links, local)
+    wants_json :: jet_http_error_page_accepts_json(request.headers.get("accept"))
+    (body, content_type) :: if wants_json { (projection.json(), "application/json; charset=utf-8") } else { (projection.html(), "text/html; charset=utf-8") }
+    response := jet_http_srv_response_owned(projection.status, ^body)
+    _ :: response.headers.set("content-type", content_type)
+    _ :: response.headers.set("cache-control", "no-store")
+    _ :: response.headers.set("vary", "Accept")
+    _ :: response.headers.set("x-request-id", &projection.request_id)
+    response
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1844
+fn jet_http_srv_response_with_headers(status: Int, body: &String, headers: JetHTTPHeaders) -> JetHTTPResponse {
+    response := jet_http_srv_response_owned(status, body.to_string())
+    response.headers = ^headers
+    response
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1854
+fn jet_http_srv_response_header(resp: JetHTTPResponse, name: &String, value: &String) -> JetHTTPResponse {
+    if resp.headers.append(name, value).is_err() {
+        resp.status = 500
+        resp.body = JetHTTPBody.from_text("500 Internal Server Error".to_string())
+        resp.headers = JetHTTPHeaders.new()
+    }
+    resp
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1867
+fn jet_http_srv_response_header_owned(resp: JetHTTPResponse, name: String, value: String) -> JetHTTPResponse {
+    if !JetHTTPHeaders.valid_name(&name) || !JetHTTPHeaders.valid_value(&value) {
+        resp.status = 500
+        resp.body = JetHTTPBody.from_text("500 Internal Server Error".to_string())
+        resp.headers = JetHTTPHeaders.new()
+    } else {
+        resp.headers.entries.push((^name, ^value))
+    }
+    resp
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1881
+fn jet_http_srv_response_status(resp: &JetHTTPResponse) -> Int { resp.status }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1882
+fn jet_http_srv_response_body(resp: &JetHTTPResponse) -> JetHTTPBody { resp.body.clone() }
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1886
+fn jet_http_mux_serve(addr: &String, mux: JetHTTPMux, tls: JetHTTPServerTls?, deadline: jet_std.Duration?) -> Unit HTTPError! {
+    if tls.is_some() { return Err(HTTPError.IO("TLS server requires the native TLS adapter".to_string())) }
+    mux :: jet_http_mux_with_optional_deadline(^mux, deadline.as_ref())
+    jet_http_mux_validate(&mux).map_err(operation -> HTTPError.IO(^operation))?
+    // GATE #4565: kernel primitive
+    #Unsafe("bind native listener and share atomic shutdown with the audited listener lifecycle") {
+        listener :: TcpListener.bind(addr.as_str()).map_err(error -> HTTPError.IO("bind on `{addr}` failed: {error}"))?
+        shutdown :: Arc.new(AtomicBool.new(false))
+        jet_http_server_run_listener(^listener, ^mux, JetHTTPServerOptions.safe(), ^shutdown, None, None, None).map(_ -> ()).map_err(operation -> HTTPError.IO(^operation))
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1918
+fn jet_http_server_bind(addr: &String, mux: JetHTTPMux, tls: JetHTTPServerTls?, deadline: jet_std.Duration?) -> JetHTTPServer HTTPError! {
+    if tls.is_some() { return Err(HTTPError.IO("TLS server requires the native TLS adapter".to_string())) }
+    mux :: jet_http_mux_with_optional_deadline(^mux, deadline.as_ref())
+    jet_http_server_bind_with_tls(addr, ^mux, None)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1935
+// Bind the beginner server on safe loopback and install request deadline middleware.
+fn jet_http_server_default(mux: &JetHTTPMux, deadline: &jet_std.Duration) -> JetHTTPServer {
+    mux :: jet_http_mux_with_deadline(mux.clone(), deadline)
+    address :: "127.0.0.1:8080".to_string()
+    jet_http_server_bind(&address, ^mux, None, None).unwrap_or_else(error -> panic("HTTP server bind failed: {error}"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1948
+fn jet_http_server_wait(server: &JetHTTPServer) -> JetHTTPShutdownReport HTTPError! { jet_http_server_serve(server) }
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1953
+fn jet_http_server_bind_with_tls(addr: &String, mux: JetHTTPMux, tls_conn: JetHTTPTlsConn?) -> JetHTTPServer HTTPError! {
+    os :: target.selected_os()
+    supported :: ["linux", "android", "macos", "ios", "freebsd", "openbsd", "netbsd", "windows"].contains(os) ||
+        (os == "wasi" && target.selected_env() == "p2" && target.selected_arch() == "wasm32")
+    if !supported { return Err(HTTPError.UnsupportedTarget(HTTPOperation.ServerBind)) }
+    jet_http_mux_validate(&mux).map_err(operation -> HTTPError.IO(^operation))?
+    // GATE #4565: kernel primitive
+    #Unsafe("bind supported native listener and initialize synchronized single-serve lifecycle state") {
+        listener :: TcpListener.bind(addr.as_str()).map_err(error -> HTTPError.IO("bind on `{addr}` failed: {error}"))?
+        local_addr :: listener.local_addr().map_err(error -> HTTPError.IO("local address failed: {error}"))?.to_string()
+        Ok(JetHTTPServer { inner: Arc.new(JetHTTPServerState {
+            listener: Mutex.new(Val(^listener)), mux: ^mux, local_addr: ^local_addr,
+            shutdown: Arc.new(AtomicBool.new(false)), shutdown_called: AtomicBool.new(false),
+            grace_ms: Arc.new(AtomicU64.new(U64{30000})),
+            drain_deadline_ms: Arc.new(AtomicU64.new(U64{0})),
+            lifecycle: AtomicU8.new(U8{0}), report: Mutex.new(None),
+            report_ready: Condvar.new(), tls_conn: ^tls_conn,
+        }) })
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2015
+fn jet_http_server_local_addr(server: &JetHTTPServer) -> String HTTPError! { Ok(server.inner.local_addr.clone()) }
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2019
+fn jet_http_server_serve(server: &JetHTTPServer) -> JetHTTPShutdownReport HTTPError! {
+    // GATE #4565: kernel primitive
+    #Unsafe("atomic single-serve claim and mutex-protected listener/report ownership with condition wakeups") {
+        server.inner.lifecycle.compare_exchange(U8{0}, U8{1}, Ordering.AcqRel, Ordering.Acquire).map_err(_ -> HTTPError.IO("HTTP server can only be served once".to_string()))?
+        listener :: (server.inner.listener.lock() ?? panic("unwrap failed")).take().ok_or_else(() -> HTTPError.IO("HTTP server listener was already consumed".to_string()))?
+        result :: jet_http_server_run_listener(^listener, server.inner.mux.clone(), JetHTTPServerOptions.safe(),
+            server.inner.shutdown.clone(), Val(server.inner.grace_ms.clone()),
+            Val(server.inner.drain_deadline_ms.clone()), server.inner.tls_conn.clone()).map_err(operation -> HTTPError.IO(^operation))
+        server.inner.lifecycle.store(U8{2}, Ordering.Release)
+        match result {
+            .Ok(report) -> {
+                *server.inner.report.lock().unwrap() = Val(report)
+                server.inner.report_ready.notify_all()
+                Ok(report)
+            },
+            .Err(error) -> {
+                server.inner.report_ready.notify_all()
+                Err(^error)
+            },
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2051
+fn jet_http_server_wait_for_report(server: &JetHTTPServer) -> JetHTTPShutdownReport HTTPError! {
+    // GATE #4565: kernel primitive
+    #Unsafe("wait on report mutex until serving lifecycle becomes terminal") {
+        report := server.inner.report.lock() ?? panic("unwrap failed")
+        while report.is_none() && server.inner.lifecycle.load(Ordering.Acquire) == U8{1} {
+            report = server.inner.report_ready.wait(^report) ?? panic("unwrap failed")
+        }
+        (*report).ok_or_else(() -> HTTPError.IO("HTTP server stopped without a shutdown report".to_string()))
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2064
+fn jet_http_server_shutdown(server: &JetHTTPServer, grace: &jet_std.Duration) -> JetHTTPShutdownReport HTTPError! {
+    // GATE #4565: kernel primitive
+    #Unsafe("claim shutdown once and publish shared absolute drain deadline before release-store cancellation") {
+        already_requested :: server.inner.shutdown_called.swap(true, Ordering.AcqRel)
+        if already_requested { return jet_http_server_wait_for_report(server) }
+        // Claim terminal state on an unserved server before a racing serve can win.
+        if server.inner.lifecycle.compare_exchange(U8{0}, U8{2}, Ordering.AcqRel, Ordering.Acquire).is_ok() {
+            return Err(HTTPError.IO("HTTP server is not serving".to_string()))
+        }
+        if server.inner.lifecycle.load(Ordering.Acquire) != U8{1} {
+            return Err(HTTPError.IO("HTTP server is not serving".to_string()))
+        }
+        grace_ms :: grace.as_millis().max(0) as U64
+        deadline_ms :: jet_http_unix_now_ms().saturating_add(grace_ms)
+        server.inner.drain_deadline_ms.store(deadline_ms, Ordering.Release)
+        server.inner.grace_ms.store(grace_ms, Ordering.Release)
+        server.inner.shutdown.store(true, Ordering.Release)
+        jet_http_server_wait_for_report(server)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2100
+fn jet_http_server_run_listener(listener: TcpListener, mux: JetHTTPMux, options: JetHTTPServerOptions, shutdown: Arc<AtomicBool>, dynamic_grace_ms: Arc<AtomicU64>?, drain_deadline_ms: Arc<AtomicU64>?, tls_conn: JetHTTPTlsConn?) -> JetHTTPShutdownReport Err! {
+    jet_scheduler_with_root_control(() -> jet_http_server_run_listener_inner(^listener, ^mux, ^options, ^shutdown, ^dynamic_grace_ms, ^drain_deadline_ms, ^tls_conn))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2122
+fn jet_http_server_run_listener_inner(listener: TcpListener, mux: JetHTTPMux, options: JetHTTPServerOptions, shutdown: Arc<AtomicBool>, dynamic_grace_ms: Arc<AtomicU64>?, drain_deadline_ms: Arc<AtomicU64>?, tls_conn: JetHTTPTlsConn?) -> JetHTTPShutdownReport Err! {
+    if target.selected_os() == "wasi" && target.selected_env() == "p2" && target.selected_arch() == "wasm32" {
+        return jet_http_server_run_listener_wasip2(^listener, ^mux, ^options, ^shutdown, ^dynamic_grace_ms, ^drain_deadline_ms, ^tls_conn)
+    }
+    // GATE #4565: kernel primitive
+    #Unsafe("bounded native accept queue; synchronized worker counts, tracked socket cancellation and joined worker lifetimes") {
+        listener.set_nonblocking(true).map_err(error -> "http listener setup failed: {error}")?
+        (tx, rx) :: mpsc.sync_channel<(TcpStream, IpAddr)>(options.admission_queue)
+        rx :: Arc.new(Mutex.new(^rx))
+        active :: Arc.new(Mutex.new([TcpStream].new()))
+        completed :: Arc.new(AtomicUsize.new(0))
+        force_cancel :: Arc.new(AtomicBool.new(false))
+        connection_count :: Arc.new(AtomicUsize.new(0))
+        per_ip :: Arc.new(Mutex.new([IpAddr:Int].new()))
+        drain_deadline_ms :: drain_deadline_ms.unwrap_or_else(() -> Arc.new(AtomicU64.new(U64{0})))
+        workers := []
+        loop _ in 0..<options.workers.max(1) {
+            worker_rx :: rx.clone()
+            worker_mux :: mux.clone()
+            worker_options :: options.clone()
+            worker_active :: active.clone()
+            worker_completed :: completed.clone()
+            worker_force_cancel :: force_cancel.clone()
+            worker_shutdown :: shutdown.clone()
+            worker_grace :: dynamic_grace_ms.clone()
+            worker_deadline :: drain_deadline_ms.clone()
+            worker_connection_count :: connection_count.clone()
+            worker_per_ip :: per_ip.clone()
+            worker_tls :: tls_conn.clone()
+            workers.push(thread.spawn(() -> {
+                loop {
+                    received :: (worker_rx.lock() ?? panic("unwrap failed")).recv()
+                    (stream, peer_ip) := match received { .Ok(pair) -> pair, .Err(_) -> break }
+                    if worker_force_cancel.load(Ordering.Acquire) {
+                        _ :: stream.shutdown(Shutdown.Both)
+                    } else {
+                        peer :: stream.peer_addr().ok()
+                        match stream.try_clone() { .Ok(tracked) -> worker_active.lock().unwrap().push(^tracked), .Err(_) -> {} }
+                        jet_scheduler_with_root_control(() -> {
+                            if worker_tls == .Val(tls) {
+                                _ :: tls(^stream, worker_shutdown.clone(), worker_options.clone(), worker_grace.clone(), worker_deadline.clone())
+                            } else {
+                                jet_http_server_handle_stream(&stream, &worker_mux, &worker_options, &worker_shutdown, worker_grace.as_deref(), Val(worker_deadline.as_ref()))
+                            }
+                        })
+                        worker_completed.fetch_add(1, Ordering.Relaxed)
+                        worker_active.lock().unwrap().retain(tracked -> tracked.peer_addr().ok() != peer)
+                    }
+                    worker_connection_count.fetch_sub(1, Ordering.AcqRel)
+                    counts := worker_per_ip.lock() ?? panic("unwrap failed")
+                    if counts.get_mut(&peer_ip) == .Val(count) {
+                        *count -= 1
+                        if *count == 0 { counts.remove(&peer_ip) }
+                    }
+                }
+            }))
+        }
+        report := JetHTTPShutdownReport.default()
+        accept_error := None
+        while !shutdown.load(Ordering.Acquire) {
+            if jet_scheduler_wait_point_cancelled() {
+                shutdown.store(true, Ordering.Release)
+                break
+            }
+            match listener.accept() {
+                .Ok((stream, peer)) -> {
+                    if stream.set_nonblocking(false) == .Err(error) {
+                        _ :: stream.shutdown(Shutdown.Both)
+                        shutdown.store(true, Ordering.Release)
+                        force_cancel.store(true, Ordering.Release)
+                        if active.lock() == .Ok(active_streams) {
+                            for active_stream in active_streams.iter() { _ :: active_stream.shutdown(Shutdown.Both) }
+                        }
+                        accept_error = Val("http accepted stream setup failed: {error}")
+                        break
+                    }
+                    peer_ip :: peer.ip()
+                    globally_full :: connection_count.load(Ordering.Acquire) >= options.max_connections
+                    ip_full :: (per_ip.lock() ?? panic("unwrap failed")).get(&peer_ip).copied().unwrap_or(0) >= options.max_connections_per_ip
+                    if globally_full || ip_full {
+                        report.user_overloaded += 1
+                        _ :: stream.set_read_timeout(Val(Duration.from_millis(U64{10})))
+                        discard := [U8].filled(8192, U8{0})
+                        _ :: stream.read(&discard)
+                        _ :: stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                        _ :: stream.flush()
+                        _ :: stream.shutdown(Shutdown.Write)
+                        next
+                    }
+                    connection_count.fetch_add(1, Ordering.AcqRel)
+                    *per_ip.lock().unwrap().entry(peer_ip).or_insert(0) += 1
+                    match tx.try_send((^stream, peer_ip)) {
+                        .Ok(()) -> report.user_accepted += 1,
+                        .Err(mpsc.TrySendError.Full((stream, peer_ip))) -> {
+                            connection_count.fetch_sub(1, Ordering.AcqRel)
+                            counts := per_ip.lock() ?? panic("unwrap failed")
+                            if counts.get_mut(&peer_ip) == .Val(count) {
+                                *count -= 1
+                                if *count == 0 { counts.remove(&peer_ip) }
+                            }
+                            drop(^counts)
+                            report.user_overloaded += 1
+                            _ :: stream.set_read_timeout(Val(Duration.from_millis(U64{10})))
+                            discard := [U8].filled(8192, U8{0})
+                            _ :: stream.read(&discard)
+                            _ :: stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                            _ :: stream.flush()
+                            _ :: stream.shutdown(Shutdown.Write)
+                        },
+                        .Err(mpsc.TrySendError.Disconnected((_stream, peer_ip))) -> {
+                            connection_count.fetch_sub(1, Ordering.AcqRel)
+                            counts := per_ip.lock() ?? panic("unwrap failed")
+                            if counts.get_mut(&peer_ip) == .Val(count) {
+                                *count -= 1
+                                if *count == 0 { counts.remove(&peer_ip) }
+                            }
+                            break
+                        },
+                    }
+                },
+                .Err(error) if error.kind() == ErrorKind.WouldBlock -> thread.sleep(Duration.from_millis(U64{2})),
+                .Err(error) -> {
+                    accept_error = Val("http accept failed: {error}")
+                    force_cancel.store(true, Ordering.Release)
+                    for stream in (active.lock() ?? panic("unwrap failed")).iter() { _ :: stream.shutdown(Shutdown.Both) }
+                    break
+                },
+            }
+        }
+        drop(^tx)
+        grace :: dynamic_grace_ms.as_ref().map(value -> Duration.from_millis(value.load(Ordering.Acquire))).unwrap_or(options.shutdown_grace)
+        existing :: drain_deadline_ms.load(Ordering.Acquire)
+        deadline_ms :: if existing > U64{0} { existing } else {
+            computed :: jet_http_unix_now_ms().saturating_add(grace.as_millis() as U64)
+            drain_deadline_ms.store(computed, Ordering.Release)
+            computed
+        }
+        deadline :: jet_http_instant_from_unix_ms(deadline_ms)
+        while accept_error.is_none() && completed.load(Ordering.Acquire) < report.user_accepted as Int && Instant.now() < deadline {
+            thread.sleep(Duration.from_millis(U64{2}))
+        }
+        // Let H2 observe the shared deadline after its polling read timeout.
+        observe :: deadline + Duration.from_millis(U64{30})
+        while accept_error.is_none() && completed.load(Ordering.Acquire) < report.user_accepted as Int && Instant.now() < observe {
+            thread.sleep(Duration.from_millis(U64{2}))
+        }
+        report.user_completed = completed.load(Ordering.Acquire).min(report.user_accepted as Int) as Int
+        report.user_cancelled = report.user_accepted.saturating_sub(report.user_completed)
+        if report.user_cancelled > 0 {
+            force_cancel.store(true, Ordering.Release)
+            for stream in (active.lock() ?? panic("unwrap failed")).iter() { _ :: stream.shutdown(Shutdown.Both) }
+        }
+        loop worker in workers { _ :: worker.join() }
+        if accept_error == .Val(error) { return Err(^error) }
+        Ok(report)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2338
+fn jet_http_server_run_listener_wasip2(listener: TcpListener, mux: JetHTTPMux, options: JetHTTPServerOptions, shutdown: Arc<AtomicBool>, dynamic_grace_ms: Arc<AtomicU64>?, drain_deadline_ms: Arc<AtomicU64>?, tls_conn: JetHTTPTlsConn?) -> JetHTTPShutdownReport Err! {
+    // GATE #4565: kernel primitive
+    #Unsafe("WASI Preview 2 accept is single-threaded; preserve protocol and cancellation without native thread spawn") {
+        listener.set_nonblocking(true).map_err(error -> "http listener setup failed: {error}")?
+        drain_deadline_ms :: drain_deadline_ms.unwrap_or_else(() -> Arc.new(AtomicU64.new(U64{0})))
+        report := JetHTTPShutdownReport.default()
+        while !shutdown.load(Ordering.Acquire) {
+            if jet_scheduler_wait_point_cancelled() {
+                shutdown.store(true, Ordering.Release)
+                break
+            }
+            match listener.accept() {
+                .Ok((stream, _peer)) -> {
+                    report.user_accepted += 1
+                    stream.set_nonblocking(false).map_err(error -> "http connection setup failed: {error}")?
+                    if tls_conn.as_ref() == .Val(tls) {
+                        if tls(^stream, shutdown.clone(), options.clone(), dynamic_grace_ms.clone(), drain_deadline_ms.clone()) == .Err(error) { eprintln("E2801: Connection failed: {error}") }
+                    } else { jet_http_server_handle_stream_wasip2(&stream, &mux, &options) }
+                    report.user_completed += 1
+                },
+                .Err(error) if error.kind() == ErrorKind.WouldBlock -> thread.sleep(Duration.from_millis(U64{2})),
+                .Err(error) -> return Err("http accept failed: {error}"),
+            }
+        }
+        report.user_cancelled = report.user_accepted.saturating_sub(report.user_completed)
+        Ok(report)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2399
+fn jet_http_server_handle_stream_wasip2(stream: &TcpStream, mux: &JetHTTPMux, options: &JetHTTPServerOptions) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("borrow accepted WASI stream for bounded request read and response write") {
+        raw :: match jet_http_srv_read_with_limits(stream, options) {
+            .Ok(raw) -> raw,
+            .Err(error) -> {
+                _ :: stream.write_all(jet_http_srv_read_error_response(&error).as_bytes())
+                return
+            },
+        }
+        request :: match jet_http_srv_parse(&raw) {
+            .Ok(request) -> request,
+            .Err(error) -> {
+                _ :: stream.write_all(jet_http_srv_read_error_response(&error).as_bytes())
+                return
+            },
+        }
+        response :: jet_http_mux_dispatch(mux, ^request).unwrap_or_else(jet_http_srv_error_response)
+        _ :: jet_http_srv_write_response(stream, &response, "HTTP/1.1", true)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2424
+fn jet_http_unix_now_ms() -> U64 {
+    // GATE #4565: kernel primitive
+    #Unsafe("sample native wall clock relative to UNIX epoch") {
+        SystemTime.now().duration_since(UNIX_EPOCH).map(duration -> duration.as_millis() as U64).unwrap_or(U64{0})
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2431
+fn jet_http_instant_from_unix_ms(deadline_ms: U64) -> Instant {
+    // GATE #4565: kernel primitive
+    #Unsafe("convert wall deadline to native monotonic instant at a single sampling point") {
+        now :: Instant.now()
+        now_ms :: jet_http_unix_now_ms()
+        if deadline_ms <= now_ms { now } else { now + Duration.from_millis(deadline_ms - now_ms) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2441
+fn jet_http_server_handle_stream(stream: &TcpStream, mux: &JetHTTPMux, options: &JetHTTPServerOptions, shutdown: &AtomicBool, dynamic_grace_ms: &AtomicU64?, drain_deadline_ms: &AtomicU64?) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("native socket timeout and shutdown; preserve connection loan and WebSocket guard during dispatch") {
+        _ :: stream.set_write_timeout(Val(options.write_idle_timeout))
+        if jet_http2_is_preface(stream, options.read_header_timeout) {
+            (result, last_stream) :: jet_http2_serve_with_last_stream(stream, mux, options, shutdown, dynamic_grace_ms, drain_deadline_ms)
+            if result.is_err() {
+                _ :: jet_http2_write_frame(stream, U8{7}, U8{0}, U32{0}, &jet_http2_goaway_payload(last_stream, U32{1}))
+                _ :: stream.flush()
+            }
+            _ :: stream.shutdown(Shutdown.Both)
+            return
+        }
+        loop request_index in 0..<JET_HTTP_MAX_REQUESTS_PER_CONNECTION {
+            if request_index > 0 && shutdown.load(Ordering.Acquire) { return }
+            (request, request_version) :: match jet_http_srv_read_streaming(stream, options, request_index > 0, if request_index > 0 { Val(shutdown) } else { None }) {
+                .Ok(.Val(request)) -> request,
+                .Ok(.None) -> return,
+                .Err(error) -> {
+                    _ :: stream.write_all(jet_http_srv_read_error_response(&error).as_bytes())
+                    jet_http_srv_finish_close(stream)
+                    return
+                },
+            }
+            if request_index > 0 && shutdown.load(Ordering.Acquire) { return }
+            body :: request.body.clone()
+            close :: !jet_http_srv_request_keep_alive(&request_version, &request.headers) || request_index + 1 == JET_HTTP_MAX_REQUESTS_PER_CONNECTION
+            if request_index > 0 && shutdown.load(Ordering.Acquire) { return }
+            _ws_guard :: JetWsStreamGuard.install(stream)
+            response :: jet_http_mux_dispatch(mux, ^request).unwrap_or_else(jet_http_srv_error_response)
+            if jet_ws_take_upgraded() { return }
+            close :: close || !body.is_drained() || (request_version == "HTTP/1.0" && response.body.length().is_none())
+            if jet_http_srv_write_response(stream, &response, &request_version, close).is_err() { return }
+            if close {
+                jet_http_srv_finish_close(stream)
+                return
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2523
+fn jet_http_srv_empty_response(status: Int) -> JetHTTPResponse {
+    response := jet_http_srv_response_owned(status, String.new())
+    response.body = JetHTTPBody.empty()
+    response
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2529
+fn jet_http_srv_finish_close(stream: &TcpStream) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("half-close writes then drain at most 64KiB with 10ms read timeout") {
+        _ :: stream.shutdown(Shutdown.Write)
+        _ :: stream.set_read_timeout(Val(Duration.from_millis(U64{10})))
+        discarded := 0
+        buffer := [U8].filled(4096, U8{0})
+        while discarded < 64 * 1024 {
+            match stream.read(&buffer) { .Ok(0) -> break, .Err(_) -> break, .Ok(read) -> discarded += read }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2542
+const JET_HTTP2_PREFACE: [U8; 24] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2543
+const JET_HTTP2_MAX_FRAME: USize = 16 * 1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2544
+const JET_HTTP2_MAX_HEADER_LIST: USize = 32 * 1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2546
+trait JetHTTP2Transport: Read + Write {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2547
+    fn jet_http_set_read_timeout(self: &Self, timeout: Duration?) -> Unit Err!
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2551
+    fn jet_http_set_write_timeout(self: &Self, timeout: Duration?) -> Unit Err!
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2557
+impl TcpStream.JetHTTP2Transport {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2558
+    fn jet_http_set_read_timeout(self: &Self, timeout: Duration?) -> Unit Err! {
+        // GATE #4565: kernel primitive
+        #Unsafe("set borrowed native TCP read timeout") { self.set_read_timeout(timeout).map_err(_ -> "HTTP/2 read timeout setup failed".to_string()) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2566
+    fn jet_http_set_write_timeout(self: &Self, timeout: Duration?) -> Unit Err! {
+        // GATE #4565: kernel primitive
+        #Unsafe("set borrowed native TCP write timeout") { self.set_write_timeout(timeout).map_err(_ -> "HTTP/2 write timeout setup failed".to_string()) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2575
+struct JetHTTP2TlsTransport {
+    reader: JetHTTPTlsReader, writer: JetHTTPTlsWriter,
+    set_read_timeout: JetHTTPTlsTimeout, set_write_timeout: JetHTTPTlsTimeout,
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2582
+impl JetHTTP2TlsTransport.Read {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2583
+    fn read(self: &Self, output: &[U8]) -> USize IOError! { self.reader.read(output) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2588
+impl JetHTTP2TlsTransport.Write {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2589
+    fn write(self: &Self, input: &[U8]) -> USize IOError! { self.writer.write(input) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2593
+    fn flush(self: &Self) -> Unit IOError! { self.writer.flush() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2598
+impl JetHTTP2TlsTransport.JetHTTP2Transport {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2599
+    fn jet_http_set_read_timeout(self: &Self, timeout: Duration?) -> Unit Err! { (self.set_read_timeout)(timeout) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2606
+    fn jet_http_set_write_timeout(self: &Self, timeout: Duration?) -> Unit Err! { (self.set_write_timeout)(timeout) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2614
+// GATE #4565: kernel primitive
+static JET_HTTP2_HUFFMAN: OnceLock<[(U8, U32):U8]> = #Unsafe("publish immutable HPACK table once across workers") { OnceLock.new() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2615
+const JET_HTTP2_HUFFMAN_LENGTHS: [U8; 256] = [
+    13, 23, 28, 28, 28, 28, 28, 28, 28, 24, 30, 28, 28, 30, 28, 28,
+    28, 28, 28, 28, 28, 28, 30, 28, 28, 28, 28, 28, 28, 28, 28, 28,
+    6, 10, 10, 12, 13, 6, 8, 11, 10, 10, 8, 11, 8, 6, 6, 6,
+    5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 7, 8, 15, 6, 12, 10,
+    13, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 8, 7, 8, 13, 19, 13, 14, 6,
+    15, 5, 6, 5, 6, 5, 6, 6, 6, 5, 7, 7, 6, 6, 6, 5,
+    6, 7, 6, 5, 5, 6, 7, 7, 7, 7, 7, 15, 11, 14, 13, 28,
+    20, 22, 20, 20, 22, 22, 22, 23, 22, 23, 23, 23, 23, 23, 24, 23,
+    24, 24, 22, 23, 24, 23, 23, 23, 23, 21, 22, 23, 22, 23, 23, 24,
+    22, 21, 20, 22, 22, 23, 23, 21, 23, 22, 22, 24, 21, 22, 23, 23,
+    21, 21, 22, 21, 23, 22, 23, 23, 20, 22, 22, 22, 23, 22, 22, 23,
+    26, 26, 20, 19, 22, 23, 22, 25, 26, 26, 26, 27, 27, 26, 24, 25,
+    19, 21, 26, 27, 27, 26, 27, 24, 21, 21, 26, 26, 28, 27, 27, 27,
+    20, 24, 20, 21, 22, 21, 21, 23, 22, 22, 25, 25, 24, 24, 26, 23,
+    26, 27, 26, 26, 27, 27, 27, 27, 27, 28, 27, 27, 27, 27, 27, 26,
+]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2634
+struct JetHTTP2Frame { kind: U8, flags: U8, stream: U32, payload: [U8] }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2641
+fn jet_http2_is_preface(stream: &TcpStream, timeout: Duration) -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("peek bounded TCP preface without consuming; native monotonic timeout and brief wait") {
+        started :: Instant.now()
+        _ :: stream.set_read_timeout(Val(timeout))
+        bytes := [U8].filled(24, U8{0})
+        while started.elapsed() < timeout {
+            match stream.peek(&bytes) {
+                .Ok(read) if read > 0 -> {
+                    if bytes[0..<read] != JET_HTTP2_PREFACE[0..<read] { return false }
+                    if read == bytes.len() { return true }
+                },
+                .Ok(_) -> return false,
+                .Err(error) if error.kind() == ErrorKind.WouldBlock || error.kind() == ErrorKind.TimedOut -> return false,
+                .Err(_) -> return false,
+            }
+            thread.sleep(Duration.from_millis(U64{1}))
+        }
+        false
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2660
+fn jet_http2_read_frame<R: Read>(reader: &R) -> JetHTTP2Frame Err! {
+    header := [U8].filled(9, U8{0})
+    reader.read_exact(&header).map_err(error -> {
+        if error.kind() == ErrorKind.WouldBlock || error.kind() == ErrorKind.TimedOut { "HTTP/2 read timed out".to_string() } else { "HTTP/2 frame header ended early".to_string() }
+    })?
+    length :: ((header[0] as USize) << 16) | ((header[1] as USize) << 8) | (header[2] as USize)
+    if length > JET_HTTP2_MAX_FRAME { return Err("HTTP/2 frame exceeds the advertised maximum".to_string()) }
+    if header[5] & U8{0x80} != U8{0} { return Err("HTTP/2 reserved stream bit is set".to_string()) }
+    stream :: U32.from_be_bytes([header[5], header[6], header[7], header[8]])
+    payload := [U8].filled(length, U8{0})
+    reader.read_exact(&payload).map_err(error -> {
+        if error.kind() == ErrorKind.WouldBlock || error.kind() == ErrorKind.TimedOut { "HTTP/2 frame payload timed out".to_string() } else { "HTTP/2 frame payload ended early".to_string() }
+    })?
+    Ok(JetHTTP2Frame { kind: header[3], flags: header[4], stream, payload: ^payload })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2680
+fn jet_http2_write_frame<W: Write>(writer: &W, kind: U8, flags: U8, stream: U32, payload: &[U8]) -> Unit Err! {
+    if payload.len() > 0x00ffffff { return Err("HTTP/2 frame payload is too large".to_string()) }
+    length :: payload.len()
+    stream :: (stream & U32{0x7fffffff}).to_be_bytes()
+    header :: [(length >> 16) as U8, (length >> 8) as U8, length as U8, kind, flags, stream[0], stream[1], stream[2], stream[3]]
+    writer.write_all(&header).and_then(() -> writer.write_all(payload)).map_err(_ -> "HTTP/2 write failed".to_string())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2698
+fn jet_http2_goaway_payload(last_stream: U32, error_code: U32) -> [U8; 8] {
+    payload := [U8; 8].filled(U8{0})
+    payload[0..<4].copy_from_slice(&(last_stream & U32{0x7fffffff}).to_be_bytes())
+    payload[4..].copy_from_slice(&error_code.to_be_bytes())
+    payload
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2705
+fn jet_http2_integer(input: &[U8], cursor: &USize, prefix: U8) -> USize Err! {
+    first :: *input.get(*cursor).ok_or_else(() -> "HPACK integer ended early".to_string())?
+    *cursor += 1
+    mask :: ((U16{1} << prefix) as U8) - U8{1}
+    value := (first & mask) as USize
+    if value < mask as USize { return Ok(value) }
+    shift := 0
+    loop {
+        byte :: *input.get(*cursor).ok_or_else(() -> "HPACK integer ended early".to_string())?
+        *cursor += 1
+        if shift >= USize.BITS as USize || ((byte & U8{0x7f}) as USize) > (USize.MAX - value) >> shift { return Err("HPACK integer overflow".to_string()) }
+        value += ((byte & U8{0x7f}) as USize) << shift
+        if byte & U8{0x80} == U8{0} { return Ok(value) }
+        shift += 7
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2724
+fn jet_http2_huffman(input: &[U8]) -> String Err! {
+    // GATE #4565: kernel primitive
+    table :: #Unsafe("initialize and borrow immutable HPACK table through OnceLock") {
+        JET_HTTP2_HUFFMAN.get_or_init(() -> {
+            entries := [(U8, U32):U8].with_capacity(256)
+            symbols := (U16{0}..<U16{256}).collect<[U16]>()
+            symbols.sort_by_key(symbol -> (JET_HTTP2_HUFFMAN_LENGTHS[*symbol as USize], *symbol))
+            code := U32{0}
+            prior := U8{0}
+            loop symbol in symbols {
+                length :: JET_HTTP2_HUFFMAN_LENGTHS[symbol as USize]
+                code <<= (length - prior) as U32
+                entries.insert((length, code), symbol as U8)
+                code += U32{1}
+                prior = length
+            }
+            entries
+        })
+    }
+    output := [U8].new()
+    code := U32{0}
+    length := U8{0}
+    loop byte in input {
+        for shift in (0..<8).rev() {
+            code = (code << 1) | (((byte >> shift) & U8{1}) as U32)
+            length += U8{1}
+            if table.get(&(length, code)) == .Val(symbol) {
+                output.push(*symbol)
+                code = U32{0}
+                length = U8{0}
+            } else if length == U8{30} { return Err("HPACK Huffman code is invalid".to_string()) }
+        }
+    }
+    if length > U8{7} || code != (U32{1} << length) - U32{1} { return Err("HPACK Huffman padding is invalid".to_string()) }
+    String.from_utf8(^output).map_err(_ -> "HPACK string is not UTF-8".to_string())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2760
+fn jet_http2_string(input: &[U8], cursor: &USize) -> String Err! {
+    huffman :: input.get(*cursor).is_some_and(byte -> byte & U8{0x80} != U8{0})
+    length :: jet_http2_integer(input, cursor, U8{7})?
+    end :: cursor.checked_add(length).ok_or_else(() -> "HPACK string length overflow".to_string())?
+    bytes :: input.get(*cursor..<end).ok_or_else(() -> "HPACK string ended early".to_string())?
+    *cursor = end
+    if huffman { jet_http2_huffman(bytes) } else { std.str.from_utf8(bytes).map(value -> value.to_string()).map_err(_ -> "HPACK string is not UTF-8".to_string()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2771
+fn jet_http2_static(index: USize) -> (String, String)? {
+    const NAMES: [String; 47] = [
+        "accept-charset", "accept-encoding", "accept-language", "accept-ranges", "accept",
+        "access-control-allow-origin", "age", "allow", "authorization", "cache-control",
+        "content-disposition", "content-encoding", "content-language", "content-length",
+        "content-location", "content-range", "content-type", "cookie", "date", "etag", "expect",
+        "expires", "from", "host", "if-match", "if-modified-since", "if-none-match", "if-range",
+        "if-unmodified-since", "last-modified", "link", "location", "max-forwards",
+        "proxy-authenticate", "proxy-authorization", "range", "referer", "refresh", "retry-after",
+        "server", "set-cookie", "strict-transport-security", "transfer-encoding", "user-agent",
+        "vary", "via", "www-authenticate",
+    ]
+    match index {
+        1 -> Val((":authority", "")), 2 -> Val((":method", "GET")), 3 -> Val((":method", "POST")),
+        4 -> Val((":path", "/")), 5 -> Val((":path", "/index.html")),
+        6 -> Val((":scheme", "http")), 7 -> Val((":scheme", "https")),
+        8 -> Val((":status", "200")), 9 -> Val((":status", "204")), 10 -> Val((":status", "206")),
+        11 -> Val((":status", "304")), 12 -> Val((":status", "400")), 13 -> Val((":status", "404")),
+        14 -> Val((":status", "500")),
+        15..61 -> Val((NAMES[index - 15], if index == 16 { "gzip, deflate" } else { "" })),
+        _ -> None,
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2795
+struct JetHTTP2Hpack { dynamic: [(String, String)], dynamic_size: USize, max_size: USize }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2801
+impl JetHTTP2Hpack {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2802
+    fn new() -> Self { Self { dynamic: [], dynamic_size: 0, max_size: 4096 } }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2804
+    fn field(self: &Self, index: USize) -> (String, String)? {
+        jet_http2_static(index).map((name, value) -> (name.to_string(), value.to_string())).or_else(() -> self.dynamic.get(index.checked_sub(62)?).cloned())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2809
+    fn resize(self: &Self, size: USize) -> Unit Err! {
+        if size > 4096 { return Err("HPACK dynamic table size exceeds server limit".to_string()) }
+        self.max_size = size
+        while self.dynamic_size > self.max_size {
+            (name, value) :: match self.dynamic.pop() { .Val(pair) -> pair, .None -> break }
+            self.dynamic_size -= name.len() + value.len() + 32
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2819
+    fn insert(self: &Self, name: String, value: String) -> {
+        size :: name.len() + value.len() + 32
+        if size > self.max_size {
+            self.dynamic.clear()
+            self.dynamic_size = 0
+            return
+        }
+        while self.dynamic_size + size > self.max_size {
+            (old_name, old_value) :: match self.dynamic.pop() { .Val(pair) -> pair, .None -> break }
+            self.dynamic_size -= old_name.len() + old_value.len() + 32
+        }
+        self.dynamic.insert(0, (^name, ^value))
+        self.dynamic_size += size
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2835
+fn jet_http2_decode_headers(decoder: &JetHTTP2Hpack, block: &[U8]) -> [(String, String)] Err! {
+    headers := [(String, String)].new()
+    cursor := USize{0}
+    allow_size_update := true
+    list_size := USize{0}
+    while cursor < block.len() {
+        byte :: block[cursor]
+        if byte & U8{0x80} != U8{0} {
+            index :: jet_http2_integer(block, &cursor, U8{7})?
+            (name, value) :: decoder.field(index).ok_or_else(() -> "HPACK index is invalid".to_string())?
+            list_size = list_size.saturating_add(name.len() + value.len() + 32)
+            headers.push((^name, ^value))
+            allow_size_update = false
+        } else if byte & U8{0xe0} == U8{0x20} {
+            if !allow_size_update { return Err("HPACK table size update follows a header".to_string()) }
+            size :: jet_http2_integer(block, &cursor, U8{5})?
+            decoder.resize(size)?
+        } else {
+            indexed :: byte & U8{0x40} != U8{0}
+            prefix :: if indexed { U8{6} } else { U8{4} }
+            name_index :: jet_http2_integer(block, &cursor, prefix)?
+            name :: if name_index == 0 { jet_http2_string(block, &cursor)? } else { decoder.field(name_index).map(field -> field.0).ok_or_else(() -> "HPACK name index is invalid".to_string())? }
+            value :: jet_http2_string(block, &cursor)?
+            list_size = list_size.saturating_add(name.len() + value.len() + 32)
+            if indexed { decoder.insert(name.clone(), value.clone()) }
+            headers.push((^name, ^value))
+            allow_size_update = false
+        }
+        if list_size > JET_HTTP2_MAX_HEADER_LIST { return Err("HTTP/2 header list is too large".to_string()) }
+        if headers.len() > 100 { return Err("HTTP/2 request has too many headers".to_string()) }
+    }
+    Ok(^headers)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2872
+fn jet_http2_encode_integer(output: &[U8], value: USize, prefix: U8, bits: U8) -> {
+    mask :: (USize{1} << prefix) - 1
+    if value < mask {
+        output.push(bits | value as U8)
+        return
+    }
+    output.push(bits | mask as U8)
+    rest := value - mask
+    while rest >= 128 {
+        output.push((rest as U8 & U8{0x7f}) | U8{0x80})
+        rest >>= 7
+    }
+    output.push(rest as U8)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2881
+fn jet_http2_encode_string(output: &[U8], value: &String) -> {
+    jet_http2_encode_integer(output, value.len(), U8{7}, U8{0})
+    output.extend_from_slice(value.as_bytes())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2886
+fn jet_http2_encode_response_headers(response: &JetHTTPResponse, length: USize?) -> [U8] {
+    output := [U8].new()
+    status_index :: match response.status { 200 -> Val(8), 204 -> Val(9), 206 -> Val(10), 304 -> Val(11), 400 -> Val(12), 404 -> Val(13), 500 -> Val(14), _ -> None }
+    if status_index == .Val(index) { jet_http2_encode_integer(&output, index, U8{7}, U8{0x80}) } else {
+        jet_http2_encode_integer(&output, 8, U8{4}, U8{0})
+        jet_http2_encode_string(&output, &response.status.to_string())
+    }
+    if length == .Val(length) {
+        jet_http2_encode_integer(&output, 28, U8{4}, U8{0})
+        jet_http2_encode_string(&output, &length.to_string())
+    }
+    connection_headers :: response.headers.all("connection").into_iter().flat_map(value -> value.split(',')).map(name -> name.trim()).filter(name -> !name.is_empty()).collect<[_]>() // #4303
+    for (name, value) in &response.headers {
+        lower :: name.to_ascii_lowercase()
+        if ["connection", "content-length", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade"].contains(lower.as_str()) || connection_headers.iter().any(candidate -> name.eq_ignore_ascii_case(candidate)) { next }
+        jet_http2_encode_integer(&output, 0, U8{4}, U8{0})
+        jet_http2_encode_string(&output, &lower)
+        jet_http2_encode_string(&output, value)
+    }
+    output
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2914
+fn jet_http2_encode_trailers(trailers: &JetHTTPHeaders) -> [U8] Err! {
+    output := [U8].new()
+    for (name, value) in trailers {
+        if !jet_http_trailer_name_allowed(name) { return Err("HTTP/2 response trailer is forbidden".to_string()) }
+        jet_http2_encode_integer(&output, 0, U8{4}, U8{0})
+        jet_http2_encode_string(&output, &name.to_ascii_lowercase())
+        jet_http2_encode_string(&output, value)
+    }
+    if output.len() > JET_HTTP2_MAX_HEADER_LIST { return Err("HTTP/2 response trailer list is too large".to_string()) }
+    Ok(^output)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2930
+fn jet_http2_request_trailers(headers: [(String, String)]) -> JetHTTPHeaders Err! {
+    trailers := JetHTTPHeaders.new()
+    for (name, value) in headers {
+        if name.starts_with(':') { return Err("HTTP/2 trailer contains a pseudo-header".to_string()) }
+        if name.bytes().any(byte -> byte.is_ascii_uppercase()) { return Err("HTTP/2 trailer name contains uppercase".to_string()) }
+        if !jet_http_trailer_name_allowed(&name) { return Err("HTTP/2 request trailer is forbidden".to_string()) }
+        trailers.append(&name, &value).map_err(_ -> "HTTP/2 trailer is invalid".to_string())?
+    }
+    Ok(^trailers)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2949
+fn jet_http2_request_with_trailers(headers: [(String, String)], body: JetHTTPBody, trailers: Arc<Mutex<JetHTTPHeaders>>, end_stream: Bool) -> (JetHTTPRequest, USize?) Err! {
+    method := None
+    path := None
+    scheme := None
+    authority := None
+    regular := JetHTTPHeaders.new()
+    saw_regular := false
+    for (name, value) in headers {
+        if name.bytes().any(byte -> byte.is_ascii_uppercase()) { return Err("HTTP/2 header name contains uppercase".to_string()) }
+        if name.starts_with(':') {
+            if saw_regular { return Err("HTTP/2 pseudo-header follows regular headers".to_string()) }
+            slot :: match name.as_str() {
+                ":method" -> &method, ":path" -> &path, ":scheme" -> &scheme, ":authority" -> &authority,
+                _ -> return Err("HTTP/2 pseudo-header is invalid".to_string()),
+            }
+            if slot.replace(^value).is_some() { return Err("HTTP/2 pseudo-header is duplicated".to_string()) }
+        } else {
+            saw_regular = true
+            if ["connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade"].contains(name.as_str()) { return Err("HTTP/2 connection-specific header is forbidden".to_string()) }
+            if name == "te" && !value.eq_ignore_ascii_case("trailers") { return Err("HTTP/2 TE value is invalid".to_string()) }
+            regular.append(&name, &value).map_err(_ -> "HTTP/2 header is invalid".to_string())?
+        }
+    }
+    method :: method.ok_or_else(() -> "HTTP/2 method is missing".to_string())?
+    if !JetHTTPHeaders.valid_name(&method) { return Err("HTTP/2 request target is invalid".to_string()) }
+    path :: if method == "CONNECT" {
+        // RFC 9113 §8.5: CONNECT omits scheme/path; authority is its target.
+        if path.is_some() { return Err("HTTP/2 CONNECT must omit :path".to_string()) }
+        if scheme.is_some() { return Err("HTTP/2 CONNECT must omit :scheme".to_string()) }
+        authority :: authority.ok_or_else(() -> "HTTP/2 CONNECT requires :authority".to_string())?
+        if jet_http_trim_ows(&authority) != authority { return Err("HTTP/2 authority is invalid".to_string()) }
+        parsed :: jet_http_parse_authority(&authority).ok_or_else(() -> "HTTP/2 authority is invalid".to_string())?
+        if regular.get("host") == .Val(host) {
+            host :: jet_http_parse_authority(host).ok_or_else(() -> "HTTP/2 authority does not match host".to_string())?
+            if parsed.host != host.host || parsed.port != host.port { return Err("HTTP/2 authority does not match host".to_string()) }
+        } else { regular.append("host", &jet_http_format_authority(&parsed)).map_err(_ -> "HTTP/2 authority is invalid".to_string())? }
+        jet_http_format_authority(&parsed)
+    } else {
+        path :: path.ok_or_else(() -> "HTTP/2 path is missing".to_string())?
+        if scheme.as_deref() != "http" && scheme.as_deref() != "https" { return Err("HTTP/2 scheme is invalid".to_string()) }
+        if authority == .Val(authority) {
+            jet_http_parse_authority(&authority).ok_or_else(() -> "HTTP/2 authority is invalid".to_string())?
+            if regular.get("host").is_some_and(host -> !host.eq_ignore_ascii_case(&authority)) { return Err("HTTP/2 authority does not match host".to_string()) }
+            if regular.get("host").is_none() { regular.append("host", &authority).map_err(_ -> "HTTP/2 authority is invalid".to_string())? }
+        }
+        if !(jet_http_path_query_valid(&path) || method == "OPTIONS" && path == "*") { return Err("HTTP/2 request target is invalid".to_string()) }
+        path
+    }
+    content_length := None
+    loop value in regular.all("content-length") { content_length = Val(jet_http_parse_content_length(value, content_length).map_err(error -> error.to_string())?) }
+    // GATE #4565: kernel primitive
+    #Unsafe("publish validated request framing and end-stream state through body mutex and release atomic") {
+        if body.state.lock() == .Ok(state) {
+            state.length = content_length
+            state.drained.store(end_stream, Ordering.Release)
+        }
+    }
+    Ok((JetHTTPRequest.server_body_with_trailers(&method, ^path, ^body, ^regular, ^trailers), content_length))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3040
+fn jet_http2_request(headers: [(String, String)], body: JetHTTPBody) -> (JetHTTPRequest, USize?) Err! {
+    // GATE #4565: kernel primitive
+    trailers :: #Unsafe("allocate shared request trailer slot") { Arc.new(Mutex.new(JetHTTPHeaders.new())) }
+    jet_http2_request_with_trailers(^headers, ^body, ^trailers, true)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3052
+enum JetHTTP2BodyPart { Data { bytes: [U8], flow_bytes: USize }, End }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3057
+struct JetHTTPSchedulerBlockingWait {}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3059
+impl JetHTTPSchedulerBlockingWait {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3060
+    fn enter() -> Self {
+        jet_scheduler_blocking_wait_enter()
+        Self {}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3066
+impl JetHTTPSchedulerBlockingWait.Drop {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3067
+    fn drop(self: &Self) -> { jet_scheduler_blocking_wait_leave() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3070
+struct JetHTTP2BodyReader {
+    receiver: mpsc.Receiver<JetHTTP2BodyPart>,
+    consumed: mpsc.Sender<(U32, USize)>,
+    stream_id: U32,
+    current: (Cursor<[U8]>, USize)?,
+    ended: Bool,
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3078
+impl JetHTTP2BodyReader.Read {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3079
+    fn read(self: &Self, output: &[U8]) -> USize IOError! {
+        // GATE #4565: kernel primitive
+        #Unsafe("receive bounded body parts under scheduler blocking guard and return consumed flow credit") {
+            loop {
+                if self.current.as_mut() == .Val((current, flow_bytes)) {
+                    read :: current.read(output)?
+                    done :: current.position() == current.get_ref().len() as U64
+                    if done {
+                        flow_bytes :: *flow_bytes
+                        self.current = None
+                        _ :: self.consumed.send((self.stream_id, flow_bytes))
+                    }
+                    if read != 0 { return Ok(read) }
+                }
+                if self.ended { return Ok(0) }
+                part :: match self.receiver.try_recv() {
+                    .Ok(part) -> Ok(^part),
+                    .Err(mpsc.TryRecvError.Disconnected) -> Err(mpsc.RecvError),
+                    .Err(mpsc.TryRecvError.Empty) -> {
+                        _wait :: JetHTTPSchedulerBlockingWait.enter()
+                        self.receiver.recv()
+                    },
+                }
+                if jet_scheduler_wait_point_cancelled() { jet_task_deliver_cancel() }
+                match part {
+                    .Ok(JetHTTP2BodyPart.Data { bytes, flow_bytes }) -> self.current = Val((Cursor.new(^bytes), flow_bytes)),
+                    .Ok(JetHTTP2BodyPart.End) -> self.ended = true,
+                    .Err(_) -> self.ended = true,
+                }
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3111
+struct JetHTTP2RequestStream {
+    sender: mpsc.SyncSender<JetHTTP2BodyPart>,
+    pending: VecDeque<JetHTTP2BodyPart>,
+    received: USize, unconsumed_flow: USize, expected: USize?,
+    inbound_closed: Bool, response_done: Bool,
+    control: Arc<JetTaskControl>?, body_started: Instant,
+    trailers: Arc<Mutex<JetHTTPHeaders>>,
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3124
+impl JetHTTP2RequestStream {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3125
+    fn pump(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("nonblocking bounded body queue send; retain unsent part on full and discard on disconnect") {
+            while self.pending.pop_front() == .Val(part) {
+                match self.sender.try_send(^part) {
+                    .Ok(()) -> {},
+                    .Err(.Full(part)) -> {
+                        self.pending.push_front(^part)
+                        break
+                    },
+                    .Err(.Disconnected(_)) -> {
+                        self.pending.clear()
+                        break
+                    },
+                }
+            }
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3142
+impl JetHTTP2RequestStream.Drop {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3143
+    fn drop(self: &Self) -> { if self.control.as_ref() == .Val(control) { control.cancel() } }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3148
+struct JetHTTP2DispatchTasks { tasks: [(JetSchedulerJoin<Unit>, Arc<JetTaskControl>)] }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3152
+impl JetHTTP2DispatchTasks {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3153
+    fn push(self: &Self, task: JetSchedulerJoin<Unit>, control: Arc<JetTaskControl>) -> { self.tasks.push((^task, ^control)) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3157
+    fn drain(self: &Self) -> {
+        for (task, control) in std.mem.take(&self.tasks) {
+            control.cancel()
+            task.drain()
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3165
+impl JetHTTP2DispatchTasks.Default {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3166
+    fn default() -> Self { Self { tasks: [] } }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3171
+impl JetHTTP2DispatchTasks.Drop {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3172
+    fn drop(self: &Self) -> { self.drain() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3177
+struct JetHTTP2Outgoing {
+    receiver: mpsc.Receiver<JetHTTP2ResponsePart>?, chunk: [U8],
+    offset: USize, expected: USize?, sent: USize,
+    control: Arc<JetTaskControl>, source_closer: Arc<JetHTTPBodyCloser>?,
+    producer: JetSchedulerJoin<Unit>?, trailer_block: [U8],
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3189
+enum JetHTTP2ResponsePart { Chunk([U8]), Error, End }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3195
+impl JetHTTP2Outgoing.Drop {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3196
+    fn drop(self: &Self) -> {
+        // Disconnect before joining: producer may be blocked on send during reset.
+        drop(self.receiver.take())
+        self.control.cancel()
+        if self.source_closer.as_ref() == .Val(closer) { closer.close() }
+        if self.producer.take() == .Val(producer) { producer.drain() }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3207
+fn jet_http2_write_header_block<W: Write>(stream: &W, stream_id: U32, flags: U8, block: &[U8], max_frame: USize) -> Unit Err! {
+    if block.len() <= max_frame { return jet_http2_write_frame(stream, U8{1}, flags | U8{0x4}, stream_id, block) }
+    chunks := block.chunks(max_frame).peekable()
+    first :: chunks.next() ?? panic("non-empty HPACK block")
+    jet_http2_write_frame(stream, U8{1}, flags & !U8{0x4}, stream_id, first)?
+    while chunks.next() == .Val(chunk) {
+        jet_http2_write_frame(stream, U8{9}, if chunks.peek().is_none() { U8{0x4} } else { U8{0} }, stream_id, chunk)?
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3224
+fn jet_http2_start_response<W: Write>(stream: &W, stream_id: U32, response: JetHTTPResponse, max_frame: USize) -> JetHTTP2Outgoing? Err! {
+    body_forbidden :: (100..<200).contains(&response.status) || response.status == 204 || response.status == 304
+    reset_content :: response.status == 205
+    head :: response.head_content_length.is_some()
+    trailer_block :: jet_http2_encode_trailers(&response.trailers)?
+    has_trailers :: !trailer_block.is_empty()
+    if has_trailers && (body_forbidden || reset_content || head) { return Err("HTTP/2 response trailers are invalid for this response".to_string()) }
+    length :: if body_forbidden { None } else if reset_content { Val(0) } else { response.head_content_length.or_else(() -> response.body.length()) }
+    empty :: body_forbidden || reset_content || head || length == 0
+    headers :: jet_http2_encode_response_headers(&response, length)
+    if headers.len() > JET_HTTP2_MAX_HEADER_LIST { return Err("HTTP/2 response header list is too large".to_string()) }
+    chunks := if empty { None } else {
+        chunks :: response.body.chunks(JET_HTTP2_MAX_FRAME).map_err(error -> error.to_string())?
+        if !chunks.h2_cancellable() { return Err("HTTP/2 streaming response body must be bounded or cancellable".to_string()) }
+        Val(^chunks)
+    }
+    jet_http2_write_header_block(stream, stream_id, if empty && !has_trailers { U8{0x1} } else { U8{0} }, &headers, max_frame)?
+    stream.flush().map_err(_ -> "HTTP/2 flush failed".to_string())?
+    if empty && !has_trailers { return Ok(None) }
+    // GATE #4565: kernel primitive
+    #Unsafe("bounded native response queue and cancellable scheduler producer with owned source closer") {
+        if empty {
+            (sender, receiver) :: mpsc.sync_channel<JetHTTP2ResponsePart>(1)
+            sender.send(JetHTTP2ResponsePart.End).map_err(_ -> "HTTP/2 trailer queue failed".to_string())?
+            drop(^sender)
+            return Ok(Val(JetHTTP2Outgoing {
+                receiver: Val(^receiver), chunk: [], offset: 0, expected: Val(0), sent: 0,
+                control: JetTaskControl.new(), source_closer: None, producer: None, trailer_block: ^trailer_block,
+            }))
+        }
+        chunks := chunks.take() ?? panic("non-empty HTTP/2 response has chunks")
+        source_closer :: chunks.closer()
+        (sender, receiver) :: mpsc.sync_channel<JetHTTP2ResponsePart>(1)
+        control :: JetTaskControl.new()
+        task_control :: control.clone()
+        producer :: jet_scheduler_spawn_blocking_with_control(() -> {
+            loop {
+                part :: {
+                    _wait :: JetHTTPSchedulerBlockingWait.enter()
+                    match chunks.next() {
+                        .Val(.Ok(chunk)) -> JetHTTP2ResponsePart.Chunk(^chunk),
+                        .Val(.Err(_)) -> JetHTTP2ResponsePart.Error,
+                        .None -> JetHTTP2ResponsePart.End,
+                    }
+                }
+                if jet_scheduler_wait_point_cancelled() { break }
+                done :: part == JetHTTP2ResponsePart.Error || part == JetHTTP2ResponsePart.End
+                sent :: match sender.try_send(^part) {
+                    .Ok(()) -> true,
+                    .Err(.Disconnected(_)) -> false,
+                    .Err(.Full(part)) -> {
+                        _wait :: JetHTTPSchedulerBlockingWait.enter()
+                        sender.send(^part).is_ok()
+                    },
+                }
+                if done || !sent { break }
+            }
+        }, ^task_control)
+        Ok(Val(JetHTTP2Outgoing {
+            receiver: Val(^receiver), chunk: [], offset: 0, expected: length, sent: 0,
+            control: ^control, source_closer: ^source_closer, producer: Val(^producer), trailer_block: ^trailer_block,
+        }))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3311
+fn jet_http2_flush_body<W: Write>(stream: &W, stream_id: U32, outgoing: &JetHTTP2Outgoing, connection_window: &I64, stream_window: &I64, max_frame: USize) -> Bool Err! {
+    // GATE #4565: kernel primitive
+    #Unsafe("nonblocking native response receive; write bounded flow-controlled frames without blocking on producer") {
+        loop {
+            if outgoing.offset == outgoing.chunk.len() {
+                match outgoing.receiver.as_ref().expect("HTTP/2 response receiver missing").try_recv() {
+                    .Ok(.Chunk(chunk)) -> {
+                        outgoing.chunk = ^chunk
+                        outgoing.offset = 0
+                        if outgoing.chunk.is_empty() { next }
+                    },
+                    .Ok(JetHTTP2ResponsePart.Error) -> {
+                        jet_http2_write_frame(stream, U8{3}, U8{0}, stream_id, &U32{2}.to_be_bytes())?
+                        stream.flush().map_err(_ -> "HTTP/2 flush failed".to_string())?
+                        return Ok(true)
+                    },
+                    .Err(mpsc.TryRecvError.Disconnected) -> {
+                        jet_http2_write_frame(stream, U8{3}, U8{0}, stream_id, &U32{2}.to_be_bytes())?
+                        stream.flush().map_err(_ -> "HTTP/2 flush failed".to_string())?
+                        return Ok(true)
+                    },
+                    .Ok(JetHTTP2ResponsePart.End) -> {
+                        if outgoing.expected.is_some_and(expected -> expected != outgoing.sent) {
+                            jet_http2_write_frame(stream, U8{3}, U8{0}, stream_id, &U32{2}.to_be_bytes())?
+                            stream.flush().map_err(_ -> "HTTP/2 flush failed".to_string())?
+                            return Ok(true)
+                        }
+                        if outgoing.trailer_block.is_empty() { jet_http2_write_frame(stream, U8{0}, U8{0x1}, stream_id, &[])? } else {
+                            jet_http2_write_header_block(stream, stream_id, U8{0x1}, &outgoing.trailer_block, max_frame)?
+                        }
+                        stream.flush().map_err(_ -> "HTTP/2 flush failed".to_string())?
+                        return Ok(true)
+                    },
+                    .Err(mpsc.TryRecvError.Empty) -> return Ok(false),
+                }
+            }
+            if *connection_window <= I64{0} || *stream_window <= I64{0} { return Ok(false) }
+            remaining :: outgoing.expected.map(expected -> expected.saturating_sub(outgoing.sent)).unwrap_or(USize.MAX)
+            if remaining == 0 {
+                jet_http2_write_frame(stream, U8{3}, U8{0}, stream_id, &U32{2}.to_be_bytes())?
+                stream.flush().map_err(_ -> "HTTP/2 flush failed".to_string())?
+                return Ok(true)
+            }
+            length :: (outgoing.chunk.len() - outgoing.offset).min(max_frame).min(*connection_window as USize).min(*stream_window as USize).min(remaining)
+            jet_http2_write_frame(stream, U8{0}, U8{0}, stream_id, &outgoing.chunk[outgoing.offset..<outgoing.offset + length])?
+            outgoing.offset += length
+            outgoing.sent += length
+            *connection_window -= length as I64
+            *stream_window -= length as I64
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3374
+fn jet_http2_dispatch(mux: &JetHTTPMux, request: JetHTTPRequest) -> JetHTTPResponse Err! {
+    Ok(jet_http_mux_dispatch(mux, ^request).unwrap_or_else(jet_http_srv_error_response))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3381
+fn jet_http2_queue_response<W: Write>(stream: &W, stream_id: U32, response: JetHTTPResponse, outgoing: &[U32:JetHTTP2Outgoing], stream_windows: &[U32:I64], connection_window: &I64, initial_window: I64, max_frame: USize) -> Bool Err! {
+    response := match jet_http2_start_response(stream, stream_id, ^response, max_frame)? { .Val(response) -> response, .None -> return Ok(true) }
+    window :: stream_windows.entry(stream_id).or_insert(initial_window)
+    if !jet_http2_flush_body(stream, stream_id, &response, connection_window, window, max_frame)? {
+        outgoing.insert(stream_id, ^response)
+        return Ok(false)
+    }
+    Ok(true)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3400
+fn jet_http2_serve<T: JetHTTP2Transport>(stream: &T, mux: &JetHTTPMux, options: &JetHTTPServerOptions, shutdown: &AtomicBool, dynamic_grace_ms: &AtomicU64?, drain_deadline_ms: &AtomicU64?) -> Unit Err! {
+    jet_http2_serve_with_last_stream(stream, mux, options, shutdown, dynamic_grace_ms, drain_deadline_ms).0
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3418
+fn jet_http2_serve_with_last_stream<T: JetHTTP2Transport>(stream: &T, mux: &JetHTTPMux, options: &JetHTTPServerOptions, shutdown: &AtomicBool, dynamic_grace_ms: &AtomicU64?, drain_deadline_ms: &AtomicU64?) -> (Unit Err!, U32) {
+    last_stream := U32{0}
+    result :: jet_http2_serve_inner(stream, mux, options, shutdown, dynamic_grace_ms, drain_deadline_ms, &last_stream)
+    (result, last_stream)
+}
+

@@ -24,7 +24,7 @@ use jet_foundation::Report::{
 };
 
 // D-ALLOC-PROGRAM1=A: the CLI executable installs the resident instance once.
-// JIT/interpreter entry points only marshal the checked package fact into the
+// Interpreter entry points only marshal the checked package fact into the
 // same Prelude kernel; they never implement allocation policy.
 #[global_allocator]
 static JET_HOST_ALLOCATOR: jet::program_allocator::JetHostProgramAllocator =
@@ -35,7 +35,6 @@ mod CmdBackendScaffold;
 mod CmdBudget;
 mod CmdCodemod;
 mod CmdCompile;
-mod CmdConsoleHost;
 mod CmdDb;
 mod CmdDevTools;
 mod CmdDoc;
@@ -68,7 +67,6 @@ mod CmdStructure;
 mod CmdSupply;
 mod CmdTest;
 mod CmdTry;
-mod DevAot;
 mod EngineDispatch;
 mod NativeLinker;
 mod OutputAdapter;
@@ -92,7 +90,6 @@ use CmdCompile::{
     run_native_source_from_stdin, run_new, run_test_opts, run_web_app_dev_entry,
     scaffold_browser_tests, validate_target, FuzzRunOpts, NativeExecutionRequest, TestRunOpts,
 };
-use CmdConsoleHost::ConsoleHost;
 use CmdDb::run_db;
 use CmdDevTools::{
     run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust, run_eval,
@@ -600,12 +597,6 @@ impl BuildProfile {
         }
     }
 
-    /// #3953 owner ruling: dev profiles build native code through Cranelift;
-    /// release-class, CI, size, no-OS and named profiles keep rustc/LLVM.
-    pub(crate) fn cranelift_backend(&self) -> bool {
-        matches!(self, BuildProfile::Default | BuildProfile::Fast | BuildProfile::Debug)
-    }
-
     pub(crate) fn release_inspect(&self) -> Option<jet::Package::Blocks::ReleaseInspect> {
         self.is_release().then(|| self.config().inspect)
     }
@@ -773,6 +764,9 @@ fn command_help(cmd: &str) -> String {
     for (long, help) in jet::CLI::flags_for_command(cmd) {
         output.push_str(&format!("  {long:<28} {help}\n"));
     }
+    if cmd == jet::CLI::JOBS_COMMAND {
+        output.push_str(jet::CLI::JOB_INVOCATION_HELP);
+    }
     output
 }
 
@@ -885,10 +879,16 @@ fn greeting() -> String {
 /// close (reusing the edit-distance muscle behind S14 teaching errors).
 // E2101 has the same argv-only boundary as E2102: no Jet source span exists for
 // a command token, so there is no `fix_edits` entry for `jet fix` to apply.
-fn unknown_subcommand(cmd: &str) -> ! {
+fn unknown_subcommand(cmd: &str, jobs: &[String]) -> ! {
     let bin = jet::Syntax::BINARY_NAME;
-    let fix = match jet::CLI::closest_command(cmd) {
-        Some(close) => format!("did you mean `{bin} {close}`? Run `{bin} help` to see them all."),
+    let closest = jet::CLI::COMMANDS.iter().map(|command| command.name)
+        .chain(jobs.iter().map(String::as_str))
+        .filter_map(|name| {
+            let distance = jet::CLI::edit_distance(cmd, name);
+            (distance <= 3).then_some((distance, name))
+        }).min();
+    let fix = match closest {
+        Some((_, close)) => format!("did you mean `{bin} {close}`? Run `{bin} help` to see them all."),
         None => format!("run `{bin} help` to see every command."),
     };
     emit_cli_report(
@@ -1224,14 +1224,14 @@ fn check_flags(raw: &[String], subcmd: &str) {
                 "did you mean `{close}`? Or use `{bin} {subcmd} <file> -- {head}` to pass it to your program"
             ),
             Some(close) if subcmd == jet::CLI::JOBS_COMMAND => format!(
-                "did you mean `{close}`? Or write it after the job name, `{bin} {subcmd} <name> {head}`, to pass it to the job"
+                "did you mean `{close}`? Or write it after the job name, `{bin} <name> {head}`, to pass it to the job"
             ),
             Some(close) => format!("did you mean `{close}`? (run `{bin} help` for the flags)"),
             None if matches!(subcmd, "run" | "test") => format!(
                 "use `{bin} {subcmd} <file> -- {head}` to pass this flag to your program"
             ),
             None if subcmd == jet::CLI::JOBS_COMMAND => format!(
-                "write it after the job name, `{bin} {subcmd} <name> {head}`, to pass it to the job"
+                "write it after the job name, `{bin} <name> {head}`, to pass it to the job"
             ),
             None => format!("drop the flag, or run `{bin} help` to see the flags"),
         };
@@ -1244,6 +1244,61 @@ fn check_flags(raw: &[String], subcmd: &str) {
         );
         exit(ExitCodes::USAGE);
     }
+}
+
+/// D-JOBS1=A: the commands that compile, and so take `--threads N`.
+const THREADS_COMMANDS: &[&str] = &["build", "run", "check", "test", "dev", "inspect"];
+
+/// `--threads N` (or `--threads=N`) before `--`: `None` when absent, else the
+/// compiler's thread cap. A usage error names the flag and exits: a value
+/// below 1 or not a number, or the flag on a command that does not compile.
+/// `--jobs` and `-j`, the spelling other build tools use, are refused on the
+/// compiling commands with a pointer to `--threads`; `jet jobs` is unchanged.
+fn parse_compiler_threads(jet_argv: &[String], command: &str) -> Option<usize> {
+    let compiling = THREADS_COMMANDS.contains(&command);
+    for (index, argument) in jet_argv.iter().enumerate() {
+        let jobs_flag = argument == "--jobs"
+            || argument.starts_with("--jobs=")
+            || argument == "-j"
+            || (argument.starts_with("-j") && argument.len() > 2);
+        if compiling && jobs_flag {
+            let head = argument.split('=').next().unwrap_or(argument);
+            crate::cli_error!(
+                @full "E2102",
+                format!("`{head}` isn't a flag jet understands"),
+                "`jet jobs` runs your project's named jobs; the compiler's thread cap is `--threads`",
+                "write `--threads N` to cap the compiler at N threads"
+            );
+            exit(ExitCodes::USAGE);
+        }
+        let text = if let Some(value) = argument.strip_prefix("--threads=") {
+            value
+        } else if argument == "--threads" {
+            jet_argv.get(index + 1).map_or("", String::as_str)
+        } else {
+            continue;
+        };
+        if !compiling {
+            crate::cli_error!(
+                @fix "E2102",
+                "`--threads` is only valid with a command that compiles",
+                "use it with `jet build`, `run`, `check`, `test`, `dev`, or `inspect`"
+            );
+            exit(ExitCodes::USAGE);
+        }
+        return match text.parse::<i64>() {
+            Ok(count) if count >= 1 => Some(usize::try_from(count).unwrap_or(usize::MAX)),
+            _ => {
+                crate::cli_error!(
+                    @fix "E2104",
+                    format!("`--threads` needs a whole number of compiler threads, at least 1, not `{text}`"),
+                    "write `--threads 1` for one compiler thread, or leave the flag out to let jet choose"
+                );
+                exit(ExitCodes::USAGE);
+            }
+        };
+    }
+    None
 }
 
 fn reject_retired_gate_flags(argv: &[String], json: bool) {
@@ -1470,10 +1525,21 @@ fn named_debug_replay(argv: &[String], command: &str, json: bool) -> Option<Stri
 }
 
 fn parse_gate_flags(argv: &[String], json: bool) -> jet::Policy::GateSet {
+    if let Err(diagnostics) = jet::GateWriters::check_invocation_flags(Path::new("."), argv) {
+        for diagnostic in diagnostics {
+            emit_cli_value(diagnostic, json);
+        }
+        exit(ExitCodes::USER_ERROR);
+    }
     let mut gates = jet::Policy::GateSet::default();
     let mut index = 0;
     while index < argv.len() {
         let argument = &argv[index];
+        match jet::GateWriters::invocation_gate_kind(argument) {
+            Some(jet::Sema::GateLedger::GateKind::BuildFlag) => gates.record_invocation_flag(false),
+            Some(jet::Sema::GateLedger::GateKind::SessionFlag) => gates.record_invocation_flag(true),
+            _ => {}
+        }
         let spec = if let Some(spec) = argument.strip_prefix("--gate=") {
             Some(spec.to_string())
         } else if argument == "--gate" {
@@ -1495,7 +1561,7 @@ fn parse_gate_flags(argv: &[String], json: bool) -> jet::Policy::GateSet {
                         "E2104",
                         "invalid audited gate".to_string(),
                         detail,
-                        "use `--gate unsafe=allow`, `--gate impure=allow`, or `--gate nondeterministic=allow`".to_string(),
+                        "use `--gate <gate-kind>=allow`; gate kinds are listed by `jet inspect gates`".to_string(),
                         json,
                     );
                     exit(ExitCodes::USAGE);
@@ -2383,9 +2449,6 @@ fn run_console(
     mode: OutputMode,
     authority_allow: &[String],
     authority_deny: &[String],
-    gates: jet::Policy::GateSet,
-    profile: Option<&str>,
-    setting_overrides: &BTreeMap<String, String>,
 ) -> i32 {
     let sandbox = match console_sandbox(argv) {
         Ok(sandbox) => sandbox,
@@ -2395,50 +2458,6 @@ fn run_console(
         }
     };
     let root = PathBuf::from(project_dir.unwrap_or("."));
-    let member = flag_value(argv, "-p");
-    let entry = match resolve_bare_entry("run", &root, member, mode, true) {
-        Some(entry) => entry,
-        None => {
-            missing_bare_entry("run", &root, mode);
-        }
-    };
-    let file = entry.path.to_string_lossy().into_owned();
-    let entry_fn = entry.callable;
-    let snapshot = match crate::Store::read_authority_file(&entry.path) {
-        Ok(snapshot) => snapshot,
-        Err(error) => {
-            emit_cli_diagnostic(
-                "E2105",
-                format!("can't securely read console entry `{file}`: {error}"),
-            );
-            return ExitCodes::USER_ERROR;
-        }
-    };
-    let source = match snapshot.text() {
-        Ok(source) => source.to_owned(),
-        Err(error) => {
-            emit_cli_diagnostic(
-                "E2105",
-                format!("can't read console entry `{file}`: {error}"),
-            );
-            return ExitCodes::USER_ERROR;
-        }
-    };
-    let source_identity = snapshot.path().to_path_buf();
-    let source_for_closure = source.clone();
-    let file_for_closure = file.clone();
-    let source_closure = match jet_jit::on_compiler_stack(move || {
-        jet::Driver::load_immutable_source_closure(
-            &file_for_closure,
-            &[(source_identity.as_path(), source_for_closure.as_str())],
-        )
-    }) {
-        Ok(source_closure) => source_closure,
-        Err(diagnostics) => {
-            emit_cli_diagnostics(&file, &source, &diagnostics);
-            return ExitCodes::USER_ERROR;
-        }
-    };
     let mut project = match jet::REPL::ConsoleProject::from_root(root.clone()) {
         Ok(project) => project,
         Err(error) => {
@@ -2446,13 +2465,13 @@ fn run_console(
             return ExitCodes::USER_ERROR;
         }
     };
-    let package_facts = match jet_jit::on_compiler_stack({
+    let package_facts = match jet::with_compiler_stack({
         let root = root.clone();
         move || jet::Loader::package_facts_for_root(&root)
     }) {
         Ok(package_facts) => package_facts,
         Err(diagnostics) => {
-            emit_cli_diagnostics(&file, &source, &diagnostics);
+            emit_cli_diagnostics(&root.display().to_string(), "", &diagnostics);
             return ExitCodes::USER_ERROR;
         }
     };
@@ -2474,32 +2493,6 @@ fn run_console(
         }
     }
     let (allow, deny) = console_rights(sandbox, authority_allow, authority_deny);
-    let application_authority =
-        (!authority_allow.is_empty() || !authority_deny.is_empty()).then(|| {
-            jet_foundation::Authority::ApplicationAuthority::from_policy(
-                Some(authority_allow),
-                Some(authority_deny),
-                "console invocation",
-            )
-        });
-    let profile = profile.unwrap_or("dev").to_owned();
-    let settings = setting_overrides.clone();
-    let boot = match jet::Interpreter::boot_console_with_source_closure(
-        &file,
-        &source_closure,
-        gates,
-        &profile,
-        &settings,
-        application_authority.as_ref(),
-        entry_fn.as_deref(),
-    ) {
-        Ok(boot) => boot,
-        Err(diagnostics) => {
-            emit_cli_diagnostics(&file, &source, &diagnostics);
-            return ExitCodes::USER_ERROR;
-        }
-    };
-    CmdDevTools::render_lints(&file, mode, &boot.lints);
     let ttl_ms = match console_flag_value(argv, "--console-ttl") {
         Some(value) => match value.parse::<u64>() {
             Ok(ttl_ms) => Some(ttl_ms),
@@ -2513,40 +2506,7 @@ fn run_console(
         },
         None => None,
     };
-    jet_jit::on_compiler_stack(move || {
-        let mut lease = boot.lease;
-        if !lease.startup_stdout().is_empty() {
-            write_mode_renderable(mode, lease.startup_stdout());
-        }
-        if !lease.startup_stderr().is_empty() {
-            write_mode_diagnostic(mode, lease.startup_stderr());
-        }
-        let mut host = ConsoleHost::new().with_router(lease.router());
-        for resource in lease.take_database_resources() {
-            host = match host.with_database_resource(resource) {
-                Ok(host) => host,
-                Err(error) => {
-                    emit_cli_diagnostic(console_error_code(&error), error.to_string());
-                    return ExitCodes::USER_ERROR;
-                }
-            };
-        }
-        for binding in lease.take_service_bindings() {
-            host = match host.with_service_binding(binding) {
-                Ok(host) => host,
-                Err(error) => {
-                    emit_cli_diagnostic(console_error_code(&error), error.to_string());
-                    return ExitCodes::USER_ERROR;
-                }
-            };
-        }
-        let project = match host.attach_project(project) {
-            Ok(project) => project,
-            Err(error) => {
-                emit_cli_diagnostic(console_error_code(&error), error.to_string());
-                return ExitCodes::USER_ERROR;
-            }
-        };
+    jet::with_compiler_stack(move || {
         let mut options = jet::REPL::ConsoleOptions::new(project)
             .with_mode(if sandbox {
                 jet::REPL::ConsoleMode::SandboxData
@@ -2559,7 +2519,7 @@ fn run_console(
         if let Some(ttl_ms) = ttl_ms {
             options = options.with_ttl_ms(ttl_ms);
         }
-        let mut session = match host.open(options) {
+        let mut session = match jet::REPL::open_attached(options, jet::REPL::ConsoleHostAdapters::new()) {
             Ok(session) => session,
             Err(error) => {
                 emit_cli_diagnostic(console_error_code(&error), error.to_string());
@@ -2635,10 +2595,20 @@ fn main() {
     let argv0 = argv.next().unwrap_or_default();
     let mut raw: Vec<String> = argv.collect();
     normalize_compiler_alias(&mut raw, &argv0);
-    // D-JOB-ARGV1=A: `jet jobs <name> …` forwards every word after the job
-    // name to the job, so the output profile, flag check, and dispatch below
-    // only see Jet's own words.
-    jet::CLI::separate_job_argv(&mut raw);
+    // D-JET-VERBS1=A: discover from parsed project source, before output
+    // policy or flag parsing can consume words owned by the job.
+    let project_jobs = if matches!(raw.first().map(String::as_str),
+        Some("__jet_receipt_persist" | "__jet_repl_run_stdin")) {
+        None
+    } else {
+        discover_project_jobs(&raw)
+    };
+    let top_job = project_jobs.as_ref().is_some_and(|(_, registry)| {
+        first_command_word(&raw).is_some_and(|name| registry.find_visible(name).is_some())
+    });
+    if top_job {
+        jet::CLI::separate_job_argv(&mut raw);
+    }
     if raw.first().map(String::as_str) == Some("__jet_receipt_persist") {
         std::process::exit(jet::ReceiptStore::run_optional_receipt_helper(&raw[1..]));
     }
@@ -2683,7 +2653,15 @@ fn main() {
         run_question_mark(&raw[1..], &output);
     }
 
-    normalize_frequency_ring_argv(&mut raw, mode, profile);
+    if !top_job {
+        if let Some(index) = first_command_index(&raw) {
+            if index != 0 {
+                let command = raw.remove(index);
+                raw.insert(0, command);
+            }
+        }
+        normalize_frequency_ring_argv(&mut raw, mode, profile);
+    }
     // D-CLI-ONE1=A: the host parser has no second inventory. Check the
     // registry-derived command/flag table before dispatch so a stale parser
     // seam fails loudly instead of silently diverging from help/completions.
@@ -3042,6 +3020,9 @@ fn main() {
             {
                 continue;
             }
+            if a.starts_with("--threads=") {
+                continue;
+            }
             // Syntax tokens that begin with `-` (`->`, `-=`) are valid `jet
             // explain` queries; keep them positional rather than as flags.
             let explain_syntax_query = jet_argv.first().is_some_and(|arg| arg == "explain")
@@ -3104,7 +3085,9 @@ fn main() {
     // D-LINT-VISIBILITY2=A: command identity is a host fact. Resolve bare
     // source-path sugar as `run`, while keeping program arguments after `--`
     // outside the output policy.
-    let output_command = if jet::CLI::is_builtin(cmd) {
+    let output_command = if top_job {
+        "run"
+    } else if jet::CLI::is_builtin(cmd) {
         cmd
     } else if looks_like_jet_source(cmd) {
         "run"
@@ -3135,6 +3118,15 @@ fn main() {
         }
     }
 
+    // D-JOBS1=A: the one compiler thread cap, installed before anything
+    // compiles. An unknown command or a help request reports first.
+    let compiles = top_job || jet::CLI::is_builtin(cmd) || looks_like_jet_source(cmd);
+    if compiles && !jet_argv.iter().any(|a| jet::CLI::is_help_flag(a)) {
+        if let Some(threads) = parse_compiler_threads(jet_argv, output_command) {
+            jet_foundation::CompilerThreads::set_cap(threads);
+        }
+    }
+
     // D-OBSERVE-LIVE1=A: dev sessions expose bounded scheduler facts by
     // default; other executions opt in explicitly. Generated programs derive
     // their own PID and publish no payloads or secrets.
@@ -3147,14 +3139,60 @@ fn main() {
     if raw.iter().any(|arg| arg == "--gc-trace") {
         CmdGc::configure_trace();
     }
-    if raw.iter().any(|arg| arg == "--trace-tiers") {
-        jet_jit::set_trace_tiers(true);
-    }
 
     // If the first word is not in the single CLI registry, try an external
     // `jet-<cmd>` on PATH (D-DX5, cargo/git style), else teach E2101 with a
     // "did you mean".
-    if !jet::CLI::is_builtin(cmd) {
+    if top_job || !jet::CLI::is_builtin(cmd) {
+        if top_job {
+            check_flags(jet_argv, "jobs");
+            let (entry, _) = project_jobs.as_ref().expect("discovered job has an entry");
+            let registry = job_registry_for_entry(&entry.path, mode);
+            validate_job_registry(&entry.path, &registry, mode);
+            validate_job_working_directories(&entry.path, &registry, mode);
+            maybe_dispatch_pinned_toolchain(&raw, mode);
+            let mut job_args = vec![cmd.to_string()];
+            job_args.extend(passthrough.iter().map(|arg| (*arg).clone()));
+            let program_args = job_args.iter().collect::<Vec<_>>();
+            let entry_str = entry.path.to_string_lossy().into_owned();
+            let effective = effective_target("run", &entry_str, cross_target.as_deref());
+            reject_native_web_run("run", &entry_str, effective.as_deref(), mode);
+            let effective = native_run_target("run", &entry_str, effective);
+            run_native_execution(NativeExecutionRequest {
+                command: "run",
+                file: &entry_str,
+                emit_rust,
+                emit_generated,
+                library: library_flag,
+                small,
+                no_os,
+                gates,
+                build_grants: &build_grants,
+                invocation_authority: invocation_authority.as_ref(),
+                remote_builder: remote_builder.as_deref(),
+                locked,
+                target: effective.as_deref(),
+                target_machine: selected_machine.as_ref(),
+                explain_partition,
+                verbose,
+                sbom,
+                release: release_flag,
+                profile: named_profile.as_deref(),
+                setting_overrides: &setting_overrides,
+                output: output_name.as_deref(),
+                program_args: &program_args,
+                mode,
+                output_profile: Some(&profile),
+                record: record_name.as_deref(),
+                interpret,
+                entry_fn: None,
+                check_project_scope: false,
+                package_scope: true,
+                build_override: true,
+                source_overlay: None,
+            });
+            return;
+        }
         // c6vz465: `jet <file>` → `jet run <file>` when the first word names a
         // source path (not a typo'd subcommand like `buld`).
         if looks_like_jet_source(cmd) {
@@ -3228,7 +3266,11 @@ fn main() {
                 });
             exit(status.code().unwrap_or(ExitCodes::OK));
         }
-        unknown_subcommand(cmd);
+        check_flags(jet_argv, "jobs");
+        let names = project_jobs.as_ref()
+            .map(|(_, registry)| registry.completion_words())
+            .unwrap_or_default();
+        unknown_subcommand(cmd, &names);
     }
 
     if cmd == "run" {
@@ -3806,92 +3848,19 @@ fn main() {
                 );
                 return;
             }
-            let job_program_args = if passthrough_sep.is_some() {
-                passthrough.iter().map(|arg| (*arg).clone()).collect::<Vec<_>>()
-            } else {
-                args.iter().skip(2).map(|arg| (*arg).clone()).collect::<Vec<_>>()
-            };
-            if watch_requested {
-                validate_job_working_directories(&entry.path, &registry, mode);
-            }
-            if watch_requested {
-                let requested = args.get(1).map(|value| value.as_str());
-                run_job_watch(
-                    &entry.path,
-                    &registry,
-                    requested,
-                    job_options,
-                    &job_program_args,
-                    mode,
-                    profile,
-                );
-            }
-            if let Some(name) = args.get(1).map(|value| value.as_str()) {
-                if registry.find_visible(name).is_none() {
-                    let declared = registry.completion_words();
-                    let fix = if declared.is_empty() {
-                        "mark a function `#Job`, or check the spelling".to_string()
-                    } else {
-                        format!(
-                            "check the spelling; declared jobs: {}",
-                            declared.join(", ")
-                        )
-                    };
-                    crate::emit_cli_report(
-                        "E1294",
-                        format!("No job named `{name}`."),
-                        "`jet jobs` only invokes visible checked `#Job fn`s in the selected entry"
-                            .to_string(),
-                        fix,
-                        mode.json,
-                    );
-                    exit(ExitCodes::USER_ERROR);
+            if !watch_requested {
+                if let Some(name) = args.get(1) {
+                    crate::cli_error!(@fix "E2101", format!("`jet jobs {name}` no longer runs a job"), format!("run `jet {name}`; `jet jobs` lists jobs"));
+                    exit(ExitCodes::USAGE);
                 }
-                validate_job_working_directories(&entry.path, &registry, mode);
-                let name = name.to_string();
-                let mut job_args = vec![name];
-                job_args.extend(job_program_args);
-                let program_args = job_args.iter().collect::<Vec<_>>();
-                let entry_str = entry.path.to_string_lossy().into_owned();
-                let effective = effective_target("run", &entry_str, cross_target.as_deref());
-                reject_native_web_run("run", &entry_str, effective.as_deref(), mode);
-                let effective = native_run_target("run", &entry_str, effective);
-                run_native_execution(NativeExecutionRequest {
-                    command: "run",
-                    file: &entry_str,
-                    emit_rust,
-                    emit_generated,
-                    library: library_flag,
-                    small,
-                    no_os,
-                    gates,
-                    build_grants: &build_grants,
-                    invocation_authority: invocation_authority.as_ref(),
-                    remote_builder: remote_builder.as_deref(),
-                    locked,
-                    target: effective.as_deref(),
-                    target_machine: selected_machine.as_ref(),
-                    explain_partition,
-                    verbose,
-                    sbom,
-                    release: release_flag,
-                    profile: named_profile.as_deref(),
-                    setting_overrides: &setting_overrides,
-                    output: output_name.as_deref(),
-                    program_args: &program_args,
-                    mode,
-                    output_profile: Some(&profile),
-                    record: record_name.as_deref(),
-                    interpret,
-                    entry_fn: None,
-                    check_project_scope: false,
-                    package_scope: true,
-                    build_override: true,
-                    source_overlay: None,
-                });
-            } else {
-                render_job_registry(&registry, profile);
             }
+            if watch_requested {
+                validate_job_working_directories(&entry.path, &registry, mode);
+                let job_args = passthrough.iter().map(|arg| (*arg).clone()).collect::<Vec<_>>();
+                run_job_watch(&entry.path, &registry, args.get(1).map(|name| name.as_str()),
+                    job_options, &job_args, mode, profile);
+            }
+            render_job_registry(&registry, profile);
             return;
         }
         "generate" => {
@@ -4099,9 +4068,6 @@ fn main() {
                     mode,
                     &authority_allow,
                     &authority_deny,
-                    gates,
-                    named_profile.as_deref(),
-                    &setting_overrides,
                 ));
             }
             let allow = authority_allow.clone();
@@ -4144,8 +4110,8 @@ fn main() {
                     requested_target.as_deref(),
                 )
             });
-            // c139 (D-JIT2=A): --interpret forces tier-0 interpreter; otherwise
-            // CraneliftBackend wraps it (M0 delegates, M1+ JIT-compiles).
+            // D-EXEC2=A: `--interpret` hosts the program in the in-process
+            // evaluator; otherwise each generation is a child `jet run`.
             let use_interpreter = raw.iter().any(|a| a == "--interpret");
             // c77 (D-DEVMODE1=A): default auto-detect; experts force a mode with
             // --restart / --swap / --watch=off.
@@ -5251,6 +5217,43 @@ fn job_registry_for_entry(
     jet_foundation::CLISchema::JobRegistry::for_entry(&bundle)
 }
 
+fn first_command_index(raw: &[String]) -> Option<usize> {
+    let mut index = 0;
+    while index < raw.len() {
+        let argument = raw[index].as_str();
+        if argument == "--" { return None; }
+        if jet::CLI::flag_takes_separate_value(argument) {
+            index += 2;
+        } else if argument.starts_with('-') {
+            index += 1;
+        } else {
+            return Some(index);
+        }
+    }
+    None
+}
+
+fn first_command_word(raw: &[String]) -> Option<&str> {
+    first_command_index(raw).map(|index| raw[index].as_str())
+}
+
+fn discover_project_jobs(raw: &[String]) -> Option<(ResolvedEntry, jet_foundation::CLISchema::JobRegistry)> {
+    let name = first_command_word(raw)?;
+    if jet_foundation::CLICommands::is_command_name(name) || name.ends_with(".jet") {
+        return None;
+    }
+    let cwd = std::env::current_dir().ok()?;
+    let mode = OutputMode { json: false, color: jet::Diagnostics::ColorChoice::Never, quiet: true };
+    let entry = resolve_bare_entry("run", &cwd, flag_value(raw, "-p"), mode, true)?;
+    let source = fs::read_to_string(&entry.path).ok()?;
+    let (source, _) = jet::Package::mask_inline_package_source(&source).ok()?;
+    let (tokens, diagnostics) = jet::Lexer::lex(&source);
+    if !diagnostics.is_empty() { return None; }
+    let program = jet::Parser::parse_with_source(&tokens, &source).ok()?;
+    let registry = jet_foundation::CLISchema::JobRegistry::from_items(&program.items);
+    Some((entry, registry))
+}
+
 fn reject_job_graph(entry: &Path, reason: String, mode: OutputMode) -> ! {
     crate::emit_cli_report(
         "E1331",
@@ -6276,7 +6279,7 @@ impl ResolvedEntry {
 /// its own for `--json`.
 ///
 /// A relative entry runs the whole pipeline: `jet dev` already hands its raw
-/// argument to the loader, sema, the JIT, the watcher, and the cache, and
+/// argument to the loader, sema, the build, the watcher, and the cache, and
 /// `find_manifest_root` canonicalizes its start before walking up.
 ///
 /// The canonical-equality guard is what makes this safe rather than merely

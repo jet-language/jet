@@ -1,0 +1,14 @@
+// One preallocated owned-text concatenation kernel; operands are borrowed.
+// Rust: crates/jet-codegen/src/Prelude/Core/StringConcat.rs:8
+#Inline
+pub fn jet_string_concat_hot(left: String, right: String) -> String Never! {
+    result := String.with_capacity(left.len() + right.len())
+    result.push_str(left)
+    result.push_str(right)
+    ^result
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/StringConcat.rs:20
+#Inline
+pub fn jet_string_concat(left: String, right: String) -> String Never! {
+    jet_string_concat_hot(left, right)
+}

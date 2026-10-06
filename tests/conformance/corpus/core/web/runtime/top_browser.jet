@@ -1,0 +1,62 @@
+use core.web.runtime.top_browser.[JetBrowserTrace, JetBrowserError, jet_browser_profile,
+    jet_browser_profile_allows, jet_browser_timeout, jet_browser_parse_locked,
+    jet_browser_parse_message, jet_browser_id, jet_browser_fact_hash,
+    jet_browser_event_network_facts, jet_browser_event_download_facts,
+    jet_browser_css_attr_equals, jet_browser_cdp_method_ok, jet_browser_trace_redacted]
+use core.encoding.runtime.std_data_tree.[DataTree]
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:463-595
+#Test("browser_profile_pins_methods_and_timeout_range") {
+    assert_eq(jet_browser_profile("bidi-2024.11").expect("supported profile").version, "2024.11")
+    assert(jet_browser_profile_allows("bidi-2024.11", "session.status"))
+    assert(not jet_browser_profile_allows("bidi-2024.11", "permissions.setPermission"))
+    assert(jet_browser_profile_allows("bidi-2025.5", "permissions.setPermission"))
+    assert(not jet_browser_profile_allows("unknown", "session.status"))
+    assert(jet_browser_timeout(1).is_ok())
+    assert(jet_browser_timeout(600000).is_ok())
+    assert(jet_browser_timeout(0).is_err())
+    assert(jet_browser_timeout(600001).is_err())
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:601-670
+#Test("browser_lock_last_matching_entry_and_required_fields") {
+    raw :: "[[browser]]\nengine = \"chromium\"\nbinary = \"/first\"\nprotocol = \"bidi-2024.11\"\noutput-hash = \"first\"\nsize = 1\n[[unrelated]]\nengine = \"chromium\"\n[[browser]]\nengine = \"chromium\"\nbinary = \"/last\"\nprotocol = \"bidi-2025.5\"\noutput-hash = \"last\"\nsize = 2\n"
+    locked :: jet_browser_parse_locked(&raw, "chromium").expect("complete lock entry")
+    assert_eq(locked.binary, "/last")
+    assert_eq(locked.size, I64{2})
+    assert(jet_browser_parse_locked("[[browser]]\nengine=\"chromium\"\n", "chromium").is_err())
+    assert(jet_browser_parse_locked(&raw, "firefox").is_err())
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:256-429
+#Test("browser_wire_object_and_redacted_event_facts") {
+    assert_eq(jet_browser_fact_hash(""), "cbf29ce484222325")
+    assert(jet_browser_parse_message("[]").is_err())
+    value :: jet_browser_parse_message("{{\"id\":2}}").expect("object wire message")
+    assert_eq(jet_browser_id(&value), Val(I64{2}))
+    assert_eq(jet_browser_id(&DataTree.Object([("id", DataTree.Float(2.5))])), None)
+    event :: jet_browser_parse_message("{{\"params\":{{\"isBlocked\":true,\"request\":{{\"request\":\"opaque\",\"method\":\"GET\",\"url\":\"https://private.invalid/token\"}},\"response\":{{\"status\":200}},\"download\":\"download-id\",\"suggestedFilename\":\"secret.txt\"}}}}").expect("event object")
+    (request, method, url_hash, blocked, status) :: jet_browser_event_network_facts(&event)
+    assert_eq(request, "opaque")
+    assert_eq(method, "GET")
+    assert_eq(url_hash, jet_browser_fact_hash("https://private.invalid/token"))
+    assert(blocked)
+    assert_eq(status, I64{200})
+    (download, name_hash) :: jet_browser_event_download_facts(&event)
+    assert_eq(download, "download-id")
+    assert_eq(name_hash, jet_browser_fact_hash("secret.txt"))
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1497-1510,2051-2073,2130-2157
+#Test("browser_expert_cdp_and_trace_shape_do_not_leak_payloads") {
+    assert(jet_browser_cdp_method_ok("Page.navigate"))
+    assert(not jet_browser_cdp_method_ok("session.status"))
+    assert(not jet_browser_cdp_method_ok("Page.navigate.extra"))
+    assert(not jet_browser_cdp_method_ok("goog:cdp.sendCommand"))
+    assert_eq(jet_browser_css_attr_equals("data-testid", "a\"b\\c"), "[data-testid=\"a\\\"b\\\\c\"]")
+    trace :: JetBrowserTrace{entries: ["connect", "send:1:cbf29ce484222325", "recv:1:cbf29ce484222325", "event:cbf29ce484222325"]}
+    assert(jet_browser_trace_redacted(&trace))
+    assert(not jet_browser_trace_redacted(&JetBrowserTrace{entries: ["send:1:https://private.invalid"]}))
+    assert(not jet_browser_trace_redacted(&JetBrowserTrace{entries: ["event:cbf29ce484222325:secret"]}))
+    assert(not jet_browser_trace_redacted(&JetBrowserTrace{entries: ["send:-1:cbf29ce484222325"]}))
+}

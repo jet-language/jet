@@ -844,7 +844,17 @@ impl<'a> Fmt<'a> {
                             )
                         }),
                         |arg| crate::AST::Expr::span(arg),
-                        |f, arg| f.fmt_expr(arg, Prec::OrFallback),
+                        |f, arg| {
+                            if let crate::AST::Expr::TupleLit(fields, ..) = arg {
+                                if fields.len() == 1 {
+                                    f.write(&fields[0].0);
+                                    f.write(": ");
+                                    f.fmt_expr(&fields[0].1, Prec::OrFallback);
+                                    return;
+                                }
+                            }
+                            f.fmt_expr(arg, Prec::OrFallback)
+                        },
                     );
                     self.write(")");
                 }

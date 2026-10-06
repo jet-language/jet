@@ -1,0 +1,138 @@
+use core.game.runtime.top_game_dev_protocol.[GameDevPolicy, GameDevRunMode, GameDevPhase, GameDevTransitionStatus, GameDevLaunchProfile, GameDevExtension, GameDevStopped, GameDevEvent]
+use core.game.runtime.top_game_dev_protocol.[GameDevInput, GameDevControl]
+use core.game.runtime.top_game_dev_protocol.[GameDevRunIdentity, GameDevProfileRing, GameProfileIdentity, GameProfileSnapshot, GameProfileComparison, GameProfileComparisonError, GameDevSession]
+use core.game.runtime.kernel_game_frame_profiler.JetGameFrameProfilerError
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:11-30,54-99
+#Test("game_dev_defaults_deny_debug_data_and_classify_running_phases") {
+    assert(!GameDevPolicy.default().game_debug_data_enabled())
+    assert(GameDevPolicy.new(true).game_debug_data_enabled())
+    assert(GameDevRunMode.Headless.is_headless())
+    assert(!GameDevRunMode.PlayInEditor.is_headless())
+    assert(!GameDevRunMode.SimulateInEditor.is_headless())
+    assert(GameDevPhase.Playing.is_running())
+    assert(GameDevPhase.Simulating.is_running())
+    assert(!GameDevPhase.Paused.is_running())
+    assert(!GameDevPhase.FrameAdvance.is_running())
+    assert(!GameDevPhase.Editing.is_running())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:198-226
+#Test("game_dev_launch_profile_retains_first_256_phases_and_clones_headless") {
+    profile := GameDevLaunchProfile.new("native", GameDevRunMode.PlayInEditor)
+    loop i in 0..<300 {
+        &profile.record_phase(GameDevPhase.Playing, GameDevTransitionStatus.Applied, i.to_string())
+    }
+    assert(profile.phases.len() == 256)
+    assert(profile.phases[0].detail == "0")
+    assert(profile.phases[255].detail == "255")
+    headless :: profile.headless_variant()
+    assert(headless.run_mode == GameDevRunMode.Headless)
+    assert(profile.run_mode == GameDevRunMode.PlayInEditor)
+    assert(headless.phases == profile.phases)
+    assert(headless.headless_compatible)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:270-300
+#Test("game_dev_extension_policy_precedes_profile_validation") {
+    match GameDevExtension.checked_gameplay_debugger_with_policy("", GameDevPolicy.new(false)) {
+        Err(message) -> assert(message == "Gameplay Debugger is unavailable outside a development profile")
+        Ok(_) -> assert(false)
+    }
+    match GameDevExtension.checked_gameplay_debugger_with_policy("\n", GameDevPolicy.new(true)) {
+        Err(message) -> assert(message == "game dev extension profile must be non-empty and printable")
+        Ok(_) -> assert(false)
+    }
+    assert(GameDevExtension.checked_gameplay_debugger_with_policy("release", GameDevPolicy.new(true))! == None)
+    extension :: GameDevExtension.checked_gameplay_debugger_with_policy("dev", GameDevPolicy.new(true))!.unwrap()
+    assert(extension.category() == "Gameplay Debugger")
+    assert(extension.extension() == "jet.gameplay.debugger")
+    assert(extension.profile() == "dev")
+    assert(GameDevEvent.GameplayDebugger(extension).kind() == "GameplayDebugger")
+    assert(GameDevEvent.Stopped(GameDevStopped.new("closed", 7)).kind() == "Stopped")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:756/763/770/777
+#Test("game_dev_input_json_preserves_pressed_and_signed_axis_values") {
+    assert_eq(GameDevInput.key("quote\"", true).render_json(),
+        "{\"kind\":\"key\",\"code\":\"quote\\\"\",\"pressed\":true}")
+    assert_eq(GameDevInput.button("fire", false).render_json(),
+        "{\"kind\":\"button\",\"name\":\"fire\",\"pressed\":false}")
+    assert_eq(GameDevInput.axis("horizontal", I64{-9}).render_json(),
+        "{\"kind\":\"axis\",\"name\":\"horizontal\",\"value\":-9}")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:831
+#Test("game_dev_control_json_keeps_transition_and_boolean_discriminants") {
+    assert_eq(GameDevControl.Play.render_json(), "{\"kind\":\"play\"}")
+    assert_eq(GameDevControl.Simulate.render_json(), "{\"kind\":\"simulate\"}")
+    assert_eq(GameDevControl.FrameAdvance.render_json(), "{\"kind\":\"frame_advance\"}")
+    assert_eq(GameDevControl.SetOverlayVisible(false).render_json(),
+        "{\"kind\":\"set_overlay_visible\",\"visible\":false}")
+    assert_eq(GameDevControl.SetInputCapture(true).render_json(),
+        "{\"kind\":\"set_input_capture\",\"capture\":true}")
+    assert_eq(GameDevControl.SetErrorPauseEnabled(false).render_json(),
+        "{\"kind\":\"set_error_pause_enabled\",\"enabled\":false}")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:831
+#Test("game_dev_control_autocomplete_keeps_supplied_order_and_escapes_text") {
+    control :: GameDevControl.Autocomplete{query: "he\n", commands: ["help", "hello\""]}
+    assert_eq(control.render_json(),
+        "{\"kind\":\"autocomplete\",\"query\":\"he\\n\",\"commands\":[\"help\",\"hello\\\"\"]}")
+    assert_eq(GameDevControl.Input(GameDevInput.axis("x", I64{2})).render_json(),
+        "{\"kind\":\"input\",\"input\":{\"kind\":\"axis\",\"name\":\"x\",\"value\":2}}")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:951/966/1644
+#Test("game_dev_run_validation_and_session_policy_precedence") {
+    identity :: GameDevRunIdentity.new("", "source", "build", "revision")
+    match GameDevProfileRing.new(identity.clone()) {
+        Err(.EmptyIdentity(field)) -> assert_eq(field, "session")
+        _ -> assert(false)
+    }
+    match GameDevSession.new(identity, U64{0}) {
+        Err(.InvalidTraceContext(reason)) -> assert_eq(reason, "game development data is disabled for this profile")
+        _ -> assert(false)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1152-1207
+#Test("game_dev_snapshot_requires_pause_before_checking_run_identity") {
+    run :: GameDevRunIdentity.new("session", "source", "build", "revision")
+    ring := GameDevProfileRing.new(run.clone())!
+    mismatch :: GameDevRunIdentity.new("session", "source", "wrong", "revision")
+    identity :: GameProfileIdentity.new("scene", "build", "target", [])
+    match GameProfileSnapshot.from_profiler(ring.profiler(), mismatch.clone(), identity.clone()) {
+        Err(error) -> assert_eq(error.code(), "profile_incomplete")
+        Ok(_) -> assert(false)
+    }
+    _ :: &ring.pause()
+    match GameProfileSnapshot.from_profiler(ring.profiler(), mismatch, identity.clone()) {
+        Err(.IncompatibleIdentity(field, left, right)) -> {
+            assert_eq(field, "build")
+            assert_eq(left, "wrong")
+            assert_eq(right, "build")
+        }
+        _ -> assert(false)
+    }
+    snapshot :: ring.snapshot(identity)!
+    assert_eq(snapshot.run, run)
+    assert_eq(snapshot.trace_identity.build, "build")
+    assert_eq(snapshot.projection.total_function_ns, U64{0})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1220-1272
+#Test("game_dev_comparison_allows_distinct_builds_sessions_and_signed_deltas") {
+    left_ring := GameDevProfileRing.new(GameDevRunIdentity.new("left-session", "source-a", "build-a", "revision-a"))!
+    right_ring := GameDevProfileRing.new(GameDevRunIdentity.new("right-session", "source-b", "build-b", "revision-b"))!
+    _ :: &left_ring.pause()
+    _ :: &right_ring.pause()
+    left := left_ring.snapshot(GameProfileIdentity.new("scene", "build-a", "target", []))!
+    right := right_ring.snapshot(GameProfileIdentity.new("scene", "build-b", "target", []))!
+    left.projection.total_function_ns = U64{20}
+    right.projection.total_function_ns = U64{10}
+    comparison :: GameProfileComparison.compare(left.clone(), right.clone())!
+    assert_eq(comparison.total_function_ns_delta, I128{-10})
+    assert(!comparison.is_regression())
+    assert(GameProfileComparison.compare(right.clone(), left.clone())!.is_regression())
+    right.identity.scene = "other"
+    right.identity.target = "other-target"
+    match GameProfileComparison.compare(left, right) {
+        Err(.IncompatibleIdentity(field, _, _)) -> assert_eq(field, "scene")
+        _ -> assert(false)
+    }
+}

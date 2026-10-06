@@ -1,0 +1,47 @@
+use core.data.runtime.top_data_flow_03.jet_data_web as web
+use core.encoding.runtime.std_data_tree.DataTree
+use core.data.DataErrorKind
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4096
+#Test("web_wire_requires_array_args") {
+    root :: DataTree.Object([("args", DataTree.Int(1))])
+    match web.args(&root) {
+        Err(error) -> { assert(error.kind == DataErrorKind.InvalidArgument); assert(error.reason == "wire args must be an array") }
+        Ok(_) -> assert(false)
+    }
+    root :: DataTree.Object([("args", DataTree.Array([]))])
+    assert(web.args(&root).unwrap().is_empty())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4114
+#Test("web_exact_integer_and_byte_bounds") {
+    assert(web.integer(&DataTree.Number("42"), "test").unwrap() == 42)
+    assert(web.integer(&DataTree.Number("1.5"), "test").is_err())
+    assert(web.bytes(&DataTree.Array([DataTree.Int(0), DataTree.Int(255)]), "test").unwrap() == [0, 255])
+    match web.bytes(&DataTree.Array([DataTree.Int(256)]), "test") {
+        Err(error) -> assert(error.reason == "byte outside 0..255")
+        Ok(_) -> assert(false)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4557
+#Test("web_type_key_strips_abi_suffix") {
+    root :: DataTree.Object([("type_args", DataTree.Array([DataTree.Text("example.Row:abi=3")]))])
+    assert(web.type_key(&root, "load").unwrap() == "example.Row")
+    invalid :: DataTree.Object([("type_args", DataTree.Array([]))])
+    match web.type_key(&invalid, "load") {
+        Err(error) -> assert(error.reason == "typed data operation requires one canonical T type argument")
+        Ok(_) -> assert(false)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4590
+#Test("web_dispatch_validates_typed_wire_before_handles") {
+    root :: DataTree.Object([("op", DataTree.Text("snapshot")), ("args", DataTree.Array([]))])
+    match web.dispatch(&root) {
+        Err(error) -> assert(error.reason == "typed data operation requires one canonical T type argument")
+        Ok(_) -> assert(false)
+    }
+    root :: DataTree.Object([("op", DataTree.Text("count")), ("args", DataTree.Array([DataTree.Array([DataTree.Null, DataTree.Int(3)])]))])
+    match web.dispatch(&root).unwrap() { DataTree.Int(value) -> assert(value == 2), _ -> assert(false) }
+}

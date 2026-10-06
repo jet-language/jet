@@ -1,0 +1,1044 @@
+use core.data.[DataError, DataErrorKind, DataLimits]
+use core.prelude.runtime.std_common_types.[DataTrackedMeta, GroupValue, DataStream, DataStreamInner]
+use core.prelude.runtime.std_common_types_02.[DataQuery, DataGroupedQuery]
+use core.encoding.runtime.std_data_tree.[FieldError, DataTree, parse_json_typed_datatree]
+use core.prelude.runtime.std_common_types.DataEvent
+use core.encoding.runtime.top_encoding_traits.[__jet_Decode, __jet_Encode]
+use core.encoding.runtime.std_stream.JetFileReader
+use core.encoding.runtime.top_encoding_stream.[jet_enc_json_reader, jet_enc_jsonl_reader,
+    jet_json_fold_budget]
+use core.encoding.runtime.top_encoding_stream_02.[jet_enc_csv_reader, jet_json_fold_from_event]
+use core.encoding.runtime.top_ring_csv_log_time_crypto.jet_ring_csv_parse
+use core.mem.runtime.portable_core.[JetOutcome, JetAbsent]
+use core.mem.runtime.portable_alloc.jet_outcome_of
+use core.data.runtime.top_data_stats.jet_data_error
+use core.data.runtime.top_data_flow.[JetDataExtreme, JetDataExtremeWatchSource,
+    JetDataMapWatchSource, JetDataGroupWatchSource, jet_data_query_collect,
+    jet_data_extreme_materialized, jet_data_grouped_steps, jet_data_group_sum_materialized,
+    jet_data_limits_validate, jet_data_from_encoding]
+use std.ops.Add
+use std.marker.PhantomData
+use std.sync.Arc
+use std.rc.Rc
+use std.cell.RefCell
+use std.any.type_name
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1794
+fn jet_data_query_extreme_by<T: Clone, K: Clone + PartialOrd>(
+    query: &DataQuery<T>, key: fn(T) -> K, extreme: JetDataExtreme,
+    operation: &String) -> DataQuery<K> {
+    source :: query.maintained_watch_source()
+    tracking :: query.tracking.clone()
+    steps := query.plan()
+    steps.push(operation.rsplit(".").next().unwrap_or(operation).to_string())
+    key :: Arc.new(key)
+    input :: query.clone()
+    compute_key :: key.clone()
+    result := jet_data_reducer_query(tracking, ^steps, fn() {
+        rows :: jet_data_query_collect(&input)?
+        jet_data_extreme_materialized(^rows, compute_key.as_ref(), extreme, operation)
+    })
+    if source == Some(source) {
+        result = result.with_watch_source(Rc.new(JetDataExtremeWatchSource{
+            source: ^source, base: RefCell.new(None), key: ^key,
+            extreme: extreme, operation: operation}))
+    }
+    ^result
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1830
+fn jet_data_query_min<T: Clone, V: Clone + PartialOrd>(
+    query: &DataQuery<T>, key: fn(T) -> V) -> DataQuery<V> {
+    jet_data_query_extreme_by(query, key, JetDataExtreme.Min, "query.min")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1842
+fn jet_data_query_max<T: Clone, V: Clone + PartialOrd>(
+    query: &DataQuery<T>, key: fn(T) -> V) -> DataQuery<V> {
+    jet_data_query_extreme_by(query, key, JetDataExtreme.Max, "query.max")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1856
+fn jet_data_query_map_checked<T: Clone, U: Clone>(
+    query: &DataQuery<T>, mapper: fn(T) -> Result<U, DataError>) -> DataQuery<U> {
+    source :: query.maintained_watch_source()
+    tracking :: query.tracking.clone()
+    steps := query.plan()
+    steps.push("map")
+    mapper :: Arc.new(mapper)
+    input :: query.clone()
+    compute_mapper :: mapper.clone()
+    mapped := jet_data_reducer_query(tracking, ^steps, fn() {
+        rows :: jet_data_query_collect(&input)?
+        rows.into_iter().map(fn(row) { compute_mapper(^row) }).collect()
+    })
+    if source == Some(source) {
+        watch_source :: JetDataMapWatchSource{source: ^source, base: RefCell.new(None), map: ^mapper}
+        mapped = mapped.with_watch_source(Rc.new(^watch_source))
+    }
+    ^mapped
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1887
+fn jet_data_query_map<T: Clone, U: Clone>(
+    query: &DataQuery<T>, mapper: fn(T) -> U) -> DataQuery<U> {
+    jet_data_query_map_checked(query, fn(row) { Ok(mapper(^row)) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1901
+fn jet_data_reducer_query<O>(tracking: Rc<DataTrackedMeta>?, steps: [String],
+    compute: fn() -> Result<[O], DataError>) -> DataQuery<O> {
+    match tracking {
+        .Val(tracking) -> DataQuery.from_recomputation(^steps, ^tracking, compute)
+        None -> DataQuery.from_computation(^steps, compute)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1916
+fn jet_data_group_sum_query_checked<T: Clone, K: Clone + PartialEq, V: Clone + Add>(
+    grouped: &DataGroupedQuery<T, K>,
+    value: fn(T) -> Result<V, DataError>) -> DataQuery<GroupValue<K, V>> {
+    query :: grouped.query.clone()
+    key :: grouped.key.clone()
+    value :: Arc.new(value)
+    steps :: jet_data_grouped_steps(grouped, "sum")
+    tracking :: query.tracking.clone()
+    source :: query.tracked_reader()
+    sum_recomputed :: type_name<V>() == "f32" or type_name<V>() == "f64"
+    aggregate :: Arc.new(fn(values: &[V]) {
+        values := values.iter().cloned()
+        first :: match values.next() {
+            .Val(first) -> ^first
+            None -> return Err(jet_data_error(DataErrorKind.State,
+                "query.group_by.sum", "empty group has no sum"))
+        }
+        Ok(values.fold(^first, fn(total, value) { total + value }))
+    })
+    compute_query :: query.clone()
+    compute_key :: key.clone()
+    compute_value :: value.clone()
+    result :: jet_data_reducer_query(tracking, steps, fn() {
+        jet_data_group_sum_materialized(&compute_query, compute_key.as_ref(), compute_value.as_ref())
+    })
+    if source == Some(source) {
+        result.with_watch_source(Rc.new(JetDataGroupWatchSource{
+            source: ^source, operations: query.operations.clone(), key: ^key,
+            value: ^value, aggregate: ^aggregate, operation: "query.group_by.sum",
+            mode: if sum_recomputed -> "recomputed" else -> "incremental",
+            recomputed: sum_recomputed, state: RefCell.new(None)}))
+    } else { ^result }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1971
+fn jet_data_group_sum_query<T: Clone, K: Clone + PartialEq, V: Clone + Add>(
+    grouped: &DataGroupedQuery<T, K>, value: fn(T) -> V) -> DataQuery<GroupValue<K, V>> {
+    jet_data_group_sum_query_checked(grouped, fn(row) { Ok(value(^row)) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1986
+fn jet_data_group_count_query<T: Clone, K: Clone + PartialEq, V: Clone + From<I64>>(
+    grouped: &DataGroupedQuery<T, K>) -> DataQuery<GroupValue<K, V>> {
+    query :: grouped.query.clone()
+    key :: grouped.key.clone()
+    steps :: jet_data_grouped_steps(grouped, "count")
+    tracking :: query.tracking.clone()
+    source :: query.tracked_reader()
+    value :: Arc.new(fn(_: T) { Ok(V.from(1)) })
+    aggregate :: Arc.new(fn(values: &[V]) { Ok(V.from(values.len() as I64)) })
+    compute_query :: query.clone()
+    compute_key :: key.clone()
+    result :: jet_data_reducer_query(tracking, steps, fn() {
+        rows :: jet_data_query_collect(&compute_query)?
+        limits :: DataLimits.safe()
+        groups: [(K, I64)] := []
+        loop row in rows {
+            group_key :: compute_key(^row)
+            if groups.iter_mut().find(fn(entry) { entry.0 == group_key }) == Some(entry) {
+                entry.1 = entry.1.saturating_add(1)
+            } else {
+                if groups.len() as I64 >= limits.max_groups {
+                    return Err(jet_data_error(DataErrorKind.Limit,
+                        "query.group_by.count", "max_groups {limits.max_groups} exceeded"))
+                }
+                groups.push((^group_key, 1))
+            }
+        }
+        Ok(groups.into_iter().map(fn(entry) {
+            GroupValue{key: ^entry.0, value: V.from(entry.1)}
+        }).collect())
+    })
+    if source == Some(source) {
+        result.with_watch_source(Rc.new(JetDataGroupWatchSource{
+            source: ^source, operations: query.operations.clone(), key: ^key,
+            value: ^value, aggregate: ^aggregate, operation: "query.group_by.count",
+            mode: "incremental", recomputed: false, state: RefCell.new(None)}))
+    } else { ^result }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2049
+fn jet_data_group_mean_query_checked<T: Clone, K: Clone + PartialEq>(
+    grouped: &DataGroupedQuery<T, K>,
+    value: fn(T) -> Result<F64, DataError>) -> DataQuery<GroupValue<K, F64>> {
+    query :: grouped.query.clone()
+    key :: grouped.key.clone()
+    source :: query.tracked_reader()
+    steps :: jet_data_grouped_steps(grouped, "mean")
+    tracking :: query.tracking.clone()
+    aggregate :: Arc.new(fn(values: &[F64]) {
+        if values.iter().any(fn(value) { not value.is_finite() }) {
+            return Err(jet_data_error(DataErrorKind.NonFinite,
+                "query.group_by.mean", "group values must be finite"))
+        }
+        if values.is_empty() {
+            return Err(jet_data_error(DataErrorKind.State,
+                "query.group_by.mean", "empty group has no mean"))
+        }
+        Ok(values.iter().copied().sum<F64>() / values.len() as F64)
+    })
+    value :: Arc.new(value)
+    compute_query :: query.clone()
+    compute_key :: key.clone()
+    compute_value :: value.clone()
+    result :: jet_data_reducer_query(tracking, steps, fn() {
+        rows :: jet_data_query_collect(&compute_query)?
+        limits :: DataLimits.safe()
+        groups: [(K, F64, I64)] := []
+        loop row in rows {
+            group_key :: compute_key(row.clone())
+            group_value :: compute_value(^row)?
+            if not group_value.is_finite() {
+                return Err(jet_data_error(DataErrorKind.NonFinite,
+                    "query.group_by.mean", "group values must be finite"))
+            }
+            if groups.iter_mut().find(fn(entry) { entry.0 == group_key }) == Some(entry) {
+                entry.1 += group_value
+                entry.2 = entry.2.saturating_add(1)
+            } else {
+                if groups.len() as I64 >= limits.max_groups {
+                    return Err(jet_data_error(DataErrorKind.Limit,
+                        "query.group_by.mean", "max_groups {limits.max_groups} exceeded"))
+                }
+                groups.push((^group_key, group_value, 1))
+            }
+        }
+        Ok(groups.into_iter().map(fn(entry) {
+            GroupValue{key: ^entry.0, value: entry.1 / entry.2 as F64}
+        }).collect())
+    })
+    if source == Some(source) {
+        result.with_watch_source(Rc.new(JetDataGroupWatchSource{
+            source: ^source, operations: query.operations.clone(), key: ^key,
+            value: ^value, aggregate: ^aggregate, operation: "query.group_by.mean",
+            mode: "recomputed", recomputed: true, state: RefCell.new(None)}))
+    } else { ^result }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2142
+fn jet_data_group_mean_query<T: Clone, K: Clone + PartialEq>(
+    grouped: &DataGroupedQuery<T, K>, value: fn(T) -> F64) -> DataQuery<GroupValue<K, F64>> {
+    jet_data_group_mean_query_checked(grouped, fn(row) { Ok(value(^row)) })
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2156
+fn jet_data_csv_reader<T: __jet_Decode>(
+    input: JetFileReader, limits: DataLimits) -> Result<DataStream, DataError> {
+    jet_data_limits_validate(&limits)?
+    reader :: jet_enc_csv_reader(^input, limits.encoding.clone(), ",", false, false)
+        .map_err(fn(enc) { jet_data_from_encoding("csv_reader", Err(JetAbsent), ^enc) })?
+    Ok(DataStream{inner: DataStreamInner.CSV{reader: ^reader, headers: None},
+        limits: ^limits, terminal: None, eof: false, row_index: 0, cancelled: false})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2182
+fn jet_data_json_reader<T: __jet_Decode>(
+    input: JetFileReader, limits: DataLimits) -> Result<DataStream, DataError> {
+    jet_data_limits_validate(&limits)?
+    reader := jet_enc_json_reader(^input, limits.encoding.clone())
+        .map_err(fn(enc) { jet_data_from_encoding("json_reader", Err(JetAbsent), ^enc) })?
+    reader.typed_numbers = true
+    Ok(DataStream{inner: DataStreamInner.JSON{reader: ^reader, array_started: false, array_done: false},
+        limits: ^limits, terminal: None, eof: false, row_index: 0, cancelled: false})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2204
+fn jet_data_jsonl_reader(input: JetFileReader, limits: DataLimits) -> Result<DataStream, DataError> {
+    jet_data_limits_validate(&limits)?
+    reader :: jet_enc_jsonl_reader(^input, limits.encoding.clone())
+        .map_err(fn(enc) { jet_data_from_encoding("jsonl_reader", Err(JetAbsent), ^enc) })?
+    Ok(DataStream{inner: DataStreamInner.JSONL{reader: ^reader},
+        limits: ^limits, terminal: None, eof: false, row_index: 0, cancelled: false})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2221
+fn jet_data_stream_fail<T>(stream: &DataStream, error: DataError) -> Result<T, DataError> {
+    stream.terminal = Val(error.clone())
+    Err(^error)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2229
+fn jet_data_field_errors_reason(errors: [FieldError]) -> String {
+    errors.into_iter().map(fn(error) {
+        if error.path.is_empty() -> ^error.reason
+        else -> "{error.path}: {error.reason}"
+    }).collect<[String]>().join("; ")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2243
+fn jet_data_stream_decode_csv_row<T: __jet_Decode>(
+    headers: &[String], row: [String], row_index: I64) -> Result<T, DataError> {
+    if row.len() != headers.len() {
+        error := jet_data_error(DataErrorKind.Decode, "csv_reader",
+            "CSV row has {row.len()} fields; expected {headers.len()}")
+        error.row = Val(Int.from_i64(row_index))
+        return Err(^error)
+    }
+    obj :: headers.iter().cloned().zip(row.into_iter().map(fn(value) { DataTree.Text(^value) })).collect()
+    T.jet_decode(&DataTree.Object(^obj)).map_err(fn(errors) {
+        error := jet_data_error(DataErrorKind.Decode, "csv_reader", jet_data_field_errors_reason(^errors))
+        error.row = Val(Int.from_i64(row_index))
+        ^error
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2280
+// D-FAIL-CARRIER1=A: clean absence ends the stream; a broken row is a report.
+fn jet_data_stream_next<T: __jet_Decode>(
+    stream: &DataStream) -> Result<JetOutcome<T, JetAbsent>, DataError> {
+    jet_data_stream_scan<T>(stream).map(jet_outcome_of)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2287
+fn jet_data_stream_scan<T: __jet_Decode>(stream: &DataStream) -> Result<T?, DataError> {
+    if stream.terminal == .Val(error) -> return Err(error.clone())
+    if stream.cancelled {
+        return jet_data_stream_fail(stream, jet_data_error(DataErrorKind.State,
+            "data.stream", "stream was cancelled before the next row"))
+    }
+    if stream.eof -> return Ok(None)
+    match &stream.inner {
+        DataStreamInner.CSV{reader, headers} -> {
+            if headers.is_none() {
+                match reader.next_record() {
+                    Ok(.Val(header)) -> headers = Val(^header.fields)
+                    Ok(None) -> {
+                        stream.eof = true
+                        return Ok(None)
+                    }
+                    Err(enc) -> return jet_data_stream_fail(stream,
+                        jet_data_from_encoding("csv_reader", Err(JetAbsent), ^enc))
+                }
+            }
+            header :: (headers.as_ref() ?? panic("unwrap failed")).clone()
+            match reader.next_record() {
+                Ok(None) -> {
+                    stream.eof = true
+                    Ok(None)
+                }
+                Ok(.Val(row)) -> {
+                    stream.row_index += 1
+                    match jet_data_stream_decode_csv_row<T>(&header, ^row.fields, stream.row_index) {
+                        Ok(value) -> Ok(Val(^value))
+                        Err(error) -> jet_data_stream_fail(stream, ^error)
+                    }
+                }
+                Err(enc) -> jet_data_stream_fail(stream,
+                    jet_data_from_encoding("csv_reader", Ok(stream.row_index + 1), ^enc))
+            }
+        }
+        DataStreamInner.JSON{reader, array_started, array_done} -> {
+            if array_done -> {
+                stream.eof = true
+                return Ok(None)
+            }
+            if not array_started {
+                match reader.next_event() {
+                    Ok(.Val(DataEvent.ArrayStart)) -> array_started = true
+                    Ok(.Val(_)) -> return jet_data_stream_fail(stream,
+                        jet_data_error(DataErrorKind.Decode, "json_reader",
+                            "typed JSON stream requires a top-level array of objects"))
+                    Ok(None) -> {
+                        stream.eof = true
+                        return Ok(None)
+                    }
+                    Err(enc) -> return jet_data_stream_fail(stream,
+                        jet_data_from_encoding("json_reader", Err(JetAbsent), ^enc))
+                }
+            }
+            first :: match reader.next_event() {
+                Ok(None) -> {
+                    array_done = true
+                    stream.eof = true
+                    return Ok(None)
+                }
+                Ok(.Val(DataEvent.ArrayEnd)) -> {
+                    array_done = true
+                    stream.eof = true
+                    return Ok(None)
+                }
+                Ok(.Val(event)) -> ^event
+                Err(enc) -> return jet_data_stream_fail(stream,
+                    jet_data_from_encoding("json_reader", Ok(stream.row_index + 1), ^enc))
+            }
+            heap := match jet_json_fold_budget(reader) {
+                Ok(heap) -> ^heap
+                Err(enc) -> return jet_data_stream_fail(stream,
+                    jet_data_from_encoding("json_reader", Ok(stream.row_index + 1), ^enc))
+            }
+            match jet_json_fold_from_event(reader, ^first, &heap) {
+                Ok(tree) -> {
+                    stream.row_index += 1
+                    match T.jet_decode(&tree) {
+                        Ok(value) -> Ok(Val(^value))
+                        Err(errors) -> {
+                            error := jet_data_error(DataErrorKind.Decode, "json_reader",
+                                jet_data_field_errors_reason(^errors))
+                            error.row = Val(Int.from_i64(stream.row_index))
+                            jet_data_stream_fail(stream, ^error)
+                        }
+                    }
+                }
+                Err(enc) -> jet_data_stream_fail(stream,
+                    jet_data_from_encoding("json_reader", Ok(stream.row_index + 1), ^enc))
+            }
+        }
+        DataStreamInner.JSONL{reader} -> match reader.next_record() {
+            Ok(None) -> {
+                stream.eof = true
+                Ok(None)
+            }
+            Ok(.Val(tree)) -> {
+                stream.row_index += 1
+                match T.jet_decode(&tree) {
+                    Ok(value) -> Ok(Val(^value))
+                    Err(errors) -> {
+                        error := jet_data_error(DataErrorKind.Decode, "jsonl_reader",
+                            jet_data_field_errors_reason(^errors))
+                        error.row = Val(Int.from_i64(stream.row_index))
+                        jet_data_stream_fail(stream, ^error)
+                    }
+                }
+            }
+            Err(enc) -> jet_data_stream_fail(stream,
+                jet_data_from_encoding("jsonl_reader", Ok(stream.row_index + 1), ^enc))
+        }
+        DataStreamInner.Provider{format: _format, rows, cursor} -> {
+            if cursor >= rows.len() -> {
+                stream.eof = true
+                return Ok(None)
+            }
+            tree :: rows[cursor].clone()
+            cursor += 1
+            stream.row_index += 1
+            match T.jet_decode(&tree) {
+                Ok(value) -> Ok(Val(^value))
+                Err(errors) -> {
+                    error := jet_data_error(DataErrorKind.Decode, "data.provider",
+                        jet_data_field_errors_reason(^errors))
+                    error.row = Val(Int.from_i64(stream.row_index))
+                    jet_data_stream_fail(stream, ^error)
+                }
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2483
+fn jet_data_stream_collect<T: __jet_Decode + Clone>(stream: &DataStream) -> Result<[T], DataError> {
+    jet_data_limits_validate(&stream.limits)?
+    max_output_rows :: USize.try_from(stream.limits.max_output_rows).map_err(fn(_) {
+        jet_data_error(DataErrorKind.Limit, "collect", "max_output_rows cannot be represented by this target")
+    })?
+    out := [T].with_capacity(max_output_rows.min(256))
+    loop {
+        match jet_data_stream_next<T>(stream)? {
+            Err(JetAbsent) -> return Ok(^out)
+            Ok(row) -> {
+                if out.len() >= max_output_rows {
+                    // Crossing fails before retaining the item that crosses.
+                    return jet_data_stream_fail(stream, jet_data_error(DataErrorKind.Limit,
+                        "collect", "max_output_rows {stream.limits.max_output_rows} exceeded"))
+                }
+                out.try_reserve_exact(1).map_err(fn(_) {
+                    jet_data_error(DataErrorKind.Limit, "collect",
+                        "output allocation exceeded the configured bound")
+                })?
+                out.push(^row)
+            }
+        }
+    }
+}
+
+// D-DX-LOADERS1=A: core text loaders and deterministic snapshots share the
+// provider carrier; there is no second cache or credential store.
+use jet_foundation.PreludeDataFlow as LoaderKernel
+use core.data.[DataAuthority, DataLoaderStatus, DataFreshness, DataInvalidationCause,
+    DataFormat, DataSourceIdentity]
+use core.prelude.runtime.std_common_types.[DataLoader, DataLoaderKind]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2531
+const JET_DATA_LOADER_MAX_PUBLIC_TEXT: USize = 4096
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2532
+const JET_DATA_LOADER_MAX_STATUS_TEXT: USize = 1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2534
+fn jet_data_loader_kernel_kind(kind: DataLoaderKind) -> LoaderKernel.LoaderKind {
+    match kind {
+        .File -> LoaderKernel.LoaderKind.File
+        .URL -> LoaderKernel.LoaderKind.URL
+        .Database -> LoaderKernel.LoaderKind.Database
+        .Value -> LoaderKernel.LoaderKind.Value
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2547
+fn jet_data_loader_kernel_limits(limits: &DataLimits) -> LoaderKernel.Limits {
+    LoaderKernel.Limits{buffer_bytes: limits.encoding.buffer_bytes, max_depth: limits.encoding.max_depth,
+        max_item_bytes: limits.encoding.max_item_bytes, max_total_bytes: limits.encoding.max_total_bytes.ok(),
+        max_expansion_depth: limits.encoding.max_expansion_depth,
+        max_expansion_bytes: limits.encoding.max_expansion_bytes, max_groups: limits.max_groups,
+        max_sort_rows: limits.max_sort_rows, max_join_rows: limits.max_join_rows,
+        max_output_rows: limits.max_output_rows}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2564
+fn jet_data_loader_kernel_authority(authority: &DataAuthority) -> LoaderKernel.Authority {
+    LoaderKernel.Authority{scope: authority.scope.clone(), revision: authority.revision.clone()}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2573
+fn jet_data_loader_kernel_status(status: &DataLoaderStatus) -> LoaderKernel.Status {
+    LoaderKernel.Status{identity: status.identity.clone(),
+        freshness: match status.freshness {
+            .Pending -> LoaderKernel.Freshness.Pending
+            .Fresh -> LoaderKernel.Freshness.Fresh
+            .Stale -> LoaderKernel.Freshness.Stale
+            .Error -> LoaderKernel.Freshness.Error
+            .Offline -> LoaderKernel.Freshness.Offline
+            .Cancelled -> LoaderKernel.Freshness.Cancelled
+        },
+        invalidated_by: match status.invalidated_by {
+            .NoCause -> LoaderKernel.InvalidationCause.NoCause
+            .Loader -> LoaderKernel.InvalidationCause.Loader
+            .Input -> LoaderKernel.InvalidationCause.Input
+            .ArchiveMember -> LoaderKernel.InvalidationCause.ArchiveMember
+            .Parameters -> LoaderKernel.InvalidationCause.Parameters
+            .Credential -> LoaderKernel.InvalidationCause.Credential
+            .Capability -> LoaderKernel.InvalidationCause.Capability
+            .Manual -> LoaderKernel.InvalidationCause.Manual
+        },
+        error: status.error.clone(), cleanup: status.cleanup.clone(),
+        buffered_bytes: status.buffered_bytes, backpressure: status.backpressure,
+        last_good: status.last_good}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2626
+fn jet_data_loader_kernel_state<T>(loader: &DataLoader<T>) -> LoaderKernel.LoaderState {
+    LoaderKernel.LoaderState{
+        source: LoaderKernel.SourceIdentity{kind: jet_data_loader_kernel_kind(loader.source.kind),
+            locator: loader.source.locator.clone(), member: loader.source.member.clone(),
+            parameters: loader.source.parameters.clone()},
+        format: loader.format.as_str().to_string(),
+        authority: jet_data_loader_kernel_authority(&loader.authority),
+        limits: jet_data_loader_kernel_limits(&loader.limits), payload: loader.payload.clone(),
+        last_good: loader.last_good.clone(), cancelled: loader.cancelled, offline: loader.offline,
+        status: jet_data_loader_kernel_status(&loader.status), raw_locator: loader.raw_locator.clone()}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2648
+fn jet_data_loader_apply_kernel<T>(loader: &DataLoader<T>, state: LoaderKernel.LoaderState) -> {
+    loader.source.locator = ^state.source.locator
+    loader.source.member = ^state.source.member
+    loader.source.parameters = ^state.source.parameters
+    loader.authority.scope = ^state.authority.scope
+    loader.authority.revision = ^state.authority.revision
+    loader.payload = ^state.payload
+    loader.last_good = ^state.last_good
+    loader.cancelled = state.cancelled
+    loader.offline = state.offline
+    loader.status.identity = ^state.status.identity
+    loader.status.freshness = match state.status.freshness {
+        .Pending -> DataFreshness.Pending
+        .Fresh -> DataFreshness.Fresh
+        .Stale -> DataFreshness.Stale
+        .Error -> DataFreshness.Error
+        .Offline -> DataFreshness.Offline
+        .Cancelled -> DataFreshness.Cancelled
+    }
+    loader.status.invalidated_by = match state.status.invalidated_by {
+        .NoCause -> DataInvalidationCause.NoCause
+        .Loader -> DataInvalidationCause.Loader
+        .Input -> DataInvalidationCause.Input
+        .ArchiveMember -> DataInvalidationCause.ArchiveMember
+        .Parameters -> DataInvalidationCause.Parameters
+        .Credential -> DataInvalidationCause.Credential
+        .Capability -> DataInvalidationCause.Capability
+        .Manual -> DataInvalidationCause.Manual
+    }
+    loader.status.error = ^state.status.error
+    loader.status.cleanup = ^state.status.cleanup
+    loader.status.buffered_bytes = state.status.buffered_bytes
+    loader.status.backpressure = state.status.backpressure
+    loader.status.last_good = state.status.last_good
+    loader.raw_locator = ^state.raw_locator
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2706
+fn jet_data_loader_status_from_kernel(status: LoaderKernel.Status) -> DataLoaderStatus {
+    DataLoaderStatus{identity: ^status.identity,
+        freshness: match status.freshness {
+            .Pending -> DataFreshness.Pending
+            .Fresh -> DataFreshness.Fresh
+            .Stale -> DataFreshness.Stale
+            .Error -> DataFreshness.Error
+            .Offline -> DataFreshness.Offline
+            .Cancelled -> DataFreshness.Cancelled
+        },
+        invalidated_by: match status.invalidated_by {
+            .NoCause -> DataInvalidationCause.NoCause
+            .Loader -> DataInvalidationCause.Loader
+            .Input -> DataInvalidationCause.Input
+            .ArchiveMember -> DataInvalidationCause.ArchiveMember
+            .Parameters -> DataInvalidationCause.Parameters
+            .Credential -> DataInvalidationCause.Credential
+            .Capability -> DataInvalidationCause.Capability
+            .Manual -> DataInvalidationCause.Manual
+        },
+        error: ^status.error, cleanup: ^status.cleanup, buffered_bytes: status.buffered_bytes,
+        backpressure: status.backpressure, last_good: status.last_good}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2759
+fn jet_data_loader_kernel_error(error: LoaderKernel.KernelError) -> DataError {
+    kind :: match error.kind {
+        .InvalidArgument -> DataErrorKind.InvalidArgument
+        .Limit -> DataErrorKind.Limit
+        .State -> DataErrorKind.State
+        .Bridge -> DataErrorKind.Bridge
+    }
+    jet_data_loader_error(kind, &error.operation, ^error.reason)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2773
+fn jet_data_loader_bounded_text(value: &String, max_bytes: USize) -> String {
+    LoaderKernel.bounded_text(value, max_bytes)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2777
+fn jet_data_loader_sensitive_value(value: &String) -> Bool { LoaderKernel.sensitive_value(value) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2781
+fn jet_data_loader_status_text(value: &String) -> String { LoaderKernel.status_text(value) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2785
+fn jet_data_loader_error(kind: DataErrorKind, operation: &String, reason: String) -> DataError {
+    jet_data_error(kind, operation, jet_data_loader_bounded_text(&reason, JET_DATA_LOADER_MAX_STATUS_TEXT))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2798
+fn jet_data_loader_public_parameter(parameter: &String) -> String { LoaderKernel.public_parameter(parameter) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2802
+fn jet_data_loader_public_member(member: &String) -> String { LoaderKernel.public_member(member) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2806
+fn jet_data_loader_public_locator(locator: &String) -> String { LoaderKernel.public_locator(locator) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2810
+fn jet_data_loader_validate_public_text(label: &String, value: &String,
+    allow_empty: Bool) -> Result<(), DataError> {
+    LoaderKernel.validate_public_text(label, value, allow_empty).map_err(jet_data_loader_kernel_error)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2819
+fn jet_data_loader_authority(scope: &String, revision: &String) -> Result<DataAuthority, DataError> {
+    LoaderKernel.authority(scope, revision).map(fn(authority) {
+        DataAuthority{scope: ^authority.scope, revision: ^authority.revision}
+    }).map_err(jet_data_loader_kernel_error)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2831
+fn jet_data_loader_format(format: &String) -> Result<DataFormat, DataError> {
+    DataFormat.from_str(format).ok_or_else(fn() {
+        jet_data_loader_error(DataErrorKind.Bridge, "data.loader",
+            "format `{format}` is provider-owned; import its package")
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2841
+fn jet_data_loader_new<T>(kind: DataLoaderKind, locator: String, member: String,
+    parameters: [String], format: DataFormat, limits: DataLimits,
+    authority: DataAuthority) -> Result<DataLoader<T>, DataError> {
+    state :: LoaderKernel.new_loader(jet_data_loader_kernel_kind(kind), ^locator, ^member,
+        ^parameters, format.as_str().to_string(), jet_data_loader_kernel_limits(&limits),
+        jet_data_loader_kernel_authority(&authority)).map_err(jet_data_loader_kernel_error)?
+    Ok(DataLoader{source: DataSourceIdentity{kind: kind, locator: ^state.source.locator,
+            member: ^state.source.member, parameters: ^state.source.parameters},
+        format: format, authority: DataAuthority{scope: ^state.authority.scope, revision: ^state.authority.revision},
+        limits: ^limits, payload: ^state.payload, last_good: ^state.last_good,
+        cancelled: state.cancelled, offline: state.offline,
+        status: DataLoaderStatus{identity: ^state.status.identity, freshness: .Pending,
+            invalidated_by: .NoCause, error: ^state.status.error, cleanup: ^state.status.cleanup,
+            buffered_bytes: state.status.buffered_bytes, backpressure: state.status.backpressure,
+            last_good: state.status.last_good},
+        raw_locator: ^state.raw_locator, marker: PhantomData})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2892
+fn jet_data_loader_validate_runtime<T>(loader: &DataLoader<T>) -> Result<(), DataError> {
+    LoaderKernel.validate_loader(&jet_data_loader_kernel_state(loader)).map_err(jet_data_loader_kernel_error)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2899
+fn jet_data_loader_format_for_locator(locator: &String) -> Result<DataFormat, DataError> {
+    path := locator.split(fn(character) { character == '?' or character == '#' }).next().unwrap_or(locator)
+    path = path.rsplit_once("/").map_or(path, fn(entry) { entry.1 })
+    extension :: match path.rsplit_once(".").map(fn(entry) { entry.1 }) {
+        Val(extension) -> extension
+        None -> return Err(jet_data_loader_error(DataErrorKind.Bridge, "data.load",
+            "source has no core format; import a provider package"))
+    }
+    jet_data_loader_format(extension)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2917
+fn jet_data_loader_load<T>(locator: &String, limits: &DataLimits) -> Result<DataLoader<T>, DataError> {
+    format :: jet_data_loader_format_for_locator(locator)?
+    if locator.starts_with("http://") or locator.starts_with("https://") {
+        return jet_data_loader_url(locator, &format.as_str().to_string(), "network", limits)
+    }
+    jet_data_loader_file(locator, &format.as_str().to_string(), limits)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2933
+fn jet_data_loader_load_default<T>(locator: &String) -> Result<DataLoader<T>, DataError> {
+    jet_data_loader_load(locator, &DataLimits.safe())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2939
+fn jet_data_loader_file<T>(path: &String, format: &String,
+    limits: &DataLimits) -> Result<DataLoader<T>, DataError> {
+    jet_data_loader_new(.File, path.clone(), "", [], jet_data_loader_format(format)?,
+        limits.clone(), jet_data_loader_authority("local", "")?)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2955
+fn jet_data_loader_file_member<T>(path: &String, member: &String, format: &String,
+    limits: &DataLimits) -> Result<DataLoader<T>, DataError> {
+    jet_data_loader_new(.File, path.clone(), member.clone(), [], jet_data_loader_format(format)?,
+        limits.clone(), jet_data_loader_authority("local", "")?)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2972
+fn jet_data_loader_url<T>(url: &String, format: &String, authority: &String,
+    limits: &DataLimits) -> Result<DataLoader<T>, DataError> {
+    jet_data_loader_new(.URL, url.clone(), "", [], jet_data_loader_format(format)?,
+        limits.clone(), jet_data_loader_authority(authority, "")?)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2989
+fn jet_data_loader_database<T>(query: &String, parameters: &[String], authority: &String,
+    limits: &DataLimits) -> Result<DataLoader<T>, DataError> {
+    jet_data_loader_new(.Database, query.clone(), "", parameters.clone(), .JSON,
+        limits.clone(), jet_data_loader_authority(authority, "")?)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3006
+fn jet_data_loader_value<T: __jet_Encode>(value: &T,
+    limits: &DataLimits) -> Result<DataLoader<T>, DataError> {
+    content :: jet_data_loader_canonical_tree(&value.jet_encode())
+    bytes :: content.into_bytes()
+    jet_data_loader_check_payload(limits, bytes.len(), "data.value")?
+    loader := jet_data_loader_new<T>(.Value, "value", "", [], .JSON,
+        limits.clone(), jet_data_loader_authority("local", "")?)?
+    loader.payload = Val(^bytes)
+    Ok(^loader)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3026
+fn jet_data_loader_check_payload(limits: &DataLimits, bytes: USize,
+    operation: &String) -> Result<(), DataError> {
+    LoaderKernel.check_payload(&jet_data_loader_kernel_limits(limits), bytes, operation)
+        .map_err(jet_data_loader_kernel_error)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3039
+fn jet_data_loader_quote(value: &String) -> String {
+    output := String.with_capacity(value.len() + 2)
+    output.push('"')
+    loop character in value.chars() {
+        match character {
+            '"' -> output.push_str("\\\"")
+            '\\' -> output.push_str("\\\\")
+            '\n' -> output.push_str("\\n")
+            '\r' -> output.push_str("\\r")
+            '\t' -> output.push_str("\\t")
+            character if character.is_control() -> output.push_str("\\u{character as U32:04x}")
+            character -> output.push(character)
+        }
+    }
+    output.push('"')
+    ^output
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3059
+fn jet_data_loader_canonical_tree(tree: &DataTree) -> String {
+    match tree {
+        .Null -> "null"
+        .Bool(value) -> value.to_string()
+        .Int(value) -> value.to_string()
+        .Float(value) -> "{value:?}"
+        .Number(value) -> value.clone()
+        .TypedText(value) | .Text(value) -> jet_data_loader_quote(value)
+        .Bytes(values) -> {
+            body :: values.iter().map(fn(value) { value.to_string() }).collect<[String]>().join(",")
+            "[{body}]"
+        }
+        .Array(values) -> {
+            body :: values.iter().map(jet_data_loader_canonical_tree).collect<[String]>().join(",")
+            "[{body}]"
+        }
+        .Object(entries) -> {
+            entries := entries.clone()
+            entries.sort_by(fn(left, right) { left.0.cmp(&right.0) })
+            body :: entries.iter().map(fn(entry) {
+                key :: jet_data_loader_quote(&entry.0)
+                value :: jet_data_loader_canonical_tree(&entry.1)
+                "{key}:{value}"
+            }).collect<[String]>().join(",")
+            "{{{body}}}"
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3104
+fn jet_data_loader_schema(tree: &DataTree, format: DataFormat) -> DataSchema {
+    schema := DataSchema.infer(tree, format)
+    schema.identity = jet_data_loader_digest(schema.identity.as_bytes())
+    ^schema
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3113
+fn jet_data_loader_digest(bytes: &[U8]) -> String { LoaderKernel.digest(bytes) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3117
+fn jet_data_loader_csv_tree(text: &String, limits: &DataLimits) -> Result<DataTree, DataError> {
+    text :: text.to_string()
+    rows :: jet_ring_csv_parse(&text, ",", false, false).map_err(fn(reason) {
+        jet_data_loader_error(DataErrorKind.Decode, "data.loader.csv", ^reason)
+    })?
+    rows := rows.into_iter()
+    header :: match rows.next() {
+        .Val(header) -> ^header
+        None -> return Ok(DataTree.Array([]))
+    }
+    header_names: [String:Bool] := [:]
+    loop name in &header {
+        jet_data_loader_validate_public_text("CSV header", name, false)?
+        if header_names.insert(name.clone(), true).is_some() {
+            return Err(jet_data_loader_error(DataErrorKind.Decode, "data.loader.csv",
+                "duplicate CSV header `{name}`"))
+        }
+    }
+    values := []
+    loop row in rows {
+        if values.len() as I64 >= limits.max_output_rows {
+            return Err(jet_data_loader_error(DataErrorKind.Limit, "data.loader.csv",
+                "max_output_rows {limits.max_output_rows} exceeded"))
+        }
+        if row.len() > header.len() {
+            return Err(jet_data_loader_error(DataErrorKind.Decode, "data.loader.csv",
+                "CSV row has {row.len()} fields; header has {header.len()}"))
+        }
+        fields :: header.iter().enumerate().map(fn(entry) {
+            (entry.1.clone(), row.get(entry.0).map(fn(value) { DataTree.Text(value.clone()) })
+                .unwrap_or(DataTree.Null))
+        }).collect()
+        values.push(DataTree.Object(^fields))
+    }
+    Ok(DataTree.Array(^values))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3181
+fn jet_data_loader_jsonl_tree(text: &String, limits: &DataLimits) -> Result<DataTree, DataError> {
+    values := []
+    loop (line_index, line) in text.lines().enumerate() {
+        line := line.trim() // #4303
+        if line.is_empty() -> next
+        if values.len() as I64 >= limits.max_output_rows {
+            return Err(jet_data_loader_error(DataErrorKind.Limit, "data.loader.jsonl",
+                "max_output_rows {limits.max_output_rows} exceeded"))
+        }
+        value :: parse_json_typed_datatree(line).map_err(fn(error) {
+            reason :: match error.line {
+                Ok(line) -> "invalid JSONL record at line {line_index + 1} (line {line}): {error.reason}"
+                Err(_) -> "invalid JSONL record at line {line_index + 1}: {error.reason}"
+            }
+            jet_data_loader_error(DataErrorKind.Decode, "data.loader.jsonl", ^reason)
+        })?
+        values.push(^value)
+    }
+    Ok(DataTree.Array(^values))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3222
+fn jet_data_loader_check_tree_rows(tree: &DataTree, limits: &DataLimits,
+    operation: &String) -> Result<(), DataError> {
+    if tree == DataTree.Array(rows) {
+        if rows.len() as I64 > limits.max_output_rows {
+            return Err(jet_data_loader_error(DataErrorKind.Limit, operation,
+                "max_output_rows {limits.max_output_rows} exceeded"))
+        }
+    }
+    Ok(())
+}
+
+use jet_foundation.[ArrowData, ArrowFileReader]
+use core.data.[DataSchema, DataProvenance, DataSnapshotIdentity]
+use core.prelude.runtime.std_common_types.[DataSnapshot]
+use std.fs
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3244
+// D-DATA-READER1=A: official Parquet provider ABI; Arrow IPC remains separate.
+// GATE #4565: kernel primitive
+#FFI(c)
+fn jet_data_read(format: U8, input: *const U8, input_len: USize,
+    limits: *const ArrowFileReader.ProviderLimits,
+    out_schema: *mut *mut ArrowData.ArrowSchema,
+    out_array: *mut *mut ArrowData.ArrowArray) -> I32
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3254
+fn jet_data_arrow_limits(limits: &DataLimits) -> Result<ArrowData.ArrowLimits, DataError> {
+    max_buffer_bytes :: USize.try_from(limits.encoding.max_expansion_bytes).map_err(fn(_) {
+        jet_data_loader_error(DataErrorKind.Limit, "data.loader.parquet",
+            "max_expansion_bytes cannot be represented by this target")
+    })?
+    max_total_i64 :: limits.encoding.max_total_bytes.ok().unwrap_or_else(fn() {
+        limits.encoding.max_item_bytes.max(limits.encoding.max_expansion_bytes)
+    })
+    max_total_bytes :: USize.try_from(max_total_i64).map_err(fn(_) {
+        jet_data_loader_error(DataErrorKind.Limit, "data.loader.parquet",
+            "max_total_bytes cannot be represented by this target")
+    })?
+    Ok(ArrowData.ArrowLimits{max_rows: limits.max_output_rows, max_columns: 1024,
+        max_children: limits.encoding.max_depth, max_dictionary_values: limits.max_output_rows,
+        max_buffer_bytes: max_buffer_bytes, max_total_bytes: max_total_bytes})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3291
+fn jet_data_arrow_error(error: ArrowData.ArrowError) -> DataError {
+    kind :: match error.kind {
+        .Limit -> DataErrorKind.Limit
+        .ProducerFailure -> DataErrorKind.Bridge
+        _ -> DataErrorKind.Decode
+    }
+    jet_data_loader_error(kind, "data.loader.parquet", error.to_string())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3302
+fn jet_data_loader_parquet_tree(payload: &[U8], limits: &DataLimits) -> Result<DataTree, DataError> {
+    arrow_limits :: jet_data_arrow_limits(limits)?
+    // GATE #4565: kernel primitive
+    #Unsafe("exact official provider C ABI; checked Arrow owner validates pointers, callbacks, offsets and buffers") {
+        ArrowFileReader.register(jet_data_read).map_err(jet_data_arrow_error)?
+        ArrowFileReader.read_tree(ArrowFileReader.FORMAT_PARQUET, payload, &arrow_limits)
+            .map_err(jet_data_arrow_error)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3319
+fn jet_data_loader_tree(payload: &[U8], format: DataFormat,
+    limits: &DataLimits) -> Result<DataTree, DataError> {
+    if format == .Parquet -> return jet_data_loader_parquet_tree(payload, limits)
+    if format == .Arrow {
+        return Err(jet_data_loader_error(DataErrorKind.Bridge, "data.loader",
+            "Arrow IPC has a separate provider boundary; Parquet is the registered reader"))
+    }
+    text :: String.from_utf8(payload.to_vec()).map_err(fn(error) {
+        jet_data_loader_error(DataErrorKind.Decode, "data.loader", "payload is not UTF-8: {error}")
+    })?
+    tree :: match format {
+        .JSON -> parse_json_typed_datatree(&text).map_err(fn(error) {
+            reason :: match error.line {
+                Ok(line) -> "invalid JSON (line {line}): {error.reason}"
+                Err(_) -> "invalid JSON: {error.reason}"
+            }
+            jet_data_loader_error(DataErrorKind.Decode, "data.loader.json", ^reason)
+        })?
+        .CSV -> jet_data_loader_csv_tree(&text, limits)?
+        .JSONL -> jet_data_loader_jsonl_tree(&text, limits)?
+        .Parquet | .Arrow -> unreachable()
+    }
+    jet_data_loader_check_tree_rows(&tree, limits, "data.loader")?
+    Ok(^tree)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3362
+fn jet_data_loader_payload<T>(loader: &DataLoader<T>) -> Result<([U8], Bool), DataError> {
+    state :: jet_data_loader_kernel_state(loader)
+    if LoaderKernel.payload(&state).map_err(jet_data_loader_kernel_error)? == .Val(payload) {
+        return Ok(^payload)
+    }
+    if loader.source.kind == .File and loader.source.member.is_empty() {
+        // GATE #4565: kernel primitive
+        payload :: #Unsafe("read the retained raw local path; public locator remains redacted in diagnostics") {
+            fs.read(&loader.raw_locator)
+        }.map_err(fn(error) {
+            jet_data_loader_error(DataErrorKind.IO, "data.loader.file",
+                "could not read `{loader.source.locator}`: {error}")
+        })?
+        jet_data_loader_check_payload(&loader.limits, payload.len(), "data.loader.file")?
+        return Ok((^payload, loader.offline))
+    }
+    operation :: match loader.source.kind {
+        .URL -> "data.loader.url"
+        .Database -> "data.loader.database"
+        .File -> "data.loader.archive"
+        .Value -> "data.loader.value"
+    }
+    Err(jet_data_loader_error(DataErrorKind.Bridge, operation,
+        "provider payload is missing; core does not access remote authority"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3397
+fn jet_data_loader_fail<T>(loader: &DataLoader<T>, error: DataError) -> DataError {
+    kind :: match error.kind {
+        .Limit -> LoaderKernel.ErrorKind.Limit
+        .State -> LoaderKernel.ErrorKind.State
+        .Bridge -> LoaderKernel.ErrorKind.Bridge
+        _ -> LoaderKernel.ErrorKind.InvalidArgument
+    }
+    state := jet_data_loader_kernel_state(loader)
+    LoaderKernel.fail(&state, &LoaderKernel.KernelError{kind: kind,
+        operation: error.operation.clone(), reason: error.reason.clone()})
+    jet_data_loader_apply_kernel(loader, ^state)
+    ^error
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3427
+fn jet_data_loader_snapshot<T: __jet_Decode + __jet_Encode>(
+    loader: &DataLoader<T>) -> Result<DataSnapshot<T>, DataError> {
+    if loader.cancelled {
+        return Err(jet_data_loader_fail(loader, jet_data_loader_error(DataErrorKind.State,
+            "data.loader", "loader was cancelled before snapshot")))
+    }
+    if jet_data_loader_validate_runtime(loader) == Err(error) {
+        return Err(jet_data_loader_fail(loader, ^error))
+    }
+    jet_data_limits_validate(&loader.limits).map_err(fn(error) { jet_data_loader_fail(loader, ^error) })?
+    (payload, offline) :: match jet_data_loader_payload(loader) {
+        Ok(payload) -> ^payload
+        Err(error) -> return Err(jet_data_loader_fail(loader, ^error))
+    }
+    tree :: match jet_data_loader_tree(&payload, loader.format, &loader.limits) {
+        Ok(tree) -> ^tree
+        Err(error) -> return Err(jet_data_loader_fail(loader, ^error))
+    }
+    value :: match T.jet_decode(&tree) {
+        Ok(value) -> ^value
+        Err(errors) -> return Err(jet_data_loader_fail(loader,
+            jet_data_loader_error(DataErrorKind.Decode, "data.loader",
+                jet_data_field_errors_reason(^errors))))
+    }
+    canonical :: jet_data_loader_canonical_tree(&value.jet_encode()).into_bytes()
+    schema :: jet_data_loader_schema(&tree, loader.format)
+    schema_id :: schema.identity.clone()
+    provenance :: DataProvenance{source: loader.source.clone(), format: loader.format,
+        authority: loader.authority.clone()}
+    state := jet_data_loader_kernel_state(loader)
+    facts :: match LoaderKernel.commit_snapshot(&state, ^payload, &canonical, &schema_id, offline) {
+        Ok(facts) -> ^facts
+        Err(error) -> return Err(jet_data_loader_fail(loader, jet_data_loader_kernel_error(^error)))
+    }
+    jet_data_loader_apply_kernel(loader, ^state)
+    status :: loader.status.clone()
+    identity :: DataSnapshotIdentity{id: "snapshot-{facts.snapshot_id}", source: "source-{facts.source_id}",
+        content: ^facts.content_id, schema: ^facts.schema_id, format: loader.format}
+    Ok(DataSnapshot{value: ^value, identity: ^identity, provenance: ^provenance,
+        schema: ^schema, status: ^status, content: ^canonical})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3508
+fn jet_data_loader_bind<T>(loader: &DataLoader<T>, payload: &[U8]) -> Result<(), DataError> {
+    state := jet_data_loader_kernel_state(loader)
+    if LoaderKernel.bind(&state, payload.clone()) == Err(error) {
+        return Err(jet_data_loader_fail(loader, jet_data_loader_kernel_error(^error)))
+    }
+    jet_data_loader_apply_kernel(loader, ^state)
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3525
+fn jet_data_loader_bind_text<T>(loader: &DataLoader<T>, payload: &String) -> Result<(), DataError> {
+    jet_data_loader_bind(loader, &payload.as_bytes().to_vec())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3532
+fn jet_data_loader_cancel<T>(loader: &DataLoader<T>) -> {
+    state := jet_data_loader_kernel_state(loader)
+    LoaderKernel.cancel(&state)
+    jet_data_loader_apply_kernel(loader, ^state)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3538
+fn jet_data_loader_offline<T>(loader: &DataLoader<T>, enabled: Bool) -> {
+    state := jet_data_loader_kernel_state(loader)
+    LoaderKernel.set_offline(&state, enabled)
+    jet_data_loader_apply_kernel(loader, ^state)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3547
+fn jet_data_loader_invalidate<T>(loader: &DataLoader<T>, cause: DataInvalidationCause) -> {
+    state := jet_data_loader_kernel_state(loader)
+    LoaderKernel.invalidate(&state, match cause {
+        .NoCause -> LoaderKernel.InvalidationCause.NoCause
+        .Loader -> LoaderKernel.InvalidationCause.Loader
+        .Input -> LoaderKernel.InvalidationCause.Input
+        .ArchiveMember -> LoaderKernel.InvalidationCause.ArchiveMember
+        .Parameters -> LoaderKernel.InvalidationCause.Parameters
+        .Credential -> LoaderKernel.InvalidationCause.Credential
+        .Capability -> LoaderKernel.InvalidationCause.Capability
+        .Manual -> LoaderKernel.InvalidationCause.Manual
+    })
+    jet_data_loader_apply_kernel(loader, ^state)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3584
+fn jet_data_loader_needs_refresh<T>(loader: &DataLoader<T>) -> Bool {
+    LoaderKernel.needs_refresh(&jet_data_loader_kernel_state(loader))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3588
+fn jet_data_loader_ready<T>(loader: &DataLoader<T>) -> Bool {
+    LoaderKernel.ready(&jet_data_loader_kernel_state(loader))
+}

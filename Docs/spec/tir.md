@@ -15,7 +15,7 @@ choices into an executable lens or create a second meaning.
 ## One semantic core (R12 / D-ONECORE1=A)
 
 There is one structured semantic core. Every executable lens—Rust AOT emit,
-Cranelift, interpreter, and web—consumes that core exhaustively. Surface sugar
+interpreter, and web—consumes that core exhaustively. Surface sugar
 expands during lowering or an earlier sema rewrite into core nodes that those
 lenses already handle. A coverage miss is an internal compiler error, never a
 fallback.
@@ -41,11 +41,17 @@ The initial fact/carrier contract is:
 | Purity | sema `Func.is_pure` and `AutoVectorizationFacts.effect_free_body` | Do not apply a reorder or vector hint. |
 | Comptime value | sema comptime binding facts lowered to `TExprKind::CtLit` | Keep runtime evaluation or serialization. |
 
+Generic call evidence belongs to the caller's lexical scope, not the callee's
+registration row. Both local and cross-module calls must carry that scope's
+type parameters and canonical trait bounds into inference, including explicit
+type arguments. Lowering consumes the checked substitutions and bound evidence;
+it must not reconstruct a forwarded parameter's bounds from its spelling.
+
 Both executable lenses consume the channel read-only. A missing field means
 “not proven”; it never authorizes codegen to re-derive sema policy. An optimized
 lens may derive a private SSA form internally, but that form is not a third
 semantic representation or source of truth. Every TIR construct remains
-exhaustive for AOT, Cranelift, interpreter, and web.
+exhaustive for AOT, interpreter, and web.
 
 ## Lowering rules
 

@@ -797,7 +797,7 @@ fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: 
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if environment.registration_graph == None -> return SemaMethodSpecialCheck{handled: true, value: None}
-    direct :: sema_call_direct_target_from_registration(function, environment.registration_graph, environment.module_identity, environment.package_identity, type_args, method_span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    direct :: sema_call_direct_target_from_registration(function, environment.registration_graph, environment.module_identity, environment.package_identity, environment.generic_params, type_args, method_span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     call := Call{
         name: "{type_name}.{method_name}",
         name_span: method_span,
@@ -1048,7 +1048,7 @@ fn sema_expression_typed_literal_text_parts(parts: [StrPart], kind: MIRTypedHead
     Val(SemaExpressionTypedTextParts{literals: literals, holes: holes, trusted_html: trusted_html})
 }
 
-fn sema_expression_validate_boundary_literal(kind: MIRTypedHeadKind, parts: [StrPart], span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_expression_validate_boundary_literal(kind: MIRTypedHeadKind, parts: [StrPart], span: Span, environment: SemaScopeEnvironment, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     name := if kind == {
         .URL -> "URL"
         .Path -> "Path"
@@ -1075,9 +1075,15 @@ fn sema_expression_validate_boundary_literal(kind: MIRTypedHeadKind, parts: [Str
             }
         }
     }
-    graph_option :: environment.registration_graph
-    graph :: graph_option ?? panic("boundary literal checking has no canonical registration graph")
-    validate :: graph.host_hooks.typed_boundary_literal_validate ?? panic("canonical Prelude boundary literal validator is not installed")
+    if environment.registration_graph == None -> panic("boundary literal checking has no canonical registration graph")
+    // A check on a compiler thread records that it wanted the validator and
+    // is checked again where the callbacks live.
+    if sema_host_hooks_withheld(context.host_hooks) {
+        _ := sema_host_hook_callbacks(context.host_hooks)
+        return true
+    }
+    hooks :: sema_host_hook_callbacks(context.host_hooks) ?? panic("canonical Prelude boundary literal validator is not installed")
+    validate :: hooks.typed_boundary_literal_validate ?? panic("canonical Prelude boundary literal validator is not installed")
     if validate(kind, literals) == .Val(reason) {
         &diagnostics.push(sema_error("E0155", span, "this `{name}` literal is invalid", reason, "fix the literal, or parse a runtime String with the ordinary `{name}` constructor"))
         return false
@@ -1093,7 +1099,7 @@ fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value:
             return None
         }
     }
-    if !sema_expression_validate_boundary_literal(kind, parts, expr_span(value), environment, &diagnostics) -> return None
+    if !sema_expression_validate_boundary_literal(kind, parts, expr_span(value), environment, context, &diagnostics) -> return None
     checked :: sema_expression_typed_literal_text_parts(parts, kind, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     result_head := if kind == MIRTypedHeadKind.URL -> Type.Named{name: "URL"} else -> head
     result := sema_tir_expr(result_head, TExprKind.HostCall{call: THostCall.TypedTextInterp{kind: kind, literals: checked.literals, holes: checked.holes, trusted_html: checked.trusted_html}}, span)

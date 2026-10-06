@@ -1,26 +1,27 @@
-# Compiler speed: the two-lens law
+# Compiler speed: one build path
 
-Jet has one compiler meaning and two execution lenses. The **JIT lens** serves
-the edit/run loop; the **AOT lens** produces an optimized artifact when the
-program is ready. This page is for compiler contributors and users reasoning
+Jet has one compiler meaning and one native build path. Until native in-memory
+O0 lands, `jet run` and `jet dev` build through it and execute the result
+(D-EXEC2=A); the release profile produces an optimized artifact. This page is
+for compiler contributors and users reasoning
 about build/run trade-offs. The executable perf schema and gate are in
 [`Tools/perf/ci-perf-check.sh`](../../../Tools/perf/ci-perf-check.sh), with
 scenario planning in
 [`Tools/perf/test-ci-perf-check.sh`](../../../Tools/perf/test-ci-perf-check.sh);
 [R12 and I9](../philosophy.md) are the semantic constraints.
 
-## One core, two lenses
+## One core, one build path
 
-Both lenses consume the same executable TIR from the same front end (R12).
-They must preserve the same supported features and behavior (I9). Compile-speed
-work therefore targets development latency through JIT coverage and precise
-incrementality, while AOT retains the optimization work requested by the
-program's profile.
+Every execution consumes the same executable TIR from the same front end
+(R12) and preserves the same supported features and behavior (I9).
+Compile-speed work therefore targets development latency through precise
+incrementality and backend cost, while optimized builds retain the
+optimization work requested by the program's profile.
 
 The Rust host remains the production and reference implementation boundary for
 compiler work. A Jet-authored compiler path is a staged port contract: it may
 replace redundant work only after the same front-end checks, TIR meaning,
-diagnostics, and AOT/JIT parity are proven. This document does not claim that
+diagnostics, and tier parity are proven. This document does not claim that
 the staged port has replaced the default compiler or that the Rust reference
 boundary has been removed.
 
@@ -42,11 +43,11 @@ an irreducible cost. The two-lens contract requires:
 - Incremental checking uses module interfaces and dependent-only invalidation.
   Staged source parsing is bounded and deterministic, with stable module
   discovery order.
-- Pure-Jet `jet dev` reloads should not invoke the Rust host backend for work
-  that the JIT can execute.
+- `jet dev` rebuilds only what an edit invalidates before restarting the
+  program.
 
 `D-BUILD-DEFAULT1=B` sets `jet run` and `jet dev` to the fast profile while
-`jet build` remains optimized. `D-AOT-CRANELIFT1` is ratified under this law.
+`jet build` remains optimized. D-EXEC2=A retired `D-AOT-CRANELIFT1`.
 The command and backend sources, rather than this paragraph, define which
 profile a particular invocation selects.
 

@@ -17,9 +17,9 @@ The input directory contains exactly this, with small files shown inline:
       | module env.dev {
       |     packages: [
       | 
-    denied/run.jet  (18 bytes)
+    denied/run.jet  (22 bytes)
       | #Job
-      | fn lint() {}
+      | fn lint_all() {}
       | 
     readonly/
     readonly/env.jet  (463 bytes)
@@ -40,9 +40,9 @@ The input directory contains exactly this, with small files shown inline:
       |     files: ["config/generated.txt": File{ content: "generated\n", mode: .Copy }]
       | }
       | 
-    readonly/run.jet  (18 bytes)
+    readonly/run.jet  (22 bytes)
       | #Job
-      | fn lint() {}
+      | fn lint_all() {}
       | 
 
 ## Required output

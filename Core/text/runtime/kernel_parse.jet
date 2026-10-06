@@ -1,0 +1,420 @@
+// PORT-PENDING 2150 crates-jet-jit-src-parse: crates/jet-jit/src/Parse.rs:1-416
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Native JIT adapters for `binary.Reader`, `text.Cursor`, and match scans.
+//RS //! Marshalling only: handles in, heap values out. The semantics come from the
+//RS //! shared kernels in `jet_foundation::StreamCursor` (spliced verbatim into the
+//RS //! AOT prelude) and `jet_foundation::MatchScan` — no second parser.
+//RS 
+//RS use super::Concurrency;
+//RS use crate::Marshal::result_err_msg;
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_module::Module;
+//RS use jet_foundation::MatchScan::{self, JetBinMatchValue};
+//RS use jet_foundation::StreamCursor as kernel;
+//RS 
+//RS /// Reader/Cursor state is the shared D-SHIFT1 kernel (`jet-foundation`), the
+//RS /// same source the AOT prelude splices in — the JIT only marshals handles.
+//RS pub(crate) type ReaderSlot = kernel::JetReader;
+//RS pub(crate) type CursorSlot = kernel::JetCursor;
+//RS 
+//RS fn push_reader(slot: ReaderSlot) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.readers.push(slot);
+//RS         rt.readers.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn push_cursor(slot: CursorSlot) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.cursors.push(slot);
+//RS         rt.cursors.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn with_reader_mut<R>(handle: i64, f: impl FnOnce(&mut ReaderSlot) -> R) -> Option<R> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = (handle as usize).wrapping_sub(1);
+//RS         rt.readers.get_mut(idx).map(f)
+//RS     })
+//RS }
+//RS 
+//RS fn with_cursor_mut<R>(handle: i64, f: impl FnOnce(&mut CursorSlot) -> R) -> Option<R> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = (handle as usize).wrapping_sub(1);
+//RS         rt.cursors.get_mut(idx).map(f)
+//RS     })
+//RS }
+//RS 
+//RS fn result_ok(bits: i64) -> i64 {
+//RS     crate::Marshal::result_ok(bits as u64)
+//RS }
+//RS 
+//RS fn result_err(msg: String) -> i64 {
+//RS     result_err_msg(&msg)
+//RS }
+//RS 
+//RS fn result_ok_bytes(bytes: Vec<u8>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt
+//RS             .heap
+//RS             .alloc_int_list(bytes.into_iter().map(|b| b as i64).collect());
+//RS         crate::runtime_host::alloc_jit_result(rt, true, list as u64)
+//RS     })
+//RS }
+//RS 
+//RS /// The `Ok` payload of `take_pattern` is the checked capture tuple: one record
+//RS /// field per hole in hole order, tagged with the tuple's MIR type, so field
+//RS /// reads, Display and typed drops see the record `MirOperation::Tuple` builds
+//RS /// (the evaluator's `mir_pattern_capture_result`). A hole-free pattern is Unit.
+//RS fn result_ok_capture_tuple(
+//RS     captures: Vec<MatchScan::JetPatternCapture>,
+//RS     tuple_type: i64,
+//RS     context: &str,
+//RS ) -> i64 {
+//RS     let record = Concurrency::with_runtime_mut(|rt| {
+//RS         if captures.is_empty() {
+//RS             return Some(0);
+//RS         }
+//RS         let record = rt.heap.alloc_record(captures.len());
+//RS         for (index, capture) in (0_i64..).zip(captures) {
+//RS             match capture {
+//RS                 MatchScan::JetPatternCapture::Text(value) => {
+//RS                     let value = rt.heap.alloc_string(value);
+//RS                     rt.heap.record_set_string(record, index, value)?;
+//RS                 }
+//RS                 MatchScan::JetPatternCapture::Int(value) => {
+//RS                     rt.heap.record_set_int(record, index, value)?;
+//RS                 }
+//RS                 MatchScan::JetPatternCapture::Float(value) => {
+//RS                     rt.heap.record_set_float(record, index, value)?;
+//RS                 }
+//RS                 MatchScan::JetPatternCapture::Bool(value) => {
+//RS                     rt.heap.record_set_bool(record, index, value)?;
+//RS                 }
+//RS                 MatchScan::JetPatternCapture::Bytes(bytes) => {
+//RS                     let list = rt
+//RS                         .heap
+//RS                         .alloc_int_list(bytes.into_iter().map(i64::from).collect());
+//RS                     rt.heap.record_set_int(record, index, list)?;
+//RS                 }
+//RS             }
+//RS         }
+//RS         rt.trait_object_types
+//RS             .insert(record, jet_foundation::MIR::MirTypeId(tuple_type as u64));
+//RS         Some(record)
+//RS     });
+//RS     match record {
+//RS         Some(record) => result_ok(record),
+//RS         None => result_err(format!("{context}: capture tuple rejected a field")),
+//RS     }
+//RS }
+//RS 
+//RS fn clone_byte_list(handle: i64) -> Vec<u8> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(handle).unwrap_or(0);
+//RS         (0..len)
+//RS             .filter_map(|i| rt.heap.list_get_int(handle, i).map(|v| v as u8))
+//RS             .collect()
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_reader_over(bytes: i64) -> i64 {
+//RS     push_reader(kernel::jet_reader_over(&clone_byte_list(bytes)))
+//RS }
+//RS 
+//RS macro_rules! reader_read {
+//RS     ($name:ident, $kernel:path) => {
+//RS         fn $name(handle: i64) -> i64 {
+//RS             match with_reader_mut(handle, |r| $kernel(r).map(|v| v as i64)) {
+//RS                 Some(Ok(v)) => result_ok(v),
+//RS                 Some(Err(e)) => result_err(e),
+//RS                 None => result_err("Reader: bad handle".into()),
+//RS             }
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS reader_read!(jet_jit_reader_read_u8, kernel::jet_reader_read_u8);
+//RS reader_read!(jet_jit_reader_read_i8, kernel::jet_reader_read_i8);
+//RS reader_read!(jet_jit_reader_read_u16_le, kernel::jet_reader_read_u16_le);
+//RS reader_read!(jet_jit_reader_read_u16_be, kernel::jet_reader_read_u16_be);
+//RS reader_read!(jet_jit_reader_read_i16_le, kernel::jet_reader_read_i16_le);
+//RS reader_read!(jet_jit_reader_read_i16_be, kernel::jet_reader_read_i16_be);
+//RS reader_read!(jet_jit_reader_read_u32_le, kernel::jet_reader_read_u32_le);
+//RS reader_read!(jet_jit_reader_read_u32_be, kernel::jet_reader_read_u32_be);
+//RS reader_read!(jet_jit_reader_read_i32_le, kernel::jet_reader_read_i32_le);
+//RS reader_read!(jet_jit_reader_read_i32_be, kernel::jet_reader_read_i32_be);
+//RS reader_read!(jet_jit_reader_read_u64_le, kernel::jet_reader_read_u64_le);
+//RS reader_read!(jet_jit_reader_read_u64_be, kernel::jet_reader_read_u64_be);
+//RS reader_read!(jet_jit_reader_read_i64_le, kernel::jet_reader_read_i64_le);
+//RS reader_read!(jet_jit_reader_read_i64_be, kernel::jet_reader_read_i64_be);
+//RS 
+//RS macro_rules! reader_read_float {
+//RS     ($name:ident, $kernel:path, $convert:expr) => {
+//RS         fn $name(handle: i64) -> i64 {
+//RS             match with_reader_mut(handle, |r| $kernel(r).map(|v| $convert(v) as i64)) {
+//RS                 Some(Ok(v)) => result_ok(v),
+//RS                 Some(Err(e)) => result_err(e),
+//RS                 None => result_err("Reader: bad handle".into()),
+//RS             }
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS reader_read_float!(
+//RS     jet_jit_reader_read_f32_le,
+//RS     kernel::jet_reader_read_f32_le,
+//RS     |v: f32| (v as f64).to_bits()
+//RS );
+//RS reader_read_float!(
+//RS     jet_jit_reader_read_f32_be,
+//RS     kernel::jet_reader_read_f32_be,
+//RS     |v: f32| (v as f64).to_bits()
+//RS );
+//RS reader_read_float!(
+//RS     jet_jit_reader_read_f64_le,
+//RS     kernel::jet_reader_read_f64_le,
+//RS     |v: f64| v.to_bits()
+//RS );
+//RS reader_read_float!(
+//RS     jet_jit_reader_read_f64_be,
+//RS     kernel::jet_reader_read_f64_be,
+//RS     |v: f64| v.to_bits()
+//RS );
+//RS 
+//RS fn jet_jit_reader_peek(handle: i64) -> i64 {
+//RS     match with_reader_mut(handle, |r| kernel::jet_reader_peek(r)) {
+//RS         Some(Ok(value)) => result_ok(i64::from(value)),
+//RS         Some(Err(e)) => result_err(e),
+//RS         None => result_err("Reader: bad handle".into()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_reader_seek(handle: i64, position: i64) -> i64 {
+//RS     match with_reader_mut(handle, |r| kernel::jet_reader_seek(r, position)) {
+//RS         Some(Ok(())) => result_ok(0),
+//RS         Some(Err(e)) => result_err(e),
+//RS         None => result_err("Reader: bad handle".into()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_reader_skip(handle: i64, count: i64) -> i64 {
+//RS     match with_reader_mut(handle, |r| kernel::jet_reader_skip(r, count)) {
+//RS         Some(Ok(())) => result_ok(0),
+//RS         Some(Err(e)) => result_err(e),
+//RS         None => result_err("Reader: bad handle".into()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_reader_take(handle: i64, n: i64) -> i64 {
+//RS     match with_reader_mut(handle, |r| kernel::jet_reader_take(r, n)) {
+//RS         Some(Ok(bytes)) => result_ok_bytes(bytes),
+//RS         Some(Err(e)) => result_err(e),
+//RS         None => result_err("Reader: bad handle".into()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_reader_remaining(handle: i64) -> i64 {
+//RS     with_reader_mut(handle, |r| kernel::jet_reader_remaining(r)).unwrap_or(0)
+//RS }
+//RS 
+//RS fn jet_jit_reader_at_end(handle: i64) -> i8 {
+//RS     with_reader_mut(handle, |r| i8::from(kernel::jet_reader_at_end(r))).unwrap_or(1)
+//RS }
+//RS 
+//RS fn jet_jit_cursor_over(text: i64) -> i64 {
+//RS     let s = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(text).unwrap_or_default());
+//RS     push_cursor(kernel::jet_cursor_over(&s))
+//RS }
+//RS 
+//RS fn jet_jit_cursor_skip_ws(handle: i64) {
+//RS     let _ = with_cursor_mut(handle, kernel::jet_cursor_skip_ws);
+//RS }
+//RS 
+//RS fn jet_jit_cursor_take_until(handle: i64, delim: i64) -> i64 {
+//RS     let delim = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(delim).unwrap_or_default());
+//RS     match with_cursor_mut(handle, |c| kernel::jet_cursor_take_until(c, &delim)) {
+//RS         Some(Ok(s)) => {
+//RS             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
+//RS             result_ok(sid)
+//RS         }
+//RS         Some(Err(e)) => result_err(e),
+//RS         None => result_err("Cursor: bad handle".into()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_cursor_advance(handle: i64, nbytes: i64) {
+//RS     let _ = with_cursor_mut(handle, |c| {
+//RS         c.pos = (c.pos + nbytes as usize).min(c.buf.len());
+//RS     });
+//RS }
+//RS fn jet_jit_reader_take_pattern(handle: i64, descriptor: i64, tuple_type: i64) -> i64 {
+//RS     let Some(mir_parts) = Concurrency::with_runtime_mut(|rt| {
+//RS         let index = descriptor
+//RS             .checked_sub(1)
+//RS             .and_then(|value| usize::try_from(value).ok())?;
+//RS         match rt.pattern_descriptors.get(index).cloned()? {
+//RS             crate::runtime_host::JitPatternDescriptor::Binary(parts) => Some(parts),
+//RS             crate::runtime_host::JitPatternDescriptor::Text(_) => None,
+//RS         }
+//RS     }) else {
+//RS         return result_err("Reader.take_pattern: invalid binary pattern descriptor".to_string());
+//RS     };
+//RS     let parts = mir_parts
+//RS         .iter()
+//RS         .map(|part| match part {
+//RS             jet_foundation::MIR::MirBinaryPatternPart::Literal(value) => {
+//RS                 jet_foundation::MatchScan::JetBinMatchPart::Lit(value.as_slice())
+//RS             }
+//RS             jet_foundation::MIR::MirBinaryPatternPart::Bits { width, little, .. } => {
+//RS                 jet_foundation::MatchScan::JetBinMatchPart::Bits {
+//RS                     width: usize::from(*width),
+//RS                     little: *little,
+//RS                 }
+//RS             }
+//RS             jet_foundation::MIR::MirBinaryPatternPart::Rest { .. } => {
+//RS                 jet_foundation::MatchScan::JetBinMatchPart::Rest
+//RS             }
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     let scan = with_reader_mut(handle, |reader| {
+//RS         let Some((bits, captures)) =
+//RS             MatchScan::jet_bin_match_scan(kernel::jet_reader_tail(reader), &parts, true)
+//RS         else {
+//RS             return Err(kernel::jet_reader_pattern_miss(reader));
+//RS         };
+//RS         kernel::jet_reader_take_pattern(reader, bits / 8)?;
+//RS         Ok(captures
+//RS             .into_iter()
+//RS             .map(|capture| match capture {
+//RS                 JetBinMatchValue::Int(value) => jet_foundation::MatchScan::JetPatternCapture::Int(value as i64),
+//RS                 JetBinMatchValue::Rest(value) => jet_foundation::MatchScan::JetPatternCapture::Bytes(value),
+//RS             })
+//RS             .collect::<Vec<_>>())
+//RS     });
+//RS     let captures = match scan {
+//RS         Some(Ok(captures)) => captures,
+//RS         Some(Err(error)) => return result_err(error),
+//RS         None => return result_err("Reader.take_pattern: bad handle".to_string()),
+//RS     };
+//RS     result_ok_capture_tuple(captures, tuple_type, "Reader.take_pattern")
+//RS }
+//RS fn jet_jit_cursor_take_pattern(handle: i64, descriptor: i64, tuple_type: i64) -> i64 {
+//RS     let Some(mir_parts) = Concurrency::with_runtime_mut(|rt| {
+//RS         let index = descriptor
+//RS             .checked_sub(1)
+//RS             .and_then(|value| usize::try_from(value).ok())?;
+//RS         match rt.pattern_descriptors.get(index).cloned()? {
+//RS             crate::runtime_host::JitPatternDescriptor::Text(parts) => Some(parts),
+//RS             crate::runtime_host::JitPatternDescriptor::Binary(_) => None,
+//RS         }
+//RS     }) else {
+//RS         return result_err("Cursor.take_pattern: invalid text pattern descriptor".to_string());
+//RS     };
+//RS     let parts = mir_parts
+//RS         .iter()
+//RS         .map(|part| match part {
+//RS             jet_foundation::MIR::MirTextPatternPart::Literal(value) => {
+//RS                 jet_foundation::MatchScan::JetTextMatchPart::Literal(value.as_str())
+//RS             }
+//RS             jet_foundation::MIR::MirTextPatternPart::Hole { kind, .. } => {
+//RS                 jet_foundation::MatchScan::JetTextMatchPart::Hole {
+//RS                     kind: match kind {
+//RS                         jet_foundation::MIR::MirTextHoleKind::Text => {
+//RS                             jet_foundation::MatchScan::JetTextHoleKind::Text
+//RS                         }
+//RS                         jet_foundation::MIR::MirTextHoleKind::Int => {
+//RS                             jet_foundation::MatchScan::JetTextHoleKind::Int
+//RS                         }
+//RS                         jet_foundation::MIR::MirTextHoleKind::Float => {
+//RS                             jet_foundation::MatchScan::JetTextHoleKind::Float
+//RS                         }
+//RS                         jet_foundation::MIR::MirTextHoleKind::Bool => {
+//RS                             jet_foundation::MatchScan::JetTextHoleKind::Bool
+//RS                         }
+//RS                         jet_foundation::MIR::MirTextHoleKind::InlineRange { lo, hi } => {
+//RS                             jet_foundation::MatchScan::JetTextHoleKind::InlineRange {
+//RS                                 lo: *lo,
+//RS                                 hi: *hi,
+//RS                             }
+//RS                         }
+//RS                     },
+//RS                 }
+//RS             }
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     let scan = with_cursor_mut(handle, |cursor| {
+//RS         let Some((consumed, captures)) =
+//RS             MatchScan::jet_text_match_scan(kernel::jet_cursor_tail(cursor), &parts, true)
+//RS         else {
+//RS             return Err(kernel::jet_cursor_pattern_miss(cursor));
+//RS         };
+//RS         kernel::jet_cursor_take_pattern(cursor, consumed);
+//RS         Ok(captures)
+//RS     });
+//RS     let captures = match scan {
+//RS         Some(Ok(captures)) => captures,
+//RS         Some(Err(error)) => return result_err(error),
+//RS         None => return result_err("Cursor.take_pattern: bad handle".to_string()),
+//RS     };
+//RS     result_ok_capture_tuple(captures, tuple_type, "Cursor.take_pattern")
+//RS }
+//RS 
+//RS 
+//RS 
+//RS host_fns! {
+//RS     struct HostFns;
+//RS     register: register_symbols;
+//RS     declare: declare(module) {
+//RS         let cc = module.target_config().default_call_conv;
+//RS         let mut sig_unary = Signature::new(cc);
+//RS         sig_unary.params.push(AbiParam::new(types::I64));
+//RS         sig_unary.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_binary = sig_unary.clone();
+//RS         sig_binary.params.push(AbiParam::new(types::I64));
+//RS         let mut sig_ternary = sig_binary.clone();
+//RS         sig_ternary.params.push(AbiParam::new(types::I64));
+//RS         let mut sig_void_unary = Signature::new(cc);
+//RS         sig_void_unary.params.push(AbiParam::new(types::I64));
+//RS         let mut sig_i8 = Signature::new(cc);
+//RS         sig_i8.params.push(AbiParam::new(types::I64));
+//RS         sig_i8.returns.push(AbiParam::new(types::I8));
+//RS 
+//RS 
+//RS     }
+//RS     reader_over: "jet_jit_reader_over" => jet_jit_reader_over: sig_unary;
+//RS     reader_over_owned: "jet_reader_over_owned" => jet_jit_reader_over: sig_unary;
+//RS     reader_read_u8: "jet_jit_reader_read_u8" => jet_jit_reader_read_u8: sig_unary;
+//RS     reader_read_i8: "jet_jit_reader_read_i8" => jet_jit_reader_read_i8: sig_unary;
+//RS     reader_read_u16_le: "jet_jit_reader_read_u16_le" => jet_jit_reader_read_u16_le: sig_unary;
+//RS     reader_read_u16_be: "jet_jit_reader_read_u16_be" => jet_jit_reader_read_u16_be: sig_unary;
+//RS     reader_read_i16_le: "jet_jit_reader_read_i16_le" => jet_jit_reader_read_i16_le: sig_unary;
+//RS     reader_read_i16_be: "jet_jit_reader_read_i16_be" => jet_jit_reader_read_i16_be: sig_unary;
+//RS     reader_read_u32_le: "jet_jit_reader_read_u32_le" => jet_jit_reader_read_u32_le: sig_unary;
+//RS     reader_read_u32_be: "jet_jit_reader_read_u32_be" => jet_jit_reader_read_u32_be: sig_unary;
+//RS     reader_read_i32_le: "jet_jit_reader_read_i32_le" => jet_jit_reader_read_i32_le: sig_unary;
+//RS     reader_read_i32_be: "jet_jit_reader_read_i32_be" => jet_jit_reader_read_i32_be: sig_unary;
+//RS     reader_read_u64_le: "jet_jit_reader_read_u64_le" => jet_jit_reader_read_u64_le: sig_unary;
+//RS     reader_read_u64_be: "jet_jit_reader_read_u64_be" => jet_jit_reader_read_u64_be: sig_unary;
+//RS     reader_read_i64_le: "jet_jit_reader_read_i64_le" => jet_jit_reader_read_i64_le: sig_unary;
+//RS     reader_read_i64_be: "jet_jit_reader_read_i64_be" => jet_jit_reader_read_i64_be: sig_unary;
+//RS     reader_read_f32_le: "jet_jit_reader_read_f32_le" => jet_jit_reader_read_f32_le: sig_unary;
+//RS     reader_read_f32_be: "jet_jit_reader_read_f32_be" => jet_jit_reader_read_f32_be: sig_unary;
+//RS     reader_read_f64_le: "jet_jit_reader_read_f64_le" => jet_jit_reader_read_f64_le: sig_unary;
+//RS     reader_read_f64_be: "jet_jit_reader_read_f64_be" => jet_jit_reader_read_f64_be: sig_unary;
+//RS     reader_peek: "jet_jit_reader_peek" => jet_jit_reader_peek: sig_unary;
+//RS     reader_seek: "jet_jit_reader_seek" => jet_jit_reader_seek: sig_binary;
+//RS     reader_skip: "jet_jit_reader_skip" => jet_jit_reader_skip: sig_binary;
+//RS     reader_take: "jet_jit_reader_take" => jet_jit_reader_take: sig_binary;
+//RS     reader_take_pattern: "jet_jit_reader_take_pattern" => jet_jit_reader_take_pattern: sig_ternary;
+//RS     reader_remaining: "jet_jit_reader_remaining" => jet_jit_reader_remaining: sig_unary;
+//RS     reader_at_end: "jet_jit_reader_at_end" => jet_jit_reader_at_end: sig_i8;
+//RS     cursor_over: "jet_jit_cursor_over" => jet_jit_cursor_over: sig_unary;
+//RS     cursor_skip_ws: "jet_jit_cursor_skip_ws" => jet_jit_cursor_skip_ws: sig_void_unary;
+//RS     cursor_take_until: "jet_jit_cursor_take_until" => jet_jit_cursor_take_until: sig_binary;
+//RS     cursor_take_pattern: "jet_jit_cursor_take_pattern" => jet_jit_cursor_take_pattern: sig_ternary;
+//RS     cursor_advance: "jet_jit_cursor_advance" => jet_jit_cursor_advance: sig_binary;
+//RS }
+//RS 
+// END-PORT-PENDING 2150 crates/jet-jit/src/Parse.rs:1-416
+

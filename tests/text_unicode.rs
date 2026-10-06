@@ -94,6 +94,22 @@ fn pinned_unicode_tables_regenerate_byte_identically() {
 }
 
 #[test]
+fn control_category_has_exact_utf8_scan_ranges() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let data = fs::read_to_string(root.join("tests/data/unicode/ucd/UnicodeData.txt")).unwrap();
+    let controls: Vec<u32> = data
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split(';');
+            let cp = u32::from_str_radix(fields.next()?, 16).ok()?;
+            fields.next()?;
+            (fields.next()? == "Cc").then_some(cp)
+        })
+        .collect();
+    assert_eq!(controls, (0..32).chain(127..160).collect::<Vec<_>>());
+}
+
+#[test]
 fn generated_rust_emits_only_the_unicode_tier_the_program_needs() {
     let hello = jet::compile(r#"fn run() { print("hello") }"#).expect("hello compiles");
     assert_eq!(
@@ -478,7 +494,6 @@ fn main() {
 
 #[test]
 fn unicode_grapheme_zwj_requires_pictographic_context_on_all_run_tiers() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let source = r#"
 use core.text as text
 
@@ -521,7 +536,7 @@ fn run() {
         let output = command
             .arg(&program)
             .current_dir(&scratch.path)
-            .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tier}-run")))
+            .env("JET_STORE_DIR", scratch.join(&format!("{tier}-run")))
             .env("JET_STORE_DIR", scratch.join(&format!("{tier}-build")))
             .env("NO_COLOR", "1")
             .output()
@@ -563,7 +578,7 @@ fn unicode_text_audit_matches_golden_on_all_run_tiers() {
         let output = command
             .arg(&example)
             .current_dir(root)
-            .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tier}-run")))
+            .env("JET_STORE_DIR", scratch.join(&format!("{tier}-run")))
             .env("JET_STORE_DIR", scratch.join(&format!("{tier}-build")))
             .env("NO_COLOR", "1")
             .output()
@@ -606,7 +621,7 @@ fn wrap_semantics_audit_matches_golden_on_all_run_tiers() {
         let output = command
             .arg(&example)
             .current_dir(root)
-            .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tier}-run")))
+            .env("JET_STORE_DIR", scratch.join(&format!("{tier}-run")))
             .env("JET_STORE_DIR", scratch.join(&format!("{tier}-build")))
             .env("NO_COLOR", "1")
             .output()
@@ -647,7 +662,7 @@ fn string_from_bytes_matches_golden_on_all_run_tiers() {
         let output = command
             .arg(&example)
             .current_dir(root)
-            .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tier}-run")))
+            .env("JET_STORE_DIR", scratch.join(&format!("{tier}-run")))
             .env("JET_STORE_DIR", scratch.join(&format!("{tier}-build")))
             .env("NO_COLOR", "1")
             .output()

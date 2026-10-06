@@ -1,0 +1,1030 @@
+use std.sync.[Arc, Weak]
+use std.sync.atomic.[AtomicI64, Ordering]
+use core.math.runtime.std_math_task_mem.[JetShared, JetSharedCell, JetSharedSnapshot, JetSharedRevisionError]
+use core.mem.runtime.shared_protocol.[jet_shared_acquire, JetSharedCanonicalOwner]
+use jet_stm as jet_stm
+use jet_std.[JetShow, JetDisplay, JetDebug]
+use jet_jit.SourceSharedInterop.[SourceSharedInterop, SourceSharedInteropWeakOwner, SourceSharedInteropOwnerAliasLease]
+use core.mem.runtime.shared_protocol.[JetSharedPhysicalCompletion, JetSharedPhysicalOperationOutcome, JetSharedPhysicalOwnerApi, JetSharedPhysicalFinalizerBinding, JetSharedGuardState, JetSharedCanonicalPermit, JET_SHARED_GUARD_INVALID]
+use std.ops.[Deref, DerefMut]
+use std.fmt as fmt
+use std.rc.Rc
+use std.cell.[Cell, RefCell]
+use jet_std.[JetOutcome, JetAbsent, jet_outcome_of]
+use core.mem.runtime.shared_protocol.jet_shared_guard_acquire
+use jet_std.jet_runtime_stop_with_context
+use core.mem.runtime.shared_protocol.[JET_SHARED_GUARD_EDIT_REQUIRED, jet_shared_guard_map, jet_shared_guard_split, jet_shared_guard_require_edit_capability, jet_shared_guard_wait_once, JetConditionWaiter, JetConditionProtocol, jet_shared_condition_notify_one, jet_shared_condition_notify_all]
+use jet_std.[ParkSlot, jet_scheduler_yield, jet_scheduler_wake, jet_scheduler_wait_point_interrupted, JetCell, __jet_Equatable, jet_pool_stale_message]
+use std.mem as mem
+use std.marker.PhantomData
+use std.cmp as cmp
+use std.hash.[Hash, Hasher]
+
+// Continuation of the canonical JetShared implementation.
+impl<T> JetShared<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1798
+    fn try_edit_with<R, E>(self: &Self, f: fn(&T) -> (T, R) E!) -> R E! {
+        permit :: jet_shared_acquire(&self.0.protocol, true, fn() { false }) ?? panic("uncancelled Shared edit acquires")
+        next :: self.0.next_revision() ?? panic("Shared revision generation exhausted")
+        // GATE #4565: kernel primitive
+        #Unsafe("exclusive protocol permit remains held across preparation and payload publication") {
+            if self.0.scalar.is_some() {
+                current :: self.0.scalar_snapshot() ?? panic("scalar Shared payload disappeared")
+                (replacement, result) :: f(&current)?
+                self.0.store_scalar_value(&replacement)
+                self.0.revision.store(next, Ordering.Release)
+                return Ok(^result)
+            }
+            current :: (&*self.0.value.get()).as_ref() ?? panic("Shared payload was retired")
+            (replacement, result) :: f(current)?
+            *self.0.value.get() = Val(^replacement)
+            self.0.revision.store(next, Ordering.Release)
+            Ok(^result)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1839
+    fn try_replace_if_revision(self: &Self, expected_revision: U64,
+        replacement: T) -> (Bool, U64) JetSharedRevisionError! {
+        permit :: jet_shared_acquire(&self.0.protocol, true, fn() { false }) ?? panic("uncancelled Shared conditional replace acquires")
+        // GATE #4565: kernel primitive
+        #Unsafe("revision compare and replacement share one exclusive protocol permit") {
+            current :: self.0.revision.load(Ordering.Acquire)
+            if current != expected_revision -> return Ok((false, current))
+            next :: self.0.next_revision()?
+            if self.0.scalar.is_some() { self.0.store_scalar_value(&replacement) }
+            else { *self.0.value.get() = Val(^replacement) }
+            self.0.revision.store(next, Ordering.Release)
+            Ok((true, next))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1868
+    pub fn guard_read(self: &Self) -> JetSharedGuard<T> {
+        JetSharedGuard.read(self.0.clone(), true, false)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1871
+    pub fn guard_edit(self: &Self) -> JetSharedGuard<T> {
+        JetSharedGuard.edit(self.0.clone(), true, false)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1874
+    fn physical_guard_read(self: &Self) -> JetSharedGuard<T> {
+        JetSharedGuard.read(self.0.clone(), false, true)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1877
+    fn physical_guard_edit(self: &Self) -> JetSharedGuard<T> {
+        JetSharedGuard.edit(self.0.clone(), false, true)
+    }
+}
+impl<T: Clone> JetShared<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1884
+    // D-STM1=A: private transaction working value, one commit publication.
+    pub fn edit_txn(self: &Self, stm: &jet_stm.Guard, f: fn(&T) -> ()) -> {
+        cell :: self.0.clone()
+        protocol: Arc<JetSharedCanonicalOwner> :: cell.protocol.clone()
+        staged :: stm.stage_value(protocol.clone(), fn() { cell.with_read(fn(value) { value.clone() }) })
+        stm.mark_write(protocol.clone())
+        f(&staged.borrow_mut())
+        commit_cell :: cell.clone()
+        commit_staged :: staged.clone()
+        stm.record_edit_with_commit(^protocol, Box.new(fn() {}),
+            Box.new(fn(_) {
+                value :: commit_staged.borrow().clone()
+                next :: commit_cell.next_revision() ?? panic("Shared revision generation exhausted")
+                // GATE #4565: kernel primitive
+                #Unsafe("transaction commit owns participant permit while publishing staged value and revision") {
+                    if commit_cell.scalar.is_some() { commit_cell.store_scalar_value(&value) }
+                    else { *commit_cell.value.get() = Val(^value) }
+                    commit_cell.revision.store(next, Ordering.Release)
+                }
+            }))
+    }
+}
+impl<T, U: Clone> JetSharedSnapshot<T, U> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1924
+    pub fn value(self: &Self) -> U {
+        self.value.as_ref().expect("snapshot projection was consumed").clone()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1927
+    fn into_value_and_revision(self: Self) -> (U, U64) {
+        (self.value.take() ?? panic("snapshot projection was consumed"), self.revision)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1932
+    fn revision(self: &Self) -> U64 { self.revision }
+}
+impl<T, U> Drop for JetSharedSnapshot<T, U> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1937
+    fn drop(self: &Self) -> { self.owner.release_logical_owner_during_drop() }
+}
+impl<T, U: JetShow> JetShow for JetSharedSnapshot<T, U> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1944
+    fn jet_show(self: &Self) -> String {
+        "SharedSnapshot({self.value.as_ref().expect("snapshot projection was consumed").jet_show()})"
+    }
+}
+impl<T, U: JetShow> JetDisplay for JetSharedSnapshot<T, U> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1949
+    fn jet_display(self: &Self) -> String { self.jet_show() }
+}
+impl<T, U: JetShow> JetDebug for JetSharedSnapshot<T, U> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1954
+    fn jet_debug(self: &Self) -> String { self.jet_show() }
+}
+impl<T> Clone for JetShared<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1960
+    fn clone(self: &Self) -> Self {
+        // GATE #4565: kernel primitive
+        #Unsafe("logical alias count is incremented under lifetime mutex before shared physical carrier clones") {
+            lifetime := self.0.owner_lifetime.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+            assert(lifetime.logical_owners > 0, "cannot clone a retired Shared owner")
+            lifetime.logical_owners = lifetime.logical_owners.checked_add(1) ?? panic("Shared owner count exhausted")
+            drop(^lifetime)
+            JetShared(self.0.clone(), true)
+        }
+    }
+}
+impl<T> Drop for JetShared<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1980
+    fn drop(self: &Self) -> {
+        if self.1 { self.0.release_logical_owner_during_drop() }
+    }
+}
+impl<T> JetShared<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1990
+    // D-SHARED-CYCLE1=C: expert weak edge; sema rejects strong cycles.
+    pub fn downgrade(self: &Self) -> JetSharedWeak<T> {
+        // GATE #4565: kernel primitive
+        #Unsafe("weak edge retains physical identity without adding logical owner") { JetSharedWeak(Arc.downgrade(&self.0)) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1994
+    pub fn strong_count(self: &Self) -> I64 { self.0.logical_owner_count() as I64 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1999
+    pub fn same(self: &Self, other: &JetShared<T>) -> Bool {
+        // GATE #4565: kernel primitive
+        #Unsafe("compare shared allocation identities rather than payload equality") { Arc.ptr_eq(&self.0, &other.0) }
+    }
+}
+impl<T: Send + Sync> JetShared<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2004
+    fn physical_owner(self: &Self) -> JetSharedPhysicalOwner<T> {
+        // GATE #4565: kernel primitive
+        #Unsafe("non-counting transport capability retains weak root and canonical permit ordering key") {
+            JetSharedPhysicalOwner{cell: Arc.downgrade(&self.0), identity: self.physical_identity(),
+                protocol_order_key: self.physical_protocol_order_key()}
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2015
+fn jet_shared_next_alias_token_id() -> I64 Err! {
+    // GATE #4565: kernel primitive
+    #Unsafe("process-wide relaxed counter reserves unique alias token before retaining logical owner") {
+        static NEXT: AtomicI64 = AtomicI64.new(1)
+        NEXT.fetch_update(Ordering.Relaxed, Ordering.Relaxed, fn(next) { next.checked_add(1) })
+            .map_err(fn(_) { "Shared owner alias token IDs exhausted" })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2030
+// Weak physical transport identity never changes language-visible alias count.
+struct JetSharedPhysicalOwner<T: Send + Sync> {
+    cell: Weak<JetSharedCell<T>>,
+    identity: Usize,
+    protocol_order_key: Usize,
+}
+impl<T: Send + Sync> Clone for JetSharedPhysicalOwner<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2036
+    fn clone(self: &Self) -> Self {
+        // GATE #4565: kernel primitive
+        #Unsafe("clone weak allocation identity without retaining a logical owner") {
+            Self{cell: self.cell.clone(), identity: self.identity, protocol_order_key: self.protocol_order_key}
+        }
+    }
+}
+impl<T: Send + Sync> JetSharedPhysicalOwner<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2046
+    fn physical_identity(self: &Self) -> Usize { self.identity }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2050
+    fn protocol_order_key(self: &Self) -> Usize { self.protocol_order_key }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2054
+    fn strong_count(self: &Self) -> Usize {
+        // GATE #4565: kernel primitive
+        #Unsafe("temporary physical upgrade observes logical count without retaining alias") {
+            self.cell.upgrade().map_or(0, fn(cell) { cell.logical_owner_count() })
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2060
+    fn pin(self: &Self) -> JetSharedPhysicalPin<T>? {
+        // GATE #4565: kernel primitive
+        #Unsafe("pin only live owner without adding language-visible logical alias") {
+            cell :: self.cell.upgrade() ?? return None
+            if !cell.has_live_owner() -> return None
+            Val(JetSharedPhysicalPin{owner: JetShared(^cell, false)})
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2070
+    fn upgrade(self: &Self) -> JetSharedPhysicalBorrow<T>? {
+        // GATE #4565: kernel primitive
+        #Unsafe("physical borrow counter protects payload until active borrow releases") {
+            cell :: self.cell.upgrade() ?? return None
+            if !cell.begin_physical_borrow() -> return None
+            Val(JetSharedPhysicalBorrow{owner: JetShared(^cell, false), active: true})
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2080
+    fn try_retain_alias(self: &Self) -> JetSharedPhysicalOwnerAlias<T>? Err! {
+        token_id :: jet_shared_next_alias_token_id()?
+        // GATE #4565: kernel primitive
+        #Unsafe("reserve token first then retain logical owner only while weak root can upgrade") {
+            cell :: self.cell.upgrade() ?? return Ok(None)
+            if !cell.retain_logical_owner() -> return Ok(None)
+            Ok(Val(JetSharedPhysicalOwnerAlias{cell: ^cell, token_id: token_id, active: true}))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2093
+    fn retain_alias(self: &Self) -> JetSharedPhysicalOwnerAlias<T> Err! {
+        alias :: self.try_retain_alias()?
+        alias.ok_or_else(fn() { "Shared owner has no remaining logical aliases" })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2100
+type JetSharedSourceInteropRootBuilder = Arc<fn() -> SourceSharedInterop Err!>
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2107
+struct JetSharedPhysicalOwnerWeak<T: Send + Sync> {
+    owner: JetSharedPhysicalOwner<T>,
+    root_builder: JetSharedSourceInteropRootBuilder,
+    type_id: U64,
+}
+impl<T: Send + Sync> SourceSharedInteropWeakOwner for JetSharedPhysicalOwnerWeak<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2117
+    fn upgrade(self: &Self) -> (SourceSharedInterop, Box<SourceSharedInteropOwnerAliasLease>)? Err! {
+        alias :: self.owner.try_retain_alias()? ?? return Ok(None)
+        root :: self.owner.source_interop_root(self.type_id, self.root_builder.clone())?
+        if root.type_id() != self.type_id || root.identity() != self.owner.physical_identity()
+            || root.protocol_order_key() != self.owner.protocol_order_key() {
+            return Err("Source Shared weak upgrade resolved an inconsistent physical root")
+        }
+        Ok(Val((^root, Box.new(^alias))))
+    }
+}
+impl<T: Send + Sync> SourceSharedInteropOwnerAliasLease for JetSharedPhysicalOwnerAlias<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2151
+    fn token_id(self: &Self) -> I64 { JetSharedPhysicalOwnerAlias.token_id(self) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2155
+    fn release(self: Box<Self>) -> JetSharedPhysicalOperationOutcome<()> {
+        JetSharedPhysicalOperationOutcome.new(Ok(()), (*self).release())
+    }
+}
+impl<T: Send + Sync> JetSharedPhysicalOwner<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2166
+    fn source_interop_root(self: &Self, type_id: U64,
+        root_builder: JetSharedSourceInteropRootBuilder) -> SourceSharedInterop Err! {
+        root :: root_builder()?
+        if root.type_id() != type_id {
+            return Err("Source Shared callback root has a different checked type")
+        }
+        owner :: self.clone()
+        weak_owner :: self.clone()
+        weak_root_builder :: root_builder.clone()
+        count_owner :: self.clone()
+        retain_owner :: self.clone()
+        physical_identity :: self.physical_identity()
+        protocol_order_key :: self.protocol_order_key()
+        Ok(root.with_owner_identity(physical_identity)
+            .with_protocol_order_key(protocol_order_key)
+            .with_owner_lifecycle(fn() {
+                Box.new(JetSharedPhysicalOwnerWeak{owner: weak_owner.clone(),
+                    root_builder: weak_root_builder.clone(), type_id: type_id})
+            })
+            .with_owner_alias_lifecycle(fn() { Ok(count_owner.strong_count()) },
+                fn() { retain_owner.retain_alias().map(fn(alias) {
+                    Box.new(^alias) as Box<SourceSharedInteropOwnerAliasLease>
+                }) })
+            .with_typed_owner(^owner))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2209
+struct JetSharedPhysicalOwnerAlias<T: Send + Sync> {
+    cell: Arc<JetSharedCell<T>>,
+    token_id: I64,
+    active: Bool,
+}
+impl<T: Send + Sync> JetSharedPhysicalOwnerAlias<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2216
+    fn token_id(self: &Self) -> I64 { self.token_id }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2220
+    fn release(self: Self) -> JetSharedPhysicalCompletion? {
+        self.active = false
+        self.cell.release_logical_owner()
+    }
+}
+impl<T: Send + Sync> Drop for JetSharedPhysicalOwnerAlias<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2227
+    fn drop(self: &Self) -> {
+        if self.active {
+            self.active = false
+            self.cell.release_logical_owner_during_drop()
+        }
+    }
+}
+impl<T: Send + Sync> JetSharedPhysicalOwnerApi for JetSharedPhysicalOwner<T> {
+    type Root = T
+    type Pin = JetSharedPhysicalPin<T>
+    type Borrow = JetSharedPhysicalBorrow<T>
+    type Alias = JetSharedPhysicalOwnerAlias<T>
+    type PhysicalGuard = JetSharedGuard<T>
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2244
+    fn owner_identity(self: &Self) -> USize { self.physical_identity() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2248
+    fn protocol_order_key(self: &Self) -> USize { JetSharedPhysicalOwner.protocol_order_key(self) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2252
+    fn logical_owner_count(self: &Self) -> USize Err! { Ok(self.strong_count()) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2256
+    fn pin_live_owner(self: &Self) -> Self.Pin? Err! { Ok(self.pin()) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2260
+    fn reserve_logical_alias(self: &Self) -> Self.Alias? Err! { self.try_retain_alias() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2264
+    fn alias_token_id(self: &Self, alias: &Self.Alias) -> I64 { alias.token_id() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2268
+    fn install_payload_finalizer(self: &Self, finalizer: &JetSharedPhysicalFinalizerBinding<T>?) -> () Err! {
+        // GATE #4565: kernel primitive
+        #Unsafe("weak allocation upgrade pins the cell while installing its payload finalizer") {
+            cell :: self.cell.upgrade().ok_or_else(fn() { "Shared owner payload is no longer available" })?
+            cell.install_payload_finalizer(finalizer)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2279
+    fn release_owner_alias(self: &Self, alias: Self.Alias) -> JetSharedPhysicalOperationOutcome<()> {
+        completion :: alias.release()
+        JetSharedPhysicalOperationOutcome.new(Ok(()), ^completion)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2287
+    fn release_physical_borrow(self: &Self, borrow: Self.Borrow) -> JetSharedPhysicalOperationOutcome<()> {
+        completion :: borrow.release()
+        JetSharedPhysicalOperationOutcome.new(Ok(()), ^completion)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2295
+    fn release_physical_guard(self: &Self, guard: Self.PhysicalGuard) -> JetSharedPhysicalOperationOutcome<()> {
+        guard.release()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2302
+    fn with_live_root<R>(self: &Self, callback: fn(&T, U64) -> R) -> JetSharedPhysicalOperationOutcome<R?> {
+        root :: self.upgrade() ?? return JetSharedPhysicalOperationOutcome.new(Ok(None), None)
+        value :: root.read(fn(value) { callback(value, root.revision()) })
+        completion :: root.release()
+        JetSharedPhysicalOperationOutcome.new(Ok(Val(^value)), ^completion)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2314
+    fn with_live_edit<R>(self: &Self, callback: fn(&T) -> R) -> JetSharedPhysicalOperationOutcome<R?> {
+        root :: self.upgrade() ?? return JetSharedPhysicalOperationOutcome.new(Ok(None), None)
+        value :: root.edit(^callback)
+        completion :: root.release()
+        JetSharedPhysicalOperationOutcome.new(Ok(Val(^value)), ^completion)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2326
+    fn replace_if_revision(self: &Self, expected_revision: U64, replacement: T)
+        -> JetSharedPhysicalOperationOutcome<(Bool, U64)?> where T: Clone {
+        root :: self.upgrade() ?? return JetSharedPhysicalOperationOutcome.new(Ok(None), None)
+        result :: (fn() -> (Bool, U64)? Err! {
+            snapshot :: root.capture()
+            if snapshot.revision() != expected_revision -> return Ok(Val((false, root.revision())))
+            replaced :: root.try_replace(^snapshot, ^replacement).map_err(fn(error) { "{error:?}" })?
+            Ok(Val((replaced, root.revision())))
+        })()
+        completion :: root.release()
+        JetSharedPhysicalOperationOutcome.new(^result, ^completion)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2351
+    fn acquire_physical_guard(self: &Self, editable: Bool) -> JetSharedPhysicalOperationOutcome<Self.PhysicalGuard?> {
+        root :: self.upgrade() ?? return JetSharedPhysicalOperationOutcome.new(Ok(None), None)
+        guard :: if editable { root.physical_guard_edit() } else { root.physical_guard_read() }
+        completion :: root.release()
+        JetSharedPhysicalOperationOutcome.new(Ok(Val(^guard)), ^completion)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2369
+struct JetSharedPhysicalPin<T: Send + Sync> { owner: JetShared<T> }
+impl<T: Send + Sync> Deref for JetSharedPhysicalPin<T> {
+    type Target = JetShared<T>
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2376
+    fn deref(self: &Self) -> &Self.Target { &self.owner }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2380
+struct JetSharedPhysicalBorrow<T: Send + Sync> {
+    owner: JetShared<T>,
+    active: Bool,
+}
+impl<T: Send + Sync> Deref for JetSharedPhysicalBorrow<T> {
+    type Target = JetShared<T>
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2388
+    fn deref(self: &Self) -> &Self.Target { &self.owner }
+}
+impl<T: Send + Sync> JetSharedPhysicalBorrow<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2394
+    fn release(self: Self) -> JetSharedPhysicalCompletion? {
+        if !self.active -> return None
+        self.active = false
+        self.owner.0.end_physical_borrow()
+    }
+}
+impl<T: Send + Sync> Drop for JetSharedPhysicalBorrow<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2404
+    fn drop(self: &Self) -> {
+        if self.active {
+            self.active = false
+            self.owner.0.end_physical_borrow_during_drop()
+        }
+    }
+}
+impl<T> JetShow for JetShared<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2419
+    fn jet_show(self: &Self) -> String { "Shared(..)" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2426
+pub struct JetSharedWeak<T>(Weak<JetSharedCell<T>>)
+impl<T> JetSharedWeak<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2428
+    pub fn upgrade(self: &Self) -> JetOutcome<JetShared<T>, JetAbsent> {
+        // GATE #4565: kernel primitive
+        #Unsafe("weak upgrade retains logical owner before exposing the strong handle") {
+            upgraded :: self.0.upgrade().and_then(fn(cell) {
+                if cell.retain_logical_owner() { Val(JetShared(^cell, true)) } else { None }
+            })
+            jet_outcome_of(^upgraded)
+        }
+    }
+}
+impl<T> Clone for JetSharedWeak<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2437
+    fn clone(self: &Self) -> Self {
+        // GATE #4565: kernel primitive
+        #Unsafe("clone weak physical identity without changing logical owner count") { JetSharedWeak(self.0.clone()) }
+    }
+}
+impl<T> PartialEq for JetSharedWeak<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2442
+    fn eq(self: &Self, other: &Self) -> Bool {
+        // GATE #4565: kernel primitive
+        #Unsafe("compare weak allocation identity without upgrading payload") { self.0.ptr_eq(&other.0) }
+    }
+}
+impl<T> Eq for JetSharedWeak<T> {}
+impl<T> fmt.Debug for JetSharedWeak<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2448
+    fn fmt(self: &Self, f: &fmt.Formatter) -> () fmt.Error! { f.write_str("Shared.Weak(..)") }
+}
+impl<T> JetShow for JetSharedWeak<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2453
+    fn jet_show(self: &Self) -> String { "Shared.Weak(..)" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2461
+// All mapped/split children retain the root permit and scalar commit owner.
+pub struct JetSharedGuard<T> {
+    state: Arc<JetSharedGuardState>,
+    lease: Rc<JetSharedLease>,
+    project: Rc<fn(*()) -> *T>,
+    editable: Bool,
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2468
+trait JetSharedLease {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2469
+    fn root_ptr(self: &Self) -> *()
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2470
+    fn mark_dirty(self: &Self) ->
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2471
+    fn publish_and_release(self: &Self) -> JetSharedPhysicalOperationOutcome<()>
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2472
+    fn reacquire_and_refresh(self: &Self, cancelled: &fn() -> Bool) -> Bool Err!
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2476
+    fn held(self: &Self) -> Bool
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2477
+    fn revision(self: &Self) -> U64 Err!
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2478
+    fn abort_release(self: &Self) -> JetSharedPhysicalOperationOutcome<()>
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2479
+    fn release(self: &Self) -> JetSharedPhysicalOperationOutcome<()>
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2480
+    fn release_during_drop(self: &Self) ->
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2483
+struct JetSharedLogicalGuardOwner<T> {
+    cell: Arc<JetSharedCell<T>>,
+    active: Bool,
+}
+impl<T> JetSharedLogicalGuardOwner<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2489
+    fn acquire(cell: Arc<JetSharedCell<T>>) -> Self? {
+        if cell.retain_guard_owner() { Val(Self{cell: ^cell, active: true}) } else { None }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2493
+    fn release(self: Self) -> JetSharedPhysicalCompletion? {
+        if !self.active -> return None
+        self.active = false
+        self.cell.release_logical_owner()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2501
+    fn release_and_deliver(self: Self) -> {
+        if self.active {
+            self.active = false
+            self.cell.release_logical_owner_during_drop()
+        }
+    }
+}
+impl<T> Drop for JetSharedLogicalGuardOwner<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2510
+    fn drop(self: &Self) -> {
+        if self.active {
+            self.active = false
+            self.cell.release_logical_owner_during_drop()
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2518
+struct JetSharedActiveGuardBorrow<T> {
+    cell: Arc<JetSharedCell<T>>,
+    active: Bool,
+}
+impl<T> JetSharedActiveGuardBorrow<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2524
+    fn acquire(cell: Arc<JetSharedCell<T>>) -> Self? {
+        if cell.begin_physical_borrow() { Val(Self{cell: ^cell, active: true}) } else { None }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2528
+    fn release(self: Self) -> JetSharedPhysicalCompletion? {
+        if !self.active -> return None
+        self.active = false
+        self.cell.end_physical_borrow()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2536
+    fn release_and_deliver(self: Self) -> {
+        if self.active {
+            self.active = false
+            self.cell.end_physical_borrow_during_drop()
+        }
+    }
+}
+impl<T> Drop for JetSharedActiveGuardBorrow<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2545
+    fn drop(self: &Self) -> {
+        if self.active {
+            self.active = false
+            self.cell.end_physical_borrow_during_drop()
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2554
+struct JetSharedRootLease<T> {
+    permit: Arc<JetSharedCanonicalPermit>,
+    editable: Bool,
+    dirty: Cell<Bool>,
+    logical_owner: RefCell<JetSharedLogicalGuardOwner<T>?>,
+    physical_borrow: RefCell<JetSharedActiveGuardBorrow<T>?>,
+    cell: Arc<JetSharedCell<T>>,
+}
+impl<T> JetSharedLease for JetSharedRootLease<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2563
+    fn root_ptr(self: &Self) -> *() {
+        assert(self.permit.held(), "SharedGuard lease is released")
+        // GATE #4565: kernel primitive
+        #Unsafe("permit and logical guard owner keep the payload alive while the root projection is used") {
+            (&*self.cell.value.get()).as_mut().expect("Shared payload was retired") as *T as *()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2573
+    fn mark_dirty(self: &Self) -> { if self.editable { self.dirty.set(true) } }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2579
+    fn publish_and_release(self: &Self) -> JetSharedPhysicalOperationOutcome<()> {
+        if !self.editable || !self.permit.held() {
+            return JetSharedPhysicalOperationOutcome.new(Err(JET_SHARED_GUARD_INVALID.to_string()), None)
+        }
+        if self.dirty.replace(false) { self.cell.commit_guard() }
+        self.permit.release()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2592
+    fn reacquire_and_refresh(self: &Self, cancelled: &fn() -> Bool) -> Bool Err! {
+        if self.permit.reacquire(cancelled) {
+            self.cell.refresh_scalar_shadow()
+            Ok(true)
+        } else { Ok(false) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2604
+    fn held(self: &Self) -> Bool { self.permit.held() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2607
+    fn revision(self: &Self) -> U64 Err! {
+        if !self.permit.held() -> return Err(JET_SHARED_GUARD_INVALID.to_string())
+        // GATE #4565: kernel primitive
+        #Unsafe("acquire reads revision published by the current held protocol permit") {
+            Ok(self.cell.revision.load(Ordering.Acquire))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2617
+    fn abort_release(self: &Self) -> JetSharedPhysicalOperationOutcome<()> { self.permit.release() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2621
+    fn release(self: &Self) -> JetSharedPhysicalOperationOutcome<()> {
+        if self.editable && self.permit.held() && self.dirty.replace(false) { self.cell.commit_guard() }
+        // Release the physical permit before payload retirement can acquire other permits.
+        permit_outcome :: self.permit.release()
+        completion := ^permit_outcome.completion
+        if self.logical_owner.borrow_mut().take() == .Val(owner) {
+            if completion.is_some() { owner.release_and_deliver() } else { completion = owner.release() }
+        }
+        if self.physical_borrow.borrow_mut().take() == .Val(borrow) {
+            if completion.is_some() { borrow.release_and_deliver() } else { completion = borrow.release() }
+        }
+        JetSharedPhysicalOperationOutcome.new(^permit_outcome.result, ^completion)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2646
+    fn release_during_drop(self: &Self) -> {
+        if self.editable && self.permit.held() && self.dirty.replace(false) { self.cell.commit_guard() }
+        self.permit.release_during_drop()
+        if self.logical_owner.borrow_mut().take() == .Val(owner) { owner.release_and_deliver() }
+        if self.physical_borrow.borrow_mut().take() == .Val(borrow) { borrow.release_and_deliver() }
+    }
+}
+impl<T> Drop for JetSharedRootLease<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2663
+    fn drop(self: &Self) -> { self.release_during_drop() }
+}
+impl<T> JetSharedGuard<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2669
+    fn release(self: Self) -> JetSharedPhysicalOperationOutcome<()> {
+        // GATE #4565: kernel primitive
+        #Unsafe("release root lease only for the final mapped or split guard carrier") {
+            if Rc.strong_count(&self.lease) == 1 { self.lease.release() }
+            else { JetSharedPhysicalOperationOutcome.new(Ok(()), None) }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2679
+    fn read(cell: Arc<JetSharedCell<T>>, logical_owner: Bool, physical_borrow: Bool) -> Self {
+        state :: jet_shared_guard_acquire(&cell.protocol, false, fn() { false })
+            .unwrap_or_else(fn() { jet_runtime_stop_with_context("E3001", "", 0, "", "", JET_SHARED_GUARD_INVALID) })
+        logical_owner :: if logical_owner {
+            Val(JetSharedLogicalGuardOwner.acquire(cell.clone()) ?? panic("Shared guard requires a live owner"))
+        } else { None }
+        physical_borrow :: if physical_borrow {
+            Val(JetSharedActiveGuardBorrow.acquire(cell.clone()) ?? panic("Shared guard requires a live owner"))
+        } else { None }
+        cell.refresh_scalar_shadow()
+        permit :: state.permit_arc()
+        // GATE #4565: kernel primitive
+        #Unsafe("guard retains root lease and identity projection until the final child releases") {
+            Self{state: ^state, lease: Rc.new(JetSharedRootLease{permit: ^permit, editable: false,
+                dirty: Cell.new(false), logical_owner: RefCell.new(^logical_owner),
+                physical_borrow: RefCell.new(^physical_borrow), cell: ^cell}),
+                project: Rc.new(fn(root) { root.cast<T>() }), editable: false}
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2720
+    fn edit(cell: Arc<JetSharedCell<T>>, logical_owner: Bool, physical_borrow: Bool) -> Self {
+        state :: jet_shared_guard_acquire(&cell.protocol, true, fn() { false })
+            .unwrap_or_else(fn() { jet_runtime_stop_with_context("E3001", "", 0, "", "", JET_SHARED_GUARD_INVALID) })
+        logical_owner :: if logical_owner {
+            Val(JetSharedLogicalGuardOwner.acquire(cell.clone()) ?? panic("Shared guard requires a live owner"))
+        } else { None }
+        physical_borrow :: if physical_borrow {
+            Val(JetSharedActiveGuardBorrow.acquire(cell.clone()) ?? panic("Shared guard requires a live owner"))
+        } else { None }
+        cell.refresh_scalar_shadow()
+        permit :: state.permit_arc()
+        // GATE #4565: kernel primitive
+        #Unsafe("exclusive guard retains root lease and dirty scalar shadow until the final child releases") {
+            Self{state: ^state, lease: Rc.new(JetSharedRootLease{permit: ^permit, editable: true,
+                dirty: Cell.new(true), logical_owner: RefCell.new(^logical_owner),
+                physical_borrow: RefCell.new(^physical_borrow), cell: ^cell}),
+                project: Rc.new(fn(root) { root.cast<T>() }), editable: true}
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2760
+    fn physical_root_ptr(self: &Self) -> *() Err! {
+        if !self.lease.held() -> return Err(JET_SHARED_GUARD_INVALID.to_string())
+        Ok(self.lease.root_ptr())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2766
+    fn physical_revision(self: &Self) -> U64 Err! { self.lease.revision() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2770
+    fn physical_mark_dirty(self: &Self) -> () Err! {
+        if !self.editable || !self.lease.held() -> return Err(JET_SHARED_GUARD_INVALID.to_string())
+        self.lease.mark_dirty()
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2778
+    fn physical_wait_suspend(self: &Self) -> JetSharedPhysicalOperationOutcome<()> {
+        if !self.editable {
+            return JetSharedPhysicalOperationOutcome.new(Err(JET_SHARED_GUARD_EDIT_REQUIRED.to_string()), None)
+        }
+        self.lease.publish_and_release()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2790
+    fn physical_wait_resume(self: &Self, cancelled: &fn() -> Bool) -> Bool Err! {
+        self.lease.reacquire_and_refresh(cancelled)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2797
+    fn physical_permit_held(self: &Self) -> Bool { self.lease.held() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2800
+    fn physical_wait_abort(self: &Self) -> JetSharedPhysicalOperationOutcome<()> { self.lease.abort_release() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2806
+    pub fn map_read<U>(self: Self, field: I64, project: fn(&T) -> &U) -> JetSharedGuard<U> {
+        mapped :: jet_shared_guard_map(&self.state, field, false).unwrap_or_else(fn(message) {
+            jet_runtime_stop_with_context("E3001", "", 0, "", "", message)
+        })
+        root :: (self.project)(self.lease.root_ptr())
+        // GATE #4565: kernel primitive
+        #Unsafe("held root lease and sema-validated stored-field projection keep projected read payload live") {
+            projected :: project(&*root) as *U
+            JetSharedGuard{state: ^mapped, lease: self.lease.clone(),
+                project: Rc.new(fn(_) { projected }), editable: false}
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2836
+    pub fn map_edit<U>(self: Self, field: I64, project: fn(&T) -> &U) -> JetSharedGuard<U> {
+        if !self.editable {
+            jet_runtime_stop_with_context("E3001", "", 0, "", "", JET_SHARED_GUARD_EDIT_REQUIRED)
+        }
+        mapped :: jet_shared_guard_map(&self.state, field, true).unwrap_or_else(fn(message) {
+            jet_runtime_stop_with_context("E3001", "", 0, "", "", message)
+        })
+        root :: (self.project)(self.lease.root_ptr())
+        // GATE #4565: kernel primitive
+        #Unsafe("exclusive root lease and sema-validated stored-field projection keep projected edit payload live") {
+            projected :: project(&*root) as *U
+            JetSharedGuard{state: ^mapped, lease: self.lease.clone(),
+                project: Rc.new(fn(_) { projected }), editable: true}
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2876
+    pub fn split_read<A, B>(self: Self, first_field: I64, second_field: I64,
+        project: fn(&T) -> (&A, &B)) -> (JetSharedGuard<A>, JetSharedGuard<B>) {
+        (first_state, second_state) :: jet_shared_guard_split(&self.state, first_field, second_field, false)
+            .unwrap_or_else(fn(message) { jet_runtime_stop_with_context("E3001", "", 0, "", "", message) })
+        root :: (self.project)(self.lease.root_ptr())
+        // GATE #4565: kernel primitive
+        #Unsafe("held root permit protects both sema-validated disjoint stored-field read projections") {
+            (first, second) :: project(&*root)
+            first :: first as *A
+            second :: second as *B
+            (JetSharedGuard{state: ^first_state, lease: self.lease.clone(),
+                project: Rc.new(fn(_) { first }), editable: false},
+             JetSharedGuard{state: ^second_state, lease: self.lease.clone(),
+                project: Rc.new(fn(_) { second }), editable: false})
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2921
+    pub fn split_edit<A, B>(self: Self, first_field: I64, second_field: I64,
+        project: fn(&T) -> (&A, &B)) -> (JetSharedGuard<A>, JetSharedGuard<B>) {
+        if !self.editable {
+            jet_runtime_stop_with_context("E3001", "", 0, "", "", JET_SHARED_GUARD_EDIT_REQUIRED)
+        }
+        (first_state, second_state) :: jet_shared_guard_split(&self.state, first_field, second_field, true)
+            .unwrap_or_else(fn(message) { jet_runtime_stop_with_context("E3001", "", 0, "", "", message) })
+        root :: (self.project)(self.lease.root_ptr())
+        // GATE #4565: kernel primitive
+        #Unsafe("exclusive root permit protects both sema-validated disjoint stored-field edit projections") {
+            (first, second) :: project(&*root)
+            first :: first as *A
+            second :: second as *B
+            (JetSharedGuard{state: ^first_state, lease: self.lease.clone(),
+                project: Rc.new(fn(_) { first }), editable: true},
+             JetSharedGuard{state: ^second_state, lease: self.lease.clone(),
+                project: Rc.new(fn(_) { second }), editable: true})
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:2976
+    pub fn wait(self: &Self, condition: &JetCondition, ready: fn(&T) -> Bool) -> () Err! {
+        state :: self.state.clone()
+        if !state.held() -> return Err(JET_SHARED_GUARD_INVALID.to_string())
+        jet_shared_guard_require_edit_capability(self.editable, state.permit()).map_err(fn(message) { message.to_string() })?
+        loop {
+            if ready(self) -> return Ok(())
+            // GATE #4565: kernel primitive
+            waiter: Arc<JetConditionWaiter> :: #Unsafe("scheduler park slot is retained until registered condition waiter finishes") {
+                Arc.new(JetSchedulerConditionWaiter{slot: ParkSlot.new()})
+            }
+            match jet_shared_guard_wait_once(Val(state.as_ref()), Val(&condition.inner), ^waiter) {
+                Ok(()) -> {}
+                Err(error) -> return Err(error.message().to_string())
+            }
+        }
+    }
+}
+impl<T> Deref for JetSharedGuard<T> {
+    type Target = T
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3008
+    fn deref(self: &Self) -> &T {
+        value :: (self.project)(self.lease.root_ptr())
+        // GATE #4565: kernel primitive
+        #Unsafe("root lease holds the matching permit while sema-validated projected reference exists") { &*value }
+    }
+}
+impl<T> DerefMut for JetSharedGuard<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3019
+    fn deref_mut(self: &Self) -> &T {
+        assert(self.editable, "read SharedGuard used for edit")
+        self.lease.mark_dirty()
+        value :: (self.project)(self.lease.root_ptr())
+        // GATE #4565: kernel primitive
+        #Unsafe("editable root lease holds exclusive permit while projected mutable reference exists") { &*value }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3031
+struct JetSchedulerConditionWaiter { slot: Arc<ParkSlot> }
+impl JetConditionWaiter for JetSchedulerConditionWaiter {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3036
+    fn park(self: &Self) -> () ()! {
+        // GATE #4565: kernel primitive
+        #Unsafe("scheduler owns the retained condition park slot through yield") {
+            jet_scheduler_yield("Shared condition", &self.slot, None)
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3041
+    fn wake(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("wake only the retained slot of this registered condition waiter") { jet_scheduler_wake(&self.slot) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3045
+    fn interrupted(self: &Self) -> Bool {
+        // GATE #4565: kernel primitive
+        #Unsafe("observe scheduler interruption for the current wait point") { jet_scheduler_wait_point_interrupted() }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3051
+#Derive(Clone)
+pub struct JetCondition { inner: Arc<JetConditionProtocol> }
+impl JetCondition {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3056
+    pub fn new() -> Self { Self{inner: JetConditionProtocol.new()} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3062
+    pub fn notify_one(self: &Self) -> { jet_shared_condition_notify_one(&self.inner) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3066
+    pub fn notify_all(self: &Self) -> { jet_shared_condition_notify_all(&self.inner) }
+}
+impl<T> JetShow for JetCell<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3072
+    fn jet_show(self: &Self) -> String { "Cell(..)" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3082
+enum JetPoolSlot<T> { Occupied(U32, T), Vacant(U32) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3087
+pub struct JetPool<T> {
+    slots: [JetPoolSlot<T>],
+    free: [USize],
+}
+impl<T> JetPool<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3093
+    pub fn new() -> Self { JetPool{slots: [], free: []} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3100
+    pub fn add(self: &Self, value: T) -> JetId<T> {
+        if self.free.pop() == .Val(idx) {
+            gen :: match self.slots[idx] {
+                .Vacant(g) -> g
+                .Occupied(..) -> unreachable("a free-list slot is always Vacant")
+            }
+            self.slots[idx] = .Occupied(gen, ^value)
+            return JetId.new(idx as U32, gen)
+        }
+        idx :: self.slots.len()
+        self.slots.push(.Occupied(0, ^value))
+        JetId.new(idx as U32, 0)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3119
+    pub fn remove(self: &Self, id: JetId<T>) -> JetOutcome<T, JetAbsent> {
+        idx :: id.index as USize
+        occupied :: match self.slots.get(idx) {
+            Val(.Occupied(g, _)) -> *g == id.generation
+            _ -> false
+        }
+        if !occupied -> return Err(JetAbsent)
+        next_gen :: id.generation.wrapping_add(1)
+        old :: mem.replace(&self.slots[idx], .Vacant(next_gen))
+        self.free.push(idx)
+        match ^old {
+            .Occupied(_, v) -> Ok(^v)
+            .Vacant(_) -> unreachable("just checked Occupied above")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3140
+    pub fn ids(self: &Self) -> [JetId<T>] {
+        self.slots.iter().enumerate().filter_map(fn((i, s)) {
+            match s {
+                .Occupied(g, _) -> Val(JetId.new(i as U32, *g))
+                .Vacant(_) -> None
+            }
+        }).collect()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3153
+    pub fn checked_get(self: &Self, id: JetId<T>) -> (&T)? {
+        match self.slots.get(id.index as USize) {
+            Val(.Occupied(generation, value)) if *generation == id.generation -> Val(value)
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3165
+    pub fn checked_get_mut(self: &Self, id: JetId<T>) -> (&T)? {
+        match self.slots.get_mut(id.index as USize) {
+            Val(.Occupied(generation, value)) if *generation == id.generation -> Val(value)
+            _ -> None
+        }
+    }
+}
+impl<T> JetShow for JetPool<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3180
+    fn jet_show(self: &Self) -> String { "Pool({self.slots.len()} slots)" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3185
+pub struct JetId<T> {
+    index: U32,
+    generation: U32,
+    _marker: PhantomData<fn() -> T>,
+}
+impl<T> JetId<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3191
+    fn new(index: U32, generation: U32) -> Self {
+        JetId{index: index, generation: generation, _marker: PhantomData}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3201
+    pub fn to_word(self: Self) -> I64 { (((self.generation as U64) << 32) | ((self.index as U64) + 1)) as I64 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3206
+    pub fn from_word(word: I64) -> Self? {
+        raw :: word as U64
+        index :: (raw as U32).checked_sub(1)?
+        Val(Self.new(index, (raw >> 32) as U32))
+    }
+}
+impl<T> Clone for JetId<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3213
+    fn clone(self: &Self) -> Self { *self }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3217
+impl<T> Copy for JetId<T> {}
+impl<T> PartialEq for JetId<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3219
+    fn eq(self: &Self, other: &Self) -> Bool { self.index == other.index && self.generation == other.generation }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3223
+impl<T> Eq for JetId<T> {}
+impl<T> PartialOrd for JetId<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3225
+    fn partial_cmp(self: &Self, other: &Self) -> cmp.Ordering? { Val(self.cmp(other)) }
+}
+impl<T> Ord for JetId<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3230
+    fn cmp(self: &Self, other: &Self) -> cmp.Ordering {
+        (self.index, self.generation).cmp(&(other.index, other.generation))
+    }
+}
+impl<T> __jet_Equatable for JetId<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3235
+    fn equal(self: &Self, rhs: &Self) -> Bool { self == rhs }
+}
+impl<T> Hash for JetId<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3240
+    fn hash<H: Hasher>(self: &Self, state: &H) -> {
+        self.index.hash(state)
+        self.generation.hash(state)
+    }
+}
+impl<T> fmt.Debug for JetId<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3246
+    fn fmt(self: &Self, f: &fmt.Formatter) -> () fmt.Error! {
+        f.write_fmt("ID(#{self.index}@{self.generation})")
+    }
+}
+impl<T> JetShow for JetId<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3254
+    fn jet_show(self: &Self) -> String { "ID(#{self.index}@{self.generation})" }
+}
+impl<T> JetDisplay for JetId<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3260
+    fn jet_display(self: &Self) -> String { "ID(#{self.index}@{self.generation})" }
+}
+impl<T> JetDebug for JetId<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3264
+    fn jet_debug(self: &Self) -> String { "ID(#{self.index}@{self.generation})" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3275
+pub fn jet_pool_get<T: Clone>(pool: &JetPool<T>, id: JetId<T>, file: String,
+    line: U32, fn_name: String, src_line: String) -> T {
+    jet_pool_get_ref(pool, id, file, line, fn_name, src_line).clone()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3287
+pub fn jet_pool_get_ref<T>(pool: &JetPool<T>, id: JetId<T>, file: String,
+    line: U32, fn_name: String, src_line: String) -> &T {
+    match pool.checked_get(id) {
+        Val(value) -> value
+        None -> jet_runtime_stop_with_context("E3001", file, line, fn_name, src_line, jet_pool_stale_message())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3312
+pub fn jet_pool_get_mut<T>(pool: &JetPool<T>, id: JetId<T>, file: String,
+    line: U32, fn_name: String, src_line: String) -> &T {
+    match pool.checked_get_mut(id) {
+        Val(value) -> value
+        None -> jet_runtime_stop_with_context("E3001", file, line, fn_name, src_line, jet_pool_stale_message())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3335
+pub fn jet_pool_set<T>(pool: &JetPool<T>, id: JetId<T>, value: T, file: String,
+    line: U32, fn_name: String, src_line: String) -> {
+    if pool.checked_get_mut(id) == .Val(slot) {
+        *slot = ^value
+        return
+    }
+    jet_runtime_stop_with_context("E3001", file, line, fn_name, src_line, jet_pool_stale_message())
+}
+

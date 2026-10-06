@@ -233,11 +233,11 @@ fn jet_codegen_source_byte_range(bytes: [U8], start: Int, end: Int) -> [U8] Neve
     out
 }
 
-// Row of the lowered function's source file in `builder.source_index` (and
-// `builder.source_files`, built in the same order).
-fn jet_codegen_builder_source_row(builder: JetCodegenBuilder, ambiguous: String, missing: String) -> Int Never! {
-    row :: builder.source_index.by_path.get(builder.function.source_file) ?? panic(missing)
-    if builder.source_index.duplicate_paths.get(builder.function.source_file) != None -> panic(ambiguous)
+// Row of the lowered function's source file in `program.source_index` (and
+// `program.source_files`, built in the same order).
+fn jet_codegen_builder_source_row(builder: JetCodegenBuilder, program: JetCodegenProgram, ambiguous: String, missing: String) -> Int Never! {
+    row :: program.source_index.by_path.get(builder.function.source_file) ?? panic(missing)
+    if program.source_index.duplicate_paths.get(builder.function.source_file) != None -> panic(ambiguous)
     row
 }
 
@@ -283,6 +283,45 @@ fn jet_codegen_function_index(functions: ^[TFunc]) -> JetCodegenFunctionIndex Ne
     JetCodegenFunctionIndex{rows: functions, first_by_key: first_by_key, first_by_name: first_by_name, next_by_key: next_by_key, next_by_name: next_by_name, qualified_rows: qualified_rows}
 }
 
+// Appends `functions` to `index` in order, as if they had followed its rows
+// when it was built: first rows and qualified rows keep their earlier
+// owners, and each same-key and same-name chain gains the new rows at its
+// end. Moves the rows out of `functions` (left empty).
+fn jet_codegen_function_index_append(index: &JetCodegenFunctionIndex, functions: &[TFunc]) Never! {
+    reversed := [TFunc]{}
+    loop functions.len() > 0 {
+        function := &functions.pop() ?? { break }
+        &reversed.push(^function)
+    }
+    loop reversed.len() > 0 {
+        function := &reversed.pop() ?? { break }
+        row :: index.rows.len()
+        &index.next_by_key.push(-1)
+        &index.next_by_name.push(-1)
+        key_tail := index.first_by_key.get(function.key) ?? -1
+        if key_tail < 0 {
+            index.first_by_key[function.key] = row
+        } else {
+            loop index.next_by_key[key_tail] >= 0 {
+                key_tail = index.next_by_key[key_tail]
+            }
+            index.next_by_key[key_tail] = row
+        }
+        name_tail := index.first_by_name.get(function.name) ?? -1
+        if name_tail < 0 {
+            index.first_by_name[function.name] = row
+        } else {
+            loop index.next_by_name[name_tail] >= 0 {
+                name_tail = index.next_by_name[name_tail]
+            }
+            index.next_by_name[name_tail] = row
+        }
+        qualified :: jet_codegen_qualified_function_key(function.module_identity, function.key)
+        if index.qualified_rows.get(qualified) == None -> index.qualified_rows[qualified] = row else -> index.qualified_rows[qualified] = -1
+        &index.rows.push(^function)
+    }
+}
+
 // Moves every row of `from` onto the end of `to` in order, leaving `from`
 // empty. Each pop moves one row, so the rows are never resident twice.
 pub fn jet_codegen_move_function_rows(to: &[TFunc], from: &[TFunc]) Never! {
@@ -297,8 +336,10 @@ pub fn jet_codegen_move_function_rows(to: &[TFunc], from: &[TFunc]) Never! {
     }
 }
 
-struct JetCodegenBuilder {
-    pub function: TFunc
+// The program-wide inputs of lowering, read-only while functions lower: every
+// function taking a builder takes this beside it, so compiler threads can
+// share one program while each lowers on its own builder.
+struct JetCodegenProgram {
     pub function_index: JetCodegenFunctionIndex
     pub modules: [SemaGraphModuleResult]
     // Method owner metadata over `modules` (jet_codegen_owner_index).
@@ -307,6 +348,17 @@ struct JetCodegenBuilder {
     pub field_symbols: [String:[JetCodegenFieldSymbolRow]]
     pub source_files: [MIRSourceFile]
     pub source_index: JetCodegenSourceIndex
+}
+
+// One lowering's state: the function being lowered (every field but
+// `constant_copies` is per function, JetCodegenFunctionState) beside a
+// JetCodegenProgram.
+struct JetCodegenBuilder {
+    pub function: TFunc
+    // Card #4258: whether each constant (by symbol key) copies into its use
+    // sites, decided on its first read (jet_codegen_constant_copies_into_uses
+    // reads only the program, so every builder decides alike).
+    pub constant_copies: [String:Bool]
     pub current_span: Span
     pub current_line: Int?
     pub generic_type_names: [String]
@@ -369,52 +421,56 @@ struct JetCodegenBuilder {
     // a read window binding names another value's slot, so a consuming use
     // copies it instead of moving the slot out of its owner.
     pub read_alias_places: [U64:Bool]
+    // D-MEM-COPYSEM1: the immutable place bindings of the function whose root
+    // their scope leaves alone (jet_codegen_stable_element_lets), by
+    // jet_codegen_element_let_key.
+    pub stable_element_lets: [String:Bool]
     // #3740: the plain-return call a propagating `Try` consumes directly
     // (`jet_codegen_plain_try_identity`), and whether that call took it.
     pub plain_try_operand: String?
     pub plain_try_taken: Bool
 }
 
-fn jet_codegen_source_location(builder: JetCodegenBuilder, include_source_line: Bool) -> JetCodegenSourceLocation Never! {
+fn jet_codegen_source_location(builder: JetCodegenBuilder, program: JetCodegenProgram, include_source_line: Bool) -> JetCodegenSourceLocation Never! {
     if builder.function.source_file == "" -> panic("checked function has an empty source path")
-    row :: jet_codegen_builder_source_row(builder, "ambiguous checked function source context", "checked function has no readonly source context")
-    if builder.source_files[row].id != mir_source_file_id(builder.source_files[row].path) -> panic("checked function source context has a conflicting file identity")
-    byte_count :: builder.source_index.rows[row].bytes.len()
+    row :: jet_codegen_builder_source_row(builder, program, "ambiguous checked function source context", "checked function has no readonly source context")
+    if program.source_files[row].id != mir_source_file_id(program.source_files[row].path) -> panic("checked function source context has a conflicting file identity")
+    byte_count :: program.source_index.rows[row].bytes.len()
     line := builder.current_line ?? 1
     if {
         builder.current_line == None -> {
             span := builder.current_span
             if span.start < 0 || span.start > byte_count -> panic("checked span falls outside its readonly source context")
-            line = jet_codegen_line_of(builder.source_index.rows[row].line_starts, span.start)
+            line = jet_codegen_line_of(program.source_index.rows[row].line_starts, span.start)
         } else -> {
-            if line < 1 || line > builder.source_index.rows[row].line_starts.len() -> panic("checked line marker is outside its readonly source context")
+            if line < 1 || line > program.source_index.rows[row].line_starts.len() -> panic("checked line marker is outside its readonly source context")
         }
     }
-    line_start :: builder.source_index.rows[row].line_starts[line - 1]
+    line_start :: program.source_index.rows[row].line_starts[line - 1]
     source_line := String?{None}
     if include_source_line {
-        line_end := jet_codegen_source_line_end(builder.source_index.rows[row].bytes, line_start)
-        if line_end > line_start && builder.source_index.rows[row].bytes[line_end - 1] == (U8{13}) -> line_end -= 1
-        line_text := String.from_bytes(jet_codegen_source_byte_range(builder.source_index.rows[row].bytes, line_start, line_end)) ?? panic("checked source line is not valid UTF-8")
+        line_end := jet_codegen_source_line_end(program.source_index.rows[row].bytes, line_start)
+        if line_end > line_start && program.source_index.rows[row].bytes[line_end - 1] == (U8{13}) -> line_end -= 1
+        line_text := String.from_bytes(jet_codegen_source_byte_range(program.source_index.rows[row].bytes, line_start, line_end)) ?? panic("checked source line is not valid UTF-8")
         if line_text == "" -> panic("checked source location resolves to an empty source line")
         source_line = Val(line_text)
     }
     JetCodegenSourceLocation{line: line, source_line: source_line}
 }
 
-fn jet_codegen_source_location_at(builder: &JetCodegenBuilder, span: Span, include_source_line: Bool) -> JetCodegenSourceLocation Never! {
+fn jet_codegen_source_location_at(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, include_source_line: Bool) -> JetCodegenSourceLocation Never! {
     previous_span := builder.current_span
     builder.current_span = span
-    location := jet_codegen_source_location(builder, include_source_line)
+    location := jet_codegen_source_location(builder, program, include_source_line)
     builder.current_span = previous_span
     location
 }
 
 // #3713: the 1-based character column of `span` in the function's source,
 // the same fact `Diagnostics::span_line_col` gives the host compiler.
-fn jet_codegen_source_column_at(builder: JetCodegenBuilder, span: Span) -> Int Never! {
-    row :: builder.source_index.by_path.get(builder.function.source_file) ?? panic("checked function has no readonly source context")
-    jet_codegen_source_column(builder.source_index.rows[row].bytes, span)
+fn jet_codegen_source_column_at(builder: JetCodegenBuilder, program: JetCodegenProgram, span: Span) -> Int Never! {
+    row :: program.source_index.by_path.get(builder.function.source_file) ?? panic("checked function has no readonly source context")
+    jet_codegen_source_column(program.source_index.rows[row].bytes, span)
 }
 
 fn jet_codegen_source_column(bytes: [U8], span: Span) -> Int Never! {
@@ -428,8 +484,8 @@ fn jet_codegen_source_column(bytes: [U8], span: Span) -> Int Never! {
     column
 }
 
-fn jet_codegen_assignment_panic_location(builder: &JetCodegenBuilder, span: Span, include_source_line: Bool) -> TPanicLoc Never! {
-    source := jet_codegen_source_location_at(&builder, span, include_source_line)
+fn jet_codegen_assignment_panic_location(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, include_source_line: Bool) -> TPanicLoc Never! {
+    source := jet_codegen_source_location_at(&builder, program, span, include_source_line)
     source_line := if include_source_line -> source.source_line ?? panic("checked source context has no source line") else -> ""
     TPanicLoc{
         file: builder.function.source_file,
@@ -459,7 +515,7 @@ struct JetCodegenLambdaValue {
 }
 
 
-fn jet_codegen_identity(builder: &JetCodegenBuilder, kind: String, span: Span, role: String, detail: String) -> String Never! {
+fn jet_codegen_identity(builder: &JetCodegenBuilder, program: JetCodegenProgram, kind: String, span: Span, role: String, detail: String) -> String Never! {
     index := builder.next_identity
     builder.next_identity = index + 1
     "{builder.function.key}|{kind}|{span.start}:{span.end}|{role}|{detail}|{index}"
@@ -706,22 +762,22 @@ pub fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type,
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::new
-// The program-wide inputs move into the builder, which owns them.
-fn jet_codegen_new_builder(function: TFunc, function_index: ^JetCodegenFunctionIndex, modules: ^[SemaGraphModuleResult], field_symbols: ^[String:[JetCodegenFieldSymbolRow]], source_files: [MIRSourceFile], source_index: ^JetCodegenSourceIndex) -> JetCodegenBuilder Never! {
-    owners :: jet_codegen_owner_index(modules)
+// The program-wide inputs move into the program, which owns them.
+fn jet_codegen_new_program(function_index: ^JetCodegenFunctionIndex, modules: ^[SemaGraphModuleResult], field_symbols: ^[String:[JetCodegenFieldSymbolRow]], source_files: [MIRSourceFile], source_index: ^JetCodegenSourceIndex) -> JetCodegenProgram Never! {
+    owners := jet_codegen_owner_index(modules)
+    JetCodegenProgram{function_index: function_index, modules: modules, owners: ^owners, field_symbols: field_symbols, source_files: source_files, source_index: source_index}
+}
+
+// A builder ready to lower `function` against `program`.
+fn jet_codegen_new_builder(function: TFunc, program: JetCodegenProgram) -> JetCodegenBuilder Never! {
     generic_type_names := [String]{}
     loop param in function.generic_params -> &generic_type_names.push(param.name)
-    loop name in jet_codegen_function_type_generic_names(function, owners) {
+    loop name in jet_codegen_function_type_generic_names(function, program.owners) {
         if !generic_type_names.contains(name) -> &generic_type_names.push(name)
     }
     builder := JetCodegenBuilder{
         function: function,
-        function_index: function_index,
-        modules: modules,
-        owners: owners,
-        field_symbols: field_symbols,
-        source_files: source_files,
-        source_index: source_index,
+        constant_copies: [String:Bool]{},
         generic_type_names: generic_type_names,
         current_span: function.source_span,
         current_line: None,
@@ -772,18 +828,19 @@ fn jet_codegen_new_builder(function: TFunc, function_index: ^JetCodegenFunctionI
         window_aliases: [String]{},
         read_windows: [U64:Bool]{},
         read_alias_places: [U64:Bool]{},
+        stable_element_lets: [String:Bool]{},
         plain_try_operand: None,
         plain_try_taken: false,
     }
-    entry := jet_codegen_new_block(&builder, function.source_span, "entry")
+    entry := jet_codegen_new_block(&builder, program, function.source_span, "entry")
     builder.entry = entry
     builder.current = entry
     builder
 }
 
-// The per-function part of a `JetCodegenBuilder`: every field except the
-// program-wide inputs (function_index, modules, owners, field_symbols, source_files,
-// source_index). A new builder field that belongs to one function must be
+// The per-function part of a `JetCodegenBuilder`: every field except
+// `constant_copies`, which holds program facts. A new builder field that
+// belongs to one function must be
 // added here, to `jet_codegen_begin_function`, `jet_codegen_function_state`
 // and `jet_codegen_restore_function_state`, or it leaks between functions.
 struct JetCodegenFunctionState {
@@ -830,6 +887,7 @@ struct JetCodegenFunctionState {
     pub window_aliases: [String]
     pub read_windows: [U64:Bool]
     pub read_alias_places: [U64:Bool]
+    pub stable_element_lets: [String:Bool]
     pub plain_try_operand: String?
     pub plain_try_taken: Bool
 }
@@ -839,13 +897,13 @@ struct JetCodegenFunctionState {
 // function of a run: a builder per function copied the whole checked program
 // (all functions, modules and source files) once per function.
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::new
-fn jet_codegen_begin_function(builder: &JetCodegenBuilder, function: TFunc) Never! {
+fn jet_codegen_begin_function(builder: &JetCodegenBuilder, program: JetCodegenProgram, function: TFunc) Never! {
     generic_type_names := [String]{}
     loop param in function.generic_params -> &generic_type_names.push(param.name)
-    loop name in jet_codegen_function_type_generic_names(function, builder.owners) {
+    loop name in jet_codegen_function_type_generic_names(function, program.owners) {
         if !generic_type_names.contains(name) -> &generic_type_names.push(name)
     }
-    jet_codegen_restore_function_state(&builder, JetCodegenFunctionState{
+    jet_codegen_restore_function_state(&builder, program, JetCodegenFunctionState{
         function: function,
         current_span: function.source_span,
         current_line: None,
@@ -897,10 +955,11 @@ fn jet_codegen_begin_function(builder: &JetCodegenBuilder, function: TFunc) Neve
         window_aliases: [String]{},
         read_windows: [U64:Bool]{},
         read_alias_places: [U64:Bool]{},
+        stable_element_lets: [String:Bool]{},
         plain_try_operand: None,
         plain_try_taken: false,
     })
-    entry := jet_codegen_new_block(&builder, function.source_span, "entry")
+    entry := jet_codegen_new_block(&builder, program, function.source_span, "entry")
     builder.entry = entry
     builder.current = entry
 }
@@ -909,7 +968,7 @@ fn jet_codegen_begin_function(builder: &JetCodegenBuilder, function: TFunc) Neve
 // function lowered on the same builder. The snapshot must own its nested
 // rows independently: beginning the child resets the builder's list.
 // Rust: none (Jet-only pass)
-fn jet_codegen_function_state(builder: JetCodegenBuilder) -> JetCodegenFunctionState Never! {
+fn jet_codegen_function_state(builder: JetCodegenBuilder, program: JetCodegenProgram) -> JetCodegenFunctionState Never! {
     JetCodegenFunctionState{
         function: builder.function,
         current_span: builder.current_span,
@@ -954,13 +1013,14 @@ fn jet_codegen_function_state(builder: JetCodegenBuilder) -> JetCodegenFunctionS
         window_aliases: builder.window_aliases,
         read_windows: builder.read_windows,
         read_alias_places: builder.read_alias_places,
+        stable_element_lets: builder.stable_element_lets,
         plain_try_operand: builder.plain_try_operand,
         plain_try_taken: builder.plain_try_taken,
     }
 }
 
 // Rust: none (Jet-only pass)
-fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, state: ^JetCodegenFunctionState) Never! {
+fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, program: JetCodegenProgram, state: ^JetCodegenFunctionState) Never! {
     builder.function = state.function
     builder.current_span = state.current_span
     builder.current_line = state.current_line
@@ -1004,12 +1064,13 @@ fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, state: ^JetCo
     builder.window_aliases = state.window_aliases
     builder.read_windows = state.read_windows
     builder.read_alias_places = state.read_alias_places
+    builder.stable_element_lets = state.stable_element_lets
     builder.plain_try_operand = state.plain_try_operand
     builder.plain_try_taken = state.plain_try_taken
 }
 
-fn jet_codegen_new_block(builder: &JetCodegenBuilder, span: Span, role: String) -> MIRBlockID Never! {
-    identity := jet_codegen_identity(&builder, "block", span, role, "")
+fn jet_codegen_new_block(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, role: String) -> MIRBlockID Never! {
+    identity := jet_codegen_identity(&builder, program, "block", span, role, "")
     id := MIRBlockID{value: stable_id("mir-block", identity)}
     _ := &builder.block_positions.add(id.value, builder.blocks.len())
     &builder.blocks.push(MIRBasicBlock{
@@ -1021,7 +1082,7 @@ fn jet_codegen_new_block(builder: &JetCodegenBuilder, span: Span, role: String) 
     id
 }
 
-fn jet_codegen_switch_block(builder: &JetCodegenBuilder, block: MIRBlockID) Never! {
+fn jet_codegen_switch_block(builder: &JetCodegenBuilder, program: JetCodegenProgram, block: MIRBlockID) Never! {
     builder.current = block
 }
 
@@ -1032,38 +1093,40 @@ fn jet_codegen_is_open_terminator(terminator: MIRTerminator) -> Bool Never! {
     }
 }
 
-fn jet_codegen_block_is_open(builder: JetCodegenBuilder, block_id: MIRBlockID) -> Bool Never! {
+fn jet_codegen_block_is_open(builder: JetCodegenBuilder, program: JetCodegenProgram, block_id: MIRBlockID) -> Bool Never! {
     at :: builder.block_positions.get(block_id.value) ?? return false
     jet_codegen_is_open_terminator(builder.blocks[at].terminator)
 }
 
-fn jet_codegen_current_is_open(builder: JetCodegenBuilder) -> Bool Never! {
-    jet_codegen_block_is_open(builder, builder.current)
+fn jet_codegen_current_is_open(builder: JetCodegenBuilder, program: JetCodegenProgram) -> Bool Never! {
+    jet_codegen_block_is_open(builder, program, builder.current)
 }
 
-fn jet_codegen_terminate(builder: &JetCodegenBuilder, terminator: MIRTerminator) Never! {
+fn jet_codegen_terminate(builder: &JetCodegenBuilder, program: JetCodegenProgram, terminator: MIRTerminator) Never! {
     at :: builder.block_positions.get(builder.current.value) ?? panic("Jet codegen tried to terminate a missing MIR block")
     builder.blocks[at].terminator = terminator
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::emit
-fn jet_codegen_emit(builder: &JetCodegenBuilder, span: Span, ty: Type?, requested: MIROperation) -> MIRValueID? {
-    // D-MEM-COPYSEM1: a read parameter's place has no storage to give up.
-    // Consuming a read alias of it (a read window or a read-place binding)
-    // copies the place, exactly as consuming the copy it stands for would.
+fn jet_codegen_emit(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, ty: Type?, requested: MIROperation) -> MIRValueID? {
+    // D-MEM-COPYSEM1: a read parameter's place has no storage to give up,
+    // and neither has an element of a container (Rust `lower_receiver_place`
+    // never moves an index place). Consuming a read alias of one (a read
+    // window or a read-place binding) copies the place, exactly as consuming
+    // the copy it stands for would.
     operation := requested
-    if requested == .MovePlace(moved) && jet_codegen_read_parameter_place(builder, moved) -> operation = MIROperation.ReadPlace{place: moved}
-    operation = jet_codegen_scalar_copy_fact(builder, operation)
+    if requested == .MovePlace(moved) && jet_codegen_unmovable_place(builder, program, moved) -> operation = MIROperation.ReadPlace{place: moved}
+    operation = jet_codegen_scalar_copy_fact(builder, program, operation)
     role := "operation"
-    identity := jet_codegen_identity(&builder, "operation", span, role, "")
+    identity := jet_codegen_identity(&builder, program, "operation", span, role, "")
     op_id := MIROpID{value: stable_id("mir-op", identity)}
     result := MIRValueID?{None}
     mir_ty := MIRType?{None}
     if ty != None {
-        value_type := jet_codegen_lower_type_for_function(ty, builder)
+        value_type := jet_codegen_lower_type_for_function(ty, builder, program)
         value := MIRValueID{value: stable_id("mir-value", identity)}
-        value_ownership :: jet_codegen_operation_ownership(builder, ty, operation)
-        jet_codegen_push_value(&builder, MIRValueFact{id: value, ty: value_type, span: span, ownership: value_ownership})
+        value_ownership :: jet_codegen_operation_ownership(builder, program, ty, operation)
+        jet_codegen_push_value(&builder, program, MIRValueFact{id: value, ty: value_type, span: span, ownership: value_ownership})
         result = Val(value)
         mir_ty = Val(value_type)
     }
@@ -1071,32 +1134,32 @@ fn jet_codegen_emit(builder: &JetCodegenBuilder, span: Span, ty: Type?, requeste
     at :: builder.block_positions.get(builder.current.value) ?? panic("Jet codegen emitted into a missing MIR block")
     &builder.blocks[at].instructions.push(instruction)
     if operation == {
-        .MovePlace(place) -> jet_codegen_set_drop_live(&builder, place, false)
-        .InitializeUninit(place) -> jet_codegen_set_drop_live(&builder, place, true)
-        .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, place, true)
+        .MovePlace(place) -> jet_codegen_set_drop_live(&builder, program, place, false)
+        .InitializeUninit(place) -> jet_codegen_set_drop_live(&builder, program, place, true)
+        .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, program, place, true)
         else -> {}
     }
     result
 }
 
-fn jet_codegen_emit_value(builder: &JetCodegenBuilder, span: Span, ty: Type, operation: MIROperation) -> MIRValueID Never! {
-    jet_codegen_emit(&builder, span, Val(ty), operation) ?? panic("typed MIR operation produced no value")
+fn jet_codegen_emit_value(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, ty: Type, operation: MIROperation) -> MIRValueID Never! {
+    jet_codegen_emit(&builder, program, span, Val(ty), operation) ?? panic("typed MIR operation produced no value")
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::emit_mir_type
-fn jet_codegen_emit_mir_type(builder: &JetCodegenBuilder, span: Span, ty: MIRType, ownership: MIROwnership, requested: MIROperation) -> MIRValueID Never! {
-    operation :: jet_codegen_scalar_copy_fact(builder, requested)
-    identity := jet_codegen_identity(&builder, "operation", span, "operation", "")
+fn jet_codegen_emit_mir_type(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, ty: MIRType, ownership: MIROwnership, requested: MIROperation) -> MIRValueID Never! {
+    operation :: jet_codegen_scalar_copy_fact(builder, program, requested)
+    identity := jet_codegen_identity(&builder, program, "operation", span, "operation", "")
     op_id := MIROpID{value: stable_id("mir-op", identity)}
     value := MIRValueID{value: stable_id("mir-value", identity)}
-    jet_codegen_push_value(&builder, MIRValueFact{id: value, ty: ty, span: span, ownership: ownership})
+    jet_codegen_push_value(&builder, program, MIRValueFact{id: value, ty: ty, span: span, ownership: ownership})
     instruction := MIRInstruction{id: op_id, span: span, source_line: None, result: Val(value), ty: Val(ty), operation: operation}
     at :: builder.block_positions.get(builder.current.value) ?? panic("Jet codegen emitted into a missing MIR block")
     &builder.blocks[at].instructions.push(instruction)
     if operation == {
-        .MovePlace(place) -> jet_codegen_set_drop_live(&builder, place, false)
-        .InitializeUninit(place) -> jet_codegen_set_drop_live(&builder, place, true)
-        .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, place, true)
+        .MovePlace(place) -> jet_codegen_set_drop_live(&builder, program, place, false)
+        .InitializeUninit(place) -> jet_codegen_set_drop_live(&builder, program, place, true)
+        .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, program, place, true)
         else -> {}
     }
     value
@@ -1104,7 +1167,7 @@ fn jet_codegen_emit_mir_type(builder: &JetCodegenBuilder, span: Span, ty: MIRTyp
 
 // #4318 (mir.rs emit_mir_type_with_ownership): an implicit copy (materialize,
 // share) of a Copy-ABI value is a bitwise `Scalar` read.
-fn jet_codegen_scalar_copy_fact(builder: JetCodegenBuilder, operation: MIROperation) -> MIROperation Never! {
+fn jet_codegen_scalar_copy_fact(builder: JetCodegenBuilder, program: JetCodegenProgram, operation: MIROperation) -> MIROperation Never! {
     if operation == .Copy(value, fact) {
         at :: builder.value_positions.get(value.value) ?? return ~operation
         return MIROperation.Copy{value: value, fact: mir_copy_fact_for_ownership(fact, builder.values[at].ownership.mode)}
@@ -1122,17 +1185,17 @@ fn jet_codegen_ownership(ty: Type) -> MIROwnership Never! {
         else -> mir_owned_ownership()
     }
 }
-fn jet_codegen_operation_ownership(builder: JetCodegenBuilder, ty: Type, operation: MIROperation) -> MIROwnership Never! {
+fn jet_codegen_operation_ownership(builder: JetCodegenBuilder, program: JetCodegenProgram, ty: Type, operation: MIROperation) -> MIROwnership Never! {
     if operation == {
         .MovePlace(_) | .Move(_) -> return mir_ownership_from_access(MIRAccess.Move)
         .AddressOf(_, access) -> return mir_ownership_from_access(access)
         .RawAddressOf(_) -> return MIROwnership{mode: MIROwnershipMode.ReadBorrow, drop: MIRDropKind.NoDrop, moved: false, last_use: false, gc_root: false}
-        .Phi(incoming) -> return jet_codegen_phi_ownership(builder, incoming)
+        .Phi(incoming) -> return jet_codegen_phi_ownership(builder, program, incoming)
         else -> return jet_codegen_ownership(ty)
     }
 }
 
-fn jet_codegen_phi_ownership(builder: JetCodegenBuilder, incoming: [MIRPhiIncoming]) -> MIROwnership Never! {
+fn jet_codegen_phi_ownership(builder: JetCodegenBuilder, program: JetCodegenProgram, incoming: [MIRPhiIncoming]) -> MIROwnership Never! {
     if incoming.len() == 0 -> panic("Jet codegen produced a MIR phi with no ownership inputs")
     first := MIROwnership?{None}
     owned_inputs := true
@@ -1171,7 +1234,7 @@ fn jet_codegen_phi_ownership(builder: JetCodegenBuilder, incoming: [MIRPhiIncomi
     panic("Jet codegen phi joins incompatible ownership modes")
 }
 
-fn jet_codegen_set_drop_live(builder: &JetCodegenBuilder, place: MIRPlaceID, live: Bool) Never! {
+fn jet_codegen_set_drop_live(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, live: Bool) Never! {
     matching := JetCodegenDropLive?{None}
     loop record in builder.drop_live_places {
         if record.place == place {
@@ -1181,14 +1244,14 @@ fn jet_codegen_set_drop_live(builder: &JetCodegenBuilder, place: MIRPlaceID, liv
     }
     if matching == None -> return
     record :: matching ?? panic("Jet codegen lost a drop-live record")
-    value := jet_codegen_emit_value(&builder, record.span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: live}})
-    _ := jet_codegen_emit(&builder, record.span, None, MIROperation.WritePlace{place: record.live, value: value})
+    value := jet_codegen_emit_value(&builder, program, record.span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: live}})
+    _ := jet_codegen_emit(&builder, program, record.span, None, MIROperation.WritePlace{place: record.live, value: value})
 }
 
 // Rust `retain_place_access`: a place row referenced by several operations
 // keeps the strongest access any of them required (Move, then Write, then
 // Read), so a later read cannot invalidate an earlier borrow or move.
-fn jet_codegen_retain_place_access(builder: &JetCodegenBuilder, place: MIRPlaceID, requested: MIRAccess) Never! {
+fn jet_codegen_retain_place_access(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, requested: MIRAccess) Never! {
     loop index in 0..<builder.places.len() {
         if builder.places[index].id != place -> next
         current :: builder.places[index].access
@@ -1201,7 +1264,7 @@ fn jet_codegen_retain_place_access(builder: &JetCodegenBuilder, place: MIRPlaceI
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::register_owned_drop
-fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, place: MIRPlaceID, ty: Type, ownership: MIROwnership, initialized: Bool) Never! {
+fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, ty: Type, ownership: MIROwnership, initialized: Bool) Never! {
     if ownership.drop == MIRDropKind.NoDrop || jet_codegen_ownership(ty).mode == MIROwnershipMode.Copy -> return
     identity := "{builder.function.key}|drop-live|{place.value}"
     local_id := MIRLocalID{value: stable_id("mir-local", identity)}
@@ -1213,8 +1276,8 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, place: MIRPlaceID
             break
         }
     }
-    live_ty := jet_codegen_lower_type_for_function(Type.Bool, builder)
-    jet_codegen_push_local(&builder, MIRLocal{
+    live_ty := jet_codegen_lower_type_for_function(Type.Bool, builder, program)
+    jet_codegen_push_local(&builder, program, MIRLocal{
         id: local_id,
         name: "$drop-live.{place.value}",
         span: owner_span,
@@ -1228,7 +1291,7 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, place: MIRPlaceID
         string_view: false,
         gc_root: false,
     })
-    jet_codegen_push_place(&builder, MIRPlace{
+    jet_codegen_push_place(&builder, program, MIRPlace{
         id: live_place,
         span: owner_span,
         ty: live_ty,
@@ -1242,8 +1305,8 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, place: MIRPlaceID
     // ones bound after that exit. Entry-block writes dominate every path.
     resume_block := builder.current
     builder.current = builder.entry
-    cleared := jet_codegen_emit_value(&builder, owner_span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: false}})
-    _ := jet_codegen_emit(&builder, owner_span, None, MIROperation.WritePlace{place: live_place, value: cleared})
+    cleared := jet_codegen_emit_value(&builder, program, owner_span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: false}})
+    _ := jet_codegen_emit(&builder, program, owner_span, None, MIROperation.WritePlace{place: live_place, value: cleared})
     builder.current = resume_block
     record := JetCodegenDropLive{
         place: place,
@@ -1257,37 +1320,37 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, place: MIRPlaceID
     if builder.cleanup_frames.len() == 0 -> panic("drop cleanup registered without an active cleanup frame")
     frame_index := builder.cleanup_frames.len() - 1
     &builder.cleanup_frames[frame_index].actions.push(JetCodegenCleanupAction.DropPlace{record: record})
-    initial := jet_codegen_emit_value(&builder, owner_span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: initialized}})
-    _ := jet_codegen_emit(&builder, owner_span, None, MIROperation.WritePlace{place: live_place, value: initial})
+    initial := jet_codegen_emit_value(&builder, program, owner_span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: initialized}})
+    _ := jet_codegen_emit(&builder, program, owner_span, None, MIROperation.WritePlace{place: live_place, value: initial})
 }
-fn jet_codegen_emit_drop_cleanup(builder: &JetCodegenBuilder, record: JetCodegenDropLive) Never! {
-    if !jet_codegen_current_is_open(builder) -> return
-    live := jet_codegen_emit_value(&builder, record.span, Type.Bool, MIROperation.ReadPlace{place: record.live})
-    drop_block := jet_codegen_new_block(&builder, record.span, "drop-live")
-    next_block := jet_codegen_new_block(&builder, record.span, "drop-live-next")
-    jet_codegen_terminate(&builder, MIRTerminator.Branch{condition: live, then_target: drop_block, else_target: next_block})
-    jet_codegen_switch_block(&builder, drop_block)
+fn jet_codegen_emit_drop_cleanup(builder: &JetCodegenBuilder, program: JetCodegenProgram, record: JetCodegenDropLive) Never! {
+    if !jet_codegen_current_is_open(builder, program) -> return
+    live := jet_codegen_emit_value(&builder, program, record.span, Type.Bool, MIROperation.ReadPlace{place: record.live})
+    drop_block := jet_codegen_new_block(&builder, program, record.span, "drop-live")
+    next_block := jet_codegen_new_block(&builder, program, record.span, "drop-live-next")
+    jet_codegen_terminate(&builder, program, MIRTerminator.Branch{condition: live, then_target: drop_block, else_target: next_block})
+    jet_codegen_switch_block(&builder, program, drop_block)
     // The cleanup consumes the owned value, so its shared place row carries
     // Move access (Rust `emit_owned_place_cleanup`).
-    jet_codegen_retain_place_access(&builder, record.place, MIRAccess.Move)
-    value := jet_codegen_emit_value(&builder, record.span, record.ty, MIROperation.MovePlace{place: record.place})
-    scope_close := jet_codegen_scope_end_close_function(builder, record.ty)
+    jet_codegen_retain_place_access(&builder, program, record.place, MIRAccess.Move)
+    value := jet_codegen_emit_value(&builder, program, record.span, record.ty, MIROperation.MovePlace{place: record.place})
+    scope_close := jet_codegen_scope_end_close_function(builder, program, record.ty)
     if scope_close == {
-        .Val(function) -> jet_codegen_emit_scope_end_close(&builder, function, record.ty, value, record.span)
-        .None -> _ := jet_codegen_emit(&builder, record.span, None, MIROperation.Drop{value: value, kind: record.kind})
+        .Val(function) -> jet_codegen_emit_scope_end_close(&builder, program, function, record.ty, value, record.span)
+        .None -> _ := jet_codegen_emit(&builder, program, record.span, None, MIROperation.Drop{value: value, kind: record.kind})
     }
-    if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MIRTerminator.Jump{target: next_block})
-    jet_codegen_switch_block(&builder, next_block)
+    if jet_codegen_current_is_open(builder, program) -> jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: next_block})
+    jet_codegen_switch_block(&builder, program, next_block)
 }
 
-fn jet_codegen_emit_cleanup_action(builder: &JetCodegenBuilder, action: JetCodegenCleanupAction) Never! {
-    if !jet_codegen_current_is_open(builder) -> return
+fn jet_codegen_emit_cleanup_action(builder: &JetCodegenBuilder, program: JetCodegenProgram, action: JetCodegenCleanupAction) Never! {
+    if !jet_codegen_current_is_open(builder, program) -> return
     if action == {
         .DeferredCall(thunk) -> {
             current_span := builder.current_span
-            _ := jet_codegen_emit(&builder, current_span, None, MIROperation.IndirectCall{callee: thunk, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+            _ := jet_codegen_emit(&builder, program, current_span, None, MIROperation.IndirectCall{callee: thunk, args: [MIRCallArg]{}, type_args: [MIRType]{}})
         }
-        .DropPlace(record) -> jet_codegen_emit_drop_cleanup(&builder, record)
+        .DropPlace(record) -> jet_codegen_emit_drop_cleanup(&builder, program, record)
     }
 }
 
@@ -1301,7 +1364,7 @@ fn jet_codegen_cleanup_action_is_drop(action: JetCodegenCleanupAction) -> Bool {
 /// D-SHAPE-RESOURCE1=A: explicit deferred actions run first in reverse
 /// registration order; the automatic safety net then closes or releases every
 /// still-live local in reverse declaration order.
-fn jet_codegen_emit_cleanup_frame(builder: &JetCodegenBuilder, frame_index: Int) Never! {
+fn jet_codegen_emit_cleanup_frame(builder: &JetCodegenBuilder, program: JetCodegenProgram, frame_index: Int) Never! {
     if frame_index < 0 || frame_index >= builder.cleanup_frames.len() -> panic("MIR cleanup frame index is outside the active stack")
     frame := builder.cleanup_frames[frame_index]
     loop automatic in [false, true] {
@@ -1310,39 +1373,39 @@ fn jet_codegen_emit_cleanup_frame(builder: &JetCodegenBuilder, frame_index: Int)
             index -= 1
             action := frame.actions[index]
             if jet_codegen_cleanup_action_is_drop(action) != automatic -> next
-            jet_codegen_emit_cleanup_action(&builder, action)
-            if !jet_codegen_current_is_open(builder) -> return
+            jet_codegen_emit_cleanup_action(&builder, program, action)
+            if !jet_codegen_current_is_open(builder, program) -> return
         }
     }
-    if frame.owner != None && jet_codegen_current_is_open(builder) {
+    if frame.owner != None && jet_codegen_current_is_open(builder, program) {
         scope :: frame.owner ?? panic("owned cleanup frame lost its MIR scope")
         current_span := builder.current_span
-        _ := jet_codegen_emit(&builder, current_span, None, MIROperation.ScopeExit{scope: scope})
+        _ := jet_codegen_emit(&builder, program, current_span, None, MIROperation.ScopeExit{scope: scope})
     }
 }
 
-fn jet_codegen_emit_cleanups_from_frame_depth(builder: &JetCodegenBuilder, frame_depth: Int) Never! {
+fn jet_codegen_emit_cleanups_from_frame_depth(builder: &JetCodegenBuilder, program: JetCodegenProgram, frame_depth: Int) Never! {
     if frame_depth < 0 || frame_depth > builder.cleanup_frames.len() -> panic("MIR cleanup depth is outside the active stack")
     index := builder.cleanup_frames.len()
     loop index > frame_depth {
         index -= 1
-        jet_codegen_emit_cleanup_frame(&builder, index)
-        if !jet_codegen_current_is_open(builder) -> return
+        jet_codegen_emit_cleanup_frame(&builder, program, index)
+        if !jet_codegen_current_is_open(builder, program) -> return
     }
 }
 
-fn jet_codegen_emit_explicit_stop_cleanups(builder: &JetCodegenBuilder) Never! {
-    jet_codegen_emit_cleanups_from_frame_depth(&builder, 0)
+fn jet_codegen_emit_explicit_stop_cleanups(builder: &JetCodegenBuilder, program: JetCodegenProgram) Never! {
+    jet_codegen_emit_cleanups_from_frame_depth(&builder, program, 0)
 }
 
-fn jet_codegen_register_deferred_call(builder: &JetCodegenBuilder, thunk: MIRValueID) Never! {
+fn jet_codegen_register_deferred_call(builder: &JetCodegenBuilder, program: JetCodegenProgram, thunk: MIRValueID) Never! {
     if builder.cleanup_frames.len() == 0 -> panic("defer registered without an active cleanup frame")
     frame_index := builder.cleanup_frames.len() - 1
     &builder.cleanup_frames[frame_index].actions.push(JetCodegenCleanupAction.DeferredCall{thunk: thunk})
     builder.cleanup_frames[frame_index].explicit = builder.cleanup_frames[frame_index].explicit + 1
 }
 
-fn jet_codegen_terminate_cleanup_frame_depth(builder: JetCodegenBuilder, terminator: MIRTerminator, depth: Int) -> Int Never! {
+fn jet_codegen_terminate_cleanup_frame_depth(builder: JetCodegenBuilder, program: JetCodegenProgram, terminator: MIRTerminator, depth: Int) -> Int Never! {
     if terminator == {
         .Return(_) -> {
             if depth != -1 -> panic("function return carries a loop cleanup depth")
@@ -1379,14 +1442,14 @@ fn jet_codegen_terminate_cleanup_frame_depth(builder: JetCodegenBuilder, termina
 // a drop chain its exits share (jet_codegen_seal_exit_chains), so cleanup code
 // grows with the frame's locals, not with exits times locals. Exits that
 // cannot share a chain clean up inline on their own path.
-fn jet_codegen_terminate_with_owned_cleanup(builder: &JetCodegenBuilder, terminator: MIRTerminator, depth: Int) -> Bool {
-    if !jet_codegen_prepare_transaction_exit(&builder, terminator) -> return false
+fn jet_codegen_terminate_with_owned_cleanup(builder: &JetCodegenBuilder, program: JetCodegenProgram, terminator: MIRTerminator, depth: Int) -> Bool {
+    if !jet_codegen_prepare_transaction_exit(&builder, program, terminator) -> return false
     if depth < -1 -> panic("checked MIR cleanup depth is negative")
-    frame_depth := jet_codegen_terminate_cleanup_frame_depth(builder, terminator, depth)
-    if jet_codegen_enter_exit_chain(&builder, terminator, frame_depth) -> return true
-    jet_codegen_emit_cleanups_from_frame_depth(&builder, frame_depth)
-    if !jet_codegen_current_is_open(builder) -> return false
-    jet_codegen_terminate(&builder, terminator)
+    frame_depth := jet_codegen_terminate_cleanup_frame_depth(builder, program, terminator, depth)
+    if jet_codegen_enter_exit_chain(&builder, program, terminator, frame_depth) -> return true
+    jet_codegen_emit_cleanups_from_frame_depth(&builder, program, frame_depth)
+    if !jet_codegen_current_is_open(builder, program) -> return false
+    jet_codegen_terminate(&builder, program, terminator)
     true
 }
 
@@ -1394,7 +1457,7 @@ fn jet_codegen_terminate_with_owned_cleanup(builder: &JetCodegenBuilder, termina
 // cleans up inline instead: no frame it leaves owes cleanup, or it carries a
 // value no slot can hold (a break value feeds its loop's phi by predecessor;
 // a borrow stays on its own path).
-fn jet_codegen_enter_exit_chain(builder: &JetCodegenBuilder, terminator: MIRTerminator, frame_depth: Int) -> Bool Never! {
+fn jet_codegen_enter_exit_chain(builder: &JetCodegenBuilder, program: JetCodegenProgram, terminator: MIRTerminator, frame_depth: Int) -> Bool Never! {
     owes_cleanup := false
     index := frame_depth
     loop index < builder.cleanup_frames.len() {
@@ -1408,9 +1471,9 @@ fn jet_codegen_enter_exit_chain(builder: &JetCodegenBuilder, terminator: MIRTerm
     if terminator == {
         .Return(value) -> {
             if value == .Val(returned) {
-                place :: jet_codegen_exit_value_slot(&builder, returned) ?? return false
+                place :: jet_codegen_exit_value_slot(&builder, program, returned) ?? return false
                 current_span := builder.current_span
-                _ := jet_codegen_emit(&builder, current_span, None, MIROperation.WritePlace{place: place, value: returned})
+                _ := jet_codegen_emit(&builder, program, current_span, None, MIROperation.WritePlace{place: place, value: returned})
                 slot = Val(place)
                 tail = MIRTerminator.Return{value: None}
                 key = "return|{place.value}"
@@ -1426,15 +1489,15 @@ fn jet_codegen_enter_exit_chain(builder: &JetCodegenBuilder, terminator: MIRTerm
         else -> return false
     }
     top := builder.cleanup_frames.len() - 1
-    entry := jet_codegen_exit_chain_entry(&builder, top, key, tail, slot, frame_depth)
-    jet_codegen_terminate(&builder, MIRTerminator.Jump{target: entry})
+    entry := jet_codegen_exit_chain_entry(&builder, program, top, key, tail, slot, frame_depth)
+    jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: entry})
     true
 }
 
 // The local a returned value waits in while its drop chain runs, one per
 // returned type; None for a borrow.
 // Rust: none (Jet-only pass)
-fn jet_codegen_exit_value_slot(builder: &JetCodegenBuilder, value: MIRValueID) -> MIRPlaceID? Never! {
+fn jet_codegen_exit_value_slot(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: MIRValueID) -> MIRPlaceID? Never! {
     // The returned value was produced just before the exit, so the scan from
     // the newest fact is short.
     fact := MIRValueFact?{None}
@@ -1462,7 +1525,7 @@ fn jet_codegen_exit_value_slot(builder: &JetCodegenBuilder, value: MIRValueID) -
     ownership := row.ownership
     ownership.moved = false
     ownership.last_use = false
-    jet_codegen_push_local(&builder, MIRLocal{
+    jet_codegen_push_local(&builder, program, MIRLocal{
         id: local_id,
         name: "$exit-value.{ordinal}",
         span: span,
@@ -1476,7 +1539,7 @@ fn jet_codegen_exit_value_slot(builder: &JetCodegenBuilder, value: MIRValueID) -
         string_view: false,
         gc_root: false,
     })
-    jet_codegen_push_place(&builder, MIRPlace{
+    jet_codegen_push_place(&builder, program, MIRPlace{
         id: place,
         span: span,
         ty: row.ty,
@@ -1491,23 +1554,23 @@ fn jet_codegen_exit_value_slot(builder: &JetCodegenBuilder, value: MIRValueID) -
 
 // The block an exit from frame `depth` toward `key` jumps to: one per target
 // and per count of the frame's explicit actions so far.
-fn jet_codegen_exit_chain_entry(builder: &JetCodegenBuilder, depth: Int, key: String, tail: MIRTerminator, slot: MIRPlaceID?, cut: Int) -> MIRBlockID Never! {
+fn jet_codegen_exit_chain_entry(builder: &JetCodegenBuilder, program: JetCodegenProgram, depth: Int, key: String, tail: MIRTerminator, slot: MIRPlaceID?, cut: Int) -> MIRBlockID Never! {
     explicit := builder.cleanup_frames[depth].explicit
     loop row in builder.cleanup_frames[depth].pending_exits {
         if row.key == key && row.explicit == explicit -> return row.block
     }
     current_span := builder.current_span
-    block := jet_codegen_new_block(&builder, current_span, "cleanup-chain")
+    block := jet_codegen_new_block(&builder, program, current_span, "cleanup-chain")
     &builder.cleanup_frames[depth].pending_exits.push(JetCodegenPendingExit{key: key, terminator: tail, slot: slot, explicit: explicit, cut: cut, block: block})
     block
 }
 
 // The block that ends every drop chain toward `chain.key` with the exit.
-fn jet_codegen_exit_tail(builder: &JetCodegenBuilder, chain: JetCodegenPendingExit) -> MIRBlockID Never! {
+fn jet_codegen_exit_tail(builder: &JetCodegenBuilder, program: JetCodegenProgram, chain: JetCodegenPendingExit) -> MIRBlockID Never! {
     if builder.exit_tails.get(chain.key) == .Val(known) -> return MIRBlockID{value: known}
     current_span := builder.current_span
-    block := jet_codegen_new_block(&builder, current_span, "cleanup-chain-exit")
-    jet_codegen_switch_block(&builder, block)
+    block := jet_codegen_new_block(&builder, program, current_span, "cleanup-chain-exit")
+    jet_codegen_switch_block(&builder, program, block)
     terminator := chain.terminator
     if chain.slot == .Val(place) {
         slot_ty := MIRType?{None}
@@ -1515,22 +1578,22 @@ fn jet_codegen_exit_tail(builder: &JetCodegenBuilder, chain: JetCodegenPendingEx
             if existing.place == place -> slot_ty = Val(existing.ty)
         }
         ty :: slot_ty ?? panic("exit value slot has no type")
-        value := jet_codegen_emit_mir_type(&builder, current_span, ty, mir_ownership_from_access(MIRAccess.Move), MIROperation.MovePlace{place: place})
+        value := jet_codegen_emit_mir_type(&builder, program, current_span, ty, mir_ownership_from_access(MIRAccess.Move), MIROperation.MovePlace{place: place})
         terminator = MIRTerminator.Return{value: Val(value)}
     }
-    jet_codegen_terminate(&builder, terminator)
+    jet_codegen_terminate(&builder, program, terminator)
     _ := &builder.exit_tails.add(chain.key, block.value)
     block
 }
 
 // The pending entry block for `key` after `explicit` explicit actions, or a
 // new link block when no exit entered there.
-fn jet_codegen_exit_chain_block(builder: &JetCodegenBuilder, pending: [JetCodegenPendingExit], key: String, explicit: Int) -> MIRBlockID Never! {
+fn jet_codegen_exit_chain_block(builder: &JetCodegenBuilder, program: JetCodegenProgram, pending: [JetCodegenPendingExit], key: String, explicit: Int) -> MIRBlockID Never! {
     loop row in pending {
         if row.key == key && row.explicit == explicit -> return row.block
     }
     current_span := builder.current_span
-    jet_codegen_new_block(&builder, current_span, "cleanup-chain")
+    jet_codegen_new_block(&builder, program, current_span, "cleanup-chain")
 }
 
 // Lower the drop chains exits from frame `depth` jump to, using the frame's
@@ -1542,7 +1605,7 @@ fn jet_codegen_exit_chain_block(builder: &JetCodegenBuilder, pending: [JetCodege
 // false on an exit taken before the local was bound, so one release sequence
 // serves every exit of the frame; explicit actions run unconditionally, hence
 // the per-count entries. Runs when the frame closes and at the end of the body.
-fn jet_codegen_seal_exit_chains(builder: &JetCodegenBuilder, depth: Int) Never! {
+fn jet_codegen_seal_exit_chains(builder: &JetCodegenBuilder, program: JetCodegenProgram, depth: Int) Never! {
     resume_block := builder.current
     loop builder.cleanup_frames[depth].pending_exits.len() > 0 {
         pending := builder.cleanup_frames[depth].pending_exits
@@ -1560,50 +1623,50 @@ fn jet_codegen_seal_exit_chains(builder: &JetCodegenBuilder, depth: Int) Never! 
         loop row in pending {
             if sealed.contains(row.key) -> next
             &sealed.push(row.key)
-            following := if depth <= row.cut -> jet_codegen_exit_tail(&builder, row) else -> jet_codegen_exit_chain_entry(&builder, depth - 1, row.key, row.terminator, row.slot, row.cut)
+            following := if depth <= row.cut -> jet_codegen_exit_tail(&builder, program, row) else -> jet_codegen_exit_chain_entry(&builder, program, depth - 1, row.key, row.terminator, row.slot, row.cut)
             deepest := 0
             loop other in pending {
                 if other.key == row.key && other.explicit > deepest -> deepest = other.explicit
             }
             if deepest > explicit.len() -> panic("drop chain entry outlives its explicit cleanup")
-            block := jet_codegen_exit_chain_block(&builder, pending, row.key, 0)
-            jet_codegen_switch_block(&builder, block)
+            block := jet_codegen_exit_chain_block(&builder, program, pending, row.key, 0)
+            jet_codegen_switch_block(&builder, program, block)
             index := automatic.len()
             loop index > 0 {
                 index -= 1
-                jet_codegen_emit_cleanup_action(&builder, automatic[index])
+                jet_codegen_emit_cleanup_action(&builder, program, automatic[index])
             }
-            if frame.owner != None && jet_codegen_current_is_open(builder) {
+            if frame.owner != None && jet_codegen_current_is_open(builder, program) {
                 scope :: frame.owner ?? panic("owned cleanup frame lost its MIR scope")
                 current_span := builder.current_span
-                _ := jet_codegen_emit(&builder, current_span, None, MIROperation.ScopeExit{scope: scope})
+                _ := jet_codegen_emit(&builder, program, current_span, None, MIROperation.ScopeExit{scope: scope})
             }
-            if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MIRTerminator.Jump{target: following})
+            if jet_codegen_current_is_open(builder, program) -> jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: following})
             count := 1
             loop count <= deepest {
                 previous := block
-                block = jet_codegen_exit_chain_block(&builder, pending, row.key, count)
-                jet_codegen_switch_block(&builder, block)
-                jet_codegen_emit_cleanup_action(&builder, explicit[count - 1])
-                if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MIRTerminator.Jump{target: previous})
+                block = jet_codegen_exit_chain_block(&builder, program, pending, row.key, count)
+                jet_codegen_switch_block(&builder, program, block)
+                jet_codegen_emit_cleanup_action(&builder, program, explicit[count - 1])
+                if jet_codegen_current_is_open(builder, program) -> jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: previous})
                 count += 1
             }
         }
     }
-    jet_codegen_switch_block(&builder, resume_block)
+    jet_codegen_switch_block(&builder, program, resume_block)
 }
 
 // Seal every active frame's drop chains, innermost first, so each enclosing
 // frame sees the entries its inner chains continue into.
-fn jet_codegen_seal_all_exit_chains(builder: &JetCodegenBuilder) Never! {
+fn jet_codegen_seal_all_exit_chains(builder: &JetCodegenBuilder, program: JetCodegenProgram) Never! {
     depth := builder.cleanup_frames.len()
     loop depth > 0 {
         depth -= 1
-        jet_codegen_seal_exit_chains(&builder, depth)
+        jet_codegen_seal_exit_chains(&builder, program, depth)
     }
 }
 
-fn jet_codegen_enter_scope(builder: &JetCodegenBuilder, kind: MIRScopeKind, span: Span, name: String?) -> MIRScopeID Never! {
+fn jet_codegen_enter_scope(builder: &JetCodegenBuilder, program: JetCodegenProgram, kind: MIRScopeKind, span: Span, name: String?) -> MIRScopeID Never! {
     detail := if name != None -> name else -> ""
     role := if kind == {
         .Unsafe -> "Unsafe"
@@ -1622,10 +1685,10 @@ fn jet_codegen_enter_scope(builder: &JetCodegenBuilder, kind: MIRScopeKind, span
         .ScopeMember -> "ScopeMember"
         .DebugOnly -> "DebugOnly"
     }
-    identity := jet_codegen_identity(&builder, "scope", span, role, detail)
+    identity := jet_codegen_identity(&builder, program, "scope", span, role, detail)
     scope := MIRScopeID{value: stable_id("mir-scope", identity)}
     &builder.scopes.push(MIRScope{id: scope, kind: kind, span: span, name: name, deadline: None, facts: [MIRScopeFact]{}})
-    _ := jet_codegen_emit(&builder, span, None, MIROperation.ScopeEnter{scope: scope, test_member: None})
+    _ := jet_codegen_emit(&builder, program, span, None, MIROperation.ScopeEnter{scope: scope, test_member: None})
     &builder.cleanup_frames.push(JetCodegenCleanupFrame{
         owner: Val(scope),
         depth: builder.scope_depth,
@@ -1638,7 +1701,7 @@ fn jet_codegen_enter_scope(builder: &JetCodegenBuilder, kind: MIRScopeKind, span
     scope
 }
 
-fn jet_codegen_set_scope_fact(builder: &JetCodegenBuilder, scope: MIRScopeID, key: String, value: String) Never! {
+fn jet_codegen_set_scope_fact(builder: &JetCodegenBuilder, program: JetCodegenProgram, scope: MIRScopeID, key: String, value: String) Never! {
     loop index in 0..<builder.scopes.len() {
         if builder.scopes[index].id == scope {
             fact_index := 0
@@ -1656,7 +1719,7 @@ fn jet_codegen_set_scope_fact(builder: &JetCodegenBuilder, scope: MIRScopeID, ke
     panic("MIR scope fact targets a missing scope row")
 }
 
-fn jet_codegen_set_scope_deadline(builder: &JetCodegenBuilder, scope: MIRScopeID, deadline: MIRValueID) Never! {
+fn jet_codegen_set_scope_deadline(builder: &JetCodegenBuilder, program: JetCodegenProgram, scope: MIRScopeID, deadline: MIRValueID) Never! {
     loop index in 0..<builder.scopes.len() {
         if builder.scopes[index].id == scope {
             builder.scopes[index].deadline = Val(deadline)
@@ -1666,7 +1729,7 @@ fn jet_codegen_set_scope_deadline(builder: &JetCodegenBuilder, scope: MIRScopeID
     panic("MIR scope deadline targets a missing scope row")
 }
 
-fn jet_codegen_attach_scope_member(builder: &JetCodegenBuilder, scope: MIRScopeID, member: MIRTestScopeMember) Never! {
+fn jet_codegen_attach_scope_member(builder: &JetCodegenBuilder, program: JetCodegenProgram, scope: MIRScopeID, member: MIRTestScopeMember) Never! {
     index := 0
     loop index < builder.blocks.len() {
         if builder.blocks[index].id == builder.current {
@@ -1693,13 +1756,13 @@ fn jet_codegen_attach_scope_member(builder: &JetCodegenBuilder, scope: MIRScopeI
     panic("MIR scope member scope-enter block is missing")
 }
 
-fn jet_codegen_leave_scope(builder: &JetCodegenBuilder, scope: MIRScopeID) Never! {
+fn jet_codegen_leave_scope(builder: &JetCodegenBuilder, program: JetCodegenProgram, scope: MIRScopeID) Never! {
     if builder.cleanup_frames.len() <= 1 -> panic("MIR scope cleanup frame underflow")
     frame_index := builder.cleanup_frames.len() - 1
     frame := builder.cleanup_frames[frame_index]
     if frame.owner != Val(scope) -> panic("MIR scope exit does not match the active cleanup frame")
-    jet_codegen_seal_exit_chains(&builder, frame_index)
-    jet_codegen_emit_cleanup_frame(&builder, frame_index)
+    jet_codegen_seal_exit_chains(&builder, program, frame_index)
+    jet_codegen_emit_cleanup_frame(&builder, program, frame_index)
     _ := &builder.cleanup_frames.pop()
     loop builder.drop_live_places.len() > frame.drop_live_start -> _ := &builder.drop_live_places.pop()
     loop builder.bindings.len() > frame.binding_start -> _ := &builder.bindings.pop()
@@ -1714,9 +1777,9 @@ fn jet_codegen_leave_scope(builder: &JetCodegenBuilder, scope: MIRScopeID) Never
 // unrolls `if self.$field.compare(rhs.$field) == {…}` per recursive field,
 // and every copy hoists its subject into the same `it` symbol.
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::reserve_identity
-fn jet_codegen_local_identity(builder: &JetCodegenBuilder, local: TLocal) -> String Never! {
-    symbol :: local.symbol_id ?? return jet_codegen_identity(&builder, "local", local.span, local.name, "")
-    if local.name == "_" -> return jet_codegen_identity(&builder, "local", local.span, local.name, "")
+fn jet_codegen_local_identity(builder: &JetCodegenBuilder, program: JetCodegenProgram, local: TLocal) -> String Never! {
+    symbol :: local.symbol_id ?? return jet_codegen_identity(&builder, program, "local", local.span, local.name, "")
+    if local.name == "_" -> return jet_codegen_identity(&builder, program, "local", local.span, local.name, "")
     base :: "{builder.function.key}|local|{symbol.key}"
     identity := base
     occurrence := 0
@@ -1728,12 +1791,12 @@ fn jet_codegen_local_identity(builder: &JetCodegenBuilder, local: TLocal) -> Str
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::bind_local
-fn jet_codegen_bind_local_with_base(builder: &JetCodegenBuilder, local: TLocal, ty: Type, mutable: Bool, parameter: MIRValueID?, capture: MIRValueID?, parameter_access: MIRAccess?, capture_ownership: MIROwnership?, string_view: Bool) -> MIRPlaceID Never! {
+fn jet_codegen_bind_local_with_base(builder: &JetCodegenBuilder, program: JetCodegenProgram, local: TLocal, ty: Type, mutable: Bool, parameter: MIRValueID?, capture: MIRValueID?, parameter_access: MIRAccess?, capture_ownership: MIROwnership?, string_view: Bool) -> MIRPlaceID Never! {
     symbol_key :: (local.symbol_id ?? SymbolID{key: ""}).key
-    identity :: jet_codegen_local_identity(&builder, local)
+    identity :: jet_codegen_local_identity(&builder, program, local)
     local_id := MIRLocalID{value: stable_id("mir-local", identity)}
     place_id := MIRPlaceID{value: stable_id("mir-place", "{identity}|place")}
-    mir_ty := jet_codegen_lower_type_for_function(ty, builder)
+    mir_ty := jet_codegen_lower_type_for_function(ty, builder, program)
     access := MIRAccess.Read
     if mutable -> access = MIRAccess.Write
     ownership := jet_codegen_ownership(ty)
@@ -1752,7 +1815,7 @@ fn jet_codegen_bind_local_with_base(builder: &JetCodegenBuilder, local: TLocal, 
         access = convention
         ownership = capture_ownership ?? mir_ownership_from_access(convention)
     }
-    jet_codegen_push_place(&builder, MIRPlace{
+    jet_codegen_push_place(&builder, program, MIRPlace{
         id: place_id,
         span: local.span,
         ty: mir_ty,
@@ -1761,7 +1824,7 @@ fn jet_codegen_bind_local_with_base(builder: &JetCodegenBuilder, local: TLocal, 
         access: access,
         persist_key: local.persist_key,
     })
-    jet_codegen_push_local(&builder, MIRLocal{
+    jet_codegen_push_local(&builder, program, MIRLocal{
         id: local_id,
         name: local.name,
         span: local.span,
@@ -1780,26 +1843,26 @@ fn jet_codegen_bind_local_with_base(builder: &JetCodegenBuilder, local: TLocal, 
     if {
         parameter != None -> {
             should_drop = should_drop && ownership.mode == MIROwnershipMode.Move
-            if should_drop -> jet_codegen_register_drop_live(&builder, place_id, ty, ownership, true)
+            if should_drop -> jet_codegen_register_drop_live(&builder, program, place_id, ty, ownership, true)
         } else -> {
-            if capture == None && should_drop -> jet_codegen_register_drop_live(&builder, place_id, ty, ownership, false)
+            if capture == None && should_drop -> jet_codegen_register_drop_live(&builder, program, place_id, ty, ownership, false)
         }
     }
     place_id
 }
 
-fn jet_codegen_bind_local(builder: &JetCodegenBuilder, local: TLocal, ty: Type, mutable: Bool, parameter: MIRValueID?, parameter_access: MIRAccess?, string_view: Bool) -> MIRPlaceID Never! {
-    jet_codegen_bind_local_with_base(&builder, local, ty, mutable, parameter, None, parameter_access, None, string_view)
+fn jet_codegen_bind_local(builder: &JetCodegenBuilder, program: JetCodegenProgram, local: TLocal, ty: Type, mutable: Bool, parameter: MIRValueID?, parameter_access: MIRAccess?, string_view: Bool) -> MIRPlaceID Never! {
+    jet_codegen_bind_local_with_base(&builder, program, local, ty, mutable, parameter, None, parameter_access, None, string_view)
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::bind_local_alias
-fn jet_codegen_bind_local_alias(builder: &JetCodegenBuilder, local: TLocal, ty: Type, place: MIRPlaceID, mutable: Bool) -> MIRPlaceID Never! {
+fn jet_codegen_bind_local_alias(builder: &JetCodegenBuilder, program: JetCodegenProgram, local: TLocal, ty: Type, place: MIRPlaceID, mutable: Bool) -> MIRPlaceID Never! {
     symbol_key :: (local.symbol_id ?? SymbolID{key: ""}).key
-    identity :: jet_codegen_local_identity(&builder, local)
+    identity :: jet_codegen_local_identity(&builder, program, local)
     local_id := MIRLocalID{value: stable_id("mir-local", identity)}
     access := if mutable -> MIRAccess.Write else -> MIRAccess.Read
-    lowered_ty :: jet_codegen_lower_type_for_function(ty, builder)
-    jet_codegen_push_local(&builder, MIRLocal{
+    lowered_ty :: jet_codegen_lower_type_for_function(ty, builder, program)
+    jet_codegen_push_local(&builder, program, MIRLocal{
         id: local_id,
         name: local.name,
         span: local.span,
@@ -1818,11 +1881,11 @@ fn jet_codegen_bind_local_alias(builder: &JetCodegenBuilder, local: TLocal, ty: 
     ~place
 }
 
-fn jet_codegen_bind_capture_local(builder: &JetCodegenBuilder, local: TLocal, ty: Type, value: MIRValueID, access: MIRAccess, ownership: MIROwnership, string_view: Bool) -> MIRPlaceID Never! {
-    jet_codegen_bind_local_with_base(&builder, local, ty, access == MIRAccess.Write, None, Val(value), Val(access), Val(ownership), string_view)
+fn jet_codegen_bind_capture_local(builder: &JetCodegenBuilder, program: JetCodegenProgram, local: TLocal, ty: Type, value: MIRValueID, access: MIRAccess, ownership: MIROwnership, string_view: Bool) -> MIRPlaceID Never! {
+    jet_codegen_bind_local_with_base(&builder, program, local, ty, access == MIRAccess.Write, None, Val(value), Val(access), Val(ownership), string_view)
 }
 
-fn jet_codegen_find_binding(builder: JetCodegenBuilder, name: String) -> JetCodegenBinding? {
+fn jet_codegen_find_binding(builder: JetCodegenBuilder, program: JetCodegenProgram, name: String) -> JetCodegenBinding? {
     index := builder.bindings.len() - 1
     loop index >= 0 {
         binding :: builder.bindings[index]
@@ -1831,8 +1894,8 @@ fn jet_codegen_find_binding(builder: JetCodegenBuilder, name: String) -> JetCode
     }
     None
 }
-fn jet_codegen_find_binding_for_local(builder: JetCodegenBuilder, local: TLocal) -> JetCodegenBinding? {
-    if local.symbol_id == None -> return jet_codegen_find_binding(builder, local.name)
+fn jet_codegen_find_binding_for_local(builder: JetCodegenBuilder, program: JetCodegenProgram, local: TLocal) -> JetCodegenBinding? {
+    if local.symbol_id == None -> return jet_codegen_find_binding(builder, program, local.name)
     symbol :: local.symbol_id ?? return None
     index := builder.bindings.len() - 1
     loop index >= 0 {
@@ -1843,7 +1906,7 @@ fn jet_codegen_find_binding_for_local(builder: JetCodegenBuilder, local: TLocal)
     None
 }
 // Rust: none (Jet-only pass)
-fn jet_codegen_push_place(builder: &JetCodegenBuilder, place: MIRPlace) Never! {
+fn jet_codegen_push_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlace) Never! {
     if builder.place_positions.get(place.id.value) == None {
         _ := &builder.place_positions.add(place.id.value, builder.places.len())
     }
@@ -1851,7 +1914,7 @@ fn jet_codegen_push_place(builder: &JetCodegenBuilder, place: MIRPlace) Never! {
 }
 
 // Rust: none (Jet-only pass)
-fn jet_codegen_push_local(builder: &JetCodegenBuilder, local: MIRLocal) Never! {
+fn jet_codegen_push_local(builder: &JetCodegenBuilder, program: JetCodegenProgram, local: MIRLocal) Never! {
     if builder.local_positions.get(local.id.value) == None {
         _ := &builder.local_positions.add(local.id.value, builder.locals.len())
     }
@@ -1859,7 +1922,7 @@ fn jet_codegen_push_local(builder: &JetCodegenBuilder, local: MIRLocal) Never! {
 }
 
 // Rust: none (Jet-only pass)
-fn jet_codegen_push_value(builder: &JetCodegenBuilder, fact: MIRValueFact) Never! {
+fn jet_codegen_push_value(builder: &JetCodegenBuilder, program: JetCodegenProgram, fact: MIRValueFact) Never! {
     _ := &builder.value_positions.add(fact.id.value, builder.values.len())
     &builder.values.push(fact)
 }
@@ -1867,7 +1930,7 @@ fn jet_codegen_push_value(builder: &JetCodegenBuilder, fact: MIRValueFact) Never
 // Rebuild after drop-flag compaction; places and locals keep their first
 // matching row, while value ownership lookup keeps its last matching row.
 // Rust: none (Jet-only pass)
-fn jet_codegen_reindex_lowering_rows(builder: &JetCodegenBuilder) Never! {
+fn jet_codegen_reindex_lowering_rows(builder: &JetCodegenBuilder, program: JetCodegenProgram) Never! {
     builder.place_positions = [U64:Int]{}
     loop (index, place) in builder.places {
         if builder.place_positions.get(place.id.value) == None {
@@ -1887,21 +1950,21 @@ fn jet_codegen_reindex_lowering_rows(builder: &JetCodegenBuilder) Never! {
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::place_for_local
-fn jet_codegen_find_place(builder: JetCodegenBuilder, place_id: MIRPlaceID) -> MIRPlace? {
+fn jet_codegen_find_place(builder: JetCodegenBuilder, program: JetCodegenProgram, place_id: MIRPlaceID) -> MIRPlace? {
     index :: builder.place_positions.get(place_id.value) ?? return None
     Val(builder.places[index])
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::project_field_place
-fn jet_codegen_project_field_place(builder: &JetCodegenBuilder, base: MIRPlaceID, span: Span, ty: Type, field: MIRFieldID) -> MIRPlaceID Never! {
-    base_place :: jet_codegen_find_place(builder, base) ?? panic("checked field place has no MIR base place")
+fn jet_codegen_project_field_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, base: MIRPlaceID, span: Span, ty: Type, field: MIRFieldID) -> MIRPlaceID Never! {
+    base_place :: jet_codegen_find_place(builder, program, base) ?? panic("checked field place has no MIR base place")
     projections := [MIRProjection]{}
     loop projection in base_place.projections -> &projections.push(projection)
     &projections.push(MIRProjection.Field{field: field, span: span})
-    identity := jet_codegen_identity(&builder, "place", span, "field", "{base.value}|{field.value}")
+    identity := jet_codegen_identity(&builder, program, "place", span, "field", "{base.value}|{field.value}")
     place_id := MIRPlaceID{value: stable_id("mir-place", identity)}
-    lowered_ty :: jet_codegen_lower_type_for_function(ty, builder)
-    jet_codegen_push_place(&builder, MIRPlace{
+    lowered_ty :: jet_codegen_lower_type_for_function(ty, builder, program)
+    jet_codegen_push_place(&builder, program, MIRPlace{
         id: place_id,
         span: span,
         ty: lowered_ty,
@@ -1941,7 +2004,7 @@ fn jet_codegen_function_id(function: TFunc) -> MIRFunctionID Never! {
     mir_function_id(identity)
 }
 
-fn jet_codegen_enter_lexical(builder: &JetCodegenBuilder) Never! {
+fn jet_codegen_enter_lexical(builder: &JetCodegenBuilder, program: JetCodegenProgram) Never! {
     builder.scope_depth += 1
     &builder.cleanup_frames.push(JetCodegenCleanupFrame{
         owner: None,
@@ -1954,29 +2017,29 @@ fn jet_codegen_enter_lexical(builder: &JetCodegenBuilder) Never! {
     })
 }
 
-fn jet_codegen_leave_lexical(builder: &JetCodegenBuilder) Never! {
+fn jet_codegen_leave_lexical(builder: &JetCodegenBuilder, program: JetCodegenProgram) Never! {
     if builder.scope_depth > 0 {
         builder.scope_depth -= 1
         if builder.cleanup_frames.len() <= 1 -> panic("lexical cleanup frame underflow")
         frame_index := builder.cleanup_frames.len() - 1
         frame := builder.cleanup_frames[frame_index]
         if frame.owner != None || frame.depth <= builder.scope_depth -> panic("lexical cleanup frame does not match the active depth")
-        jet_codegen_seal_exit_chains(&builder, frame_index)
-        jet_codegen_emit_cleanup_frame(&builder, frame_index)
+        jet_codegen_seal_exit_chains(&builder, program, frame_index)
+        jet_codegen_emit_cleanup_frame(&builder, program, frame_index)
         _ := &builder.cleanup_frames.pop()
         loop builder.drop_live_places.len() > frame.drop_live_start -> _ := &builder.drop_live_places.pop()
         loop builder.bindings.len() > frame.binding_start -> _ := &builder.bindings.pop()
     }
 }
 
-fn jet_codegen_intern_prelude_call(builder: &JetCodegenBuilder, row: MIRPreludeCall) -> MIRPreludeCallID Never! {
+fn jet_codegen_intern_prelude_call(builder: &JetCodegenBuilder, program: JetCodegenProgram, row: MIRPreludeCall) -> MIRPreludeCallID Never! {
     id :: row.id
     if builder.prelude_call_positions.get(id.value) != None -> return id
-    jet_codegen_push_prelude_call(&builder, row)
+    jet_codegen_push_prelude_call(&builder, program, row)
     id
 }
 
-fn jet_codegen_push_prelude_call(builder: &JetCodegenBuilder, row: MIRPreludeCall) Never! {
+fn jet_codegen_push_prelude_call(builder: &JetCodegenBuilder, program: JetCodegenProgram, row: MIRPreludeCall) Never! {
     _ := &builder.prelude_call_positions.add(row.id.value, builder.prelude_calls.len())
     &builder.prelude_calls.push(row)
 }

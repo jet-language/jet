@@ -1,0 +1,225 @@
+// HistoryPlatform.rs:493–929, canonical kernel32 file imports. Every call is
+// #ABI(system): stdcall on Windows x86, the Windows native ABI on x86_64.
+// This unit is Windows-selected, never linked as Linux native behavior.
+// Header contracts: minwinbase.h OVERLAPPED; winbase.h FILE_RENAME_INFO /
+// FILE_DISPOSITION_INFO; fileapi.h BY_HANDLE_FILE_INFORMATION.
+//
+// #4494 admission gates: pointer-return CreateFileW (E3202), raw pointer
+// fields and fixed inline arrays in C-safe aggregates (E3203), native
+// ULONG_PTR selection. The exact target-width layouts are retained below;
+// neither exact Int nor U64 stands in for a HANDLE. Select the 32/64 binding
+// matching the actual target pointer width, never infer width from host OS.
+use core.mem as windows_mem
+use c.kernel32 as windows_os
+
+#Layout(c)
+pub struct WindowsOverlapped32 {
+    pub internal: U32
+    pub internal_high: U32
+    pub offset: U32
+    pub offset_high: U32
+    pub event: *U8
+}
+
+#Layout(c)
+pub struct WindowsOverlapped64 {
+    pub internal: U64
+    pub internal_high: U64
+    pub offset: U32
+    pub offset_high: U32
+    pub event: *U8
+}
+
+// Rust HistoryPlatform.rs728 uses a zero-initialized I32 replacement word.
+// Modern SDK FILE_RENAME_INFO has BOOLEAN/Flags union in this word; legacy
+// BOOLEAN leaves three padding bytes. The original I32{1} yields BOOLEAN=1
+// with zero padding and unchanged root/name offsets on both Windows widths.
+#Layout(c)
+pub struct FileRenameInfo {
+    pub replace_if_exists: I32
+    pub root_directory: *U8
+    pub file_name_length: U32
+    pub file_name: [U16#1]
+}
+
+#Layout(c)
+pub struct FileDispositionInfo {
+    pub delete_file: U8
+}
+
+#Layout(c)
+pub struct WindowsFileTime {
+    pub low: U32
+    pub high: U32
+}
+
+#Layout(c)
+pub struct ByHandleFileInformation {
+    pub attributes: U32
+    pub creation: WindowsFileTime
+    pub access: WindowsFileTime
+    pub write: WindowsFileTime
+    pub volume_serial: U32
+    pub size_high: U32
+    pub size_low: U32
+    pub nlink: U32
+    pub index_high: U32
+    pub index_low: U32
+}
+
+// Held HANDLE enumeration/reparse facts; winbase.h FILE_ATTRIBUTE_TAG_INFO /
+// FILE_ID_BOTH_DIR_INFO. Names are counted native UTF16, not NUL or String.
+#Layout(c)
+pub struct FileAttributeTagInfo {
+    pub attributes: U32
+    pub reparse_tag: U32
+}
+#Layout(c)
+pub struct FileIdBothDirInfo {
+    pub next_entry_offset: U32
+    pub file_index: U32
+    pub creation_time: I64
+    pub last_access_time: I64
+    pub last_write_time: I64
+    pub change_time: I64
+    pub end_of_file: I64
+    pub allocation_size: I64
+    pub attributes: U32
+    pub file_name_length: U32
+    pub ea_size: U32
+    pub short_name_length: I8
+    pub short_name: [U16#12]
+    pub file_id: I64
+    pub file_name: [U16#1]
+}
+
+// Pinned std/thread/windows available_parallelism calls GetSystemInfo.
+// Exact sysinfoapi.h SYSTEM_INFO, anonymous first union projected as its
+// two WORD fields. No hardware-count/default/error policy is implemented here.
+#Layout(c)
+pub struct WindowsSystemInfo32 {
+    pub processor_architecture: U16
+    pub reserved: U16
+    pub page_size: U32
+    pub minimum_application_address: *U8
+    pub maximum_application_address: *U8
+    pub active_processor_mask: U32
+    pub number_of_processors: U32
+    pub processor_type: U32
+    pub allocation_granularity: U32
+    pub processor_level: U16
+    pub processor_revision: U16
+}
+#Layout(c)
+pub struct WindowsSystemInfo64 {
+    pub processor_architecture: U16
+    pub reserved: U16
+    pub page_size: U32
+    pub minimum_application_address: *U8
+    pub maximum_application_address: *U8
+    pub active_processor_mask: U64
+    pub number_of_processors: U32
+    pub processor_type: U32
+    pub allocation_granularity: U32
+    pub processor_level: U16
+    pub processor_revision: U16
+}
+
+#Import module c.kernel32 {
+    #ABI(system)
+    fn get_system_info32(out: *WindowsSystemInfo32) = "GetSystemInfo"
+    #ABI(system)
+    fn get_system_info64(out: *WindowsSystemInfo64) = "GetSystemInfo"
+    #ABI(system)
+    fn create_file_w(name: *U16, access: U32, share: U32, security: *U8, creation: U32, flags: U32, template: *U8) -> *U8 = "CreateFileW"
+    #ABI(system)
+    fn get_file_attributes_w(name: *U16) -> U32 = "GetFileAttributesW"
+    #ABI(system)
+    fn create_directory_w(name: *U16, security: *U8) -> I32 = "CreateDirectoryW"
+    #ABI(system)
+    fn remove_directory_w(name: *U16) -> I32 = "RemoveDirectoryW"
+    #ABI(system)
+    fn close_handle(handle: *U8) -> I32 = "CloseHandle"
+    #ABI(system)
+    fn get_last_error() -> U32 = "GetLastError"
+    #ABI(system)
+    fn set_last_error(code: U32) = "SetLastError"
+    // GetModuleHandleW is a BORROWED module handle; do not CloseHandle or
+    // FreeLibrary it. The OS owns the module while native text is formatted.
+    #ABI(system)
+    fn get_module_handle_w(name: *U16) -> *U8 = "GetModuleHandleW"
+    // Actual va_list* parameter is **I8 on the selected Windows C ABI;
+    // IGNORE_INSERTS uses a null argument pointer. Stack WCHAR storage is
+    // caller-owned; no FORMAT_MESSAGE_ALLOCATE_BUFFER hidden allocation.
+    #ABI(system)
+    fn format_message_w(flags: U32, source: *U8, message_id: U32, language_id: U32, buffer: *U16, size: U32, arguments: **I8) -> U32 = "FormatMessageW"
+    // Caller owns writable UTF16 extent. Result count excludes NUL on
+    // success; too-small result includes required NUL. Pinned std's
+    // fill_utf16_buf calls SetLastError(0) IMMEDIATELY before each attempt;
+    // then zero + unchanged error=0 means present empty. Zero with
+    // ERROR_ENVVAR_NOT_FOUND means absent. Never use stale thread error here.
+    #ABI(system)
+    fn get_environment_variable_w(name: *U16, buffer: *U16, size: U32) -> U32 = "GetEnvironmentVariableW"
+    #ABI(system)
+    fn get_current_directory_w(size: U32, buffer: *U16) -> U32 = "GetCurrentDirectoryW"
+    // Pinned std maybe_verbatim/get_long_path: actual UTF16 full-path call,
+    // not a source lexical normalizer. The optional filepart out pointer is
+    // **WCHAR; preserve null/nested-pointer admission and buffer loan.
+    #ABI(system)
+    fn get_full_path_name_w(name: *U16, size: U32, buffer: *U16, filepart: **U16) -> U32 = "GetFullPathNameW"
+    #ABI(system)
+    fn get_final_path_name_by_handle_w(handle: *U8, path: *U16, path_len: U32, flags: U32) -> U32 = "GetFinalPathNameByHandleW"
+    #ABI(system)
+    fn lock_file_ex32(handle: *U8, flags: U32, reserved: U32, bytes_low: U32, bytes_high: U32, overlapped: *WindowsOverlapped32) -> I32 = "LockFileEx"
+    #ABI(system)
+    fn lock_file_ex64(handle: *U8, flags: U32, reserved: U32, bytes_low: U32, bytes_high: U32, overlapped: *WindowsOverlapped64) -> I32 = "LockFileEx"
+    #ABI(system)
+    fn unlock_file_ex32(handle: *U8, reserved: U32, bytes_low: U32, bytes_high: U32, overlapped: *WindowsOverlapped32) -> I32 = "UnlockFileEx"
+    #ABI(system)
+    fn unlock_file_ex64(handle: *U8, reserved: U32, bytes_low: U32, bytes_high: U32, overlapped: *WindowsOverlapped64) -> I32 = "UnlockFileEx"
+    // Actual PVOID ABI: info borrows aligned initialized class-specific
+    // storage, including the inline rename tail, through synchronous return.
+    #ABI(system)
+    fn set_file_information_by_handle(handle: *U8, info_class: I32, info: *U8, size: U32) -> I32 = "SetFileInformationByHandle"
+    #ABI(system)
+    fn flush_file_buffers(handle: *U8) -> I32 = "FlushFileBuffers"
+    #ABI(system)
+    fn get_file_information_by_handle(handle: *U8, out: *ByHandleFileInformation) -> I32 = "GetFileInformationByHandle"
+    // FileAttributeTagInfo class9; FileIdBothDirectoryInfo class10 and
+    // restart11. Buffer is the SAME held aligned initialized extent throughout
+    // synchronous IO. The descriptor owner walks bounded next offsets and
+    // name byte lengths; never reinterpret a directory FileId as full FileID.
+    #ABI(system)
+    fn get_file_information_by_handle_ex(handle: *U8, info_class: I32, buffer: *U8, size: U32) -> I32 = "GetFileInformationByHandleEx"
+    #ABI(system)
+    fn read_file32(handle: *U8, buffer: *U8, count: U32, read_count: *U32, overlapped: *WindowsOverlapped32) -> I32 = "ReadFile"
+    #ABI(system)
+    fn read_file64(handle: *U8, buffer: *U8, count: U32, read_count: *U32, overlapped: *WindowsOverlapped64) -> I32 = "ReadFile"
+    #ABI(system)
+    fn write_file32(handle: *U8, buffer: *U8, count: U32, written_count: *U32, overlapped: *WindowsOverlapped32) -> I32 = "WriteFile"
+    #ABI(system)
+    fn write_file64(handle: *U8, buffer: *U8, count: U32, written_count: *U32, overlapped: *WindowsOverlapped64) -> I32 = "WriteFile"
+    // LARGE_INTEGER out storage is one signed 64-bit counter/frequency word.
+    #ABI(system)
+    fn query_performance_counter(out: *I64) -> I32 = "QueryPerformanceCounter"
+    #ABI(system)
+    fn query_performance_frequency(out: *I64) -> I32 = "QueryPerformanceFrequency"
+    #ABI(system)
+    fn sleep(milliseconds: U32) = "Sleep"
+}
+
+// INVALID_HANDLE_VALUE is the native pointer value (HANDLE)(intptr_t)-1, NOT
+// null and NOT a narrowed 32-bit sentinel on Win64. Construction must stay in
+// an audited native-pointer gate; do not reinterpret an exact Int owner word.
+// GetFileAttributesW fails at U32 max; BOOL calls fail at zero; CreateFileW
+// fails at INVALID_HANDLE_VALUE. Capture GetLastError immediately on that rail.
+// GetFinalPathNameByHandleW(null,0) returns required UTF16 units incl NUL;
+// successful nonzero written count excludes NUL and must be < capacity.
+// UTF16 buffers retain OS code units (surrogates/nonASCII included), never
+// CString/String conversion. Caller verifies its retained parent identity.
+//
+// FILE_RENAME_INFO storage is aligned to HANDLE and has an INLINE flexible
+// tail, NOT a pointer/list. Given n UTF16 units, preserve Rust's allocation
+// sizeof(FileRenameInfo)+max(2*n-2,0); FileNameLength is bytes, not NUL length.
+// Fill that SAME live storage; no temporary array address or header-only copy.
+// FILE_DISPOSITION_INFO is exactly size=1 align=1 (delete_file:U8).

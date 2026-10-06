@@ -110,7 +110,7 @@ fn run_dev(force_interpreter: bool) -> (i32, String, String) {
     )
     .expect("L0503 dev package");
 
-    let outcome = jet::Interpreter::dev_iteration(
+    let outcome = crate::common::dev_run(
         path.to_str().expect("L0503 dev path"),
         false,
         force_interpreter,
@@ -142,7 +142,7 @@ fn assert_runtime_output(tier: &str, result: &(i32, String, String)) {
 #[test]
 fn l0503_fixture_runs_on_aot_default_dev_and_interpreter() {
     let (default_code, default_stdout, default_stderr) =
-        tir_support::jit_run("l0503_behavior_default", SOURCE);
+        tir_support::default_run("l0503_behavior_default", SOURCE);
     assert_runtime_output(
         "default jet run",
         &(default_code, default_stdout, default_stderr),

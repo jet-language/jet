@@ -1,0 +1,51 @@
+use core.game.runtime.kernel_raylib.[JetRaylibAtlasRegion, jet_raylib_parse_texture_atlas, jet_raylib_atlas_region, jet_raylib_sprite_draw_call, jet_raylib_record_draw_call, jet_raylib_take_draw_calls, jet_raylib_button_code, jet_raylib_axis_code]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:77
+#Test("atlas source updates name resolves texture and keeps valid region rows") {
+    atlas :: jet_raylib_parse_texture_atlas(&"sprites.atlas", Val("atlas: heroes\ntexture: heroes.png\nregion: idle 1 2 3 4\nregion walk -1 0 8 9 extra\nregion: bad 0 x 2 3\natlas: \n"), "fallback")
+    assert(atlas.name == "heroes")
+    assert(atlas.texture_path == Val("heroes.png"))
+    assert(atlas.regions.len() == 2)
+    assert(atlas.regions[0] == JetRaylibAtlasRegion{name: "idle", x: I64{1}, y: I64{2}, width: I64{3}, height: I64{4}})
+    assert(atlas.regions[1].name == "walk")
+    assert(atlas.regions[1].x == I64{-1})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:77
+#Test("atlas missing source retains supplied fallback and png path") {
+    atlas :: jet_raylib_parse_texture_atlas(&"sprites.atlas", None, "fallback")
+    assert(atlas.name == "fallback")
+    assert(atlas.texture_path == Val("sprites.png"))
+    assert(atlas.regions.is_empty())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:116
+#Test("region parse requires five fields but permits trailing fields") {
+    assert(jet_raylib_atlas_region(&"region: hero 1 2 3").is_none())
+    assert(jet_raylib_atlas_region(&"region: hero 1 2 3 4 extra").is_some())
+    assert(jet_raylib_atlas_region(&"region: hero 1 2 9223372036854775808 4").is_none())
+    assert(jet_raylib_atlas_region(&"other hero 1 2 3 4").is_none())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:47
+#Test("sprite selects first matching region and draw registry is consumed") {
+    _ :: jet_raylib_take_draw_calls()
+    regions :: [JetRaylibAtlasRegion{name: "hero", x: I64{1}, y: I64{2}, width: I64{3}, height: I64{4}}, JetRaylibAtlasRegion{name: "hero", x: I64{9}, y: I64{9}, width: I64{9}, height: I64{9}}]
+    call :: jet_raylib_sprite_draw_call(&"atlas", &regions, &"hero", I64{50}, I64{60}).unwrap()
+    assert(call.source_x == I64{1})
+    assert(call.source_y == I64{2})
+    assert(call.x == I64{50})
+    assert(call.y == I64{60})
+    assert(jet_raylib_sprite_draw_call(&"atlas", &regions, &"missing", I64{0}, I64{0}).is_none())
+    jet_raylib_record_draw_call(call)
+    assert(jet_raylib_take_draw_calls().len() == 1)
+    assert(jet_raylib_take_draw_calls().is_empty())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:149
+#Test("raylib input aliases and exact unknown rejection") {
+    for (name, code) in [("A", 7), ("right_face_right", 6), ("West", 8), ("North", 5), ("dpad_up", 1), ("DPadRight", 2), ("left_face_down", 3), ("DPadLeft", 4), ("LeftTrigger1", 9), ("LeftTrigger2", 10), ("RightTrigger1", 11), ("RightTrigger2", 12), ("MiddleLeft", 13), ("Middle", 14), ("MiddleRight", 15), ("LeftThumb", 16), ("RightThumb", 17), ("Left", 18), ("Right", 19)] {
+        assert(jet_raylib_button_code(&name) == Val(I32{code}))
+    }
+    for (name, code) in [("leftx", 0), ("left_y", 1), ("RightX", 2), ("righty", 3), ("lefttrigger", 4), ("RightTrigger", 5)] {
+        assert(jet_raylib_axis_code(&name) == Val(I32{code}))
+    }
+    assert(jet_raylib_button_code(&"SOUTH").is_none())
+    assert(jet_raylib_axis_code(&"unknown").is_none())
+}

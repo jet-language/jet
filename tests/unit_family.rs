@@ -258,22 +258,15 @@ fn run() {
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
 
-    if jet_jit::cranelift_host_supported() {
-        use jet::JitBackend::RunOutcome;
+    {
+        use jet::Interpreter::RunOutcome;
         let policy = common::development_policy();
-        jet_jit::reset_jit_trace_for_test();
-        let mut backend = jet_jit::CraneliftBackend::new();
-        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+        match common::run_interpreted(&bundle, &policy) {
             RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, "44482216152605.0\n"),
             RunOutcome::Problems(diagnostics) => {
                 panic!("JIT rejected standard force conversion: {diagnostics:?}")
             }
         }
-        assert!(jet_jit::jit_executed_for_test());
-        assert!(
-            !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-            "standard force conversion must stay on resident JIT"
-        );
     }
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -327,11 +320,10 @@ fn run() {
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
 
-        use jet::JitBackend::RunOutcome;
-    if jet_jit::cranelift_host_supported() {
+        use jet::Interpreter::RunOutcome;
+    {
         let policy = common::development_policy();
-        let mut backend = jet_jit::CraneliftBackend::new();
-        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+        match common::run_interpreted(&bundle, &policy) {
             RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, "3.0\n"),
             RunOutcome::Problems(diagnostics) => {
                 panic!("JIT rejected open dimensions: {diagnostics:?}")
@@ -1376,8 +1368,8 @@ fn run() {
         stdout,
         "12 meter\n4 meter/ns\n766 px\n5 usd\n12 Meter\n12\n12.0\n"
     );
-    if jet_jit::cranelift_host_supported() {
-        use jet::JitBackend::RunOutcome;
+    {
+        use jet::Interpreter::RunOutcome;
 
         let dir = common::unique_tmp("quantity_display_jit");
         std::fs::create_dir_all(&dir).unwrap();
@@ -1387,8 +1379,7 @@ fn run() {
         let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let policy = common::development_policy();
-        let mut backend = jet_jit::CraneliftBackend::new();
-        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+        match common::run_interpreted(&bundle, &policy) {
             RunOutcome::Ran { stdout, .. } => assert_eq!(
                 stdout,
                 "12 meter\n4 meter/ns\n766 px\n5 usd\n12 Meter\n12\n12.0\n"
@@ -1403,7 +1394,7 @@ fn run() {
 #UnitFamily(Length, dimension, base: meter) { meter }
 
 impl Meter.Display {
-    fn display(self) -> String -> "custom length"
+    fn display(self) -> String { "custom length" }
 }
 
 fn run() {
@@ -1425,12 +1416,11 @@ fn run() {
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
-    if jet_jit::cranelift_host_supported() {
-        use jet::JitBackend::RunOutcome;
+    {
+        use jet::Interpreter::RunOutcome;
 
         let policy = common::development_policy();
-        let mut backend = jet_jit::CraneliftBackend::new();
-        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+        match common::run_interpreted(&bundle, &policy) {
             RunOutcome::Ran { stdout, .. } => {
                 assert_eq!(stdout, "custom length\ncustom length\n12\n")
             }
@@ -1445,7 +1435,7 @@ fn run() {
 #UnitFamily(Length, dimension, base: meter) { meter }
 
 impl Meter.Display {
-    fn display(self) -> String -> "custom length"
+    fn display(self) -> String { "custom length" }
 }
 
 fn show(distance: Meter) {
@@ -1492,27 +1482,15 @@ fn run() {}
 
 #[test]
 fn dimensional_quantities_example_stays_in_native_jit() {
-    if !jet_jit::cranelift_host_supported() {
-        return;
-    }
-    use jet::JitBackend::RunOutcome;
+    use jet::Interpreter::RunOutcome;
 
     let path = "Examples/features/types/dimensional_quantities.jet";
     let mut bundle = jet::Loader::load_entry(path).unwrap();
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    assert!(
-        common::cranelift_resident_safe(&bundle),
-        "dimensional quantities must stay resident-safe: {}",
-        common::cranelift_resident_safe_detail(&bundle)
-    );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .unwrap_or_else(|reason| panic!("dimensional quantities must JIT-compile: {reason}"));
 
     let policy = common::development_policy();
-    jet_jit::reset_jit_trace_for_test();
-    let mut backend = jet_jit::CraneliftBackend::new();
-    match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+    match common::run_interpreted(&bundle, &policy) {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -1533,18 +1511,6 @@ fn dimensional_quantities_example_stays_in_native_jit() {
             panic!("JIT rejected dimensional quantities: {diagnostics:?}")
         }
     }
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "dimensional quantities did not execute native JIT code"
-    );
-    assert!(
-        !jet_jit::deopt_invoked_for_test(),
-        "dimensional quantities deoptimized to the interpreter"
-    );
-    assert!(
-        !jet_jit::fallback_invoked_for_test(),
-        "dimensional quantities invoked a forbidden fallback"
-    );
 }
 
 #[test]
@@ -1553,7 +1519,7 @@ fn imported_public_units_keep_display_metadata_across_tiers() {
 pub #UnitFamily(Length, dimension, base: meter) { meter }
 
 impl Meter.Display {
-    fn display(self) -> String -> "defined in units"
+    fn display(self) -> String { "defined in units" }
 }
 
 pub fn distance() -> Meter { return 12meter }
@@ -1595,12 +1561,11 @@ fn run() {
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
 
-    if jet_jit::cranelift_host_supported() {
-        use jet::JitBackend::RunOutcome;
+    {
+        use jet::Interpreter::RunOutcome;
 
         let policy = common::development_policy();
-        let mut backend = jet_jit::CraneliftBackend::new();
-        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+        match common::run_interpreted(&bundle, &policy) {
             RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, expected),
             RunOutcome::Problems(diagnostics) => {
                 panic!("JIT rejected imported unit display: {diagnostics:?}")
@@ -1612,7 +1577,7 @@ fn run() {
 pub #UnitFamily(Length, dimension, base: meter) { meter }
 
 impl Meter.Display {
-    fn display(self) -> String -> "defined in units"
+    fn display(self) -> String { "defined in units" }
 }
 "#;
     let web_main = r#"
@@ -2214,9 +2179,9 @@ fn unit_scalar_rewrap_lint_requires_the_direct_policy_free_identity() {
     kelvin
     celsius(scale: 1, offset: 27315/100)
 }
-fn external_scale(value: Float) -> Float -> calibrate(value)
+fn external_scale(value: Float) -> Float { calibrate(value) }
 
-fn calibrate(value: Float) -> Float -> value * 2
+fn calibrate(value: Float) -> Float { value * 2 }
 
 fn run() {
     value :: Meter.from_float(Float{4.0})

@@ -1,0 +1,303 @@
+use tests.conformance.corpus.core.port.memory_semantics.*
+use tests.common as common
+use tests.tir_support as tir_support
+use std.fs as fs
+use std.env
+use std.process.Command
+use jet
+use jet.AST.[Item, Type, TagMarker]
+use jet.Codegen.TIR.[view_copy_kind, view_copy_owned_type]
+use jet_foundation.MIR.MirViewCopyKind
+// GATE #4494: process/filesystem fixtures use real native substrate.
+
+// Rust: tests/memory_semantics.rs:23
+#Test("memory_denial_parser_keeps_the_canonical_effect_row") {
+    (tokens, lexer_diagnostics) :: jet.Lexer.lex(MEMORY_DENIAL_SOURCE)
+    assert(lexer_diagnostics.is_empty(), "lex: {lexer_diagnostics:?}")
+    program :: jet.Parser.parse(tokens).expect("memory denial source parses")
+    function :: program.items.iter().find_map(item -> item == {
+        Item.Func(function) -> if function.name == "run" { Val(function) } else { None }
+        _ -> None
+    }).expect("run function")
+    effects :: function.declared_effects.as_ref().expect("declared denial row").iter().map((name, _) -> name.as_str()).collect()
+    assert_eq(effects, ["!Mem.Alloc"])
+    (positive_tokens, positive_lex) :: jet.Lexer.lex("fn run() -[Mem.Alloc(above: 1)]> {}")
+    assert(positive_lex.is_empty(), "lex positive row: {positive_lex:?}")
+    diagnostics :: jet.Parser.parse(positive_tokens).expect_err("bounded rights are denial-only")
+    assert(diagnostics.iter().any(diagnostic -> diagnostic.code == "E0119" && diagnostic.fix.contains("!Mem.Alloc(above: 1)")))
+}
+// Rust: tests/memory_semantics.rs:57
+#Test("parameterized_memory_rights_are_denials_not_positive_effects") {
+    error :: jet.Package.PackageFacts.parse("name: \"memory\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Mem.Alloc(above: 65536)] } }\n", "test").expect_err("a bounded memory right must be a denial")
+    assert(error == {
+        jet.Package.PackageParseError.BadEffectsBlock(detail) -> detail.contains("authority.holds.deny")
+        _ -> false
+    })
+}
+// Rust: tests/memory_semantics.rs:71
+#Test("manifest_memory_denial_reaches_the_same_sema_fact_pass") {
+    root :: common.unique_tmp("jet_manifest_memory_denial")
+    fs.create_dir_all(root).unwrap()
+    fs.write(root.join("package.jet"), "name: \"memory\"\nversion: \"0.1.0\"\nauthority: { holds: { deny: [Mem.Alloc] } }\n").unwrap()
+    fs.write(root.join("main.jet"), "fn run() { print(\"frame {1}\") }\n").unwrap()
+    bundle := jet.Loader.load_entry(root.join("main.jet").to_str().unwrap()).unwrap()
+    assert_eq(bundle.package_guarantees.memory_denials, ["Mem.Alloc"])
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(diagnostics.iter().any(diagnostic -> diagnostic.code == "E0921"), "manifest denial did not reach the memory fact pass: {diagnostics:#?}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/memory_semantics.rs:93
+#Test("memory_denial_matches_aot_jit_and_interpreter") {
+    tir_support.assert_tiers_agree("memory-denial-parity", MEMORY_DENIAL_SOURCE, "memory denial\n")
+}
+// Rust: tests/memory_semantics.rs:102
+#Test("memory_denial_example_matches_all_hosted_tiers") {
+    tir_support.assert_example_cli_tiers_agree("memory/effect_denials", fs.read_to_string("Examples/features/expected/memory/effect_denials.out").unwrap())
+}
+// Rust: tests/memory_semantics.rs:110
+#Test("memory_denial_matches_the_dev_interpreter_path") {
+    root :: common.unique_tmp("jet_memory_denial_dev")
+    fs.create_dir_all(root).unwrap()
+    entry :: root.join("main.jet")
+    fs.write(entry, MEMORY_DENIAL_SOURCE).unwrap()
+    output :: Command.new(jet()).args(["dev", entry.to_str().unwrap(), "--interpret", "--watch=off"]).current_dir(root).env("NO_COLOR", "1").output().unwrap()
+    assert(output.status.success(), "dev rejected the memory denial source: {String.from_utf8_lossy(output.stderr)}")
+    assert_eq(String.from_utf8_lossy(output.stdout), "memory denial\n")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/memory_semantics.rs:131
+#Test("memory_denial_matches_comptime") {
+    compiled :: jet.compile(MEMORY_COMPTIME_SOURCE).expect("comptime source compiles")
+    assert(compiled.rust.contains("memory denial"))
+}
+// Rust: tests/memory_semantics.rs:137
+#Test("memory_denial_matches_repl") {
+    transcript :: jet.REPL.run_transcript(["fn denied() -[!Mem.Alloc]> { print(\"memory denial\") }", "denied()"], None)
+    assert(transcript.contains("memory denial"), "REPL lost the denial program: {transcript}")
+    assert(!transcript.contains("E0921"), "REPL changed a valid denial into a diagnostic: {transcript}")
+}
+// Rust: tests/memory_semantics.rs:156
+#Test("memory_denial_matches_web_lowering") {
+    compiled :: jet.compile_web_with_path(MEMORY_DENIAL_SOURCE, "tests/fixtures/memory_denial_web.jet").expect("web accepts the memory denial source")
+    assert(compiled.web.is_some(), "web lowering produced no artifact")
+}
+// Rust: tests/memory_semantics.rs:207
+#Test("memo_computed_and_view_copy_examples_agree_across_execution_tiers") {
+    tir_support.assert_example_cli_tiers_agree("memory/memoize", fs.read_to_string("Examples/features/expected/memory/memoize.out").unwrap())
+    tir_support.assert_example_cli_tiers_agree("memory/computed_field", fs.read_to_string("Examples/features/expected/memory/computed_field.out").unwrap())
+    tir_support.assert_example_cli_tiers_agree("memory/copy_verb", fs.read_to_string("Examples/features/expected/memory/copy_verb.out").unwrap())
+    // D-MEM-COPYSEM1=A: implicit read-window materialization at interpolation, owned parameter and return.
+    tir_support.assert_example_cli_tiers_agree("memory/string_view", fs.read_to_string("Examples/features/expected/memory/string_view.out").unwrap())
+}
+// Rust: tests/memory_semantics.rs:236
+#Test("one_table_names_the_shared_read_view_copy_kernel_for_every_tier") {
+    view_of :: (element: Type) -> Type.Apply{name: "View", args: [element]}
+    str_view :: view_of(Type.Named("str"))
+    int_view :: view_of(Type.Int)
+    tagged_str_view :: Type.Tagged{marker: TagMarker.User("ReadAlias"), inner: str_view.clone()}
+    fake_string_view :: Type.Apply{name: "foo.View", args: [Type.Named("str")]}
+    fake_list_view :: Type.Apply{name: "foo.ViewMut", args: [Type.Int]}
+    malformed_view_placeholder :: Type.Apply{name: "View<>", args: [Type.Named("str")]}
+    assert_eq(view_copy_kind(str_view), Val(MirViewCopyKind.String))
+    assert_eq(view_copy_kind(str_view).expect("string kind").symbol(), "jet_string_view_copy")
+    assert_eq(view_copy_owned_type(str_view), Val(Type.String))
+    assert_eq(view_copy_kind(int_view), Val(MirViewCopyKind.List))
+    assert_eq(view_copy_kind(int_view).expect("list kind").symbol(), "jet_view_copy")
+    assert_eq(view_copy_owned_type(int_view), Val(Type.List(Type.Int)))
+    assert_eq(view_copy_kind(tagged_str_view), Val(MirViewCopyKind.String))
+    assert_eq(view_copy_owned_type(tagged_str_view), Val(Type.String))
+    assert_eq(view_copy_kind(fake_string_view), None)
+    assert_eq(view_copy_kind(fake_list_view), None)
+    assert_eq(view_copy_kind(malformed_view_placeholder), None)
+    assert_eq(view_copy_kind(Type.List(Type.Int)), Val(MirViewCopyKind.List))
+    assert_eq(view_copy_kind(Type.String), Val(MirViewCopyKind.String))
+    assert_eq(view_copy_owned_type(Type.String), None)
+    crate_root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap()).join("crates/jet-codegen/src")
+    rust_kernel :: fs.read_to_string(crate_root.join("Prelude/Core/ViewCopy.rs")).unwrap()
+    js_kernel :: fs.read_to_string(crate_root.join("Prelude/Core/ViewCopy.js")).unwrap()
+    loop symbol in ["jet_view_copy", "jet_string_view_copy"] {
+        assert(rust_kernel.contains("fn {symbol}"), "Prelude/Core/ViewCopy.rs must declare {symbol}")
+        assert(js_kernel.contains("function {symbol}"), "Prelude/Core/ViewCopy.js must declare {symbol}")
+    }
+    producer :: fs.read_to_string(crate_root.join("Codegen/TIR/mod.rs")).unwrap()
+    assert(producer.contains("MirViewCopyKind"))
+    assert(!producer.contains("\"jet_string_view_copy\""))
+    assert(!producer.contains("\"jet_view_copy\""))
+    lambda_producer :: fs.read_to_string(crate_root.join("Codegen/TIR/lower/lambdas.rs")).unwrap()
+    assert(lambda_producer.contains("view_copy_kind"))
+    assert(lambda_producer.contains(".symbol()"))
+    assert(!lambda_producer.contains("\"jet_string_view_copy\""))
+    assert(!lambda_producer.contains("\"jet_view_copy\""))
+    loop engine in [crate_root.join("Codegen/MIRRust.rs"), crate_root.join("Codegen/MIRWeb.rs"), crate_root.join("Codegen/MIREval.rs")] {
+        text :: fs.read_to_string(engine).unwrap()
+        assert(text.contains("mir_view_copy_kind") || text.contains("MirViewCopyKind"), "{engine.display()} must consume the canonical MIR view-copy classifier")
+    }
+    // Retired JIT representation probe maps to shared-runtime behavior at hosted tiers.
+    tir_support.assert_example_cli_tiers_agree("memory/string_view", fs.read_to_string("Examples/features/expected/memory/string_view.out").unwrap())
+}
+// Rust: tests/memory_semantics.rs:348
+#Test("computed_field_nested_value_blocks_use_and_invalidate_sibling_dependencies") {
+    src :: `struct Score {
+    enabled: Bool
+    base: Int
+    bonus: Int
+    #Memo
+    total: Int -> if enabled -> {
+        subtotal :: base + bonus
+        subtotal
+    } else -> base
+}
+fn run() {
+    score := Score{enabled: true, base: 10, bonus: 2}
+    print(score.total)
+    score.bonus = 7
+    print(score.total)
+}
+`
+    tir_support.assert_tiers_agree("computed_field_nested_value", src, "12\n17\n")
+}
+// Rust: tests/memory_semantics.rs:372
+#Test("exercised_memory_ledger_reports_empty_gc_sentry_and_combined_runs") {
+    root :: common.unique_tmp("jet_memory_audit")
+    fs.create_dir_all(root).unwrap()
+    ledger(root, [])
+    empty :: run(root, ["audit", "memory", "--json"])
+    assert(empty.status.success(), String.from_utf8_lossy(empty.stderr))
+    assert_cli_snapshot("memory_audit_empty.txt", empty.stdout)
+    empty_json :: String.from_utf8_lossy(empty.stdout)
+    assert(empty_json.contains("\"coverage\":\"exercised runs only\""))
+    assert(empty_json.contains("\"witnesses\":0"))
+    gc :: row("gc", "gc", ["own the value directly"])
+    ledger(root, [gc])
+    gc_only :: run(root, ["audit", "memory", "--json"])
+    gc_json :: String.from_utf8_lossy(gc_only.stdout)
+    assert(gc_only.status.success(), String.from_utf8_lossy(gc_only.stderr))
+    assert_cli_snapshot("memory_audit_gc.txt", gc_only.stdout)
+    assert(gc_json.contains("\"kind\":\"gc\""))
+    assert(gc_json.contains("\"witnesses\":1"))
+    sentry :: row("sentry", "R0802", ["move the raw access"])
+    ledger(root, [sentry])
+    sentry_only :: run(root, ["audit", "memory", "--json"])
+    sentry_json :: String.from_utf8_lossy(sentry_only.stdout)
+    assert(sentry_only.status.success(), String.from_utf8_lossy(sentry_only.stderr))
+    assert_cli_snapshot("memory_audit_sentry.txt", sentry_only.stdout)
+    assert(sentry_json.contains("\"kind\":\"sentry\""))
+    assert(sentry_json.contains("\"witnesses\":1"))
+    ledger(root, [gc, sentry])
+    combined :: run(root, ["audit", "memory", "--json"])
+    combined_json :: String.from_utf8_lossy(combined.stdout)
+    assert(combined.status.success(), String.from_utf8_lossy(combined.stderr))
+    assert_cli_snapshot("memory_audit_combined.txt", combined.stdout)
+    assert(combined_json.contains("\"kind\":\"gc\""))
+    assert(combined_json.contains("\"kind\":\"sentry\""))
+    assert(combined_json.contains("\"witnesses\":2"))
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/memory_semantics.rs:431
+#Test("memory_fix_applies_one_exact_repair_and_names_ambiguous_options") {
+    root :: common.unique_tmp("jet_memory_fix")
+    fs.create_dir_all(root).unwrap()
+    fs.write(root.join("main.jet"), "borrow").unwrap()
+    exact :: row("gc", "gc", ["owned"])
+    ledger(root, [exact])
+    fixed :: run(root, ["fix", "memory"])
+    assert(fixed.status.success(), String.from_utf8_lossy(fixed.stderr))
+    assert_cli_snapshot("memory_fix_exact.txt", fixed.stdout)
+    assert_eq(fs.read_to_string(root.join("main.jet")).unwrap(), "owned")
+    fs.write(root.join("main.jet"), "borrow").unwrap()
+    ambiguous :: row("gc", "gc", ["owned", "#Policy(gc) borrow"])
+    ledger(root, [ambiguous])
+    unchanged :: run(root, ["fix", "memory"])
+    assert(unchanged.status.success(), String.from_utf8_lossy(unchanged.stderr))
+    assert_cli_snapshot("memory_fix_ambiguous.txt", unchanged.stdout)
+    stdout :: String.from_utf8_lossy(unchanged.stdout)
+    assert(stdout.contains("options: main.jet:0..6 observed"))
+    assert(stdout.contains("  - owned"))
+    assert(stdout.contains("  - #Policy(gc) borrow"))
+    assert_eq(fs.read_to_string(root.join("main.jet")).unwrap(), "borrow")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/memory_semantics.rs:473
+#Test("missing_memory_ledger_is_stable_e2112") {
+    root :: common.unique_tmp("jet_memory_missing")
+    fs.create_dir_all(root).unwrap()
+    output :: run(root, ["audit", "memory"])
+    assert_eq(output.status.code(), Val(1))
+    actual :: String.from_utf8_lossy(output.stderr).replace(root.to_str().unwrap(), "WORKSPACE")
+    assert_eq(actual, fs.read_to_string("tests/cli/memory_ledger_missing_e2112.txt").unwrap())
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/memory_semantics.rs:485
+#Test("gc_promotions_append_to_the_configured_cross_run_memory_ledger") {
+    root :: common.unique_tmp("jet_memory_gc_feed")
+    fs.create_dir_all(root).unwrap()
+    source :: root.join("gc.jet")
+    fs.write(source, `#Policy(gc)
+#[!Equatable, !Comparable]
+enum Link {
+    End(Int)
+    Next(Link)
+}
+fn promoted_cycle() -> Link {
+    first := Link.Next(Link.End(1))
+    second := Link.Next(first)
+    first = Link.Next(second)
+    return first
+}
+fn run() {
+    cycle :: promoted_cycle()
+    print(cycle)
+}
+`).unwrap()
+    source_text :: source.to_str().unwrap()
+    first :: run(root, ["run", source_text])
+    assert(first.status.success(), "first GC run failed: {String.from_utf8_lossy(first.stderr)}")
+    assert_eq(String.from_utf8_lossy(first.stdout), "Next(Next(Next(End(1))))\n")
+    ledger_path :: root.join(".jet/memory/ledger-v1.jsonl")
+    first_ledger :: fs.read_to_string(ledger_path).unwrap()
+    first_rows :: first_ledger.lines().count()
+    assert(first_rows > 0, "the exercised GC run wrote no witnesses")
+    assert(first_ledger.lines().all(row -> row.contains("\"kind\":\"gc\"") && row.contains("\"provenance\":\"")))
+    second :: run(root, ["run", source_text])
+    assert(second.status.success(), "second GC run failed: {String.from_utf8_lossy(second.stderr)}")
+    assert_eq(String.from_utf8_lossy(second.stdout), "Next(Next(Next(End(1))))\n")
+    persisted :: fs.read_to_string(ledger_path).unwrap()
+    assert_eq(persisted.lines().count(), first_rows * 2)
+    audit :: run(root, ["audit", "memory", "--json"])
+    assert(audit.status.success(), "memory audit failed: {String.from_utf8_lossy(audit.stderr)}")
+    audit_text :: String.from_utf8_lossy(audit.stdout)
+    assert(audit_text.contains("\"coverage\":\"exercised runs only\""))
+    assert(audit_text.contains("\"witnesses\":{first_rows * 2}"))
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/memory_semantics.rs:558
+#Test("erased_memory_policy_and_bounds_facts_do_not_escape") {
+    erased_policy :: `fn need(value: String) { print(value) }
+fn run() {
+    source :: "  hello  "
+    view :: source.trim()
+    #Off {
+        #Policy(copies: .Explicit) { print("erased") }
+    }
+    need(view)
+}
+`
+    jet.compile(erased_policy).expect("an erased explicit-copy policy must be restored")
+    active_policy :: `fn need(value: String) { print(value) }
+fn run() {
+    source :: "  hello  "
+    view :: source.trim()
+    #Policy(copies: .Explicit) { need(view) }
+}
+`
+    diagnostics :: jet.compile(active_policy).expect_err("active copy policy must remain strict")
+    assert(diagnostics.iter().any(diagnostic -> diagnostic.code == "E2307"), "active explicit-copy policy lost its refusal: {diagnostics:#?}")
+    erased_bounds :: `fn run() {
+    values :: [Int#2]{1, 2}
+    #Off { print(values[0]) }
+    print(values[2])
+}
+`
+    bounds_diagnostics :: jet.compile(erased_bounds).expect_err("out-of-range indexing must remain rejected")
+    assert(bounds_diagnostics.iter().any(diagnostic -> diagnostic.code == "E0965"), "erased bounds facts must not make a later out-of-range read valid: {bounds_diagnostics:#?}")
+}

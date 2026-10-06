@@ -1,0 +1,376 @@
+// GameWorldInspector.rs has no inline/macro/included test assertions.
+// Faithful behavioral controls for its original branches; native GameDevProtocol
+// integration remains at that separately assigned canonical owner. No mocks.
+// Main publishes core.game.runtime.kernel_game_world_inspector before exercising.
+use core.game.runtime.kernel_game_world_inspector as world
+
+fn world_test_property(field: String, value: String?, transient: Bool, start: Int, end: Int) -> world.JetGameWorldPropertyFact Never! {
+    world.JetGameWorldPropertyFact.new(~field, "Int", ~value, transient, world.JetGameWorldSourceSpan{start, end}) ?? panic(err.show())
+}
+fn world_test_component(id: String, properties: [world.JetGameWorldPropertyFact]) -> world.JetGameWorldComponentFact Never! {
+    world.JetGameWorldComponentFact.new(~id, "Transform", "authored", ~properties) ?? panic(err.show())
+}
+fn world_test_entity(id: String, parent: String?, components: [world.JetGameWorldComponentFact]) -> world.JetGameWorldEntityFact Never! {
+    world.JetGameWorldEntityFact.new(~id, ~parent, ~id, ~components) ?? panic(err.show())
+}
+fn world_test_fact(frame: U64, revision: String) -> world.JetGameWorldFact Never! {
+    p :: world_test_property("x", Val("7"), false, 10, 20)
+    t :: world_test_property("live", None, true, 30, 30)
+    c :: world_test_component("component", [world.JetGameWorldPropertyFact]{p, t})
+    e :: world_test_entity("entity", None, [world.JetGameWorldComponentFact]{c})
+    world.JetGameWorldFact.new("world", frame, "source", ~revision, [world.JetGameWorldEntityFact]{e}) ?? panic(err.show())
+}
+fn world_test_selection(property: String?) -> world.JetGameWorldSelection Never! {
+    world.JetGameWorldSelection.new("world", Val("entity"), Val("component"), ~property) ?? panic(err.show())
+}
+fn world_test_inspector() -> world.JetGameWorldInspector Never! {
+    inspector := world.JetGameWorldInspector.new() ?? panic(err.show())
+    &inspector.ingest(world_test_fact(U64{1}, "revision")) ?? panic(err.show())
+    ^inspector
+}
+fn world_test_eval(frame: U64, expression: String, authority: String, budget: U64) -> world.JetGamePausedEvalRequest Never! {
+    world.JetGamePausedEvalRequest.new("request", "session", "world", frame, "entity", "component", ~expression, ~authority, budget) ?? panic(err.show())
+}
+fn world_test_validate_error(fact: world.JetGameWorldFact, expected: world.JetGameWorldInspectorError) Never! {
+    fact.validate() ?? { assert_eq(err, expected); return }
+    panic("expected world validation failure")
+}
+fn world_test_edit_error(request: world.JetGameWorldEditRequest, expected: world.JetGameWorldInspectorError) Never! {
+    request.validate() ?? { assert_eq(err, expected); return }
+    panic("expected edit validation failure")
+}
+fn world_test_bound_edit(inspector: world.JetGameWorldInspector, request: world.JetGameWorldEditRequest, expected: world.JetGameWorldInspectorError) Never! {
+    inspector.validate_edit_request(request) ?? { assert_eq(err, expected); return }
+    panic("expected bound edit refusal")
+}
+fn world_test_target(source: String, revision: String, instance: String, start: Int, end: Int) -> world.JetGameWorldEditTarget Never! {
+    world.JetGameWorldEditTarget.new(~source, ~revision, ~instance, world.JetGameWorldSourceSpan{start, end}) ?? panic(err.show())
+}
+fn world_test_select_error(inspector: &world.JetGameWorldInspector, selection: ^world.JetGameWorldSelection, expected: world.JetGameWorldInspectorError) Never! {
+    &inspector.select(^selection) ?? { assert_eq(err, expected); return }
+    panic("expected selection refusal")
+}
+fn world_test_ingest_error(inspector: &world.JetGameWorldInspector, fact: ^world.JetGameWorldFact, expected: world.JetGameWorldInspectorError) Never! {
+    &inspector.ingest(^fact) ?? { assert_eq(err, expected); return }
+    panic("expected ingestion refusal")
+}
+
+#Test("world source spans retain empty facts and reject reversed endpoints") {
+    span :: world.JetGameWorldSourceSpan.new(4, 4) ?? panic(err.show())
+    assert(span.is_empty())
+    assert_eq(span.render_json(), "{{\"start\":4,\"end\":4}}")
+    assert_eq(span.compare(world.JetGameWorldSourceSpan{start: 4, end: 5}), Ordering.Less)
+    _ :: world.JetGameWorldSourceSpan.new(5, 4) ?? {
+        assert_eq(err, world.JetGameWorldInspectorError.InvalidSourceSpan)
+        return
+    }
+    panic("reversed source span accepted")
+}
+#Test("world text validates whitespace before oversize and counts UTF8 bytes") {
+    whitespace := [String]{}
+    loop _ in 0..<16385 -> &whitespace.push(" ")
+    fact := world_test_fact(U64{1}, "revision")
+    fact.world_id = whitespace.join("")
+    world_test_validate_error(fact, world.JetGameWorldInspectorError.EmptyText("world id"))
+    unicode := [String]{}
+    loop _ in 0..<8193 -> &unicode.push("é")
+    fact.world_id = unicode.join("")
+    world_test_validate_error(fact, world.JetGameWorldInspectorError.TextTooLong("world id"))
+    fact.world_id = "  \t"
+    world_test_validate_error(fact, world.JetGameWorldInspectorError.EmptyText("world id"))
+}
+#Test("world property states optional value and validation priority") {
+    property :: world_test_property("x", None, false, 0, 0)
+    assert(property.is_authored())
+    assert_eq(property.state(), "authored")
+    transient :: world_test_property("x", Val("0"), true, 0, 0)
+    assert(!transient.is_authored())
+    assert_eq(transient.state(), "transient")
+    _ :: world.JetGameWorldPropertyFact.new("x", "Int", Val(" "), false, world.JetGameWorldSourceSpan{start: 2, end: 1}) ?? {
+        assert_eq(err, world.JetGameWorldInspectorError.EmptyText("published value"))
+        return
+    }
+    panic("empty published value accepted")
+}
+#Test("world duplicate properties and components preserve exact typed IDs") {
+    fact := world_test_fact(U64{1}, "revision")
+    &fact.entities[0].components[0].properties.push(world_test_property("x", Val("9"), false, 40, 50))
+    world_test_validate_error(fact, world.JetGameWorldInspectorError.DuplicateProperty("component", "x"))
+    fact = world_test_fact(U64{1}, "revision")
+    &fact.entities[0].components.push(world_test_component("component", [world.JetGameWorldPropertyFact]{}))
+    world_test_validate_error(fact, world.JetGameWorldInspectorError.DuplicateId("component"))
+}
+#Test("world entity component and global IDs share one namespace") {
+    fact := world_test_fact(U64{1}, "revision")
+    &fact.entities.push(world_test_entity("component", None, [world.JetGameWorldComponentFact]{}))
+    world_test_validate_error(fact, world.JetGameWorldInspectorError.DuplicateId("component"))
+    fact = world_test_fact(U64{1}, "revision")
+    &fact.entities.push(world_test_entity("entity", None, [world.JetGameWorldComponentFact]{}))
+    world_test_validate_error(fact, world.JetGameWorldInspectorError.DuplicateId("entity"))
+}
+#Test("world limits preserve validation before global topology") {
+    fact := world_test_fact(U64{1}, "revision")
+    loop _ in 0..<256 -> &fact.entities[0].components[0].properties.push(world_test_property("p", None, false, 0, 0))
+    world_test_validate_error(fact, world.JetGameWorldInspectorError.TooManyProperties("component"))
+    fact = world_test_fact(U64{1}, "revision")
+    loop _ in 0..<256 -> &fact.entities[0].components.push(world_test_component("c", [world.JetGameWorldPropertyFact]{}))
+    world_test_validate_error(fact, world.JetGameWorldInspectorError.TooManyComponents("entity"))
+    fact = world_test_fact(U64{1}, "revision")
+    loop _ in 0..<4096 -> &fact.entities.push(world_test_entity("e", None, [world.JetGameWorldComponentFact]{}))
+    world_test_validate_error(fact, world.JetGameWorldInspectorError.TooManyEntities)
+}
+#Test("world topology returns first cycle ID and originating missing-parent child") {
+    fact := world_test_fact(U64{1}, "revision")
+    fact.entities[0].parent_id = Val("child")
+    &fact.entities.push(world_test_entity("child", Val("missing"), [world.JetGameWorldComponentFact]{}))
+    world_test_validate_error(fact, world.JetGameWorldInspectorError.MissingParent("entity", "missing"))
+    fact.entities[1].parent_id = Val("entity")
+    world_test_validate_error(fact, world.JetGameWorldInspectorError.Cycle("entity"))
+    fact.entities[0].parent_id = Val("entity")
+    world_test_validate_error(fact, world.JetGameWorldInspectorError.Cycle("entity"))
+}
+#Test("world canonical JSON sorts only output and preserves C0 UTF8 escaping") {
+    p1 :: world_test_property("z", Val("é"), false, 1, 2)
+    control :: String.from_bytes([U8]{0,8,12,10,13,9,34,92}) ?? panic("control UTF8")
+    p2 :: world_test_property("a", Val("x{control}"), true, 3, 3)
+    c :: world_test_component("component", [world.JetGameWorldPropertyFact]{p1, p2})
+    e :: world_test_entity("entity", None, [world.JetGameWorldComponentFact]{c})
+    fact :: world.JetGameWorldFact.new("world", U64{18446744073709551615}, "source", "revision", [world.JetGameWorldEntityFact]{e}) ?? panic(err.show())
+    expected :: "{{\"world_id\":\"world\",\"frame_id\":18446744073709551615,\"source_id\":\"source\",\"revision\":\"revision\",\"entities\":[{{\"entity_id\":\"entity\",\"parent_id\":null,\"name\":\"entity\",\"components\":[{{\"component_id\":\"component\",\"type_name\":\"Transform\",\"authored_instance_id\":\"authored\",\"properties\":[{{\"field\":\"a\",\"type_name\":\"Int\",\"published_value\":\"x\\u0000\\u0008\\u000c\\n\\r\\t\\\"\\\\\",\"transient\":true,\"source_span\":{{\"start\":3,\"end\":3}}}},{{\"field\":\"z\",\"type_name\":\"Int\",\"published_value\":\"é\",\"transient\":false,\"source_span\":{{\"start\":1,\"end\":2}}}}]}}]}}]}}"
+    assert_eq(fact.render_json(), expected)
+    assert_eq(fact.entities[0].components[0].properties[0].field, "z")
+}
+#Test("world selection validation and state changes fail closed") {
+    inspector := world_test_inspector()
+    invalid := world_test_selection(Val("x"))
+    invalid.world_id = "other"
+    &inspector.select(^invalid) ?? {
+        assert_eq(err, world.JetGameWorldInspectorError.MismatchedWorld("world", "other"))
+        assert(inspector.project() == None)
+        return
+    }
+    panic("mismatched world selection accepted")
+}
+#Test("world selection hierarchy and unknown entity component property") {
+    inspector := world_test_inspector()
+    selection := world_test_selection(Val("x"))
+    selection.entity_id = None
+    world_test_select_error(&inspector, ~selection, world.JetGameWorldInspectorError.InvalidSelectionHierarchy)
+    selection.entity_id = Val("missing")
+    world_test_select_error(&inspector, ~selection, world.JetGameWorldInspectorError.UnknownEntity("missing"))
+    selection.entity_id = Val("entity")
+    selection.component_id = Val("missing")
+    world_test_select_error(&inspector, ~selection, world.JetGameWorldInspectorError.UnknownComponent("missing"))
+    selection.component_id = Val("component")
+    selection.property_id = Val("missing")
+    world_test_select_error(&inspector, ~selection, world.JetGameWorldInspectorError.UnknownProperty("missing"))
+    assert(inspector.project() == None)
+}
+#Test("world projection is owned and new ingestion clears selection atomically") {
+    inspector := world_test_inspector()
+    &inspector.select(world_test_selection(Val("x"))) ?? panic(err.show())
+    projection :: inspector.project() ?? panic("projection absent")
+    assert_eq((projection.property ?? panic("property absent")).published_value, Val("7"))
+    assert(projection.entity != None && projection.component != None)
+    bad := world_test_fact(U64{2}, "revision")
+    bad.world_id = ""
+    world_test_ingest_error(&inspector, ^bad, world.JetGameWorldInspectorError.EmptyText("world id"))
+    assert(inspector.project() != None)
+    &inspector.ingest(world_test_fact(U64{2}, "revision")) ?? panic(err.show())
+    assert(inspector.project() == None)
+    assert_eq(projection.frame_id, U64{1})
+}
+#Test("world authored edit copies provenance and never mutates published value") {
+    inspector := world_test_inspector()
+    &inspector.set_session_identity("session", "game")
+    identity :: inspector.session_identity() ?? panic("identity absent")
+    assert_eq(identity.session_id, "session")
+    assert_eq(identity.tier, "game")
+    &inspector.select(world_test_selection(Val("x"))) ?? panic(err.show())
+    edit :: inspector.edit_request("x", "11") ?? panic(err.show())
+    inspector.validate_edit_request(edit) ?? panic(err.show())
+    assert_eq(edit.targets[0].session_id, Val("session"))
+    assert_eq(edit.targets[0].tier, Val("game"))
+    assert_eq(edit.targets[0].authored_instance_id, "authored")
+    assert_eq(edit.field_patch.value, "11")
+    assert_eq((inspector.project() ?? panic("projection")).property ?? panic("property"), world_test_property("x", Val("7"), false, 10, 20))
+}
+#Test("world transient and mismatched field edits are rejected") {
+    inspector := world_test_inspector()
+    &inspector.select(world_test_selection(Val("live"))) ?? panic(err.show())
+    _ :: inspector.edit_request("live", "2") ?? { assert_eq(err, world.JetGameWorldInspectorError.NotEditable("live")); return }
+    panic("transient edit accepted")
+}
+#Test("world edit duplicate precedence validates first target before later bad target") {
+    a :: world_test_target("source", "revision", "authored", 1, 2)
+    bad := ~a
+    bad.source_id = ""
+    request :: world.JetGameWorldEditRequest{targets: [world.JetGameWorldEditTarget]{~a, bad, ~a}, field_patch: world.JetGameWorldFieldPatch{field: "x", value: "2"}}
+    world_test_edit_error(request, world.JetGameWorldInspectorError.DuplicateEditTarget)
+    empty :: world.JetGameWorldEditRequest{targets: [world.JetGameWorldEditTarget]{}, field_patch: world.JetGameWorldFieldPatch{field: "", value: ""}}
+    world_test_edit_error(empty, world.JetGameWorldInspectorError.InvalidEdit("targets must not be empty"))
+}
+#Test("world edit target ordering includes span session and tier and serializes provenance") {
+    z :: world_test_target("z", "revision", "authored", 3, 4)
+    a :: world_test_target("a", "revision", "authored", 1, 2)
+    request :: world.JetGameWorldEditRequest.new([world.JetGameWorldEditTarget]{z, a}, "x", "2") ?? panic(err.show())
+    assert_eq(request.targets[0].source_id, "a")
+    assert_eq(request.render_json(), "{{\"targets\":[{{\"source_id\":\"a\",\"revision\":\"revision\",\"authored_instance_id\":\"authored\",\"source_span\":{{\"start\":1,\"end\":2}},\"session_id\":null,\"tier\":null}},{{\"source_id\":\"z\",\"revision\":\"revision\",\"authored_instance_id\":\"authored\",\"source_span\":{{\"start\":3,\"end\":4}},\"session_id\":null,\"tier\":null}}],\"field_patch\":{{\"field\":\"x\",\"value\":\"2\"}}}")
+}
+#Test("world bound edit rejects source revision session tier and false provenance in order") {
+    inspector := world_test_inspector()
+    &inspector.set_session_identity("session", "game")
+    &inspector.select(world_test_selection(Val("x"))) ?? panic(err.show())
+    request := inspector.edit_request("x", "2") ?? panic(err.show())
+    request.targets[0].source_id = "other"
+    world_test_bound_edit(inspector, request, world.JetGameWorldInspectorError.InvalidEdit("target source is not the current world source"))
+    request.targets[0].source_id = "source"
+    request.targets[0].revision = "old"
+    world_test_bound_edit(inspector, request, world.JetGameWorldInspectorError.StaleRevision("revision", "old"))
+    request.targets[0].revision = "revision"
+    request.targets[0].session_id = Val("other")
+    world_test_bound_edit(inspector, request, world.JetGameWorldInspectorError.StaleSession("session", "other"))
+    request.targets[0].session_id = Val("session")
+    request.targets[0].tier = Val("other")
+    world_test_bound_edit(inspector, request, world.JetGameWorldInspectorError.StaleTier("game", "other"))
+    request.targets[0].tier = Val("game")
+    request.targets[0].authored_instance_id = "wrong"
+    world_test_bound_edit(inspector, request, world.JetGameWorldInspectorError.InvalidEdit("target provenance does not name an authored property"))
+}
+#Test("world paused evaluation preserves refusal ordering and all authority spellings") {
+    empty :: world.JetGameWorldInspector.default()
+    invalid := world_test_eval(U64{1}, "x", "running", U64{10})
+    invalid.budget = U64{0}
+    assert_eq(empty.evaluate_request(^invalid).status, world.JET_GAME_PAUSED_EVAL_INVALID)
+    loop authority in [String]{"RUNNING", "running-frame", "running_frame", "LiVe", "live-frame", "live_frame"} {
+        assert_eq(empty.evaluate_request(world_test_eval(U64{1}, "x", authority, U64{10})).status, world.JET_GAME_PAUSED_EVAL_RUNNING)
+    }
+    assert_eq(empty.evaluate_request(world_test_eval(U64{1}, "x", "unknown", U64{10})).status, world.JET_GAME_PAUSED_EVAL_UNAUTHORIZED)
+    loop authority in [String]{"PAUSED", "paused-frame", "paused_frame", "debug.paused", "game.debug.paused"} {
+        assert_eq(empty.evaluate_request(world_test_eval(U64{1}, "x", authority, U64{10})).status, world.JET_GAME_PAUSED_EVAL_NO_WORLD)
+    }
+}
+#Test("world paused evaluation exact frame published fact budgets and result JSON") {
+    inspector := world_test_inspector()
+    result :: inspector.evaluate_request(world_test_eval(U64{1}, "x", "paused", U64{1}))
+    assert_eq(result.status, world.JET_GAME_PAUSED_EVAL_OK)
+    assert_eq(result.render_json(), "{{\"request_id\":\"request\",\"status\":\"ok\",\"type_name\":\"Int\",\"published_value\":\"7\",\"source_span\":{{\"start\":10,\"end\":20}}}}")
+    assert_eq(inspector.evaluate_request(world_test_eval(U64{1}, "x+1", "paused", U64{1})).status, world.JET_GAME_PAUSED_EVAL_BUDGET)
+    assert_eq(inspector.evaluate_request(world_test_eval(U64{1}, "x+1", "paused", U64{10})).status, world.JET_GAME_PAUSED_EVAL_UNSUPPORTED)
+    transient :: inspector.evaluate_request(world_test_eval(U64{1}, "live", "paused", U64{10}))
+    assert_eq(transient.status, world.JET_GAME_PAUSED_EVAL_OK)
+    assert_eq(transient.published_value, None)
+    assert_eq(inspector.evaluate_request(world_test_eval(U64{2}, "x", "paused", U64{10})).status, world.JET_GAME_PAUSED_EVAL_STALE)
+    &inspector.ingest(world_test_fact(U64{2}, "revision")) ?? panic(err.show())
+    assert_eq(inspector.evaluate_request(world_test_eval(U64{1}, "x", "paused", U64{10})).status, world.JET_GAME_PAUSED_EVAL_OK)
+    &inspector.ingest(world_test_fact(U64{3}, "new")) ?? panic(err.show())
+    assert_eq(inspector.evaluate_request(world_test_eval(U64{1}, "x", "paused", U64{10})).status, world.JET_GAME_PAUSED_EVAL_STALE)
+}
+#Test("world frame retention evicts oldest and newest duplicate frame wins") {
+    inspector := world.JetGameWorldInspector.default()
+    loop i in 0..<257 {
+        frame :: U64.from_int(i) ?? panic("frame index")
+        &inspector.ingest(world_test_fact(frame, "revision")) ?? panic(err.show())
+    }
+    assert_eq(inspector.evaluate_request(world_test_eval(U64{0}, "x", "paused", U64{10})).status, world.JET_GAME_PAUSED_EVAL_STALE)
+    assert_eq(inspector.evaluate_request(world_test_eval(U64{1}, "x", "paused", U64{10})).status, world.JET_GAME_PAUSED_EVAL_OK)
+    latest := world_test_fact(U64{1}, "revision")
+    latest.entities[0].components[0].properties[0].published_value = Val("99")
+    &inspector.ingest(^latest) ?? panic(err.show())
+    assert_eq(inspector.evaluate_request(world_test_eval(U64{1}, "x", "paused", U64{10})).published_value, Val("99"))
+}
+#Test("world evaluation session and tier stale before empty-world lookup") {
+    inspector := world.JetGameWorldInspector.default()
+    &inspector.set_session_identity("expected", "O2")
+    assert_eq(inspector.evaluate_request(world_test_eval(U64{1}, "x", "paused", U64{10})).status, world.JET_GAME_PAUSED_EVAL_STALE)
+    request := world_test_eval(U64{1}, "x", "paused", U64{10})
+    request.session_id = "expected"
+    assert_eq(inspector.evaluate_request(~request).status, world.JET_GAME_PAUSED_EVAL_STALE)
+    request = request.with_tier("O2") ?? panic(err.show())
+    assert_eq(inspector.evaluate_request(^request).status, world.JET_GAME_PAUSED_EVAL_NO_WORLD)
+}
+#Test("world eval result empty type exception is distinct from whitespace type") {
+    result :: world.JetGamePausedEvalResult.new("id", "no_world", "", None, None) ?? panic(err.show())
+    assert_eq(result.render_json(), "{{\"request_id\":\"id\",\"status\":\"no_world\",\"type_name\":\"\",\"published_value\":null,\"source_span\":null}}")
+    _ :: world.JetGamePausedEvalResult.new("id", "no_world", " ", None, None) ?? { assert_eq(err, world.JetGameWorldInspectorError.EmptyText("evaluation result type")); return }
+    panic("whitespace result type accepted")
+}
+#Test("world logical inspector equality ignores physical ring position") {
+    a := world.JetGameWorldInspector.default()
+    b := world.JetGameWorldInspector.default()
+    loop _ in 0..<257 -> &a.ingest(world_test_fact(U64{1}, "revision")) ?? panic(err.show())
+    loop _ in 0..<256 -> &b.ingest(world_test_fact(U64{1}, "revision")) ?? panic(err.show())
+    assert(a.equals(b))
+    &b.set_session_identity("different", "game")
+    assert(!a.equals(b))
+}
+
+#Test("world offline selection JSON and world-only projection retain null branches") {
+    inspector := world_test_inspector()
+    selection :: world.JetGameWorldSelection.new("world", None, None, None) ?? panic(err.show())
+    assert_eq(selection.render_json(), "{{\"world_id\":\"world\",\"entity_id\":null,\"component_id\":null,\"property_id\":null}}")
+    &inspector.select(~selection) ?? panic(err.show())
+    projection :: inspector.project() ?? panic("world projection")
+    assert_eq(projection.render_json(), "{{\"selection\":{{\"world_id\":\"world\",\"entity_id\":null,\"component_id\":null,\"property_id\":null}},\"world_id\":\"world\",\"frame_id\":1,\"source_id\":\"source\",\"revision\":\"revision\",\"entity\":null,\"component\":null,\"property\":null}}")
+    assert(inspector.session_identity() == None)
+    _ :: inspector.edit_request("x", "2") ?? { assert_eq(err, world.JetGameWorldInspectorError.InvalidSelectionHierarchy); return }
+    panic("world-only selection editable")
+}
+#Test("world empty inspector select and edit errors preserve no-world precedence") {
+    inspector := world.JetGameWorldInspector.default()
+    assert(inspector.project() == None)
+    world_test_select_error(&inspector, world_test_selection(Val("x")), world.JetGameWorldInspectorError.NoWorld)
+    _ :: inspector.edit_request("", "") ?? { assert_eq(err, world.JetGameWorldInspectorError.NoWorld); return }
+    panic("empty inspector edit accepted")
+}
+#Test("world no selection and authored mismatched field edits are rejected") {
+    inspector := world_test_inspector()
+    no_selection :: inspector.edit_request("x", "2") ? ok -> false ! error -> error == world.JetGameWorldInspectorError.NoSelection
+    assert(no_selection)
+    &inspector.select(world_test_selection(Val("x"))) ?? panic(err.show())
+    _ :: inspector.edit_request("other", "2") ?? { assert_eq(err, world.JetGameWorldInspectorError.NotEditable("other")); return }
+    panic("unselected field editable")
+}
+#Test("world empty authored span is valid fact but never an edit target") {
+    inspector := world.JetGameWorldInspector.default()
+    fact := world_test_fact(U64{1}, "revision")
+    fact.entities[0].components[0].properties[0].source_span = world.JetGameWorldSourceSpan{start: 10, end: 10}
+    &inspector.ingest(^fact) ?? panic(err.show())
+    &inspector.select(world_test_selection(Val("x"))) ?? panic(err.show())
+    _ :: inspector.edit_request("x", "2") ?? { assert_eq(err, world.JetGameWorldInspectorError.InvalidSourceSpan); return }
+    panic("empty authored span editable")
+}
+#Test("world direct target validation keeps paired session-tier before empty span") {
+    target := world_test_target("source", "revision", "authored", 10, 20)
+    target.session_id = Val("session")
+    target.source_span = world.JetGameWorldSourceSpan{start: 10, end: 10}
+    request :: world.JetGameWorldEditRequest{targets: [world.JetGameWorldEditTarget]{target}, field_patch: world.JetGameWorldFieldPatch{field: "x", value: "2"}}
+    world_test_edit_error(request, world.JetGameWorldInspectorError.InvalidEdit("edit session and tier must be supplied together"))
+}
+#Test("world canonical entity and component sorting never changes original arrays") {
+    a :: world_test_entity("a", None, [world.JetGameWorldComponentFact]{world_test_component("b", [world.JetGameWorldPropertyFact]{}), world_test_component("a_component", [world.JetGameWorldPropertyFact]{})})
+    z :: world_test_entity("z", Val("a"), [world.JetGameWorldComponentFact]{})
+    fact :: world.JetGameWorldFact.new("w", U64{0}, "s", "r", [world.JetGameWorldEntityFact]{z, a}) ?? panic(err.show())
+    assert_eq(fact.render_json(), "{{\"world_id\":\"w\",\"frame_id\":0,\"source_id\":\"s\",\"revision\":\"r\",\"entities\":[{{\"entity_id\":\"a\",\"parent_id\":null,\"name\":\"a\",\"components\":[{{\"component_id\":\"a_component\",\"type_name\":\"Transform\",\"authored_instance_id\":\"authored\",\"properties\":[]}},{{\"component_id\":\"b\",\"type_name\":\"Transform\",\"authored_instance_id\":\"authored\",\"properties\":[]}}]}},{{\"entity_id\":\"z\",\"parent_id\":\"a\",\"name\":\"z\",\"components\":[]}}]}}")
+    assert_eq(fact.entities[0].entity_id, "z")
+    assert_eq(fact.entities[1].components[0].component_id, "b")
+}
+#Test("world evaluation request JSON and lookup before budget follow original order") {
+    inspector :: world_test_inspector()
+    request := world_test_eval(U64{1}, "x", "paused", U64{1})
+    assert_eq(request.render_json(), "{{\"request_id\":\"request\",\"session_id\":\"session\",\"tier\":\"game\",\"world_id\":\"world\",\"frame_id\":1,\"entity_id\":\"entity\",\"component_id\":\"component\",\"expression\":\"x\",\"required_authority\":\"paused\",\"budget\":1}}")
+    request.expression = "long expression"
+    request.entity_id = "missing"
+    assert_eq(inspector.evaluate_request(~request).status, world.JET_GAME_PAUSED_EVAL_UNSUPPORTED)
+    request.entity_id = "entity"
+    request.component_id = "missing"
+    assert_eq(inspector.evaluate_request(^request).status, world.JET_GAME_PAUSED_EVAL_UNSUPPORTED)
+}
+#Test("world byte budgets count Unicode UTF8 not scalar width") {
+    inspector := world.JetGameWorldInspector.default()
+    fact := world_test_fact(U64{1}, "revision")
+    fact.entities[0].components[0].properties[0].field = "é"
+    &inspector.ingest(^fact) ?? panic(err.show())
+    assert_eq(inspector.evaluate_request(world_test_eval(U64{1}, "é", "paused", U64{1})).status, world.JET_GAME_PAUSED_EVAL_BUDGET)
+    assert_eq(inspector.evaluate_request(world_test_eval(U64{1}, "é", "paused", U64{2})).status, world.JET_GAME_PAUSED_EVAL_OK)
+}

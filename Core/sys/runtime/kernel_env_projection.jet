@@ -1,0 +1,63 @@
+// EnvProjection.rs:1–46. D-SHAPE-ONE1: the host-neutral typed environment
+// projection boundary over kernel_env_config. The compiler's checked #Shape
+// supplies the field map; hosts supply the process snapshot and marshal the
+// returned entries into their DataTree carrier for the canonical Decode.
+use core.sys.runtime.kernel_env_config as env_projection_config
+
+// Rust `names` item `(&str, &str)` (:12): a field's canonical environment
+// name and the decode key it projects to, read from the checked shape facts;
+// only a matched key is copied into an entry's segments.
+pub struct JetEnvShapeName {
+    pub env_name: String
+    pub decode_name: String
+}
+
+// Rust jet_env_config_entries_for_names (:8–46). Shape fields are validated
+// in order before any source is read: a blank name, then a decode key already
+// seen ignoring ASCII case. A matched entry decodes under its field's key;
+// the result is stably sorted by segments, then by source name.
+pub fn jet_env_config_entries_for_names(prefix: String, dotenv: String?, allow: [String], names: [JetEnvShapeName], process: ^[env_projection_config.JetEnvConfigVar]) -> [env_projection_config.JetEnvConfigEntry] Err! {
+    // Rust BTreeSet<String> of ASCII-uppercased decode keys (:16–24).
+    seen := [String: Bool]{}
+    loop field in names {
+        if env_projection_config.jet_env_config_is_blank(field.env_name) || env_projection_config.jet_env_config_is_blank(field.decode_name) {
+            return Err("invalid environment shape field")
+        }
+        folded := env_projection_config.jet_env_config_ascii_upper(field.decode_name)
+        if seen.has_key(folded) -> return Err("ambiguous environment shape field `{field.decode_name}`")
+        seen[folded] = true
+    }
+
+    entries := env_projection_config.jet_env_config_entries(prefix, dotenv, allow, ^process) ?? return Err(err)
+    loop i in 0..<entries.len() {
+        loop field in names {
+            if env_projection_matches(entries[i].name, prefix, field.env_name) {
+                entries[i].segments = [String]{~field.decode_name}
+                break
+            }
+        }
+    }
+    &entries.sort_by((left: env_projection_config.JetEnvConfigEntry, right: env_projection_config.JetEnvConfigEntry) -> env_projection_order(left, right))
+    entries
+}
+
+// Rust find predicate (:28–36), its three tests in their original order.
+fn env_projection_matches(name: String, prefix: String, env_name: String) -> Bool Never! {
+    if env_projection_config.jet_env_config_eq_ignore_ascii_case(name, env_name) -> return true
+    full := "{prefix}{env_name}"
+    if env_projection_config.jet_env_config_eq_ignore_ascii_case(name, full) -> return true
+    env_projection_config.jet_env_config_suffix_eq_ignore_ascii_case(name, prefix, env_name)
+}
+
+// Rust `left.segments.cmp(&right.segments).then_with(|| left.name.cmp(&right.name))`
+// (:40–44): lexicographic Vec<String>, then the byte-ordered source name.
+fn env_projection_order(left: env_projection_config.JetEnvConfigEntry, right: env_projection_config.JetEnvConfigEntry) -> Ordering Never! {
+    common :: if left.segments.len() < right.segments.len() -> left.segments.len() else -> right.segments.len()
+    loop i in 0..<common {
+        order :: left.segments[i] <=> right.segments[i]
+        if order != Ordering.Equal -> return order
+    }
+    length_order :: left.segments.len() <=> right.segments.len()
+    if length_order != Ordering.Equal -> return length_order
+    left.name <=> right.name
+}

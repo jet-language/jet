@@ -110,7 +110,7 @@ fn authorize_core_build(
     match Provider::approval_facts(spec, table, ctx) {
         Ok(Some(identity)) => {
             crate::RuntimePolicy::warn_sandbox_fallback(theme);
-            Trust::gate_build_identity(theme, trust_store, &identity, bypass)
+            Trust::gate_build_identity(theme, trust_store, ctx.project_dir.unwrap_or(Path::new(".")), &identity, bypass)
                 .map_err(|_| CoreBuildAuthorizationError::Denied)
         }
         Ok(None) => Ok(()),

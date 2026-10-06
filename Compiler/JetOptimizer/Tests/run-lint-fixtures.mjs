@@ -7,9 +7,9 @@
 //
 // The fixtures reuse the MIR builders and example programs of the lowering
 // fixtures (Compiler/JetBackend/Tests/LowerFixtures.jet) without their
-// lowering report and entry point. MIR.jet names three Foundation items
-// (Span, Effect, ParamZone with param_zone_name) whose files pull in the whole
-// diagnostics registry; their exact definitions are copied out of those files.
+// lowering report and entry point. MIR.jet also names Foundation span, call
+// registry and parameter-zone items whose files pull in the whole diagnostics
+// registry; their exact definitions are copied out of those files.
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -66,8 +66,21 @@ const parts = [
   "// [unit source: Foundation items named by MIR.jet]",
   item("Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet", "pub struct Span {"),
   item("Compiler/JetFoundation/Source/Registry/CoreCalls.jet", "pub enum Effect "),
+  ...[
+    "pub enum SinkClass ",
+    "pub enum CoreCallFallibility ",
+    "pub enum CoreCallPureRoute {",
+    "pub enum CoreCallInterpreterRoute ",
+    "pub enum CoreCallSymbol ",
+    "pub struct CoreMarkerApplication {",
+  ].map((head) => item("Compiler/JetFoundation/Source/Registry/CoreCalls.jet", head)),
   item("Compiler/JetFoundation/Source/Types/Types.jet", "pub enum ParamZone {"),
   item("Compiler/JetFoundation/Source/Types/Types.jet", "pub fn param_zone_name("),
+  ...[
+    "pub struct ByteLayout {",
+    "pub struct FieldLayoutFacts {",
+    "pub struct LayoutFacts {",
+  ].map((head) => item("Compiler/JetFoundation/Source/Target/Layout.jet", head)),
   "",
   body("Compiler/JetFoundation/Source/MIR/MIR.jet"),
   body("Compiler/JetOptimizer/Source/Verification/Lint.jet"),

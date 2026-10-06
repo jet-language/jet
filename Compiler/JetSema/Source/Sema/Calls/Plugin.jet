@@ -133,10 +133,10 @@ fn sema_plugin_retired_method_diagnostic(method: String, span: Span, diagnostics
 }
 
 fn sema_plugin_record_exec(method: String, success: Type, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
-    result := Type.Result{ok: success, err: Type.String}
+    result := Type.Result{ok: success, err: Type.Named{name: "PluginError"}}
     sema_effect_record_intrinsic_fact(environment, &scopes, &context, "Plugin.{method}", span, SemaCallFacts{
         return_type: result,
-        failure_carrier: TFailureCarrier.Result{success: success, error: Type.String},
+        failure_carrier: TFailureCarrier.Result{success: success, error: Type.Named{name: "PluginError"}},
         effect_bound: Val([EffectRowEntry]{EffectRowEntry{name: "Exec", span: span}}),
         type_args: [Type]{},
         default_refs: [FunctionDefaultRef]{},
@@ -237,7 +237,7 @@ pub fn sema_call_try_plugin_method(receiver: Expr, receiver_value: TExpr, method
     }
     if !supported -> return SemaMethodSpecialCheck{handled: true, value: None}
     signature := MIRComponentSignatureDescriptor{params: component_params, result: result_descriptor ?? return SemaMethodSpecialCheck{handled: true, value: None}}
-    result := Type.Result{ok: result_type, err: Type.String}
+    result := Type.Result{ok: result_type, err: Type.Named{name: "PluginError"}}
     value := sema_tir_expr(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.PluginInvoke{export_name: export_value.name, signature: signature}, args: values}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }

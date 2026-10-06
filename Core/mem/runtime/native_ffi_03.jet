@@ -1,0 +1,1720 @@
+// PORT-PENDING 0217 crates-jet-jit-src-ffi-slice-3619: crates/jet-jit/src/Ffi.rs:3619-5334
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn call_runtime_inner(
+//RS     wrapper: &str,
+//RS     args: &[MirRuntimeValue],
+//RS     ret_f32: bool,
+//RS     span: Span,
+//RS     target: MirForeignTarget,
+//RS ) -> Result<AmbientMirExternResult, Diagnostic> {
+//RS     let state = FFI_STATE.lock().unwrap_or_else(|e| e.into_inner());
+//RS     let Some(state) = state.as_ref() else {
+//RS         return Err(ffi_diag(wrapper, "has no prepared bridge", span));
+//RS     };
+//RS     let Some(entry) = state.by_wrapper.get(wrapper) else {
+//RS         return Err(ffi_diag(
+//RS             wrapper,
+//RS             "is not bound in the prepared bridge",
+//RS             span,
+//RS         ));
+//RS     };
+//RS     if args.len() != entry.params.len() {
+//RS         return Err(ffi_diag(
+//RS             wrapper,
+//RS             format!("argc {} != {}", args.len(), entry.params.len()),
+//RS             span,
+//RS         ));
+//RS     }
+//RS     let (slots, storage) =
+//RS         prepare_runtime_call(args, entry, &state.records, wrapper, span, target)?;
+//RS     let mut out = FfiSlot {
+//RS         value: 0,
+//RS         ptr: std::ptr::null_mut(),
+//RS         len: 0,
+//RS     };
+//RS     call_uniform(state, wrapper, entry, &slots, &mut out, span)?;
+//RS     let value = decode_runtime_result(state, entry, &out, wrapper, span, target, ret_f32)?;
+//RS     let writebacks =
+//RS         decode_runtime_writebacks(state, entry, args, &slots, &storage, wrapper, span)?;
+//RS     retire_handle_args(args, &entry.params, entry.close_handle, target);
+//RS     Ok(AmbientMirExternResult { value, writebacks })
+//RS }
+//RS fn managed_callback_type(ty: &MirType) -> bool {
+//RS     let MirTypeKind::Fn(signature) = ty.kind() else {
+//RS         return false;
+//RS     };
+//RS     signature.params.len() == 1
+//RS         && signature.ret.is_none()
+//RS         && matches!(
+//RS             signature.params[0].kind(),
+//RS             MirTypeKind::Apply { name, args }
+//RS                 if name.name == "FfiCallbackEvent"
+//RS                     && args.len() == 1
+//RS                     && matches!(args[0].kind(), MirTypeKind::Int)
+//RS         )
+//RS }
+//RS 
+//RS fn mir_param_abi(
+//RS     ty: &MirType,
+//RS     is_handle: bool,
+//RS     is_record: bool,
+//RS     is_scalar_enum: bool,
+//RS ) -> Option<ParamAbi> {
+//RS     if managed_callback_type(ty) {
+//RS         return Some(ParamAbi::Callback);
+//RS     }
+//RS     if is_record {
+//RS         return Some(ParamAbi::Record);
+//RS     }
+//RS     if is_scalar_enum {
+//RS         return Some(ParamAbi::Int);
+//RS     }
+//RS     if is_handle && matches!(ty.kind(), MirTypeKind::Apply { .. }) {
+//RS         return Some(ParamAbi::Handle);
+//RS     }
+//RS     if ty.is_string() {
+//RS         return Some(ParamAbi::String);
+//RS     }
+//RS     match ty.kind() {
+//RS         MirTypeKind::List(_) => Some(ParamAbi::List),
+//RS         _ => match ty.layout.abi {
+//RS             MirAbi::Scalar(MirScalarKind::Int | MirScalarKind::Pointer) => Some(ParamAbi::Int),
+//RS             MirAbi::Scalar(MirScalarKind::Float | MirScalarKind::Float32) => Some(ParamAbi::Float),
+//RS             MirAbi::Scalar(MirScalarKind::Bool) => Some(ParamAbi::Bool),
+//RS             MirAbi::Scalar(MirScalarKind::Char)
+//RS             | MirAbi::Aggregate
+//RS             | MirAbi::Sequence
+//RS             | MirAbi::Function
+//RS             | MirAbi::Nominal
+//RS             | MirAbi::Dynamic
+//RS             | MirAbi::Never => None,
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn mir_ret_abi(
+//RS     ty: Option<&MirType>,
+//RS     is_handle: bool,
+//RS     is_record: bool,
+//RS     is_scalar_enum: bool,
+//RS ) -> Option<RetAbi> {
+//RS     let Some(ty) = ty else {
+//RS         return Some(RetAbi::Unit);
+//RS     };
+//RS     if is_record {
+//RS         return Some(RetAbi::Record);
+//RS     }
+//RS     if is_scalar_enum {
+//RS         return Some(RetAbi::Int);
+//RS     }
+//RS     if is_handle && matches!(ty.kind(), MirTypeKind::Apply { .. }) {
+//RS         return Some(RetAbi::Handle);
+//RS     }
+//RS     match ty.kind() {
+//RS         MirTypeKind::List(_) => Some(RetAbi::List),
+//RS         _ => match ty.layout.abi {
+//RS             MirAbi::Scalar(MirScalarKind::Int | MirScalarKind::Pointer) => Some(RetAbi::Int),
+//RS             MirAbi::Scalar(MirScalarKind::Float | MirScalarKind::Float32) => Some(RetAbi::Float),
+//RS             MirAbi::Scalar(MirScalarKind::Bool) => Some(RetAbi::Bool),
+//RS             MirAbi::Scalar(MirScalarKind::Char)
+//RS             | MirAbi::Aggregate
+//RS             | MirAbi::Sequence
+//RS             | MirAbi::Function
+//RS             | MirAbi::Nominal
+//RS             | MirAbi::Dynamic
+//RS             | MirAbi::Never => None,
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS enum MirForeignTarget {
+//RS     Cranelift,
+//RS     Interpreter,
+//RS }
+//RS 
+//RS fn validate_mir_bridge(
+//RS     foreign: &MirForeign,
+//RS     span: Span,
+//RS     target: MirForeignTarget,
+//RS ) -> Result<bool, Diagnostic> {
+//RS     let wrapper = bridge_wrapper_name(foreign);
+//RS     let (applicable, target_name) = match target {
+//RS         MirForeignTarget::Cranelift => (
+//RS             foreign.target_applicability.cranelift,
+//RS             "Cranelift",
+//RS         ),
+//RS         MirForeignTarget::Interpreter => (
+//RS             foreign.target_applicability.interpreter,
+//RS             "interpreter",
+//RS         ),
+//RS     };
+//RS     if !applicable {
+//RS         return Err(ffi_diag(
+//RS             &wrapper,
+//RS             format!("is not applicable to the {target_name} target"),
+//RS             span,
+//RS         ));
+//RS     }
+//RS     if foreign.path.is_empty() || foreign.symbol.is_empty() {
+//RS         return Err(ffi_diag(
+//RS             &wrapper,
+//RS             "has no checked bridge identity",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     if !matches!(
+//RS         foreign.foreign_language,
+//RS         MirForeignLanguage::C | MirForeignLanguage::Cpp | MirForeignLanguage::Assembly
+//RS     ) || !matches!(
+//RS         foreign.foreign_abi,
+//RS         MirForeignAbi::C | MirForeignAbi::CUnwind
+//RS     ) {
+//RS         return Err(ffi_diag(
+//RS             &wrapper,
+//RS             "has no supported native bridge ABI",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     let state = FFI_STATE.lock().unwrap_or_else(|error| error.into_inner());
+//RS     let Some(state) = state.as_ref() else {
+//RS         return Err(ffi_diag(&wrapper, "has no prepared bridge", span));
+//RS     };
+//RS     let Some(entry) = state.by_wrapper.get(&wrapper) else {
+//RS         return Err(ffi_diag(
+//RS             &wrapper,
+//RS             "is not bound in the prepared bridge",
+//RS             span,
+//RS         ));
+//RS     };
+//RS     let expected_params = foreign
+//RS         .params
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(index, parameter)| {
+//RS             mir_param_abi(
+//RS                 &parameter.ty,
+//RS                 entry
+//RS                     .param_handles
+//RS                     .get(index)
+//RS                     .copied()
+//RS                     .flatten()
+//RS                     .is_some(),
+//RS                 !foreign.bridge_eligible && mir_record_type(&parameter.ty, &state.records),
+//RS                 mir_scalar_enum_type(&parameter.ty, &state.records),
+//RS             )
+//RS             .ok_or_else(|| {
+//RS                 ffi_diag(
+//RS                     &wrapper,
+//RS                     format!("parameter `{}` has no supported bridge carrier", parameter.name),
+//RS                     span,
+//RS                 )
+//RS             })
+//RS         })
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let expected_ret = mir_ret_abi(
+//RS         foreign.return_type.as_ref(),
+//RS         entry.handle.is_some()
+//RS             && foreign
+//RS                 .return_type
+//RS                 .as_ref()
+//RS                 .is_some_and(|ty| matches!(ty.kind(), MirTypeKind::Apply { .. })),
+//RS         !foreign.bridge_eligible
+//RS             && foreign
+//RS                 .return_type
+//RS                 .as_ref()
+//RS                 .is_some_and(|ty| mir_record_type(ty, &state.records)),
+//RS         foreign
+//RS             .return_type
+//RS             .as_ref()
+//RS             .is_some_and(|ty| mir_scalar_enum_type(ty, &state.records)),
+//RS     )
+//RS     .ok_or_else(|| {
+//RS         ffi_diag(
+//RS             &wrapper,
+//RS             "return type has no supported bridge carrier",
+//RS             span,
+//RS         )
+//RS     })?;
+//RS     let expected_access = foreign
+//RS         .params
+//RS         .iter()
+//RS         .map(|parameter| parameter.access)
+//RS         .collect::<Vec<_>>();
+//RS     let same_types = entry
+//RS         .param_types
+//RS         .iter()
+//RS         .zip(foreign.params.iter().map(|parameter| &parameter.ty))
+//RS         .all(|(left, right)| left.same_checked_type(right));
+//RS     let same_ret_type = match (entry.ret_type.as_ref(), foreign.return_type.as_ref()) {
+//RS         (None, None) => true,
+//RS         (Some(left), Some(right)) => left.same_checked_type(right),
+//RS         _ => false,
+//RS     };
+//RS     if entry.params != expected_params
+//RS         || entry.param_access != expected_access
+//RS         || !same_types
+//RS         || entry.ret != expected_ret
+//RS         || !same_ret_type
+//RS         || entry.param_handles.len() != foreign.params.len()
+//RS     {
+//RS         return Err(ffi_diag(
+//RS             &wrapper,
+//RS             "does not match the checked bridge signature",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     Ok(foreign
+//RS         .return_type
+//RS         .as_ref()
+//RS         .is_some_and(|ty| matches!(ty.kind(), MirTypeKind::Float32)))
+//RS }
+//RS 
+//RS /// Call the exact typed bridge selected by a canonical MIR foreign row.
+//RS fn call_mir_foreign_for_target(
+//RS     foreign: &MirForeign,
+//RS     args: Vec<MirRuntimeValue>,
+//RS     span: Span,
+//RS     target: MirForeignTarget,
+//RS ) -> Result<AmbientMirExternResult, Diagnostic> {
+//RS     let wrapper = bridge_wrapper_name(foreign);
+//RS     let ret_f32 = validate_mir_bridge(foreign, span, target)?;
+//RS     if args.len() != foreign.params.len() {
+//RS         return Err(ffi_diag(
+//RS             &wrapper,
+//RS             format!("argc {} != {}", args.len(), foreign.params.len()),
+//RS             span,
+//RS         ));
+//RS     }
+//RS     call_runtime_inner(&wrapper, &args, ret_f32, span, target)
+//RS }
+//RS 
+//RS /// Ambient provider for canonical MIR foreign calls made by the interpreter.
+//RS pub(crate) fn ambient_mir_extern_call(
+//RS     foreign: &MirForeign,
+//RS     args: Vec<MirRuntimeValue>,
+//RS     span: Span,
+//RS ) -> Option<Result<AmbientMirExternResult, Diagnostic>> {
+//RS     Some(call_mir_foreign_for_target(
+//RS         foreign,
+//RS         args,
+//RS         span,
+//RS         MirForeignTarget::Interpreter,
+//RS     ))
+//RS }
+//RS 
+//RS /// Ambient provider for canonical MIR foreign calls made by Cranelift.
+//RS pub(crate) fn ambient_mir_extern_call_cranelift(
+//RS     foreign: &MirForeign,
+//RS     args: Vec<MirRuntimeValue>,
+//RS     span: Span,
+//RS ) -> Option<Result<AmbientMirExternResult, Diagnostic>> {
+//RS     Some(call_mir_foreign_for_target(
+//RS         foreign,
+//RS         args,
+//RS         span,
+//RS         MirForeignTarget::Cranelift,
+//RS     ))
+//RS }
+//RS 
+//RS /// Convert one erased heap cell using the checked MIR element descriptor.
+//RS fn heap_cell_to_runtime(
+//RS     heap: &jet_rt::JetArena,
+//RS     cell: &JetVal,
+//RS     ty: &MirType,
+//RS     records: &HashMap<MirTypeId, FfiRecordDesc>,
+//RS ) -> Result<MirRuntimeValue, String> {
+//RS     match ty.kind() {
+//RS         MirTypeKind::Int
+//RS         | MirTypeKind::IntN { .. }
+//RS         | MirTypeKind::InlineRange { .. }
+//RS         | MirTypeKind::Tagged { .. }
+//RS         | MirTypeKind::Quantity { .. } => match cell {
+//RS             JetVal::Int(value) | JetVal::Word { value, .. } => Ok(MirRuntimeValue::Int(*value)),
+//RS             _ => Err(format!("expected integer cell for `{}`", ty.canonical_key())),
+//RS         },
+//RS         MirTypeKind::Float | MirTypeKind::Float32 => match cell {
+//RS             JetVal::Float(value) => Ok(MirRuntimeValue::Float {
+//RS                 value: *value,
+//RS                 f32: matches!(ty.kind(), MirTypeKind::Float32),
+//RS             }),
+//RS             _ => Err(format!("expected float cell for `{}`", ty.canonical_key())),
+//RS         },
+//RS         MirTypeKind::Bool => match cell {
+//RS             JetVal::Bool(value) => Ok(MirRuntimeValue::Bool(*value)),
+//RS             JetVal::Int(value) => Ok(MirRuntimeValue::Bool(*value != 0)),
+//RS             _ => Err(format!("expected bool cell for `{}`", ty.canonical_key())),
+//RS         },
+//RS         MirTypeKind::Char => match cell {
+//RS             JetVal::Char(value) => Ok(MirRuntimeValue::Char(*value)),
+//RS             JetVal::Int(value) => char::from_u32(*value as u32)
+//RS                 .map(MirRuntimeValue::Char)
+//RS                 .ok_or_else(|| "character cell is not valid Unicode".to_string()),
+//RS             _ => Err(format!("expected character cell for `{}`", ty.canonical_key())),
+//RS         },
+//RS         MirTypeKind::String => match cell {
+//RS             JetVal::String(value) => Ok(MirRuntimeValue::String(value.clone())),
+//RS             JetVal::StringView { owner, start, end } => heap
+//RS                 .get_string(*owner)
+//RS                 .and_then(|text| text.get(*start..*end))
+//RS                 .map(|text| MirRuntimeValue::String(text.to_string()))
+//RS                 .ok_or_else(|| "string view cell is invalid".to_string()),
+//RS             JetVal::Int(value) => heap
+//RS                 .clone_string(*value)
+//RS                 .map(MirRuntimeValue::String)
+//RS                 .ok_or_else(|| "string handle cell is invalid".to_string()),
+//RS             _ => Err(format!("expected string cell for `{}`", ty.canonical_key())),
+//RS         },
+//RS         MirTypeKind::Apply { name: nominal, .. } => {
+//RS             let id = ty
+//RS                 .identity
+//RS                 .or(Some(nominal.id))
+//RS                 .ok_or_else(|| "record has no checked type identity".to_string())?;
+//RS             let descriptor = records
+//RS                 .get(&id)
+//RS                 .ok_or_else(|| format!("record `{}` has no checked C layout", nominal.name))?;
+//RS             if let Some(enum_info) = descriptor.enum_info.as_ref() {
+//RS                 let fields = if enum_info.has_payload {
+//RS                     match cell {
+//RS                         JetVal::Record(fields) => fields.clone(),
+//RS                         JetVal::Int(handle) | JetVal::RecordRef(handle) => heap
+//RS                             .clone_record_values(*handle)
+//RS                             .ok_or_else(|| "enum record handle is invalid".to_string())?,
+//RS                         _ => return Err(format!("expected enum record for `{}`", nominal.name)),
+//RS                     }
+//RS                 } else {
+//RS                     Vec::new()
+//RS                 };
+//RS                 let discriminant = if enum_info.has_payload {
+//RS                     let Some(JetVal::Int(discriminant)) = fields.first() else {
+//RS                         return Err(format!(
+//RS                             "enum `{}` has no integer discriminant carrier",
+//RS                             nominal.name
+//RS                         ));
+//RS                     };
+//RS                     *discriminant
+//RS                 } else {
+//RS                     match cell {
+//RS                         JetVal::Int(discriminant) => *discriminant,
+//RS                         _ => {
+//RS                             return Err(format!(
+//RS                                 "expected integer enum carrier for `{}`",
+//RS                                 nominal.name
+//RS                             ))
+//RS                         }
+//RS                     }
+//RS                 };
+//RS                 let variant = enum_info
+//RS                     .variants
+//RS                     .iter()
+//RS                     .find(|variant| variant.discriminant == discriminant)
+//RS                     .ok_or_else(|| {
+//RS                         format!(
+//RS                             "native enum `{}` has invalid discriminant {}",
+//RS                             nominal.name, discriminant
+//RS                         )
+//RS                     })?;
+//RS                 let payload_cells = fields.get(1..).unwrap_or(&[]);
+//RS                 let mut args = Vec::new();
+//RS                 match &variant.payload {
+//RS                     MirVariantPayload::Unit => {
+//RS                         if !payload_cells.is_empty() {
+//RS                             return Err(format!(
+//RS                                 "unit enum variant `{}` has a payload",
+//RS                                 variant.name
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                     MirVariantPayload::Single(payload_ty) => {
+//RS                         if payload_cells.len() != 1 {
+//RS                             return Err(format!(
+//RS                                 "enum variant `{}` has the wrong payload count",
+//RS                                 variant.name
+//RS                             ));
+//RS                         }
+//RS                         args.push((
+//RS                             None,
+//RS                             heap_cell_to_runtime(
+//RS                                 heap,
+//RS                                 &payload_cells[0],
+//RS                                 payload_ty,
+//RS                                 records,
+//RS                             )?,
+//RS                         ));
+//RS                     }
+//RS                     MirVariantPayload::Named(payload_fields) => {
+//RS                         if payload_cells.len() != payload_fields.len() {
+//RS                             return Err(format!(
+//RS                                 "enum variant `{}` has the wrong payload count",
+//RS                                 variant.name
+//RS                             ));
+//RS                         }
+//RS                         for (field, payload_cell) in payload_fields.iter().zip(payload_cells) {
+//RS                             args.push((
+//RS                                 Some(field.name.clone()),
+//RS                                 heap_cell_to_runtime(heap, payload_cell, &field.ty, records)?,
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 return Ok(MirRuntimeValue::Enum {
+//RS                     type_name: descriptor.name.clone(),
+//RS                     variant: variant.name.clone(),
+//RS                     args,
+//RS                 });
+//RS             }
+//RS             let fields = match cell {
+//RS                 JetVal::Record(fields) => fields.clone(),
+//RS                 JetVal::Int(handle) | JetVal::RecordRef(handle) => heap
+//RS                     .clone_record_values(*handle)
+//RS                     .ok_or_else(|| "record handle cell is invalid".to_string())?,
+//RS                 _ => return Err(format!("expected record cell for `{}`", nominal.name)),
+//RS             };
+//RS             if fields.len() < descriptor.fields.len() {
+//RS                 return Err(format!("record `{}` is missing fields", nominal.name));
+//RS             }
+//RS             let mut out = Vec::with_capacity(descriptor.fields.len());
+//RS             for (index, field) in descriptor.fields.iter().enumerate() {
+//RS                 out.push((
+//RS                     field.name.clone(),
+//RS                     heap_cell_to_runtime(heap, &fields[index], &field.ty, records)?,
+//RS                 ));
+//RS             }
+//RS             Ok(MirRuntimeValue::Struct {
+//RS                 type_name: descriptor.name.clone(),
+//RS                 fields: out,
+//RS             })
+//RS         }
+//RS         MirTypeKind::FixedList { elem, .. } => heap_cells_to_runtime(heap, cell, elem, records),
+//RS         MirTypeKind::List(inner) => {
+//RS             let JetVal::List(values) = cell else {
+//RS                 return Err(format!("nested list `{}` is not a boxed list", ty.canonical_key()));
+//RS             };
+//RS             values
+//RS                 .iter()
+//RS                 .map(|value| heap_cell_to_runtime(heap, value, inner, records))
+//RS                 .collect::<Result<Vec<_>, _>>()
+//RS                 .map(MirRuntimeValue::List)
+//RS         }
+//RS         _ => Err(format!("type `{}` cannot cross the C bridge", ty.canonical_key())),
+//RS     }
+//RS }
+//RS 
+//RS fn heap_cells_to_runtime(
+//RS     heap: &jet_rt::JetArena,
+//RS     carrier: &JetVal,
+//RS     inner: &MirType,
+//RS     records: &HashMap<MirTypeId, FfiRecordDesc>,
+//RS ) -> Result<MirRuntimeValue, String> {
+//RS     match carrier {
+//RS         JetVal::IntList(values) => values
+//RS             .iter()
+//RS             .map(|value| heap_cell_to_runtime(heap, &JetVal::Int(*value), inner, records))
+//RS             .collect::<Result<Vec<_>, _>>()
+//RS             .map(MirRuntimeValue::List),
+//RS         JetVal::List(values) => values
+//RS             .iter()
+//RS             .map(|value| heap_cell_to_runtime(heap, value, inner, records))
+//RS             .collect::<Result<Vec<_>, _>>()
+//RS             .map(MirRuntimeValue::List),
+//RS         JetVal::UninitList {
+//RS             values,
+//RS             initialized,
+//RS         } => {
+//RS             if initialized.iter().any(|initialized| !initialized) {
+//RS                 return Err("list contains uninitialized elements".to_string());
+//RS             }
+//RS             values
+//RS                 .iter()
+//RS                 .map(|value| heap_cell_to_runtime(heap, value, inner, records))
+//RS                 .collect::<Result<Vec<_>, _>>()
+//RS                 .map(MirRuntimeValue::List)
+//RS         }
+//RS         _ => Err("fixed-array cell does not contain a list".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn heap_list_to_runtime(
+//RS     heap: &jet_rt::JetArena,
+//RS     list: i64,
+//RS     inner: &MirType,
+//RS     records: &HashMap<MirTypeId, FfiRecordDesc>,
+//RS ) -> Result<MirRuntimeValue, String> {
+//RS     let carrier = heap
+//RS         .clone_value(list)
+//RS         .ok_or_else(|| "list handle is invalid".to_string())?;
+//RS     let values = match carrier {
+//RS         JetVal::IntList(values) => values
+//RS             .into_iter()
+//RS             .map(JetVal::Int)
+//RS             .collect::<Vec<_>>(),
+//RS         JetVal::List(values) => values,
+//RS         JetVal::UninitList {
+//RS             values,
+//RS             initialized,
+//RS         } => {
+//RS             if initialized.iter().any(|initialized| !initialized) {
+//RS                 return Err("list contains uninitialized elements".to_string());
+//RS             }
+//RS             values
+//RS         }
+//RS         _ => return Err("list handle does not contain a list".to_string()),
+//RS     };
+//RS     values
+//RS         .iter()
+//RS         .map(|value| heap_cell_to_runtime(heap, value, inner, records))
+//RS         .collect::<Result<Vec<_>, _>>()
+//RS         .map(MirRuntimeValue::List)
+//RS }
+//RS 
+//RS fn heap_arg_to_runtime(
+//RS     heap: &jet_rt::JetArena,
+//RS     value: i64,
+//RS     abi: ParamAbi,
+//RS     ty: &MirType,
+//RS     records: &HashMap<MirTypeId, FfiRecordDesc>,
+//RS ) -> Result<MirRuntimeValue, String> {
+//RS     match abi {
+//RS         ParamAbi::Callback => {
+//RS             Err("managed callback arguments require the callback registration adapter".to_string())
+//RS         }
+//RS         ParamAbi::Record => {
+//RS             let cell = heap
+//RS                 .clone_value(value)
+//RS                 .ok_or_else(|| "record handle is invalid".to_string())?;
+//RS             heap_cell_to_runtime(heap, &cell, ty, records)
+//RS         }
+//RS         ParamAbi::Int | ParamAbi::Handle => heap
+//RS             .int_to_i64(value)
+//RS             .map(MirRuntimeValue::Int)
+//RS             .ok_or_else(|| "integer argument is not representable".to_string()),
+//RS         ParamAbi::Float => {
+//RS             let bits = value as u64;
+//RS             Ok(MirRuntimeValue::Float {
+//RS                 value: if matches!(ty.kind(), MirTypeKind::Float32) {
+//RS                     f32::from_bits(bits as u32) as f64
+//RS                 } else {
+//RS                     f64::from_bits(bits)
+//RS                 },
+//RS                 f32: matches!(ty.kind(), MirTypeKind::Float32),
+//RS             })
+//RS         }
+//RS         ParamAbi::Bool => heap
+//RS             .int_to_i64(value)
+//RS             .map(|value| MirRuntimeValue::Bool(value != 0))
+//RS             .ok_or_else(|| "bool argument is not an integer word".to_string()),
+//RS         ParamAbi::String => heap
+//RS             .clone_string(value)
+//RS             .map(MirRuntimeValue::String)
+//RS             .ok_or_else(|| "string argument is not a valid string handle".to_string()),
+//RS         ParamAbi::List => {
+//RS             let MirTypeKind::List(inner) = ty.kind() else {
+//RS                 return Err("list carrier has a non-list type".to_string());
+//RS             };
+//RS             heap_list_to_runtime(heap, value, inner, records)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn heap_runtime_to_jetval(
+//RS     heap: &mut jet_rt::JetArena,
+//RS     value: &MirRuntimeValue,
+//RS     ty: &MirType,
+//RS     records: &HashMap<MirTypeId, FfiRecordDesc>,
+//RS ) -> Result<JetVal, String> {
+//RS     if matches!(value, MirRuntimeValue::NativeOwned(_)) {
+//RS         return Err("native-owned payload cannot cross the C bridge".to_string());
+//RS     }
+//RS     match ty.kind() {
+//RS         MirTypeKind::Int
+//RS         | MirTypeKind::IntN { .. }
+//RS         | MirTypeKind::InlineRange { .. }
+//RS         | MirTypeKind::Tagged { .. }
+//RS         | MirTypeKind::Quantity { .. } => match value {
+//RS             MirRuntimeValue::Int(value) => Ok(JetVal::Int(*value)),
+//RS             MirRuntimeValue::BigInt(value) => heap
+//RS                 .int_from_str(value)
+//RS                 .map(JetVal::Int),
+//RS             _ => Err(format!("native result is not integer `{}`", ty.canonical_key())),
+//RS         },
+//RS         MirTypeKind::Float | MirTypeKind::Float32 => match value {
+//RS             MirRuntimeValue::Float { value, .. } => Ok(JetVal::Float(*value)),
+//RS             _ => Err(format!("native result is not float `{}`", ty.canonical_key())),
+//RS         },
+//RS         MirTypeKind::Bool => match value {
+//RS             MirRuntimeValue::Bool(value) => Ok(JetVal::Bool(*value)),
+//RS             _ => Err(format!("native result is not bool `{}`", ty.canonical_key())),
+//RS         },
+//RS         MirTypeKind::Char => match value {
+//RS             MirRuntimeValue::Char(value) => Ok(JetVal::Char(*value)),
+//RS             _ => Err(format!("native result is not char `{}`", ty.canonical_key())),
+//RS         },
+//RS         MirTypeKind::String => match value {
+//RS             MirRuntimeValue::String(value) => Ok(JetVal::String(value.clone())),
+//RS             _ => Err(format!("native result is not string `{}`", ty.canonical_key())),
+//RS         },
+//RS         MirTypeKind::Apply { name: nominal, .. } => {
+//RS             let id = ty
+//RS                 .identity
+//RS                 .or(Some(nominal.id))
+//RS                 .ok_or_else(|| "record has no checked type identity".to_string())?;
+//RS             let descriptor = records
+//RS                 .get(&id)
+//RS                 .ok_or_else(|| format!("record `{}` has no checked C layout", nominal.name))?;
+//RS             if let Some(enum_info) = descriptor.enum_info.as_ref() {
+//RS                 let MirRuntimeValue::Enum {
+//RS                     variant: variant_name,
+//RS                     args,
+//RS                     ..
+//RS                 } = value
+//RS                 else {
+//RS                     return Err(format!("native result is not enum `{}`", nominal.name));
+//RS                 };
+//RS                 let variant = enum_info
+//RS                     .variants
+//RS                     .iter()
+//RS                     .find(|variant| variant.name == variant_name.as_str())
+//RS                     .ok_or_else(|| {
+//RS                         format!(
+//RS                             "native result has unknown enum variant `{}`",
+//RS                             variant_name
+//RS                         )
+//RS                     })?;
+//RS                 if !enum_tag_value_valid(
+//RS                     enum_info.tag,
+//RS                     enum_info.tag_size,
+//RS                     variant.discriminant,
+//RS                 ) {
+//RS                     return Err(format!(
+//RS                         "enum variant `{}` has an invalid checked discriminant",
+//RS                         variant.name
+//RS                     ));
+//RS                 }
+//RS                 if !enum_info.has_payload {
+//RS                     if !args.is_empty() {
+//RS                         return Err(format!(
+//RS                             "unit enum variant `{}` has a payload",
+//RS                             variant.name
+//RS                         ));
+//RS                     }
+//RS                     return Ok(JetVal::Int(variant.discriminant));
+//RS                 }
+//RS                 let mut cells = vec![JetVal::Int(variant.discriminant)];
+//RS                 match &variant.payload {
+//RS                     MirVariantPayload::Unit => {
+//RS                         if !args.is_empty() {
+//RS                             return Err(format!(
+//RS                                 "unit enum variant `{}` has a payload",
+//RS                                 variant.name
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                     MirVariantPayload::Single(payload_ty) => {
+//RS                         let Some((field, payload)) = args.first() else {
+//RS                             return Err(format!(
+//RS                                 "enum variant `{}` is missing its payload",
+//RS                                 variant.name
+//RS                             ));
+//RS                         };
+//RS                         if field.is_some() || args.len() != 1 {
+//RS                             return Err(format!(
+//RS                                 "enum variant `{}` has the wrong payload shape",
+//RS                                 variant.name
+//RS                             ));
+//RS                         }
+//RS                         cells.push(heap_runtime_to_jetval(heap, payload, payload_ty, records)?);
+//RS                     }
+//RS                     MirVariantPayload::Named(payload_fields) => {
+//RS                         if args.len() != payload_fields.len() {
+//RS                             return Err(format!(
+//RS                                 "enum variant `{}` has the wrong payload count",
+//RS                                 variant.name
+//RS                             ));
+//RS                         }
+//RS                         for (field, (name, payload)) in payload_fields.iter().zip(args) {
+//RS                             if name.as_deref() != Some(field.name.as_str()) {
+//RS                                 return Err(format!(
+//RS                                     "enum variant `{}` is missing field `{}`",
+//RS                                     variant.name, field.name
+//RS                                 ));
+//RS                             }
+//RS                             cells.push(heap_runtime_to_jetval(
+//RS                                 heap,
+//RS                                 payload,
+//RS                                 &field.ty,
+//RS                                 records,
+//RS                             )?);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 return Ok(JetVal::RecordRef(heap.alloc_record_values(cells)));
+//RS             }
+//RS             let MirRuntimeValue::Struct { fields, .. } = value else {
+//RS                 return Err(format!("native result is not record `{}`", nominal.name));
+//RS             };
+//RS             let mut cells = Vec::with_capacity(descriptor.fields.len());
+//RS             for (index, field) in descriptor.fields.iter().enumerate() {
+//RS                 let field_value = fields
+//RS                     .iter()
+//RS                     .find(|(name, _)| name == &field.name)
+//RS                     .or_else(|| fields.get(index))
+//RS                     .map(|(_, value)| value)
+//RS                     .ok_or_else(|| format!("record `{}` is missing `{}`", nominal.name, field.name))?;
+//RS                 cells.push(heap_runtime_to_jetval(heap, field_value, &field.ty, records)?);
+//RS             }
+//RS             Ok(JetVal::RecordRef(heap.alloc_record_values(cells)))
+//RS         }
+//RS         MirTypeKind::FixedList { elem, .. } => {
+//RS             let MirRuntimeValue::List(values) = value else {
+//RS                 return Err(format!("native result is not fixed array `{}`", ty.canonical_key()));
+//RS             };
+//RS             values
+//RS                 .iter()
+//RS                 .map(|value| heap_runtime_to_jetval(heap, value, elem, records))
+//RS                 .collect::<Result<Vec<_>, _>>()
+//RS                 .map(JetVal::List)
+//RS         }
+//RS         MirTypeKind::List(inner) => {
+//RS             let MirRuntimeValue::List(values) = value else {
+//RS                 return Err(format!("native result is not list `{}`", ty.canonical_key()));
+//RS             };
+//RS             values
+//RS                 .iter()
+//RS                 .map(|value| heap_runtime_to_jetval(heap, value, inner, records))
+//RS                 .collect::<Result<Vec<_>, _>>()
+//RS                 .map(JetVal::List)
+//RS         }
+//RS         _ => Err(format!("type `{}` cannot cross the C bridge", ty.canonical_key())),
+//RS     }
+//RS }
+//RS 
+//RS fn heap_restore_list(
+//RS     heap: &mut jet_rt::JetArena,
+//RS     list: i64,
+//RS     inner: &MirType,
+//RS     values: &[MirRuntimeValue],
+//RS     records: &HashMap<MirTypeId, FfiRecordDesc>,
+//RS ) -> Result<(), String> {
+//RS     let original = heap
+//RS         .clone_value(list)
+//RS         .ok_or_else(|| "mutable list handle is invalid".to_string())?;
+//RS     let original_len = match &original {
+//RS         JetVal::IntList(values) => values.len(),
+//RS         JetVal::List(values) | JetVal::UninitList { values, .. } => values.len(),
+//RS         _ => return Err("mutable list handle does not contain a list".to_string()),
+//RS     };
+//RS     if original_len != values.len() {
+//RS         return Err("native mutable list changed its element count".to_string());
+//RS     }
+//RS 
+//RS     if matches!(inner.kind(), MirTypeKind::Int | MirTypeKind::IntN { .. })
+//RS         && values.iter().all(|value| matches!(value, MirRuntimeValue::Int(_)))
+//RS     {
+//RS         let values = values
+//RS             .iter()
+//RS             .map(|value| match value {
+//RS                 MirRuntimeValue::Int(value) => *value,
+//RS                 _ => unreachable!(),
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         if matches!(&original, JetVal::IntList(_)) {
+//RS             heap.replace_int_list(list, values)
+//RS                 .ok_or_else(|| "mutable integer list cannot be restored".to_string())?;
+//RS             return Ok(());
+//RS         }
+//RS     }
+//RS     if matches!(inner.kind(), MirTypeKind::Float | MirTypeKind::Float32)
+//RS         && values
+//RS             .iter()
+//RS             .all(|value| matches!(value, MirRuntimeValue::Float { .. }))
+//RS         && matches!(&original, JetVal::List(_))
+//RS     {
+//RS         let values = values
+//RS             .iter()
+//RS             .map(|value| match value {
+//RS                 MirRuntimeValue::Float { value, .. } => *value,
+//RS                 _ => unreachable!(),
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         heap.replace_float_list(list, values)
+//RS             .ok_or_else(|| "mutable float list cannot be restored".to_string())?;
+//RS         return Ok(());
+//RS     }
+//RS     if matches!(inner.kind(), MirTypeKind::String)
+//RS         && matches!(&original, JetVal::IntList(_))
+//RS         && values
+//RS             .iter()
+//RS             .all(|value| matches!(value, MirRuntimeValue::String(_)))
+//RS     {
+//RS         let handles = values
+//RS             .iter()
+//RS             .map(|value| match value {
+//RS                 MirRuntimeValue::String(value) => heap.alloc_string(value.clone()),
+//RS                 _ => unreachable!(),
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         heap.replace_int_list(list, handles)
+//RS             .ok_or_else(|| "mutable string list cannot be restored".to_string())?;
+//RS         return Ok(());
+//RS     }
+//RS 
+//RS     let cells = values
+//RS         .iter()
+//RS         .map(|value| heap_runtime_to_jetval(heap, value, inner, records))
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let mut preserve_old = vec![false; cells.len()];
+//RS     if matches!(inner.kind(), MirTypeKind::Apply { .. }) {
+//RS         let old_cells = match &original {
+//RS             JetVal::IntList(values) => values.iter().copied().map(JetVal::Int).collect(),
+//RS             JetVal::List(values) | JetVal::UninitList { values, .. } => values.clone(),
+//RS             _ => Vec::new(),
+//RS         };
+//RS         for (index, old_cell) in old_cells.iter().enumerate() {
+//RS             let Some(old_record) = (match old_cell {
+//RS                 JetVal::Int(handle) | JetVal::RecordRef(handle) => Some(*handle),
+//RS                 _ => None,
+//RS             }) else {
+//RS                 continue;
+//RS             };
+//RS             let Some(JetVal::RecordRef(new_record)) = cells.get(index) else {
+//RS                 continue;
+//RS             };
+//RS             if heap.record_assign_from(old_record, *new_record).is_some() {
+//RS                 preserve_old[index] = true;
+//RS             }
+//RS         }
+//RS     }
+//RS     let slots = heap
+//RS         .list_values_mut(list)
+//RS         .ok_or_else(|| "mutable list cannot be restored".to_string())?;
+//RS     for (index, (slot, cell)) in slots.iter_mut().zip(cells).enumerate() {
+//RS         if !preserve_old[index] {
+//RS             *slot = cell;
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS fn heap_restore_writeback(
+//RS     heap: &mut jet_rt::JetArena,
+//RS     args_list: i64,
+//RS     parameter: usize,
+//RS     original_arg: i64,
+//RS     abi: ParamAbi,
+//RS     ty: &MirType,
+//RS     value: MirRuntimeValue,
+//RS     records: &HashMap<MirTypeId, FfiRecordDesc>,
+//RS ) -> Result<(), String> {
+//RS     match abi {
+//RS         ParamAbi::Record => {
+//RS             let cell = heap_runtime_to_jetval(heap, &value, ty, records)?;
+//RS             if let Some(JetVal::RecordRef(old_record)) = heap.clone_value(original_arg) {
+//RS                 if let JetVal::RecordRef(new_record) = &cell {
+//RS                     if heap.record_assign_from(old_record, *new_record).is_some() {
+//RS                         return Ok(());
+//RS                     }
+//RS                 }
+//RS             }
+//RS             let slots = heap
+//RS                 .list_values_mut(args_list)
+//RS                 .ok_or_else(|| "foreign argument list cannot be restored".to_string())?;
+//RS             let slot = slots
+//RS                 .get_mut(parameter)
+//RS                 .ok_or_else(|| "mutable record argument index is out of range".to_string())?;
+//RS             *slot = cell;
+//RS             Ok(())
+//RS         }
+//RS         ParamAbi::List => {
+//RS             let MirTypeKind::List(inner) = ty.kind() else {
+//RS                 return Err("mutable list writeback has a non-list type".to_string());
+//RS             };
+//RS             let MirRuntimeValue::List(values) = value else {
+//RS                 return Err("mutable list writeback is not a list".to_string());
+//RS             };
+//RS             heap_restore_list(heap, original_arg, inner, &values, records)
+//RS         }
+//RS         ParamAbi::String => {
+//RS             let MirRuntimeValue::String(value) = value else {
+//RS                 return Err("mutable String writeback is not a String".to_string());
+//RS             };
+//RS             let handle = heap.alloc_string(value);
+//RS             let slots = heap
+//RS                 .list_values_mut(args_list)
+//RS                 .ok_or_else(|| "foreign argument list cannot be restored".to_string())?;
+//RS             let slot = slots
+//RS                 .get_mut(parameter)
+//RS                 .ok_or_else(|| "mutable String argument index is out of range".to_string())?;
+//RS             *slot = JetVal::Int(handle);
+//RS             Ok(())
+//RS         }
+//RS         ParamAbi::Handle => {
+//RS             let same = matches!(value, MirRuntimeValue::Int(value) if value == original_arg);
+//RS             if same {
+//RS                 Ok(())
+//RS             } else {
+//RS                 Err("mutable handle writeback changed its checked token".to_string())
+//RS             }
+//RS         }
+//RS         ParamAbi::Int | ParamAbi::Float | ParamAbi::Bool => {
+//RS             let cell = heap_runtime_to_jetval(heap, &value, ty, records)?;
+//RS             let slots = heap
+//RS                 .list_values_mut(args_list)
+//RS                 .ok_or_else(|| "foreign argument list cannot be restored".to_string())?;
+//RS             let slot = slots
+//RS                 .get_mut(parameter)
+//RS                 .ok_or_else(|| "mutable scalar argument index is out of range".to_string())?;
+//RS             *slot = cell;
+//RS             Ok(())
+//RS         }
+//RS         ParamAbi::Callback => Err("managed callback writeback is not supported".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn heap_result_value(
+//RS     heap: &mut jet_rt::JetArena,
+//RS     value: MirRuntimeValue,
+//RS     entry: &FfiEntry,
+//RS     records: &HashMap<MirTypeId, FfiRecordDesc>,
+//RS ) -> Result<i64, String> {
+//RS     match value {
+//RS         MirRuntimeValue::Unit => Ok(0),
+//RS         MirRuntimeValue::Int(value) => Ok(heap.int_from_i64(value)),
+//RS         MirRuntimeValue::BigInt(value) => heap.int_from_str(&value),
+//RS         MirRuntimeValue::Float { value, .. } => Ok(value.to_bits() as i64),
+//RS         MirRuntimeValue::Bool(value) => Ok(i64::from(value)),
+//RS         MirRuntimeValue::Char(value) => Ok(i64::from(value as u32)),
+//RS         MirRuntimeValue::String(value) => Ok(heap.alloc_string(value)),
+//RS         MirRuntimeValue::Struct { type_name, fields } => {
+//RS             let Some(ret_type) = entry.ret_type.as_ref() else {
+//RS                 return Err("native record result has no type".to_string());
+//RS             };
+//RS             let record = MirRuntimeValue::Struct { type_name, fields };
+//RS             match heap_runtime_to_jetval(heap, &record, ret_type, records)? {
+//RS                 JetVal::RecordRef(handle) | JetVal::Int(handle) => Ok(handle),
+//RS                 _ => Err("native record result did not produce a record handle".to_string()),
+//RS             }
+//RS         }
+//RS         MirRuntimeValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } => {
+//RS             let Some(ret_type) = entry.ret_type.as_ref() else {
+//RS                 return Err("native enum result has no type".to_string());
+//RS             };
+//RS             let enum_value = MirRuntimeValue::Enum {
+//RS                 type_name,
+//RS                 variant,
+//RS                 args,
+//RS             };
+//RS             match heap_runtime_to_jetval(heap, &enum_value, ret_type, records)? {
+//RS                 JetVal::RecordRef(handle) | JetVal::Int(handle) => Ok(handle),
+//RS                 _ => Err("native enum result did not produce a valid carrier".to_string()),
+//RS             }
+//RS         }
+//RS         MirRuntimeValue::List(values) => {
+//RS             let Some(ret_type) = entry.ret_type.as_ref() else {
+//RS                 return Err("native list result has no list type".to_string());
+//RS             };
+//RS             let MirTypeKind::List(inner) = ret_type.kind() else {
+//RS                 return Err("native list result has a non-list type".to_string());
+//RS             };
+//RS             let cells = values
+//RS                 .iter()
+//RS                 .map(|value| heap_runtime_to_jetval(heap, value, inner, records))
+//RS                 .collect::<Result<Vec<_>, _>>()?;
+//RS             if matches!(inner.kind(), MirTypeKind::Int | MirTypeKind::IntN { .. })
+//RS                 && cells.iter().all(|cell| matches!(cell, JetVal::Int(_)))
+//RS             {
+//RS                 Ok(heap.alloc_int_list(
+//RS                     cells
+//RS                         .into_iter()
+//RS                         .map(|cell| match cell {
+//RS                             JetVal::Int(value) => value,
+//RS                             _ => unreachable!(),
+//RS                         })
+//RS                         .collect(),
+//RS                 ))
+//RS             } else {
+//RS                 Ok(heap.alloc_list_values(cells))
+//RS             }
+//RS         }
+//RS         MirRuntimeValue::NativeOwned(_) => {
+//RS             Err("native bridge returned a native-owned payload".to_string())
+//RS         }
+//RS         MirRuntimeValue::Moved => Err("native bridge returned a moved value".to_string()),
+//RS         _ => Err("native bridge returned an unsupported value".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS /// `wrapper` / `args` are heap string / int-list handles. Returns a heap
+//RS /// carrier for the canonical MIR runtime value.
+//RS fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
+//RS     let name = clone_string(wrapper);
+//RS     let Some(argv) = Concurrency::with_runtime_mut(|rt| {
+//RS         let values = rt.heap.clone_list_values(args)?;
+//RS         values
+//RS             .into_iter()
+//RS             .map(|value| match value {
+//RS                 JetVal::Int(value) => Some(value),
+//RS                 JetVal::RecordRef(value) => Some(value),
+//RS                 JetVal::Float(value) => Some(value.to_bits() as i64),
+//RS                 JetVal::Bool(value) => Some(i64::from(value)),
+//RS                 JetVal::Char(value) => Some(i64::from(value as u32)),
+//RS                 _ => None,
+//RS             })
+//RS             .collect::<Option<Vec<_>>>()
+//RS     }) else {
+//RS         trap("jit ffi: extern call arguments are not a valid value list");
+//RS         return 0;
+//RS     };
+//RS     let Some(entry) = ({
+//RS         let state = FFI_STATE.lock().unwrap_or_else(|e| e.into_inner());
+//RS         state
+//RS             .as_ref()
+//RS             .and_then(|state| state.by_wrapper.get(&name).cloned())
+//RS     }) else {
+//RS         trap(&format!("jit ffi: unbound wrapper `{name}`"));
+//RS         return 0;
+//RS     };
+//RS     let records = {
+//RS         let state = FFI_STATE.lock().unwrap_or_else(|e| e.into_inner());
+//RS         state
+//RS             .as_ref()
+//RS             .map(|state| state.records.clone())
+//RS             .unwrap_or_default()
+//RS     };
+//RS     if argv.len() != entry.params.len() {
+//RS         trap(&format!(
+//RS             "jit ffi: `{name}` argc {} != {}",
+//RS             argv.len(),
+//RS             entry.params.len()
+//RS         ));
+//RS         return 0;
+//RS     }
+//RS     let runtime_args = Concurrency::with_runtime_string(|rt| {
+//RS         entry
+//RS             .params
+//RS             .iter()
+//RS             .zip(&entry.param_types)
+//RS             .zip(argv.iter().copied())
+//RS             .map(|((abi, ty), value)| heap_arg_to_runtime(&rt.heap, value, *abi, ty, &records))
+//RS             .collect::<Result<Vec<_>, _>>()
+//RS     });
+//RS     let runtime_args = match runtime_args {
+//RS         Ok(args) => args,
+//RS         Err(error) => {
+//RS             trap(&format!("jit ffi: `{name}` {error}"));
+//RS             return 0;
+//RS         }
+//RS     };
+//RS     let bridge_result = call_runtime_inner(
+//RS         &name,
+//RS         &runtime_args,
+//RS         entry.ret_type.as_ref().is_some_and(|ty| {
+//RS             matches!(ty.kind(), MirTypeKind::Float32)
+//RS         }),
+//RS         Span::new(0, 0),
+//RS         MirForeignTarget::Cranelift,
+//RS     );
+//RS     let result = match bridge_result {
+//RS         Ok(result) => result,
+//RS         Err(error) if error.code == "E3014" => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.set_ffi_runtime_stop(FFI_RUNTIME_PANIC));
+//RS             return 0;
+//RS         }
+//RS         Err(error) if error.runtime_host_fault_parts().is_some() => {
+//RS             trap(&error.what);
+//RS             return 0;
+//RS         }
+//RS         Err(error) => {
+//RS             trap(&error.what);
+//RS             return 0;
+//RS         }
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         for writeback in result.writebacks {
+//RS             let parameter = writeback.parameter;
+//RS             let Some(abi) = entry.params.get(parameter).copied() else {
+//RS                 rt.set_host_fault(&format!(
+//RS                     "jit ffi: `{name}` writeback parameter index is out of range"
+//RS                 ));
+//RS                 return 0;
+//RS             };
+//RS             if entry.param_access.get(parameter) != Some(&MirAccess::Write) {
+//RS                 rt.set_host_fault(&format!(
+//RS                     "jit ffi: `{name}` writeback targets a non-writable parameter"
+//RS                 ));
+//RS                 return 0;
+//RS             }
+//RS             let Some(ty) = entry.param_types.get(parameter) else {
+//RS                 rt.set_host_fault(&format!(
+//RS                     "jit ffi: `{name}` writeback type is missing"
+//RS                 ));
+//RS                 return 0;
+//RS             };
+//RS             let Some(original_arg) = argv.get(parameter).copied() else {
+//RS                 rt.set_host_fault(&format!(
+//RS                     "jit ffi: `{name}` writeback argument is missing"
+//RS                 ));
+//RS                 return 0;
+//RS             };
+//RS             if let Err(error) = heap_restore_writeback(
+//RS                 &mut rt.heap,
+//RS                 args,
+//RS                 parameter,
+//RS                 original_arg,
+//RS                 abi,
+//RS                 ty,
+//RS                 writeback.value,
+//RS                 &records,
+//RS             ) {
+//RS                 rt.set_host_fault(&format!("jit ffi: `{name}` {error}"));
+//RS                 return 0;
+//RS             }
+//RS         }
+//RS         match heap_result_value(&mut rt.heap, result.value, &entry, &records) {
+//RS             Ok(value) => value,
+//RS             Err(error) => {
+//RS                 rt.set_host_fault(&format!("jit ffi: `{name}` {error}"));
+//RS                 0
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ffi_drop(token_id: i64) {
+//RS     let result = {
+//RS         let state = FFI_STATE.lock().unwrap_or_else(|e| e.into_inner());
+//RS         state.as_ref().map_or_else(
+//RS             || {
+//RS                 let _ = take_ffi_handle(token_id);
+//RS                 Ok(())
+//RS             },
+//RS             |state| close_ffi_token(state, token_id, Span::new(0, 0)),
+//RS         )
+//RS     };
+//RS     if let Err(error) = result {
+//RS         trap(&error.what);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_ffi_callback_register(
+//RS     callback_handle: i64,
+//RS     native_start_handle: i64,
+//RS     native_stop_handle: i64,
+//RS     identity_handle: i64,
+//RS     digest_handle: i64,
+//RS ) -> i64 {
+//RS     let callback = Concurrency::with_runtime_mut(|rt| {
+//RS         crate::runtime_host::jit_callable_parts(rt, callback_handle)
+//RS     });
+//RS     let Some(callback) = callback else {
+//RS         trap("managed callback registration received an invalid callable");
+//RS         return 0;
+//RS     };
+//RS     let native_start_wrapper = clone_string(native_start_handle);
+//RS     let native_stop_wrapper = clone_string(native_stop_handle);
+//RS     let identity = clone_string(identity_handle);
+//RS     let digest = clone_string(digest_handle);
+//RS     if native_start_wrapper.is_empty()
+//RS         || native_stop_wrapper.is_empty()
+//RS         || identity.is_empty()
+//RS         || digest.is_empty()
+//RS         || digest
+//RS             != jet_foundation::SHA256::sha256_hex(
+//RS                 format!("jet-ffi-callback-plan-v1\0{identity}").as_bytes(),
+//RS             )
+//RS     {
+//RS         trap("managed callback registration has incomplete or invalid bridge metadata");
+//RS         return 0;
+//RS     }
+//RS     let native_start = {
+//RS         let state = FFI_STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         state
+//RS             .as_ref()
+//RS             .and_then(|state| state.by_wrapper.get(&native_start_wrapper))
+//RS             .and_then(|entry| entry.callback_start)
+//RS     };
+//RS     let Some(native_start) = native_start else {
+//RS         trap("managed callback registration has no native-start helper");
+//RS         return 0;
+//RS     };
+//RS     let state = Arc::new(JitCallbackState {
+//RS         callback,
+//RS         native_stop_wrapper,
+//RS         native_token: AtomicUsize::new(0),
+//RS         start_complete: AtomicBool::new(false),
+//RS         phase: AtomicU8::new(JIT_CALLBACK_ACTIVE),
+//RS         in_flight: AtomicUsize::new(0),
+//RS         stop_started: AtomicBool::new(false),
+//RS         owner_consumed: AtomicBool::new(false),
+//RS         callback_failure: Mutex::new(None),
+//RS         wait: Mutex::new(()),
+//RS         drained: Condvar::new(),
+//RS     });
+//RS     let raw = Arc::into_raw(Arc::clone(&state)) as usize;
+//RS     let start_state = Arc::clone(&state);
+//RS     JIT_CALLBACKS
+//RS         .lock()
+//RS         .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS         .insert(raw, state);
+//RS     let token = unsafe { native_start(Some(jet_jit_ffi_callback_trampoline), raw as *mut c_void) };
+//RS     if token.is_null() {
+//RS         start_state.quarantine("managed callback native start returned a null token");
+//RS         start_state.start_complete.store(true, Ordering::Release);
+//RS         start_state.drained.notify_all();
+//RS         remove_jit_callback(raw, false);
+//RS         trap("managed callback native start returned a null token");
+//RS         return 0;
+//RS     }
+//RS     start_state.native_token.store(token as usize, Ordering::Release);
+//RS     start_state.start_complete.store(true, Ordering::Release);
+//RS     start_state.drained.notify_all();
+//RS     raw as i64
+//RS }
+//RS 
+//RS fn jet_jit_ffi_callback_unsubscribe(handle: i64) -> i64 {
+//RS     let Ok(raw) = usize::try_from(handle) else {
+//RS         trap("managed callback unsubscribe received an invalid registration");
+//RS         return 0;
+//RS     };
+//RS     let state = {
+//RS         let callbacks = JIT_CALLBACKS
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         callbacks.get(&raw).cloned()
+//RS     };
+//RS     let Some(state) = state else {
+//RS         trap("managed callback unsubscribe received an unknown registration");
+//RS         return 0;
+//RS     };
+//RS     if state.owner_consumed.swap(true, Ordering::AcqRel) {
+//RS         trap("managed callback registration was already consumed");
+//RS         return 0;
+//RS     }
+//RS     // SAFETY: the successful registry lookup above proves the raw Arc owner is
+//RS     // live; consuming registration is the only path that calls `from_raw`.
+//RS     let owner = unsafe { Arc::from_raw(raw as *const JitCallbackState) };
+//RS     Concurrency::spawn_ffi_task(move || {
+//RS         let result = owner.stop_and_drain();
+//RS         let stopped = owner.phase.load(Ordering::Acquire) == JIT_CALLBACK_STOPPED;
+//RS         if stopped {
+//RS             remove_jit_callback(raw, true);
+//RS         }
+//RS         if let Err(error) = result {
+//RS             Concurrency::set_task_trap(&error);
+//RS         }
+//RS         0
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ffi_emit_task(wrapper_handle: i64, value: i64) -> i64 {
+//RS     let wrapper = clone_string(wrapper_handle);
+//RS     if wrapper.is_empty() {
+//RS         trap("managed callback emit task has no native bridge identity");
+//RS         return 0;
+//RS     }
+//RS     Concurrency::spawn_ffi_task(move || {
+//RS         match call_runtime_inner(
+//RS             &wrapper,
+//RS             &[MirRuntimeValue::Int(value)],
+//RS             false,
+//RS             Span::new(0, 0),
+//RS             MirForeignTarget::Cranelift,
+//RS         ) {
+//RS             Ok(result) if result.writebacks.is_empty() => match result.value {
+//RS                 MirRuntimeValue::Int(value) => value,
+//RS                 _ => {
+//RS                     Concurrency::set_task_trap(
+//RS                         "managed callback emit returned a non-integer value",
+//RS                     );
+//RS                     0
+//RS                 }
+//RS             },
+//RS             Ok(_) => {
+//RS                 Concurrency::set_task_trap(
+//RS                     "managed callback emit returned an unexpected writable parameter",
+//RS                 );
+//RS                 0
+//RS             }
+//RS             Err(error) => {
+//RS                 Concurrency::set_task_trap(&error.what);
+//RS                 0
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS 
+//RS host_fns! {
+//RS     struct FfiHostFns;
+//RS     register: register_ffi_host_symbols;
+//RS     declare: declare_ffi_host_fns(module) {
+//RS         let cc = module.target_config().default_call_conv;
+//RS         let mut sig = Signature::new(cc);
+//RS         sig.params.push(AbiParam::new(types::I64));
+//RS         sig.params.push(AbiParam::new(types::I64));
+//RS         sig.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_callback_register = Signature::new(cc);
+//RS         for _ in 0..5 {
+//RS             sig_callback_register
+//RS                 .params
+//RS                 .push(AbiParam::new(types::I64));
+//RS         }
+//RS         sig_callback_register.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_callback_unsubscribe = Signature::new(cc);
+//RS         sig_callback_unsubscribe
+//RS             .params
+//RS             .push(AbiParam::new(types::I64));
+//RS         sig_callback_unsubscribe
+//RS             .returns
+//RS             .push(AbiParam::new(types::I64));
+//RS         let mut sig_callback_event_stop = Signature::new(cc);
+//RS         sig_callback_event_stop
+//RS             .returns
+//RS             .push(AbiParam::new(types::I64));
+//RS         let sig_emit_task = sig.clone();
+//RS         let mut sig_drop_handle = Signature::new(cc);
+//RS         sig_drop_handle.params.push(AbiParam::new(types::I64));
+//RS         let mut sig_atomic_load = Signature::new(cc);
+//RS         sig_atomic_load.params.push(AbiParam::new(types::I64));
+//RS         sig_atomic_load.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_atomic_store = Signature::new(cc);
+//RS         sig_atomic_store.params.push(AbiParam::new(types::I64));
+//RS         sig_atomic_store.params.push(AbiParam::new(types::I64));
+//RS         sig_atomic_store.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_atomic_compare_exchange = Signature::new(cc);
+//RS         sig_atomic_compare_exchange
+//RS             .params
+//RS             .push(AbiParam::new(types::I64));
+//RS         sig_atomic_compare_exchange
+//RS             .params
+//RS             .push(AbiParam::new(types::I64));
+//RS         sig_atomic_compare_exchange
+//RS             .params
+//RS             .push(AbiParam::new(types::I64));
+//RS         sig_atomic_compare_exchange
+//RS             .returns
+//RS             .push(AbiParam::new(types::I64));
+//RS         let sig_atomic_try_new = sig_atomic_store.clone();
+//RS         let sig_atomic_try_add = sig_atomic_store.clone();
+//RS     }
+//RS     call: "jet_jit_extern_call" => jet_jit_extern_call: sig;
+//RS     callback_register: "jet_jit_ffi_callback_register" => jet_jit_ffi_callback_register: sig_callback_register;
+//RS     callback_unsubscribe: "jet_jit_ffi_callback_unsubscribe" => jet_jit_ffi_callback_unsubscribe: sig_callback_unsubscribe;
+//RS     callback_event_stop: "jet_jit_ffi_callback_event_stop" => jet_jit_ffi_callback_event_stop: sig_callback_event_stop;
+//RS     emit_task: "jet_jit_ffi_emit_task" => jet_jit_ffi_emit_task: sig_emit_task;
+//RS     drop_handle: "jet_jit_ffi_drop" => jet_jit_ffi_drop: sig_drop_handle;
+//RS     atomic_new: "JetAtomic::new" => jet_atomic_new: sig_atomic_store;
+//RS     atomic_try_new: "JetAtomic::try_new" => jet_atomic_try_new: sig_atomic_try_new;
+//RS     atomic_try_add: "jet_atomic_try_add" => jet_atomic_try_add: sig_atomic_try_add;
+//RS     atomic_load: "jet_atomic_load" => jet_atomic_load: sig_atomic_load;
+//RS     atomic_store: "jet_atomic_store" => jet_atomic_store: sig_atomic_store;
+//RS     atomic_add: "jet_atomic_add" => jet_atomic_add: sig_atomic_store;
+//RS     atomic_compare_exchange: "jet_atomic_compare_exchange" => jet_atomic_compare_exchange: sig_atomic_compare_exchange;
+//RS     atomic_publish: "jet_atomic_publish" => jet_atomic_publish: sig_atomic_store;
+//RS     atomic_observe: "jet_atomic_observe" => jet_atomic_observe: sig_atomic_load;
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     use std::collections::HashMap;
+//RS 
+//RS     unsafe extern "C" fn test_clear_panic_hook() {}
+//RS 
+//RS     unsafe extern "C" fn test_take_failure() -> i8 {
+//RS         0
+//RS     }
+//RS 
+//RS     fn test_state() -> FfiState {
+//RS         FfiState {
+//RS             handle: std::ptr::null_mut(),
+//RS             clear_panic_hook_fn: test_clear_panic_hook,
+//RS             free_fn: None,
+//RS             take_failure_fn: test_take_failure,
+//RS             artifact_identity: String::new(),
+//RS             by_wrapper: HashMap::new(),
+//RS             close_by_handle: HashMap::new(),
+//RS             records: HashMap::new(),
+//RS             arrow_provider_lease: None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn test_entry() -> FfiEntry {
+//RS         let int = MirType::from_kind(MirTypeKind::Int);
+//RS         let list = MirType::from_kind(MirTypeKind::List(Box::new(int.clone())));
+//RS         FfiEntry {
+//RS             params: vec![
+//RS                 ParamAbi::Int,
+//RS                 ParamAbi::Int,
+//RS                 ParamAbi::List,
+//RS                 ParamAbi::String,
+//RS                 ParamAbi::Handle,
+//RS             ],
+//RS             param_handles: vec![None; 5],
+//RS             param_types: vec![
+//RS                 int.clone(),
+//RS                 int.clone(),
+//RS                 list,
+//RS                 MirType::from_kind(MirTypeKind::String),
+//RS                 int,
+//RS             ],
+//RS             param_access: vec![
+//RS                 MirAccess::Read,
+//RS                 MirAccess::Write,
+//RS                 MirAccess::Write,
+//RS                 MirAccess::Write,
+//RS                 MirAccess::Write,
+//RS             ],
+//RS             ret: RetAbi::Unit,
+//RS             ret_type: None,
+//RS             handle: None,
+//RS             close_handle: None,
+//RS             ptr: std::ptr::null(),
+//RS             callback_start: None,
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_helper_wrapper_reuse_requires_the_checked_abi() {
+//RS         let int = MirType::from_kind(MirTypeKind::Int);
+//RS         let entry = FfiEntry {
+//RS             params: vec![ParamAbi::Int],
+//RS             param_handles: vec![None],
+//RS             param_types: vec![int.clone()],
+//RS             param_access: vec![MirAccess::Read],
+//RS             ret: RetAbi::Int,
+//RS             ret_type: Some(int.clone()),
+//RS             handle: None,
+//RS             close_handle: None,
+//RS             ptr: std::ptr::null(),
+//RS             callback_start: None,
+//RS         };
+//RS         let spec = FfiEntrySpec {
+//RS             wrapper_name: "source_helper".to_string(),
+//RS             params: vec![ParamAbi::Int],
+//RS             param_handles: vec![None],
+//RS             param_types: vec![int.clone()],
+//RS             param_access: vec![MirAccess::Read],
+//RS             ret: RetAbi::Int,
+//RS             ret_type: Some(int),
+//RS             handle: None,
+//RS             close_handle: None,
+//RS         };
+//RS         assert!(source_helper_entry_matches_spec(&entry, &spec));
+//RS 
+//RS         let mut incompatible = spec;
+//RS         incompatible.params = vec![ParamAbi::Bool];
+//RS         incompatible.param_types = vec![MirType::from_kind(MirTypeKind::Bool)];
+//RS         incompatible.ret = RetAbi::Bool;
+//RS         incompatible.ret_type = Some(MirType::from_kind(MirTypeKind::Bool));
+//RS         assert!(!source_helper_entry_matches_spec(&entry, &incompatible));
+//RS     }
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn source_helper_rejects_a_missing_data_provider_library() {
+//RS         let mut state = test_state();
+//RS         let error = ensure_source_helper_data_provider(&mut state, None, true).unwrap_err();
+//RS         assert!(error.contains("Arrow Data provider"));
+//RS         assert!(state.arrow_provider_lease.is_none());
+//RS     }
+//RS 
+//RS     unsafe extern "C" fn test_uniform_writeback(
+//RS         args: *const FfiSlot,
+//RS         argc: usize,
+//RS         out: *mut FfiSlot,
+//RS     ) -> i32 {
+//RS         let args = unsafe { std::slice::from_raw_parts(args, argc) };
+//RS         unsafe {
+//RS             (args[1].ptr as *mut i64).write(23);
+//RS             for (index, value) in [4i64, 5].iter().copied().enumerate() {
+//RS                 (args[2].ptr as *mut i64).add(index).write(value);
+//RS             }
+//RS             std::ptr::copy_nonoverlapping(b"new\0".as_ptr(), args[3].ptr, 4);
+//RS             (*out).value = 0;
+//RS             (*out).ptr = std::ptr::null_mut();
+//RS             (*out).len = 0;
+//RS         }
+//RS         0
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn native_uniform_abi_invocation_returns_indexed_writebacks() {
+//RS         let mut state = test_state();
+//RS         let mut entry = test_entry();
+//RS         entry.ptr = test_uniform_writeback as *const ();
+//RS         state
+//RS             .by_wrapper
+//RS             .insert("test_generated_out".to_string(), entry);
+//RS         *FFI_STATE.lock().unwrap_or_else(|error| error.into_inner()) = Some(state);
+//RS         let result = call_runtime_inner(
+//RS             "test_generated_out",
+//RS             &[
+//RS                 MirRuntimeValue::Int(3),
+//RS                 MirRuntimeValue::Int(7),
+//RS                 MirRuntimeValue::List(vec![
+//RS                     MirRuntimeValue::Int(1),
+//RS                     MirRuntimeValue::Int(2),
+//RS                 ]),
+//RS                 MirRuntimeValue::String("old".to_string()),
+//RS                 MirRuntimeValue::Int(42),
+//RS             ],
+//RS             false,
+//RS             Span::new(0, 0),
+//RS             MirForeignTarget::Interpreter,
+//RS         );
+//RS         *FFI_STATE.lock().unwrap_or_else(|error| error.into_inner()) = None;
+//RS         let result = result.expect("uniform native ABI fixture must return");
+//RS         assert_eq!(
+//RS             result.writebacks,
+//RS             vec![
+//RS                 AmbientMirExternWriteback {
+//RS                     parameter: 1,
+//RS                     value: MirRuntimeValue::Int(23),
+//RS                 },
+//RS                 AmbientMirExternWriteback {
+//RS                     parameter: 2,
+//RS                     value: MirRuntimeValue::List(vec![
+//RS                         MirRuntimeValue::Int(4),
+//RS                         MirRuntimeValue::Int(5),
+//RS                     ]),
+//RS                 },
+//RS                 AmbientMirExternWriteback {
+//RS                     parameter: 3,
+//RS                     value: MirRuntimeValue::String("new".to_string()),
+//RS                 },
+//RS                 AmbientMirExternWriteback {
+//RS                     parameter: 4,
+//RS                     value: MirRuntimeValue::Int(42),
+//RS                 },
+//RS             ]
+//RS         );
+//RS     }
+//RS 
+//RS 
+//RS     #[test]
+//RS     fn native_writeback_decode_covers_scalar_list_string_and_indexed_handle_carriers() {
+//RS         let state = test_state();
+//RS         let entry = test_entry();
+//RS         for target in [MirForeignTarget::Interpreter, MirForeignTarget::Cranelift] {
+//RS             let handle_arg = if matches!(target, MirForeignTarget::Cranelift) {
+//RS                 register_ffi_handle(MirHandleId(0xfeed), 42)
+//RS             } else {
+//RS                 42
+//RS             };
+//RS             let args = vec![
+//RS                 MirRuntimeValue::Int(3),
+//RS                 MirRuntimeValue::Int(7),
+//RS                 MirRuntimeValue::List(vec![
+//RS                     MirRuntimeValue::Int(1),
+//RS                     MirRuntimeValue::Int(2),
+//RS                 ]),
+//RS                 MirRuntimeValue::String("old".to_string()),
+//RS                 MirRuntimeValue::Int(handle_arg),
+//RS             ];
+//RS             let (slots, mut storage) = prepare_runtime_call(
+//RS                 &args,
+//RS                 &entry,
+//RS                 &state.records,
+//RS                 "test_writeback",
+//RS                 Span::new(0, 0),
+//RS                 target,
+//RS             )
+//RS             .expect("test arguments have checked carriers");
+//RS             assert_eq!(storage.len(), 3);
+//RS             storage[0].as_bytes_mut()[..8].copy_from_slice(&23i64.to_ne_bytes());
+//RS 
+//RS             for (index, value) in [4i64, 5].iter().copied().enumerate() {
+//RS                 let start = index * 8;
+//RS                 storage[1].as_bytes_mut()[start..start + 8]
+//RS                     .copy_from_slice(&value.to_ne_bytes());
+//RS             }
+//RS             storage[2].as_bytes_mut().copy_from_slice(b"new\0");
+//RS 
+//RS             let writebacks = decode_runtime_writebacks(
+//RS                 &state,
+//RS                 &entry,
+//RS                 &args,
+//RS                 &slots,
+//RS                 &storage,
+//RS                 "test_writeback",
+//RS                 Span::new(0, 0),
+//RS             )
+//RS             .expect("native storage mutations decode losslessly");
+//RS             assert_eq!(
+//RS                 writebacks,
+//RS                 vec![
+//RS                     AmbientMirExternWriteback {
+//RS                         parameter: 1,
+//RS                         value: MirRuntimeValue::Int(23),
+//RS                     },
+//RS                     AmbientMirExternWriteback {
+//RS                         parameter: 2,
+//RS                         value: MirRuntimeValue::List(vec![
+//RS                             MirRuntimeValue::Int(4),
+//RS                             MirRuntimeValue::Int(5),
+//RS                         ]),
+//RS                     },
+//RS                     AmbientMirExternWriteback {
+//RS                         parameter: 3,
+//RS                         value: MirRuntimeValue::String("new".to_string()),
+//RS                     },
+//RS                     AmbientMirExternWriteback {
+//RS                         parameter: 4,
+//RS                         value: MirRuntimeValue::Int(handle_arg),
+//RS                     },
+//RS                 ]
+//RS             );
+//RS             if matches!(target, MirForeignTarget::Cranelift) {
+//RS                 assert_eq!(take_ffi_handle(handle_arg), Some((MirHandleId(0xfeed), 42)));
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn native_handle_registry_distinguishes_reused_raw_instances() {
+//RS         let handle = MirHandleId(0xbeef);
+//RS         let first = register_ffi_handle(handle, 17);
+//RS         assert_eq!(take_ffi_handle(first), Some((handle, 17)));
+//RS         let second = register_ffi_handle(handle, 17);
+//RS         assert_ne!(first, second);
+//RS         assert_eq!(ffi_handle_raw(second), Some(17));
+//RS         assert_eq!(take_ffi_handle(second), Some((handle, 17)));
+//RS     }
+//RS     #[test]
+//RS     fn native_handle_registry_validates_each_parameter_type() {
+//RS         let expected = MirHandleId(0x1111);
+//RS         let other = MirHandleId(0x2222);
+//RS         let token = register_ffi_handle(expected, 17);
+//RS         let args = [MirRuntimeValue::Int(token)];
+//RS         assert_eq!(
+//RS             runtime_handle_arg(
+//RS                 &args,
+//RS                 0,
+//RS                 "test_handle_types",
+//RS                 Span::new(0, 0),
+//RS                 MirForeignTarget::Cranelift,
+//RS                 Some(expected),
+//RS             )
+//RS             .unwrap(),
+//RS             17
+//RS         );
+//RS         assert!(
+//RS             runtime_handle_arg(
+//RS                 &args,
+//RS                 0,
+//RS                 "test_handle_types",
+//RS                 Span::new(0, 0),
+//RS                 MirForeignTarget::Cranelift,
+//RS                 Some(other),
+//RS             )
+//RS             .is_err()
+//RS         );
+//RS         assert_eq!(take_ffi_handle(token), Some((expected, 17)));
+//RS     }
+//RS }
+// END-PORT-PENDING 0217 crates/jet-jit/src/Ffi.rs:3619-5334
+

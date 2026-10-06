@@ -1,0 +1,363 @@
+use core.mem.[Ptr]
+use core.ffi.[c_void]
+use core.cell.[RefCell]
+use core.alloc.[Box]
+use core.thread.[ThreadLocal]
+use core.sync.atomic.[compiler_fence, Ordering]
+use core.sys.target as target
+use core.io.[Error]
+use core.fmt.[Display, Formatter]
+use core.panic.[panic_any]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:7
+#Error
+#Clone
+#Debug
+#Eq
+pub enum JetCryptoError {
+    InvalidLength(operation: String, parameter: String, expected: String, actual: USize)
+    InvalidEncoding(operation: String, value_kind: String)
+    UnsupportedVersion(operation: String, version: U32)
+    UnsupportedAlgorithm(operation: String, algorithm: String)
+    OpenFailed
+    NonContributoryKey
+    OutputLength(operation: String, minimum: USize, maximum: USize, actual: I64)
+    PasswordPolicy(reason: String)
+    EntropyUnavailable
+    ResourceUnavailable(resource: String)
+    Internal(incident_id: String)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:23
+impl Display for JetCryptoError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:24
+    fn fmt(self: &JetCryptoError, f: &Formatter) -> () core.fmt.Error! {
+        text :: when self {
+            .InvalidLength(operation, parameter, expected, actual) -> "{operation}: {parameter} must be {expected}; got {actual}"
+            .InvalidEncoding(operation, value_kind) -> "{operation}: {value_kind} is not canonical"
+            .UnsupportedVersion(operation, version) -> "{operation}: version {version} is not supported"
+            .UnsupportedAlgorithm(operation, algorithm) -> "{operation}: algorithm {algorithm} is not supported"
+            .OpenFailed -> "encrypted data could not be opened"
+            .NonContributoryKey -> "X25519 peer key does not contribute to a shared secret"
+            .OutputLength(operation, minimum, maximum, actual) -> "{operation}: output length must be {minimum}..{maximum}; got {actual}"
+            .PasswordPolicy(_) -> "password hash is outside Jet's accepted policy"
+            .EntropyUnavailable -> "the operating system could not provide cryptographic randomness"
+            .ResourceUnavailable(resource) -> "{resource} is unavailable for this cryptographic operation"
+            .Internal(incident_id) -> "Jet could not preserve a cryptographic invariant; incident {incident_id}"
+        }
+        f.write_str(text)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:41
+// JetCryptoEntropyError was an alias; all consumers use JetCryptoError directly.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:43,61
+#Clone
+#Copy
+#Debug
+#Eq
+pub enum JetCryptoEntropyStep {
+    Filled(count: USize)
+    Interrupted
+    Failed
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:51
+#If(test) {
+    #Clone
+    #Copy
+    #Debug
+    #Eq
+    pub enum JetCryptoWasiAttemptEvent {
+        Created
+        ProviderReturned(errno: U16)
+        Zeroized
+        Released
+        Returned
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:69
+    // GATE #4565: kernel primitive — test-only thread-confined mutable closures.
+    static JET_CRYPTO_ENTROPY_TEST_PROVIDER: ThreadLocal<RefCell<Box<fn(&[U8]) -> JetCryptoEntropyStep>?>> = ThreadLocal.new(fn() { RefCell.new(None) })
+    static JET_CRYPTO_ZEROIZE_TEST_OBSERVER: ThreadLocal<RefCell<Box<fn([U8]) -> ()>?>> = ThreadLocal.new(fn() { RefCell.new(None) })
+    static JET_CRYPTO_WASI_ATTEMPT_TEST_OBSERVER: ThreadLocal<RefCell<Box<fn(JetCryptoWasiAttemptEvent, USize, [U8]) -> ()>?>> = ThreadLocal.new(fn() { RefCell.new(None) })
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:83
+    pub fn jet_crypto_entropy_set_test_provider(provider: fn(&[U8]) -> JetCryptoEntropyStep) -> {
+        #Unsafe("test thread owns its mutable provider") {
+            JET_CRYPTO_ENTROPY_TEST_PROVIDER.with(fn(slot) { *slot.borrow_mut() = Val(Box.new(^provider)) })
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:92
+    pub fn jet_crypto_entropy_clear_test_provider() -> {
+        #Unsafe("test thread clears its provider") { JET_CRYPTO_ENTROPY_TEST_PROVIDER.with(fn(slot) { *slot.borrow_mut() = None }) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:99
+    pub fn jet_crypto_entropy_set_zeroize_test_observer(observer: fn([U8]) -> ()) -> {
+        #Unsafe("test thread owns its observer") { JET_CRYPTO_ZEROIZE_TEST_OBSERVER.with(fn(slot) { *slot.borrow_mut() = Val(Box.new(^observer)) }) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:108
+    pub fn jet_crypto_entropy_clear_zeroize_test_observer() -> {
+        #Unsafe("test thread clears its observer") { JET_CRYPTO_ZEROIZE_TEST_OBSERVER.with(fn(slot) { *slot.borrow_mut() = None }) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:115
+    pub fn jet_crypto_entropy_set_wasi_attempt_test_observer(observer: fn(JetCryptoWasiAttemptEvent, USize, [U8]) -> ()) -> {
+        #Unsafe("test thread owns its WASI observer") { JET_CRYPTO_WASI_ATTEMPT_TEST_OBSERVER.with(fn(slot) { *slot.borrow_mut() = Val(Box.new(^observer)) }) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:124
+    pub fn jet_crypto_entropy_clear_wasi_attempt_test_observer() -> {
+        #Unsafe("test thread clears its WASI observer") { JET_CRYPTO_WASI_ATTEMPT_TEST_OBSERVER.with(fn(slot) { *slot.borrow_mut() = None }) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:131
+    fn jet_crypto_entropy_observe_wasi_attempt(event: JetCryptoWasiAttemptEvent, generation: USize, bytes: [U8]) -> {
+        #Unsafe("test-only observer borrows attempt bytes during notification") {
+            JET_CRYPTO_WASI_ATTEMPT_TEST_OBSERVER.with(fn(slot) {
+                if slot.borrow_mut().as_mut() == .Val(observer) { observer(event, generation, bytes) }
+            })
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:143
+pub fn jet_crypto_entropy_zeroize(bytes: &[U8]) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("volatile writes and SeqCst compiler fence forbid eliding secret erasure") {
+        for byte in &bytes { core.ptr.write_volatile(Ptr.from_ref(byte), U8{0}) }
+        compiler_fence(Ordering.SeqCst)
+        #If(test) {
+            JET_CRYPTO_ZEROIZE_TEST_OBSERVER.with(fn(slot) {
+                if slot.borrow_mut().as_mut() == .Val(observer) { observer(bytes) }
+            })
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:157
+#Clone
+pub struct JetCryptoSecretBytes { bytes: [U8] }
+impl JetCryptoSecretBytes {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:161
+    pub fn new(bytes: [U8]) -> JetCryptoSecretBytes { JetCryptoSecretBytes{bytes: ^bytes} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:165
+    pub fn as_vec(self: &JetCryptoSecretBytes) -> &[U8] from self { &self.bytes }
+}
+impl Drop for JetCryptoSecretBytes {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:171
+    fn drop(self: &JetCryptoSecretBytes) -> { jet_crypto_entropy_zeroize(&self.bytes) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:177
+#If(test) {
+    pub fn jet_crypto_entropy_unsupported_for_test(out: &[U8]) -> () JetCryptoError! {
+        jet_crypto_entropy_zeroize(out)
+        Err(JetCryptoError.EntropyUnavailable)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:184
+fn jet_crypto_entropy_fill_loop(out: &[U8], provider: fn(&[U8]) -> JetCryptoEntropyStep) -> () JetCryptoError! {
+    filled := USize{0}
+    while filled < out.len() {
+        when provider(&out[filled..]) {
+            .Filled(n) if n > 0 && n <= out.len() - filled -> { filled += n }
+            .Interrupted -> jet_crypto_entropy_zeroize(&out[filled..])
+            .Filled(_) | .Failed -> {
+                jet_crypto_entropy_zeroize(out)
+                return Err(JetCryptoError.EntropyUnavailable)
+            }
+        }
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:207
+#If(test) {
+    pub fn jet_crypto_entropy_fill_with(out: &[U8], provider: fn(&[U8]) -> JetCryptoEntropyStep) -> () JetCryptoError! {
+        jet_crypto_entropy_fill_loop(out, ^provider)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:221
+// GATE #4565: kernel primitive — selected Linux GNU libc only.
+#FFI(c)
+fn getrandom(buffer: Ptr<c_void>, length: USize, flags: U32) -> ISize
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:242
+// GATE #4565: kernel primitive — selected macOS Security framework only.
+#FFI(c)
+fn SecRandomCopyBytes(rnd: Ptr<c_void>, count: USize, bytes: Ptr<U8>) -> I32
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:262
+// GATE #4565: kernel primitive — selected Windows x64/ARM64 bcrypt system ABI.
+#FFI(c)
+fn BCryptGenRandom(algorithm: Ptr<c_void>, buffer: Ptr<U8>, length: U32, flags: U32) -> I32
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:219,239,259,389
+fn jet_crypto_entropy_fill_native(out: &[U8]) -> () JetCryptoError! {
+    arch :: target.selected_arch()
+    if (arch == "x86_64" || arch == "aarch64") && target.selected_os() == "linux" && target.selected_env() == "gnu" {
+        return jet_crypto_entropy_fill_loop(out, fn(suffix) {
+            // GATE #4565: kernel primitive
+            #Unsafe("getrandom fills initialized borrowed suffix; capture errno immediately after failure") {
+                result :: getrandom(suffix.as_mut_ptr().cast<c_void>(), suffix.len(), 0)
+                if result > 0 { .Filled(result as USize) }
+                else if result < 0 && Error.last_os_error().raw_os_error() == 4 { .Interrupted }
+                else { .Failed }
+            }
+        })
+    }
+    if (arch == "x86_64" || arch == "aarch64") && target.selected_os() == "macos" {
+        return jet_crypto_entropy_fill_loop(out, fn(suffix) {
+            // GATE #4565: kernel primitive
+            status :: #Unsafe("Security fills the entire borrowed suffix") { SecRandomCopyBytes(Ptr.null(), suffix.len(), suffix.as_mut_ptr()) }
+            if status == 0 { .Filled(suffix.len()) } else { .Failed }
+        })
+    }
+    if (arch == "x86_64" || arch == "aarch64") && target.selected_os() == "windows" && target.selected_env() == "msvc" {
+        return jet_crypto_entropy_fill_loop(out, fn(suffix) {
+            // GATE #4565: kernel primitive
+            status :: #Unsafe("BCrypt system-preferred RNG fills the borrowed suffix; count bounded by public entropy API") {
+                BCryptGenRandom(Ptr.null(), suffix.as_mut_ptr(), suffix.len() as U32, 2)
+            }
+            if status == 0 { .Filled(suffix.len()) } else { .Failed }
+        })
+    }
+    jet_crypto_entropy_zeroize(out)
+    Err(JetCryptoError.EntropyUnavailable)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:285
+// GATE #4565: kernel primitive — import random_get from wasi_snapshot_preview1.
+#FFI(c)
+fn random_get(buffer: Ptr<U8>, length: USize) -> U16
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:299
+// GATE #4565: kernel primitive — import get-random-u64 from wasi:random/random@0.2.0.
+#FFI(c)
+fn get_random_u64() -> U64
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:282,292
+fn jet_crypto_entropy_wasi_attempt(out: &[U8]) -> () U16! {
+    // GATE #4565: kernel primitive
+    #Unsafe("selected WASI preview imports fill borrowed initialized storage") {
+        if target.selected_env() == "p1" {
+            errno :: random_get(out.as_mut_ptr(), out.len())
+            if errno == 0 { Ok(()) } else { Err(errno) }
+        } else {
+            loop chunk in out.chunks_mut(8) {
+                bytes :: get_random_u64().to_ne_bytes()
+                chunk.copy_from_slice(&bytes[0..<chunk.len()])
+            }
+            Ok(())
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:313
+fn jet_crypto_entropy_wasi_with(count: USize, provider: fn(&[U8]) -> U16) -> [U8] JetCryptoError! {
+    const ERRNO_INTR: U16 = 27
+    loop generation in 0..<17 {
+        allocation := [U8].filled(count, 0)
+        #If(test) { jet_crypto_entropy_observe_wasi_attempt(.Created, generation, allocation) }
+        errno :: provider(&allocation)
+        #If(test) { jet_crypto_entropy_observe_wasi_attempt(.ProviderReturned(errno), generation, allocation) }
+        if errno == 0 {
+            #If(test) { jet_crypto_entropy_observe_wasi_attempt(.Returned, generation, allocation) }
+            return Ok(^allocation)
+        }
+        jet_crypto_entropy_zeroize(&allocation)
+        #If(test) { jet_crypto_entropy_observe_wasi_attempt(.Zeroized, generation, allocation) }
+        drop(^allocation)
+        #If(test) { jet_crypto_entropy_observe_wasi_attempt(.Released, generation, []) }
+        if errno != ERRNO_INTR || generation == 16 -> return Err(JetCryptoError.EntropyUnavailable)
+    }
+    unreachable()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:364
+#If(test) {
+    pub fn jet_crypto_entropy_wasi_with_for_test(count: USize, provider: fn(&[U8]) -> U16) -> [U8] JetCryptoError! {
+        jet_crypto_entropy_wasi_with(count, ^provider)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:398
+fn jet_crypto_entropy_fill_platform(out: &[U8]) -> () JetCryptoError! {
+    #If(test) {
+        // GATE #4565: kernel primitive
+        scripted :: #Unsafe("test thread borrows its optional scripted provider") {
+            JET_CRYPTO_ENTROPY_TEST_PROVIDER.with(fn(slot) {
+                loan := slot.borrow_mut()
+                loan.as_mut().map(fn(provider) { jet_crypto_entropy_fill_loop(out, provider) })
+            })
+        }
+        if scripted == .Val(result) -> return ^result
+    }
+    jet_crypto_entropy_fill_native(out)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:413
+pub fn jet_crypto_entropy_bytes(count: I64) -> [U8] JetCryptoError! {
+    if count < 0 -> return Err(JetCryptoError.InvalidLength(operation: "core.crypto.random.bytes", parameter: "count", expected: "non-negative", actual: count.unsigned_abs() as USize))
+    if count > 1048576 -> return Err(JetCryptoError.OutputLength(operation: "core.crypto.random.bytes", minimum: 0, maximum: 1048576, actual: count))
+    if count == 0 -> return Ok([])
+    if target.selected_os() == "wasi" && target.selected_arch() == "wasm32" && (target.selected_env() == "p1" || target.selected_env() == "p2") {
+        return jet_crypto_entropy_wasi_with(count as USize, fn(out) {
+            match jet_crypto_entropy_wasi_attempt(out) {
+                Ok(_) -> U16{0}
+                Err(errno) -> errno
+            }
+        })
+    }
+    out := [U8].filled(count as USize, 0)
+    jet_crypto_entropy_fill_platform(&out)?
+    Ok(^out)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:445
+pub fn jet_crypto_entropy_fill(out: &[U8]) -> () JetCryptoError! {
+    fresh := match jet_crypto_entropy_bytes(out.len() as I64) {
+        Ok(bytes) -> ^bytes
+        Err(error) -> {
+            jet_crypto_entropy_zeroize(out)
+            return Err(^error)
+        }
+    }
+    out.copy_from_slice(&fresh)
+    jet_crypto_entropy_zeroize(&fresh)
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:459
+// All exports live at this canonical owner; no module or error re-export aliases.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:485
+pub fn jet_crypto_entropy_fail_closed(operation: String, error: JetCryptoError) -> Never {
+    // GATE #4565: kernel primitive
+    #Unsafe("ordinary shared foreign-boundary panic enters registered E3001 execution-tier reporting") {
+        panic_any("__jet_ffi_runtime__: {operation}: {error}")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:519
+pub fn jet_crypto_zeroize(bytes: [U8]) -> {
+    secret := ^bytes
+    jet_crypto_entropy_zeroize(&secret)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:523
+fn jet_crypto_uuid_format(bytes: [U8#16]) -> String {
+    "{bytes[0]:02x}{bytes[1]:02x}{bytes[2]:02x}{bytes[3]:02x}-{bytes[4]:02x}{bytes[5]:02x}-{bytes[6]:02x}{bytes[7]:02x}-{bytes[8]:02x}{bytes[9]:02x}-{bytes[10]:02x}{bytes[11]:02x}{bytes[12]:02x}{bytes[13]:02x}{bytes[14]:02x}{bytes[15]:02x}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:545
+pub fn jet_crypto_uuid_v4_result() -> String JetCryptoError! {
+    bytes := [U8#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    jet_crypto_entropy_fill(&bytes)?
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+    Ok(jet_crypto_uuid_format(bytes))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:553
+pub fn jet_crypto_uuid_v7_result(timestamp_ms: I64) -> String JetCryptoError! {
+    bytes := [U8#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    timestamp :: timestamp_ms as U64
+    bytes[0] = (timestamp >> 40) as U8
+    bytes[1] = (timestamp >> 32) as U8
+    bytes[2] = (timestamp >> 24) as U8
+    bytes[3] = (timestamp >> 16) as U8
+    bytes[4] = (timestamp >> 8) as U8
+    bytes[5] = timestamp as U8
+    jet_crypto_entropy_fill(&bytes[6..])?
+    bytes[6] = (bytes[6] & 0x0f) | 0x70
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+    Ok(jet_crypto_uuid_format(bytes))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:570
+pub fn jet_crypto_uuid_v4() -> String {
+    match jet_crypto_uuid_v4_result() {
+        Ok(uuid) -> ^uuid
+        Err(error) -> jet_crypto_entropy_fail_closed("core.crypto.uuid.v4", ^error)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:577
+pub fn jet_crypto_uuid_v7(timestamp_ms: I64) -> String {
+    match jet_crypto_uuid_v7_result(timestamp_ms) {
+        Ok(uuid) -> ^uuid
+        Err(error) -> jet_crypto_entropy_fail_closed("core.crypto.uuid.v7", ^error)
+    }
+}
+

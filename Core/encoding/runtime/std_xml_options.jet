@@ -1,0 +1,44 @@
+// D-ENC-XML-SURFACE1=A: shared checked XML stream policy and limits.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/XmlOptions.rs:4
+#Derive(Clone, Debug, PartialEq, Eq)
+pub struct XMLLimits {
+    pub max_depth: I64,
+    pub max_nodes: I64,
+    pub max_attributes_per_element: I64,
+    pub max_name_bytes: I64,
+    pub max_text_bytes: I64,
+    pub max_entity_declarations: I64,
+    pub max_entity_depth: I64,
+    pub max_entity_replacement_bytes: I64,
+}
+impl XMLLimits {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/XmlOptions.rs:16
+    pub fn safe() -> Self {
+        Self{max_depth: 256, max_nodes: 1_000_000, max_attributes_per_element: 1024,
+            max_name_bytes: 4096, max_text_bytes: 16_777_216, max_entity_declarations: 1024,
+            max_entity_depth: 32, max_entity_replacement_bytes: 8_388_608}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/XmlOptions.rs:31
+#Derive(Clone, Debug, PartialEq, Eq)
+pub enum XMLEntityPolicy { Preserve, Reject, Resolve([String:String]) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/XmlOptions.rs:38
+#Derive(Clone, Debug, PartialEq, Eq)
+pub struct XMLParseOptions { pub entities: XMLEntityPolicy, pub limits: XMLLimits }
+impl XMLParseOptions {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/XmlOptions.rs:44
+    pub fn safe() -> Self { Self{entities: XMLEntityPolicy.Preserve, limits: XMLLimits.safe()} }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/XmlOptions.rs:53
+#Derive(Clone, Debug, PartialEq, Eq)
+pub enum XMLEncoding { UTF8, UTF8BOM, UTF16LE, UTF16BE }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/XmlOptions.rs:61
+#Derive(Clone, Debug, PartialEq, Eq)
+pub enum XMLLexicalPolicy { PreserveValid, Deterministic }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/XmlOptions.rs:67
+#Derive(Clone, Debug, PartialEq, Eq)
+pub struct XMLRenderOptions { pub encoding: XMLEncoding, pub lexical: XMLLexicalPolicy }
+impl XMLRenderOptions {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/XmlOptions.rs:73
+    pub fn safe() -> Self { Self{encoding: XMLEncoding.UTF8, lexical: XMLLexicalPolicy.PreserveValid} }
+}

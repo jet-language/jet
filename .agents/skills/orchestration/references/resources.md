@@ -1,40 +1,24 @@
-# Bounded resources and liveness
+# Shared artifacts and bounded build output
 
-Load this reference for a worker wave, long proof, recovery, or any command that
-can consume shared machine resources. Controls are bounded defaults; choose the
-smallest limit that fits the artifact and owner-approved scope.
+Use this reference when parallel work shares build resources or proof artifacts.
+Choose the smallest resource budget that fits the approved work.
 
-## Time and liveness
+## Share heavy artifacts
 
-Use 300 seconds for mechanical fixture work, 720 seconds for normal work, and
-1,200 seconds only for one narrow semantic root cause. At the limit, cancel the
-lane, salvage only a coherent owned patch, and rebrief a smaller slice. Use
-`hub jobs` or `hub wait` with pid-aware status; a log is not a process and a
-missing completion marker is not failure by itself.
+Build heavy artifacts once for each integrated source revision and share them
+with every worker that needs them. Record the source revision with the artifact;
+a stale binary is not proof. Avoid per-worker copies or private builds unless
+the worker's unintegrated change is itself what must be measured. Serialize
+writers to shared artifacts.
 
-Use the host's task tool as the first dispatch path. If it cannot run the
-required role, record the exact harness failure in the handoff before a bounded
-fallback. Prompts do not select a model.
+## Keep build output separate and bounded
 
-## Disk and memory
+Keep build output outside the repository on disk-backed storage. Give each
+checkout exclusive ownership of its Cargo target; shared binaries do not imply
+shared writable build targets. Configure external targets through `jet-env`.
+Bound disk and memory use before starting work, account for peak allocations,
+and reclaim idle output promptly after integration. Never remove source,
+protected evidence, or artifacts still in use to make room for another job.
 
-Use the checkout's own bounded `target/`, with `CARGO_INCREMENTAL=0`.
-The orchestrator's lock-serialized build targets (one writer each) opt in
-to incremental compilation with `JET_CARGO_INCREMENTAL=1` and are pruned
-between builds.
-Keep scratch at `~/.cache/jet-dev/scratch` and logs/briefs at
-`~/.cache/jet-dev`; `/tmp` is RAM-backed and must not hold Cargo targets,
-large logs, or test scratch. Monitor available RAM, swap, disk, and target size.
-Respect `JET_TARGET_CAP_GB` (120 GiB by default).
-
-Run repository commands through `Tools/agent/jet-env`. For source checks,
-use the checkout-aware commands in the brief, for example:
-
-```sh
-Tools/agent/jet-env jet check path/to/file.jet
-Tools/agent/jet-env jet fmt --check path/to/file.jet
-```
-
-Before any runtime claim, build a fresh binary through the wrapper and exercise
-the actual path. A worker type-check, stale `target/debug/jet`, or static log
-cannot establish runtime, tier, snapshot, golden, or I9 evidence.
+Use fresh artifacts for runtime claims. A source check, worker receipt, or stale
+binary cannot establish runtime, tier, snapshot, golden, or I9 evidence.

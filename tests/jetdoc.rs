@@ -202,9 +202,9 @@ fn package_fixture_rejects_order_and_content_drift() {
     let json = String::from_utf8(first.stdout).expect("UTF-8 package docs JSON");
     for needle in [
         "\"summary\":\"Alpha API.\"",
-        "\"signature\":\"pub fn alpha() -> Int -> 6\\nfailure: Int (implicit default !Err)\"",
+        "\"signature\":\"pub fn alpha() -> Int\\nfailure: Int (implicit default !Err)\"",
         "\"summary\":\"Zulu API.\"",
-        "\"signature\":\"pub fn zulu() -> Int -> 7\\nfailure: Int (implicit default !Err)\"",
+        "\"signature\":\"pub fn zulu() -> Int\\nfailure: Int (implicit default !Err)\"",
         "\"link\":\"ordered.jet#L7\"",
         "\"link\":\"ordered.jet#L4\"",
     ] {

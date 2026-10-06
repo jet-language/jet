@@ -1,3 +1,16 @@
+// D-PLUGIN-FAILURE1=A: one carrier shared with the Wasmtime host and all tiers.
+pub use plugin_wire::{PluginError, PluginFault, PluginFrame, PluginLimit};
+
+impl super::JetDisplay for PluginError {
+    fn jet_display(&self) -> String { self.to_string() }
+}
+impl super::JetShow for PluginError {
+    fn jet_show(&self) -> String { self.to_string() }
+}
+impl super::JetDebug for PluginError {
+    fn jet_debug(&self) -> String { format!("{self:?}") }
+}
+
 // ── core.db: the tagged SQL parameter/column value (D-DBDRIVER1) ───────────
 // `DBValue` mirrors `JSON`'s dynamic-value construction mechanism
 // (`DBValue.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)` / `.Blob(bytes)` /

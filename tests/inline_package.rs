@@ -155,7 +155,7 @@ fn run() {
         .unwrap();
         fs::write(
             root.join("deps/dep/dep.jet"),
-            "pub fn value() -> String -> \"dependency\"\n",
+            "pub fn value() -> String { \"dependency\" }\n",
         )
         .unwrap();
     }

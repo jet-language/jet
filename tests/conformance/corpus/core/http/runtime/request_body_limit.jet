@@ -1,0 +1,150 @@
+// #4431: exercise the actual Core parse_request and native HTTPRequest body.
+// HTTPMessage.rs:4,699–716 supplies the inclusive 1 MiB cap; frozen
+// HTTPServer.rs:5176–5204 bounds before collection and checks framing.
+// This ticket preserves Core's existing precedence, not #4428 byte-body parity.
+use core.http as http_limit_api
+
+fn http_limit_raw(head: String, size: Int, byte: U8) -> [U8] Never! {
+    raw := head.bytes()
+    loop i in 0..<size {
+        &raw.push(byte)
+    }
+    raw
+}
+
+fn http_limit_error(raw: [U8]) -> String Never! {
+    if http_limit_api.parse_request(raw) == {
+        .Ok(_) -> return "Ok"
+        .Err(error) -> {
+            if error == {
+                .BodyTooLarge(limit) -> return "BodyTooLarge:{limit}"
+                .Protocol(version) -> return "Protocol:{version}"
+                .InvalidMethod -> return "InvalidMethod"
+                .InvalidURL -> return "InvalidURL"
+                .InvalidHeader -> return "InvalidHeader"
+                .InvalidFraming -> return "InvalidFraming"
+                .UnsupportedEncoding -> return "UnsupportedEncoding"
+                else -> return "unexpected error"
+            }
+        }
+        else -> return "unexpected outcome"
+    }
+}
+
+fn http_limit_text(raw: [U8]) -> String Never! {
+    req :: http_limit_api.parse_request(raw) ?? return "parse failed"
+    req.text() ?? "text failed"
+}
+
+#Test("request exact byte cap is accepted with intact body") {
+    cr :: String.from_bytes([U8]{13}) ?? ""
+    raw :: http_limit_raw("POST /cap HTTP/1.1{cr}\nHost: example.test{cr}\nContent-Length: 1048576{cr}\n{cr}\n", 1048576, U8{97})
+    text :: http_limit_text(raw)
+    bytes :: text.bytes()
+    assert_eq(bytes.len(), 1048576)
+    assert_eq(bytes[0], U8{97})
+    assert_eq(bytes[1048575], U8{97})
+}
+
+#Test("request cap plus one rejects with the exact body limit") {
+    cr :: String.from_bytes([U8]{13}) ?? ""
+    raw :: http_limit_raw("POST /cap HTTP/1.1{cr}\nHost: example.test{cr}\nContent-Length: 1048577{cr}\n{cr}\n", 1048577, U8{97})
+    assert_eq(http_limit_error(raw), "BodyTooLarge:1048576")
+}
+
+#Test("incomplete and non CRLF head framing precedes oversize body") {
+    cr :: String.from_bytes([U8]{13}) ?? ""
+    incomplete :: http_limit_raw("GET / HTTP/1.1{cr}\nHost: example.test{cr}\n", 1048577, U8{97})
+    assert_eq(http_limit_error(incomplete), "InvalidFraming")
+    malformed :: http_limit_raw("GET / HTTP/1.1\nHost: example.test{cr}\n{cr}\n", 1048577, U8{97})
+    assert_eq(http_limit_error(malformed), "InvalidFraming")
+}
+
+#Test("head byte bound precedes body cap") {
+    cr :: String.from_bytes([U8]{13}) ?? ""
+    head_bytes := http_limit_raw("GET / HTTP/1.1{cr}\nHost: example.test{cr}\nX-Large: ", 32768, U8{97})
+    ending :: "{cr}\n{cr}\n".bytes()
+    loop byte in ending {
+        &head_bytes.push(byte)
+    }
+    raw :: http_limit_raw(String.from_bytes(head_bytes) ?? "", 1048577, U8{97})
+    assert_eq(http_limit_error(raw), "InvalidHeader")
+}
+
+#Test("invalid head UTF8 precedes body cap") {
+    cr :: String.from_bytes([U8]{13}) ?? ""
+    raw := "GET / HTTP/1.1{cr}\nHost: example.test{cr}\nX: ".bytes()
+    &raw.push(U8{255})
+    ending :: "{cr}\n{cr}\n".bytes()
+    loop byte in ending {
+        &raw.push(byte)
+    }
+    loop i in 0..<1048577 {
+        &raw.push(U8{97})
+    }
+    assert_eq(http_limit_error(raw), "Protocol:HTTP")
+}
+
+#Test("body cap precedes method target version and header syntax validation") {
+    cr :: String.from_bytes([U8]{13}) ?? ""
+    heads :: [String]{
+        "G@T / HTTP/1.1{cr}\nHost: example.test{cr}\n{cr}\n",
+        "POST bad-target HTTP/1.1{cr}\nHost: example.test{cr}\n{cr}\n",
+        "POST / HTTP/9{cr}\nHost: example.test{cr}\n{cr}\n",
+        "POST / HTTP/1.1{cr}\nBad Header: value{cr}\n{cr}\n",
+    }
+    loop head in heads {
+        assert_eq(http_limit_error(http_limit_raw(head, 1048577, U8{97})), "BodyTooLarge:1048576")
+    }
+}
+
+#Test("body cap precedes semantic framing encoding and body UTF8 errors") {
+    cr :: String.from_bytes([U8]{13}) ?? ""
+    heads :: [String]{
+        "POST / HTTP/1.1{cr}\nHost: example.test{cr}\nContent-Length: 0{cr}\n{cr}\n",
+        "POST / HTTP/1.1{cr}\nHost: example.test{cr}\nContent-Length: 1{cr}\nContent-Length: 2{cr}\n{cr}\n",
+        "POST / HTTP/1.1{cr}\nHost: example.test{cr}\nContent-Length: 1{cr}\nTransfer-Encoding: chunked{cr}\n{cr}\n",
+        "POST / HTTP/1.1{cr}\nHost: example.test{cr}\nContent-Encoding: gzip{cr}\n{cr}\n",
+        "POST / HTTP/1.1{cr}\nHost: example.test{cr}\nContent-Length: 1048577{cr}\n{cr}\n",
+    }
+    loop head in heads {
+        assert_eq(http_limit_error(http_limit_raw(head, 1048577, U8{255})), "BodyTooLarge:1048576")
+    }
+}
+
+#Test("within cap head and framing errors precede invalid body UTF8") {
+    cr :: String.from_bytes([U8]{13}) ?? ""
+    assert_eq(http_limit_error(http_limit_raw("G@T / HTTP/1.1{cr}\nHost: example.test{cr}\nContent-Length: 1{cr}\n{cr}\n", 1, U8{255})), "InvalidMethod")
+    assert_eq(http_limit_error(http_limit_raw("POST / HTTP/1.1{cr}\nBad Header: value{cr}\nContent-Length: 1{cr}\n{cr}\n", 1, U8{255})), "InvalidHeader")
+    assert_eq(http_limit_error(http_limit_raw("POST / HTTP/1.1{cr}\nHost: example.test{cr}\nContent-Length: 0{cr}\n{cr}\n", 1, U8{255})), "InvalidFraming")
+    assert_eq(http_limit_error(http_limit_raw("POST / HTTP/1.1{cr}\nHost: example.test{cr}\nContent-Length: 1{cr}\nTransfer-Encoding: chunked{cr}\n{cr}\n", 1, U8{255})), "InvalidFraming")
+    assert_eq(http_limit_error(http_limit_raw("POST / HTTP/1.1{cr}\nHost: example.test{cr}\nContent-Length: 1{cr}\nContent-Encoding: gzip{cr}\n{cr}\n", 1, U8{255})), "UnsupportedEncoding")
+    assert_eq(http_limit_error(http_limit_raw("POST / HTTP/1.1{cr}\nHost: example.test{cr}\nContent-Length: 1{cr}\n{cr}\n", 1, U8{255})), "UnsupportedEncoding")
+}
+
+#Test("within cap missing and oversized declared lengths remain framing errors") {
+    cr :: String.from_bytes([U8]{13}) ?? ""
+    assert_eq(http_limit_error(http_limit_raw("POST / HTTP/1.1{cr}\nHost: example.test{cr}\n{cr}\n", 1, U8{97})), "InvalidFraming")
+    assert_eq(http_limit_error("POST / HTTP/1.1{cr}\nHost: example.test{cr}\nContent-Length: 1048577{cr}\n{cr}\n".bytes()), "InvalidFraming")
+}
+
+#Test("zero length body accepts absent and zero content length") {
+    cr :: String.from_bytes([U8]{13}) ?? ""
+    empty :: "GET /empty HTTP/1.1{cr}\nHost: example.test{cr}\n{cr}\n".bytes()
+    assert_eq(http_limit_error(empty), "Ok")
+    assert_eq(http_limit_text(empty), "")
+    declared :: "POST /empty HTTP/1.1{cr}\nHost: example.test{cr}\nContent-Length: 0{cr}\n{cr}\n".bytes()
+    assert_eq(http_limit_error(declared), "Ok")
+    assert_eq(http_limit_text(declared), "")
+}
+
+#Test("normal ASCII and multibyte body byte lengths and headers survive") {
+    cr :: String.from_bytes([U8]{13}) ?? ""
+    assert_eq(http_limit_text("POST /normal HTTP/1.1{cr}\nHost: example.test{cr}\nContent-Length: 5{cr}\n{cr}\nhello".bytes()), "hello")
+    raw :: "POST /normal HTTP/1.1{cr}\nHost: example.test{cr}\nX-Example: intact{cr}\nContent-Length: 7{cr}\n{cr}\nhé🙂".bytes()
+    req :: http_limit_api.parse_request(raw) ?? panic("normal request failed")
+    assert_eq(req.method(), "POST")
+    assert_eq(req.path(), "/normal")
+    assert_eq(req.header("x-example"), Val("intact"))
+    assert_eq(req.text() ?? "text failed", "hé🙂")
+}

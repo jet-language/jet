@@ -19,7 +19,7 @@ use jet_lexer.[
 fn parser_c_module_ahead_at(state: &JetParserState, offset: Int) -> Bool Never! {
     if parser_kind_at(&state, offset) != TOKEN_HASH || parser_kind_at(&state, offset + 1) != TOKEN_IDENT -> return false
     marker :: parser_lookahead(&state, offset + 1)
-    (marker.payload.decoded == "Import" || marker.payload.decoded == "Bindgen") && parser_kind_at(&state, offset + 2) == TOKEN_KW_MODULE
+    (marker.payload.decoded == "Import" || marker.payload.decoded == "Bindgen" || marker.payload.decoded == "Extern") && parser_kind_at(&state, offset + 2) == TOKEN_KW_MODULE
 }
 
 fn parser_item_declaration_ahead_at(state: &JetParserState, offset: Int) -> Bool Never! {

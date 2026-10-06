@@ -1,0 +1,1805 @@
+// PORT-PENDING 0200 crates-jet-jit-src-collections-slice-7294: crates/jet-jit/src/Collections.rs:7294-9094
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn jet_jit_list_unzip(pairs: i64, left_kind: i64, right_kind: i64) -> i64 {
+//RS     let (Some(left_kind), Some(right_kind)) = (
+//RS         crate::runtime_host::JitZipValueKind::from_code(left_kind),
+//RS         crate::runtime_host::JitZipValueKind::from_code(right_kind),
+//RS     ) else {
+//RS         jet_foundation::ice!(None, "unzip column kind code out of range");
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         jit_list_unzip_columns(&mut rt.heap, pairs, left_kind, right_kind)
+//RS     })
+//RS }
+//RS 
+//RS /// The arena half of `jet_jit_list_unzip`, split from the runtime borrow so it
+//RS /// can be pinned without a resident runtime.
+//RS ///
+//RS /// #2091: the gate arm and the lowering now read ONE table
+//RS /// (`LowerCtx::unzip_column_kinds`), so the last pairing under `.unzip()` that
+//RS /// can still drift is the per-kind representation pair inside this file — the
+//RS /// writer `jit_zip_set_value` against the readers `jit_zip_record_field` and
+//RS /// `jit_zip_read_value`. That pair is exactly what shipped two EMPTY lists, and
+//RS /// it is a pure set over `JitZipValueKind`, so `unzip_column_round_trip` below
+//RS /// checks it instead of leaving a stem as the only witness.
+//RS fn jit_list_unzip_columns(
+//RS     heap: &mut jet_rt::JetArena,
+//RS     pairs: i64,
+//RS     left_kind: crate::runtime_host::JitZipValueKind,
+//RS     right_kind: crate::runtime_host::JitZipValueKind,
+//RS ) -> i64 {
+//RS     // A stop, not `unwrap_or_default()`: an unzip receiver that is not a
+//RS     // row-handle list used to answer two EMPTY lists here, which is the same
+//RS     // silent wrong answer the `record_get_int` column read gave.
+//RS     let Some(rows) = heap.clone_int_list(pairs) else {
+//RS         jet_foundation::ice!(None, "unzip receiver is not a row-handle list");
+//RS     };
+//RS     let mut columns = Vec::with_capacity(rows.len());
+//RS     for row in rows {
+//RS         let left = jit_zip_record_field(heap, left_kind, row, 0);
+//RS         let right = jit_zip_record_field(heap, right_kind, row, 1);
+//RS         if matches!(left, JitZipValue::Absent) || matches!(right, JitZipValue::Absent) {
+//RS             jet_foundation::ice!(None, "unzip row representation mismatch");
+//RS         }
+//RS         columns.push((left, right));
+//RS     }
+//RS     let (left_values, right_values) = collection_semantics::list_unzip_pairs(columns);
+//RS     let left = heap.alloc_empty_list();
+//RS     for value in left_values {
+//RS         if jit_zip_push_column_value(heap, left, value).is_none() {
+//RS             jet_foundation::ice!(None, "unzip column representation mismatch");
+//RS         }
+//RS     }
+//RS     let right = heap.alloc_empty_list();
+//RS     for value in right_values {
+//RS         if jit_zip_push_column_value(heap, right, value).is_none() {
+//RS             jet_foundation::ice!(None, "unzip column representation mismatch");
+//RS         }
+//RS     }
+//RS     let result = heap.alloc_record(2);
+//RS     let _ = heap.record_set_int(result, 0, left);
+//RS     let _ = heap.record_set_int(result, 1, right);
+//RS     result
+//RS }
+//RS 
+//RS /// The one pairing `.unzip()` still has on both sides of a representation
+//RS /// boundary: `jit_zip_set_value` writes a column word, `jit_zip_record_field`
+//RS /// reads it back out of the row, and `jit_zip_read_value` reads it back out of
+//RS /// the republished column. Total over `JitZipValueKind`, so it is checkable as
+//RS /// a set — unlike the `TBuiltinOp` lowering halves, which need a live
+//RS /// `FunctionBuilder` (#2091).
+//RS #[cfg(test)]
+//RS mod unzip_column_round_trip {
+//RS     use super::{
+//RS         jit_list_unzip_columns, jit_zip_pack_value, jit_zip_read_value, jit_zip_set_value,
+//RS         JitZipValue,
+//RS     };
+//RS     use crate::runtime_host::{JitZipColumn, JitZipValueKind};
+//RS 
+//RS     /// No `_` arm: a new column kind must fail to compile here rather than
+//RS     /// quietly skip the round trip.
+//RS     fn kind_name(kind: JitZipValueKind) -> &'static str {
+//RS         match kind {
+//RS             JitZipValueKind::Int => "Int",
+//RS             JitZipValueKind::Float => "Float",
+//RS             JitZipValueKind::Bool => "Bool",
+//RS             JitZipValueKind::Char => "Char",
+//RS             JitZipValueKind::String => "String",
+//RS             JitZipValueKind::Opaque => "Opaque",
+//RS         }
+//RS     }
+//RS 
+//RS     const EVERY_KIND: [JitZipValueKind; 6] = [
+//RS         JitZipValueKind::Int,
+//RS         JitZipValueKind::Float,
+//RS         JitZipValueKind::Bool,
+//RS         JitZipValueKind::Char,
+//RS         JitZipValueKind::String,
+//RS         JitZipValueKind::Opaque,
+//RS     ];
+//RS 
+//RS     /// One column word per kind, in the encoding that kind's writer expects.
+//RS     fn sample(heap: &mut jet_rt::JetArena, kind: JitZipValueKind, nth: i64) -> JitZipValue {
+//RS         match kind {
+//RS             JitZipValueKind::Float => JitZipValue::Float(0.5 + nth as f64),
+//RS             JitZipValueKind::Bool => JitZipValue::Bits(nth % 2),
+//RS             JitZipValueKind::Char => JitZipValue::Bits(i64::from(u32::from('a')) + nth),
+//RS             JitZipValueKind::String => JitZipValue::Bits(heap.alloc_string(format!("col{nth}"))),
+//RS             JitZipValueKind::Int | JitZipValueKind::Opaque => JitZipValue::Bits(11 * nth + 3),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Compare by VALUE, never by word: `record_get_string` republishes a fresh
+//RS     /// handle, so two equal strings hold different handles.
+//RS     fn rendered(heap: &jet_rt::JetArena, kind: JitZipValueKind, value: JitZipValue) -> String {
+//RS         match (kind, value) {
+//RS             (JitZipValueKind::String, JitZipValue::Bits(handle)) => heap
+//RS                 .clone_string(handle)
+//RS                 .unwrap_or_else(|| format!("<handle {handle} is not a string>")),
+//RS             (_, JitZipValue::Bits(bits)) => bits.to_string(),
+//RS             (_, JitZipValue::Float(value)) => format!("f{:016x}", value.to_bits()),
+//RS             (_, JitZipValue::Absent) => "<absent>".to_string(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn round_trip(kind: JitZipValueKind, optional: bool, rows: i64) {
+//RS         let mut heap = jet_rt::JetArena::default();
+//RS         let pairs = heap.alloc_empty_list();
+//RS         let left_column = JitZipColumn {
+//RS             input: kind,
+//RS             field: kind,
+//RS             optional,
+//RS         };
+//RS         let right_column = JitZipColumn {
+//RS             input: JitZipValueKind::Int,
+//RS             field: JitZipValueKind::Int,
+//RS             optional: false,
+//RS         };
+//RS         // `LowerCtx::unzip_column_kinds` maps an OPTIONAL field to `Opaque`
+//RS         // because the optional writer stores the packed presence word through
+//RS         // `record_set_int` whatever the payload kind is.
+//RS         let left_read = if optional {
+//RS             JitZipValueKind::Opaque
+//RS         } else {
+//RS             kind
+//RS         };
+//RS         let mut expected_left = Vec::new();
+//RS         let mut expected_right = Vec::new();
+//RS         for nth in 0..rows {
+//RS             let word = sample(&mut heap, kind, nth);
+//RS             let record = heap.alloc_record(2);
+//RS             assert!(
+//RS                 jit_zip_set_value(&mut heap, record, 0, left_column, word).is_some(),
+//RS                 "`{}` column word could not be written at all (optional={optional})",
+//RS                 kind_name(kind)
+//RS             );
+//RS             let right_word = JitZipValue::Bits(1_000 + nth);
+//RS             assert!(
+//RS                 jit_zip_set_value(&mut heap, record, 1, right_column, right_word).is_some(),
+//RS                 "Int companion column word could not be written at all"
+//RS             );
+//RS             let stored = if optional {
+//RS                 JitZipValue::Bits(jit_zip_pack_value(word))
+//RS             } else {
+//RS                 word
+//RS             };
+//RS             expected_left.push(rendered(&heap, left_read, stored));
+//RS             expected_right.push(rendered(&heap, JitZipValueKind::Int, right_word));
+//RS             assert!(heap.list_push_int(pairs, record).is_some());
+//RS         }
+//RS 
+//RS         let out = jit_list_unzip_columns(&mut heap, pairs, left_read, JitZipValueKind::Int);
+//RS         let left_list = heap
+//RS             .record_get_int(out, 0)
+//RS             .expect("unzip published no left column handle");
+//RS         let right_list = heap
+//RS             .record_get_int(out, 1)
+//RS             .expect("unzip published no right column handle");
+//RS         assert_eq!(
+//RS             heap.list_len(left_list),
+//RS             Some(rows),
+//RS             "`{}` left column lost rows (optional={optional}) — the empty-list \
+//RS              answer is exactly the shipped bug",
+//RS             kind_name(kind)
+//RS         );
+//RS         assert_eq!(
+//RS             heap.list_len(right_list),
+//RS             Some(rows),
+//RS             "Int right column lost rows next to a `{}` left column \
+//RS              (optional={optional})",
+//RS             kind_name(kind)
+//RS         );
+//RS         for nth in 0..rows {
+//RS             let index = nth as usize;
+//RS             let left = jit_zip_read_value(&heap, left_list, left_read, index)
+//RS                 .unwrap_or(JitZipValue::Absent);
+//RS             assert_eq!(
+//RS                 rendered(&heap, left_read, left),
+//RS                 expected_left[index],
+//RS                 "`{}` column word {nth} did not survive the row it was written \
+//RS                  into (optional={optional})",
+//RS                 kind_name(kind)
+//RS             );
+//RS             let right = jit_zip_read_value(&heap, right_list, JitZipValueKind::Int, index)
+//RS                 .unwrap_or(JitZipValue::Absent);
+//RS             assert_eq!(
+//RS                 rendered(&heap, JitZipValueKind::Int, right),
+//RS                 expected_right[index],
+//RS                 "Int column word {nth} did not survive next to a `{}` column \
+//RS                  (optional={optional})",
+//RS                 kind_name(kind)
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn every_unzip_column_kind_survives_the_row_it_was_written_into() {
+//RS         for kind in EVERY_KIND {
+//RS             for rows in [0, 1, 3] {
+//RS                 round_trip(kind, false, rows);
+//RS                 round_trip(kind, true, rows);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// The distinct case, which is the whole reason `Opaque` may not assert a
+//RS     /// representation: `unzip_column_kinds` answers for the gate too, so it
+//RS     /// reads the distinct-blind `clif_ty` and calls a `distinct Name = String`
+//RS     /// column `Opaque`, while the row writer stored the cell the AWARE erasure
+//RS     /// chose. Reading that cell must work for every shape the writer can
+//RS     /// produce, or a legal receiver the gate admitted stops on an ICE.
+//RS     #[test]
+//RS     fn an_opaque_column_reads_every_cell_shape_the_writer_can_produce() {
+//RS         for kind in EVERY_KIND {
+//RS             let mut heap = jet_rt::JetArena::default();
+//RS             let pairs = heap.alloc_empty_list();
+//RS             let written = JitZipColumn {
+//RS                 input: kind,
+//RS                 field: kind,
+//RS                 optional: false,
+//RS             };
+//RS             let int_column = JitZipColumn {
+//RS                 input: JitZipValueKind::Int,
+//RS                 field: JitZipValueKind::Int,
+//RS                 optional: false,
+//RS             };
+//RS             let word = sample(&mut heap, kind, 1);
+//RS             let record = heap.alloc_record(2);
+//RS             assert!(jit_zip_set_value(&mut heap, record, 0, written, word).is_some());
+//RS             assert!(
+//RS                 jit_zip_set_value(&mut heap, record, 1, int_column, JitZipValue::Bits(5)).is_some()
+//RS             );
+//RS             assert!(heap.list_push_int(pairs, record).is_some());
+//RS             // The cell keeps its own shape, so compare against the shape the
+//RS             // writer chose, not against `Opaque`.
+//RS             let expected = rendered(&heap, kind, word);
+//RS 
+//RS             let out = jit_list_unzip_columns(
+//RS                 &mut heap,
+//RS                 pairs,
+//RS                 JitZipValueKind::Opaque,
+//RS                 JitZipValueKind::Int,
+//RS             );
+//RS             let left_list = heap
+//RS                 .record_get_int(out, 0)
+//RS                 .expect("unzip published no left column handle");
+//RS             assert_eq!(
+//RS                 heap.list_len(left_list),
+//RS                 Some(1),
+//RS                 "an `Opaque` read of a `{}` cell dropped the row",
+//RS                 kind_name(kind)
+//RS             );
+//RS             let left = jit_zip_read_value(&heap, left_list, kind, 0).unwrap_or(JitZipValue::Absent);
+//RS             assert_eq!(
+//RS                 rendered(&heap, kind, left),
+//RS                 expected,
+//RS                 "an `Opaque` read of a `{}` cell did not republish it in that \
+//RS                  cell's own shape",
+//RS                 kind_name(kind)
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     /// The stem shape: `["a", "bb", "c"].zip([1, 2, 3]).unzip()`. This answered
+//RS     /// two EMPTY lists, and the residency gate was the only thing standing
+//RS     /// between that and a user (#2091).
+//RS     #[test]
+//RS     fn a_string_int_pair_unzips_into_a_string_column_and_an_int_column() {
+//RS         let mut heap = jet_rt::JetArena::default();
+//RS         let pairs = heap.alloc_empty_list();
+//RS         let string_column = JitZipColumn {
+//RS             input: JitZipValueKind::String,
+//RS             field: JitZipValueKind::String,
+//RS             optional: false,
+//RS         };
+//RS         let int_column = JitZipColumn {
+//RS             input: JitZipValueKind::Int,
+//RS             field: JitZipValueKind::Int,
+//RS             optional: false,
+//RS         };
+//RS         for (text, number) in [("a", 1), ("bb", 2), ("c", 3)] {
+//RS             let text = heap.alloc_string(text);
+//RS             let record = heap.alloc_record(2);
+//RS             assert!(jit_zip_set_value(
+//RS                 &mut heap,
+//RS                 record,
+//RS                 0,
+//RS                 string_column,
+//RS                 JitZipValue::Bits(text)
+//RS             )
+//RS             .is_some());
+//RS             assert!(
+//RS                 jit_zip_set_value(&mut heap, record, 1, int_column, JitZipValue::Bits(number))
+//RS                     .is_some()
+//RS             );
+//RS             assert!(heap.list_push_int(pairs, record).is_some());
+//RS         }
+//RS 
+//RS         let out = jit_list_unzip_columns(
+//RS             &mut heap,
+//RS             pairs,
+//RS             JitZipValueKind::String,
+//RS             JitZipValueKind::Int,
+//RS         );
+//RS         let left = heap.record_get_int(out, 0).expect("left column handle");
+//RS         let right = heap.record_get_int(out, 1).expect("right column handle");
+//RS         let strings: Vec<String> = (0..3)
+//RS             .map(|index| {
+//RS                 heap.list_get_string(left, index)
+//RS                     .unwrap_or_else(|| "<lost>".to_string())
+//RS             })
+//RS             .collect();
+//RS         let numbers: Vec<i64> = (0..3)
+//RS             .map(|index| heap.list_get_int(right, index).unwrap_or(-1))
+//RS             .collect();
+//RS         assert_eq!(
+//RS             strings,
+//RS             vec!["a".to_string(), "bb".to_string(), "c".to_string()],
+//RS             "the String column came back wrong — two empty lists is the shape \
+//RS              the `record_get_int` read produced"
+//RS         );
+//RS         assert_eq!(numbers, vec![1, 2, 3], "the Int column came back wrong");
+//RS     }
+//RS 
+//RS     /// An optional column carries the packed presence word, so `none` must
+//RS     /// republish as the zero word and `some` as payload + 1.
+//RS     #[test]
+//RS     fn an_optional_column_republishes_its_packed_presence_word() {
+//RS         let mut heap = jet_rt::JetArena::default();
+//RS         let pairs = heap.alloc_empty_list();
+//RS         let optional_string = JitZipColumn {
+//RS             input: JitZipValueKind::String,
+//RS             field: JitZipValueKind::String,
+//RS             optional: true,
+//RS         };
+//RS         let int_column = JitZipColumn {
+//RS             input: JitZipValueKind::Int,
+//RS             field: JitZipValueKind::Int,
+//RS             optional: false,
+//RS         };
+//RS         let present = heap.alloc_string("here");
+//RS         for word in [JitZipValue::Absent, JitZipValue::Bits(present)] {
+//RS             let record = heap.alloc_record(2);
+//RS             assert!(jit_zip_set_value(&mut heap, record, 0, optional_string, word).is_some());
+//RS             assert!(
+//RS                 jit_zip_set_value(&mut heap, record, 1, int_column, JitZipValue::Bits(9)).is_some()
+//RS             );
+//RS             assert!(heap.list_push_int(pairs, record).is_some());
+//RS         }
+//RS 
+//RS         let out = jit_list_unzip_columns(
+//RS             &mut heap,
+//RS             pairs,
+//RS             JitZipValueKind::Opaque,
+//RS             JitZipValueKind::Int,
+//RS         );
+//RS         let left = heap.record_get_int(out, 0).expect("left column handle");
+//RS         assert_eq!(
+//RS             heap.list_get_int(left, 0),
+//RS             Some(0),
+//RS             "`none` lost its zero presence word, so the column reads as \
+//RS              `some(handle - 1)`"
+//RS         );
+//RS         assert_eq!(
+//RS             heap.list_get_int(left, 1),
+//RS             Some(present.wrapping_add(1)),
+//RS             "a present optional column word lost its +1 packing"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_list_starts_with(list: i64, prefix: i64) -> i8 {
+//RS     collection_semantics::list_starts_with(&clone_list_ints(list), &clone_list_ints(prefix)) as i8
+//RS }
+//RS 
+//RS fn jet_jit_list_ends_with(list: i64, suffix: i64) -> i8 {
+//RS     collection_semantics::list_ends_with(&clone_list_ints(list), &clone_list_ints(suffix)) as i8
+//RS }
+//RS 
+//RS fn jet_jit_iter_repeat(list: i64, n: i64) -> i64 {
+//RS     alloc_from_ints(&collection_semantics::iter_repeat(clone_list_ints(list), n))
+//RS }
+//RS 
+//RS fn jet_jit_iter_cycle(list: i64, n: i64) -> i64 {
+//RS     alloc_from_ints(&collection_semantics::iter_cycle(clone_list_ints(list), n))
+//RS }
+//RS 
+//RS fn jet_jit_iter_drop_last(list: i64, n: i64) -> i64 {
+//RS     alloc_from_ints(&collection_semantics::iter_drop_last(
+//RS         clone_list_ints(list),
+//RS         n,
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_iter_shuffle(list: i64) -> i64 {
+//RS     alloc_from_ints(&collection_semantics::iter_shuffle(clone_list_ints(list)))
+//RS }
+//RS 
+//RS fn jet_jit_iter_is_sorted(list: i64) -> i8 {
+//RS     collection_semantics::iter_is_sorted(clone_list_ints(list)) as i8
+//RS }
+//RS fn jet_jit_iter_is_sorted_by(list: i64, callback: i64) -> i8 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let sorted = collection_semantics::iter_is_sorted_by_i64(clone_list_ints(list), |value| {
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         let key = invoke_closure_i64(slot, *value);
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         key
+//RS     });
+//RS     if closure_trapped() {
+//RS         return 0;
+//RS     }
+//RS     sorted as i8
+//RS }
+//RS fn jet_jit_iter_dedup_by(list: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let values = collection_semantics::iter_dedup_by_i64(clone_list_ints(list), move |value| {
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         let key = invoke_closure_i64(slot, *value);
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         key
+//RS     });
+//RS     if closure_trapped() {
+//RS         return 0;
+//RS     }
+//RS     alloc_from_ints(&values)
+//RS }
+//RS fn jet_jit_iter_chunk_while(list: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let chunks =
+//RS         collection_semantics::iter_chunk_while_i64(clone_list_ints(list), move |left, right| {
+//RS             if closure_trapped() {
+//RS                 return false;
+//RS             }
+//RS             let keep = invoke_closure_i64_pair(slot, *left, *right);
+//RS             if closure_trapped() {
+//RS                 return false;
+//RS             }
+//RS             keep != 0
+//RS         });
+//RS     if closure_trapped() {
+//RS         return 0;
+//RS     }
+//RS     alloc_nested_from_ints(&chunks)
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS fn jet_jit_iter_last_index_of(list: i64, needle: i64) -> i64 {
+//RS     let value = collection_semantics::iter_last_index_of(clone_list_ints(list), needle).ok();
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+//RS }
+//RS 
+//RS /// Exact Int law: the resident heap sums spilled and inline words exactly,
+//RS /// then the shared Prelude divides the Float of that sum by the count.
+//RS fn jet_jit_iter_average_int(list: i64) -> f64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let values = clone_list_ints_with_runtime(rt, list);
+//RS         let count = values.len();
+//RS         let sum = values
+//RS             .into_iter()
+//RS             .fold(rt.heap.int_from_i64(0), |acc, value| rt.heap.int_add(acc, value));
+//RS         collection_semantics::average_of_sum(rt.heap.int_to_f64(sum), count)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_iter_average_float(list: i64) -> f64 {
+//RS     collection_semantics::iter_average_float(clone_list_floats(list))
+//RS }
+//RS 
+//RS fn jet_jit_iter_compare(list: i64, other: i64) -> i64 {
+//RS     collection_semantics::iter_compare(clone_list_ints(list), clone_list_ints(other))
+//RS }
+//RS 
+//RS fn jet_jit_iter_split(list: i64, n: i64) -> i64 {
+//RS     let (left, right) = collection_semantics::iter_split_i64(clone_list_ints(list), n);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let pair = rt.heap.alloc_record(2);
+//RS         let left = {
+//RS             let handle = rt.heap.alloc_empty_list();
+//RS             for value in left {
+//RS                 let _ = rt.heap.list_push_int(handle, value);
+//RS             }
+//RS             handle
+//RS         };
+//RS         let right = {
+//RS             let handle = rt.heap.alloc_empty_list();
+//RS             for value in right {
+//RS                 let _ = rt.heap.list_push_int(handle, value);
+//RS             }
+//RS             handle
+//RS         };
+//RS         let _ = rt.heap.record_set_int(pair, 0, left);
+//RS         let _ = rt.heap.record_set_int(pair, 1, right);
+//RS         pair
+//RS     })
+//RS }
+//RS fn jet_jit_iter_split_at(list: i64, n: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let (left, right) = collection_semantics::iter_split_i64(clone_list_ints(list), n);
+//RS     let (left, right) = Concurrency::with_runtime_mut(|rt| {
+//RS         let left_handle = rt.heap.alloc_empty_list();
+//RS         for value in left {
+//RS             let _ = rt.heap.list_push_int(left_handle, value);
+//RS         }
+//RS         let right_handle = rt.heap.alloc_empty_list();
+//RS         for value in right {
+//RS             let _ = rt.heap.list_push_int(right_handle, value);
+//RS         }
+//RS         (left_handle, right_handle)
+//RS     });
+//RS     let result = invoke_closure_i64_pair(slot, left, right);
+//RS     if closure_trapped() {
+//RS         return 0;
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_list_equal(left: i64, right: i64) -> i8 {
+//RS     collection_semantics::list_equal(&clone_list_ints(left), &clone_list_ints(right)) as i8
+//RS }
+//RS 
+//RS fn jet_jit_list_binary_search(list: i64, needle: i64) -> i64 {
+//RS     let value = collection_semantics::list_binary_search(&clone_list_ints(list), &needle).ok();
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+//RS }
+//RS 
+//RS fn jet_jit_list_union(left: i64, right: i64) -> i64 {
+//RS     alloc_from_ints(&collection_semantics::list_union(
+//RS         &clone_list_ints(left),
+//RS         &clone_list_ints(right),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_list_intersection(left: i64, right: i64) -> i64 {
+//RS     alloc_from_ints(&collection_semantics::list_intersection(
+//RS         &clone_list_ints(left),
+//RS         &clone_list_ints(right),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_list_difference(left: i64, right: i64) -> i64 {
+//RS     alloc_from_ints(&collection_semantics::list_difference(
+//RS         &clone_list_ints(left),
+//RS         &clone_list_ints(right),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_list_random(list: i64) -> i64 {
+//RS     let value = collection_semantics::list_random(&clone_list_ints(list)).ok();
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+//RS }
+//RS 
+//RS fn jet_jit_list_min_max(list: i64) -> i64 {
+//RS     let values = clone_list_ints(list);
+//RS     let Some((min, max)) = collection_semantics::list_min_max_int(&values).ok() else {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             crate::runtime_host::alloc_jit_result(rt, false, 0)
+//RS         });
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let pair = rt.heap.alloc_record(2);
+//RS         let _ = rt.heap.record_set_int(pair, 0, min);
+//RS         let _ = rt.heap.record_set_int(pair, 1, max);
+//RS         crate::runtime_host::alloc_jit_result(rt, true, pair as u64)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_list_min_max_f64(list: i64) -> i64 {
+//RS     let values = clone_list_floats(list);
+//RS     let Some((min, max)) = collection_semantics::list_min_max_float(&values).ok() else {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             crate::runtime_host::alloc_jit_result(rt, false, 0)
+//RS         });
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let pair = rt.heap.alloc_record(2);
+//RS         let _ = rt.heap.record_set_float(pair, 0, min);
+//RS         let _ = rt.heap.record_set_float(pair, 1, max);
+//RS         crate::runtime_host::alloc_jit_result(rt, true, pair as u64)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_list_min_max_str(list: i64) -> i64 {
+//RS     let values = clone_list_strings(list);
+//RS     let Some((min, max)) = collection_semantics::list_min_max_string(&values).ok() else {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             crate::runtime_host::alloc_jit_result(rt, false, 0)
+//RS         });
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let pair = rt.heap.alloc_record(2);
+//RS         let min = rt.heap.alloc_string(min);
+//RS         let max = rt.heap.alloc_string(max);
+//RS         let _ = rt.heap.record_set_string(pair, 0, min);
+//RS         let _ = rt.heap.record_set_string(pair, 1, max);
+//RS         crate::runtime_host::alloc_jit_result(rt, true, pair as u64)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_list_replace(list: i64, index: i64, new: i64) -> i64 {
+//RS     alloc_from_ints(&collection_semantics::list_replace(
+//RS         &clone_list_ints(list),
+//RS         index,
+//RS         new,
+//RS     ))
+//RS }
+//RS 
+//RS /// Stable sort `list` in place by parallel i64 `keys` (same length).
+//RS fn jet_jit_list_sort_by_i64_keys(list: i64, keys: i64) {
+//RS     jet_jit_list_sort_by_i64_keys_impl(list, keys, false);
+//RS }
+//RS 
+//RS fn jet_jit_list_sort_by_i64_keys_desc(list: i64, keys: i64) {
+//RS     jet_jit_list_sort_by_i64_keys_impl(list, keys, true);
+//RS }
+//RS 
+//RS fn jet_jit_list_sort_by_i64_keys_impl(list: i64, keys: i64, descending: bool) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let xs = clone_list_ints_with_runtime(rt, list);
+//RS         let keys = rt
+//RS             .heap
+//RS             .clone_int_list(keys)
+//RS             .expect("jit sort_by: bad keys handle");
+//RS         debug_assert_eq!(xs.len(), keys.len());
+//RS         let mut pairs: Vec<(i64, i64)> = keys.into_iter().zip(xs).collect();
+//RS         if descending {
+//RS             collection_semantics::list_sort_by_desc(&mut pairs, |pair| pair.0);
+//RS         } else {
+//RS             collection_semantics::list_sort_by(&mut pairs, |pair| pair.0);
+//RS         }
+//RS         for (dst, (_, value)) in pairs.into_iter().enumerate() {
+//RS             crate::runtime_host::sequence_set_int(rt, list, dst, value)
+//RS                 .expect("jit sort_by: set");
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS /// Stable sort `list` by parallel string-handle keys (Jet `String` heap ids).
+//RS fn jet_jit_list_sort_by_str_keys(list: i64, keys: i64) {
+//RS     jet_jit_list_sort_by_str_keys_impl(list, keys, false);
+//RS }
+//RS 
+//RS fn jet_jit_list_sort_by_str_keys_desc(list: i64, keys: i64) {
+//RS     jet_jit_list_sort_by_str_keys_impl(list, keys, true);
+//RS }
+//RS 
+//RS fn jet_jit_list_sort_by_str_keys_impl(list: i64, keys: i64, descending: bool) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let xs = clone_list_ints_with_runtime(rt, list);
+//RS         let key_ids = rt
+//RS             .heap
+//RS             .clone_int_list(keys)
+//RS             .expect("jit sort_by_str: bad keys handle");
+//RS         debug_assert_eq!(xs.len(), key_ids.len());
+//RS         let key_strs: Vec<String> = key_ids
+//RS             .iter()
+//RS             .map(|id| rt.heap.clone_string(*id).unwrap_or_default())
+//RS             .collect();
+//RS         let mut pairs: Vec<(String, i64)> = key_strs.into_iter().zip(xs).collect();
+//RS         if descending {
+//RS             collection_semantics::list_sort_by_desc(&mut pairs, |pair| pair.0.clone());
+//RS         } else {
+//RS             collection_semantics::list_sort_by(&mut pairs, |pair| pair.0.clone());
+//RS         }
+//RS         for (dst, (_, value)) in pairs.into_iter().enumerate() {
+//RS             crate::runtime_host::sequence_set_int(rt, list, dst, value)
+//RS                 .expect("jit sort_by_str: set");
+//RS         }
+//RS     });
+//RS }
+//RS /// Stable sort `list` by parallel DateTime handles.
+//RS fn jet_jit_list_sort_by_datetime_keys(list: i64, keys: i64) {
+//RS     jet_jit_list_sort_by_datetime_keys_impl(list, keys, false);
+//RS }
+//RS 
+//RS fn jet_jit_list_sort_by_datetime_keys_desc(list: i64, keys: i64) {
+//RS     jet_jit_list_sort_by_datetime_keys_impl(list, keys, true);
+//RS }
+//RS 
+//RS fn jet_jit_list_sort_by_datetime_keys_impl(list: i64, keys: i64, descending: bool) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let values = clone_list_ints_with_runtime(rt, list);
+//RS         let key_ids = clone_list_ints_with_runtime(rt, keys);
+//RS         debug_assert_eq!(values.len(), key_ids.len());
+//RS         let Some(mut pairs) = key_ids
+//RS             .into_iter()
+//RS             .zip(values)
+//RS             .map(|(key, value)| {
+//RS                 let index = usize::try_from(key.checked_sub(1)?).ok()?;
+//RS                 let key = match rt.time_values.get(index)?.as_ref()? {
+//RS                     crate::Time::TimeValue::DateTime(key) => key.clone(),
+//RS                     _ => return None,
+//RS                 };
+//RS                 Some((key, value))
+//RS             })
+//RS             .collect::<Option<Vec<_>>>()
+//RS         else {
+//RS             return;
+//RS         };
+//RS         if descending {
+//RS             collection_semantics::list_sort_by_desc(&mut pairs, |pair| pair.0.clone());
+//RS         } else {
+//RS             collection_semantics::list_sort_by(&mut pairs, |pair| pair.0.clone());
+//RS         }
+//RS         for (index, (_, value)) in pairs.into_iter().enumerate() {
+//RS             crate::runtime_host::sequence_set_int(rt, list, index, value)
+//RS                 .expect("jit sort_by_datetime: set");
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS /// Stable sort `list` by parallel Date handles.
+//RS fn jet_jit_list_sort_by_date_keys(list: i64, keys: i64) {
+//RS     jet_jit_list_sort_by_date_keys_impl(list, keys, false);
+//RS }
+//RS 
+//RS fn jet_jit_list_sort_by_date_keys_desc(list: i64, keys: i64) {
+//RS     jet_jit_list_sort_by_date_keys_impl(list, keys, true);
+//RS }
+//RS 
+//RS fn jet_jit_list_sort_by_date_keys_impl(list: i64, keys: i64, descending: bool) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let values = clone_list_ints_with_runtime(rt, list);
+//RS         let key_ids = clone_list_ints_with_runtime(rt, keys);
+//RS         debug_assert_eq!(values.len(), key_ids.len());
+//RS         let Some(mut pairs) = key_ids
+//RS             .into_iter()
+//RS             .zip(values)
+//RS             .map(|(key, value)| {
+//RS                 let index = usize::try_from(key.checked_sub(1)?).ok()?;
+//RS                 let key = match rt.time_values.get(index)?.as_ref()? {
+//RS                     crate::Time::TimeValue::Date(key) => key.clone(),
+//RS                     _ => return None,
+//RS                 };
+//RS                 Some((key, value))
+//RS             })
+//RS             .collect::<Option<Vec<_>>>()
+//RS         else {
+//RS             return;
+//RS         };
+//RS         if descending {
+//RS             collection_semantics::list_sort_by_desc(&mut pairs, |pair| pair.0.clone());
+//RS         } else {
+//RS             collection_semantics::list_sort_by(&mut pairs, |pair| pair.0.clone());
+//RS         }
+//RS         for (index, (_, value)) in pairs.into_iter().enumerate() {
+//RS             crate::runtime_host::sequence_set_int(rt, list, index, value)
+//RS                 .expect("jit sort_by_date: set");
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS 
+//RS fn list_i64_value(rt: &crate::JitRuntime, value: i64) -> i64 {
+//RS     rt.heap.int_to_i64(value).unwrap_or(value)
+//RS }
+//RS 
+//RS fn list_u64_value(rt: &crate::JitRuntime, value: i64) -> u64 {
+//RS     rt.heap
+//RS         .int_to_i128(value)
+//RS         .map(|value| value as u64)
+//RS         .unwrap_or(value as u64)
+//RS }
+//RS 
+//RS fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64, debug: bool) -> String {
+//RS     if kind >= 16 {
+//RS         let child_kind = kind - 16;
+//RS         let children = rt.heap.clone_int_list(list).unwrap_or_default();
+//RS         let rendered = children
+//RS             .into_iter()
+//RS             .map(|child| list_text(rt, child, child_kind, debug))
+//RS             .collect::<Vec<_>>();
+//RS         return format!("[{}]", rendered.join(", "));
+//RS     }
+//RS 
+//RS     match kind {
+//RS         1 => {
+//RS             let values = rt
+//RS                 .heap
+//RS                 .clone_int_list(list)
+//RS                 .unwrap_or_default()
+//RS                 .into_iter()
+//RS                 .map(|id| rt.heap.clone_string(id).unwrap_or_default())
+//RS                 .collect::<Vec<_>>();
+//RS             if debug {
+//RS                 collection_semantics::debug_string_list(values)
+//RS             } else {
+//RS                 collection_semantics::display_string_list(values)
+//RS             }
+//RS         }
+//RS         2 => {
+//RS             let values = rt.heap.clone_int_list(list).unwrap_or_default();
+//RS             if debug {
+//RS                 collection_semantics::debug_exact_int_list(values)
+//RS             } else {
+//RS                 collection_semantics::display_exact_int_list(values)
+//RS             }
+//RS         }
+//RS         3 => {
+//RS             let values = rt
+//RS                 .heap
+//RS                 .clone_int_list(list)
+//RS                 .unwrap_or_default()
+//RS                 .into_iter()
+//RS                 .map(|value| list_u64_value(rt, value))
+//RS                 .collect::<Vec<_>>();
+//RS             if debug {
+//RS                 collection_semantics::debug_u64_list(values)
+//RS             } else {
+//RS                 collection_semantics::display_u64_list(values)
+//RS             }
+//RS         }
+//RS         4 => {
+//RS             let len = rt.heap.list_len(list).unwrap_or(0);
+//RS             let values = (0..len)
+//RS                 .map(|index| rt.heap.list_get_float(list, index).unwrap_or(0.0))
+//RS                 .collect::<Vec<_>>();
+//RS             if debug {
+//RS                 collection_semantics::debug_f64_list(values)
+//RS             } else {
+//RS                 collection_semantics::display_f64_list(values)
+//RS             }
+//RS         }
+//RS         7 => {
+//RS             let len = rt.heap.list_len(list).unwrap_or(0);
+//RS             let values = (0..len)
+//RS                 .map(|index| rt.heap.list_get_float(list, index).unwrap_or(0.0) as f32)
+//RS                 .collect::<Vec<_>>();
+//RS             if debug {
+//RS                 collection_semantics::debug_f32_list(values)
+//RS             } else {
+//RS                 collection_semantics::display_f32_list(values)
+//RS             }
+//RS         }
+//RS         5 => {
+//RS             let values = rt
+//RS                 .heap
+//RS                 .clone_int_list(list)
+//RS                 .unwrap_or_default()
+//RS                 .into_iter()
+//RS                 .map(|value| value != 0)
+//RS                 .collect::<Vec<_>>();
+//RS             if debug {
+//RS                 collection_semantics::debug_bool_list(values)
+//RS             } else {
+//RS                 collection_semantics::display_bool_list(values)
+//RS             }
+//RS         }
+//RS         6 => {
+//RS             let values = rt
+//RS                 .heap
+//RS                 .clone_int_list(list)
+//RS                 .unwrap_or_default()
+//RS                 .into_iter()
+//RS                 .map(|value| char::from_u32(value as u32).unwrap_or('?'))
+//RS                 .collect::<Vec<_>>();
+//RS             if debug {
+//RS                 collection_semantics::debug_char_list(values)
+//RS             } else {
+//RS                 collection_semantics::display_char_list(values)
+//RS             }
+//RS         }
+//RS         8 => {
+//RS             let values = rt
+//RS                 .heap
+//RS                 .clone_int_list(list)
+//RS                 .unwrap_or_default()
+//RS                 .into_iter()
+//RS                 .map(|value| list_i64_value(rt, value) as i8)
+//RS                 .collect::<Vec<_>>();
+//RS             if debug {
+//RS                 collection_semantics::debug_i8_list(values)
+//RS             } else {
+//RS                 collection_semantics::display_i8_list(values)
+//RS             }
+//RS         }
+//RS         9 => {
+//RS             let values = rt
+//RS                 .heap
+//RS                 .clone_int_list(list)
+//RS                 .unwrap_or_default()
+//RS                 .into_iter()
+//RS                 .map(|value| list_i64_value(rt, value) as i16)
+//RS                 .collect::<Vec<_>>();
+//RS             if debug {
+//RS                 collection_semantics::debug_i16_list(values)
+//RS             } else {
+//RS                 collection_semantics::display_i16_list(values)
+//RS             }
+//RS         }
+//RS         10 => {
+//RS             let values = rt
+//RS                 .heap
+//RS                 .clone_int_list(list)
+//RS                 .unwrap_or_default()
+//RS                 .into_iter()
+//RS                 .map(|value| list_i64_value(rt, value) as i32)
+//RS                 .collect::<Vec<_>>();
+//RS             if debug {
+//RS                 collection_semantics::debug_i32_list(values)
+//RS             } else {
+//RS                 collection_semantics::display_i32_list(values)
+//RS             }
+//RS         }
+//RS         11 => {
+//RS             let values = rt
+//RS                 .heap
+//RS                 .clone_int_list(list)
+//RS                 .unwrap_or_default()
+//RS                 .into_iter()
+//RS                 .map(|value| list_i64_value(rt, value))
+//RS                 .collect::<Vec<_>>();
+//RS             if debug {
+//RS                 collection_semantics::debug_native_i64_list(values)
+//RS             } else {
+//RS                 collection_semantics::display_native_i64_list(values)
+//RS             }
+//RS         }
+//RS         12 => {
+//RS             let values = rt
+//RS                 .heap
+//RS                 .clone_int_list(list)
+//RS                 .unwrap_or_default()
+//RS                 .into_iter()
+//RS                 .map(|value| list_u64_value(rt, value) as u8)
+//RS                 .collect::<Vec<_>>();
+//RS             if debug {
+//RS                 collection_semantics::debug_u8_list(values)
+//RS             } else {
+//RS                 collection_semantics::display_u8_list(values)
+//RS             }
+//RS         }
+//RS         13 => {
+//RS             let values = rt
+//RS                 .heap
+//RS                 .clone_int_list(list)
+//RS                 .unwrap_or_default()
+//RS                 .into_iter()
+//RS                 .map(|value| list_u64_value(rt, value) as u16)
+//RS                 .collect::<Vec<_>>();
+//RS             if debug {
+//RS                 collection_semantics::debug_u16_list(values)
+//RS             } else {
+//RS                 collection_semantics::display_u16_list(values)
+//RS             }
+//RS         }
+//RS         14 => {
+//RS             let values = rt
+//RS                 .heap
+//RS                 .clone_int_list(list)
+//RS                 .unwrap_or_default()
+//RS                 .into_iter()
+//RS                 .map(|value| list_u64_value(rt, value) as u32)
+//RS                 .collect::<Vec<_>>();
+//RS             if debug {
+//RS                 collection_semantics::debug_u32_list(values)
+//RS             } else {
+//RS                 collection_semantics::display_u32_list(values)
+//RS             }
+//RS         }
+//RS         15 => {
+//RS             let values = rt
+//RS                 .heap
+//RS                 .clone_int_list(list)
+//RS                 .unwrap_or_default()
+//RS                 .into_iter()
+//RS                 .map(|id| {
+//RS                     let index = id.saturating_sub(1) as usize;
+//RS                     rt.fraction_values
+//RS                         .get(index)
+//RS                         .and_then(|slot| slot.as_ref())
+//RS                         .map(|value| value.to_string_rep())
+//RS                         .unwrap_or_else(|| "0/1".to_string())
+//RS                 })
+//RS                 .collect::<Vec<_>>();
+//RS             if debug {
+//RS                 collection_semantics::debug_string_list(values)
+//RS             } else {
+//RS                 collection_semantics::display_string_list(values)
+//RS             }
+//RS         }
+//RS         _ => {
+//RS             let values = rt.heap.clone_int_list(list).unwrap_or_default();
+//RS             if debug {
+//RS                 collection_semantics::debug_i64_list(values)
+//RS             } else {
+//RS                 collection_semantics::display_i64_list(values)
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn list_debug_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
+//RS     list_text(rt, list, kind, true)
+//RS }
+//RS 
+//RS fn list_display_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
+//RS     list_text(rt, list, kind, false)
+//RS }
+//RS 
+//RS /// Jet Debug list text as a string handle for structural-value marshalling.
+//RS fn jet_jit_list_debug(list: i64, kind: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let text = list_debug_text(rt, list, kind);
+//RS         rt.heap.alloc_string(text)
+//RS     })
+//RS }
+//RS 
+//RS /// Jet Display list text as a string handle for interpolation.
+//RS fn jet_jit_list_display(list: i64, kind: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let text = list_display_text(rt, list, kind);
+//RS         rt.heap.alloc_string(text)
+//RS     })
+//RS }
+//RS 
+//RS /// String Debug text as a handle for structural-value marshalling.
+//RS fn jet_jit_string_debug(value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let text = rt.heap.clone_string(value).unwrap_or_default();
+//RS         rt.heap
+//RS             .alloc_string(collection_semantics::debug_string(text))
+//RS     })
+//RS }
+//RS 
+//RS /// Marshal a resident scalar into the shared Prelude Debug implementation.
+//RS /// `kind`: 0 = Int, 1 = Float, 2 = Bool, 3 = Char, 4 = F32. Floats arrive as bits.
+//RS fn jet_jit_scalar_debug(value: i64, kind: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let text = match kind {
+//RS             0 => collection_semantics::debug_i64(value),
+//RS             1 => collection_semantics::debug_f64(f64::from_bits(value as u64)),
+//RS             2 => collection_semantics::debug_bool(value != 0),
+//RS             3 => collection_semantics::debug_char(char::from_u32(value as u32).unwrap_or('?')),
+//RS             4 => collection_semantics::debug_f32(f32::from_bits(value as u32)),
+//RS             _ => String::new(),
+//RS         };
+//RS         rt.heap.alloc_string(text)
+//RS     })
+//RS }
+//RS 
+//RS /// Append a map after the JIT has marshalled rendered key/value handles.
+//RS fn jet_jit_str_push_debug_map(buf_id: i64, entries_id: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(entries) = rt.heap.clone_int_list(entries_id) else {
+//RS             return;
+//RS         };
+//RS         if entries.len() % 2 != 0 {
+//RS             return;
+//RS         }
+//RS         let mut marshalled = Vec::with_capacity(entries.len() / 2);
+//RS         for pair in entries.chunks_exact(2) {
+//RS             let Some(key) = rt.heap.clone_string(pair[0]) else {
+//RS                 return;
+//RS             };
+//RS             let Some(value) = rt.heap.clone_string(pair[1]) else {
+//RS                 return;
+//RS             };
+//RS             marshalled.push((key, value));
+//RS         }
+//RS         let text = jet_foundation::StructuralDebug::jet_debug_map(marshalled);
+//RS         if let Some(buf) = rt.heap.get_string_mut(buf_id) {
+//RS             buf.push_str(&text);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS /// Append `T?` Debug text through the shared StructuralDebug formatter.
+//RS fn jet_jit_str_push_debug_optional(buf_id: i64, payload_id: i64, present: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let payload = (present != 0).then(|| rt.heap.clone_string(payload_id).unwrap_or_default());
+//RS         let text = jet_foundation::StructuralDebug::jet_debug_optional(payload);
+//RS         if let Some(buf) = rt.heap.get_string_mut(buf_id) {
+//RS             buf.push_str(&text);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS /// Append a record after the JIT has marshalled rendered values and metadata.
+//RS fn jet_jit_str_push_debug_record(buf_id: i64, type_name_id: i64, fields_id: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(type_name) = rt.heap.clone_string(type_name_id) else {
+//RS             return;
+//RS         };
+//RS         let fields = rt.heap.clone_int_list(fields_id).unwrap_or_default();
+//RS         if fields.len() % 4 != 0 {
+//RS             return;
+//RS         }
+//RS         let mut marshalled = Vec::with_capacity(fields.len() / 4);
+//RS         for field in fields.chunks_exact(4) {
+//RS             let Some(name) = rt.heap.clone_string(field[0]) else {
+//RS                 return;
+//RS             };
+//RS             let Some(value) = rt.heap.clone_string(field[1]) else {
+//RS                 return;
+//RS             };
+//RS             if field[2] < 0 {
+//RS                 return;
+//RS             }
+//RS             marshalled.push(jet_foundation::StructuralDebug::JetDebugField {
+//RS                 name,
+//RS                 value,
+//RS                 storage_index: field[2] as usize,
+//RS                 redacted: field[3] != 0,
+//RS             });
+//RS         }
+//RS         let text = jet_foundation::StructuralDebug::jet_debug_record_fields(&type_name, marshalled);
+//RS         if let Some(buf) = rt.heap.get_string_mut(buf_id) {
+//RS             buf.push_str(&text);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS /// Append a positional variant through the shared StructuralDebug formatter.
+//RS fn jet_jit_str_push_debug_variant(buf_id: i64, variant_id: i64, payload_id: i64, has_payload: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(variant) = rt.heap.clone_string(variant_id) else {
+//RS             return;
+//RS         };
+//RS         let payload =
+//RS             (has_payload != 0).then(|| rt.heap.clone_string(payload_id).unwrap_or_default());
+//RS         let text = jet_foundation::StructuralDebug::jet_debug_variant(&variant, payload);
+//RS         if let Some(buf) = rt.heap.get_string_mut(buf_id) {
+//RS             buf.push_str(&text);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS /// `list.pop()` — Option ABI: `0` = None, `value + 1` = Some (i64/handle elems).
+//RS fn jet_jit_list_pop(list: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(xs) = rt.heap.list_values_mut(list) else {
+//RS             jet_foundation::ice!(None, "jit list pop: bad handle");
+//RS         };
+//RS         match collection_semantics::list_pop(xs) {
+//RS             Some(jet_rt::JetVal::Int(v)) => v.wrapping_add(1),
+//RS             Some(jet_rt::JetVal::Float(v)) => (v.to_bits() as i64).wrapping_add(1),
+//RS             Some(_) | None => 0,
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS /// `&it.next()` (D-ITER-RESUME1=A): pull one item from the same JIT `Iter`
+//RS /// handle, lazy or list-backed, so the handle keeps the exact remainder.
+//RS /// Option ABI matches `list.pop()`: `0` = None, `value + 1` = Some.
+//RS fn jet_jit_iter_next(iter: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if crate::runtime_host::lazy_iter_index(rt, iter).is_some() {
+//RS             return crate::runtime_host::lazy_iter_next(rt, iter)
+//RS                 .map_or(0, |value| value.wrapping_add(1));
+//RS         }
+//RS         let Some(xs) = rt.heap.list_values_mut(iter) else {
+//RS             jet_foundation::ice!(None, "jit iter next: bad handle");
+//RS         };
+//RS         if xs.is_empty() {
+//RS             return 0;
+//RS         }
+//RS         match xs.remove(0) {
+//RS             jet_rt::JetVal::Int(v) => v.wrapping_add(1),
+//RS             jet_rt::JetVal::Float(v) => (v.to_bits() as i64).wrapping_add(1),
+//RS             _ => 0,
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS /// `list.insert(i, v)` — shared Prelude bounds semantics, with the JIT only
+//RS /// marshalling the list handle and runtime-stop boundary.
+//RS fn jet_jit_list_insert(list: i64, idx: i64, v: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(xs) = rt.heap.list_values_mut(list) else {
+//RS             jet_foundation::ice!(None, "jit list insert: bad handle");
+//RS         };
+//RS         match collection_semantics::list_insert(xs, idx, jet_rt::JetVal::Int(v)) {
+//RS             Ok(()) => {}
+//RS             Err(error) => {
+//RS                 let message = error.message();
+//RS                 rt.set_runtime_stop(error.code(), 0, &message);
+//RS             }
+//RS         }
+//RS     });
+//RS }
+//RS fn jet_jit_list_insert_f64(list: i64, idx: i64, value: f64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(values) = rt.heap.list_values_mut(list) else {
+//RS             jet_foundation::ice!(None, "jit float list insert: bad handle");
+//RS         };
+//RS         if let Err(error) =
+//RS             collection_semantics::list_insert(values, idx, jet_rt::JetVal::Float(value))
+//RS         {
+//RS             let message = error.message();
+//RS             rt.set_runtime_stop(error.code(), 0, &message);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS /// `list.remove(i, RemoveBy.Slot)` — shared Prelude bounds semantics, with the
+//RS /// JIT only marshalling the list handle and runtime-stop boundary.
+//RS fn jet_jit_list_remove_slot(list: i64, idx: i64, line: u32) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(xs) = rt.heap.list_values_mut(list) else {
+//RS             jet_foundation::ice!(None, "jit list remove slot: bad handle");
+//RS         };
+//RS         match collection_semantics::list_remove_slot(xs, idx) {
+//RS             Ok(jet_rt::JetVal::Int(removed)) => option_packed(Some(removed)),
+//RS             Ok(_) => 0,
+//RS             Err(message) => {
+//RS                 rt.set_runtime_stop("E3010", line, &message);
+//RS                 0
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn set_handle(rt: &mut crate::JitRuntime, set: HashSet<i64>, string_kind: bool) -> i64 {
+//RS     rt.sets.push(set);
+//RS     rt.set_string_kinds.push(string_kind);
+//RS     rt.sets.len() as i64
+//RS }
+//RS 
+//RS fn sorted_set_handle(rt: &mut crate::JitRuntime, set: BTreeSet<i64>, string_kind: bool) -> i64 {
+//RS     rt.sorted_sets.push(set);
+//RS     rt.sorted_set_string_kinds.push(string_kind);
+//RS     rt.sorted_sets.len() as i64
+//RS }
+//RS 
+//RS fn set_is_string(rt: &crate::JitRuntime, handle: i64) -> bool {
+//RS     rt.set_string_kinds
+//RS         .get((handle as usize).wrapping_sub(1))
+//RS         .copied()
+//RS         .unwrap_or(false)
+//RS }
+//RS 
+//RS fn sorted_set_is_string(rt: &crate::JitRuntime, handle: i64) -> bool {
+//RS     rt.sorted_set_string_kinds
+//RS         .get((handle as usize).wrapping_sub(1))
+//RS         .copied()
+//RS         .unwrap_or(false)
+//RS }
+//RS 
+//RS fn string_ids(rt: &crate::JitRuntime, values: &HashSet<i64>) -> HashMap<String, i64> {
+//RS     values
+//RS         .iter()
+//RS         .filter_map(|id| rt.heap.clone_string(*id).map(|value| (value, *id)))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn sorted_string_ids(rt: &crate::JitRuntime, values: &BTreeSet<i64>) -> HashMap<String, i64> {
+//RS     values
+//RS         .iter()
+//RS         .filter_map(|id| rt.heap.clone_string(*id).map(|value| (value, *id)))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn set_string_values(rt: &crate::JitRuntime, values: &HashSet<i64>) -> HashSet<String> {
+//RS     string_ids(rt, values).into_keys().collect()
+//RS }
+//RS 
+//RS fn sorted_string_values(rt: &crate::JitRuntime, values: &BTreeSet<i64>) -> BTreeSet<String> {
+//RS     sorted_string_ids(rt, values).into_keys().collect()
+//RS }
+//RS 
+//RS fn authority_rights(rt: &crate::JitRuntime, authority: i64) -> BTreeSet<String> {
+//RS     let rights_handle = rt.heap.record_get_int(authority, 0).unwrap_or(0);
+//RS     rt.sorted_sets
+//RS         .get((rights_handle as usize).wrapping_sub(1))
+//RS         .map(|rights| sorted_string_values(rt, rights))
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS /// D-AGENT-EXEC1: marshal the one authority carrier into the shared process
+//RS /// Prelude. The process host never interprets rights or creates a second
+//RS /// policy; it only serializes the existing record.
+//RS pub(crate) fn authority_wire(rt: &crate::JitRuntime, authority: i64) -> String {
+//RS     authority_rights(rt, authority)
+//RS         .into_iter()
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n")
+//RS }
+//RS 
+//RS fn authority_record(rt: &mut crate::JitRuntime, rights: BTreeSet<String>) -> i64 {
+//RS     let ids = rights
+//RS         .iter()
+//RS         .map(|right| rt.heap.alloc_string(right.clone()))
+//RS         .collect::<BTreeSet<_>>();
+//RS     let rights_handle = sorted_set_handle(rt, ids, true);
+//RS     let authority = rt.heap.alloc_record(1);
+//RS     let _ = rt.heap.record_set_int(authority, 0, rights_handle);
+//RS     authority
+//RS }
+//RS 
+//RS pub(crate) fn authority_file_scope(
+//RS     rt: &crate::JitRuntime,
+//RS     authority: i64,
+//RS ) -> authority_semantics::JetFileScope {
+//RS     let rights = authority_rights(rt, authority);
+//RS     let authority = authority_semantics::JetAuthority::from_rights(rights.into_iter().collect());
+//RS     authority_semantics::JetFileScope::from_authority(&authority)
+//RS }
+//RS 
+//RS /// D-AUTHORITY-NAME1=A: the JIT host is only a handle
+//RS /// adapter. The rights policy comes from the shared Prelude source above.
+//RS fn jet_jit_authority_workspace() -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         authority_record(rt, authority_semantics::jet_authority_workspace_rights())
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_authority_from_rights(rights: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(rights).unwrap_or(0);
+//RS         let values = (0..len)
+//RS             .map(|index| {
+//RS                 rt.heap
+//RS                     .list_get_int(rights, index)
+//RS                     .and_then(|value| rt.heap.clone_string(value))
+//RS                     .unwrap_or_default()
+//RS             })
+//RS             .collect();
+//RS         authority_record(
+//RS             rt,
+//RS             authority_semantics::jet_authority_rights_from_strings(values),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_authority_with(authority: i64, requested: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let held = authority_rights(rt, authority);
+//RS         let requested = rt.heap.clone_string(requested).unwrap_or_default();
+//RS         match authority_semantics::jet_authority_with_right(&held, &requested) {
+//RS             Ok(rights) => authority_record(rt, rights),
+//RS             Err(message) => {
+//RS                 let line = rt.current_line;
+//RS                 rt.set_runtime_stop("E0712", line, &message);
+//RS                 0
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_authority_without(authority: i64, requested: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let held = authority_rights(rt, authority);
+//RS         let requested = rt.heap.clone_string(requested).unwrap_or_default();
+//RS         authority_record(
+//RS             rt,
+//RS             authority_semantics::jet_authority_without_right(&held, &requested),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn canonical_string_set(
+//RS     rt: &crate::JitRuntime,
+//RS     values: impl IntoIterator<Item = i64>,
+//RS ) -> HashSet<i64> {
+//RS     let mut ids = HashMap::new();
+//RS     for id in values {
+//RS         if let Some(value) = rt.heap.clone_string(id) {
+//RS             ids.entry(value).or_insert(id);
+//RS         }
+//RS     }
+//RS     ids.into_values().collect()
+//RS }
+//RS 
+//RS fn canonical_sorted_string_set(
+//RS     rt: &crate::JitRuntime,
+//RS     values: impl IntoIterator<Item = i64>,
+//RS ) -> BTreeSet<i64> {
+//RS     canonical_string_set(rt, values).into_iter().collect()
+//RS }
+//RS 
+//RS fn deque_handle(rt: &mut crate::JitRuntime, dq: VecDeque<i64>) -> i64 {
+//RS     rt.deques.push(dq);
+//RS     rt.deques.len() as i64
+//RS }
+//RS 
+//RS fn jet_jit_set_from_list(list: i64, string_kind: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let xs = rt.heap.clone_int_list(list).unwrap_or_default();
+//RS         let string_kind = string_kind != 0;
+//RS         let set = if string_kind {
+//RS             canonical_string_set(rt, xs)
+//RS         } else {
+//RS             xs.into_iter().collect()
+//RS         };
+//RS         set_handle(rt, set, string_kind)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_from_list_int(list: i64) -> i64 {
+//RS     jet_jit_set_from_list(list, 0)
+//RS }
+//RS 
+//RS // #1478: empty Set constructor + remaining non-closure surface.
+//RS fn jet_jit_set_new(string_kind: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| set_handle(rt, HashSet::new(), string_kind != 0))
+//RS }
+//RS 
+//RS fn jet_jit_set_copy(set: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = (set as usize).wrapping_sub(1);
+//RS         let existing = rt.sets.get(idx).cloned().unwrap_or_default();
+//RS         let string_kind = set_is_string(rt, set);
+//RS         set_handle(rt, existing, string_kind)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_equal(a: i64, b: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let left = rt
+//RS             .sets
+//RS             .get((a as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let right = rt
+//RS             .sets
+//RS             .get((b as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let string_kind = set_is_string(rt, a) || set_is_string(rt, b);
+//RS         let eq = if string_kind {
+//RS             let left_values = set_string_values(rt, &left);
+//RS             let right_values = set_string_values(rt, &right);
+//RS             left_values == right_values
+//RS         } else {
+//RS             left == right
+//RS         };
+//RS         i8::from(eq)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_capacity(set: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.sets
+//RS             .get((set as usize).wrapping_sub(1))
+//RS             .map(|s| s.capacity() as i64)
+//RS             .unwrap_or(0)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_first(set: i64) -> i64 {
+//RS     // Packed Option ABI (0 = None, value+1 = Some) so `let f := set.first()`
+//RS     // then `f ?? …` works — result-arena Options break once bound to a local.
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let value = rt
+//RS             .sets
+//RS             .get((set as usize).wrapping_sub(1))
+//RS             .and_then(|existing| existing.iter().next().copied());
+//RS         option_packed(value)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_insert(set: i64, v: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = (set as usize).wrapping_sub(1);
+//RS         let Some(existing) = rt.sets.get(idx).cloned() else {
+//RS             return 0;
+//RS         };
+//RS         let string_kind = set_is_string(rt, set);
+//RS         if string_kind {
+//RS             let needle = rt.heap.clone_string(v).unwrap_or_default();
+//RS             if existing
+//RS                 .iter()
+//RS                 .any(|id| rt.heap.clone_string(*id).as_deref() == Some(needle.as_str()))
+//RS             {
+//RS                 return 0;
+//RS             }
+//RS         }
+//RS         if rt.sets[idx].insert(v) {
+//RS             1
+//RS         } else {
+//RS             0
+//RS         }
+//RS     })
+//RS }
+//RS fn jet_jit_set_update(set: i64, other: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = (set as usize).wrapping_sub(1);
+//RS         let other_idx = (other as usize).wrapping_sub(1);
+//RS         let Some(values) = rt.sets.get(other_idx).cloned() else {
+//RS             return;
+//RS         };
+//RS         if idx >= rt.sets.len() {
+//RS             return;
+//RS         }
+//RS         let string_kind = set_is_string(rt, set);
+//RS         for value in values {
+//RS             if string_kind {
+//RS                 let needle = rt.heap.clone_string(value).unwrap_or_default();
+//RS                 let duplicate = rt.sets[idx]
+//RS                     .iter()
+//RS                     .any(|id| rt.heap.clone_string(*id).as_deref() == Some(needle.as_str()));
+//RS                 if duplicate {
+//RS                     continue;
+//RS                 }
+//RS             }
+//RS             rt.sets[idx].insert(value);
+//RS         }
+//RS     });
+//RS }
+//RS fn jet_jit_set_relation_update(set: i64, other: i64, mode: u8) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = (set as usize).wrapping_sub(1);
+//RS         let other_idx = (other as usize).wrapping_sub(1);
+//RS         let Some(left) = rt.sets.get(idx).cloned() else {
+//RS             return;
+//RS         };
+//RS         let Some(right) = rt.sets.get(other_idx).cloned() else {
+//RS             return;
+//RS         };
+//RS         let string_kind = set_is_string(rt, set) || set_is_string(rt, other);
+//RS         let next = if string_kind {
+//RS             let ids = string_ids(rt, &left)
+//RS                 .into_iter()
+//RS                 .chain(string_ids(rt, &right))
+//RS                 .collect::<HashMap<_, _>>();
+//RS             let left_values = set_string_values(rt, &left);
+//RS             let right_values = set_string_values(rt, &right);
+//RS             let values = match mode {
+//RS                 0 => set_semantics::jet_set_difference(&left_values, &right_values),
+//RS                 1 => set_semantics::jet_set_intersection(&left_values, &right_values),
+//RS                 _ => set_semantics::jet_set_symmetric_difference(&left_values, &right_values),
+//RS             };
+//RS             values
+//RS                 .into_iter()
+//RS                 .filter_map(|value| ids.get(&value).copied())
+//RS                 .collect()
+//RS         } else {
+//RS             match mode {
+//RS                 0 => set_semantics::jet_set_difference(&left, &right),
+//RS                 1 => set_semantics::jet_set_intersection(&left, &right),
+//RS                 _ => set_semantics::jet_set_symmetric_difference(&left, &right),
+//RS             }
+//RS         };
+//RS         rt.sets[idx] = next;
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_set_difference_update(set: i64, other: i64) {
+//RS     jet_jit_set_relation_update(set, other, 0);
+//RS }
+//RS 
+//RS fn jet_jit_set_intersection_update(set: i64, other: i64) {
+//RS     jet_jit_set_relation_update(set, other, 1);
+//RS }
+//RS 
+//RS fn jet_jit_set_symmetric_difference_update(set: i64, other: i64) {
+//RS     jet_jit_set_relation_update(set, other, 2);
+//RS }
+//RS 
+//RS fn jet_jit_set_remove(set: i64, v: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = (set as usize).wrapping_sub(1);
+//RS         let Some(existing) = rt.sets.get(idx).cloned() else {
+//RS             return;
+//RS         };
+//RS         let id = if set_is_string(rt, set) {
+//RS             let needle = rt.heap.clone_string(v).unwrap_or_default();
+//RS             existing
+//RS                 .iter()
+//RS                 .find(|id| rt.heap.clone_string(**id).as_deref() == Some(needle.as_str()))
+//RS                 .copied()
+//RS         } else {
+//RS             Some(v)
+//RS         };
+//RS         if let Some(id) = id {
+//RS             rt.sets[idx].remove(&id);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_set_pop(set: i64, v: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = (set as usize).wrapping_sub(1);
+//RS         let Some(existing) = rt.sets.get(idx).cloned() else {
+//RS             return option_packed(None);
+//RS         };
+//RS         let string_kind = set_is_string(rt, set);
+//RS         let found = if string_kind {
+//RS             let needle = rt.heap.clone_string(v).unwrap_or_default();
+//RS             existing
+//RS                 .iter()
+//RS                 .find(|id| rt.heap.clone_string(**id).as_deref() == Some(needle.as_str()))
+//RS                 .copied()
+//RS         } else {
+//RS             existing.contains(&v).then_some(v)
+//RS         };
+//RS         option_packed(
+//RS             found.and_then(|id| collection_semantics::set_pop_i64(&mut rt.sets[idx], &id)),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_replace(set: i64, v: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = (set as usize).wrapping_sub(1);
+//RS         let Some(existing) = rt.sets.get(idx).cloned() else {
+//RS             return option_packed(None);
+//RS         };
+//RS         let string_kind = set_is_string(rt, set);
+//RS         let found = if string_kind {
+//RS             let needle = rt.heap.clone_string(v).unwrap_or_default();
+//RS             existing
+//RS                 .iter()
+//RS                 .find(|id| rt.heap.clone_string(**id).as_deref() == Some(needle.as_str()))
+//RS                 .copied()
+//RS         } else {
+//RS             existing.contains(&v).then_some(v)
+//RS         };
+//RS         if let Some(old) = found {
+//RS             rt.sets[idx].remove(&old);
+//RS         }
+//RS         rt.sets[idx].insert(v);
+//RS         option_packed(found)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_has(set: i64, v: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| match rt.sets.get((set as usize).wrapping_sub(1)) {
+//RS         Some(s)
+//RS             if set_is_string(rt, set) && {
+//RS                 let needle = rt.heap.clone_string(v).unwrap_or_default();
+//RS                 s.iter()
+//RS                     .any(|id| rt.heap.clone_string(*id).as_deref() == Some(needle.as_str()))
+//RS             } =>
+//RS         {
+//RS             1
+//RS         }
+//RS         Some(s) if s.contains(&v) => 1,
+//RS         _ => 0,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_is_empty(set: i64) -> i8 {
+//RS     i8::from(jet_jit_set_len(set) == 0)
+//RS }
+//RS 
+//RS fn jet_jit_sorted_set_is_empty(handle: i64) -> i8 {
+//RS     i8::from(jet_jit_sorted_set_len(handle) == 0)
+//RS }
+//RS 
+//RS fn jet_jit_priority_queue_is_empty(handle: i64) -> i8 {
+//RS     i8::from(jet_jit_priority_queue_len(handle) == 0)
+//RS }
+//RS 
+//RS fn jet_jit_deque_is_empty(dq: i64) -> i8 {
+//RS     i8::from(jet_jit_deque_len(dq) == 0)
+//RS }
+//RS 
+//RS fn jet_jit_bag_is_empty(bag: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         i8::from(
+//RS             rt.bags
+//RS                 .get((bag as usize).wrapping_sub(1))
+//RS                 .is_none_or(std::collections::HashMap::is_empty),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_lru_len(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.lrus
+//RS             .get((handle as usize).wrapping_sub(1))
+//RS             .map(|lru| lru.entries.len() as i64)
+//RS             .unwrap_or(0)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_lru_is_empty(handle: i64) -> i8 {
+//RS     i8::from(jet_jit_lru_len(handle) == 0)
+//RS }
+//RS 
+//RS fn jet_jit_bit_set_is_empty(handle: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         i8::from(
+//RS             rt.bit_sets
+//RS                 .get((handle as usize).wrapping_sub(1))
+//RS                 .is_none_or(std::collections::BTreeSet::is_empty),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_len(set: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.sets
+//RS             .get((set as usize).wrapping_sub(1))
+//RS             .map(|s| s.len() as i64)
+//RS             .unwrap_or(0)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_to_list(set: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let xs: Vec<i64> = rt
+//RS             .sets
+//RS             .get((set as usize).wrapping_sub(1))
+//RS             .map(|s| s.iter().copied().collect())
+//RS             .unwrap_or_default();
+//RS         rt.heap.alloc_int_list(xs)
+//RS     })
+//RS }
+//RS fn jet_jit_set_values(set: i64) -> i64 {
+//RS     jet_jit_list_lazy(jet_jit_set_to_list(set))
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_set_max(set: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let values = rt
+//RS             .sets
+//RS             .get((set as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let value = if set_is_string(rt, set) {
+//RS             values
+//RS                 .into_iter()
+//RS                 .filter_map(|id| rt.heap.clone_string(id).map(|text| (text, id)))
+//RS                 .max_by(|left, right| left.0.cmp(&right.0))
+//RS                 .map(|(_, id)| id)
+//RS         } else {
+//RS             values.into_iter().max()
+//RS         };
+//RS         option_i64(rt, value)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_sort(set: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let values = rt
+//RS             .sets
+//RS             .get((set as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let values = if set_is_string(rt, set) {
+//RS             let mut pairs = values
+//RS                 .into_iter()
+//RS                 .filter_map(|id| rt.heap.clone_string(id).map(|text| (text, id)))
+//RS                 .collect::<Vec<_>>();
+//RS             collection_semantics::list_sort_by(&mut pairs, |pair| pair.0.clone());
+//RS             pairs.into_iter().map(|(_, id)| id).collect()
+//RS         } else {
+//RS             let mut values = values.into_iter().collect::<Vec<_>>();
+//RS             collection_semantics::list_sort(&mut values);
+//RS             values
+//RS         };
+//RS         rt.heap.alloc_int_list(values)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_shuffle(set: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let values = rt
+//RS             .sets
+//RS             .get((set as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         rt.heap
+//RS             .alloc_int_list(collection_semantics::iter_shuffle(
+//RS                 values.into_iter().collect(),
+//RS             ))
+//RS     })
+//RS }
+//RS 
+// END-PORT-PENDING 0200 crates/jet-jit/src/Collections.rs:7294-9094
+

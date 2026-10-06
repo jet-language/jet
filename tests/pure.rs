@@ -690,7 +690,7 @@ fn eval_valid_typed_run_passes_sema() {
     let diags = jet::check_for_eval(src, "test_eval_valid.jet");
     assert!(
         diags.is_empty(),
-        "`fn run() -[]> Int ->` with correct body should pass sema, got: {:?}",
+        "`fn run() -[]> Int {{ … }}` with correct body should pass sema, got: {:?}",
         diags
     );
 }

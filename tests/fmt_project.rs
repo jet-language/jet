@@ -703,12 +703,12 @@ fn simplify_mode_is_stable_across_a_project() {
         .output()
         .unwrap();
     assert_eq!(first.status.code(), Some(0));
-    assert_eq!(read(&sources[0]), "fn answer() -> Int -> 42\n");
+    assert_eq!(read(&sources[0]), "fn answer() -> Int { 42 }\n");
     assert_eq!(
         read(&sources[1]),
-        "fn double(value: Int) -> Int -> value * 2\n"
+        "fn double(value: Int) -> Int { value * 2 }\n"
     );
-    assert_eq!(read(&sources[2]), "fn label() -> String -> \"sample\"\n");
+    assert_eq!(read(&sources[2]), "fn label() -> String { \"sample\" }\n");
 
     let before_second: Vec<Vec<u8>> = sources
         .iter()

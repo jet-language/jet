@@ -382,6 +382,15 @@ fn visit_gate(
     gates: Policy::GateSet,
     result: &mut UnsafeInspection,
 ) {
+    if let Some(diagnostic) = Policy::gate_refusal(
+        PolicyKey::Unsafe,
+        &format!("{source}:{}..{}", gate_span.start, gate_span.end),
+        Some(gate_span),
+        declarations,
+    ) {
+        push_diagnostic(result, source, diagnostic);
+        return;
+    }
     let outer = declarations
         .iter()
         .filter(|declaration| {
@@ -448,20 +457,7 @@ fn visit_gate(
         push_diagnostic(result, source, Diagnostic::error("E3106", "this unsafe gate cannot skip obligations".to_string(), "`.Skip` is site control for an effective `.PerSite` package policy; it is not ambient authorization".to_string(), "set package policy to `.PerSite`, or remove `.Skip`".to_string(), Some(gate_span)));
         value = PolicyValue::Track;
     }
-    if value == PolicyValue::Forbid {
-        push_diagnostic(
-            result,
-            source,
-            Diagnostic::error(
-                "E3105",
-                "organization or package policy forbids unsafe code".to_string(),
-                "a lexical `#Unsafe` gate cannot widen the effective safety floor".to_string(),
-                "remove the low-level operation or change the outer policy through its owner"
-                    .to_string(),
-                Some(gate_span),
-            ),
-        );
-    } else if reason.is_none() && !source_has_reason && value != PolicyValue::Relaxed {
+    if reason.is_none() && !source_has_reason && value != PolicyValue::Relaxed {
         let (what, why, fix) = if is_function {
             (
                 "this `#Unsafe` function has no reason",

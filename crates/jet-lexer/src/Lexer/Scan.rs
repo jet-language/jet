@@ -1059,6 +1059,60 @@ mod tests {
     use crate::Lexer::{StrTokPart, TokKind};
 
     #[test]
+    fn triple_delimiter_text_has_exact_run_spans_and_keeps_recovery_text() {
+        for (source, runs) in [
+            ("\"\"\"Hello\n    kept\n    \"\"\"", vec![(3, 8)]),
+            ("\"\"\"\n    kept\n    end\"\"\"", vec![(17, 20)]),
+            ("\"\"\"Hello\n    kept\n    end\"\"\"", vec![(3, 8), (22, 25)]),
+            ("\"\"\"abc\"\"\"", vec![(3, 6), (3, 6)]),
+            ("\"\"\"{name}\nkept\n\"\"\"", vec![(3, 9)]),
+            ("\"\"\" \té😀 rest\nkept\n\"\"\"", vec![(5, 11)]),
+            ("SQL{\"\"\"query\nkept\n\"\"\"}", vec![(7, 12)]),
+            ("\"\"\"\rstray\nkept\n\"\"\"", vec![(3, 9)]),
+        ] {
+            let (tokens, diagnostics) = lex_raw(source);
+            assert_eq!(diagnostics.len(), runs.len(), "{source}: {diagnostics:?}");
+            for (diagnostic, (start, end)) in diagnostics.iter().zip(runs) {
+                assert_eq!(diagnostic.code, "E0084", "{source}");
+                assert_eq!(diagnostic.span, Some(crate::Diagnostics::Span::new(start, end)), "{source}");
+                assert!(diagnostic.fix.contains("ordinary string"));
+                assert!(diagnostic.fix.contains("backtick raw string"));
+            }
+            assert!(tokens.iter().any(|token| matches!(&token.kind, TokKind::Str(_))));
+        }
+    }
+
+    #[test]
+    fn triple_delimiter_whitespace_crlf_and_foreign_bodies_are_legal() {
+        for source in [
+            "\"\"\"   \nhello\n   \"\"\" }",
+            "\"\"\"\t\t\nhello\n\t\t\"\"\"",
+            "\"\"\" \t\r\nhello\r\n \t\"\"\"",
+            "SQL{\"\"\"\nhello\n\"\"\"}",
+        ] {
+            let (tokens, diagnostics) = lex_raw(source);
+            assert!(diagnostics.is_empty(), "{source}: {diagnostics:?}");
+            let text = tokens.iter().find_map(|token| match &token.kind {
+                TokKind::Str(parts) => Some(parts),
+                _ => None,
+            }).unwrap();
+            // CRLF decoding stays unchanged; only its delimiter-line CR is
+            // exempt from the new check.
+            let expected = if source.contains('\r') { "hello\r" } else { "hello" };
+            assert!(matches!(text.as_slice(), [StrTokPart::Lit(value)] if value == expected));
+        }
+        for lang in ["c", "cpp", "asm"] {
+            let source = format!("#FFI({lang}) fn foreign() {{ \"\"\"text {{value}} \\raw\"\"\" }}");
+            let (tokens, diagnostics) = lex_raw(&source);
+            assert!(diagnostics.is_empty(), "{lang}: {diagnostics:?}");
+            assert!(tokens.iter().any(|token| matches!(
+                &token.kind, TokKind::Str(parts)
+                    if matches!(parts.as_slice(), [StrTokPart::Lit(value)] if value == "text {value} \\raw")
+            )));
+        }
+    }
+
+    #[test]
     fn raw_foreign_body_marker_does_not_capture_a_later_function() {
         let source = r#"#FFI(c) fn foreign() -> Int {
     """int64_t foreign(void) { return 1; }"""

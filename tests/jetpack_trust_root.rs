@@ -452,18 +452,20 @@ fn core_build_hook_requires_the_exact_trust_identity() {
     let store = dir.join("trust");
     jetpack::Trust::add_grant(
         &store,
+        &dir,
         &jetpack::Trust::TrustGrant {
             authority: "build".to_string(),
             subject: "build-sha256:trusted".to_string(),
             scope: "repo".to_string(),
         },
-    );
+    ).unwrap();
     let hostile_identity = "build-sha256:trusted\n$(touch core-build-pwned)";
     let theme = jetpack::Output::Theme::resolve(true);
 
     assert!(jetpack::Trust::gate_build_identity(
         &theme,
         &store,
+        &dir,
         hostile_identity,
         false,
     )

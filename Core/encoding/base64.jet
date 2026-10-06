@@ -4,10 +4,11 @@
 // D-ENCBASE-STRICT1: edition 2027+ decoders are strict RFC 4648 (no
 // whitespace, canonical padding, zero unused bits) and report
 // `invalid <codec> at byte <N>: <reason>`; edition 2026 keeps the compatibility
-// parser. The codec kernels are the host rows; these members forward to them.
+// parser. Decoders retain host rows; encoders use the borrowed-byte owner.
 use core as core
 use core.encoding.hex as hex
 use core.encoding.base32 as base32
+use core.encoding.runtime.kernel_base_encode as base64_encode_kernel
 #Error
 pub struct Base64Error {
     pub reason: String
@@ -22,9 +23,16 @@ fn rewrap(reason: String) -> Base64Error Never! { Base64Error{reason: reason} }
 
 fn u8_int(b: U8) -> Int Never! { Int.from_u8(b) }
 
-pub fn encode(data: [U8]) -> String Never! { core.encoding.base64.encode(data) }
+// Rust jet_std_b64_encode:117–138; the public owning list is borrowed in-place.
+pub fn encode(data: [U8]) -> String Never! {
+    view :: data[0..<data.len()]
+    base64_encode_kernel.encode64(view)
+}
 
-pub fn encode_url(data: [U8]) -> String Never! { core.encoding.base64.encode_url(data) }
+pub fn encode_url(data: [U8]) -> String Never! {
+    view :: data[0..<data.len()]
+    base64_encode_kernel.encode64_url(view)
+}
 
 pub fn decode(text: String) -> [U8] Base64Error! {
     if core.encoding.base64.decode(text) == {
@@ -67,7 +75,10 @@ pub fn b85decode(text: String) -> [U8] Base64Error! { base85_decode(text, C_B85_
 pub fn z85encode(data: [U8]) -> String Base64Error! { base85_encode(data, C_Z85_ALPHABET, true) }
 pub fn z85decode(text: String) -> [U8] Base64Error! { base85_decode(text, C_Z85_ALPHABET, true) }
 
-pub fn encodebytes(data: [U8]) -> String Never! { core.encoding.base64.encodebytes(data) }
+pub fn encodebytes(data: [U8]) -> String Never! {
+    view :: data[0..<data.len()]
+    base64_encode_kernel.encode64_bytes(view)
+}
 
 pub fn decodebytes(text: String) -> [U8] Base64Error! {
     if core.encoding.base64.decodebytes(text) == {
@@ -99,13 +110,16 @@ fn decode_base32hex(text: String) -> [U8] Base64Error! {
     }
 }
 
-pub fn encode_url_padded(data: [U8]) -> String Never! { core.encoding.base64.encode_url_padded(data) }
+pub fn encode_url_padded(data: [U8]) -> String Never! {
+    view :: data[0..<data.len()]
+    base64_encode_kernel.encode64_url_padded(view)
+}
 
 pub fn decode_padded(text: String) -> [U8] Base64Error! { decode(text) }
 
-pub fn pad(text: String) -> String Never! { core.encoding.base64.pad(text) }
+pub fn pad(text: String) -> String Never! { base64_encode_kernel.pad64(text) }
 
-pub fn unpad(text: String) -> String Never! { core.encoding.base64.unpad(text) }
+pub fn unpad(text: String) -> String Never! { base64_encode_kernel.unpad64(text) }
 
 pub fn is_base64(text: String) -> Bool Never! {
     decode(text) == .Ok(_)

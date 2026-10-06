@@ -1,0 +1,18 @@
+// Function-boundary cell fixed-return-64: a 64-byte fixed array ([Int#8])
+// is built and returned by value on every call of a hot loop.
+#CLI struct Args { n: Int }
+
+fn fill(seed: Int) -> [Int#8] {
+    out := [Int#8]{0, 0, 0, 0, 0, 0, 0, 0}
+    loop i in 0..<8 -> out[i] = seed + i
+    out
+}
+
+fn run(args: Args) {
+    acc := 0
+    loop i in 0..<args.n {
+        block :: fill(i)
+        loop x in block -> acc += x
+    }
+    print(acc)
+}

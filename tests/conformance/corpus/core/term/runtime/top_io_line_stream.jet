@@ -1,0 +1,24 @@
+use core.term.runtime.top_io_line_stream.*
+use core.prelude.runtime.std_open.[IOError, IOOperation]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs:68-76.
+#Test("stdin_empty_delimiter_rejects_without_read") {
+    match jet_std_io_read_until("") {
+        Err(IOError.Other(context)) -> {
+            assert(context.operation == IOOperation.Read)
+            assert(context.resource == Val("stdin"))
+            assert(context.cause == Val("empty delimiter"))
+        },
+        _ -> assert(false),
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs:121-129.
+#Test("stdin_negative_take_rejects_without_allocation_or_read") {
+    match jet_std_io_take(-1) {
+        Err(IOError.Other(context)) -> {
+            assert(context.operation == IOOperation.Read)
+            assert(context.resource == Val("stdin"))
+            assert(context.cause == Val("negative take"))
+        },
+        _ -> assert(false),
+    }
+}

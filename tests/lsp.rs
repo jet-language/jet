@@ -881,7 +881,7 @@ fn lsp_mcp_environment_resources_are_read_only() {
 "#,
     )
     .unwrap();
-    fs::write(project.join("run.jet"), "#Job\nfn lint() {}\n").unwrap();
+    fs::write(project.join("run.jet"), "#Job\nfn lint_all() {}\n").unwrap();
 
     let root_uri = format!("file://{}", project.path.display());
     let mut child = Command::new(jet_bin())
@@ -934,7 +934,7 @@ fn lsp_mcp_environment_resources_are_read_only() {
     assert!(read.contains("fixture"), "read: {read}");
     assert!(read.contains("generated.txt"), "read: {read}");
     assert!(read.contains("HOME"), "read: {read}");
-    assert!(read.contains("lint"), "read: {read}");
+    assert!(read.contains("lint_all"), "read: {read}");
     assert!(
         !read.contains("/test/home"),
         "resource leaked a variable value: {read}"
@@ -1525,17 +1525,12 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
     std::fs::write(&path, source).expect("write tier-parity diagnostic fixture");
     let aot = jet::compile_with_path(source, &path_string)
         .expect_err("AOT front end must reject a missing method");
-    let run = match jet::Interpreter::run_jit_once(&path_string) {
-        jet_foundation::JitBackend::RunOutcome::Problems(diags) => diags,
-        other => panic!("default resident JIT must reject E0311: {other:?}"),
-    };
-    let interpreter = match jet::Interpreter::dev_iteration(&path_string, false, true) {
-        jet_foundation::JitBackend::RunOutcome::Problems(diags) => diags,
+    let interpreter = match crate::common::dev_run(&path_string, false, true) {
+        jet::Interpreter::RunOutcome::Problems(diags) => diags,
         other => panic!("interpreter must reject E0311: {other:?}"),
     };
     let tiers = [
         ("AOT", aot.as_slice()),
-        ("default resident JIT", run.as_slice()),
         ("interpreter", interpreter.as_slice()),
     ];
     for (tier, diags) in tiers.iter().copied() {
@@ -3806,8 +3801,8 @@ fn lsp_checked_identity_and_versioned_rename() {
     let root = common::Scratch::new("lsp-checked-rename");
     fs::write(root.join("package.jet"), "name: \"rename\"\nversion: \"0.1.0\"\n").unwrap();
     let main = "use scoring as grades\nuse \"util\"\nfn run() {\n    print(grades.letter(91))\n    print(util.letter(91))\n}\nfn shadow(letter: Int) { print(letter) }\n";
-    let scoring = "pub fn letter(score: Int) -> String -> \"A\"\n";
-    let util = "pub fn letter(score: Int) -> String -> \"unrelated\"\n";
+    let scoring = "pub fn letter(score: Int) -> String { \"A\" }\n";
+    let util = "pub fn letter(score: Int) -> String { \"unrelated\" }\n";
     let sources = [("run.jet", main), ("scoring.jet", scoring), ("util.jet", util)];
     for (name, source) in sources {
         fs::write(root.join(name), source).unwrap();

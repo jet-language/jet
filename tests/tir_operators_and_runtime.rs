@@ -6,8 +6,8 @@ mod common;
 mod tir_support;
 
 use tir_support::{
-    assert_example_cli_tiers_agree, assert_tiers_agree, build_and_run, compile, compile_source,
-    have_rustc, jit_run_with_env,
+    assert_example_cli_tiers_agree, assert_tiers_agree, build_and_run, compile_source,
+    have_rustc, default_run_with_env,
 };
 
 /// D-OPDEF1=A: user arithmetic/equality/order reuse ordinary trait methods.
@@ -117,7 +117,7 @@ struct Pair {
     a: Int
     b: Int
 }
-fn align(left: D, right: D) -> Pair -> Pair{a: left.value, b: right.value}
+fn align(left: D, right: D) -> Pair { Pair{a: left.value, b: right.value} }
 impl D.Add {
     fn add(self, rhs: D) -> D {
         pair :: align(self, rhs)
@@ -443,7 +443,7 @@ fn run() {
     }
 }
 "#;
-    let (code, stdout, stderr) = jit_run_with_env(
+    let (code, stdout, stderr) = default_run_with_env(
         "tir_nested_checked_arithmetic_policy",
         src,
         &[("JET_ARITHMETIC_VALUE", "200")],
@@ -493,7 +493,7 @@ fn run() {
         ("3", "256", "conversion overflow"),
         ("4", "2", "out-of-bounds indexing"),
     ] {
-        let (code, stdout, stderr) = jit_run_with_env(
+        let (code, stdout, stderr) = default_run_with_env(
             &format!("tir_wrapping_safety_{case}"),
             src,
             &[("JET_ARITHMETIC_CASE", case), ("JET_ARITHMETIC_VALUE", value)],
@@ -513,7 +513,7 @@ fn list_bounds_stop_keeps_registered_code_across_tiers() {
         ),
     ] {
         let source = format!(
-            "fn pick(values: [Int], index: Int) -> Int -> values[index]\n{body}"
+            "fn pick(values: [Int], index: Int) -> Int {{ values[index] }}\n{body}"
         );
         let files = [("main.jet", source.as_str())];
         for run in [

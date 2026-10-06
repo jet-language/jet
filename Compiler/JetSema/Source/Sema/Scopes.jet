@@ -91,6 +91,10 @@ pub struct SemaCallSiteFact {
     // The statement drops this call's result. The solved effect phase reports
     // it when the callee's row is empty (E0433).
     pub discarded: Bool
+    // The statement drops this call's result, but the callee's checked
+    // carrier can still fail. The bundle failure solve sets `discarded` when
+    // it projects the callee onto `T Never!` (#3708, D-DISCARD1=A).
+    pub discarded_if_infallible: Bool{false}
 }
 
 pub struct SemaCallReturnViewFact {
@@ -362,6 +366,37 @@ pub struct SemaScopeEnvironment {
     // locations name it (Rust `capture_panic_loc` `fn_name`).
     pub function_name: String{""}
 }
+
+// The declaration scope of one module for compile-time probes (dependency
+// probes, item checks, function checks): sema_registration_apply_graph_module
+// runs once into `table` instead of once per probe, and each probe checks
+// inside a mark and rolls back (sema_comptime_probe_prepare). The probing
+// environment's graph changes only by staged values
+// (sema_comptime_graph_apply_values), which type waiting constants and nothing
+// else, so `constants` names the only bindings a rebuilt table could differ
+// in, and where their graph rows live.
+pub struct SemaScopeProbe {
+    pub module_identity: String
+    pub table: SemaScopeTable
+    // sema_registration_apply_graph_module's result and its diagnostics.
+    pub applied: Bool
+    pub diagnostics: [Diagnostic]
+    pub constants: [SemaScopeProbeConstant]
+    // The host callbacks the probe's checks reach (SemaHostHookAccess).
+    pub host_hooks: SemaHostHookAccess?{None}
+}
+
+// A module-scope binding whose symbol is a constant still waiting for its
+// known-time type (sema_comptime_symbol_waits), and its graph row.
+pub struct SemaScopeProbeConstant {
+    pub binding: Int
+    pub source: SemaScopeProbeSource
+}
+
+pub enum SemaScopeProbeSource {
+    Symbol(position: Int)
+    Import(import_index: Int, binding: Int)
+}
  
 pub struct SemaCheckContext {
     pub exact_int_reachable: Bool
@@ -468,6 +503,9 @@ pub struct SemaCheckContext {
     // does not handle yet or a lost compiler invariant. These reach the
     // driver's internal-problem report (I2), never the user's diagnostics.
     pub incomplete_reasons: [String]{[String]{}}
+    // The host callbacks this check may call (SemaHostHookAccess); every
+    // context derived from it reaches the same ones.
+    pub host_hooks: SemaHostHookAccess?{None}
 }
 
  
@@ -515,6 +553,10 @@ pub struct SemaScopeTable {
     // row here, so a rollback restores the table without a whole-table copy.
     pub binding_undo: [SemaScopeBindingUndo]{[SemaScopeBindingUndo]{}}
     pub open_marks: Int{0}
+    // The function a compiler thread is checking (sema_function_check_shared),
+    // which names its panic locations; None names the environment's
+    // `function_name`.
+    pub location_function: String?{None}
 }
 
 pub struct SemaScopeBindingUndo {
@@ -774,6 +816,7 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         source_nesting: source.source_nesting,
         implicit_loop_subject_depth: source.implicit_loop_subject_depth,
         subject_shorthand_depth: source.subject_shorthand_depth,
+        host_hooks: source.host_hooks,
     }
 }
 
@@ -1003,6 +1046,7 @@ pub fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
         copies_explicit: source.copies_explicit,
         binding_undo: ~source.binding_undo,
         open_marks: source.open_marks,
+        location_function: source.location_function,
     }
 }
 

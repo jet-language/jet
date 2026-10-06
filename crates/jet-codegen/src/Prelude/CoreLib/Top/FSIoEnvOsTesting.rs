@@ -252,7 +252,7 @@ fn jet_std_io_input_secret(prompt: &String) -> Result<String, jet_std::IOError> 
 // #1480 / D-STDIN1: line-stream ownership moved to the shared
 // Core/StdinReader.rs fragment so AOT, JIT, and Source use one reader kernel.
 
-fn jet_std_io_binread(path: &String) -> Result<Vec<u8>, jet_std::IOError> {
+fn jet_std_io_binread(path: &str) -> Result<Vec<u8>, jet_std::IOError> {
     jet_std_fs_read_bytes(path)
 }
 

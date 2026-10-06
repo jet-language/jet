@@ -1,0 +1,21 @@
+use core.crypto as crypto
+use core.encoding as encoding
+// SHA256Raw.rs has no inline tests; controls exercise the existing canonical owners.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs:2
+#Test("sha256_raw_canonical_owner_preserves_standard_vectors") {
+    assert(crypto.sha256("".bytes()).hex() == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+    assert(crypto.sha256("abc".bytes()).hex() == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs:82,103
+#Test("hmac_sha256_canonical_owner_preserves_keyed_known_vector") {
+    digest :: crypto.hmac_sha256("key".bytes(), "The quick brown fox jumps over the lazy dog".bytes())
+    assert(encoding.bytes_to_hex(digest) == "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs:107
+#Test("constant_time_equal_keeps_length_mismatch_even_for_zero_suffix") {
+    assert(crypto.constant_time_equal_bytes([U8]{}, [U8]{}))
+    assert(crypto.constant_time_equal_bytes([U8]{1, 0, 2}, [U8]{1, 0, 2}))
+    assert(!crypto.constant_time_equal_bytes([U8]{1}, [U8]{1, 0}))
+    assert(!crypto.constant_time_equal_bytes([U8]{1, 0}, [U8]{1}))
+    assert(!crypto.constant_time_equal_bytes([U8]{1, 0, 2}, [U8]{1, 0, 3}))
+}

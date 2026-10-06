@@ -1,0 +1,24 @@
+use core.files.runtime.kernel_fs_ops as fs
+use core.files.runtime.kernel_authority as authority
+
+// Rust: crates/jet-codegen/src/Prelude/Core/FSOps.rs:112 (behavioral controls; no inline tests)
+#Test("filesystem glob wildcard bytes") {
+    assert(fs.jet_fs_glob_match("a/*/?.jet", "a/b/c.jet"))
+    assert(not fs.jet_fs_glob_match("a/?.jet", "a/cc.jet"))
+    assert(fs.jet_fs_glob_match("*", ""))
+    assert(not fs.jet_fs_glob_match("?", ""))
+    assert(fs.jet_fs_glob_match("", ""))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/FSOps.rs:28-79
+#Test("filesystem scope never grants ambient reads") {
+    scope :: authority.JetFileScope.from_authority(authority.JetAuthority.from_rights(["FS.Read"]))
+    result :: fs.jet_fs_scope_read(scope, "file")
+    assert(result is Err(_))
+    if result is Err(error) {
+        assert(error.kind() == .PermissionDenied)
+        assert(error.to_string() == "path is outside the granted FS.Read root")
+    }
+    workspace :: authority.JetFileScope.from_authority(authority.JetAuthority.workspace())
+    assert(fs.jet_fs_scope_read(workspace, "../outside") is Err(_))
+    assert(fs.jet_fs_scope_read(workspace, ".") is Err(_))
+}

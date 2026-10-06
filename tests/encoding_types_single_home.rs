@@ -68,18 +68,18 @@ fn declaration_sites(root: &Path, name: &str) -> Vec<String> {
 }
 
 #[test]
-fn encoding_types_have_one_definition_home_and_jit_include() {
+fn encoding_types_have_one_definition_home_and_evalhost_include() {
     let root = root();
     let home = root.join(HOME);
     let home_source = fs::read_to_string(&home).expect("EncodingTypes.rs is readable");
-    let jit_source = fs::read_to_string(root.join("crates/jet-jit/src/enc_stream/mod.rs"))
-        .expect("enc_stream/mod.rs is readable");
+    let evalhost_source = fs::read_to_string(root.join("crates/jet-evalhost/src/Encoding.rs"))
+        .expect("jet-evalhost Encoding.rs is readable");
 
     assert!(
-        jit_source.contains(
-            "include!(\"../../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs\");"
+        evalhost_source.contains(
+            "include!(\"../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs\");"
         ),
-        "JIT must include the Prelude encoding type definitions"
+        "the evaluator host must include the Prelude encoding type definitions"
     );
 
     for name in TYPES {

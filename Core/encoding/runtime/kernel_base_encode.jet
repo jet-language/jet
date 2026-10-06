@@ -1,0 +1,135 @@
+// EncodingBase.rs:3–4,117–237: the independent RFC 4648 encoder SCC.
+// Inputs borrow the original byte owner and extent; only output is allocated.
+// The dense-i64 JIT encoder (:152–181) retires: adapters must marshal checked
+// U8 storage and call this owner, never retain a second semantic encoder.
+// Native cutover gates: exact output reservation with the original fatal OOM
+// rail, consuming String.from_bytes without a copy (StringBytes.rs:2–4 still
+// copies), and retained UTF-8 byte_count (#4318/#4392). No allocation-parity
+// claim is implied by output vectors. Ordinary push keeps the infallible rail.
+use core.text as base_encode_text
+use core.text.runtime.kernel_unicode_string as base_encode_unicode
+
+// Rust JET_B64_CHARS / URL replacement (:3–4,183–193). Arithmetic lookup
+// avoids allocating/copying an alphabet for each call or output quantum.
+fn b64_digit(index: U32, url: Bool) -> U8 Never! {
+    if index < (U32{26}) -> return U8.from_u32(index + U32{65}) ?? panic("Base64 digit narrowing failed")
+    if index < (U32{52}) -> return U8.from_u32(index + U32{71}) ?? panic("Base64 digit narrowing failed")
+    if index < (U32{62}) -> return U8.from_u32(index - U32{4}) ?? panic("Base64 digit narrowing failed")
+    if index == (U32{62}) -> return if url -> U8{45} else -> U8{43}
+    if url -> U8{95} else -> U8{47}
+}
+
+// Rust jet_std_b64_encode:117–138, with URL policy from :183–193 and the
+// 76-byte LF framing from jet_std_b64_encodebytes:141–149. Framing is streamed
+// into the same output owner rather than copying an intermediate encoding.
+fn b64_encode(data: View<U8>, url: Bool, padded: Bool, wrapped: Bool) -> String Never! {
+    out := [U8]{}
+    at := 0
+    column := U32{0}
+    loop at < data.len() {
+        width := data.len() - at
+        if width > 3 -> width = 3
+        b0 :: U32.from_u8(data[at])
+        b1 :: if width > 1 -> U32.from_u8(data[at + 1]) else -> U32{0}
+        b2 :: if width > 2 -> U32.from_u8(data[at + 2]) else -> U32{0}
+        word :: (b0 << 16) | (b1 << 8) | b2
+        &out.push(b64_digit(word >> 18, url))
+        &out.push(b64_digit((word >> 12) & U32{63}, url))
+        if wrapped -> column += U32{2}
+        if width > 1 {
+            &out.push(b64_digit((word >> 6) & U32{63}, url))
+            if wrapped -> column += U32{1}
+        } else {
+            if padded {
+                &out.push(U8{61})
+                if wrapped -> column += U32{1}
+            }
+        }
+        if width > 2 {
+            &out.push(b64_digit(word & U32{63}, url))
+            if wrapped -> column += U32{1}
+        } else {
+            if padded {
+                &out.push(U8{61})
+                if wrapped -> column += U32{1}
+            }
+        }
+        if wrapped && column == (U32{76}) {
+            &out.push(U8{10})
+            column = U32{0}
+        }
+        at += width
+    }
+    if wrapped && column != (U32{0}) -> &out.push(U8{10})
+    String.from_bytes(out) ?? panic("Base64 encoder produced invalid UTF-8")
+}
+
+// Rust jet_std_b64_encode:117–138.
+pub fn encode64(data: View<U8>) -> String Never! { b64_encode(data, false, true, false) }
+// Rust jet_std_b64url_encode:183–188.
+pub fn encode64_url(data: View<U8>) -> String Never! { b64_encode(data, true, false, false) }
+// Rust jet_std_b64url_encode_padded:189–193.
+pub fn encode64_url_padded(data: View<U8>) -> String Never! { b64_encode(data, true, true, false) }
+// Rust jet_std_b64_encodebytes:141–149. Empty has zero chunks and no LF.
+pub fn encode64_bytes(data: View<U8>) -> String Never! { b64_encode(data, false, true, true) }
+
+// Rust jet_std_b64_pad:194–200. Rust len is UTF-8 bytes, not scalar count.
+pub fn pad64(text: String) -> String Never! {
+    remainder :: base_encode_text.byte_count(text) %% 4
+    if remainder == 0 -> return ~text
+    suffix :: if remainder == {
+        1 -> "==="
+        2 -> "=="
+        else -> "="
+    }
+    "{text}{suffix}"
+}
+
+// Rust jet_std_b64_unpad:201–203. Only trailing ASCII '=' is removed;
+// scalar offsets are deliberately used with String.slice, never byte offsets.
+pub fn unpad64(text: String) -> String Never! {
+    raw :: base_encode_unicode.utf8_bytes(text)
+    byte_end := raw.len()
+    end := text.len()
+    loop byte_end > 0 {
+        if raw[byte_end - 1] != (U8{61}) -> break
+        byte_end -= 1
+        end -= 1
+    }
+    text.slice(0, end)
+}
+
+// Rust JET_BASE32_CHARS / JET_BASE32HEX_CHARS:205–206.
+fn b32_digit(index: U32, hex: Bool) -> U8 Never! {
+    if hex {
+        if index < (U32{10}) -> return U8.from_u32(index + U32{48}) ?? panic("Base32hex digit narrowing failed")
+        return U8.from_u32(index + U32{55}) ?? panic("Base32hex digit narrowing failed")
+    }
+    if index < (U32{26}) -> return U8.from_u32(index + U32{65}) ?? panic("Base32 digit narrowing failed")
+    U8.from_u32(index + U32{24}) ?? panic("Base32 digit narrowing failed")
+}
+
+// Rust base32_encode_with_alphabet:208–229. One reusable fixed U32 buffer;
+// shifted-out bits are discarded exactly as in Rust, not retained in Int.
+fn b32_encode(data: View<U8>, hex: Bool) -> String Never! {
+    out := [U8]{}
+    buffer := U32{0}
+    bits := U32{0}
+    loop byte in data {
+        buffer = (buffer << 8) | U32.from_u8(byte)
+        bits += U32{8}
+        loop bits >= (U32{5}) {
+            index :: (buffer >> (bits - U32{5})) & U32{31}
+            &out.push(b32_digit(index, hex))
+            bits -= U32{5}
+        }
+    }
+    if bits > (U32{0}) -> &out.push(b32_digit((buffer << (U32{5} - bits)) & U32{31}, hex))
+    loop out.len() %% 8 != 0 -> &out.push(U8{61})
+    String.from_bytes(out) ?? panic("Base32 encoder produced invalid UTF-8")
+}
+
+// Rust jet_std_base32_encode:231–233.
+pub fn encode32(data: View<U8>) -> String Never! { b32_encode(data, false) }
+// Rust jet_std_base32hex_encode:235–237.
+pub fn encode32_hex(data: View<U8>) -> String Never! { b32_encode(data, true) }

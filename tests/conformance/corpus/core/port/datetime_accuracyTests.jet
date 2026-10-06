@@ -1,0 +1,360 @@
+use tests.conformance.corpus.core.port.datetime_accuracy.*
+use tests.common as common
+use tests.tir_support as tir_support
+use tests.corelib_parts.support.build_and_run
+use std.fs as fs
+use std.process as process
+use std.collections.HashSet
+use jet.[compile, render_diagnostics, format_source]
+use jet_foundation.XmlPull.base_encoding_2026
+// GATE #4494: real compiler/process and filesystem fixtures, no mocks.
+
+// Rust: tests/datetime_accuracy.rs:228
+#Test("datetime_accuracy_differential_and_properties") {
+    rows :: vectors()
+    assert_corpus_shape(rows)
+    repo :: root()
+    scratch :: common.test_scratch_root("datetime_accuracy_{process.id()}")
+    _ :: fs.remove_dir_all(scratch)
+    fs.create_dir_all(scratch).unwrap()
+    loop (batch, source_name, golden_name) in BATCHES {
+        source :: repo.join(source_name)
+        golden :: repo.join(golden_name)
+        assert(source.is_file(), "missing datetime accuracy witness: {source_name}")
+        expected :: expected_output(rows, batch)
+        assert_eq(fs.read(golden).unwrap_or_else(error -> panic("read {golden_name}: {error}")), expected, "datetime accuracy golden disagrees with committed oracle rows for {batch}")
+        default :: run_witness(repo, scratch.join(batch), source, false)
+        assert(default.status.success(), "default datetime accuracy witness failed for {batch}:\n{String.from_utf8_lossy(default.stderr)}")
+        assert_output(batch, "default", default.stdout, expected)
+        release :: run_witness(repo, scratch.join(batch), source, true)
+        assert(release.status.success(), "release datetime accuracy witness failed for {batch}:\n{String.from_utf8_lossy(release.stderr)}")
+        assert_output(batch, "release", release.stdout, expected)
+        assert_output(batch, "default-vs-release", release.stdout, default.stdout)
+    }
+    _ :: fs.remove_dir_all(scratch)
+}
+
+// Rust: tests/deadline_and_crypto_text_single_home.rs:42
+#Test("e3003_why_text_lives_only_in_the_one_renderer") {
+    repo :: root()
+    files := [OSPath]{}
+    collect_rs_files(repo.join("crates"), &files)
+    homes := [String]{}
+    loop file in files {
+        text :: fs.read_to_string(file).unwrap_or_default()
+        if text.contains(E3003_WHY) { homes.push(file.strip_prefix(repo).unwrap_or(file).display().to_string()) }
+    }
+    assert_eq(homes, [E3003_HOME], "E3003 why text must live only in {E3003_HOME}, found in: {homes}")
+}
+// Rust: tests/deadline_and_crypto_text_single_home.rs:68
+#Test("e3003_spacing_survives_and_entry_crypto_arm_is_gone") {
+    repo :: root()
+    task_group :: fs.read_to_string(repo.join(E3003_HOME)).unwrap()
+    assert(task_group.contains("\\n Why: {{}}\\n Fix: {{}}"), "E3003 renderer must use Why/Fix spacing (one leading space): {task_group}")
+    items :: fs.read_to_string(repo.join("crates/jet-codegen/src/Codegen/Items.rs")).unwrap()
+    assert(!items.contains("handle the CryptoError") && !items.contains("unhandled cryptographic error"), "entry codegen must not retain the retired CryptoError-specific arm")
+}
+
+// Rust: tests/decimal_fast_path.rs:4
+DECIMAL_SOURCE :: `
+fn run() -> {
+    small_left :: Decimal("1.20")
+    small_right :: Decimal("2.30")
+    print(small_left + small_right)
+    print(small_right - small_left)
+    print(Decimal("-1.20") + Decimal("0.20"))
+    print(Decimal("9.5") * Decimal("2.0"))
+    equal_left :: Decimal("1.0")
+    equal_right :: Decimal("1.00")
+    print(equal_left == equal_right)
+    zero_left :: Decimal("0.00")
+    zero_right :: Decimal("-0.0")
+    print(zero_left == zero_right)
+    print(Decimal("12.00").div(Decimal("4.00")))
+    print(Decimal("1.00").div(Decimal("8.00")))
+    big :: Decimal("170141183460469231731687303715884105727")
+    print(big + Decimal("1"))
+    print(big * Decimal("2"))
+    print(Decimal("12345678901234567890123456789012345678901234567890.00"))
+    big_scale_left :: Decimal("12345678901234567890123456789012345678901234567890.00")
+    big_scale_right :: Decimal("12345678901234567890123456789012345678901234567890.0")
+    print(big_scale_left == big_scale_right)
+}
+`
+// Rust: tests/decimal_fast_path.rs:34
+#Test("decimal_small_and_big_paths_keep_exact_tier_behavior") {
+    tir_support.assert_tiers_agree("decimal_fast_path", DECIMAL_SOURCE, "3.50\n1.10\n-1.00\n19.0\ntrue\ntrue\n3\n0.125\n170141183460469231731687303715884105728\n340282366920938463463374607431768211454\n12345678901234567890123456789012345678901234567890.00\ntrue\n")
+}
+
+// Rust: tests/dom_runtime_parity.rs:60
+#Test("dom_runtime_ports_the_same_pipeline_stages_in_the_same_order") {
+    repo :: root()
+    ui :: fs.read_to_string(repo.join("crates/jet-codegen/src/Prelude/Ui.rs")).expect("read Ui.rs")
+    dom :: fs.read_to_string(repo.join("crates/jet-codegen/src/Prelude/DomRuntime.js")).expect("read DomRuntime.js")
+    rust_stages :: rust_backend_stage_order(ui)
+    assert(!rust_stages.is_empty(), "expected JetBackend to declare at least one stage")
+    js_exports :: js_export_order(dom)
+    expected :: rust_stages.iter().map(stage -> js_export_name(stage)).collect()
+    expected_set :: HashSet.from_iter(expected.iter())
+    actual :: js_exports.iter().filter(name -> expected_set.contains(name)).cloned().collect()
+    assert_eq(actual, expected, "DomRuntime.js must export exactly the JetBackend pipeline stages {expected}, in that order (Ui.rs is the source of truth) — found {actual} instead. Rename or reorder drift means DomRuntime.js is no longer a faithful port of Ui.rs.")
+}
+// Rust: tests/dom_runtime_parity.rs:99
+#Test("dom_runtime_default_mount_matches_ui_rs") {
+    repo :: root()
+    ui :: fs.read_to_string(repo.join("crates/jet-codegen/src/Prelude/Ui.rs")).expect("read Ui.rs")
+    dom :: fs.read_to_string(repo.join("crates/jet-codegen/src/Prelude/DomRuntime.js")).expect("read DomRuntime.js")
+    rust_cols :: number_after(ui, "pub const DEFAULT_MOUNT_COLS: f64 = ")
+    rust_rows :: number_after(ui, "pub const DEFAULT_MOUNT_ROWS: f64 = ")
+    js_cols :: number_after(dom, "export const DEFAULT_MOUNT_COLS = ")
+    js_rows :: number_after(dom, "export const DEFAULT_MOUNT_ROWS = ")
+    assert_eq(rust_cols, js_cols, "Ui.rs DEFAULT_MOUNT_COLS ({rust_cols}) drifted from DomRuntime.js ({js_cols})")
+    assert_eq(rust_rows, js_rows, "Ui.rs DEFAULT_MOUNT_ROWS ({rust_rows}) drifted from DomRuntime.js ({js_rows})")
+}
+
+// Rust: tests/duration_runtime.rs:6
+#Test("checked_duration_constructors_preserve_units_across_tiers") {
+    source :: `
+fn run() -> {
+    fractional :: Duration.seconds(1.5) ?? panic("fractional duration")
+    whole :: Duration.milliseconds(1500) ?? panic("whole duration")
+    exact :: Duration.nanoseconds(4611686018427387904) ?? panic("exact duration")
+    print(fractional.in(.Milliseconds) ?? panic("fractional read"))
+    print(whole.in(.Seconds) ?? panic("whole read"))
+    print(exact.in(.Nanoseconds) ?? panic("exact read"))
+    _overflow :: Duration.hours(9223372036854775807) ?? {
+        print("overflow")
+        return
+    }
+    print("unexpected duration")
+}
+`
+    tir_support.assert_tiers_agree("duration_checked_constructors", source, "1500\n1\n4611686018427387904\noverflow\n")
+}
+// Rust: tests/duration_runtime.rs:30
+#Test("retired_duration_aliases_are_not_callable") {
+    loop source in ["use core.time as time\nfn run() -> {{ _ :: time.seconds(1) }}", "fn run() -> {{ d :: Duration.seconds(1) ?? panic(\"duration\")\n_ :: d.millis() }}"] {
+        assert(compile(source).is_err(), "retired duration alias compiled: {source}")
+    }
+}
+// Rust: tests/duration_runtime.rs:43
+#Test("local_duration_binding_shadows_builtin_without_reaching_codegen") {
+    source :: "fn run() -> {{\nDuration :: 1\n_ :: Duration.seconds(1)\n}}"
+    diagnostics :: compile(source).expect_err("shadowed Duration should fail in sema")
+    rendered :: render_diagnostics("shadow.jet", source, diagnostics)
+    assert(rendered.contains("[E0311]"), rendered)
+}
+// Rust: tests/duration_runtime.rs:54
+#Test("formatter_preserves_duration_unit_calls") {
+    source :: "fn run()->{{d::Duration.seconds(1)??panic(\"duration\")\nprint(d.in(.Milliseconds)??panic(\"read\"))}}"
+    once :: format_source(source).expect("duration source should format")
+    twice :: format_source(once).expect("formatted duration source should parse")
+    assert_eq(once, twice)
+    assert(once.contains("Duration.seconds(1)"))
+    assert(once.contains("d.in(.Milliseconds)"))
+}
+
+// Rust: tests/encoding_corpus.rs:133
+#Test("every_encoding_corpus_manifest_verifies_before_use") {
+    manifests := 0
+    loop entry in fs.read_dir(fixtures_encoding()).unwrap().flatten() {
+        path :: entry.path()
+        if path.join("MANIFEST.tsv").is_file() { manifests += verify_manifest(path); continue }
+        if path.is_dir() {
+            loop nested in fs.read_dir(path).unwrap().flatten() {
+                nested_path :: nested.path()
+                if nested_path.join("MANIFEST.tsv").is_file() { manifests += verify_manifest(nested_path) }
+            }
+        }
+    }
+    assert(manifests >= 14, "expected every encoding corpus manifest row to verify; got {manifests}")
+}
+// Rust: tests/encoding_corpus.rs:158
+#Test("rfc4648_vectors_decode_with_strict_2027_surface") {
+    _ :: verify_manifest(fixtures_encoding().join("rfc4648"))
+    corpus :: fs.read_to_string(fixtures_encoding().join("rfc4648/vectors.tsv")).unwrap()
+    loop line in corpus.lines().filter(line -> !line.starts_with('#') && !line.is_empty()) {
+        fields :: line.split('\t').collect()
+        assert_eq(fields.len(), 4, "bad RFC 4648 row: {line}")
+        (plain_text, base64, base64url, base32) :: (fields[0], fields[1], fields[2], fields[3])
+        plain := [U8]{}
+        if plain_text.strip_prefix("HEX:") == .Val(hex) {
+            loop index in (0..hex.len()).step_by(2) { plain.push(U8.from_str_radix(hex.slice(index, index + 2), 16).unwrap()) }
+        } else { plain = plain_text.as_bytes().to_list() }
+        assert_eq(base_encoding_2026.decode_base64(base64).unwrap(), plain)
+        assert_eq(base_encoding_2026.decode_base64url(base64url).unwrap(), plain)
+        assert_eq(base_encoding_2026.decode_base32(base32).unwrap(), plain)
+    }
+}
+// Rust: tests/encoding_corpus.rs:186
+#Test("rfc4180_cases_parse_through_csv_whole_value_api") {
+    _ :: common.have_rustc()
+    _ :: verify_manifest(fixtures_encoding().join("rfc4180"))
+    corpus :: fs.read_to_string(fixtures_encoding().join("rfc4180/cases.tsv")).unwrap()
+    dir :: common.unique_tmp("jet_enc_rfc4180")
+    fs.create_dir_all(dir).unwrap()
+    checks := ""
+    loop (index, line) in corpus.lines().filter(line -> !line.starts_with('#') && !line.is_empty()).enumerate() {
+        (csv, _) :: line.split_once('\t').unwrap()
+        escaped :: jet_string_literal(csv)
+        checks.push_str("    rows{index} := csv.parse({escaped}) ?? panic(\"parse\")\n    print(rows{index}.len() > 0)\n")
+    }
+    source :: "use core.encoding.csv as csv\n\nfn run() -> {{\n{checks}}}\n"
+    (code, stdout, stderr) :: build_and_run(dir, "rfc4180", source, [], None)
+    assert_eq(code, 0, "RFC 4180 corpus failed: {stderr}")
+    loop line in stdout.lines() { assert_eq(line, "true", "RFC 4180 row mismatch: {stdout}") }
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/encoding_corpus.rs:214
+#Test("rfc8259_accept_cases_parse_through_json_whole_value_api") {
+    _ :: common.have_rustc()
+    _ :: verify_manifest(fixtures_encoding().join("rfc8259"))
+    corpus :: fs.read_to_string(fixtures_encoding().join("rfc8259/accept.tsv")).unwrap()
+    dir :: common.unique_tmp("jet_enc_rfc8259")
+    fs.create_dir_all(dir).unwrap()
+    checks := ""
+    loop (index, line) in corpus.lines().filter(line -> !line.starts_with('#') && !line.is_empty()).enumerate() {
+        json := line.trim() // #4303
+        escaped :: jet_json_literal(json)
+        checks.push_str("    parsed{index} := json.parse({escaped}) ?? panic(\"parse\")\n    print(true)\n")
+    }
+    source :: "use core.encoding.json as json\n\nfn run() -> {{\n{checks}}}\n"
+    (code, stdout, stderr) :: build_and_run(dir, "rfc8259", source, [], None)
+    assert_eq(code, 0, "RFC 8259 corpus failed: {stderr}")
+    case_count :: corpus.lines().filter(line -> !line.starts_with('#') && !line.is_empty()).count()
+    assert_eq(stdout.matches("true\n").count(), case_count, stdout)
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/encoding_corpus.rs:244
+#Test("exact_typed_json_numbers") {
+    _ :: common.have_rustc()
+    dir :: common.unique_tmp("jet_enc_exact_json_numbers")
+    fs.create_dir_all(dir).unwrap()
+    source :: `
+use core.encoding.json as json
+use core.data as data
+#Codable
+struct ExactNumbers {
+    amount: Decimal
+    exponent: Decimal
+    whole: Decimal
+    tenth: Decimal
+    tenth_with_zero: Decimal
+    scientific_tenth: Decimal
+    adjacent_lo: Int
+    adjacent_hi: Int
+    large: Int
+    large_exp: Int
+}
+#Codable
+struct SmallI64 { value: I64 }
+#Codable
+struct ExactIntRow { adjacent_hi: Int, large: Int }
+LIMITED_TEXT :: prep { "1{"0".repeat(1000000)}" }
+fn run() -> {
+    raw :: "{{\"amount\":12.340,\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":9007199254740992,\"adjacent_hi\":9007199254740993,\"large\":12345678901234567890123456789012345678901234567890,\"large_exp\":1e30}}"
+    value :: json.decode<ExactNumbers>(raw) ?? panic("whole decode")
+    print(value.amount.to_string())
+    print(value.exponent.to_string())
+    print(value.whole.to_string())
+    print(value.tenth.to_string())
+    print(value.tenth_with_zero.to_string())
+    print(value.scientific_tenth.to_string())
+    print(value.adjacent_lo.to_string())
+    print(value.adjacent_hi.to_string())
+    print(value.large.to_string())
+    print(value.large_exp.to_string())
+    stream_raw :: "{{\"adjacent_hi\":9007199254740993,\"large\":12345678901234567890123456789012345678901234567890}}"
+    rows :: data.json<ExactIntRow>("[{stream_raw}]") ?? panic("stream decode")
+    loop row in rows { print(row.adjacent_hi.to_string()); print(row.large.to_string()) }
+    overflow :: json.decode<SmallI64>("{{\"value\":9223372036854775808}}")
+    if overflow == { .Err(_) -> { print("i64-overflow") } else -> { print("accepted") } }
+    print(json.decode<U64>("18446744073709551615") ?? panic("u64 maximum"))
+    if json.decode<U64>("18446744073709551616") == { .Err(_) -> print("u64-overflow") else -> print("accepted") }
+    if json.decode<U64>("-1") == { .Err(_) -> print("u64-negative") else -> print("accepted") }
+    if json.decode<Int>("\"123\"") == { .Err(_) -> print("quoted-int") else -> print("accepted") }
+    nonfinite :: json.decode<Float>("1e400")
+    if nonfinite == { .Err(_) -> { print("nonfinite") } else -> { print("accepted") } }
+    invalid_nan :: json.decode<Decimal>("NaN")
+    if invalid_nan == { .Err(_) -> { print("nan-rejected") } else -> { print("accepted") } }
+    invalid_infinity :: json.decode<Decimal>("Infinity")
+    if invalid_infinity == { .Err(_) -> { print("infinity-rejected") } else -> { print("accepted") } }
+    fractional_integer :: json.decode<Int>("1.5")
+    if fractional_integer == { .Err(_) -> { print("fractional-rejected") } else -> { print("accepted") } }
+    exponent_limited :: json.decode<Decimal>("1e1000001")
+    if exponent_limited == { .Err(_) -> { print("exponent-limit") } else -> { print("accepted") } }
+    mismatch_raw :: "{{\"amount\":\"12.340\",\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":1,\"adjacent_hi\":1,\"large\":1,\"large_exp\":1}}"
+    mismatch :: json.decode<ExactNumbers>(mismatch_raw)
+    if mismatch == { .Err(_) -> { print("mismatch") } else -> { print("accepted") } }
+    stream_mismatch :: data.json<ExactNumbers>("[{mismatch_raw}]")
+    if stream_mismatch == { .Err(_) -> { print("stream-mismatch") } else -> { print("accepted") } }
+    string_mismatch :: json.decode<String>("123")
+    if string_mismatch == { .Err(_) -> { print("string-mismatch") } else -> { print("accepted") } }
+    limited :: json.decode<Decimal>(@limited_text)
+    if limited == { .Err(_) -> { print("limit") } else -> { print("accepted") } }
+}
+`
+    (code, stdout, stderr) :: build_and_run(dir, "exact_typed_json_numbers", source, [], None)
+    assert_eq(code, 0, "exact JSON fixture failed: {stderr}")
+    assert_eq(stdout, "12.340\n0.00001\n100\n0.1\n0.10\n0.1\n9007199254740992\n9007199254740993\n12345678901234567890123456789012345678901234567890\n1000000000000000000000000000000\n9007199254740993\n12345678901234567890123456789012345678901234567890\ni64-overflow\n18446744073709551615\nu64-overflow\nu64-negative\nquoted-int\nnonfinite\nnan-rejected\ninfinity-rejected\nfractional-rejected\nexponent-limit\nmismatch\nstream-mismatch\nstring-mismatch\nlimit\n")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/encoding_corpus.rs:387
+#Test("rfc8949_wire_cases_match_cbor_parse_expectations") {
+    _ :: common.have_rustc()
+    _ :: verify_manifest(fixtures_encoding().join("rfc8949"))
+    corpus :: fs.read_to_string(fixtures_encoding().join("rfc8949/wire.tsv")).unwrap()
+    dir :: common.unique_tmp("jet_enc_rfc8949")
+    fs.create_dir_all(dir).unwrap()
+    checks := ""
+    loop (index, line) in corpus.lines().filter(line -> !line.starts_with('#') && !line.is_empty()).enumerate() {
+        (wire_hex, accept) :: line.split_once('\t').unwrap()
+        bytes :: (0..wire_hex.len()).step_by(2).map(index -> U8.from_str_radix(wire_hex.slice(index, index + 2), 16).unwrap()).collect()
+        literal :: bytes.iter().map(byte -> byte.to_string()).collect().join(", ")
+        if accept == "true" { checks.push_str("    cbor{index} := cbor.parse([{literal}]) ?? panic(\"appendix A accept {wire_hex}\")\n    print(true)\n") }
+        else { checks.push_str("    if cbor.parse([{literal}]) == {{\n        .Ok(_) -> print(false)\n        .Err(_) -> print(true)\n    }}\n") }
+    }
+    source :: "use core.encoding.cbor as cbor\n\nfn run() -> {{\n{checks}}}\n"
+    (code, stdout, stderr) :: build_and_run(dir, "rfc8949", source, [], None)
+    assert_eq(code, 0, "RFC 8949 corpus failed: {stderr}")
+    loop line in stdout.lines() { assert_eq(line, "true", "RFC 8949 row mismatch: {stdout}") }
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/encoding_corpus.rs:429
+#Test("w3c_c14n_inclusive11_vector_matches_xml_canonical_output") {
+    _ :: common.have_rustc()
+    corpus_root :: fixtures_encoding().join("xml/w3c-c14n")
+    _ :: verify_manifest(corpus_root)
+    input :: fs.read_to_string(corpus_root.join("inclusive11-input.xml")).unwrap()
+    expected :: fs.read_to_string(corpus_root.join("inclusive11-output.txt")).unwrap()
+    dir :: common.unique_tmp("jet_enc_xml_c14n")
+    fs.create_dir_all(dir).unwrap()
+    input_path :: dir.join("inclusive11-input.xml")
+    fs.write(input_path, input).unwrap()
+    shown :: input_path.to_string_lossy().replace("\\", "\\\\")
+    source :: `
+use core.encoding.xml as xml
+use core.files as files
+fn run() -> {
+    text := files.read("__PATH__") ?? panic("read")
+    tree := xml.parse(text) ?? panic("parse")
+    options := xml.XMLCanonical{mode: .Inclusive11, comments: false, inclusive_prefixes: []}
+    print(xml.canonical(tree, options) ?? panic("canonical"))
+}
+`.replace("__PATH__", shown)
+    (code, stdout, stderr) :: build_and_run(dir, "xml_c14n", source, [], None)
+    assert_eq(code, 0, "W3C C14N corpus failed: {stderr}")
+    assert_eq(stdout.trim(), expected.trim(), "C14N byte mismatch")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/encoding_corpus.rs:460
+#Test("local_cbor_hostile_oracle_case_count_is_pinned") {
+    corpus_root :: fixtures_encoding().join("local/cbor-hostile")
+    _ :: verify_manifest(corpus_root)
+    count_text :: fs.read_to_string(corpus_root.join("case-count.txt")).unwrap()
+    trimmed := count_text.trim() // #4303
+    count :: trimmed.parse<USize>().unwrap()
+    assert_eq(count, 40, "local CBOR hostile oracle case count drifted")
+}

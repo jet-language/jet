@@ -1,0 +1,25 @@
+use core.files as files
+use std.fs as fs
+
+// Rust: crates/jet-codegen/src/Prelude/Core/FileHandleOwners.rs:19,30,36 (behavioral controls; no inline tests)
+#Test("temporary file cleanup waits for last shared owner") {
+    owner :: files.temp_file("jet-0141-owner").unwrap()
+    path :: OSPath.from(owner.path)
+    copy :: owner.clone()
+    drop(^owner)
+    // GATE #4565: kernel primitive — observe the actual native path, not a mock.
+    #Unsafe("metadata checks observe real temporary-file lifetime") {
+        assert(fs.symlink_metadata(path) is Ok(_))
+        drop(^copy)
+        assert(fs.symlink_metadata(path) is Err(_))
+    }
+}
+#Test("temporary directory removes descendants on final cleanup") {
+    owner :: files.temp_dir("jet-0141-owner").unwrap()
+    path :: OSPath.from(owner.path)
+    #Unsafe("fixture writes only inside its exclusively owned temporary directory") {
+        fs.write(path.join("child"), [U8{1}]).unwrap()
+        drop(^owner)
+        assert(fs.symlink_metadata(path) is Err(_))
+    }
+}

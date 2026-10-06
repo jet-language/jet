@@ -710,9 +710,9 @@ fn sema_call_http_core_string(value: String, span: Span) -> TExpr Never! {
     sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: value}}}, span)
 }
 
-fn sema_call_http_core_unwrap_result(value: TExpr, payload: Type, message: String, span: Span, environment: SemaScopeEnvironment) -> TExpr Never! {
+fn sema_call_http_core_unwrap_result(value: TExpr, payload: Type, message: String, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> TExpr Never! {
     text := sema_call_http_core_string(message, span)
-    sema_tir_expr(payload, TExprKind.OrFallback{value: value, fallback: TOrFallback.Panic{message: text, location: sema_expression_panic_location(environment, span)}, ambient_err: None}, span)
+    sema_tir_expr(payload, TExprKind.OrFallback{value: value, fallback: TOrFallback.Panic{message: text, location: sema_expression_panic_location(environment, scopes, span)}, ambient_err: None}, span)
 }
 
 fn sema_call_http_form_text(value: String, span: Span) -> Expr Never! {
@@ -877,7 +877,7 @@ fn sema_call_http_web_form(record: CoreCallRecord, args: [CallArg], type_args: [
     input_fallibility := sema_call_failure_carrier(Val(input_result))
     if !sema_call_core_record_effects(input_record, span, [Type]{}, input_result, input_fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     input_call :: sema_call_core_tir(input_record, input_values, span, [Type]{}, [Bool]{false, false}, None, input_result, input_fallibility, None, environment, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    input := sema_call_http_core_unwrap_result(input_call, Type.Named{name: "WebFormInput"}, "web.form could not construct its derived input", span, environment)
+    input := sema_call_http_core_unwrap_result(input_call, Type.Named{name: "WebFormInput"}, "web.form could not construct its derived input", span, environment, scopes)
 
     typed_record :: sema_call_core_record("core.web.forms", "typed", 2, span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     typed_signature :: core_call_typed_signature("core.web.forms", "typed", 2) ?? {
@@ -894,7 +894,7 @@ fn sema_call_http_web_form(record: CoreCallRecord, args: [CallArg], type_args: [
     typed_fallibility := sema_call_failure_carrier(Val(typed_result))
     if !sema_call_core_record_effects(typed_record, span, [Type]{}, typed_result, typed_fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     typed_call :: sema_call_core_tir(typed_record, [TExpr]{input, sema_call_http_core_string(action_name, span)}, span, [Type]{}, [Bool]{false, false}, None, typed_result, typed_fallibility, None, environment, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    result := sema_call_http_core_unwrap_result(typed_call, Type.Named{name: "WebFormTyped"}, "web.form could not register its typed action", span, environment)
+    result := sema_call_http_core_unwrap_result(typed_call, Type.Named{name: "WebFormTyped"}, "web.form could not register its typed action", span, environment, scopes)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(result, expected, environment, &diagnostics)}
 }
 

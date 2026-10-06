@@ -1,0 +1,63 @@
+use core.term.runtime.term.[JetTermRead, JetTermSecretError, JetTermSecretErrorKind, JetTermSecretErrorOperation, jet_term_secret_error_projection, jet_term_secret_preflight, jet_term_print_frame, jet_term_trim_line, jet_term_progress_frame, jet_term_progress_finish, jet_term_style, jet_term_style_force, jet_term_set_color_mode, jet_term_style_enabled, jet_term_confirm_with_io, jet_term_choose_with_io, jet_term_width, jet_term_height]
+use core.sys.target
+
+// Rust: crates/jet-codegen/src/Prelude/Term.rs:42
+#Test("terminal_secret_error_projection_preserves_kind_resource_operation") {
+    closed :: jet_term_secret_error_projection(&JetTermSecretError.NonTerminal)
+    assert(closed.kind == JetTermSecretErrorKind.InvalidInput && closed.operation == JetTermSecretErrorOperation.Read && closed.resource == "stdin")
+    flush :: jet_term_secret_error_projection(&JetTermSecretError.Flush("failed"))
+    assert(flush.kind == JetTermSecretErrorKind.Other && flush.operation == JetTermSecretErrorOperation.Flush && flush.resource == "stdout")
+    assert(jet_term_secret_preflight(true, true) == Ok(()))
+    assert(jet_term_secret_preflight(false, true) == Err(JetTermSecretError.NonTerminal))
+    assert(JetTermSecretError.Read("actual").message() == "actual")
+}
+// Rust: crates/jet-codegen/src/Prelude/Term.rs:184,451,457
+#Test("terminal_framing_trimming_style_and_color_override_precedence") {
+    assert(jet_term_print_frame("hello\n") == "hello\n\n")
+    line := "x\r\n\r\n"
+    jet_term_trim_line(&line)
+    assert(line == "x")
+    assert(jet_term_progress_frame(true, "x") == "\rx" && jet_term_progress_frame(false, "x") == "x\n")
+    assert(jet_term_progress_finish(true) == "\n" && jet_term_progress_finish(false) == "")
+    assert(jet_term_style_force("red", "x") == "\x1b[31mx\x1b[0m")
+    assert(jet_term_style_force("unknown", "x") == "x" && jet_term_style("red", "x", false) == "x")
+    jet_term_set_color_mode("always")
+    assert(jet_term_style_enabled(true, false, false))
+    jet_term_set_color_mode("never")
+    assert(!jet_term_style_enabled(false, true, true))
+    jet_term_set_color_mode("auto")
+    assert(!jet_term_style_enabled(true, true, true) && jet_term_style_enabled(false, true, false))
+    assert(jet_term_width(fn(key) { if key == "COLUMNS" { Val("101") } else { None } }) == 101)
+    assert(jet_term_height(fn(key) { if key == "LINES" { Val("37") } else { None } }) == 37)
+}
+// Rust: crates/jet-codegen/src/Prelude/Term.rs:373
+#Test("terminal_confirmation_closed_stream_and_failed_write_do_not_reprompt") {
+    reads := 0
+    assert(!jet_term_confirm_with_io("Continue", fn(text) -> () Err! { assert(text == "Continue [y/N] "); Ok(()) }, fn() -> JetTermRead Err! { reads += 1; Ok(JetTermRead.EndOfInput) }))
+    assert(reads == 1)
+    assert(!jet_term_confirm_with_io("Continue", fn(text) -> () Err! { Err("write failed") }, fn() -> JetTermRead Err! { reads += 1; Ok(JetTermRead.Line("yes")) }))
+    assert(reads == 1)
+    assert(jet_term_confirm_with_io("Continue", fn(text) -> () Err! { Ok(()) }, fn() -> JetTermRead Err! { Ok(JetTermRead.Line(" YES ")) }))
+}
+// Rust: crates/jet-codegen/src/Prelude/Term.rs:424
+#Test("terminal_choose_exact_retry_budget_eof_and_one_based_selection") {
+    reads := 0
+    invalids := 0
+    result :: jet_term_choose_with_io("Choose", &["a", "b"], fn(text) -> () Err! { if text.starts_with("Enter") { invalids += 1 }; Ok(()) }, fn() -> JetTermRead Err! { reads += 1; Ok(JetTermRead.Line("0")) }, fn(message) { message.clone() })
+    assert(result == Err("no valid choice after 10 retries") && reads == 11 && invalids == 11)
+    reads = 0
+    result :: jet_term_choose_with_io("Choose", &["a"], fn(text) -> () Err! { Ok(()) }, fn() -> JetTermRead Err! { reads += 1; Ok(JetTermRead.EndOfInput) }, fn(message) { message.clone() })
+    assert(result == Err("the input stream closed before a choice arrived") && reads == 1)
+    assert(jet_term_choose_with_io("Choose", &["a", "b"], fn(text) -> () Err! { Ok(()) }, fn() -> JetTermRead Err! { Ok(JetTermRead.Line(" 2 ")) }, fn(message) { message.clone() }) == Ok("b"))
+}
+// Rust: crates/jet-codegen/src/Prelude/Term.rs:608,738
+prep if target.selected_os() == .Linux || target.selected_os() == .Android || target.selected_os() == .MacOS || target.selected_os() == .IOS || target.selected_os() == .FreeBSD || target.selected_os() == .OpenBSD || target.selected_os() == .NetBSD {
+    use core.term.runtime.term.[jet_term_layout_fingerprint, jet_term_configure_fd]
+    #Test("terminal_selected_layout_fingerprint_and_real_invalid_fd") {
+        fp :: jet_term_layout_fingerprint()
+        expected :: if target.selected_os() == .Linux { 60 } else if target.selected_os() == .Android { 36 } else if target.selected_os() == .MacOS || target.selected_os() == .IOS { 72 } else { 44 }
+        assert(fp[0] == expected && fp[3] == 0 && fp[15] == 8 && fp[19] == fp[11])
+        if target.selected_os() == .Android { assert(fp[9] == Usize.MAX && fp[10] == Usize.MAX && fp[18] == Usize.MAX) }
+        assert(jet_term_configure_fd(-1, false).is_err())
+    }
+}

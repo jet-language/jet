@@ -43,13 +43,13 @@ pub(crate) struct GenericArgInference {
 fn generic_bound_failure(checker: &Checker<'_>, ty: &Type, bound: &str, span: Span) -> Diagnostic {
     if let Type::Named(name) = ty {
         if checker.type_param_scope.iter().any(|param| param.name == *name) {
-            return Diagnostic::error(
+            let why = format!(
+                "type parameter `{name}` doesn't declare the `{bound}` bound, so a caller may choose a type without it"
+            );
+            let fix = format!("declare the bound where `{name}` is introduced: `<{name}: {bound}>`");
+            return Diagnostic::from_row(
                 "E0905",
-                format!("`{name}` isn't `{bound}`"),
-                format!(
-                    "type parameter `{name}` doesn't declare the `{bound}` bound, so a caller may choose a type without it"
-                ),
-                format!("declare the bound where `{name}` is introduced: `<{name}: {bound}>`"),
+                &[("type", name), ("bound", bound), ("why", &why), ("fix", &fix)],
                 Some(span),
             );
         }
@@ -1548,7 +1548,10 @@ impl<'a> Checker<'a> {
             return Some(None);
         }
 
-        if call.name == Syntax::BUILTIN_ASSERT_EQ {
+        if call.name == Syntax::BUILTIN_ASSERT_EQ
+            && self.funcs.get(Syntax::BUILTIN_ASSERT_EQ).is_none()
+            && self.lookup(Syntax::BUILTIN_ASSERT_EQ).is_none()
+        {
             self.check_assert_eq_call(call);
             return Some(None);
         }
@@ -2237,9 +2240,12 @@ impl<'a> Checker<'a> {
             } else {
                 for (param, actual) in fn_type_params.iter().zip(&call.type_args) {
                     let actual = self.resolve_type(actual.clone());
-                    // D-CALLBACK-ERR1=A: `Never` fills a failure-domain
-                    // parameter (`apply<Never>(plain)`).
-                    if !actual.is_never() {
+                    // D-CALLBACK-ERR1=A: `Never` fills only a failure-domain
+                    // parameter (`apply<Never>(plain)`); elsewhere it is a
+                    // value position (D-NEVER2=B, E2422).
+                    if !actual.is_never()
+                        || !crate::Sema::CheckerCore::sig_names_failure_domain(&sig, &param.name)
+                    {
                         self.check_declared_type(&actual, call.name_span);
                     }
                     for bound in &param.bounds {
@@ -2386,7 +2392,7 @@ impl<'a> Checker<'a> {
                     // D-SG9/D-TYPE2-DEFAULT1: let a numeric literal argument adopt the
                     // parameter's carrier or width and be checked at the literal.
                     self.expected_type = Some(param_ty.clone());
-                } else if matches!(param_ty, Type::Named(_) | Type::Option(_) | Type::Result { .. }) {
+                } else if matches!(param_ty, Type::Named(_) | Type::Option(_) | Type::Result { .. } | Type::Tuple(_)) {
                     // D-ENUMDOT2=A: named/optional type so `.Variant` can
                     // resolve from context. D-FAIL-CARRIER1=A: a `T !E`
                     // parameter is the carrier itself; without this slot

@@ -1,0 +1,113 @@
+// Prelude/Core/Time.rs:1–483 independent scalar policy; not full carrier cutover.
+use core.time.runtime.kernel_civil as civil_kernel
+
+fn civil_date(y: I64, m: I64, d: I64) -> civil_kernel.CivilDate Never! { civil_kernel.CivilDate.new(y, m, d) }
+fn civil_time(h: I64, m: I64, s: I64) -> civil_kernel.CivilTime Never! { civil_kernel.CivilTime.new(h, m, s) }
+
+#Test("civil constructor clamps month before day; leap rules include negative years") {
+    assert(civil_kernel.CivilDate.is_leap(I64{0}))
+    assert(civil_kernel.CivilDate.is_leap(I64{-400}))
+    assert(!civil_kernel.CivilDate.is_leap(I64{-100}))
+    assert(!civil_kernel.CivilDate.is_leap(I64{1900}))
+    assert(civil_kernel.CivilDate.is_leap(I64{2000}))
+    assert_eq(civil_kernel.CivilDate.days_in_month_of(I64{2024}, I64{99}), I64{30})
+    assert(civil_date(I64{2024}, I64{0}, I64{99}) == civil_date(I64{2024}, I64{1}, I64{31}))
+    assert(civil_date(I64{2023}, I64{2}, I64{29}) == civil_date(I64{2023}, I64{2}, I64{28}))
+    assert(civil_date(I64{2024}, I64{99}, I64{0}) == civil_date(I64{2024}, I64{12}, I64{1}))
+}
+
+#Test("civil epoch and negative Gregorian day numbers round trip") {
+    assert_eq(civil_date(I64{1}, I64{1}, I64{1}).to_day_number(), I64{0})
+    assert_eq(civil_date(I64{0}, I64{1}, I64{1}).to_day_number(), I64{-366})
+    assert_eq(civil_date(I64{-1}, I64{1}, I64{1}).to_day_number(), I64{-731})
+    assert_eq(civil_date(I64{1970}, I64{1}, I64{1}).to_day_number(), I64{719162})
+    n := I64{-1461}
+    loop n <= (I64{1461}) {
+        date :: civil_kernel.CivilDate.from_day_number(n)
+        assert_eq(date.to_day_number(), n)
+        n += I64{1}
+    }
+    y := I64{-400}
+    loop y <= (I64{400}) {
+        date :: civil_date(y, I64{3}, I64{1})
+        assert(civil_kernel.CivilDate.from_day_number(date.to_day_number()) == date)
+        y += I64{1}
+    }
+}
+
+// tests/comptime_core_pure_parity.rs:17–20 civil portion, same expected values.
+#Test("civil leap day arithmetic and calendar properties") {
+    d :: civil_date(I64{2024}, I64{2}, I64{29})
+    assert_eq(d.weekday(), I64{4})
+    assert_eq(d.iso_weekday(), I64{4})
+    assert_eq(d.day_of_year(), I64{60})
+    assert_eq(d.iso_week(), I64{9})
+    assert_eq(d.quarter_of_year(), I64{1})
+    assert(d.is_leap_year())
+    assert_eq(d.days_in_month(), I64{29})
+    assert(d.add_days(I64{1}) == civil_date(I64{2024}, I64{3}, I64{1}))
+    assert(d.add_months(I64{12}) == civil_date(I64{2025}, I64{2}, I64{28}))
+    assert_eq(d.diff_days(civil_date(I64{2024}, I64{2}, I64{1})), I64{28})
+    assert(d.add_period(I64{0}, I64{1}, I64{2}) == civil_date(I64{2024}, I64{3}, I64{31}))
+    assert(d.truncate("month") == civil_date(I64{2024}, I64{2}, I64{1}))
+    assert(d.truncate("year") == civil_date(I64{2024}, I64{1}, I64{1}))
+    assert(d.truncate("unknown") == d)
+    assert(d.replace(I64{2023}, I64{2}, I64{29}) == civil_date(I64{2023}, I64{2}, I64{28}))
+    assert(civil_date(I64{0}, I64{1}, I64{31}).add_months(I64{-1}) == civil_date(I64{-1}, I64{12}, I64{31}))
+    assert(d.subtract_period(I64{0}, I64{1}, I64{2}) == civil_date(I64{2024}, I64{1}, I64{27}))
+}
+
+#Test("civil ISO week-year boundaries reject unavailable week 53 and round trip negative years") {
+    d :: civil_date(I64{2021}, I64{1}, I64{1})
+    assert_eq(d.iso_week_year(), I64{2020})
+    assert_eq(d.iso_week(), I64{53})
+    assert((civil_kernel.CivilDate.from_iso_week(I64{2020}, I64{53}, I64{5}) ?? panic("valid ISO week")) == d)
+    assert(civil_kernel.CivilDate.from_iso_week(I64{2021}, I64{53}, I64{1}) == None)
+    assert(civil_kernel.CivilDate.from_iso_week(I64{2024}, I64{0}, I64{1}) == None)
+    assert(civil_kernel.CivilDate.from_iso_week(I64{2024}, I64{1}, I64{8}) == None)
+    n := I64{-731}
+    loop n <= (I64{366}) {
+        date :: civil_kernel.CivilDate.from_day_number(n)
+        inverse :: civil_kernel.CivilDate.from_iso_week(date.iso_week_year(), date.iso_week(), date.iso_weekday()) ?? panic("ISO inverse")
+        assert(date == inverse)
+        n += I64{1}
+    }
+}
+
+#Test("civil controlled wall origin uses floor division before Unix epoch") {
+    assert(civil_kernel.CivilDate.today_from_millis(I64{0}) == civil_date(I64{1970}, I64{1}, I64{1}))
+    assert(civil_kernel.CivilDate.today_from_millis(I64{-1}) == civil_date(I64{1969}, I64{12}, I64{31}))
+    assert(civil_kernel.CivilDate.today_from_millis(I64{86400000}) == civil_date(I64{1970}, I64{1}, I64{2}))
+}
+
+#Test("civil local time clamps fields and preserves nanosecond scales") {
+    t :: civil_kernel.CivilTime.with_nanosecond(I64{24}, I64{-1}, I64{60}, U32{4294967295})
+    assert_eq(t.hour, I64{23})
+    assert_eq(t.minute, I64{0})
+    assert_eq(t.second, I64{59})
+    assert_eq(t.nanos, U32{999999999})
+    assert_eq(t.millisecond(), I64{999})
+    assert_eq(t.microsecond(), I64{999999})
+    assert_eq(t.nanosecond(), I64{999999999})
+    assert_eq(t.to_seconds(), I64{82859})
+    midnight :: civil_time(I64{0}, I64{0}, I64{0})
+    last :: civil_kernel.CivilTime.with_nanosecond(I64{23}, I64{59}, I64{59}, U32{999999999})
+    assert_eq(last.difference_ns(midnight), I64{86399999999999})
+    assert_eq(midnight.difference_ns(last), I64{-86399999999999})
+}
+
+// Time.rs:4/:303 derived Ord, consumed by Date/LocalTime compare_value.
+#Test("civil derived ordering is lexicographic in declaration field order") {
+    assert(civil_date(I64{-1}, I64{12}, I64{31}) < civil_date(I64{0}, I64{1}, I64{1}))
+    assert(civil_date(I64{2024}, I64{1}, I64{31}) < civil_date(I64{2024}, I64{2}, I64{1}))
+    assert(civil_date(I64{2024}, I64{2}, I64{29}) > civil_date(I64{2024}, I64{2}, I64{28}))
+    assert(civil_date(I64{2024}, I64{2}, I64{29}) <= civil_date(I64{2024}, I64{2}, I64{29}))
+    assert(!(civil_date(I64{2025}, I64{1}, I64{1}) < civil_date(I64{2024}, I64{12}, I64{31})))
+    assert(civil_time(I64{9}, I64{59}, I64{59}) < civil_time(I64{10}, I64{0}, I64{0}))
+    assert(civil_time(I64{10}, I64{0}, I64{59}) < civil_time(I64{10}, I64{1}, I64{0}))
+    earlier :: civil_kernel.CivilTime.with_nanosecond(I64{10}, I64{0}, I64{0}, U32{999999999})
+    later :: civil_kernel.CivilTime.with_nanosecond(I64{10}, I64{0}, I64{1}, U32{0})
+    assert(earlier < later)
+    assert(civil_kernel.CivilTime.with_nanosecond(I64{10}, I64{0}, I64{0}, U32{1}) > civil_time(I64{10}, I64{0}, I64{0}))
+    assert(earlier >= earlier)
+}

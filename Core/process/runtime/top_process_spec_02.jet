@@ -1,0 +1,691 @@
+// PORT-PENDING 0155 crates-jet-codegen-src-prelude-core-processargs-module-group: crates/jet-jit/src/ProcessPrelude.rs:1-687
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS pub(crate) mod process_prelude {
+//RS     use std::ffi::{OsStr, OsString};
+//RS 
+//RS     #[cfg(unix)]
+//RS     use jet_codegen::scheduler::{
+//RS         jet_scheduler_raw_io_handle, jet_scheduler_raw_io_set_nonblocking,
+//RS         jet_scheduler_raw_io_write_wait,
+//RS     };
+//RS     use jet_codegen::interrupt_runtime::{
+//RS         jet_process_signal_error, jet_process_signal_register,
+//RS     };
+//RS     use jet_codegen::scheduler::{
+//RS         jet_scheduler_current_task_control, jet_scheduler_root_task_control,
+//RS         jet_scheduler_shielded, jet_scheduler_wait_without_unwind, jet_task_deliver_cancel,
+//RS         JetSchedulerWait,
+//RS     };
+//RS     use jet_foundation::Outcome::{jet_outcome_of, JetAbsent, JetOutcome};
+//RS 
+//RS     mod terminal_default {
+//RS         include!("../../jet-codegen/src/Prelude/TerminalDefault.rs");
+//RS     }
+//RS 
+//RS     mod jet_process_pty {
+//RS         pub use jet_codegen::process_pty::*;
+//RS     }
+//RS 
+//RS     pub(crate) mod jet_std {
+//RS         use super::{JetAbsent, JetOutcome};
+//RS 
+//RS         #[derive(Clone, Copy, Debug, PartialEq)]
+//RS         pub enum IOOperation {
+//RS             Read,
+//RS             Write,
+//RS             Flush,
+//RS             Connect,
+//RS             Accept,
+//RS             Close,
+//RS             Resolve,
+//RS             Codec,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub struct IOContext {
+//RS             pub operation: IOOperation,
+//RS             pub resource: JetOutcome<String, JetAbsent>,
+//RS             pub os_code: JetOutcome<i64, JetAbsent>,
+//RS             pub cause: JetOutcome<String, JetAbsent>,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Copy, Debug, PartialEq)]
+//RS         pub enum ProcessResourceLimit {
+//RS             WallTime,
+//RS             CpuTime,
+//RS             Memory,
+//RS             OpenFiles,
+//RS             Output,
+//RS         }
+//RS 
+//RS         impl IOContext {
+//RS             pub fn new(
+//RS                 operation: IOOperation,
+//RS                 resource: Option<String>,
+//RS                 os_code: Option<i64>,
+//RS                 cause: Option<String>,
+//RS             ) -> Self {
+//RS                 Self {
+//RS                     operation,
+//RS                     resource: super::jet_outcome_of(resource),
+//RS                     os_code: super::jet_outcome_of(os_code),
+//RS                     cause: super::jet_outcome_of(cause),
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub struct Stat {
+//RS             pub size: i64,
+//RS             pub modified_ms: i64,
+//RS             pub created_ms: i64,
+//RS             pub readonly: bool,
+//RS             pub is_file: bool,
+//RS             pub is_dir: bool,
+//RS             pub is_symlink: bool,
+//RS             pub kind: String,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub enum IOError {
+//RS             InvalidInput(IOContext),
+//RS             NotFound(IOContext),
+//RS             PermissionDenied(IOContext),
+//RS             TimedOut(IOContext),
+//RS             Cancelled(IOContext),
+//RS             Closed(IOContext),
+//RS             Protocol(IOContext),
+//RS             Other(IOContext),
+//RS             ResourceLimit(ProcessResourceLimit),
+//RS         }
+//RS 
+//RS         impl IOError {
+//RS             pub fn other(
+//RS                 operation: IOOperation,
+//RS                 resource: Option<String>,
+//RS                 cause: impl ToString,
+//RS             ) -> Self {
+//RS                 Self::Other(IOContext::new(
+//RS                     operation,
+//RS                     resource,
+//RS                     None,
+//RS                     Some(cause.to_string()),
+//RS                 ))
+//RS             }
+//RS         }
+//RS 
+//RS         pub fn io_error_at(operation: IOOperation, path: &str, error: std::io::Error) -> IOError {
+//RS             let context = IOContext::new(
+//RS                 operation,
+//RS                 Some(path.to_string()),
+//RS                 error.raw_os_error().map(i64::from),
+//RS                 Some(error.to_string()),
+//RS             );
+//RS             match error.kind() {
+//RS                 std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
+//RS                     IOError::InvalidInput(context)
+//RS                 }
+//RS                 std::io::ErrorKind::NotFound => IOError::NotFound(context),
+//RS                 std::io::ErrorKind::PermissionDenied => IOError::PermissionDenied(context),
+//RS                 std::io::ErrorKind::TimedOut => IOError::TimedOut(context),
+//RS                 std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => {
+//RS                     IOError::Closed(context)
+//RS                 }
+//RS                 _ => IOError::Other(context),
+//RS             }
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub enum EnvError {
+//RS             InvalidName,
+//RS             InvalidValue,
+//RS             NonUnicode,
+//RS         }
+//RS 
+//RS         impl EnvError {
+//RS             pub fn jet_show(&self) -> String {
+//RS                 match self {
+//RS                     Self::InvalidName => "invalid environment variable name".to_string(),
+//RS                     Self::InvalidValue => "invalid environment variable value".to_string(),
+//RS                     Self::NonUnicode => {
+//RS                         "environment contains a name or value that is not valid Unicode".to_string()
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub struct ProcessReceipt {
+//RS             // Keep exact Jet `Int` fields aligned with the AOT Prelude type.
+//RS             pub code: jet_foundation::Numeric::JetInt,
+//RS             pub output: String,
+//RS             pub errors: String,
+//RS             pub success: bool,
+//RS             // Mirrors the Prelude declaration (JetStd/Open.rs): the one
+//RS             // optional carrier, never a raw Rust `Option`.
+//RS             pub signal: JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
+//RS             pub timed_out: bool,
+//RS             pub executable_identity: String,
+//RS             pub argv: Vec<String>,
+//RS             pub input_digest: String,
+//RS             pub policy_digest: String,
+//RS             pub backend: String,
+//RS             pub authority: Vec<String>,
+//RS             pub descendants: String,
+//RS             pub limits: Vec<String>,
+//RS             pub outputs: Vec<String>,
+//RS             pub redacted: bool,
+//RS             pub pid: jet_foundation::Numeric::JetInt,
+//RS             pub limit_hit: JetOutcome<ProcessResourceLimit, JetAbsent>,
+//RS         }
+//RS 
+//RS         pub type ProcessResult = ProcessReceipt;
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub enum ProcessStreamMode {
+//RS             Stream,
+//RS             Inherit,
+//RS             Capture,
+//RS         }
+//RS         // D-FOUND-LIFECYCLE1=A: mirror the shared ProcessSignal value and its
+//RS         // mask so the resident host only marshals the checked enum.
+//RS         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS         pub enum ProcessSignal {
+//RS             Term,
+//RS             Hup,
+//RS             Int,
+//RS         }
+//RS 
+//RS         impl ProcessSignal {
+//RS             pub const fn mask(self) -> usize {
+//RS                 match self {
+//RS                     Self::Int => 1 << 0,
+//RS                     Self::Hup => 1 << 1,
+//RS                     Self::Term => 1 << 2,
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq, Eq)]
+//RS         pub struct TerminalSize {
+//RS             pub cols: i64,
+//RS             pub rows: i64,
+//RS         }
+//RS 
+//RS         impl Default for TerminalSize {
+//RS             fn default() -> Self {
+//RS                 Self {
+//RS                     cols: super::terminal_default::JET_TERMINAL_DEFAULT_COLS,
+//RS                     rows: super::terminal_default::JET_TERMINAL_DEFAULT_ROWS,
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq, Eq)]
+//RS         pub enum TerminalMode {
+//RS             Raw,
+//RS             Cooked,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq, Eq)]
+//RS         pub struct TerminalPolicy {
+//RS             pub size: TerminalSize,
+//RS             pub mode: TerminalMode,
+//RS         }
+//RS 
+//RS         impl Default for TerminalPolicy {
+//RS             fn default() -> Self {
+//RS                 Self {
+//RS                     size: TerminalSize::default(),
+//RS                     mode: TerminalMode::Cooked,
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         #[cfg(windows)]
+//RS         #[derive(Debug)]
+//RS         pub(crate) struct ConPtyControl {
+//RS             handle: std::cell::Cell<usize>,
+//RS         }
+//RS 
+//RS         #[cfg(windows)]
+//RS         #[link(name = "kernel32")]
+//RS         unsafe extern "system" {
+//RS             #[link_name = "ClosePseudoConsole"]
+//RS             fn close_pseudo_console(handle: *mut std::ffi::c_void);
+//RS         }
+//RS 
+//RS         #[cfg(windows)]
+//RS         impl ConPtyControl {
+//RS             pub(crate) fn new(handle: usize) -> Self {
+//RS                 Self {
+//RS                     handle: std::cell::Cell::new(handle),
+//RS                 }
+//RS             }
+//RS 
+//RS             pub(crate) fn raw(&self) -> usize {
+//RS                 self.handle.get()
+//RS             }
+//RS 
+//RS             pub(crate) fn close(&self) {
+//RS                 let handle = self.handle.replace(0);
+//RS                 if handle != 0 {
+//RS                     // SAFETY: this control owns the one live HPCON; replacing
+//RS                     // the handle with zero makes close idempotent across wait
+//RS                     // and drop.
+//RS                     unsafe { close_pseudo_console(handle as *mut std::ffi::c_void) };
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         #[cfg(windows)]
+//RS         impl Drop for ConPtyControl {
+//RS             fn drop(&mut self) {
+//RS                 self.close();
+//RS             }
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug)]
+//RS         pub struct TerminalSession {
+//RS             #[cfg(unix)]
+//RS             pub master: std::rc::Rc<std::fs::File>,
+//RS             #[cfg(windows)]
+//RS             pub control: std::rc::Rc<ConPtyControl>,
+//RS         }
+//RS 
+//RS         impl PartialEq for TerminalSession {
+//RS             fn eq(&self, other: &Self) -> bool {
+//RS                 #[cfg(unix)]
+//RS                 {
+//RS                     std::rc::Rc::ptr_eq(&self.master, &other.master)
+//RS                 }
+//RS                 #[cfg(windows)]
+//RS                 {
+//RS                     std::rc::Rc::ptr_eq(&self.control, &other.control)
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         impl Eq for TerminalSession {}
+//RS 
+//RS         #[derive(Debug)]
+//RS         pub enum ProcessStdin {
+//RS             Pipe(std::process::ChildStdin),
+//RS             Terminal(std::fs::File),
+//RS         }
+//RS 
+//RS         #[derive(Debug)]
+//RS         pub enum ProcessReader {
+//RS             Stdout(std::process::ChildStdout),
+//RS             Stderr(std::process::ChildStderr),
+//RS             Terminal(std::fs::File),
+//RS             Shared(std::sync::Arc<ProcessOutputState>),
+//RS         }
+//RS 
+//RS         #[derive(Debug)]
+//RS         pub(crate) struct ProcessOutputState {
+//RS             pub(crate) bytes: std::sync::Mutex<ProcessOutputBuffer>,
+//RS             pub(crate) ready: std::sync::Condvar,
+//RS         }
+//RS 
+//RS         #[derive(Debug)]
+//RS         pub(crate) struct ProcessOutputBuffer {
+//RS             pub(crate) bytes: Vec<u8>,
+//RS             pub(crate) cursor: usize,
+//RS             pub(crate) closed: bool,
+//RS             pub(crate) error: Option<(std::io::ErrorKind, String)>,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Copy, Debug, PartialEq)]
+//RS         pub struct Duration {
+//RS             pub ns: i64,
+//RS         }
+//RS 
+//RS         impl Duration {
+//RS             pub fn as_millis(self) -> i64 {
+//RS                 self.ns / 1_000_000
+//RS             }
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub struct ProcessSpec {
+//RS             pub cmd: Vec<String>,
+//RS             pub cwd: Option<String>,
+//RS             pub env_clear: bool,
+//RS             pub env_set: Vec<(String, String)>,
+//RS             pub env_remove: Vec<String>,
+//RS             pub stdin: Option<ProcessStreamMode>,
+//RS             pub stdout: ProcessStreamMode,
+//RS             pub stderr: ProcessStreamMode,
+//RS             pub timeout_ms: Option<i64>,
+//RS             pub output_limit: Option<i64>,
+//RS             pub cpu_time_limit_ms: Option<i64>,
+//RS             pub memory_limit_bytes: Option<i64>,
+//RS             pub open_file_limit: Option<i64>,
+//RS             pub detached: bool,
+//RS             pub terminal: Option<TerminalPolicy>,
+//RS             pub policy_wire: Option<String>,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub struct ProcessPlan {
+//RS             pub executable_identity: String,
+//RS             pub argv: Vec<String>,
+//RS             pub input_digest: String,
+//RS             pub policy_digest: String,
+//RS             pub backend: String,
+//RS             pub authority: Vec<String>,
+//RS             pub descendants: String,
+//RS             pub limits: Vec<String>,
+//RS             pub outputs: Vec<String>,
+//RS         }
+//RS 
+//RS         #[derive(Debug)]
+//RS         pub(crate) enum ProcessHandle {
+//RS             Std {
+//RS                 child: std::process::Child,
+//RS                 job: Option<std::rc::Rc<std::fs::File>>,
+//RS             },
+//RS             #[cfg(windows)]
+//RS             Native {
+//RS                 process: std::fs::File,
+//RS                 job: std::rc::Rc<std::fs::File>,
+//RS                 pid: u32,
+//RS             },
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug)]
+//RS         pub struct ProcessChild {
+//RS             pub inner: std::rc::Rc<std::cell::RefCell<Option<ProcessHandle>>>,
+//RS             pub wait_result: std::rc::Rc<std::cell::RefCell<Option<ProcessResult>>>,
+//RS             // Keep cancellation/drop cleanup failures visible through the
+//RS             // shared Prelude wait path.
+//RS             pub cleanup_error: std::rc::Rc<std::cell::RefCell<Option<IOError>>>,
+//RS             pub stdin: std::rc::Rc<std::cell::RefCell<Option<ProcessStdin>>>,
+//RS             pub stdout: std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
+//RS             pub stderr: std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
+//RS             pub stdout_state: Option<std::sync::Arc<ProcessOutputState>>,
+//RS             pub stderr_state: Option<std::sync::Arc<ProcessOutputState>>,
+//RS             pub stdout_worker: std::rc::Rc<
+//RS                 std::cell::RefCell<Option<std::thread::JoinHandle<std::io::Result<()>>>>,
+//RS             >,
+//RS             pub stderr_worker: std::rc::Rc<
+//RS                 std::cell::RefCell<Option<std::thread::JoinHandle<std::io::Result<()>>>>,
+//RS             >,
+//RS             pub output_limit_hit: std::sync::Arc<std::sync::atomic::AtomicBool>,
+//RS             pub output_read_error: std::sync::Arc<std::sync::atomic::AtomicBool>,
+//RS             pub terminal: JetOutcome<TerminalSession, JetAbsent>,
+//RS             pub process_group: bool,
+//RS             pub detached: bool,
+//RS             pub timeout_ms: Option<i64>,
+//RS             pub output_limit: Option<i64>,
+//RS             pub audit_spec: std::rc::Rc<ProcessSpec>,
+//RS             pub audit_plan: Option<std::rc::Rc<ProcessPlan>>,
+//RS             pub started: std::time::Instant,
+//RS         }
+//RS 
+//RS         impl PartialEq for ProcessChild {
+//RS             fn eq(&self, other: &Self) -> bool {
+//RS                 std::rc::Rc::ptr_eq(&self.inner, &other.inner)
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     type JetEnvEntries = Vec<(OsString, OsString)>;
+//RS 
+//RS     fn jet_std_env_snapshot_raw() -> JetEnvEntries {
+//RS         crate::CoreHost::jit_env_snapshot_raw()
+//RS     }
+//RS 
+//RS     /// The one logical environment table (D-ENV-MUTATE1) the resident host
+//RS     /// owns in `CoreHost`; child processes read it under the same guard the
+//RS     /// AOT `EnvInit` prelude holds through `Command::envs`.
+//RS     fn jet_env_read() -> std::sync::RwLockReadGuard<'static, JetEnvEntries> {
+//RS         crate::CoreHost::jit_env_read()
+//RS     }
+//RS 
+//RS     fn jet_env_key_eq(left: &OsStr, right: &OsStr) -> bool {
+//RS         crate::CoreHost::jit_env_key_eq(left, right)
+//RS     }
+//RS 
+//RS     fn jet_env_validate_name(name: &str) -> Result<(), jet_std::EnvError> {
+//RS         crate::CoreHost::jit_env_validate_name(name).map_err(|_| jet_std::EnvError::InvalidName)
+//RS     }
+//RS 
+//RS     fn jet_env_validate_value(value: &str) -> Result<(), jet_std::EnvError> {
+//RS         crate::CoreHost::jit_env_validate_value(value).map_err(|_| jet_std::EnvError::InvalidValue)
+//RS     }
+//RS 
+//RS     fn jet_scheduler_park_ms(wait_kind: &'static str, millis: u64) {
+//RS         jet_codegen::scheduler::jet_scheduler_park_ms(wait_kind, millis);
+//RS     }
+//RS 
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
+//RS     mod jet_process_sandbox {
+//RS         include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs");
+//RS         include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessWindowsSandbox.rs");
+//RS     }
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessPolicy.rs");
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessSpec.rs");
+//RS     // D-DX-DEVTOOLS1 / #2454: the process runtime publishes typed topology
+//RS     // facts; AOT emits this producer-only panel source beside Process.rs
+//RS     // (`push_runtime_devtools_panel_preludes`), so the resident tier includes
+//RS     // the same file.
+//RS     use jet_foundation::Devtools::*;
+//RS     include!("../../jet-codegen/src/Prelude/Core/DevtoolsTopologyPanel.rs");
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Process.rs");
+//RS 
+//RS     pub(crate) use jet_std::{
+//RS         Duration, IOContext, IOError, IOOperation, ProcessChild, ProcessPlan, ProcessReader,
+//RS         ProcessReceipt, ProcessResourceLimit, ProcessSignal, ProcessSpec, ProcessStreamMode,
+//RS         TerminalMode, TerminalPolicy, TerminalSession, TerminalSize,
+//RS     };
+//RS 
+//RS     pub(crate) fn spec_new(cmd: Vec<String>) -> ProcessSpec {
+//RS         jet_std_process_cmd_owned(cmd)
+//RS     }
+//RS     pub(crate) fn spec_arg(spec: ProcessSpec, extra: &String) -> ProcessSpec {
+//RS         jet_process_spec_arg(spec, extra)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_args_extend(spec: ProcessSpec, extra: &Vec<String>) -> ProcessSpec {
+//RS         jet_process_spec_args_extend(spec, extra)
+//RS     }
+//RS 
+//RS 
+//RS     pub(crate) fn spec_cwd(spec: ProcessSpec, cwd: &String) -> ProcessSpec {
+//RS         jet_process_spec_cwd(spec, cwd)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_env(spec: ProcessSpec, name: &String, value: &String) -> ProcessSpec {
+//RS         jet_process_spec_env(spec, name, value)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_env_remove(spec: ProcessSpec, name: &String) -> ProcessSpec {
+//RS         jet_process_spec_env_remove(spec, name)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_env_clear(spec: ProcessSpec) -> ProcessSpec {
+//RS         jet_process_spec_env_clear(spec)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_stdin(spec: ProcessSpec, mode: &ProcessStreamMode) -> ProcessSpec {
+//RS         jet_process_spec_stdin(spec, mode)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_stdout(spec: ProcessSpec, mode: &ProcessStreamMode) -> ProcessSpec {
+//RS         jet_process_spec_stdout(spec, mode)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_stderr(spec: ProcessSpec, mode: &ProcessStreamMode) -> ProcessSpec {
+//RS         jet_process_spec_stderr(spec, mode)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_timeout(spec: ProcessSpec, timeout: &Duration) -> ProcessSpec {
+//RS         jet_process_spec_timeout(spec, timeout)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_output_limit(spec: ProcessSpec, output_limit: i64) -> ProcessSpec {
+//RS         jet_process_spec_output_limit(
+//RS             spec,
+//RS             jet_foundation::Numeric::JetInt::from_i64(output_limit),
+//RS         )
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_cpu_time_limit(spec: ProcessSpec, timeout: &Duration) -> ProcessSpec {
+//RS         jet_process_spec_cpu_time_limit(spec, timeout)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_memory_limit(spec: ProcessSpec, limit: i64) -> ProcessSpec {
+//RS         jet_process_spec_memory_limit(
+//RS             spec,
+//RS             jet_foundation::Numeric::JetInt::from_i64(limit),
+//RS         )
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_open_file_limit(spec: ProcessSpec, limit: i64) -> ProcessSpec {
+//RS         jet_process_spec_open_file_limit(
+//RS             spec,
+//RS             jet_foundation::Numeric::JetInt::from_i64(limit),
+//RS         )
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_detached(spec: ProcessSpec) -> ProcessSpec {
+//RS         jet_process_spec_detached(spec)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_terminal(spec: ProcessSpec) -> ProcessSpec {
+//RS         jet_process_spec_terminal(spec)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_terminal_with_policy(
+//RS         spec: ProcessSpec,
+//RS         policy: &TerminalPolicy,
+//RS     ) -> ProcessSpec {
+//RS         jet_process_spec_terminal_with_policy(spec, policy)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_abilities(spec: &ProcessSpec) -> std::collections::HashSet<String> {
+//RS         jet_process_spec_abilities(spec)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_under_wire(spec: ProcessSpec, authority_wire: &String) -> ProcessSpec {
+//RS         jet_process_spec_under_wire(spec, authority_wire)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_plan(spec: &ProcessSpec) -> Result<ProcessPlan, IOError> {
+//RS         jet_process_spec_plan(spec)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_run(spec: &ProcessSpec) -> Result<ProcessReceipt, IOError> {
+//RS         jet_process_spec_run(spec)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_run_checked(spec: &ProcessSpec) -> Result<ProcessReceipt, IOError> {
+//RS         jet_process_spec_run_checked(spec)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_pipeline(specs: &Vec<ProcessSpec>) -> Result<ProcessReceipt, IOError> {
+//RS         jet_process_spec_pipeline(specs)
+//RS     }
+//RS 
+//RS     pub(crate) fn spec_spawn(spec: &ProcessSpec) -> Result<ProcessChild, IOError> {
+//RS         jet_process_spec_spawn(spec)
+//RS     }
+//RS 
+//RS     pub(crate) fn child_id(child: &ProcessChild) -> i64 {
+//RS         jet_process_child_id(child)
+//RS     }
+//RS 
+//RS     pub(crate) fn child_wait(child: &ProcessChild) -> Result<ProcessReceipt, IOError> {
+//RS         jet_process_child_wait(child)
+//RS     }
+//RS     pub(crate) fn child_close(child: &ProcessChild) {
+//RS         jet_process_child_close(child)
+//RS     }
+//RS 
+//RS 
+//RS     pub(crate) fn child_stdin_write(child: &ProcessChild, text: &String) -> Result<(), IOError> {
+//RS         jet_process_stdin_write(&child.stdin, text)
+//RS     }
+//RS     pub(crate) fn child_stdin_close(child: &ProcessChild) {
+//RS         jet_process_stdin_close(&child.stdin)
+//RS     }
+//RS 
+//RS     pub(crate) fn process_on_signal(signal: ProcessSignal) {
+//RS         jet_process_on_signal(&signal)
+//RS     }
+//RS 
+//RS 
+//RS     pub(crate) fn child_exited(child: &ProcessChild) -> Result<bool, IOError> {
+//RS         jet_process_child_exited(child)
+//RS     }
+//RS 
+//RS     pub(crate) fn child_kill(child: &ProcessChild) -> Result<(), IOError> {
+//RS         jet_process_child_kill(child)
+//RS     }
+//RS 
+//RS     pub(crate) fn child_terminate(child: &ProcessChild) -> Result<(), IOError> {
+//RS         jet_process_child_terminate(child)
+//RS     }
+//RS 
+//RS     pub(crate) fn child_interrupt(child: &ProcessChild) -> Result<(), IOError> {
+//RS         jet_process_child_interrupt(child)
+//RS     }
+//RS 
+//RS     pub(crate) fn stream_next_line(
+//RS         reader: &std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
+//RS     ) -> Result<Option<String>, IOError> {
+//RS         jet_process_stream_next_line(reader)
+//RS     }
+//RS     /// Send-safe owner for a process output reader.  The ordinary process
+//RS     /// Prelude keeps an `Rc<RefCell<...>>` because a child binding is
+//RS     /// thread-affine; Source loop cursors need the same reader lease behind a
+//RS     /// scheduler-safe mutex once the checked owner has been adopted.
+//RS     pub(crate) type SourceProcessReader =
+//RS         std::sync::Arc<std::sync::Mutex<Option<std::io::BufReader<ProcessReader>>>>;
+//RS 
+//RS     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS     pub(crate) enum SourceProcessStreamKind {
+//RS         Stdout,
+//RS         Stderr,
+//RS     }
+//RS 
+//RS     pub(crate) fn source_take_process_stream(
+//RS         child: &ProcessChild,
+//RS         stream: SourceProcessStreamKind,
+//RS     ) -> Result<SourceProcessReader, String> {
+//RS         let reader = match stream {
+//RS             SourceProcessStreamKind::Stdout => child.stdout.borrow_mut().take(),
+//RS             SourceProcessStreamKind::Stderr => child.stderr.borrow_mut().take(),
+//RS         };
+//RS         reader
+//RS             .map(|reader| std::sync::Arc::new(std::sync::Mutex::new(Some(reader))))
+//RS             .ok_or_else(|| "process output stream is already moved or closed".to_string())
+//RS     }
+//RS 
+//RS     pub(crate) fn source_process_stream_next_line(
+//RS         reader: &SourceProcessReader,
+//RS     ) -> Result<Option<String>, IOError> {
+//RS         let mut reader = reader.lock().map_err(|_| {
+//RS             IOError::other(
+//RS                 IOOperation::Read,
+//RS                 None,
+//RS                 "process output reader lock is poisoned",
+//RS             )
+//RS         })?;
+//RS         jet_process_child_read_line(&mut *reader)
+//RS     }
+//RS 
+//RS 
+//RS     pub(crate) fn terminal_session_resize(
+//RS         session: &TerminalSession,
+//RS         size: &TerminalSize,
+//RS     ) -> Result<(), IOError> {
+//RS         jet_terminal_session_resize(session, size)
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 0155 crates/jet-jit/src/ProcessPrelude.rs:1-687
+

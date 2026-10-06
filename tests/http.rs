@@ -1,8 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use jet::Interpreter::dev_iteration;
-use jet_foundation::JitBackend::RunOutcome;
+use jet::Interpreter::RunOutcome;
 
 mod common;
 
@@ -25,7 +24,7 @@ fn on_large_stack(work: impl FnOnce() + Send) {
 
 fn run_dev(path: &Path, use_interpreter: bool) -> Output {
     let shown = path.to_string_lossy().into_owned();
-    match dev_iteration(&shown, false, use_interpreter) {
+    match crate::common::dev_run(&shown, false, use_interpreter) {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -46,8 +45,8 @@ fn example_path(name: &str) -> PathBuf {
 }
 
 #[test]
-fn jit_http_readiness_uses_shared_scheduler_poller() {
-    let runtime = include_str!("../crates/jet-jit/src/net_http_rt.rs");
+fn evalhost_http_readiness_uses_shared_scheduler_poller() {
+    let runtime = include_str!("../crates/jet-evalhost/src/net_http_rt.rs");
     let scheduler = include_str!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
     let net = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs");
     for symbol in [
@@ -58,7 +57,7 @@ fn jit_http_readiness_uses_shared_scheduler_poller() {
     ] {
         assert!(
             runtime.contains(symbol),
-            "JIT runtime does not import {symbol}"
+            "evalhost runtime does not import {symbol}"
         );
         assert!(
             scheduler.contains(&format!("pub fn {symbol}")),
@@ -66,7 +65,7 @@ fn jit_http_readiness_uses_shared_scheduler_poller() {
         );
         assert!(
             !runtime.contains(&format!("fn {symbol}")),
-            "JIT runtime still defines local {symbol}"
+            "evalhost runtime still defines local {symbol}"
         );
     }
     #[cfg(unix)]
@@ -76,19 +75,6 @@ fn jit_http_readiness_uses_shared_scheduler_poller() {
     );
     assert!(!runtime.contains("fn jet_scheduler_tcp_stream_io_wait"));
     assert!(!runtime.contains("thread::sleep"));
-}
-
-#[test]
-fn resident_http_stop_uses_the_shared_runtime_boundary() {
-    let runtime = include_str!("../crates/jet-jit/src/net_http_rt.rs");
-    assert!(
-        runtime.contains("runtime_host::runtime_stop_unwind(\"E3001\""),
-        "resident HTTP failures must enter the shared runtime report boundary"
-    );
-    assert!(
-        !runtime.contains("std::process::exit"),
-        "resident HTTP helpers must not terminate the host process"
-    );
 }
 
 fn assert_http_example_matches_all_tiers(name: &str) {
@@ -105,23 +91,10 @@ fn assert_http_example_matches_all_tiers(name: &str) {
     assert_eq!(interpreted.stderr, "", "{name} interpreter stderr");
     assert_eq!(interpreted.exit_code, 0, "{name} interpreter exit code");
 
-    jet_jit::reset_jit_trace_for_test();
     let default = run_dev(&path, false);
     assert_eq!(default.stdout, expected, "{name} default stdout");
     assert_eq!(default.stderr, "", "{name} default stderr");
     assert_eq!(default.exit_code, 0, "{name} default exit code");
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "{name} default run did not execute JIT"
-    );
-    assert!(
-        !jet_jit::deopt_invoked_for_test(),
-        "{name} default run deopted"
-    );
-    assert!(
-        !jet_jit::fallback_invoked_for_test(),
-        "{name} default run fell back"
-    );
 
     let (code, aot_stdout, aot_stderr) =
         common::build_and_run(&format!("jet_{name}"), name, &source);
@@ -184,14 +157,8 @@ fn mounted_routes_keep_declaration_order_at_the_call_site() {
 }
 
 #[test]
-fn http_examples_match_interpreter_default_jit_and_aot() {
+fn http_examples_match_interpreter_default_and_aot() {
     if !common::have_rustc() {
-        return;
-    }
-    if !jet_jit::cranelift_host_supported() {
-        if std::env::var("JET_REQUIRE_CRANELIFT_HOST").as_deref() == Ok("1") {
-            panic!("Cranelift host required but unavailable");
-        }
         return;
     }
 

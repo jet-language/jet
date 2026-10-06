@@ -287,6 +287,69 @@ mod semantic_op_tests {
             .all(|row| row.operation.is_none()));
         let _ = fs::remove_dir_all(root);
     }
+
+    fn fact(
+        kind: &str,
+        name: &str,
+        stable_id: &str,
+        human: &str,
+        signature: &str,
+        module: &str,
+    ) -> DefinitionFact {
+        DefinitionFact {
+            stable_id: stable_id.to_string(),
+            signature_id: signature.to_string(),
+            content_id: "body".to_string(),
+            human_identity: human.to_string(),
+            name: name.to_string(),
+            kind: kind.to_string(),
+            module_path: module.to_string(),
+            span: crate::Types::SourceSpan { start: 0, end: 0 },
+        }
+    }
+
+    #[test]
+    fn review_keys_keep_human_identity_apart_from_signature_and_module() {
+        // `fn:sig:module` was both the human key of the removed rows and the
+        // signature+module key of the added row, so all three read Ambiguous.
+        let before = [
+            fact("fn", "first", "first-id", "sig:module", "old-one", "before"),
+            fact("fn", "second", "second-id", "sig:module", "old-two", "before"),
+        ];
+        let after = [fact("fn", "third", "after-id", "third", "sig", "module")];
+        for index in 0..before.len() {
+            assert_eq!(
+                unmatched_alignment(&before, &after, index, true),
+                ReviewAlignment::UnmatchedBefore
+            );
+        }
+        assert_eq!(
+            unmatched_alignment(&before, &after, 0, false),
+            ReviewAlignment::UnmatchedAfter
+        );
+    }
+
+    #[test]
+    fn review_keys_do_not_alias_colon_containing_kinds() {
+        // Kind `a` + stable id `b:c` and kind `a:b` + stable id `c` both
+        // spelled `a:b:c` and paired as one definition.
+        let before = [fact("a", "report", "b:c", "report", "old", "run")];
+        let after = [fact("a:b", "report", "c", "report-new", "new", "run")];
+        let (mut matched_before, mut matched_after, mut pairs) =
+            (BTreeSet::new(), BTreeSet::new(), Vec::new());
+        let (old, new) = (&before[..], &after[..]);
+        pair_by_key(old, new, &mut matched_before, &mut matched_after, FactKey::stable, &mut pairs);
+        pair_by_key(old, new, &mut matched_before, &mut matched_after, FactKey::human, &mut pairs);
+        pair_by_key(
+            old,
+            new,
+            &mut matched_before,
+            &mut matched_after,
+            FactKey::signature,
+            &mut pairs,
+        );
+        assert!(pairs.is_empty(), "{pairs:?}");
+    }
 }
 
 fn same_hash(recorded: &str, current: &str) -> bool {
@@ -485,7 +548,7 @@ pub fn review_semantic_ops(before: &SemIndex, after: &SemIndex) -> Vec<ReviewSem
         after_defs,
         &mut matched_before,
         &mut matched_after,
-        |fact| format!("{}:{}", fact.kind, fact.stable_id),
+        FactKey::stable,
         &mut pairs,
     );
     pair_by_key(
@@ -493,7 +556,7 @@ pub fn review_semantic_ops(before: &SemIndex, after: &SemIndex) -> Vec<ReviewSem
         after_defs,
         &mut matched_before,
         &mut matched_after,
-        |fact| format!("{}:{}", fact.kind, fact.human_identity),
+        FactKey::human,
         &mut pairs,
     );
     pair_by_key(
@@ -501,7 +564,7 @@ pub fn review_semantic_ops(before: &SemIndex, after: &SemIndex) -> Vec<ReviewSem
         after_defs,
         &mut matched_before,
         &mut matched_after,
-        |fact| format!("{}:{}:{}", fact.kind, fact.signature_id, fact.module_path),
+        FactKey::signature,
         &mut pairs,
     );
 
@@ -813,11 +876,47 @@ fn sort_review_operations(operations: &mut [ReviewSemanticOp]) {
     });
 }
 
-fn fact_keys(fact: &DefinitionFact) -> [String; 3] {
+/// One alignment key: the definition kind, one compiler identity, and the
+/// module for signature keys. The parts stay separate so an identity that
+/// contains `:` (`sig:module`) never collides with a signature+module pair.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct FactKey<'a> {
+    kind: &'a str,
+    value: &'a str,
+    module_path: Option<&'a str>,
+}
+
+impl<'a> FactKey<'a> {
+    fn stable(fact: &'a DefinitionFact) -> Self {
+        FactKey {
+            kind: &fact.kind,
+            value: &fact.stable_id,
+            module_path: None,
+        }
+    }
+
+    fn human(fact: &'a DefinitionFact) -> Self {
+        FactKey {
+            kind: &fact.kind,
+            value: &fact.human_identity,
+            module_path: None,
+        }
+    }
+
+    fn signature(fact: &'a DefinitionFact) -> Self {
+        FactKey {
+            kind: &fact.kind,
+            value: &fact.signature_id,
+            module_path: Some(&fact.module_path),
+        }
+    }
+}
+
+fn fact_keys(fact: &DefinitionFact) -> [FactKey<'_>; 3] {
     [
-        format!("{}:{}", fact.kind, fact.stable_id),
-        format!("{}:{}", fact.kind, fact.human_identity),
-        format!("{}:{}:{}", fact.kind, fact.signature_id, fact.module_path),
+        FactKey::stable(fact),
+        FactKey::human(fact),
+        FactKey::signature(fact),
     ]
 }
 
@@ -856,18 +955,18 @@ fn unmatched_alignment(
 }
 
 
-fn pair_by_key<F>(
-    before: &[DefinitionFact],
-    after: &[DefinitionFact],
+fn pair_by_key<'a, F>(
+    before: &'a [DefinitionFact],
+    after: &'a [DefinitionFact],
     matched_before: &mut BTreeSet<usize>,
     matched_after: &mut BTreeSet<usize>,
     key: F,
     pairs: &mut Vec<(usize, usize)>,
 ) where
-    F: Fn(&DefinitionFact) -> String,
+    F: Fn(&'a DefinitionFact) -> FactKey<'a>,
 {
-    let mut before_by_key: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-    let mut after_by_key: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    let mut before_by_key: BTreeMap<FactKey<'a>, Vec<usize>> = BTreeMap::new();
+    let mut after_by_key: BTreeMap<FactKey<'a>, Vec<usize>> = BTreeMap::new();
     for (index, fact) in before.iter().enumerate() {
         if !matched_before.contains(&index) {
             before_by_key.entry(key(fact)).or_default().push(index);

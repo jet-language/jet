@@ -93,13 +93,14 @@ fn parse_image(bytes: &[u8]) -> Result<KeptImage<'_>, Failure> {
         return Err("not a compiler image (bad magic)".into());
     }
     let format = u16::from_le_bytes(take(2)?.try_into().expect("two bytes"));
-    if format != 3 {
-        return Err(format!("compiler image format {format} is not the supported format 3"));
+    if format != 4 {
+        return Err(format!("compiler image format {format} is not the supported format 4"));
     }
     let _schema = take(2)?;
     let artifact = MirArtifactId(u64_at(take(8)?));
     let _entry_function = take(8)?;
     let source_authority_digest: [u8; 32] = take(32)?.try_into().expect("32 bytes");
+    let _checksum = take(32)?;
     let identity_len = usize::try_from(u64_at(take(8)?)).map_err(|_| "identity length overflows")?;
     take(identity_len)?;
     let payload_len = usize::try_from(u64_at(take(8)?)).map_err(|_| "payload length overflows")?;

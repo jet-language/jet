@@ -9,13 +9,15 @@ package {
     }
 }
 use core as core
-use core.text.parse as parse
+use core.mod.runtime.top_mod as mod_wire
+
+module runtime
 
 // core.mod — a compiled Jet unit loaded under an explicit read grant.
 //
-// The provider owns artifact validation, staging, ABI checks, and handle
-// lifetime.  The returned `Mod` is opaque; dropping it releases the native
-// module, so source cannot manufacture a detached or already-unloaded handle.
+// The canonical Foundation codec and private runtime policy own validation and
+// ABI refusal meaning. The native provider owns staging and handle lifetime:
+// `Mod` remains opaque and dropping it releases the mapped native module.
 
 /// D-MOD-ERR1=A: each case asks the caller for a different action. `Denied`:
 /// the grant refuses the path or an effect the library declares. `NotFound`:
@@ -33,7 +35,7 @@ pub enum ModError {
 pub fn load(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
     if core.mod.load(path, grant: grant) == {
         .Ok(loaded) -> Ok(loaded)
-        .Err(reason) -> Err(mod_error(reason))
+        .Err(reason) -> Err(mod_wire.mod_error(reason))
     }
 }
 pub struct CompiledModule {
@@ -48,15 +50,6 @@ pub fn unload(compiled: CompiledModule) -[FS]> CompiledModule ModError! {
     Err(ModError.Unsupported("core.mod.unload is unavailable: loaded Mod handles are provider-owned and unload on drop"))
 }
 
-// The provider reports a refusal as `<Case>: <reason>` (Top/Mod.rs
-// `JetModFailure`); an untagged reason is a malformed request, so `Invalid`.
-fn mod_error(reason: String) -> ModError Never! {
-    if reason.starts_with("Denied: ") -> return ModError.Denied(parse.strip_prefix(reason, "Denied: "))
-    if reason.starts_with("NotFound: ") -> return ModError.NotFound(parse.strip_prefix(reason, "NotFound: "))
-    if reason.starts_with("Invalid: ") -> return ModError.Invalid(parse.strip_prefix(reason, "Invalid: "))
-    if reason.starts_with("Unsupported: ") -> return ModError.Unsupported(parse.strip_prefix(reason, "Unsupported: "))
-    ModError.Invalid(reason)
-}
 
 pub fn is_loaded(compiled: CompiledModule) -> Bool Never! {
     compiled.handle > 0

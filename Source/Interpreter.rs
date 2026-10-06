@@ -1,18 +1,16 @@
-//! E2-M4 / D-LENS-RUN2 — shared JIT-lens execution driver.
+//! E2-M4 / D-EXEC2=A — shared in-process evaluator execution driver.
 //!
-//! Default `jet run` and `jet dev` execute through tiered Cranelift with
-//! silent interpreter deopt on named coverage gaps. Explicit
-//! `jet run --interpret` and `jet dev --interpret` force tier-0 only.
-//! Experts use `--trace-tiers`.
+//! Default `jet run` and `jet dev` build the program through the normal build
+//! path and execute it. `jet run --interpret` and `jet dev --interpret` run
+//! the checked MIR through the evaluator in process; this module drives them.
 
 use std::collections::{BTreeMap, HashMap};
 
 use crate::Diagnostics::Diagnostic;
 use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt};
 use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
-// c139: RunOutcome moved to jet-foundation so the jet-jit/ sibling crate
-// can implement JitBackend without a dep cycle. Re-exported here so callers
-// using `jet::Interpreter::RunOutcome` still work unchanged.
+// RunOutcome lives in jet-foundation so the evaluator host crate can share
+// it without a dependency cycle.
 pub use jet_driver::InterpreterBoundary::InterpreterInvocation;
 pub use jet_foundation::JitBackend::RunOutcome;
 
@@ -33,14 +31,6 @@ pub struct RunWithLints {
     pub lints: Vec<Diagnostic>,
     pub snapshot: Option<crate::CheckedMirSnapshot>,
 }
-/// A resident console boot completed from one checked source closure.
-///
-/// The lease owns the live JIT runtime and the typed application router.  It
-/// must remain alive for the entire attached `ConsoleSession`.
-pub struct ConsoleBoot {
-    pub lease: jet_jit::ResidentConsoleLease,
-    pub lints: Vec<Diagnostic>,
-}
 
 struct CheckedSnapshot {
     snapshot: crate::CheckedMirSnapshot,
@@ -49,9 +39,9 @@ struct CheckedSnapshot {
 }
 
 fn with_ffi_cdylib<R>(path: Option<std::path::PathBuf>, work: impl FnOnce() -> R) -> R {
-    jet_jit::set_bridge_cdylib(path);
+    jet_evalhost::set_bridge_cdylib(path);
     let result = work();
-    jet_jit::set_bridge_cdylib(None);
+    jet_evalhost::set_bridge_cdylib(None);
     result
 }
 
@@ -170,13 +160,12 @@ pub fn run_checked(
     invocation: InterpreterInvocation,
     release_devtools_policy: &ReleaseDevtoolsPolicy,
 ) -> RunOutcome {
-    let plan = jet_jit::plan_mir_tiers(program, artifact);
     let decision_ledger = jet_foundation::MIROptimization::decision_ledger(
         program,
         Some(artifact),
         "runtime",
         format!("interpreter:{}", invocation.command()),
-        plan.decision_ledger_rows(program),
+        Vec::new(),
     )
     .canonical_json();
     crate::scheduler::jet_observe_runtime_start_with_decision_ledger_from_env(
@@ -185,7 +174,7 @@ pub fn run_checked(
     );
     let config = mir_eval_config(program, try_anyway, invocation, release_devtools_policy);
     // Edition-gated Core kernels read the package edition at runtime; bind the
-    // program's edition like AOT (`__JET_PACKAGE_EDITION`) and the JIT do.
+    // program's edition like AOT (`__JET_PACKAGE_EDITION`) does.
     jet_foundation::PackageEdition::with_package_edition(&program.facts.edition, || {
         append_parked_task_report(mir_eval_outcome(
             crate::Codegen::MIREval::evaluate_mir_program_with_config(program, artifact, &config),
@@ -203,8 +192,8 @@ fn mir_eval_config(
     // D-INTERP-BUDGET1: `jet run` (including `--interpret`) has no step
     // limit, like a built binary; `jet dev` keeps its budget.
     let fuel = match invocation {
-        InterpreterInvocation::RunInterpret | InterpreterInvocation::RunDefault => None,
-        InterpreterInvocation::DevInterpret | InterpreterInvocation::DevDefault => defaults.fuel,
+        InterpreterInvocation::RunInterpret => None,
+        InterpreterInvocation::DevInterpret => defaults.fuel,
     };
     crate::Codegen::MIREval::MirEvalConfig {
         base_dir: std::path::PathBuf::from(&program.facts.project_root),
@@ -274,7 +263,7 @@ pub fn scheduled_jobs(bundle: &ProgramBundle) -> Vec<(String, crate::AST::EveryS
 }
 
 static SCHEDULED_JOB_CLOCKS: std::sync::LazyLock<
-    std::sync::Mutex<HashMap<String, jet_jit::Job::JetJobClock>>,
+    std::sync::Mutex<HashMap<String, jet_evalhost::Job::JetJobClock>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
 /// D-SCHEDULE1: the service/runtime first tick consumes the same checked
@@ -292,31 +281,19 @@ pub fn scheduled_job_names_once(bundle: &ProgramBundle) -> Vec<String> {
         .expect("scheduled job clocks poisoned");
     let clock = clocks
         .entry(key)
-        .or_insert_with(jet_jit::Job::JetJobClock::new);
-    jet_jit::Job::jet_job_schedule_due(clock, &schedules)
+        .or_insert_with(jet_evalhost::Job::JetJobClock::new);
+    jet_evalhost::Job::jet_job_schedule_due(clock, &schedules)
 }
 
-fn prelude_schedule(schedule: crate::AST::EverySchedule) -> jet_jit::Job::JetJobSchedule {
+fn prelude_schedule(schedule: crate::AST::EverySchedule) -> jet_evalhost::Job::JetJobSchedule {
     match schedule {
         crate::AST::EverySchedule::Duration { nanos } => {
-            jet_jit::Job::JetJobSchedule::Duration { nanos }
+            jet_evalhost::Job::JetJobSchedule::Duration { nanos }
         }
         crate::AST::EverySchedule::WallClockTime { hour, minute } => {
-            jet_jit::Job::JetJobSchedule::WallClockTime { hour, minute }
+            jet_evalhost::Job::JetJobSchedule::WallClockTime { hour, minute }
         }
     }
-}
-
-/// Lower a checked runtime bundle for a Cranelift dev build (#3953): the same
-/// Cranelift MIR artifact `jet run` executes, so both tiers run one program.
-pub fn lower_for_dev_aot(
-    bundle: &ProgramBundle,
-    profile: &str,
-) -> (jet_foundation::MIR::MirProgram, jet_foundation::MIR::MirArtifactId) {
-    crate::lower_checked_semantic_mir_program_for(
-        bundle,
-        artifact_request_for(bundle, jet_foundation::MIR::MirArtifactTarget::Cranelift, profile),
-    )
 }
 
 pub(crate) fn artifact_request_for(
@@ -357,15 +334,10 @@ pub(crate) fn artifact_request_for(
     jet_foundation::MIR::MirArtifactRequest::new(target, kind, mode)
 }
 
-/// One iteration of the `jet dev` watch loop, factored out so it can be
-/// golden-tested without the long-running file watcher (the outer loop is a
-/// thin shell around this). Loads + checks the file exactly like batch
-/// compilation (D-DEV: identical diagnostics), then runs via the selected
-/// backend.
-///
-/// `use_interpreter` — D-JIT2=A: when false (default for `jet dev`), the
-/// Cranelift tier-1 backend wraps the interpreter; when true (`--interpret`),
-/// tier-0 interpreter only.
+/// One iteration of the `jet dev --interpret` watch loop, factored out so it
+/// can be golden-tested without the long-running file watcher. Loads + checks
+/// the file exactly like batch compilation (D-DEV: identical diagnostics),
+/// then runs the evaluator.
 fn checked_snapshot(
     file: &str,
     gates: jet_foundation::Policy::GateSet,
@@ -457,7 +429,6 @@ fn checked_snapshot_with_application_authority_and_entry_with_overlays(
                 return Err(diags);
             }
         }
-        crate::RunCache::note_parse();
         match crate::Loader::load_entry_with_overlays(file, overlays, false) {
             Ok(mut bundle) => {
                 if let Err(diags) =
@@ -468,23 +439,23 @@ fn checked_snapshot_with_application_authority_and_entry_with_overlays(
                 let mut selected_job = false;
                 if let Some(job_fn) = job_fn {
                     let specs = job_specs(&bundle);
-                    if jet_jit::Job::jet_job_has_visible(&specs) {
+                    if jet_evalhost::Job::jet_job_has_visible(&specs) {
                         let argv = vec![String::new(), job_fn.to_string()];
-                        let selection = jet_jit::Job::jet_job_select(&argv, &specs);
-                        if matches!(selection, jet_jit::Job::JetJobSelection::Job(_)) {
+                        let selection = jet_evalhost::Job::jet_job_select(&argv, &specs);
+                        if matches!(selection, jet_evalhost::Job::JetJobSelection::Job(_)) {
                             jet_driver::Driver::swap_entry_point(&mut bundle, job_fn);
                             selected_job = true;
                         } else if entry_fn.is_none() {
                             return Err(vec![Diagnostic::error(
                                 "E1294",
-                                jet_jit::Job::jet_job_unknown_what(job_fn),
-                                jet_jit::Job::JET_JOB_UNKNOWN_WHY.to_string(),
-                                jet_jit::Job::JET_JOB_UNKNOWN_FIX.to_string(),
+                                jet_evalhost::Job::jet_job_unknown_what(job_fn),
+                                jet_evalhost::Job::JET_JOB_UNKNOWN_WHY.to_string(),
+                                jet_evalhost::Job::JET_JOB_UNKNOWN_FIX.to_string(),
                                 None,
                             )
                             .with_detail(format!(
                                 "{}\n",
-                                jet_jit::Job::jet_job_declared_detail(
+                                jet_evalhost::Job::jet_job_declared_detail(
                                     &specs.iter().map(|(name, _)| *name).collect::<Vec<_>>()
                                 )
                             ))]);
@@ -496,7 +467,6 @@ fn checked_snapshot_with_application_authority_and_entry_with_overlays(
                         jet_driver::Driver::swap_entry_point(&mut bundle, entry_fn);
                     }
                 }
-                crate::RunCache::note_check();
                 let (diags, effect_facts) = crate::Sema::check_bundle_gates_with_effect_facts(
                     &mut bundle,
                     crate::Sema::CompileMode::Run,
@@ -543,21 +513,6 @@ fn checked_snapshot_with_application_authority_and_entry_with_overlays(
                     artifact_request_for(&bundle, artifact_target, profile);
                 let (mir, artifact) =
                     crate::lower_checked_semantic_mir_program_for(&bundle, requested_artifact);
-                let (mir, artifact) = if artifact_target
-                    == jet_foundation::MIR::MirArtifactTarget::Cranelift
-                    && !jet_jit::resident_jit_safe_program(&mir)
-                {
-                    crate::lower_checked_semantic_mir_program_for(
-                        &bundle,
-                        artifact_request_for(
-                            &bundle,
-                            jet_foundation::MIR::MirArtifactTarget::Interpreter,
-                            profile,
-                        ),
-                    )
-                } else {
-                    (mir, artifact)
-                };
                 Ok(CheckedSnapshot {
                     snapshot: crate::CheckedMirSnapshot {
                         bundle,
@@ -650,7 +605,7 @@ fn host_job_validate(args: &[String]) -> Result<(), String> {
     };
     let mut argv = vec![format!("{} {name}", graph.file)];
     argv.extend(args.iter().cloned());
-    jet_jit::validate_entry_argv(&run.mir, run.artifact, &argv)
+    jet_evalhost::validate_entry_argv(&run.mir, run.artifact, &argv)
 }
 
 /// Prelude invoke slot. The Prelude runner names the running job through its
@@ -659,7 +614,7 @@ fn host_job_invoke(_program: &str, args: &[String]) {
     let Some(graph) = host_job_graph() else {
         std::panic::resume_unwind(Box::new("job graph host is not installed"));
     };
-    let Some(name) = jet_jit::Job::jet_job_context().map(|context| context.name) else {
+    let Some(name) = jet_evalhost::Job::jet_job_context().map(|context| context.name) else {
         std::panic::resume_unwind(Box::new("job invoked outside the Prelude job runner"));
     };
     let Some(run) = graph.runs.get(name) else {
@@ -672,7 +627,7 @@ fn host_job_invoke(_program: &str, args: &[String]) {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut program_args = vec![format!("{} {name}", graph.file)];
         program_args.extend(args.iter().cloned());
-        jet_jit::with_program_args(&program_args, || {
+        jet_evalhost::with_program_args(&program_args, || {
             with_ffi_cdylib(run.ffi_cdylib.clone(), || {
                 dev_run_snapshot(&run.mir, run.artifact, false, graph.invocation, &run.policy)
             })
@@ -703,11 +658,11 @@ fn host_job_invoke(_program: &str, args: &[String]) {
     }
 }
 
-fn host_job_spec(job: &jet_foundation::MIR::MirJob) -> jet_jit::Job::JetJobSpec {
+fn host_job_spec(job: &jet_foundation::MIR::MirJob) -> jet_evalhost::Job::JetJobSpec {
     use jet_foundation::MIR::{
         MirJobCachePolicy, MirJobDispatch, MirJobSchedule, MirJobScope, MirJobSkip,
     };
-    use jet_jit::Job::{
+    use jet_evalhost::Job::{
         JetJobCachePolicy, JetJobDispatch, JetJobEntry, JetJobSchedule, JetJobScope, JetJobSkip,
         JetJobSpec,
     };
@@ -830,7 +785,7 @@ fn run_job_graph(
             Err(diagnostics) => return Some(RunOutcome::Problems(diagnostics)),
         }
     }
-    let specs: &'static [jet_jit::Job::JetJobSpec] =
+    let specs: &'static [jet_evalhost::Job::JetJobSpec] =
         Box::leak(jobs.iter().map(host_job_spec).collect::<Vec<_>>().into_boxed_slice());
     let graph = std::sync::Arc::new(HostJobGraph {
         file: request.file.to_string(),
@@ -845,7 +800,7 @@ fn run_job_graph(
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(graph.clone());
     let mut argv = vec![request.file.to_string(), root.to_string()];
     argv.extend(root_args.iter().map(|arg| (*arg).to_string()));
-    jet_jit::Job::jet_job_dispatch_specs(&argv, specs, || Ok::<Option<()>, String>(None));
+    jet_evalhost::Job::jet_job_dispatch_specs(&argv, specs, || Ok::<Option<()>, String>(None));
     *HOST_JOB_GRAPH
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
@@ -884,13 +839,13 @@ fn selected_job<'a>(bundle: &ProgramBundle, requested: Option<&'a str>) -> Optio
     let name = requested?;
     let specs = job_specs(bundle);
     let argv = vec![String::new(), name.to_string()];
-    match jet_jit::Job::jet_job_select(&argv, &specs) {
-        jet_jit::Job::JetJobSelection::Job(_) => Some(name),
+    match jet_evalhost::Job::jet_job_select(&argv, &specs) {
+        jet_evalhost::Job::JetJobSelection::Job(_) => Some(name),
         _ => None,
     }
 }
 
-fn job_specs(bundle: &ProgramBundle) -> Vec<(&str, jet_jit::Job::JetJobScope)> {
+fn job_specs(bundle: &ProgramBundle) -> Vec<(&str, jet_evalhost::Job::JetJobScope)> {
     bundle
         .modules
         .iter()
@@ -903,9 +858,9 @@ fn job_specs(bundle: &ProgramBundle) -> Vec<(&str, jet_jit::Job::JetJobScope)> {
                     .map(|metadata| metadata.scope)
                     .unwrap_or_default()
                 {
-                    jet_foundation::AST::JobScope::Dev => jet_jit::Job::JetJobScope::Dev,
-                    jet_foundation::AST::JobScope::Ship => jet_jit::Job::JetJobScope::Ship,
-                    jet_foundation::AST::JobScope::Internal => jet_jit::Job::JetJobScope::Internal,
+                    jet_foundation::AST::JobScope::Dev => jet_evalhost::Job::JetJobScope::Dev,
+                    jet_foundation::AST::JobScope::Ship => jet_evalhost::Job::JetJobScope::Ship,
+                    jet_foundation::AST::JobScope::Internal => jet_evalhost::Job::JetJobScope::Internal,
                 };
                 Some((function.name.as_str(), scope))
             }
@@ -914,461 +869,22 @@ fn job_specs(bundle: &ProgramBundle) -> Vec<(&str, jet_jit::Job::JetJobScope)> {
         .collect()
 }
 
-/// Run one execution tier on the compiler's sized stack.
+/// Run one evaluator invocation on the compiler's sized stack.
 ///
-/// Running a program walks the same deep recursive descent compiling it does —
-/// TIR lowering for tier 0, Cranelift lowering for tier 1 — so a run entry
-/// needs the same explicit stack as a compile entry, and for the same reason:
-/// a caller's thread (`jet`, the dev server, an embedder, a test harness) does
-/// not know the compiler's frame budget. `run_compiler_work` reuses an active
-/// worker, so nesting these seams still crosses the boundary exactly once.
-///
-/// Three pieces of run state are thread-local on the caller's thread, so they
-/// are carried across explicitly: the program argv a caller installed with
-/// `with_program_args`, the tier-trace toggle read while lowering, and the
-/// tier flags plus trace rows a caller reads after the run. Everything else a
-/// run touches — resident module, JIT runtime, memory sentries, journey
-/// frames, `#Persist` seeding — is established and consumed inside `work`.
+/// Running a program walks the same deep recursive descent compiling it does,
+/// so a run entry needs the same explicit stack as a compile entry, and for
+/// the same reason: a caller's thread (`jet`, the dev server, an embedder, a
+/// test harness) does not know the compiler's frame budget.
+/// `run_compiler_work` reuses an active worker, so nesting these seams still
+/// crosses the boundary exactly once. The program argv a caller installed with
+/// `with_program_args` is thread-local on the caller's thread, so it is carried
+/// across explicitly.
 fn on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
-    let trace_tiers = jet_jit::trace_tiers_enabled();
     let argv = crate::Comptime::runtime_argv();
-    let (outcome, flags, rows) = crate::with_compiler_stack(move || {
-        jet_jit::set_trace_tiers(trace_tiers);
-        let outcome = match argv.as_deref() {
-            Some(args) => jet_jit::with_program_args(args, work),
-            None => work(),
-        };
-        (
-            outcome,
-            jet_jit::jit_trace_flags_for_test(),
-            jet_jit::take_last_trace(),
-        )
-    });
-    jet_jit::merge_jit_trace_flags_for_test(flags);
-    jet_jit::record_trace(rows);
-    outcome
-}
-
-/// D-LENS-RUN1: load, check, and execute one native program through strict JIT.
-pub fn run_jit_once(file: &str) -> RunOutcome {
-    run_jit_once_with_args_and_settings(file, &[], &BTreeMap::new())
-}
-
-/// D-LENS-RUN1: strict Cranelift run with the same argv shape AOT would see.
-pub fn run_jit_once_with_args(file: &str, program_args: &[&str]) -> RunOutcome {
-    run_jit_once_with_args_and_settings(file, program_args, &BTreeMap::new())
-}
-
-/// Run the strict Cranelift tier with explicit gate policy.
-pub fn run_jit_once_with_args_opts(file: &str, program_args: &[&str]) -> RunOutcome {
-    run_jit_once_with_args_opts_and_gates(
-        file,
-        program_args,
-        jet_foundation::Policy::GateSet::default(),
-    )
-}
-
-pub fn run_jit_once_with_args_opts_and_gates(
-    file: &str,
-    program_args: &[&str],
-    gates: jet_foundation::Policy::GateSet,
-) -> RunOutcome {
-    run_jit_once_with_args_opts_and_gates_and_settings(
-        file,
-        program_args,
-        gates,
-        &BTreeMap::new(),
-    )
-}
-
-pub fn run_jit_once_with_args_and_settings(
-    file: &str,
-    program_args: &[&str],
-    setting_overrides: &BTreeMap<String, String>,
-) -> RunOutcome {
-    run_jit_once_with_args_opts_and_gates_and_settings(
-        file,
-        program_args,
-        jet_foundation::Policy::GateSet::default(),
-        setting_overrides,
-    )
-}
-
-pub fn run_jit_once_with_args_opts_and_gates_and_settings(
-    file: &str,
-    program_args: &[&str],
-    gates: jet_foundation::Policy::GateSet,
-    setting_overrides: &BTreeMap<String, String>,
-) -> RunOutcome {
-    // The whole invocation stays on one worker: the warm-artifact probe, the
-    // front end, the JIT run, and the tier-artifact store that reads what the
-    // run just published all share the same thread-local run state.
-    on_compiler_stack(|| {
-        run_jit_once_on_compiler_stack(
-            file,
-            program_args,
-            gates,
-            setting_overrides,
-            "dev",
-            false,
-            None,
-            None,
-        )
+    crate::with_compiler_stack(move || match argv.as_deref() {
+        Some(args) => jet_evalhost::with_program_args(args, work),
+        None => work(),
     })
-    .outcome
-}
-
-/// Run through the strict Cranelift tier and return the non-denied diagnostics
-/// from the same front-end check. CLI command paths use this to render lints
-/// without putting them into the program-owned output streams.
-pub fn run_jit_once_with_args_opts_and_gates_and_settings_with_lints(
-    file: &str,
-    program_args: &[&str],
-    gates: jet_foundation::Policy::GateSet,
-    setting_overrides: &BTreeMap<String, String>,
-) -> RunWithLints {
-    run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority(
-        file,
-        program_args,
-        gates,
-        setting_overrides,
-        None,
-    )
-}
-
-/// Run the default JIT with the application decision already resolved by the
-/// command boundary. `None` keeps the ordinary package policy carried by the
-/// loader; `Some` is the invocation-local once approval.
-pub fn run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority(
-    file: &str,
-    program_args: &[&str],
-    gates: jet_foundation::Policy::GateSet,
-    setting_overrides: &BTreeMap<String, String>,
-    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
-) -> RunWithLints {
-    run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority_and_entry(
-        file,
-        program_args,
-        gates,
-        setting_overrides,
-        application_authority,
-        None,
-    )
-}
-
-pub fn run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority_and_entry(
-    file: &str,
-    program_args: &[&str],
-    gates: jet_foundation::Policy::GateSet,
-    setting_overrides: &BTreeMap<String, String>,
-    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
-    entry_fn: Option<&str>,
-) -> RunWithLints {
-    on_compiler_stack(|| {
-        run_jit_once_on_compiler_stack(
-            file,
-            program_args,
-            gates,
-            setting_overrides,
-            "dev",
-            true,
-            application_authority,
-            entry_fn,
-        )
-    })
-}
-
-/// Check and initialize one application for the in-process project console.
-///
-/// The source closure is the same immutable authority used by `jet run`.
-/// Package authority is checked before the resident entry executes, and a
-/// supplied invocation policy replaces only its policy half while preserving
-/// the sema-required effects.
-pub fn boot_console_with_source_closure(
-    file: &str,
-    source_closure: &[(std::path::PathBuf, String)],
-    gates: jet_foundation::Policy::GateSet,
-    profile: &str,
-    setting_overrides: &BTreeMap<String, String>,
-    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
-    entry_fn: Option<&str>,
-) -> Result<ConsoleBoot, Vec<Diagnostic>> {
-    let overlays = source_closure
-        .iter()
-        .map(|(path, source)| (path.as_path(), source.as_str()))
-        .collect::<Vec<_>>();
-    let CheckedSnapshot { snapshot, lints, ffi_cdylib } =
-        checked_snapshot_with_application_authority_and_entry_with_overlays(
-            file,
-            gates,
-            None,
-            entry_fn,
-            profile,
-            setting_overrides,
-            application_authority,
-            &overlays,
-            jet_foundation::MIR::MirArtifactTarget::Cranelift,
-        )?;
-    let crate::CheckedMirSnapshot {
-        bundle,
-        mir,
-        artifact,
-        ..
-    } = snapshot;
-    let release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile);
-    let authority = bundle.package_guarantees.application_authority;
-    if let Some(diagnostic) = authority.policy_diagnostic() {
-        return Err(vec![diagnostic]);
-    }
-    let lease = with_ffi_cdylib(ffi_cdylib, || {
-        jet_jit::resident_boot_console(&mir, artifact, &release_devtools_policy)
-    })
-    .map_err(|error| {
-        vec![Diagnostic::error(
-            "E2105",
-            "console application initialization failed".to_string(),
-            format!("the resident JIT entry could not stay attached: {error}"),
-            "repair the application entry and run the console again".to_string(),
-            None,
-        )]
-    })?;
-    Ok(ConsoleBoot { lease, lints })
-}
-
-/// Run one JIT program from an authoritative immutable source closure.
-///
-/// `file` is a diagnostic/module identity only. Every entry and import is
-/// resolved from `source_closure`; checked source paths are never reopened.
-pub fn run_jit_once_with_source_closure(
-    file: &str,
-    source_closure: &[(std::path::PathBuf, String)],
-    program_args: &[&str],
-    gates: jet_foundation::Policy::GateSet,
-    profile: &str,
-    setting_overrides: &BTreeMap<String, String>,
-    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
-    entry_fn: Option<&str>,
-) -> RunWithLints {
-    let overlays = source_closure
-        .iter()
-        .map(|(path, source)| (path.as_path(), source.as_str()))
-        .collect::<Vec<_>>();
-    on_compiler_stack(|| {
-        run_jit_once_on_compiler_stack_with_overlays(
-            file,
-            program_args,
-            gates,
-            profile,
-            setting_overrides,
-            true,
-            application_authority,
-            entry_fn,
-            &overlays,
-        )
-    })
-}
-/// Run one JIT program from an authoritative entry source snapshot.
-pub fn run_jit_once_with_source(
-    file: &str,
-    source: &str,
-    program_args: &[&str],
-    gates: jet_foundation::Policy::GateSet,
-    profile: &str,
-    setting_overrides: &BTreeMap<String, String>,
-    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
-    entry_fn: Option<&str>,
-) -> RunWithLints {
-    run_jit_once_with_source_closure(
-        file,
-        &[(std::path::PathBuf::from(file), source.to_owned())],
-        program_args,
-        gates,
-        profile,
-        setting_overrides,
-        application_authority,
-        entry_fn,
-    )
-}
-fn run_jit_once_on_compiler_stack(
-    file: &str,
-    program_args: &[&str],
-    gates: jet_foundation::Policy::GateSet,
-    setting_overrides: &BTreeMap<String, String>,
-    profile: &str,
-    surface_lints: bool,
-    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
-    entry_fn: Option<&str>,
-) -> RunWithLints {
-    run_jit_once_on_compiler_stack_with_overlays(
-        file,
-        program_args,
-        gates,
-        profile,
-        setting_overrides,
-        surface_lints,
-        application_authority,
-        entry_fn,
-        &[],
-    )
-}
-
-fn run_jit_once_on_compiler_stack_with_overlays(
-    file: &str,
-    program_args: &[&str],
-    gates: jet_foundation::Policy::GateSet,
-    profile: &str,
-    setting_overrides: &BTreeMap<String, String>,
-    surface_lints: bool,
-    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
-    entry_fn: Option<&str>,
-    overlays: &[(&std::path::Path, &str)],
-) -> RunWithLints {
-    crate::RunCache::reset_phases();
-    let entry = std::path::Path::new(file);
-    let cache_root = crate::RunCache::cache_root_for_entry(entry);
-    if let Some(result) = job_help_if_requested(
-        file,
-        program_args,
-        gates,
-        setting_overrides,
-        jet_foundation::MIR::MirArtifactTarget::Cranelift,
-    ) {
-        return result;
-    }
-    let requested = requested_job(program_args);
-    // A cached tier-1 module has the ordinary `run` entry. A named job must
-    // pass through entry selection first, so never let a warm artifact skip
-    // the shared job selector.
-    if overlays.is_empty()
-        && application_authority.is_none()
-        && entry_fn.is_none()
-        && !surface_lints
-        && requested.is_none()
-        && setting_overrides.is_empty()
-        && !matches!(profile, "release" | "hardened")
-    {
-        let release_devtools_policy = ReleaseDevtoolsPolicy::development();
-        if let Some(outcome) =
-            crate::RunCache::try_warm_run(
-                entry,
-                cache_root.as_deref(),
-                program_args,
-                None,
-                None,
-                &release_devtools_policy,
-            )
-        {
-            return RunWithLints {
-                outcome,
-                lints: Vec::new(),
-                snapshot: None,
-            };
-        }
-    }
-    match checked_snapshot_with_application_authority_and_entry_with_overlays(
-        file,
-        gates,
-        requested,
-        entry_fn,
-        profile,
-        setting_overrides,
-        application_authority,
-        overlays,
-        jet_foundation::MIR::MirArtifactTarget::Cranelift,
-    ) {
-        Ok(checked) => {
-            let CheckedSnapshot { snapshot, lints, ffi_cdylib } = checked;
-            let bundle = &snapshot.bundle;
-            let mir = &snapshot.mir;
-            let selected = selected_job(bundle, requested);
-            let release_devtools_policy = release_devtools_policy_for_bundle(bundle, profile);
-            if let Some(name) = selected {
-                let request = JobGraphRequest {
-                    file,
-                    gates,
-                    profile,
-                    setting_overrides,
-                    application_authority,
-                    overlays,
-                    artifact_target: jet_foundation::MIR::MirArtifactTarget::Cranelift,
-                    invocation: InterpreterInvocation::RunDefault,
-                };
-                if let Some(outcome) = run_job_graph(
-                    &request,
-                    name,
-                    &program_args[1..],
-                    &snapshot,
-                    ffi_cdylib.clone(),
-                    &release_devtools_policy,
-                ) {
-                    return RunWithLints {
-                        outcome,
-                        lints,
-                        snapshot: Some(snapshot),
-                    };
-                }
-            }
-            if overlays.is_empty()
-                && application_authority.is_none()
-                && entry_fn.is_none()
-                && surface_lints
-                && setting_overrides.is_empty()
-            {
-                if let Some(outcome) = crate::RunCache::try_warm_run(
-                    entry,
-                    cache_root.as_deref(),
-                    program_args,
-                    selected,
-                    Some(snapshot.artifact),
-                    &release_devtools_policy,
-                ) {
-                    return RunWithLints {
-                        outcome,
-                        lints,
-                        snapshot: None,
-                    };
-                }
-            }
-            crate::RunCache::note_lower();
-            crate::RunCache::note_codegen();
-            let runtime_args = if selected.is_some() {
-                &program_args[1..]
-            } else {
-                program_args
-            };
-            let mut args = Vec::with_capacity(runtime_args.len() + 1);
-            args.push(selected.map_or_else(|| file.to_string(), |name| format!("{file} {name}")));
-            args.extend(runtime_args.iter().map(|arg| (*arg).to_string()));
-            let outcome = jet_jit::with_program_args(&args, || {
-                with_ffi_cdylib(ffi_cdylib.clone(), || {
-                    dev_run_snapshot_on_compiler_stack(
-                        mir,
-                        snapshot.artifact,
-                        false,
-                        InterpreterInvocation::RunDefault,
-                        &release_devtools_policy,
-                    )
-                })
-            });
-            if overlays.is_empty()
-                && entry_fn.is_none()
-                && setting_overrides.is_empty()
-                && matches!(outcome, RunOutcome::Ran { .. })
-            {
-                crate::RunCache::store_after_miss(entry, cache_root.as_deref(), program_args);
-            }
-            RunWithLints {
-                outcome,
-                lints,
-                snapshot: Some(snapshot),
-            }
-        }
-        Err(diagnostics) => RunWithLints {
-            outcome: RunOutcome::Problems(diagnostics),
-            lints: Vec::new(),
-            snapshot: None,
-        },
-    }
 }
 
 /// Run one program through the tier-0 interpreter with the same argv shape as
@@ -1515,8 +1031,7 @@ pub fn run_interpreter_once_with_source_closure(
     entry_fn: Option<&str>,
     invocation: InterpreterInvocation,
 ) -> RunWithLints {
-    jet_jit::install_job_queue_provider();
-    crate::RunCache::reset_phases();
+    jet_evalhost::install_job_queue_provider();
     if let Some(result) = job_help_if_requested(
         file,
         program_args,
@@ -1584,7 +1099,7 @@ pub fn run_interpreter_once_with_source_closure(
                     selected.map_or_else(|| file.to_string(), |name| format!("{file} {name}")),
                 );
                 args.extend(runtime_args.iter().map(|arg| (*arg).to_string()));
-                let outcome = jet_jit::with_program_args(&args, || {
+                let outcome = jet_evalhost::with_program_args(&args, || {
                     with_ffi_cdylib(ffi_cdylib.clone(), || {
                         dev_run_snapshot(
                             &snapshot.mir,
@@ -1610,52 +1125,30 @@ pub fn run_interpreter_once_with_source_closure(
     })
 }
 
-pub fn dev_iteration(file: &str, try_anyway: bool, use_interpreter: bool) -> RunOutcome {
-    dev_iteration_with_gates(
-        file,
-        try_anyway,
-        use_interpreter,
-        jet_foundation::Policy::GateSet::default(),
-    )
+pub fn dev_iteration(file: &str, try_anyway: bool) -> RunOutcome {
+    dev_iteration_with_gates(file, try_anyway, jet_foundation::Policy::GateSet::default())
 }
 
 pub fn dev_iteration_with_gates(
     file: &str,
     try_anyway: bool,
-    use_interpreter: bool,
     gates: jet_foundation::Policy::GateSet,
 ) -> RunOutcome {
-    dev_iteration_with_gates_profile_and_settings(
-        file,
-        try_anyway,
-        use_interpreter,
-        gates,
-        "dev",
-        &BTreeMap::new(),
-    )
+    dev_iteration_with_gates_profile_and_settings(file, try_anyway, gates, "dev", &BTreeMap::new())
 }
 
 pub fn dev_iteration_with_gates_profile(
     file: &str,
     try_anyway: bool,
-    use_interpreter: bool,
     gates: jet_foundation::Policy::GateSet,
     profile: &str,
 ) -> RunOutcome {
-    dev_iteration_with_gates_profile_and_settings(
-        file,
-        try_anyway,
-        use_interpreter,
-        gates,
-        profile,
-        &BTreeMap::new(),
-    )
+    dev_iteration_with_gates_profile_and_settings(file, try_anyway, gates, profile, &BTreeMap::new())
 }
 
 pub fn dev_iteration_with_gates_profile_and_settings(
     file: &str,
     try_anyway: bool,
-    use_interpreter: bool,
     gates: jet_foundation::Policy::GateSet,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
@@ -1663,7 +1156,6 @@ pub fn dev_iteration_with_gates_profile_and_settings(
     dev_iteration_with_gates_profile_and_settings_with_lints(
         file,
         try_anyway,
-        use_interpreter,
         gates,
         profile,
         setting_overrides,
@@ -1674,7 +1166,6 @@ pub fn dev_iteration_with_gates_profile_and_settings(
 pub fn dev_iteration_with_gates_profile_and_settings_with_lints(
     file: &str,
     try_anyway: bool,
-    use_interpreter: bool,
     gates: jet_foundation::Policy::GateSet,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
@@ -1683,7 +1174,6 @@ pub fn dev_iteration_with_gates_profile_and_settings_with_lints(
         file,
         &[],
         try_anyway,
-        use_interpreter,
         gates,
         profile,
         setting_overrides,
@@ -1693,12 +1183,11 @@ pub fn dev_iteration_with_gates_profile_and_settings_with_lints(
 
 /// Run one dev iteration with the same program argv and named-job selection
 /// used by `jet run`. The CLI adapter owns argv marshalling; this shared
-/// Prelude-backed path owns selection before the chosen dev backend runs.
+/// Prelude-backed path owns selection before the evaluator runs.
 pub fn dev_iteration_with_args_and_gates_profile_and_settings_with_lints_and_entry(
     file: &str,
     program_args: &[&str],
     try_anyway: bool,
-    use_interpreter: bool,
     gates: jet_foundation::Policy::GateSet,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
@@ -1714,11 +1203,7 @@ pub fn dev_iteration_with_args_and_gates_profile_and_settings_with_lints_and_ent
             profile,
             setting_overrides,
             None,
-            if use_interpreter {
-                jet_foundation::MIR::MirArtifactTarget::Interpreter
-            } else {
-                jet_foundation::MIR::MirArtifactTarget::Cranelift
-            },
+            jet_foundation::MIR::MirArtifactTarget::Interpreter,
         ) {
             Ok(checked) => {
                 let CheckedSnapshot { snapshot, lints, ffi_cdylib } = checked;
@@ -1735,12 +1220,8 @@ pub fn dev_iteration_with_args_and_gates_profile_and_settings_with_lints_and_ent
                     selected.map_or_else(|| file.to_string(), |name| format!("{file} {name}")),
                 );
                 args.extend(runtime_args.iter().map(|arg| (*arg).to_string()));
-                let invocation = if use_interpreter {
-                    InterpreterInvocation::DevInterpret
-                } else {
-                    InterpreterInvocation::DevDefault
-                };
-                let outcome = jet_jit::with_program_args(&args, || {
+                let invocation = InterpreterInvocation::DevInterpret;
+                let outcome = jet_evalhost::with_program_args(&args, || {
                     with_ffi_cdylib(ffi_cdylib.clone(), || {
                         dev_run_snapshot(
                             &snapshot.mir,
@@ -1780,17 +1261,17 @@ fn job_help_if_requested(
         Ok(CheckedSnapshot { snapshot, lints, ffi_cdylib: _ }) => {
             let bundle = snapshot.bundle;
             let specs = job_specs(&bundle);
-            if !jet_jit::Job::jet_job_has_visible(&specs) {
+            if !jet_evalhost::Job::jet_job_has_visible(&specs) {
                 return None;
             }
             let argv = vec![file.to_string(), "--help".to_string()];
             if matches!(
-                jet_jit::Job::jet_job_select(&argv, &specs),
-                jet_jit::Job::JetJobSelection::Help
+                jet_evalhost::Job::jet_job_select(&argv, &specs),
+                jet_evalhost::Job::JetJobSelection::Help
             ) {
                 Some(RunWithLints {
                     outcome: RunOutcome::Ran {
-                        stdout: jet_jit::Job::jet_job_help_text(&argv, &specs),
+                        stdout: jet_evalhost::Job::jet_job_help_text(&argv, &specs),
                         stderr: String::new(),
                         exit_code: 0,
                     },
@@ -1809,7 +1290,7 @@ fn job_help_if_requested(
     }
 }
 
-/// Run an already-checked optimized MIR program through the dev backend seam.
+/// Run an already-checked optimized MIR program through the evaluator.
 pub fn dev_run_snapshot(
     program: &jet_foundation::MIR::MirProgram,
     artifact: jet_foundation::MIR::MirArtifactId,
@@ -1842,10 +1323,10 @@ pub fn run_checked_job_snapshot(
 ) -> RunOutcome {
     let mut argv = Vec::with_capacity(task_args.len() + 3);
     argv.push(file.to_string());
-    argv.push(jet_jit::Job::JET_JOB_PRIVATE_DISPATCH_FLAG.to_string());
+    argv.push(jet_evalhost::Job::JET_JOB_PRIVATE_DISPATCH_FLAG.to_string());
     argv.push(name.to_string());
     argv.extend(task_args.iter().map(|arg| (*arg).to_string()));
-    append_parked_task_report(jet_jit::with_program_args(&argv, || {
+    append_parked_task_report(jet_evalhost::with_program_args(&argv, || {
         dev_run_snapshot(
             &snapshot.mir,
             snapshot.artifact,
@@ -1864,13 +1345,8 @@ fn dev_run_snapshot_on_compiler_stack(
     release_devtools_policy: &ReleaseDevtoolsPolicy,
 ) -> RunOutcome {
     use crate::JitBackend::{InterpreterBackend, JitBackend};
-    if invocation.uses_interpreter() || !jet_jit::resident_jit_safe_program(program) {
-        let mut backend = InterpreterBackend::new(invocation);
-        backend.run(program, artifact, try_anyway, release_devtools_policy)
-    } else {
-        let mut backend = jet_jit::CraneliftBackend::new();
-        backend.run(program, artifact, try_anyway, release_devtools_policy)
-    }
+    let mut backend = InterpreterBackend::new(invocation);
+    backend.run(program, artifact, try_anyway, release_devtools_policy)
 }
 
 #[cfg(test)]
@@ -1933,185 +1409,5 @@ mod tests {
             expected.push("mac_only".to_string());
         }
         assert_eq!(names, expected);
-    }
-
-    #[test]
-    fn resident_jit_safe_job_examples() {
-        // resident_jit_safe_program_detail walks large canonical MIR graphs;
-        // default test threads overflow after Epoch 3 JIT ratchet growth.
-        std::thread::Builder::new()
-            .stack_size(16 * 1024 * 1024)
-            .spawn(|| {
-                for file in [
-                    "Examples/features/concurrency/tasks.jet",
-                    "Examples/features/concurrency/scheduler_spawn.jet",
-                ] {
-                    let mut bundle =
-                        crate::Loader::load_entry(file).unwrap_or_else(|_| panic!("load {file}"));
-                    let diags =
-                        crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
-                    assert!(
-                        diags
-                            .iter()
-                            .all(|d| !matches!(d.severity, crate::Diagnostics::Severity::Error)),
-                        "{file} must type-check"
-                    );
-                    let (mir, _artifact) = crate::lower_checked_semantic_mir_program_for(
-                        &bundle,
-                        artifact_request_for(
-                            &bundle,
-                            jet_foundation::MIR::MirArtifactTarget::Cranelift,
-                            "dev",
-                        ),
-                    );
-                    let detail = jet_jit::resident_jit_safe_program_detail(&mir);
-                    if !detail.is_empty() {
-                        eprintln!("{file}: {detail}");
-                    }
-                    assert!(detail.is_empty(), "{file} must be resident-safe: {detail}");
-                }
-            })
-            .expect("spawn resident_jit_safe_job_examples thread")
-            .join()
-            .expect("resident_jit_safe_job_examples thread panicked");
-    }
-    /// The direct harness and the CLI must hand the JIT the same checked
-    /// callable surface. Compare before selecting a backend so a tier trace
-    /// cannot hide a front-end divergence behind whole-program fallback.
-    #[test]
-    fn direct_and_cli_bundle_paths_have_identical_lowering_coverage() {
-        let src = r#"
-fn flatten_words(contents: String) -> [String] {
-    return contents.lines().map((line: String) -> line.split(" ").to_list()).flatten()
-}
-fn first(values: [Float]) -> Float -> values.first() ?? 0.0
-fn run() {
-    words :: flatten_words("one two\nthree four")
-    values :: [Float]{1.0, 2.0}
-    print(words.len())
-    print(first(values))
-}
-"#;
-        let file = std::env::temp_dir().join("jet_devmode_bundle_diff.jet");
-        std::fs::write(&file, src).unwrap();
-        let shown = file.to_string_lossy().into_owned();
-
-        let mut direct = crate::Loader::load_entry(&shown).expect("direct bundle should load");
-        let direct_diags = crate::Sema::check_bundle(&mut direct, crate::Sema::CompileMode::Run);
-        assert!(
-            direct_diags
-                .iter()
-                .all(|d| !matches!(d.severity, crate::Diagnostics::Severity::Error)),
-            "direct bundle diagnostics: {direct_diags:#?}"
-        );
-
-        let cli = checked_snapshot_with_application_authority_and_entry(
-            &shown,
-            jet_foundation::Policy::GateSet::default(),
-            None,
-            None,
-            "dev",
-            &BTreeMap::new(),
-            None,
-            jet_foundation::MIR::MirArtifactTarget::Cranelift,
-        )
-        .expect("CLI checked snapshot")
-        .snapshot;
-        let (direct_mir, direct_artifact) = crate::lower_checked_semantic_mir_program_for(
-            &direct,
-            artifact_request_for(
-                &direct,
-                jet_foundation::MIR::MirArtifactTarget::Cranelift,
-                "dev",
-            ),
-        );
-
-        fn assert_sequence(label: &str, direct: &[String], cli: &[String]) {
-            let shared = direct.len().min(cli.len());
-            for index in 0..shared {
-                if direct[index] != cli[index] {
-                    panic!(
-                        "first bundle divergence at {label}[{index}]: direct={:?}, cli={:?}",
-                        direct[index], cli[index]
-                    );
-                }
-            }
-            assert_eq!(
-                direct.len(),
-                cli.len(),
-                "first bundle divergence at {label}.len(): direct={}, cli={}",
-                direct.len(),
-                cli.len()
-            );
-        }
-
-        fn callable_shape(bundle: &ProgramBundle) -> Vec<String> {
-            bundle.modules[bundle.entry]
-                .items
-                .iter()
-                .filter_map(|item| {
-                    let Item::Func(function) = item else {
-                        return None;
-                    };
-                    let params = function
-                        .params
-                        .iter()
-                        .map(|param| format!("{:?}:{:?}", param.convention, param.ty))
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    Some(format!(
-                        "{}({params})->{:?}",
-                        function.name, function.return_type
-                    ))
-                })
-                .collect()
-        }
-
-        fn lowering_shape(
-            program: &jet_foundation::MIR::MirProgram,
-            artifact: jet_foundation::MIR::MirArtifactId,
-        ) -> (Vec<String>, Vec<String>, bool, Vec<String>) {
-            let names = jet_jit::jit_program_func_names(program);
-            let plan = jet_jit::plan_mir_tiers(program, artifact);
-            let mut native = plan
-                .native
-                .into_iter()
-                .map(|id| format!("{id:?}"))
-                .collect::<Vec<_>>();
-            native.sort();
-            let rows = plan
-                .rows
-                .iter()
-                .map(|row| format!("{:?}:{:?}:{}", row.function, row.tier, row.reason))
-                .collect();
-            (names, native, plan.whole_program_deopt, rows)
-        }
-
-        assert_eq!(
-            direct.entry, cli.bundle.entry,
-            "first bundle divergence: entry module direct={}, cli={}",
-            direct.entry, cli.bundle.entry
-        );
-        assert_eq!(
-            direct.modules.len(),
-            cli.bundle.modules.len(),
-            "first bundle divergence: module count direct={}, cli={}",
-            direct.modules.len(),
-            cli.bundle.modules.len()
-        );
-        let direct_callables = callable_shape(&direct);
-        let cli_callables = callable_shape(&cli.bundle);
-        assert_sequence("callable shape", &direct_callables, &cli_callables);
-        let (direct_names, direct_native, direct_whole, direct_rows) =
-            lowering_shape(&direct_mir, direct_artifact);
-        let (cli_names, cli_native, cli_whole, cli_rows) = lowering_shape(&cli.mir, cli.artifact);
-        assert_sequence("lowered function names", &direct_names, &cli_names);
-        assert_sequence("native coverage", &direct_native, &cli_native);
-        assert_eq!(
-            direct_whole, cli_whole,
-            "first bundle divergence: whole-program coverage direct={}, cli={}",
-            direct_whole, cli_whole
-        );
-        assert_sequence("tier rows", &direct_rows, &cli_rows);
     }
 }

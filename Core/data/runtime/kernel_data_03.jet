@@ -1,0 +1,1504 @@
+// PORT-PENDING 0214 crates-jet-jit-src-data-module-group-slice-3618: crates/jet-jit/src/Data.rs:3618-5117
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn pack_capability(
+//RS     rt: &mut crate::JitRuntime,
+//RS     capability: &data_plot_rt::JetDataPlotCapability,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(5);
+//RS     let backend = pack_enum(rt, capability.backend as i64);
+//RS     let support = pack_enum(rt, capability.support as i64);
+//RS     let feature = rt.heap.alloc_string(capability.feature.clone());
+//RS     let reason = rt.heap.alloc_string(capability.reason.clone());
+//RS     let replacement = rt.heap.alloc_string(capability.replacement.clone());
+//RS     let _ = rt.heap.record_set_record(record, 0, backend);
+//RS     let _ = rt.heap.record_set_string(record, 1, feature);
+//RS     let _ = rt.heap.record_set_record(record, 2, support);
+//RS     let _ = rt.heap.record_set_string(record, 3, reason);
+//RS     let _ = rt.heap.record_set_string(record, 4, replacement);
+//RS     record
+//RS }
+//RS 
+//RS fn pack_render(rt: &mut crate::JitRuntime, render: &data_plot_rt::JetDataPlotRender) -> i64 {
+//RS     let record = rt.heap.alloc_record(5);
+//RS     let backend = pack_enum(rt, render.backend as i64);
+//RS     let format = pack_enum(rt, render.format as i64);
+//RS     let body = rt.heap.alloc_string(render.body.clone());
+//RS     let source = pack_source(rt, &render.source);
+//RS     let capabilities = render
+//RS         .capabilities
+//RS         .iter()
+//RS         .map(|capability| jet_rt::JetVal::RecordRef(pack_capability(rt, capability)))
+//RS         .collect();
+//RS     let capabilities = rt.heap.alloc_list_values(capabilities);
+//RS     let _ = rt.heap.record_set_record(record, 0, backend);
+//RS     let _ = rt.heap.record_set_record(record, 1, format);
+//RS     let _ = rt.heap.record_set_string(record, 2, body);
+//RS     let _ = rt.heap.record_set_record(record, 3, source);
+//RS     let _ = rt.heap.record_set_int(record, 4, capabilities);
+//RS     record
+//RS }
+//RS 
+//RS 
+//RS fn apply_plot_column<F>(
+//RS     rt: &mut crate::JitRuntime,
+//RS     plot: i64,
+//RS     column: i64,
+//RS     operation: &str,
+//RS     apply: F,
+//RS ) -> i64
+//RS where
+//RS     F: FnOnce(
+//RS         &data_plot_rt::JetDataPlot<DataPlotRow>,
+//RS         data_plot_rt::JetDataPlotColumn<DataPlotRow>,
+//RS     ) -> Result<data_plot_rt::JetDataPlot<DataPlotRow>, data_kernel::jet_std::DataError>,
+//RS {
+//RS     let result = (|| {
+//RS         let mut slot = plot_slot(rt, plot, operation)?;
+//RS         let descriptor = decode_plot_column(rt, column, operation)?;
+//RS         let descriptor = ensure_plot_column(&mut slot, descriptor, operation)?;
+//RS         let column = materialize_plot_column(&descriptor);
+//RS         let plot = apply(&slot.plot, column)?;
+//RS         Ok(DataPlotSlot {
+//RS             plot,
+//RS             columns: slot.columns,
+//RS         })
+//RS     })();
+//RS     match result {
+//RS         Ok(slot) => match store_plot(rt, slot) {
+//RS             Ok(handle) => crate::runtime_host::alloc_jit_result(rt, true, handle as u64),
+//RS             Err(error) => result_data_err(error),
+//RS         },
+//RS         Err(error) => result_data_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn apply_plot_config<F>(
+//RS     rt: &mut crate::JitRuntime,
+//RS     plot: i64,
+//RS     operation: &str,
+//RS     apply: F,
+//RS ) -> i64
+//RS where
+//RS     F: FnOnce(
+//RS         &data_plot_rt::JetDataPlot<DataPlotRow>,
+//RS     ) -> Result<data_plot_rt::JetDataPlot<DataPlotRow>, data_kernel::jet_std::DataError>,
+//RS {
+//RS     let result = (|| {
+//RS         let slot = plot_slot(rt, plot, operation)?;
+//RS         let plot = apply(&slot.plot)?;
+//RS         Ok(DataPlotSlot {
+//RS             plot,
+//RS             columns: slot.columns,
+//RS         })
+//RS     })();
+//RS     match result {
+//RS         Ok(slot) => match store_plot(rt, slot) {
+//RS             Ok(handle) => crate::runtime_host::alloc_jit_result(rt, true, handle as u64),
+//RS             Err(error) => result_data_err(error),
+//RS         },
+//RS         Err(error) => result_data_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_x(plot: i64, column: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         apply_plot_column(rt, plot, column, "data.plot.x", |plot, column| {
+//RS             data_plot_rt::jet_data_plot_x(plot, column)
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_y(plot: i64, column: i64, aggregate: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = (|| {
+//RS             let aggregate = decode_aggregate(rt, aggregate, "data.plot.y")?;
+//RS             Ok(aggregate)
+//RS         })();
+//RS         match result {
+//RS             Ok(aggregate) => apply_plot_column(
+//RS                 rt,
+//RS                 plot,
+//RS                 column,
+//RS                 "data.plot.y",
+//RS                 move |plot, column| data_plot_rt::jet_data_plot_y(plot, column, aggregate),
+//RS             ),
+//RS             Err(error) => result_data_err(error),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_color(plot: i64, column: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         apply_plot_column(rt, plot, column, "data.plot.color", |plot, column| {
+//RS             data_plot_rt::jet_data_plot_color(plot, column)
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_size(plot: i64, column: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         apply_plot_column(rt, plot, column, "data.plot.size", |plot, column| {
+//RS             data_plot_rt::jet_data_plot_size(plot, column)
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_text_channel(plot: i64, column: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         apply_plot_column(rt, plot, column, "data.plot.text_channel", |plot, column| {
+//RS             data_plot_rt::jet_data_plot_text_channel(plot, column)
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_detail(plot: i64, column: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         apply_plot_column(rt, plot, column, "data.plot.detail", |plot, column| {
+//RS             data_plot_rt::jet_data_plot_detail(plot, column)
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_facet(plot: i64, column: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = (|| {
+//RS             let mut slot = plot_slot(rt, plot, "data.plot.facet")?;
+//RS             let descriptor = decode_plot_column(rt, column, "data.plot.facet")?;
+//RS             let descriptor = ensure_plot_column(&mut slot, descriptor, "data.plot.facet")?;
+//RS             let column = materialize_plot_column(&descriptor);
+//RS             let plot = slot
+//RS                 .plot
+//RS                 .clone()
+//RS                 .facet(column)
+//RS                 .map_err(data_plot_rt::JetDataPlotError::into_data_error)?;
+//RS             Ok(DataPlotSlot {
+//RS                 plot,
+//RS                 columns: slot.columns,
+//RS             })
+//RS         })();
+//RS         match result {
+//RS             Ok(slot) => match store_plot(rt, slot) {
+//RS                 Ok(handle) => crate::runtime_host::alloc_jit_result(rt, true, handle as u64),
+//RS                 Err(error) => result_data_err(error),
+//RS             },
+//RS             Err(error) => result_data_err(error),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_with_transform(plot: i64, transform: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         match decode_transform(rt, transform, "data.plot.with_transform") {
+//RS             Ok(transform) => apply_plot_config(rt, plot, "data.plot.with_transform", move |plot| {
+//RS                 data_plot_rt::jet_data_plot_with_transform(plot, transform)
+//RS             }),
+//RS             Err(error) => result_data_err(error),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_with_scale(plot: i64, scale: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         match decode_scale(rt, scale, "data.plot.with_scale") {
+//RS             Ok(scale) => apply_plot_config(rt, plot, "data.plot.with_scale", move |plot| {
+//RS                 data_plot_rt::jet_data_plot_with_scale(plot, scale)
+//RS             }),
+//RS             Err(error) => result_data_err(error),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_with_axis(plot: i64, axis: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         match decode_axis(rt, axis, "data.plot.with_axis") {
+//RS             Ok(axis) => apply_plot_config(rt, plot, "data.plot.with_axis", move |plot| {
+//RS                 data_plot_rt::jet_data_plot_with_axis(plot, axis)
+//RS             }),
+//RS             Err(error) => result_data_err(error),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_with_legend(plot: i64, legend: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         match decode_legend(rt, legend, "data.plot.with_legend") {
+//RS             Ok(legend) => apply_plot_config(rt, plot, "data.plot.with_legend", move |plot| {
+//RS                 data_plot_rt::jet_data_plot_with_legend(plot, legend)
+//RS             }),
+//RS             Err(error) => result_data_err(error),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_with_layer(plot: i64, layer: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         match decode_layer(rt, layer, "data.plot.with_layer") {
+//RS             Ok(layer) => apply_plot_config(rt, plot, "data.plot.with_layer", move |plot| {
+//RS                 data_plot_rt::jet_data_plot_with_layer(plot, layer)
+//RS             }),
+//RS             Err(error) => result_data_err(error),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_with_interaction(plot: i64, interaction: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         match decode_interaction(rt, interaction, "data.plot.with_interaction") {
+//RS             Ok(interaction) => {
+//RS                 apply_plot_config(rt, plot, "data.plot.with_interaction", move |plot| {
+//RS                     data_plot_rt::jet_data_plot_with_interaction(plot, interaction)
+//RS                 })
+//RS             }
+//RS             Err(error) => result_data_err(error),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_accessibility(plot: i64, accessibility: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         match decode_accessibility(rt, accessibility, "data.plot.accessibility") {
+//RS             Ok(accessibility) => apply_plot_config(rt, plot, "data.plot.accessibility", move |plot| {
+//RS                 data_plot_rt::jet_data_plot_accessibility(plot, accessibility)
+//RS             }),
+//RS             Err(error) => result_data_err(error),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_layout(plot: i64, layout: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         match decode_layout(rt, layout, "data.plot.layout") {
+//RS             Ok(layout) => apply_plot_config(rt, plot, "data.plot.layout", move |plot| {
+//RS                 data_plot_rt::jet_data_plot_layout(plot, layout)
+//RS             }),
+//RS             Err(error) => result_data_err(error),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_select_indices(plot: i64, indices: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let indices = match rt.heap.clone_int_list(indices) {
+//RS             Some(indices) => indices,
+//RS             None => return result_data_err(data_decode_error(
+//RS                 "data.plot.select_indices",
+//RS                 "selection is not an integer list",
+//RS             )),
+//RS         };
+//RS         apply_plot_config(rt, plot, "data.plot.select_indices", move |plot| {
+//RS             data_plot_rt::jet_data_plot_select_indices(plot, indices)
+//RS         })
+//RS     })
+//RS }
+//RS // ── Deferred typed Query carriers ─────────────────────────────────────────
+//RS //
+//RS // Query is a normal heap value in the resident tier.  Keeping the source,
+//RS // operation list, logical plan, and one-shot state in the carrier avoids a
+//RS // process-global side table and gives derived queries the same clone/share
+//RS // behaviour as the Prelude `DataQuery`.
+//RS const QUERY_CARRIER_TAG: i64 = -2963;
+//RS const GROUP_CARRIER_TAG: i64 = -2964;
+//RS const QUERY_KIND_ROWS: i64 = 0;
+//RS const QUERY_KIND_STREAM: i64 = 1;
+//RS const QUERY_KIND_COMPUTED_GROUP: i64 = 2;
+//RS const QUERY_REDUCER_COUNT: i64 = 1;
+//RS const QUERY_REDUCER_SUM: i64 = 2;
+//RS const QUERY_REDUCER_MEAN: i64 = 3;
+//RS const QUERY_OPERATION_FILTER: i64 = 1;
+//RS const QUERY_OPERATION_SORT: i64 = 2;
+//RS const QUERY_FIELD_TAG: i64 = 0;
+//RS const QUERY_FIELD_KIND: i64 = 1;
+//RS const QUERY_FIELD_SOURCE: i64 = 2;
+//RS const QUERY_FIELD_OPERATIONS: i64 = 3;
+//RS const QUERY_FIELD_PLAN: i64 = 4;
+//RS const QUERY_FIELD_STATE: i64 = 5;
+//RS const QUERY_FIELD_GROUP: i64 = 6;
+//RS const QUERY_FIELD_REDUCER: i64 = 7;
+//RS const QUERY_FIELD_VALUE_CALLBACK: i64 = 8;
+//RS const QUERY_FIELD_VALUE_TYPE: i64 = 9;
+//RS const QUERY_CARRIER_FIELDS: usize = 10;
+//RS const GROUP_FIELD_TAG: i64 = 0;
+//RS const GROUP_FIELD_QUERY: i64 = 1;
+//RS const GROUP_FIELD_KEY_CALLBACK: i64 = 2;
+//RS const GROUP_FIELD_KEY_TYPE: i64 = 3;
+//RS 
+//RS #[derive(Clone)]
+//RS struct QueryRow {
+//RS     value: jet_rt::JetVal,
+//RS     word: i64,
+//RS }
+//RS 
+//RS #[derive(Clone, PartialEq)]
+//RS enum QueryKey {
+//RS     Int(String),
+//RS     Float(f64),
+//RS     Bool(bool),
+//RS     Char(char),
+//RS     String(String),
+//RS     Other(jet_rt::JetVal),
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct QueryGroup {
+//RS     key: QueryKey,
+//RS     key_word: i64,
+//RS     count: i64,
+//RS     int_sum: Option<i64>,
+//RS     float_sum: Option<f64>,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS struct QueryParts {
+//RS     kind: i64,
+//RS     source: i64,
+//RS     operations: i64,
+//RS     /// The retained logical plan (`QUERY_FIELD_PLAN`), a list of step names
+//RS     /// each query operation appends to; `data.query.plan` reads it back.
+//RS     plan: i64,
+//RS     state: i64,
+//RS     group: i64,
+//RS     reducer: i64,
+//RS     value_callback: i64,
+//RS     value_type: i64,
+//RS }
+//RS 
+//RS fn query_carrier(rt: &crate::JitRuntime, query: i64) -> Option<QueryParts> {
+//RS     if rt.heap.record_get_int(query, QUERY_FIELD_TAG)? != QUERY_CARRIER_TAG {
+//RS         return None;
+//RS     }
+//RS     Some(QueryParts {
+//RS         kind: rt.heap.record_get_int(query, QUERY_FIELD_KIND)?,
+//RS         source: rt.heap.record_get_int(query, QUERY_FIELD_SOURCE)?,
+//RS         operations: rt.heap.record_get_int(query, QUERY_FIELD_OPERATIONS)?,
+//RS         plan: rt.heap.record_get_int(query, QUERY_FIELD_PLAN)?,
+//RS         state: rt.heap.record_get_int(query, QUERY_FIELD_STATE)?,
+//RS         group: rt.heap.record_get_int(query, QUERY_FIELD_GROUP)?,
+//RS         reducer: rt.heap.record_get_int(query, QUERY_FIELD_REDUCER)?,
+//RS         value_callback: rt.heap.record_get_int(query, QUERY_FIELD_VALUE_CALLBACK)?,
+//RS         value_type: rt.heap.record_get_int(query, QUERY_FIELD_VALUE_TYPE)?,
+//RS     })
+//RS }
+//RS 
+//RS fn query_group_parts(
+//RS     rt: &crate::JitRuntime,
+//RS     group: i64,
+//RS     operation: &str,
+//RS ) -> Result<(i64, i64, i64), DataError> {
+//RS     if rt.heap.record_get_int(group, GROUP_FIELD_TAG) != Some(GROUP_CARRIER_TAG) {
+//RS         return Err(data_decode_error(operation, "grouped query is not a valid carrier"));
+//RS     }
+//RS     let query = rt
+//RS         .heap
+//RS         .record_get_int(group, GROUP_FIELD_QUERY)
+//RS         .ok_or_else(|| data_decode_error(operation, "grouped query has no source query"))?;
+//RS     let key_callback = rt
+//RS         .heap
+//RS         .record_get_int(group, GROUP_FIELD_KEY_CALLBACK)
+//RS         .ok_or_else(|| data_decode_error(operation, "grouped query has no key callback"))?;
+//RS     let key_type = rt
+//RS         .heap
+//RS         .record_get_int(group, GROUP_FIELD_KEY_TYPE)
+//RS         .ok_or_else(|| data_decode_error(operation, "grouped query has no key type"))?;
+//RS     Ok((query, key_callback, key_type))
+//RS }
+//RS 
+//RS fn alloc_query_carrier(
+//RS     rt: &mut crate::JitRuntime,
+//RS     kind: i64,
+//RS     source: i64,
+//RS     operations: i64,
+//RS     plan: i64,
+//RS     state: i64,
+//RS     group: i64,
+//RS     reducer: i64,
+//RS     value_callback: i64,
+//RS     value_type: i64,
+//RS ) -> i64 {
+//RS     let query = rt.heap.alloc_record(QUERY_CARRIER_FIELDS);
+//RS     for (index, value) in [
+//RS         QUERY_CARRIER_TAG,
+//RS         kind,
+//RS         source,
+//RS         operations,
+//RS         plan,
+//RS         state,
+//RS         group,
+//RS         reducer,
+//RS         value_callback,
+//RS         value_type,
+//RS     ]
+//RS     .into_iter()
+//RS     .enumerate()
+//RS     {
+//RS         let _ = rt.heap.record_set_int(query, index as i64, value);
+//RS     }
+//RS     query
+//RS }
+//RS 
+//RS fn alloc_query_state(rt: &mut crate::JitRuntime) -> i64 {
+//RS     let state = rt.heap.alloc_record(1);
+//RS     let _ = rt.heap.record_set_bool(state, 0, false);
+//RS     state
+//RS }
+//RS 
+//RS fn query_plan_with_step(
+//RS     rt: &mut crate::JitRuntime,
+//RS     plan: i64,
+//RS     step: &str,
+//RS     operation: &str,
+//RS ) -> Result<i64, DataError> {
+//RS     let plan = rt
+//RS         .heap
+//RS         .clone_list(plan)
+//RS         .ok_or_else(|| data_decode_error(operation, "query plan is not a list"))?;
+//RS     let step = rt.heap.alloc_string(step);
+//RS     rt.heap
+//RS         .list_push_int(plan, step)
+//RS         .ok_or_else(|| data_decode_error(operation, "query plan cannot append a step"))?;
+//RS     Ok(plan)
+//RS }
+//RS 
+//RS fn query_operation_list_with(
+//RS     rt: &mut crate::JitRuntime,
+//RS     query: QueryParts,
+//RS     kind: i64,
+//RS     callback: i64,
+//RS     operation: &str,
+//RS ) -> Result<i64, DataError> {
+//RS     if callback >= 0
+//RS         || crate::runtime_host::jit_callable_parts(rt, callback)
+//RS             .is_none_or(|slot| slot.raw_unary.is_none() || slot.raw_pair.is_some())
+//RS     {
+//RS         return Err(data_decode_error(operation, "query callback is not a unary callable"));
+//RS     }
+//RS     let operations = rt
+//RS         .heap
+//RS         .clone_list(query.operations)
+//RS         .ok_or_else(|| data_decode_error(operation, "query operation list is not a list"))?;
+//RS     let record = rt.heap.alloc_record(2);
+//RS     let _ = rt.heap.record_set_int(record, 0, kind);
+//RS     let _ = rt.heap.record_set_int(record, 1, callback);
+//RS     rt.heap
+//RS         .list_push_int(operations, record)
+//RS         .ok_or_else(|| data_decode_error(operation, "query operation list cannot append"))?;
+//RS     Ok(operations)
+//RS }
+//RS 
+//RS fn query_rows(
+//RS     rt: &mut crate::JitRuntime,
+//RS     rows: i64,
+//RS     operation: &str,
+//RS ) -> Result<Vec<QueryRow>, DataError> {
+//RS     let values = rt
+//RS         .heap
+//RS         .clone_list_values(rows)
+//RS         .ok_or_else(|| data_decode_error(operation, "query source is not a list"))?;
+//RS     values
+//RS         .into_iter()
+//RS         .map(|value| {
+//RS             let word = row_word(rt, value.clone(), operation)?;
+//RS             Ok(QueryRow { value, word })
+//RS         })
+//RS         .collect()
+//RS }
+//RS fn query_stream_rows(
+//RS     rt: &mut crate::JitRuntime,
+//RS     stream: i64,
+//RS     operation: &str,
+//RS ) -> Result<(Vec<QueryRow>, data_kernel::jet_std::DataLimits), DataError> {
+//RS     let index = usize::try_from(stream)
+//RS         .ok()
+//RS         .and_then(|index| index.checked_sub(1))
+//RS         .ok_or_else(|| data_decode_error(operation, "query source is not a valid DataStream"))?;
+//RS     let stream = rt
+//RS         .data_streams
+//RS         .get_mut(index)
+//RS         .ok_or_else(|| data_decode_error(operation, "query source is not a valid DataStream"))?;
+//RS     let limits = stream.limits.clone();
+//RS     let rows = stream.rows[stream.index..].to_vec();
+//RS     stream.index = stream.rows.len();
+//RS     Ok((
+//RS         rows.into_iter()
+//RS             .map(|word| QueryRow {
+//RS                 value: jet_rt::JetVal::Int(word),
+//RS                 word,
+//RS             })
+//RS             .collect(),
+//RS         limits,
+//RS     ))
+//RS }
+//RS 
+//RS fn alloc_query_rows(rt: &mut crate::JitRuntime, rows: Vec<QueryRow>) -> i64 {
+//RS     if rows
+//RS         .iter()
+//RS         .all(|row| matches!(row.value, jet_rt::JetVal::Int(_)))
+//RS     {
+//RS         return rt.heap.alloc_int_list(
+//RS             rows.into_iter()
+//RS                 .map(|row| match row.value {
+//RS                     jet_rt::JetVal::Int(value) => value,
+//RS                     _ => 0,
+//RS                 })
+//RS                 .collect(),
+//RS         );
+//RS     }
+//RS     rt.heap.alloc_list_values(
+//RS         rows.into_iter()
+//RS             .map(|row| match row.value {
+//RS                 jet_rt::JetVal::RecordRef(value) => jet_rt::JetVal::Int(value),
+//RS                 value => value,
+//RS             })
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS fn query_callback(
+//RS     callback: i64,
+//RS     row: i64,
+//RS     operation: &str,
+//RS ) -> Result<i64, DataError> {
+//RS     let slot = Concurrency::with_runtime_mut(|rt| {
+//RS         crate::runtime_host::jit_callable_parts(rt, callback)
+//RS     })
+//RS     .ok_or_else(|| data_decode_error(operation, "query callback handle is unknown"))?;
+//RS     if slot.raw_unary.is_none() || slot.raw_pair.is_some() {
+//RS         return Err(data_decode_error(operation, "query callback is not unary"));
+//RS     }
+//RS     let value = crate::runtime_host::invoke_universal_unary(slot, row)
+//RS         .ok_or_else(|| data_decode_error(operation, "query callback has no universal thunk"))?;
+//RS     if let Some(reason) = Concurrency::with_runtime_mut(|rt| rt.trapped.clone()) {
+//RS         return Err(data_decode_error(operation, reason));
+//RS     }
+//RS     Ok(value)
+//RS }
+//RS 
+//RS fn query_callback_string(value: i64, operation: &str) -> Result<String, DataError> {
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(value))
+//RS         .ok_or_else(|| data_decode_error(operation, "query sort callback did not return String"))
+//RS }
+//RS 
+//RS fn descriptor_for_key(
+//RS     rt: &crate::JitRuntime,
+//RS     key: i64,
+//RS     operation: &str,
+//RS ) -> Result<crate::runtime_host::RuntimeTypeDescriptor, DataError> {
+//RS     let text = rt
+//RS         .heap
+//RS         .clone_string(key)
+//RS         .ok_or_else(|| data_decode_error(operation, "query type metadata is not a string"))?;
+//RS     let id = text
+//RS         .strip_prefix("id:")
+//RS         .and_then(|value| value.parse::<u64>().ok());
+//RS     id.and_then(|id| rt.runtime_type_descriptor(id).cloned())
+//RS         .or_else(|| rt.runtime_type_descriptor_by_name(&text).cloned())
+//RS         .ok_or_else(|| data_decode_error(operation, format!("query has no checked type `{text}`")))
+//RS }
+//RS 
+//RS fn query_key(
+//RS     raw: i64,
+//RS     descriptor: &crate::runtime_host::RuntimeTypeDescriptor,
+//RS     operation: &str,
+//RS ) -> Result<QueryKey, DataError> {
+//RS     let result = Concurrency::with_runtime_mut(|rt| {
+//RS         Some(match descriptor.kind {
+//RS             crate::runtime_host::RuntimeValueKind::Int => {
+//RS                 let text = if descriptor.integer_width.is_some() || descriptor.integer_range.is_some() {
+//RS                     if descriptor
+//RS                         .integer_width
+//RS                         .is_some_and(|width| !width.signed && width.bits == 64)
+//RS                     {
+//RS                         (raw as u64).to_string()
+//RS                     } else {
+//RS                         raw.to_string()
+//RS                     }
+//RS                 } else {
+//RS                     rt.heap.int_to_string(raw)
+//RS                 };
+//RS                 Ok(QueryKey::Int(text))
+//RS             }
+//RS             crate::runtime_host::RuntimeValueKind::Float => {
+//RS                 let value = match descriptor.abi {
+//RS                     crate::runtime_host::RuntimeValueAbi::Float32 => {
+//RS                         f32::from_bits(raw as u32) as f64
+//RS                     }
+//RS                     _ => f64::from_bits(raw as u64),
+//RS                 };
+//RS                 Ok(QueryKey::Float(value))
+//RS             }
+//RS             crate::runtime_host::RuntimeValueKind::Bool => Ok(QueryKey::Bool(raw != 0)),
+//RS             crate::runtime_host::RuntimeValueKind::Char => char::from_u32(raw as u32)
+//RS                 .map(QueryKey::Char)
+//RS                 .ok_or_else(|| data_decode_error(operation, "group key callback returned invalid Char")),
+//RS             crate::runtime_host::RuntimeValueKind::String => rt
+//RS                 .heap
+//RS                 .clone_string(raw)
+//RS                 .map(QueryKey::String)
+//RS                 .ok_or_else(|| data_decode_error(operation, "group key callback returned invalid String")),
+//RS             _ => rt
+//RS                 .heap
+//RS                 .clone_value(raw)
+//RS                 .map(QueryKey::Other)
+//RS                 .ok_or_else(|| data_decode_error(operation, "group key callback returned invalid key")),
+//RS         })
+//RS     });
+//RS     result.ok_or_else(|| data_decode_error(operation, "runtime is unavailable"))?
+//RS }
+//RS 
+//RS fn query_store_field(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     index: i64,
+//RS     raw: i64,
+//RS     descriptor: &crate::runtime_host::RuntimeTypeDescriptor,
+//RS ) -> Result<(), DataError> {
+//RS     let written = match descriptor.kind {
+//RS         crate::runtime_host::RuntimeValueKind::Float => rt.heap.record_set_float(
+//RS             record,
+//RS             index,
+//RS             if descriptor.abi == crate::runtime_host::RuntimeValueAbi::Float32 {
+//RS                 f32::from_bits(raw as u32) as f64
+//RS             } else {
+//RS                 f64::from_bits(raw as u64)
+//RS             },
+//RS         ),
+//RS         crate::runtime_host::RuntimeValueKind::Bool => rt.heap.record_set_bool(record, index, raw != 0),
+//RS         crate::runtime_host::RuntimeValueKind::Char => char::from_u32(raw as u32)
+//RS             .and_then(|value| rt.heap.record_set_char(record, index, value)),
+//RS         crate::runtime_host::RuntimeValueKind::String => rt.heap.record_set_string(record, index, raw),
+//RS         crate::runtime_host::RuntimeValueKind::Record => rt.heap.record_set_record(record, index, raw),
+//RS         crate::runtime_host::RuntimeValueKind::Enum
+//RS             if rt.heap.clone_record_values(raw).is_some() =>
+//RS         {
+//RS             rt.heap.record_set_record(record, index, raw)
+//RS         }
+//RS         _ => rt.heap.record_set_int(record, index, raw),
+//RS     };
+//RS     written.ok_or_else(|| data_decode_error("query.collect", "group result field could not be stored"))
+//RS }
+//RS 
+//RS fn query_apply_operations(
+//RS     mut rows: Vec<QueryRow>,
+//RS     operations: i64,
+//RS     limits: &data_kernel::jet_std::DataLimits,
+//RS ) -> Result<Vec<QueryRow>, DataError> {
+//RS     let operations = Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(operations))
+//RS         .ok_or_else(|| data_decode_error("query.collect", "query operation list is invalid"))?;
+//RS     for operation_handle in operations {
+//RS         let (kind, callback) = Concurrency::with_runtime_mut(|rt| {
+//RS             rt.heap
+//RS                 .record_get_int(operation_handle, 0)
+//RS                 .and_then(|kind| {
+//RS                     rt.heap
+//RS                         .record_get_int(operation_handle, 1)
+//RS                         .map(|callback| (kind, callback))
+//RS                 })
+//RS         })
+//RS         .ok_or_else(|| data_decode_error("query.collect", "query operation is invalid"))?;
+//RS         match kind {
+//RS             QUERY_OPERATION_FILTER => {
+//RS                 let mut filtered = Vec::with_capacity(rows.len());
+//RS                 for row in rows {
+//RS                     let keep = query_callback(callback, row.word, "query.filter")?;
+//RS                     if keep != 0 {
+//RS                         filtered.push(row);
+//RS                     }
+//RS                 }
+//RS                 rows = filtered;
+//RS             }
+//RS             QUERY_OPERATION_SORT => {
+//RS                 let max_sort_rows = limits.max_sort_rows;
+//RS                 if rows.len() as i64 > max_sort_rows {
+//RS                     return Err(err(
+//RS                         DataErrorKind::Limit,
+//RS                         "query.sort_by",
+//RS                         format!("max_sort_rows {max_sort_rows} exceeded"),
+//RS                     ));
+//RS                 }
+//RS                 let mut keyed = Vec::with_capacity(rows.len());
+//RS                 for row in rows {
+//RS                     let key = query_callback(callback, row.word, "query.sort_by")?;
+//RS                     keyed.push((query_callback_string(key, "query.sort_by")?, row));
+//RS                 }
+//RS                 keyed.sort_by_key(|(key, _)| key.clone());
+//RS                 rows = keyed.into_iter().map(|(_, row)| row).collect();
+//RS             }
+//RS             _ => {
+//RS                 return Err(data_decode_error(
+//RS                     "query.collect",
+//RS                     "query operation has an unknown kind",
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     let max_output_rows = limits.max_output_rows;
+//RS     if rows.len() as i64 > max_output_rows {
+//RS         return Err(err(
+//RS             DataErrorKind::Limit,
+//RS             "query.collect",
+//RS             format!("max_output_rows {max_output_rows} exceeded"),
+//RS         ));
+//RS     }
+//RS     Ok(rows)
+//RS }
+//RS 
+//RS fn query_group_rows(
+//RS     rows: Vec<QueryRow>,
+//RS     key_callback: i64,
+//RS     key_descriptor: &crate::runtime_host::RuntimeTypeDescriptor,
+//RS     reducer: i64,
+//RS     value_callback: i64,
+//RS     value_descriptor: Option<&crate::runtime_host::RuntimeTypeDescriptor>,
+//RS     limits: &data_kernel::jet_std::DataLimits,
+//RS ) -> Result<Vec<QueryRow>, DataError> {
+//RS     let operation = match reducer {
+//RS         QUERY_REDUCER_COUNT => "query.group_by.count",
+//RS         QUERY_REDUCER_SUM => "query.group_by.sum",
+//RS         QUERY_REDUCER_MEAN => "query.group_by.mean",
+//RS         _ => "query.group_by",
+//RS     };
+//RS     let value_kind = value_descriptor.map(|descriptor| descriptor.kind);
+//RS     let mut groups = Vec::new();
+//RS     for row in rows {
+//RS         let key_word = query_callback(key_callback, row.word, operation)?;
+//RS         let key = query_key(key_word, key_descriptor, operation)?;
+//RS         let position = groups.iter().position(|group: &QueryGroup| group.key == key);
+//RS         if let Some(position) = position {
+//RS             let group = &mut groups[position];
+//RS             group.count = group.count.saturating_add(1);
+//RS             match reducer {
+//RS                 QUERY_REDUCER_SUM => match value_kind {
+//RS                     Some(crate::runtime_host::RuntimeValueKind::Int) => {
+//RS                         let value = query_callback(value_callback, row.word, operation)?;
+//RS                         let next = if value_descriptor.is_some_and(|descriptor| {
+//RS                             descriptor.integer_width.is_some() || descriptor.integer_range.is_some()
+//RS                         }) {
+//RS                             group
+//RS                                 .int_sum
+//RS                                 .unwrap_or(0)
+//RS                                 .checked_add(value)
+//RS                                 .ok_or_else(|| {
+//RS                                     err(DataErrorKind::Overflow, operation, "integer group sum overflowed")
+//RS                                 })
+//RS                         } else {
+//RS                             Ok(Concurrency::with_runtime_mut(|rt| {
+//RS                                 rt.heap.int_add(group.int_sum.unwrap_or(0), value)
+//RS                             }))
+//RS                         };
+//RS                         group.int_sum = Some(next?);
+//RS                     }
+//RS                     Some(crate::runtime_host::RuntimeValueKind::Float) => {
+//RS                         let value = query_callback(value_callback, row.word, operation)?;
+//RS                         let value = match value_descriptor.map(|descriptor| descriptor.abi) {
+//RS                             Some(crate::runtime_host::RuntimeValueAbi::Float32) => {
+//RS                                 f32::from_bits(value as u32) as f64
+//RS                             }
+//RS                             _ => f64::from_bits(value as u64),
+//RS                         };
+//RS                         group.float_sum = Some(group.float_sum.unwrap_or(0.0) + value);
+//RS                     }
+//RS                     _ => {
+//RS                         return Err(data_decode_error(
+//RS                             operation,
+//RS                             "query sum callback return type is not Add-compatible",
+//RS                         ));
+//RS                     }
+//RS                 },
+//RS                 QUERY_REDUCER_MEAN => {
+//RS                     let raw_value = query_callback(value_callback, row.word, operation)?;
+//RS                     let value = f64::from_bits(raw_value as u64);
+//RS                     if !value.is_finite() {
+//RS                         return Err(err(
+//RS                             DataErrorKind::NonFinite,
+//RS                             operation,
+//RS                             "group values must be finite",
+//RS                         ));
+//RS                     }
+//RS                     group.float_sum = Some(group.float_sum.unwrap_or(0.0) + value);
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         } else {
+//RS             if groups.len() as i64 >= limits.max_groups {
+//RS                 return Err(err(
+//RS                     DataErrorKind::Limit,
+//RS                     operation,
+//RS                     format!("max_groups {} exceeded", limits.max_groups),
+//RS                 ));
+//RS             }
+//RS             let (int_sum, float_sum) = match reducer {
+//RS                 QUERY_REDUCER_SUM => match value_kind {
+//RS                     Some(crate::runtime_host::RuntimeValueKind::Int) => (
+//RS                         Some(query_callback(value_callback, row.word, operation)?),
+//RS                         None,
+//RS                     ),
+//RS                     Some(crate::runtime_host::RuntimeValueKind::Float) => {
+//RS                         let value = query_callback(value_callback, row.word, operation)?;
+//RS                         let value = match value_descriptor.map(|descriptor| descriptor.abi) {
+//RS                             Some(crate::runtime_host::RuntimeValueAbi::Float32) => {
+//RS                                 f32::from_bits(value as u32) as f64
+//RS                             }
+//RS                             _ => f64::from_bits(value as u64),
+//RS                         };
+//RS                         (None, Some(value))
+//RS                     }
+//RS                     _ => {
+//RS                         return Err(data_decode_error(
+//RS                             operation,
+//RS                             "query sum callback return type is not Add-compatible",
+//RS                         ));
+//RS                     }
+//RS                 },
+//RS                 QUERY_REDUCER_MEAN => {
+//RS                     let raw_value = query_callback(value_callback, row.word, operation)?;
+//RS                     let value = f64::from_bits(raw_value as u64);
+//RS                     if !value.is_finite() {
+//RS                         return Err(err(
+//RS                             DataErrorKind::NonFinite,
+//RS                             operation,
+//RS                             "group values must be finite",
+//RS                         ));
+//RS                     }
+//RS                     (None, Some(value))
+//RS                 }
+//RS                 _ => (None, None),
+//RS             };
+//RS             groups.push(QueryGroup {
+//RS                 key,
+//RS                 key_word,
+//RS                 count: 1,
+//RS                 int_sum,
+//RS                 float_sum,
+//RS             });
+//RS         }
+//RS     }
+//RS     let result = Concurrency::with_runtime_mut(|rt| {
+//RS         Some(
+//RS             groups
+//RS                 .into_iter()
+//RS                 .map(|group| {
+//RS                     let record = rt.heap.alloc_record(2);
+//RS                     query_store_field(rt, record, 0, group.key_word, key_descriptor)?;
+//RS                     let value = match reducer {
+//RS                         QUERY_REDUCER_COUNT => rt.heap.int_from_i64(group.count),
+//RS                         QUERY_REDUCER_SUM => {
+//RS                             if let Some(value) = group.int_sum {
+//RS                                 value
+//RS                             } else {
+//RS                                 group.float_sum.unwrap_or(0.0).to_bits() as i64
+//RS                             }
+//RS                         }
+//RS                         QUERY_REDUCER_MEAN => {
+//RS                             (group.float_sum.unwrap_or(0.0) / group.count as f64).to_bits() as i64
+//RS                         }
+//RS                         _ => 0,
+//RS                     };
+//RS                     if reducer == QUERY_REDUCER_MEAN {
+//RS                         let mean = f64::from_bits(value as u64);
+//RS                         rt.heap.record_set_float(record, 1, mean).ok_or_else(|| {
+//RS                             data_decode_error(operation, "mean result value is not a float")
+//RS                         })?;
+//RS                     } else if let Some(descriptor) = value_descriptor {
+//RS                         query_store_field(rt, record, 1, value, descriptor)?;
+//RS                     } else {
+//RS                         let _ = rt.heap.record_set_int(record, 1, value);
+//RS                     }
+//RS                     Ok(QueryRow {
+//RS                         value: jet_rt::JetVal::Int(record),
+//RS                         word: record,
+//RS                     })
+//RS                 })
+//RS                 .collect::<Result<Vec<_>, DataError>>(),
+//RS         )
+//RS     });
+//RS     result.ok_or_else(|| data_decode_error(operation, "runtime is unavailable"))?
+//RS }
+//RS 
+//RS fn query_collect_rows(
+//RS     query: i64,
+//RS ) -> Result<(Vec<QueryRow>, data_kernel::jet_std::DataLimits), DataError> {
+//RS     let parts = Concurrency::with_runtime_mut(|rt| {
+//RS         Some(
+//RS             query_carrier(rt, query)
+//RS                 .ok_or_else(|| data_decode_error("query.collect", "query is not a valid carrier")),
+//RS         )
+//RS     })
+//RS     .ok_or_else(|| data_decode_error("query.collect", "runtime is unavailable"))??;
+//RS     let (rows, limits) = if parts.kind == QUERY_KIND_ROWS {
+//RS         let rows = Concurrency::with_runtime_mut(|rt| Some(query_rows(rt, parts.source, "query.collect")))
+//RS             .ok_or_else(|| data_decode_error("query.collect", "runtime is unavailable"))??;
+//RS         (rows, data_kernel::jet_std::DataLimits::safe())
+//RS     } else if parts.kind == QUERY_KIND_STREAM {
+//RS         let already_collected = Concurrency::with_runtime_mut(|rt| {
+//RS             let already = rt.heap.record_get_bool(parts.state, 0).unwrap_or(true);
+//RS             if !already {
+//RS                 let _ = rt.heap.record_set_bool(parts.state, 0, true);
+//RS             }
+//RS             already
+//RS         });
+//RS         if already_collected {
+//RS             return Err(err(
+//RS                 DataErrorKind::State,
+//RS                 "query.collect",
+//RS                 "query has already been collected",
+//RS             ));
+//RS         }
+//RS         Concurrency::with_runtime_mut(|rt| Some(query_stream_rows(rt, parts.source, "query.collect")))
+//RS             .ok_or_else(|| data_decode_error("query.collect", "runtime is unavailable"))??
+//RS     } else if parts.kind == QUERY_KIND_COMPUTED_GROUP {
+//RS         let already_collected = Concurrency::with_runtime_mut(|rt| {
+//RS             let already = rt.heap.record_get_bool(parts.state, 0).unwrap_or(true);
+//RS             if !already {
+//RS                 let _ = rt.heap.record_set_bool(parts.state, 0, true);
+//RS             }
+//RS             already
+//RS         });
+//RS         if already_collected {
+//RS             return Err(err(
+//RS                 DataErrorKind::State,
+//RS                 "query.collect",
+//RS                 "query has already been collected",
+//RS             ));
+//RS         }
+//RS         let (base_rows, limits) = query_collect_rows(parts.source)?;
+//RS         let (_, key_callback, key_type) = Concurrency::with_runtime_mut(|rt| {
+//RS             Some(query_group_parts(rt, parts.group, "query.collect"))
+//RS         })
+//RS         .ok_or_else(|| data_decode_error("query.collect", "runtime is unavailable"))??;
+//RS         let value_descriptor = if parts.reducer == QUERY_REDUCER_SUM {
+//RS             Some(
+//RS                 Concurrency::with_runtime_mut(|rt| {
+//RS                     Some(descriptor_for_key(rt, parts.value_type, "query.group_by.sum"))
+//RS                 })
+//RS                 .ok_or_else(|| data_decode_error("query.group_by.sum", "runtime is unavailable"))??,
+//RS             )
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let key_descriptor = Concurrency::with_runtime_mut(|rt| {
+//RS             Some(descriptor_for_key(rt, key_type, "query.collect"))
+//RS         })
+//RS         .ok_or_else(|| data_decode_error("query.collect", "runtime is unavailable"))??;
+//RS         let rows = query_group_rows(
+//RS             base_rows,
+//RS             key_callback,
+//RS             &key_descriptor,
+//RS             parts.reducer,
+//RS             parts.value_callback,
+//RS             value_descriptor.as_ref(),
+//RS             &limits,
+//RS         )?;
+//RS         (rows, limits)
+//RS     } else {
+//RS         return Err(data_decode_error("query.collect", "query carrier has unknown source kind"));
+//RS     };
+//RS     Ok((query_apply_operations(rows, parts.operations, &limits)?, limits))
+//RS }
+//RS 
+//RS fn jet_jit_data_arrow_import(batch: i64) -> i64 {
+//RS     batch
+//RS }
+//RS 
+//RS fn jet_jit_data_query_arrow(batch: i64) -> i64 {
+//RS     let _ = batch;
+//RS     0
+//RS }
+//RS pub(crate) fn jet_jit_data_query(rows: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let (kind, source) = if let Some(source) = rt.heap.clone_list(rows) {
+//RS             (QUERY_KIND_ROWS, source)
+//RS         } else {
+//RS             let stream_index = usize::try_from(rows).ok().and_then(|index| index.checked_sub(1));
+//RS             if stream_index.is_none_or(|index| rt.data_streams.get(index).is_none()) {
+//RS                 rt.set_host_fault("data.query: source is not a list or DataStream");
+//RS                 return 0;
+//RS             }
+//RS             (QUERY_KIND_STREAM, rows)
+//RS         };
+//RS         let operations = rt.heap.alloc_empty_list();
+//RS         let plan = rt.heap.alloc_empty_list();
+//RS         let step = rt.heap.alloc_string(if kind == QUERY_KIND_STREAM {
+//RS             "stream"
+//RS         } else {
+//RS             "scan"
+//RS         });
+//RS         let _ = rt.heap.list_push_int(plan, step);
+//RS         let state = alloc_query_state(rt);
+//RS         alloc_query_carrier(
+//RS             rt,
+//RS             kind,
+//RS             source,
+//RS             operations,
+//RS             plan,
+//RS             state,
+//RS             0,
+//RS             0,
+//RS             0,
+//RS             0,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_query_sql(rows: i64, sql: i64, type_key: i64) -> i64 {
+//RS     let source_rows =
+//RS         match Concurrency::with_runtime_mut(|rt| Some(query_rows(rt, rows, "data.query"))) {
+//RS             Some(Ok(rows)) => rows,
+//RS             Some(Err(error)) => {
+//RS                 return crate::Encoding::result_err_fields(
+//RS                     crate::Encoding::json_rt::FieldError::one(error.reason),
+//RS                 )
+//RS             }
+//RS             None => {
+//RS                 return crate::Encoding::result_err_fields(
+//RS                     crate::Encoding::json_rt::FieldError::one("runtime is unavailable"),
+//RS                 )
+//RS             }
+//RS         };
+//RS     let Some((sql, _params)) = crate::DB::clone_sql_value(sql) else {
+//RS         return crate::Encoding::result_err_fields(
+//RS             crate::Encoding::json_rt::FieldError::one("query SQL is not a SQL value"),
+//RS         );
+//RS     };
+//RS     let descriptor = Concurrency::with_runtime_mut(|rt| {
+//RS         if type_key == 0 {
+//RS             None
+//RS         } else {
+//RS             descriptor_for_key(rt, type_key, "data.query").ok()
+//RS         }
+//RS     });
+//RS     let trees = if let Some(descriptor) = descriptor {
+//RS         match Concurrency::with_runtime_mut(|rt| {
+//RS             Some(
+//RS                 source_rows
+//RS                     .iter()
+//RS                     .map(|row| crate::Receipt::encode_jit_value(rt, row.word, &descriptor))
+//RS                     .collect::<Result<Vec<_>, _>>(),
+//RS             )
+//RS         }) {
+//RS             Some(Ok(trees)) => trees,
+//RS             Some(Err(reason)) => {
+//RS                 return crate::Encoding::result_err_fields(
+//RS                     crate::Encoding::json_rt::FieldError::one(reason),
+//RS                 )
+//RS             }
+//RS             None => {
+//RS                 return crate::Encoding::result_err_fields(
+//RS                     crate::Encoding::json_rt::FieldError::one("runtime is unavailable"),
+//RS                 )
+//RS             }
+//RS         }
+//RS     } else {
+//RS         let Some(trees) = source_rows
+//RS             .iter()
+//RS             .map(|row| crate::Encoding::read_datatree(row.word))
+//RS             .collect::<Option<Vec<_>>>()
+//RS         else {
+//RS             return crate::Encoding::result_err_fields(
+//RS                 crate::Encoding::json_rt::FieldError::one(
+//RS                     "query SQL has no checked row type metadata",
+//RS                 ),
+//RS             );
+//RS         };
+//RS         trees
+//RS     };
+//RS     let selected = match crate::Encoding::data_query_rt::jet_data_query_indices(&trees, &sql) {
+//RS         Ok(selected) => selected,
+//RS         Err(errors) => {
+//RS             return crate::Encoding::result_err_fields(errors);
+//RS         }
+//RS     };
+//RS     let selected_rows = selected
+//RS         .into_iter()
+//RS         .filter_map(|index| source_rows.get(index).cloned())
+//RS         .collect::<Vec<_>>();
+//RS     let query = Concurrency::with_runtime_mut(|rt| {
+//RS         let source = alloc_query_rows(rt, selected_rows);
+//RS         let operations = rt.heap.alloc_empty_list();
+//RS         let plan = rt.heap.alloc_empty_list();
+//RS         let scan = rt.heap.alloc_string("scan");
+//RS         let sql_step = rt.heap.alloc_string("sql");
+//RS         let _ = rt.heap.list_push_int(plan, scan);
+//RS         let _ = rt.heap.list_push_int(plan, sql_step);
+//RS         let state = alloc_query_state(rt);
+//RS         alloc_query_carrier(
+//RS             rt,
+//RS             QUERY_KIND_ROWS,
+//RS             source,
+//RS             operations,
+//RS             plan,
+//RS             state,
+//RS             0,
+//RS             0,
+//RS             0,
+//RS             0,
+//RS         )
+//RS     });
+//RS     Concurrency::with_runtime_mut(|rt| crate::runtime_host::alloc_jit_result(rt, true, query as u64))
+//RS }
+//RS 
+//RS fn jet_jit_data_query_filter(query: i64, callback: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(parts) = query_carrier(rt, query) else {
+//RS             rt.set_host_fault("data.query.filter: query is not a valid carrier");
+//RS             return 0;
+//RS         };
+//RS         let operations = match query_operation_list_with(
+//RS             rt,
+//RS             parts,
+//RS             QUERY_OPERATION_FILTER,
+//RS             callback,
+//RS             "data.query.filter",
+//RS         ) {
+//RS             Ok(operations) => operations,
+//RS             Err(error) => {
+//RS                 rt.set_host_fault(format!("data.query.filter: {error}"));
+//RS                 return 0;
+//RS             }
+//RS         };
+//RS         let plan = match query_plan_with_step(rt, parts.plan, "filter", "data.query.filter") {
+//RS             Ok(plan) => plan,
+//RS             Err(error) => {
+//RS                 rt.set_host_fault(format!("data.query.filter: {error}"));
+//RS                 return 0;
+//RS             }
+//RS         };
+//RS         alloc_query_carrier(
+//RS             rt,
+//RS             parts.kind,
+//RS             parts.source,
+//RS             operations,
+//RS             plan,
+//RS             parts.state,
+//RS             parts.group,
+//RS             parts.reducer,
+//RS             parts.value_callback,
+//RS             parts.value_type,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_query_sort_by(query: i64, callback: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(parts) = query_carrier(rt, query) else {
+//RS             rt.set_host_fault("data.query.sort_by: query is not a valid carrier");
+//RS             return 0;
+//RS         };
+//RS         let operations = match query_operation_list_with(
+//RS             rt,
+//RS             parts,
+//RS             QUERY_OPERATION_SORT,
+//RS             callback,
+//RS             "data.query.sort_by",
+//RS         ) {
+//RS             Ok(operations) => operations,
+//RS             Err(error) => {
+//RS                 rt.set_host_fault(format!("data.query.sort_by: {error}"));
+//RS                 return 0;
+//RS             }
+//RS         };
+//RS         let plan = match query_plan_with_step(rt, parts.plan, "sort_by", "data.query.sort_by") {
+//RS             Ok(plan) => plan,
+//RS             Err(error) => {
+//RS                 rt.set_host_fault(format!("data.query.sort_by: {error}"));
+//RS                 return 0;
+//RS             }
+//RS         };
+//RS         alloc_query_carrier(
+//RS             rt,
+//RS             parts.kind,
+//RS             parts.source,
+//RS             operations,
+//RS             plan,
+//RS             parts.state,
+//RS             parts.group,
+//RS             parts.reducer,
+//RS             parts.value_callback,
+//RS             parts.value_type,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_query_collect(query: i64) -> i64 {
+//RS     match query_collect_rows(query) {
+//RS         Ok((rows, _limits)) => Concurrency::with_runtime_mut(|rt| {
+//RS             let rows = alloc_query_rows(rt, rows);
+//RS             crate::runtime_host::alloc_jit_result(rt, true, rows as u64)
+//RS         }),
+//RS         Err(error) => result_data_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_data_query_plan(query: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(parts) = query_carrier(rt, query) else {
+//RS             rt.set_host_fault("data.query.plan: query is not a valid carrier");
+//RS             return 0;
+//RS         };
+//RS         rt.heap.clone_list(parts.plan).unwrap_or_else(|| {
+//RS             rt.set_host_fault("data.query.plan: query plan is not a list");
+//RS             0
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_query_group_by(query: i64, callback: i64, key_type: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if query_carrier(rt, query).is_none() {
+//RS             rt.set_host_fault("data.query.group_by: query is not a valid carrier");
+//RS             return 0;
+//RS         }
+//RS         if callback >= 0
+//RS             || crate::runtime_host::jit_callable_parts(rt, callback)
+//RS                 .is_none_or(|slot| slot.raw_unary.is_none() || slot.raw_pair.is_some())
+//RS         {
+//RS             rt.set_host_fault("data.query.group_by: key callback is not unary");
+//RS             return 0;
+//RS         }
+//RS         let group = rt.heap.alloc_record(4);
+//RS         let _ = rt.heap.record_set_int(group, GROUP_FIELD_TAG, GROUP_CARRIER_TAG);
+//RS         let _ = rt.heap.record_set_int(group, GROUP_FIELD_QUERY, query);
+//RS         let _ = rt.heap.record_set_int(group, GROUP_FIELD_KEY_CALLBACK, callback);
+//RS         let _ = rt.heap.record_set_int(group, GROUP_FIELD_KEY_TYPE, key_type);
+//RS         group
+//RS     })
+//RS }
+//RS 
+//RS fn query_reducer_plan(
+//RS     rt: &mut crate::JitRuntime,
+//RS     grouped: i64,
+//RS     reducer: &str,
+//RS     operation: &str,
+//RS ) -> Result<(QueryParts, i64, i64, i64), DataError> {
+//RS     let (query, _, _) = query_group_parts(rt, grouped, operation)?;
+//RS     let parts = query_carrier(rt, query)
+//RS         .ok_or_else(|| data_decode_error(operation, "grouped query source is invalid"))?;
+//RS     let plan = query_plan_with_step(rt, parts.plan, "group_by", operation)?;
+//RS     let plan = {
+//RS         let reducer = rt.heap.alloc_string(reducer);
+//RS         rt.heap
+//RS             .list_push_int(plan, reducer)
+//RS             .ok_or_else(|| data_decode_error(operation, "query plan cannot append reducer"))?;
+//RS         plan
+//RS     };
+//RS     Ok((parts, query, grouped, plan))
+//RS }
+//RS 
+//RS fn jet_jit_data_group_count_query(grouped: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let (_parts, query, group, plan) =
+//RS             match query_reducer_plan(rt, grouped, "count", "query.group_by.count") {
+//RS                 Ok(value) => value,
+//RS                 Err(error) => {
+//RS                     rt.set_host_fault(format!("query.group_by.count: {error}"));
+//RS                     return Some(0);
+//RS                 }
+//RS             };
+//RS         let operations = rt.heap.alloc_empty_list();
+//RS         let state = alloc_query_state(rt);
+//RS         Some(alloc_query_carrier(
+//RS             rt,
+//RS             QUERY_KIND_COMPUTED_GROUP,
+//RS             query,
+//RS             operations,
+//RS             plan,
+//RS             state,
+//RS             group,
+//RS             QUERY_REDUCER_COUNT,
+//RS             0,
+//RS             0,
+//RS         ))
+//RS     })
+//RS     .unwrap_or(0)
+//RS }
+//RS 
+//RS fn jet_jit_data_group_sum_query(grouped: i64, callback: i64, value_type: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let (_parts, query, group, plan) =
+//RS             match query_reducer_plan(rt, grouped, "sum", "query.group_by.sum") {
+//RS                 Ok(value) => value,
+//RS                 Err(error) => {
+//RS                     rt.set_host_fault(format!("query.group_by.sum: {error}"));
+//RS                     return Some(0);
+//RS                 }
+//RS             };
+//RS         if callback >= 0
+//RS             || crate::runtime_host::jit_callable_parts(rt, callback)
+//RS                 .is_none_or(|slot| slot.raw_unary.is_none() || slot.raw_pair.is_some())
+//RS         {
+//RS             rt.set_host_fault("query.group_by.sum: value callback is not unary");
+//RS             return Some(0);
+//RS         }
+//RS         let operations = rt.heap.alloc_empty_list();
+//RS         let state = alloc_query_state(rt);
+//RS         Some(alloc_query_carrier(
+//RS             rt,
+//RS             QUERY_KIND_COMPUTED_GROUP,
+//RS             query,
+//RS             operations,
+//RS             plan,
+//RS             state,
+//RS             group,
+//RS             QUERY_REDUCER_SUM,
+//RS             callback,
+//RS             value_type,
+//RS         ))
+//RS     })
+//RS     .unwrap_or(0)
+//RS }
+//RS 
+//RS fn jet_jit_data_group_mean_query(grouped: i64, callback: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let (_parts, query, group, plan) =
+//RS             match query_reducer_plan(rt, grouped, "mean", "query.group_by.mean") {
+//RS                 Ok(value) => value,
+//RS                 Err(error) => {
+//RS                     rt.set_host_fault(format!("query.group_by.mean: {error}"));
+//RS                     return Some(0);
+//RS                 }
+//RS             };
+//RS         if callback >= 0
+//RS             || crate::runtime_host::jit_callable_parts(rt, callback)
+//RS                 .is_none_or(|slot| slot.raw_unary.is_none() || slot.raw_pair.is_some())
+//RS         {
+//RS             rt.set_host_fault("query.group_by.mean: value callback is not unary");
+//RS             return Some(0);
+//RS         }
+//RS         let operations = rt.heap.alloc_empty_list();
+//RS         let state = alloc_query_state(rt);
+//RS         Some(alloc_query_carrier(
+//RS             rt,
+//RS             QUERY_KIND_COMPUTED_GROUP,
+//RS             query,
+//RS             operations,
+//RS             plan,
+//RS             state,
+//RS             group,
+//RS             QUERY_REDUCER_MEAN,
+//RS             callback,
+//RS             0,
+//RS         ))
+//RS     })
+//RS     .unwrap_or(0)
+//RS }
+//RS 
+//RS 
+//RS fn err_at(
+//RS     kind: DataErrorKind,
+//RS     op: &str,
+//RS     index: Option<i64>,
+//RS     reason: impl Into<String>,
+//RS ) -> DataError {
+//RS     let mut e = err(kind, op, reason);
+//RS     e.index = index.ok_or(JetAbsent);
+//RS     e
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct DataHostFns;
+//RS     register: register_symbols;
+//RS     declare: declare(module) {
+//RS         let cc = module.target_config().default_call_conv;
+//RS         let mut sig_void = Signature::new(cc);
+//RS         sig_void.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_unary = Signature::new(cc);
+//RS         sig_unary.params.push(AbiParam::new(types::I64));
+//RS         sig_unary.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_binary = sig_unary.clone();
+//RS         sig_binary.params.push(AbiParam::new(types::I64));
+//RS         let mut sig_ternary = sig_binary.clone();
+//RS         sig_ternary.params.push(AbiParam::new(types::I64));
+//RS         let mut sig_quaternary = sig_ternary.clone();
+//RS         sig_quaternary.params.push(AbiParam::new(types::I64));
+//RS         let mut sig_quinary = sig_quaternary.clone();
+//RS         sig_quinary.params.push(AbiParam::new(types::I64));
+//RS 
+//RS 
+//RS     }
+//RS     status: "jet_jit_data_status" => jet_jit_data_status: sig_void;
+//RS     require_bridge: "jet_jit_data_require_bridge" => jet_jit_data_require_bridge: sig_unary;
+//RS     stat: "jet_jit_data_stat" => jet_jit_data_stat: sig_binary;
+//RS     data_limits_safe: "jet_jit_data_limits_safe" => jet_jit_data_limits_safe: sig_void;
+//RS     data_limits_safe_prelude: "jet_std::DataLimits::safe" => jet_jit_data_limits_safe: sig_void;
+//RS     mean: "jet_jit_data_mean" => jet_jit_data_mean: sig_unary;
+//RS     mean_checked: "jet_data_mean_checked" => jet_jit_data_mean: sig_unary;
+//RS     variance: "jet_jit_data_variance" => jet_jit_data_variance: sig_unary;
+//RS     sum: "jet_jit_data_sum" => jet_jit_data_sum: sig_unary;
+//RS     quantile: "jet_jit_data_quantile" => jet_jit_data_quantile: sig_binary;
+//RS     describe: "jet_jit_data_describe" => jet_jit_data_describe: sig_unary;
+//RS     bar_text: "jet_jit_data_bar_text" => jet_jit_data_bar_text: sig_unary;
+//RS     bar_svg: "jet_jit_data_bar_svg" => jet_jit_data_bar_svg: sig_unary;
+//RS     line_text: "jet_jit_data_line_text" => jet_jit_data_line_text: sig_binary;
+//RS     line_svg: "jet_jit_data_line_svg" => jet_jit_data_line_svg: sig_binary;
+//RS     error_show: "jet_jit_data_error_show" => jet_jit_data_error_show: sig_unary;
+//RS     inner_join: "jet_jit_data_inner_join" => jet_jit_data_inner_join: sig_quaternary;
+//RS     left_join: "jet_jit_data_left_join" => jet_jit_data_left_join: sig_quaternary;
+//RS     pivot_sum: "jet_jit_data_pivot_sum" => jet_jit_data_pivot_sum: sig_quaternary;
+//RS     rolling_mean: "jet_jit_data_rolling_mean" => jet_jit_data_rolling_mean: sig_binary;
+//RS     data_loader_load: "jet_data_loader_load" => jet_data_loader_load: sig_ternary;
+//RS     data_loader_load_default: "jet_data_loader_load_default" => jet_data_loader_load_default: sig_binary;
+//RS     data_loader_file: "jet_data_loader_file" => jet_data_loader_file: sig_quaternary;
+//RS     data_loader_file_member: "jet_data_loader_file_member" => jet_data_loader_file_member: sig_quinary;
+//RS     data_loader_url: "jet_data_loader_url" => jet_data_loader_url: sig_quinary;
+//RS     data_loader_database: "jet_data_loader_database" => jet_data_loader_database: sig_quinary;
+//RS     data_loader_value: "jet_data_loader_value" => jet_data_loader_value: sig_ternary;
+//RS     data_loader_snapshot: "jet_data_loader_snapshot" => jet_data_loader_snapshot: sig_binary;
+//RS     data_loader_stream: "jet_data_loader_stream" => jet_data_loader_stream: sig_binary;
+//RS     data_stream_collect: "jet_data_stream_collect" => jet_data_stream_collect: sig_binary;
+//RS     data_stream_next: "jet_data_stream_next" => jet_data_stream_next: sig_binary;
+//RS     data_loader_bind: "jet_data_loader_bind" => jet_data_loader_bind: sig_binary;
+//RS     data_loader_bind_text: "jet_data_loader_bind_text" => jet_data_loader_bind_text: sig_binary;
+//RS     data_loader_cancel: "jet_data_loader_cancel" => jet_data_loader_cancel: sig_unary;
+//RS     data_loader_offline: "jet_data_loader_offline" => jet_data_loader_offline: sig_binary;
+//RS     data_loader_invalidate: "jet_data_loader_invalidate" => jet_data_loader_invalidate: sig_binary;
+//RS     data_loader_needs_refresh: "jet_data_loader_needs_refresh" => jet_data_loader_needs_refresh: sig_unary;
+//RS     data_loader_ready: "jet_data_loader_ready" => jet_data_loader_ready: sig_unary;
+//RS     data_loader_status: "jet_data_loader_status" => jet_data_loader_status: sig_unary;
+//RS     data_loader_source_identity: "jet_data_loader_source_identity" => jet_data_loader_source_identity: sig_unary;
+//RS     data_loader_authority: "jet_data_loader_authority" => jet_data_loader_authority: sig_unary;
+//RS     data_snapshot_reusable: "jet_data_snapshot_reusable" => jet_data_snapshot_reusable: sig_binary;
+//RS     data_stream_cancel: "jet_data_stream_cancel" => jet_data_stream_cancel: sig_unary;
+//RS     csv_reader: "jet_jit_data_csv_reader" => jet_jit_data_csv_reader: sig_ternary;
+//RS     json_reader: "jet_jit_data_json_reader" => jet_jit_data_json_reader: sig_ternary;
+//RS     stream_next: "jet_jit_data_stream_next" => jet_jit_data_stream_next: sig_unary;
+//RS     data_count: "jet_jit_data_count" => jet_jit_data_count: sig_unary;
+//RS     arrow_import: "jet_jit_data_arrow_import" => jet_jit_data_arrow_import: sig_unary;
+//RS     query_arrow: "jet_jit_data_query_arrow" => jet_jit_data_query_arrow: sig_unary;
+//RS     query: "jet_jit_data_query" => jet_jit_data_query: sig_unary;
+//RS     query_sql: "jet_jit_data_query_sql" => jet_jit_data_query_sql: sig_ternary;
+//RS     query_filter: "jet_jit_data_query_filter" => jet_jit_data_query_filter: sig_binary;
+//RS     query_sort_by: "jet_jit_data_query_sort_by" => jet_jit_data_query_sort_by: sig_binary;
+//RS     query_collect: "jet_jit_data_query_collect" => jet_jit_data_query_collect: sig_unary;
+//RS     query_plan: "jet_jit_data_query_plan" => jet_jit_data_query_plan: sig_unary;
+//RS     query_group_by: "jet_jit_data_query_group_by" => jet_jit_data_query_group_by: sig_ternary;
+//RS     group_count_query: "jet_jit_data_group_count_query" => jet_jit_data_group_count_query: sig_unary;
+//RS     group_sum_query: "jet_jit_data_group_sum_query" => jet_jit_data_group_sum_query: sig_ternary;
+//RS     group_mean_query: "jet_jit_data_group_mean_query" => jet_jit_data_group_mean_query: sig_binary;
+//RS     plot_column: "jet_jit_data_plot_column" => jet_jit_data_plot_column: sig_binary;
+//RS     data_plot: "jet_jit_data_plot" => jet_jit_data_plot: sig_unary;
+//RS     plot_inspect: "jet_jit_data_plot_inspect" => jet_jit_data_plot_inspect: sig_unary;
+//RS     plot_inspect_json: "jet_jit_data_plot_inspect_json" => jet_jit_data_plot_inspect_json: sig_unary;
+//RS     plot_text: "jet_jit_data_plot_text" => jet_jit_data_plot_text: sig_unary;
+//RS     plot_svg: "jet_jit_data_plot_svg" => jet_jit_data_plot_svg: sig_unary;
+//RS     plot_show: "jet_jit_data_plot_show" => jet_jit_data_plot_show: sig_unary;
+//RS     plot_render: "jet_jit_data_plot_render" => jet_jit_data_plot_render: sig_binary;
+//RS     plot_line: "jet_jit_data_plot_line" => jet_jit_data_plot_line: sig_unary;
+//RS     plot_bar: "jet_jit_data_plot_bar" => jet_jit_data_plot_bar: sig_unary;
+//RS     plot_point: "jet_jit_data_plot_point" => jet_jit_data_plot_point: sig_unary;
+//RS     plot_x: "jet_jit_data_plot_x" => jet_jit_data_plot_x: sig_binary;
+//RS     plot_y: "jet_jit_data_plot_y" => jet_jit_data_plot_y: sig_ternary;
+//RS     plot_color: "jet_jit_data_plot_color" => jet_jit_data_plot_color: sig_binary;
+//RS     plot_size: "jet_jit_data_plot_size" => jet_jit_data_plot_size: sig_binary;
+//RS     plot_text_channel: "jet_jit_data_plot_text_channel" => jet_jit_data_plot_text_channel: sig_binary;
+//RS     plot_detail: "jet_jit_data_plot_detail" => jet_jit_data_plot_detail: sig_binary;
+//RS     plot_with_transform: "jet_jit_data_plot_with_transform" => jet_jit_data_plot_with_transform: sig_binary;
+//RS     plot_with_scale: "jet_jit_data_plot_with_scale" => jet_jit_data_plot_with_scale: sig_binary;
+//RS     plot_with_axis: "jet_jit_data_plot_with_axis" => jet_jit_data_plot_with_axis: sig_binary;
+//RS     plot_with_legend: "jet_jit_data_plot_with_legend" => jet_jit_data_plot_with_legend: sig_binary;
+//RS     plot_facet: "jet_jit_data_plot_facet" => jet_jit_data_plot_facet: sig_binary;
+//RS     plot_with_layer: "jet_jit_data_plot_with_layer" => jet_jit_data_plot_with_layer: sig_binary;
+//RS     plot_with_interaction: "jet_jit_data_plot_with_interaction" => jet_jit_data_plot_with_interaction: sig_binary;
+//RS     plot_accessibility: "jet_jit_data_plot_accessibility" => jet_jit_data_plot_accessibility: sig_binary;
+//RS     plot_layout: "jet_jit_data_plot_layout" => jet_jit_data_plot_layout: sig_binary;
+//RS     plot_select_indices: "jet_jit_data_plot_select_indices" => jet_jit_data_plot_select_indices: sig_binary;
+//RS }
+// END-PORT-PENDING 0214 crates/jet-jit/src/Data.rs:3618-5117
+

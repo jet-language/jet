@@ -17,10 +17,21 @@ use core as core
 // constructors only build values that can be measured and rendered.
 module host
 
+#Equatable
 pub enum UIPreviewDevice {
     Phone
     Tablet
     Desktop
+    Custom(value: String)
+}
+
+// Preview.rs:106–112. One canonical viewport value, exact-width dimensions.
+#Equatable
+pub struct UIPreviewViewport {
+    pub device: UIPreviewDevice
+    pub width: U32
+    pub height: U32
+    pub scale: U16
 }
 
 pub enum UIPreviewKind {
@@ -97,9 +108,9 @@ pub fn text(value: String) -> UINode Never! {
     core.ui.text(value)
 }
 
-pub fn desktop() -> UIPreviewViewport Never! { core.ui.desktop() }
-pub fn phone() -> UIPreviewViewport Never! { core.ui.phone() }
-pub fn tablet() -> UIPreviewViewport Never! { core.ui.tablet() }
+pub fn desktop() -> UIPreviewViewport Never! { UIPreviewViewport.desktop() }
+pub fn phone() -> UIPreviewViewport Never! { UIPreviewViewport.phone() }
+pub fn tablet() -> UIPreviewViewport Never! { UIPreviewViewport.tablet() }
 
 pub fn key_event(code: String) -> InputEvent Never! { core.ui.key_event(code) }
 pub fn resize_event(width: Float, height: Float) -> InputEvent Never! {

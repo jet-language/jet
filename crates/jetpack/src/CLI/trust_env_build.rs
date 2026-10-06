@@ -432,7 +432,10 @@ pub(super) fn cmd_trust(theme: &Theme, parsed: &Parsed) -> i32 {
                     return 2;
                 }
             };
-            let added = Trust::add_grant(&store, &grant);
+            let added = match Trust::add_grant(&store, std::path::Path::new("."), &grant) {
+                Ok(added) => added,
+                Err(diagnostics) => return Trust::report_gate_failure(theme, diagnostics),
+            };
             theme.status(&if added {
                 format!(
                     "trusted {} `{}` ({})",

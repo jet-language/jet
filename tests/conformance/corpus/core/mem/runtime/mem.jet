@@ -1,0 +1,87 @@
+use core.mem.runtime.mem.[JetArena, JetBump, JetPool, JetFixed, jet_sentry_address_of, jet_sentry_stack_address_of, jet_sentry_volatile_read, jet_sentry_volatile_write]
+use core.mem as memory
+use core.mem.[Ptr]
+use core.cell.[RefCell]
+use alloc.rc.[Rc]
+
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:285
+struct DropProbe { events: Rc<RefCell<[Int]>>, id: Int }
+impl Drop for DropProbe {
+    fn drop(self: &Self) -> { self.events.borrow_mut().push(self.id) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:328-445
+#Test("arena_retains_chunks_preserves_values_and_drops_in_reverse_order") {
+    events :: Rc.new(RefCell.new([Int]{}))
+    arena := JetArena.with_capacity(8)
+    {
+        first :: arena.alloc(DropProbe{events: events.clone(), id: 1})
+        second :: arena.alloc(DropProbe{events: events.clone(), id: 2})
+        assert(first.id == 1 && second.id == 2)
+        facts :: arena.facts()
+        assert(facts.live_allocations == 2)
+        assert(facts.live_bytes == 2 * memory.size_of<DropProbe>())
+        assert(facts.high_water_bytes == facts.live_bytes)
+        assert(facts.retained_bytes >= facts.live_bytes)
+    }
+    retained :: arena.facts().retained_bytes
+    arena.reset()
+    assert(events.borrow().as_slice() == [2, 1])
+    assert(arena.facts().live_allocations == 0 && arena.facts().live_bytes == 0)
+    assert(arena.facts().retained_bytes == retained)
+    { assert(arena.try_alloc(U8{7}).unwrap() == 7) }
+    assert(arena.facts().retained_bytes == retained)
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:461-535
+#Test("bump_exhaustion_returns_value_error_and_reset_reuses_capacity") {
+    bump := JetBump.with_capacity(1)
+    { assert(bump.try_alloc(U8{42}).unwrap() == 42) }
+    if bump.try_alloc(U8{7}) is Err(error) {
+        assert(error.allocator == "Bump" && error.requested_bytes == 1)
+    } else { assert(false) }
+    assert(bump.facts().live_allocations == 1 && bump.facts().live_bytes == 1)
+    bump.reset()
+    assert(bump.facts().high_water_bytes == 1 && bump.facts().retained_bytes == 1)
+    { assert(bump.try_alloc(U8{9}).unwrap() == 9) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:556-689
+#Test("pool_slot_exhaustion_generation_and_compatible_class_retention") {
+    pool := JetPool.with_slots(2)
+    { _ :: pool.alloc(U64{1}); _ :: pool.alloc(U8{2}) }
+    assert(pool.try_alloc(U8{3}).is_err())
+    retained :: pool.facts().retained_bytes
+    generation :: pool.generation()
+    pool.reset()
+    assert(pool.generation() == generation + 1)
+    assert(pool.facts().live_allocations == 0 && pool.facts().live_bytes == 0)
+    { _ :: pool.try_alloc(U64{5}).unwrap(); _ :: pool.try_alloc(U8{4}).unwrap() }
+    assert(pool.facts().retained_bytes == retained)
+    assert(pool.facts().live_bytes == memory.size_of<U8>() + memory.size_of<U64>())
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:701-801
+#Test("fixed_uses_inline_backing_and_canonical_reset_drop_kernel") {
+    backing := [U8]{0}.repeat(1024)
+    events :: Rc.new(RefCell.new([Int]{}))
+    fixed := JetFixed.over(backing.as_mut_slice())
+    {
+        _ :: fixed.try_alloc(DropProbe{events: events.clone(), id: 1}).unwrap()
+        _ :: fixed.alloc(DropProbe{events: events.clone(), id: 2})
+    }
+    assert(fixed.capacity() == 1024 && fixed.used() > 0)
+    assert(fixed.facts().live_allocations == 2)
+    fixed.reset()
+    assert(events.borrow().as_slice() == [2, 1])
+    assert(fixed.used() == 0 && fixed.facts().live_allocations == 0)
+    assert(fixed.facts().retained_bytes == 1024)
+}
+// Rust: crates/jet-codegen/src/Prelude/Mem.rs:138-168
+#Test("sentry_registered_stack_and_volatile_access_use_real_storage") {
+    value := U32{7}
+    #Unsafe("test lends actual live aligned stack storage to the audited sentry accessors") {
+        ptr :: Ptr.from_ref(&value)
+        assert(jet_sentry_stack_address_of(ptr) == I64{ptr.addr()})
+        assert(jet_sentry_address_of(ptr) == I64{ptr.addr()})
+        assert(jet_sentry_volatile_read(ptr, "test_live_storage") == 7)
+        jet_sentry_volatile_write(ptr, U32{11}, "test_live_storage")
+        assert(value == 11)
+    }
+}

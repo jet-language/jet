@@ -1,0 +1,91 @@
+// ABI witnesses bypass Jet callers: upper bits of incoming Bools are dirty.
+// Alignment witnesses address an align64 datum in static and linked images.
+use core.files as files
+fn abi_value(id: Int, layout: LIRLayout) -> LIRValue Never! {
+    LIRValue{id: LIRValueID{value: id}, layout: layout, drop: LIRDrop.Trivial, jet_type: None}
+}
+
+fn abi_bool_module(stack: Bool) -> LIRModule Never! {
+    layouts := [LIRLayout]{}
+    values := [LIRValue]{}
+    params := [LIRValueID]{}
+    if stack {
+        loop index in 0..<6 {
+            &layouts.push(lir_layout_word())
+            &values.push(abi_value(index, lir_layout_word()))
+            &params.push(LIRValueID{value: index})
+        }
+    }
+    id :: values.len()
+    &layouts.push(lir_layout_bool())
+    &values.push(abi_value(id, lir_layout_bool()))
+    &params.push(LIRValueID{value: id})
+    signature :: LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: layouts, result: Val(lir_layout_bool())}
+    block :: LIRBlock{id: LIRBlockID{value: 0}, params: params, insts: [LIRInst]{}, terminator: LIRTerminator.Return{value: Val(LIRValueID{value: id})}}
+    function :: LIRFunction{id: LIRFunctionID{value: 0}, name: "bool_identity", signature: signature.id, values: values, blocks: [LIRBlock]{block}}
+    LIRModule{signatures: [LIRSignature]{signature}, functions: [LIRFunction]{function}, data: [LIRData]{}}
+}
+
+fn abi_write_bool(name: String, stack: Bool, low: Int) {
+    compiled :: x64_compile_module(abi_bool_module(stack))
+    assert(compiled.errors.len() == 0)
+    code := [U8]{}
+    if stack {
+        x64_mov_ri(&code, X64_RAX, 0)
+        x64_push(&code, X64_RAX)
+        x64_mov_ri(&code, X64_RAX, 0x12345600 + low)
+        x64_push(&code, X64_RAX)
+    } else {
+        x64_mov_ri(&code, X64_RDI, 0x12345600 + low)
+    }
+    call_at :: x64_call_rel32(&code)
+    if stack -> x64_alu_ri(&code, X64Alu.Add, X64_RSP, 16)
+    x64_mov_rr(&code, X64_RDI, X64_RAX)
+    x64_mov_ri(&code, X64_RAX, 231)
+    x64_syscall(&code)
+    start :: X64CompiledFunction{id: LIRFunctionID{value: -1}, name: "_start", code: code, relocs: [X64Reloc]{X64Reloc{at: call_at, target: X64RelocTarget.Function{id: LIRFunctionID{value: 0}}}}}
+    functions := [X64CompiledFunction]{start}
+    loop function in compiled.functions -> &functions.push(function)
+    linked :: x64_link_text(functions, [X64CompiledFunction]{}, [LIRData]{})
+    assert(linked.errors.len() == 0)
+    files.write_bytes("{name}.elf", elf64_static_executable(linked.text, 0, X64_FUNCTION_ALIGN)) ?? panic("cannot write Bool ABI fixture")
+    files.set_mode("{name}.elf", 0o755) ?? panic("cannot make Bool ABI fixture executable")
+}
+
+fn abi_alignment_module(hosted: Bool) -> LIRModule Never! {
+    pointer :: LIRValueID{value: 0}
+    zero :: LIRValueID{value: 1}
+    insts := [LIRInst]{LIRInst.DataAddress{dst: pointer, data: LIRDataID{value: 0}}, LIRInst.Const{dst: zero, value: 0}}
+    signatures := [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: if hosted -> None else -> Val(lir_layout_word())}}
+    if hosted {
+        &signatures.push(LIRSignature{id: LIRSignatureID{value: 1}, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_pointer()}, result: None})
+        &insts.push(LIRInst.Call{dst: None, signature: LIRSignatureID{value: 1}, callee: LIRCallee.Runtime{symbol: "jet_rt_alignment"}, args: [LIRValueID]{pointer}})
+    }
+    values :: [LIRValue]{abi_value(0, lir_layout_pointer()), abi_value(1, lir_layout_word())}
+    block :: LIRBlock{id: LIRBlockID{value: 0}, params: [LIRValueID]{}, insts: insts, terminator: LIRTerminator.Return{value: if hosted -> None else -> Val(zero)}}
+    function :: LIRFunction{id: LIRFunctionID{value: 0}, name: "align64", signature: LIRSignatureID{value: 0}, values: values, blocks: [LIRBlock]{block}}
+    LIRModule{signatures: signatures, functions: [LIRFunction]{function}, data: [LIRData]{LIRData{id: LIRDataID{value: 0}, bytes: [U8]{U8{1}}, align: 64}}}
+}
+
+fn abi_fixtures() {
+    abi_write_bool("bool-register-false", false, 0)
+    abi_write_bool("bool-register-true", false, 1)
+    abi_write_bool("bool-stack-false", true, 0)
+    abi_write_bool("bool-stack-true", true, 1)
+    image :: x64_static_executable(abi_alignment_module(false), LIRFunctionID{value: 0})
+    assert(image.errors.len() == 0)
+    // e_entry is _start at the text origin: preserve the maximum datum alignment.
+    assert(Int.from_u8(image.bytes[24]) % 64 == 0)
+    code := [U8]{}
+    at :: x64_lea_rip(&code, X64_RAX)
+    x64_alu_ri(&code, X64Alu.And, X64_RAX, 63)
+    x64_ret(&code)
+    probe :: X64CompiledFunction{id: LIRFunctionID{value: 0}, name: "address_remainder", code: code, relocs: [X64Reloc]{X64Reloc{at: at, target: X64RelocTarget.Data{id: LIRDataID{value: 0}}}}}
+    linked :: x64_link_text([X64CompiledFunction]{x64_start_stub(LIRFunctionID{value: 0}, true), probe}, [X64CompiledFunction]{}, abi_alignment_module(false).data)
+    assert(linked.errors.len() == 0)
+    files.write_bytes("align64.elf", elf64_static_executable(linked.text, 0, 64)) ?? panic("cannot write align64 executable")
+    files.set_mode("align64.elf", 0o755) ?? panic("cannot make align64 executable runnable")
+    object :: x64_relocatable_object(abi_alignment_module(true), LIRFunctionID{value: 0})
+    assert(object.errors.len() == 0)
+    files.write_bytes("align64.o", object.bytes) ?? panic("cannot write align64 object")
+}

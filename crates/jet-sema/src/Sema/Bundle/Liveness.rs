@@ -34,7 +34,7 @@ impl LivenessCandidate {
             self.span,
             "unreachable",
             self.detail,
-            Some("_name".to_string()),
+            None,
         )
     }
 }

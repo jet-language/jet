@@ -1,6 +1,6 @@
 //! #1629 — runtime-tier E0956 uses the shared diagnostic voice.
 //!
-//! Default `jet run` shares the TIR evaluator with comptime. When that
+//! `jet run --interpret` shares the TIR evaluator with comptime. When that
 //! evaluator hits an unsupported construct, every tier renders the same
 //! E0956 what/why/fix text.
 
@@ -8,22 +8,7 @@ use std::fs;
 
 mod common;
 
-use jet::Interpreter::run_jit_once;
-use jet_foundation::JitBackend::RunOutcome;
-
-fn skip_if_cranelift_host_unsupported() -> bool {
-    if jet_jit::cranelift_host_supported() {
-        false
-    } else if std::env::var("JET_REQUIRE_CRANELIFT_HOST").as_deref() == Ok("1") {
-        panic!(
-            "cranelift-jit host path unsupported on this architecture \
-             (JET_REQUIRE_CRANELIFT_HOST=1)"
-        );
-    } else {
-        eprintln!("note: cranelift-jit host path unsupported; skipping run-tier diag assertion");
-        true
-    }
-}
+use jet::Interpreter::RunOutcome;
 
 #[test]
 fn e1112_row_text_matches_aot_run_and_interpreter() {
@@ -45,11 +30,11 @@ fn e1112_row_text_matches_aot_run_and_interpreter_inner() {
 
     let aot = jet::compile_with_path(&src, &path)
         .expect_err("AOT front end must reject an empty task combinator");
-    let run = match run_jit_once(&path) {
+    let run = match jet::Interpreter::run_interpreter_once_with_args(&path, &[]) {
         RunOutcome::Problems(diags) => diags,
-        other => panic!("default jet run must reject E1112: {other:?}"),
+        other => panic!("jet run --interpret must reject E1112: {other:?}"),
     };
-    let interpreter = match jet::Interpreter::dev_iteration(&path, false, true) {
+    let interpreter = match crate::common::dev_run(&path, false, true) {
         RunOutcome::Problems(diags) => diags,
         other => panic!("interpreter gate must reject E1112: {other:?}"),
     };
@@ -76,7 +61,7 @@ fn e1112_row_text_matches_aot_run_and_interpreter_inner() {
     );
     assert_eq!(expected.len(), 3);
     assert!(expected.iter().all(|(code, ..)| code == "E1112"));
-    for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
+    for (tier, diags) in [("jet run --interpret", run), ("interpreter", interpreter)] {
         assert_eq!(
             shape(&diags),
             expected,
@@ -116,9 +101,6 @@ fn e0956_row_text_matches_aot_run_and_interpreter() {
 }
 
 fn e0956_row_text_matches_aot_run_and_interpreter_inner() {
-    if skip_if_cranelift_host_unsupported() {
-        return;
-    }
     let file =
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui/comptime_panic.jet");
     let path = file.to_string_lossy().into_owned();
@@ -127,11 +109,11 @@ fn e0956_row_text_matches_aot_run_and_interpreter_inner() {
 
     let aot = jet::compile_with_path(&src, &path)
         .expect_err("AOT front end must reject the unsupported comptime construct");
-    let run = match run_jit_once(&path) {
+    let run = match jet::Interpreter::run_interpreter_once_with_args(&path, &[]) {
         RunOutcome::Problems(diags) => diags,
-        other => panic!("default jet run must reject E0956: {other:?}"),
+        other => panic!("jet run --interpret must reject E0956: {other:?}"),
     };
-    let interpreter = match jet::Interpreter::dev_iteration(&path, false, true) {
+    let interpreter = match crate::common::dev_run(&path, false, true) {
         RunOutcome::Problems(diags) => diags,
         other => panic!("interpreter gate must reject E0956: {other:?}"),
     };
@@ -205,11 +187,11 @@ fn e0999_row_fix_matches_aot_run_and_interpreter_inner() {
 
     let aot = jet::compile_with_path(&src, &path)
         .expect_err("AOT front end must reject a bare marker with brackets");
-    let run = match run_jit_once(&path) {
+    let run = match jet::Interpreter::run_interpreter_once_with_args(&path, &[]) {
         RunOutcome::Problems(diags) => diags,
-        other => panic!("default jet run must reject E0999: {other:?}"),
+        other => panic!("jet run --interpret must reject E0999: {other:?}"),
     };
-    let interpreter = match jet::Interpreter::dev_iteration(&path, false, true) {
+    let interpreter = match crate::common::dev_run(&path, false, true) {
         RunOutcome::Problems(diags) => diags,
         other => panic!("interpreter gate must reject E0999: {other:?}"),
     };
@@ -290,11 +272,11 @@ fn e0311_suggested_fix_matches_aot_run_and_interpreter_inner() {
 
     let aot =
         jet::compile_with_path(&src, &path).expect_err("AOT front end must reject missing methods");
-    let run = match run_jit_once(&path) {
+    let run = match jet::Interpreter::run_interpreter_once_with_args(&path, &[]) {
         RunOutcome::Problems(diags) => diags,
-        other => panic!("default jet run must reject E0311: {other:?}"),
+        other => panic!("jet run --interpret must reject E0311: {other:?}"),
     };
-    let interpreter = match jet::Interpreter::dev_iteration(&path, false, true) {
+    let interpreter = match crate::common::dev_run(&path, false, true) {
         RunOutcome::Problems(diags) => diags,
         other => panic!("interpreter gate must reject E0311: {other:?}"),
     };
@@ -397,11 +379,7 @@ fn run() {}
         RunOutcome::Problems(diags) => diags,
         other => panic!("interpreter must reject the programmable build check: {other:?}"),
     };
-    let jit = match jet::Interpreter::run_jit_once_with_args(&path, &[]) {
-        RunOutcome::Problems(diags) => diags,
-        other => panic!("Cranelift run must reject the programmable build check: {other:?}"),
-    };
-    let dev = match jet::Interpreter::dev_iteration(&path, false, false) {
+    let dev = match crate::common::dev_run(&path, false, true) {
         RunOutcome::Problems(diags) => diags,
         other => panic!("dev must reject the programmable build check: {other:?}"),
     };
@@ -409,7 +387,6 @@ fn run() {}
         .expect_err("web checking must reject the programmable build check");
 
     for (tier, diags) in [
-        ("Cranelift run", jit),
         ("interpreter", interpreter),
         ("dev", dev),
         ("web", web),
@@ -420,4 +397,58 @@ fn run() {}
             "{tier} diagnostic drifted from AOT"
         );
     }
+}
+
+#[test]
+fn pattern_hole_reuse_reports_and_repairs_match_run_tiers() {
+    std::thread::Builder::new()
+        .name("pattern-hole-reuse-parity".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            for position in ["if", "value", "route", "bytes", "or", "and", "optional", "constant", "typed"] {
+                let shown = format!("tests/ui/pattern_hole_reuse_{position}.jet");
+                let file = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(&shown);
+                let path = file.to_string_lossy().into_owned();
+                let source = fs::read_to_string(&file).unwrap();
+                let snapshot = fs::read_to_string(file.with_extension("stderr")).unwrap();
+                let aot = jet::compile_with_path(&source, &path)
+                    .expect_err("a pattern hole cannot reuse an existing value");
+                let refusals = aot.iter().filter(|diag| diag.code == "E0118").collect::<Vec<_>>();
+                assert_eq!(refusals.len(), 1, "{position}: {aot:?}");
+                let refusal = refusals[0];
+                if matches!(position, "typed" | "bytes" | "route") {
+                    assert!(refusal.edit.is_none(), "{position} has no parenthesis-only repair");
+                } else {
+                    let edit = refusal.edit.as_ref().expect("plain text comparison has a structured repair");
+                    assert!(edit.new_text.starts_with('(') && edit.new_text.ends_with(')'));
+                    let mut fixed = source.clone();
+                    fixed.replace_range(edit.span.start..edit.span.end, &edit.new_text);
+                    // `compile_with_path` checks the file on disk, so the repair
+                    // must be written out to be the source that is compiled.
+                    let repaired = common::Scratch::new("pattern_hole_repair");
+                    let fixed_file = repaired.join(&format!("pattern_hole_reuse_{position}.jet"));
+                    fs::write(&fixed_file, &fixed).unwrap();
+                    jet::compile_with_path(&fixed, &fixed_file.to_string_lossy())
+                        .unwrap_or_else(|diags| panic!("{position} comparison repair failed: {diags:?}"));
+                }
+                let report_path = jet::Diagnostics::ReportPath::from_path(&file);
+                let expected_json = jet::render_all_json(&report_path, &source, &aot);
+                assert_eq!(jet::render_diagnostics(&shown, &source, &aot), snapshot);
+                let run = match jet::Interpreter::run_interpreter_once_with_args(&path, &[]) {
+                    RunOutcome::Problems(diags) => diags,
+                    other => panic!("{position}: run must refuse the hole: {other:?}"),
+                };
+                let interpreter = match crate::common::dev_run(&path, false, true) {
+                    RunOutcome::Problems(diags) => diags,
+                    other => panic!("{position}: interpreter must refuse the hole: {other:?}"),
+                };
+                for diags in [run, interpreter] {
+                    assert_eq!(jet::render_all_json(&report_path, &source, &diags), expected_json);
+                    assert_eq!(jet::render_diagnostics(&shown, &source, &diags), snapshot);
+                }
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
 }

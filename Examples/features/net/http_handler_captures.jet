@@ -31,7 +31,7 @@ fn run() (HTTPError | NetError | TaskFailure)! {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
     addr :: listener.local_addr() ?? panic("address failed")
     mux :: server.mux()
-    mux.post("/order", (req: HTTPRequest) HTTPResponse HTTPError! -> {
+    mux.post("/order", (req: HTTPRequest) -> {
         user :: req.header("x-user") ?? "anonymous"
         scope.execute(SQL{"INSERT INTO orders (user) VALUES ({user})"}) ?? panic("insert")
         Ok(server.response(200, "{greeting} {user}"))

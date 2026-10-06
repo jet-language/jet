@@ -274,8 +274,10 @@ impl<'a> Checker<'a> {
             } else {
                 for (param, actual) in type_params.iter().zip(type_args) {
                     let actual = self.resolve_type(actual.clone());
-                    // D-CALLBACK-ERR1=A: `Never` fills a failure-domain parameter.
-                    if !actual.is_never() {
+                    // D-CALLBACK-ERR1=A: `Never` fills only a failure-domain parameter.
+                    if !actual.is_never()
+                        || !crate::Sema::CheckerCore::sig_names_failure_domain(&sig, &param.name)
+                    {
                         self.check_declared_type(&actual, span);
                     }
                     for bound in &param.bounds {
@@ -427,11 +429,11 @@ impl<'a> Checker<'a> {
         // D-MOD-CYCLE1=A: an imported package is one namespace; the function
         // may live in any of its files.
         if !target.funcs.contains_key(&semantic_name) {
-            if let Some(owner) = self
+            let owner = self
                 .name_ledger
                 .namespace_siblings(mod_idx)
-                .into_iter()
-                .find(|&sibling| mods[sibling].funcs.contains_key(name))
+                .find(|&sibling| mods[sibling].funcs.contains_key(name));
+            if let Some(owner) = owner
             {
                 return self.infer_import_call_with_warning(
                     alias, owner, name, alias_span, span, type_args, args, resolved_ret_out,
@@ -548,8 +550,10 @@ impl<'a> Checker<'a> {
                 } else {
                     for (param, actual) in type_params.iter().zip(type_args) {
                         let actual = self.resolve_type(actual.clone());
-                        // D-CALLBACK-ERR1=A: `Never` fills a failure-domain parameter.
-                        if !actual.is_never() {
+                        // D-CALLBACK-ERR1=A: `Never` fills only a failure-domain parameter.
+                        if !actual.is_never()
+                            || !crate::Sema::CheckerCore::sig_names_failure_domain(&sig, &param.name)
+                        {
                             self.check_declared_type(&actual, span);
                         }
                         for bound in &param.bounds {

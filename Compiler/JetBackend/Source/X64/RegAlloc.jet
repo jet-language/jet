@@ -35,10 +35,16 @@ pub fn x64_inst_is_call(inst: LIRInst) -> Bool Never! {
     }
 }
 
-// Block-by-value bit matrices: `live_in[block * value_count + value]`.
+// Sparse per-block value sets: block b's live-in values are
+// `live_in[in_starts[b]..<in_starts[b + 1]]`, each value once (likewise
+// live-out). Sets are built as lists with epoch-stamped scratch marks, so
+// work and memory follow the live values instead of blocks x values bit
+// matrices. Stored flat: the struct holds no nested lists.
 struct X64Liveness {
-    pub live_in: [Bool]
-    pub live_out: [Bool]
+    pub live_in: [Int]
+    pub in_starts: [Int]
+    pub live_out: [Int]
+    pub out_starts: [Int]
 }
 
 fn x64_falses(count: Int) -> [Bool] Never! {
@@ -54,30 +60,56 @@ fn x64_liveness(function: LIRFunction) -> X64Liveness Never! {
     loop (index, block) in function.blocks {
         if block_rows.get(block.id.value) == None -> &block_rows.add(block.id.value, index).drop("checked absent above")
     }
-    gens := [[Bool]]{}
-    kills := [[Bool]]{}
+    // marks[value] == epoch means "in the set being built"; a new epoch clears
+    // every set at once.
+    defined_marks := [Int]{}
+    seen_marks := [Int]{}
+    loop _ in 0..<count {
+        &defined_marks.push(0)
+        &seen_marks.push(0)
+    }
+    epoch := 0
+    gens := [[Int]]{}
+    kills := [[Int]]{}
     successors := [[Int]]{}
     loop block in function.blocks {
-        defined := x64_falses(count)
-        gen := x64_falses(count)
-        loop param in block.params -> defined[param.value] = true
-        loop inst in block.insts {
-            loop used in lir_inst_uses(inst) { if !defined[used.value] -> gen[used.value] = true }
-            if lir_inst_def(inst) == .Val(dst) -> defined[dst.value] = true
+        epoch += 1
+        defined := [Int]{}
+        gen := [Int]{}
+        loop param in block.params {
+            defined_marks[param.value] = epoch
+            &defined.push(param.value)
         }
-        loop used in lir_terminator_uses(block.terminator) { if !defined[used.value] -> gen[used.value] = true }
+        loop inst in block.insts {
+            loop used in lir_inst_uses(inst) {
+                if defined_marks[used.value] != epoch && seen_marks[used.value] != epoch {
+                    seen_marks[used.value] = epoch
+                    &gen.push(used.value)
+                }
+            }
+            if lir_inst_def(inst) == .Val(dst) {
+                defined_marks[dst.value] = epoch
+                &defined.push(dst.value)
+            }
+        }
+        loop used in lir_terminator_uses(block.terminator) {
+            if defined_marks[used.value] != epoch && seen_marks[used.value] != epoch {
+                seen_marks[used.value] = epoch
+                &gen.push(used.value)
+            }
+        }
         &gens.push(gen)
         &kills.push(defined)
         targets := [Int]{}
         loop target in lir_terminator_targets(block.terminator) -> &targets.push(block_rows.get(target.block.value) ?? -1)
         &successors.push(targets)
     }
-    live_in := [[Bool]]{}
-    live_out := [[Bool]]{}
+    live_in := [[Int]]{}
+    live_out := [[Int]]{}
     predecessors := [[Int]]{}
     loop _ in function.blocks {
-        &live_in.push(x64_falses(count))
-        &live_out.push(x64_falses(count))
+        &live_in.push([Int]{})
+        &live_out.push([Int]{})
         &predecessors.push([Int]{})
     }
     loop (index, targets) in successors {
@@ -85,7 +117,8 @@ fn x64_liveness(function: LIRFunction) -> X64Liveness Never! {
     }
     // A worklist (first every block in reverse order, then the predecessors
     // of each block whose live-in set changed) reaches the same least fixed
-    // point as whole-CFG sweeps, without re-sweeping unchanged blocks.
+    // point as whole-CFG sweeps, without re-sweeping unchanged blocks. Sets
+    // only grow from empty, so a live-in set changed exactly when it grew.
     pending := [Int]{}
     queued := x64_falses(function.blocks.len())
     seed := function.blocks.len() - 1
@@ -99,14 +132,32 @@ fn x64_liveness(function: LIRFunction) -> X64Liveness Never! {
         block_index := pending[cursor]
         cursor += 1
         queued[block_index] = false
-        out := x64_falses(count)
+        epoch += 1
+        out := [Int]{}
         loop successor in successors[block_index] {
-            loop value in 0..<count { if live_in[successor][value] -> out[value] = true }
+            loop value in live_in[successor] {
+                if seen_marks[value] != epoch {
+                    seen_marks[value] = epoch
+                    &out.push(value)
+                }
+            }
         }
-        incoming := x64_falses(count)
-        loop value in 0..<count -> incoming[value] = gens[block_index][value] || (out[value] && !kills[block_index][value])
+        loop value in kills[block_index] -> defined_marks[value] = epoch
+        epoch += 1
+        incoming := [Int]{}
+        loop value in gens[block_index] {
+            seen_marks[value] = epoch
+            &incoming.push(value)
+        }
+        loop value in out {
+            if defined_marks[value] != epoch - 1 && seen_marks[value] != epoch {
+                seen_marks[value] = epoch
+                &incoming.push(value)
+            }
+        }
+        grew :: incoming.len() != live_in[block_index].len()
         live_out[block_index] = out
-        if incoming != live_in[block_index] {
+        if grew {
             live_in[block_index] = incoming
             loop predecessor in predecessors[block_index] {
                 if !queued[predecessor] {
@@ -116,15 +167,17 @@ fn x64_liveness(function: LIRFunction) -> X64Liveness Never! {
             }
         }
     }
-    flat_in := [Bool]{}
-    flat_out := [Bool]{}
+    flat_in := [Int]{}
+    flat_out := [Int]{}
+    in_starts := [Int]{0}
+    out_starts := [Int]{0}
     loop row in 0..<function.blocks.len() {
-        loop value in 0..<count {
-            &flat_in.push(live_in[row][value])
-            &flat_out.push(live_out[row][value])
-        }
+        loop value in live_in[row] -> &flat_in.push(value)
+        loop value in live_out[row] -> &flat_out.push(value)
+        &in_starts.push(flat_in.len())
+        &out_starts.push(flat_out.len())
     }
-    X64Liveness{live_in: flat_in, live_out: flat_out}
+    X64Liveness{live_in: flat_in, in_starts: in_starts, live_out: flat_out, out_starts: out_starts}
 }
 
 fn x64_pool_has(pool: [Int], reg: Int) -> Bool Never! {
@@ -145,7 +198,7 @@ pub fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
     position := 0
     loop (block_index, block) in function.blocks {
         touched := [Int]{}
-        loop value in 0..<count { if liveness.live_in[block_index * count + value] -> &touched.push(value) }
+        loop at in liveness.in_starts[block_index]..<liveness.in_starts[block_index + 1] -> &touched.push(liveness.live_in[at])
         loop param in block.params -> &touched.push(param.value)
         loop value in touched {
             if starts[value] < 0 || position < starts[value] -> starts[value] = position
@@ -165,7 +218,7 @@ pub fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
         }
         touched = [Int]{}
         loop used in lir_terminator_uses(block.terminator) -> &touched.push(used.value)
-        loop value in 0..<count { if liveness.live_out[block_index * count + value] -> &touched.push(value) }
+        loop at in liveness.out_starts[block_index]..<liveness.out_starts[block_index + 1] -> &touched.push(liveness.live_out[at])
         loop value in touched {
             if starts[value] < 0 || position < starts[value] -> starts[value] = position
             if position > ends[value] -> ends[value] = position

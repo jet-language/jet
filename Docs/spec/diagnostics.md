@@ -22,6 +22,10 @@ renumber one. Lexer, parser, and semantic checks raise the row that owns the
 violated rule; the CLI, LSP, machine reports, web pages, and backends project
 those rows rather than defining a second message or exposing raw backend text.
 
+Retired marker spellings retain their `$retired` replacement in
+`Prelude/Markers.jet`. Parser recovery must teach that same replacement and
+must not reinterpret a retired foreign import as a binding-generator module.
+
 ## Plain-words rubric
 
 Every active row, and every message builder that fills one, reads in plain
@@ -59,6 +63,12 @@ recover an edit. Machine JSON and LSP data carry the registered code,
 What/Why/Fix, span, and structured edits without requiring consumers to parse
 human prose. Safe edits may be applied automatically; suggested edits remain
 advisory until accepted.
+
+Borrowed-return repairs teach the provenance spelling `-> View<T> from source`
+and a view derived from that source, not shared ownership as a substitute.
+Build authority repairs use `--allow=Effect` (for example `--allow=Exec`);
+action stderr is decoded from the structured report before terminal rendering,
+so its line breaks remain actual lines rather than JSON escapes.
 
 ## Machine reports and causes
 
@@ -124,6 +134,9 @@ constant and owning decision appear only with `--verbose`.
 4. Run the focused snapshot and coverage checks, then check
    `jet explain <CODE>`. Test rendered behavior where applicable; do not add a
    persistent Markdown mirror.
+   Parser parity proofs also compare byte spans, secondary labels, edits, and
+   their applicability and safety grades in `tests/selfhost_parser.rs`; matching
+   prose alone does not prove that a machine fix edits the right source.
 
 Coverage checks both directions: each emitted code has one registered row and
 snapshot, and each row is emitted or explicitly marked retired or reserved in

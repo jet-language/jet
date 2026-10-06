@@ -115,15 +115,15 @@ fn run() (HTTPError | NetError | TaskFailure)! {
     listener :: net.tcp_listen("127.0.0.1:0")
     addr :: listener.local_addr()
     mux :: server.mux()
-    mux.get("/", (req: HTTPRequest) HTTPResponse HTTPError! -> {
+    mux.get("/", (req: HTTPRequest) -> {
         _path :: req.path()
         return Ok(server.response(200, "<h1>Orders</h1><a href=\"/orders\">list</a>"))
     })
-    mux.get("/orders", (req: HTTPRequest) HTTPResponse HTTPError! -> list_orders(db_path, cache_version, req))
-    mux.get("/orders/:id", (req: HTTPRequest) HTTPResponse HTTPError! -> detail_order(db_path, req))
-    mux.post("/orders", (req: HTTPRequest) HTTPResponse HTTPError! -> create_order(db_path, cache_version, req))
-    mux.post("/login", (req: HTTPRequest) HTTPResponse HTTPError! -> login(req))
-    mux.get("/protected", (req: HTTPRequest) HTTPResponse HTTPError! -> protected(session_id, req))
+    mux.get("/orders", (req: HTTPRequest) -> list_orders(db_path, cache_version, req))
+    mux.get("/orders/:id", (req: HTTPRequest) -> detail_order(db_path, req))
+    mux.post("/orders", (req: HTTPRequest) -> create_order(db_path, cache_version, req))
+    mux.post("/login", (req: HTTPRequest) -> login(req))
+    mux.get("/protected", (req: HTTPRequest) -> protected(session_id, req))
     server.static_files(mux, "/assets", "/home/nate/.cache/jet-dev/dx3/area-web/pkg/public")
 
     t :: task {

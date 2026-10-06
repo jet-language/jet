@@ -1,0 +1,27 @@
+// Darwin LP64-selected libc import rows. This is not a Linux errno/stat
+// fallback, and it must never load into a Linux or kernel32 native closure.
+// Main owns selected-native registry activation after stage1.
+use core.mem as darwin_mem
+use c.c as darwin_os
+
+pub DARWIN_LP64_SC_NPROCESSORS_ONLN :: I32{58}
+
+#Import module c.c {
+    // Actual Darwin c_long/size_t widths on Apple LP64, not universal Unix.
+    fn sysconf(selector: I32) -> I64 = "sysconf"
+    // xnu bsd/sys/errno.h81–82: a borrowed non-null per-thread int pointer.
+    // #4494 E3202 native pointer-return admission gate is deliberately kept.
+    fn darwin_errno_location() -> *I32 = "__error"
+    // Darwin's actual XSI status-plus-out symbol, not glibc's GNU pointer ABI.
+    // Caller owns the live NUL byte buffer; canonical IOError owner decodes
+    // actual native text/trim/classification with the preserved requested code.
+    fn xsi_strerror_r(error_number: I32, buffer: *I8, size: U64) -> I32 = "strerror_r"
+    // Borrowed nullable environment storage. Native os_path_ingress retains
+    // real environment synchronization through copying these OS bytes into
+    // OSPath. Never free this pointer or convert nonUTF8 input via String.
+    fn getenv(name: *I8) -> *I8 = "getenv"
+    fn getcwd(buffer: *I8, size: U64) -> *I8 = "getcwd"
+    // Actual Apple F_FULLFSYNC and F_DUPFD_CLOEXEC calls use selected scalar
+    // commands. Pinned sync_file has NO fsync fallback; owner retries EINTR.
+    fn fcntl(fd: I32, command: I32, args: ...I32) -> I32 = "fcntl"
+}

@@ -22,7 +22,7 @@ fn knowledge_loss_requires_a_spelled_gate() {
 fn accept_f32(value: F32) {}
 
 fn run() {
-    value :: Float.{1.0}
+    value :: Float{1.0}
     accept_f32(value)
 }
 "#,
@@ -84,4 +84,41 @@ fn inline_range_runtime_conversion_requires_try() {
         diagnostics.iter().any(|diagnostic| diagnostic.code == "E0136"),
         "expected E0136, got {diagnostics:#?}"
     );
+}
+
+#[test]
+fn compound_updates_require_their_operator() {
+    for (source, code, count) in [
+        (include_str!("ui/compound_non_arithmetic_place.jet"), "E0109", 6),
+        (include_str!("ui/operator_missing_compound_hook.jet"), "E0360", 6),
+    ] {
+        let diagnostics = jet::compile(source).expect_err("undefined compound operator");
+        assert_eq!(
+            diagnostics.iter().filter(|diagnostic| diagnostic.code == code).count(),
+            count,
+            "{diagnostics:#?}"
+        );
+    }
+    jet::compile(
+        r#"
+struct Point {
+    x: Int
+}
+
+impl Point.Add {
+    fn add(self, rhs: Point) -> Point { return Point{x: self.x + rhs.x} }
+}
+
+fn run() {
+    point := Point{x: 1}
+    point += Point{x: 2}
+    count := 1
+    count += 2
+    text := "p"
+    text += "q"
+    print("{point.x} {count} {text}")
+}
+"#,
+    )
+    .expect("defined hooks, numeric updates, and String append remain valid");
 }

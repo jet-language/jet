@@ -655,38 +655,77 @@ pub(crate) fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashM
     map
 }
 
-/// Resolve every ordinary file-module alias path reachable from module_idx.
-/// Synthetic calls can retain the whole source path even though the emitted
-/// Rust function lives in the final module's namespace.
-fn imported_module_paths(bundle: &ProgramBundle, module_idx: usize) -> Vec<(String, usize)> {
-    let mut paths = Vec::new();
-    let mut pending = vec![(String::new(), module_idx, HashSet::from([module_idx]))];
-    while let Some((prefix, owner, seen)) = pending.pop() {
-        for imp in &bundle.modules[owner].imports {
-            if is_foreign_member_list(imp)
-                || is_c_import_after_frontend(imp)
-                || matches!(imp.kind, ImportKind::Unqualified { .. })
-                || imp.core_module_path().is_some()
-            {
-                continue;
+/// Follow a dotted file-module path (`a.b`) from `module_idx` through ordinary
+/// file-module import aliases, the edges sema's `resolve_import_call_path`
+/// walks. A path may end on a module it already passed through but never
+/// continues past one.
+fn resolve_file_module_path(bundle: &ProgramBundle, module_idx: usize, path: &str) -> Option<usize> {
+    let mut owner = module_idx;
+    let mut passed = vec![module_idx];
+    let mut segments = path.split('.').peekable();
+    while let Some(segment) = segments.next() {
+        let imp = bundle.modules[owner].imports.iter().find(|imp| {
+            !matches!(imp.kind, ImportKind::Unqualified { .. })
+                && imp.core_module_path().is_none()
+                && imp.import_alias() == segment
+                && !is_c_import_after_frontend(imp)
+        })?;
+        let target = required_import_target(bundle, owner, imp);
+        if segments.peek().is_some() {
+            if passed.contains(&target) {
+                return None;
             }
-            let alias = imp.import_alias();
-            let target = required_import_target(bundle, owner, imp);
-            let path = if prefix.is_empty() {
-                alias
-            } else {
-                format!("{prefix}.{alias}")
-            };
-            paths.push((path.clone(), target));
-            if seen.contains(&target) {
-                continue;
+            passed.push(target);
+        }
+        owner = target;
+    }
+    Some(owner)
+}
+
+/// Every dotted free-call name (`a.b.f`) in the bodies sema checks for this
+/// module: functions, type and impl methods, tests, inline-module functions
+/// and error conversions. Synthetic calls (the qualified entry wrapper) keep
+/// the whole source path even though the emitted Rust function lives in the
+/// final module's namespace.
+fn dotted_call_names(items: &[Item], names: &mut HashSet<String>) {
+    fn body(stmts: &[crate::AST::Stmt], names: &mut HashSet<String>) {
+        crate::Comptime::walk_stmt_expr_nodes_for_validation(stmts, &mut |expr| {
+            if let crate::AST::Expr::Call(call) = expr {
+                if call.name.contains('.') && !names.contains(&call.name) {
+                    names.insert(call.name.clone());
+                }
             }
-            let mut next_seen = seen.clone();
-            next_seen.insert(target);
-            pending.push((path, target, next_seen));
+        });
+    }
+    fn methods<'a>(
+        methods: &'a [crate::AST::Func],
+        trait_impls: &'a [crate::AST::TraitImplBlock],
+    ) -> impl Iterator<Item = &'a crate::AST::Func> {
+        methods
+            .iter()
+            .chain(trait_impls.iter().flat_map(|block| &block.methods))
+    }
+    for item in items {
+        match item {
+            Item::Func(function) => body(&function.body, names),
+            Item::Struct(definition) => methods(&definition.methods, &definition.trait_impls)
+                .for_each(|method| body(&method.body, names)),
+            Item::Enum(definition) => methods(&definition.methods, &definition.trait_impls)
+                .for_each(|method| body(&method.body, names)),
+            Item::Impl(definition) => definition
+                .methods
+                .iter()
+                .for_each(|method| body(&method.body, names)),
+            Item::Test(test) => body(&test.body, names),
+            Item::CodeModule(code_module) => {
+                if let Some(inner) = &code_module.body {
+                    dotted_call_names(inner, names);
+                }
+            }
+            Item::ErrorConv(conversion) => body(&conversion.body, names),
+            _ => {}
         }
     }
-    paths
 }
 
 /// Return selective-import aliases that name a visible bodyless child module.
@@ -873,6 +912,7 @@ pub(crate) fn core_import_map(
 pub(crate) fn unqualified_import_maps(
     bundle: &ProgramBundle,
     module_idx: usize,
+    nested: &[NestedFileCall],
 ) -> (HashMap<String, String>, HashMap<String, (String, String)>) {
     let mut inline_map: HashMap<String, String> = HashMap::new();
     let mut file_map: HashMap<String, (String, String)> = HashMap::new();
@@ -931,8 +971,11 @@ pub(crate) fn unqualified_import_maps(
             }
         }
     }
-    for (path, rust_mod, function, _, _) in nested_file_function_entries(bundle, module_idx) {
-        file_map.insert(format!("{path}.{function}"), (rust_mod, function));
+    for call in nested {
+        file_map.insert(
+            call.name.clone(),
+            (call.rust_mod.clone(), call.function.clone()),
+        );
     }
     (inline_map, file_map)
 }
@@ -1525,25 +1568,39 @@ fn unqualified_file_function_entries(
     entries
 }
 
-fn nested_file_function_entries(
-    bundle: &ProgramBundle,
-    module_idx: usize,
-) -> Vec<(
-    String,
-    String,
-    String,
-    Vec<(AccessConvention, Type)>,
-    Option<Type>,
-)> {
-    let mut entries = Vec::new();
-    for (path, target) in imported_module_paths(bundle, module_idx) {
+/// One dotted free call (`a.b.f`) made in a module, resolved to the function
+/// it names. Keys of the codegen call maps use the whole dotted `name`.
+pub(crate) struct NestedFileCall {
+    name: String,
+    rust_mod: String,
+    function: String,
+    params: Vec<(AccessConvention, Type)>,
+    ret: Option<Type>,
+}
+
+/// Resolve the dotted free calls `module_idx` actually makes. Only names that
+/// occur in its bodies are resolved: enumerating every alias path instead is
+/// exponential in a densely connected module graph (each package member
+/// imports all of its siblings).
+pub(crate) fn nested_file_calls(bundle: &ProgramBundle, module_idx: usize) -> Vec<NestedFileCall> {
+    let mut names = HashSet::new();
+    dotted_call_names(&bundle.modules[module_idx].items, &mut names);
+    let mut calls = Vec::new();
+    for name in names {
+        let Some((path, function_name)) = name.rsplit_once('.') else {
+            continue;
+        };
+        let Some(target) = resolve_file_module_path(bundle, module_idx, path) else {
+            continue;
+        };
         for item in &bundle.modules[target].items {
             let Item::Func(function) = item else {
                 continue;
             };
-            if !bundle
-                .name_ledger
-                .visible(module_idx, target, &function.name)
+            if function.name != function_name
+                || !bundle
+                    .name_ledger
+                    .visible(module_idx, target, &function.name)
             {
                 continue;
             }
@@ -1558,24 +1615,24 @@ fn nested_file_function_entries(
                     };
                     (
                         param.convention,
-                        qualify_imported_call_type(bundle, target, &path, &ty),
+                        qualify_imported_call_type(bundle, target, path, &ty),
                     )
                 })
                 .collect();
             let ret = function
                 .return_type
                 .as_ref()
-                .map(|ty| qualify_imported_call_type(bundle, target, &path, ty));
-            entries.push((
-                path.clone(),
-                mangle(&bundle.modules[target].alias),
-                function.name.clone(),
+                .map(|ty| qualify_imported_call_type(bundle, target, path, ty));
+            calls.push(NestedFileCall {
+                name: name.clone(),
+                rust_mod: mangle(&bundle.modules[target].alias),
+                function: function.name.clone(),
                 params,
                 ret,
-            ));
+            });
         }
     }
-    entries
+    calls
 }
 
 pub(crate) fn core_source_sig_map(
@@ -1700,6 +1757,7 @@ pub(crate) fn core_source_sig_map(
 pub(crate) fn import_sig_map(
     bundle: &ProgramBundle,
     module_idx: usize,
+    nested: &[NestedFileCall],
 ) -> HashMap<(String, String), Vec<(AccessConvention, Type)>> {
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
@@ -1831,12 +1889,15 @@ pub(crate) fn import_sig_map(
             }
         }
     }
+    for call in nested {
+        map.insert(
+            (call.name.clone(), call.function.clone()),
+            call.params.clone(),
+        );
+    }
     // D-MOD4: re-exported items (`pub use sub.Item`) must carry the *real*
     // function's parameter conventions under the re-exporting alias, or calls
     // through the re-export would pass by value where a borrow is expected.
-    for (path, _, function, params, _) in nested_file_function_entries(bundle, module_idx) {
-        map.insert((format!("{path}.{function}"), function), params);
-    }
     for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
         let stem = crate::Syntax::generated_suffix(&real_mod);
         if let Some((real_idx, real)) = bundle
@@ -1882,6 +1943,7 @@ pub(crate) fn import_sig_map(
 pub(crate) fn import_ret_map(
     bundle: &ProgramBundle,
     module_idx: usize,
+    nested: &[NestedFileCall],
 ) -> HashMap<(String, String), Option<Type>> {
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
@@ -1968,8 +2030,8 @@ pub(crate) fn import_ret_map(
             }
         }
     }
-    for (path, _, function, _, ret) in nested_file_function_entries(bundle, module_idx) {
-        map.insert((format!("{path}.{function}"), function), ret);
+    for call in nested {
+        map.insert((call.name.clone(), call.function.clone()), call.ret.clone());
     }
     for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
         let stem = crate::Syntax::generated_suffix(&real_mod);

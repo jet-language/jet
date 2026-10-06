@@ -1,0 +1,62 @@
+use core.auth.runtime.top_auth_session.[jet_auth_expiry, jet_auth_constant_time_text_eq,
+    jet_auth_delivery_capability, jet_oauth_b64url_decode, jet_oauth_parse_i64, jet_oauth_parse_claims,
+    auth_runtime_reset, auth_register_user, auth_password_login, auth_session_validate,
+    auth_magic_link_issue, auth_magic_link_consume, auth_session_show, auth_session_cookie,
+    app_auth, app_auth_oauth, app_auth_routes, app_auth_show]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:84-145
+// Behavioral controls: the Rust range has no inline tests.
+#Test("auth_validation_and_secret_comparison_preserve_boundaries") {
+    assert(jet_auth_expiry(10, 0).err() == Val("auth lifetime must be positive"))
+    assert(jet_auth_expiry(I64.MAX, 1).err() == Val("auth lifetime is out of range"))
+    assert(jet_auth_expiry(10, 5).unwrap() == 15)
+    assert(jet_auth_constant_time_text_eq("secret", "secret"))
+    assert(!jet_auth_constant_time_text_eq("secret", "secreu"))
+    assert(!jet_auth_constant_time_text_eq("secret", "secret-longer"))
+    assert(jet_auth_delivery_capability("person@example.test") == Val("person@example.test"))
+    assert(jet_auth_delivery_capability("a..b@example.test").is_none())
+    assert(jet_auth_delivery_capability("person@-example.test").is_none())
+    assert(jet_auth_delivery_capability("person@example..test").is_none())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:218-494
+#Test("oauth_decoding_integer_and_claim_validation_preserve_errors") {
+    assert(jet_oauth_b64url_decode("Zg").unwrap() == [U8]{102})
+    assert(jet_oauth_b64url_decode("Zh").err() == Val("OAuth assertion encoding is non-canonical"))
+    assert(jet_oauth_b64url_decode("Zg==").err() == Val("OAuth assertion encoding is invalid"))
+    assert(jet_oauth_parse_i64("-9223372036854775808") == Val(I64.MIN))
+    assert(jet_oauth_parse_i64("9223372036854775807") == Val(I64.MAX))
+    assert(jet_oauth_parse_i64("9223372036854775808").is_none())
+    assert(jet_oauth_parse_i64("-0").is_none())
+    claims :: jet_oauth_parse_claims("{{\"sub\":\"person\",\"exp\":12,\"unknown\":[1,{{\"nested\":true}}]}}").unwrap()
+    assert(claims.subject == Val("person"))
+    assert(claims.expires_at == Val(12))
+    assert(jet_oauth_parse_claims("{{\"sub\":\"a\",\"sub\":\"b\"}}").err() == Val("OAuth claim `sub` is duplicated"))
+    assert(jet_oauth_parse_claims("{{\"exp\":1.5}}").err() == Val("OAuth claim `exp` must be an integer"))
+    assert(jet_oauth_parse_claims("{{}} trailing").err() == Val("OAuth assertion has trailing data"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:623-761
+#Test("auth_real_entropy_session_expiry_magic_single_use_and_redaction") {
+    auth_runtime_reset()
+    auth_register_user("port0250@example.test", "stored-password-hash").unwrap()
+    assert(auth_register_user("port0250@example.test", "another").err() == Val("user `port0250@example.test` already registered"))
+    assert(auth_password_login("port0250@example.test", "incorrect", 100, 50).err() == Val("invalid credentials"))
+    session :: auth_password_login("port0250@example.test", "stored-password-hash", 100, 50).unwrap()
+    assert(session.id.len() == 69)
+    assert(auth_session_validate(&session.id, 149).unwrap().user_id == "port0250@example.test")
+    assert(auth_session_validate(&session.id, 150).err() == Val("token expired"))
+    assert(auth_session_cookie(&session) == "jet_session={session.id}; HttpOnly; Secure; SameSite=Lax; Path=/")
+    assert(!auth_session_show(&session).contains(session.id))
+    assert(!auth_session_show(&session).contains(session.cookie))
+    token :: auth_magic_link_issue("port0250@example.test", 200, 50).unwrap()
+    magic_session :: auth_magic_link_consume(token.clone(), 249, 50).unwrap()
+    assert(magic_session.user_id == "port0250@example.test")
+    assert(auth_magic_link_consume(token, 249, 50).err() == Val("token expired"))
+    expired :: auth_magic_link_issue("port0250@example.test", 300, 50).unwrap()
+    assert(auth_magic_link_consume(expired, 350, 50).err() == Val("token expired"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:836-875
+#Test("auth_app_providers_are_deduplicated_and_routes_match_source_order") {
+    auth :: app_auth_oauth(app_auth("users"), "alpha, beta alpha,,")
+    assert(app_auth_show(&auth) == "Auth(users=users, providers=[alpha,beta])")
+    assert(app_auth_routes(&auth) == "AuthRoutes(POST /login -> password (users); POST /logout -> revoke session; GET /magic -> begin magic link; POST /magic -> consume magic link; GET /oauth/alpha/begin; GET /oauth/alpha/callback; GET /oauth/beta/begin; GET /oauth/beta/callback)")
+}

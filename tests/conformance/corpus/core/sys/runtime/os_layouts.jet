@@ -1,0 +1,109 @@
+// Linux x86_64 LP64 glibc native-layout corpus. Main selects this alongside
+// real libc imports; no kernel32/ntdll or Darwin __error is loaded here.
+// Windows pointer32/64 layout+runtime rows live in os_windows_layouts.jet.
+// #4494 native pointer/field/retained-storage gates remain explicit.
+use core.mem as os_layout_mem
+use core.sys.host.unix_fd as os_layout_fd
+use core.sys.host.process_control as os_layout_process
+use core.sys.host.linux_seccomp_imports as os_layout_seccomp
+
+STAT_SIZE :: prep { os_layout_fd.LinuxX8664Stat.$layout.size }
+STAT_ALIGN :: prep { os_layout_fd.LinuxX8664Stat.$layout.alignment }
+STAT_NLINK :: prep { os_layout_fd.LinuxX8664Stat.$layout[.st_nlink].offset }
+STAT_MODE :: prep { os_layout_fd.LinuxX8664Stat.$layout[.st_mode].offset }
+STAT_RDEV :: prep { os_layout_fd.LinuxX8664Stat.$layout[.st_rdev].offset }
+STAT_BYTES :: prep { os_layout_fd.LinuxX8664Stat.$layout[.st_size].offset }
+STAT_ATIM :: prep { os_layout_fd.LinuxX8664Stat.$layout[.st_atim].offset }
+STAT_MTIM :: prep { os_layout_fd.LinuxX8664Stat.$layout[.st_mtim].offset }
+STAT_CTIM :: prep { os_layout_fd.LinuxX8664Stat.$layout[.st_ctim].offset }
+STAT_RESERVED :: prep { os_layout_fd.LinuxX8664Stat.$layout[.__reserved0].offset }
+TIME_SIZE :: prep { os_layout_fd.LinuxX8664Timespec.$layout.size }
+TIME_ALIGN :: prep { os_layout_fd.LinuxX8664Timespec.$layout.alignment }
+TIME_NSEC :: prep { os_layout_fd.LinuxX8664Timespec.$layout[.tv_nsec].offset }
+
+FILTER_SIZE :: prep { os_layout_seccomp.SockFilter.$layout.size }
+FILTER_ALIGN :: prep { os_layout_seccomp.SockFilter.$layout.alignment }
+FILTER_JT :: prep { os_layout_seccomp.SockFilter.$layout[.jt].offset }
+FILTER_JF :: prep { os_layout_seccomp.SockFilter.$layout[.jf].offset }
+FILTER_K :: prep { os_layout_seccomp.SockFilter.$layout[.k].offset }
+FPROG_SIZE :: prep { os_layout_seccomp.SockFprog.$layout.size }
+FPROG_ALIGN :: prep { os_layout_seccomp.SockFprog.$layout.alignment }
+FPROG_POINTER :: prep { os_layout_seccomp.SockFprog.$layout[.filter].offset }
+
+CPUSET_SIZE :: prep { os_layout_fd.LinuxX8664CpuSet.$layout.size }
+CPUSET_ALIGN :: prep { os_layout_fd.LinuxX8664CpuSet.$layout.alignment }
+CPUSET_LAST :: prep { os_layout_fd.LinuxX8664CpuSet.$layout[.bits15].offset }
+
+DIRENT_SIZE :: prep { os_layout_fd.LinuxX8664Dirent.$layout.size }
+DIRENT_ALIGN :: prep { os_layout_fd.LinuxX8664Dirent.$layout.alignment }
+DIRENT_OFF :: prep { os_layout_fd.LinuxX8664Dirent.$layout[.d_off].offset }
+DIRENT_RECLEN :: prep { os_layout_fd.LinuxX8664Dirent.$layout[.d_reclen].offset }
+DIRENT_TYPE :: prep { os_layout_fd.LinuxX8664Dirent.$layout[.d_type].offset }
+DIRENT_NAME :: prep { os_layout_fd.LinuxX8664Dirent.$layout[.d_name].offset }
+
+#Test("Linux x86_64 glibc stat and timespec exact native layout") {
+    assert_eq(STAT_SIZE, Val(144))
+    assert_eq(STAT_ALIGN, Val(8))
+    assert_eq(STAT_NLINK, Val(16))
+    assert_eq(STAT_MODE, Val(24))
+    assert_eq(STAT_RDEV, Val(40))
+    assert_eq(STAT_BYTES, Val(48))
+    assert_eq(STAT_ATIM, Val(72))
+    assert_eq(STAT_MTIM, Val(88))
+    assert_eq(STAT_CTIM, Val(104))
+    assert_eq(STAT_RESERVED, Val(120))
+    assert_eq(TIME_SIZE, Val(16))
+    assert_eq(TIME_ALIGN, Val(8))
+    assert_eq(TIME_NSEC, Val(8))
+}
+
+#Test("Linux seccomp SockFilter exact bytes and native pointer Fprog layout") {
+    assert_eq(FILTER_SIZE, Val(8))
+    assert_eq(FILTER_ALIGN, Val(4))
+    assert_eq(FILTER_JT, Val(2))
+    assert_eq(FILTER_JF, Val(3))
+    assert_eq(FILTER_K, Val(4))
+    // Select by the actual native pointer layout, not an Int cast of a ptr.
+    if FPROG_POINTER == Val(8) {
+        assert_eq(FPROG_SIZE, Val(16))
+        assert_eq(FPROG_ALIGN, Val(8))
+    } else {
+        assert_eq(FPROG_POINTER, Val(4))
+        assert_eq(FPROG_SIZE, Val(8))
+        assert_eq(FPROG_ALIGN, Val(4))
+    }
+}
+
+
+#Test("Linux raw waitstatus distinguishes exit signal core stopped and continued") {
+    assert(os_layout_process.linux_wait_exited(I32{5888}))
+    assert_eq(os_layout_process.linux_wait_exit_code(I32{5888}), I32{23})
+    assert(!os_layout_process.linux_wait_signaled(I32{5888}))
+    assert(os_layout_process.linux_wait_signaled(I32{9}))
+    assert_eq(os_layout_process.linux_wait_term_signal(I32{9}), I32{9})
+    assert(!os_layout_process.linux_wait_exited(I32{9}))
+    assert(os_layout_process.linux_wait_core_dumped(I32{139}))
+    assert_eq(os_layout_process.linux_wait_term_signal(I32{139}), I32{11})
+    assert(os_layout_process.linux_wait_stopped(I32{4991}))
+    assert_eq(os_layout_process.linux_wait_stop_signal(I32{4991}), I32{19})
+    assert(!os_layout_process.linux_wait_signaled(I32{4991}))
+    assert(os_layout_process.linux_wait_continued(I32{65535}))
+    assert(!os_layout_process.linux_wait_signaled(I32{65535}))
+}
+
+
+#Test("Linux pinned available_parallelism cpu_set_t actual native layout") {
+    assert_eq(CPUSET_SIZE, Val(128))
+    assert_eq(CPUSET_ALIGN, Val(8))
+    assert_eq(CPUSET_LAST, Val(120))
+}
+
+
+#Test("Linux x86_64 glibc dirent holds its actual inline native name") {
+    assert_eq(DIRENT_SIZE, Val(280))
+    assert_eq(DIRENT_ALIGN, Val(8))
+    assert_eq(DIRENT_OFF, Val(8))
+    assert_eq(DIRENT_RECLEN, Val(16))
+    assert_eq(DIRENT_TYPE, Val(18))
+    assert_eq(DIRENT_NAME, Val(19))
+}

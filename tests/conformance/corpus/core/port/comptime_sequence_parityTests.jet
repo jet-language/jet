@@ -1,0 +1,571 @@
+use tests.[common, tir_support]
+use tests.comptime_sequence_parity.check_aot_comptime
+use tests.crypto_c12.assert_single_type_error
+use tests.crypto_diagnostics as crypto_diagnostics
+use tests.encoding_edition as edition
+use tests.corelib_parts.support.build_and_run
+use std.fs as fs
+use std.process.Command
+use jet.REPL.run_transcript
+use jet.Diagnostics.Severity
+use jet.[check_with_path, render_diagnostics]
+// GATE #4494: actual native compilation, subprocess IO and filesystem fixtures.
+
+// Rust: tests/comptime_sequence_parity.rs:11
+#Test("parallel_adapters_match_forced_interpreter_and_default_jit_dev") {
+    source :: `fn run() -> {
+    values :: [1, 2, 3, 4]
+    print(values.para_map((n: Int) -> n * 2))
+    print(values.para_filter((n: Int) -> n % 2 == 0))
+    split :: values.para_partition((n: Int) -> n % 2 == 0)
+    print(split.false_)
+    print(split.true_)
+    print(values.para_fold(() -> 0, (acc: Int, n: Int) -> acc + n, (left: Int, right: Int) -> left + right))
+}
+`
+    tir_support.assert_tiers_agree("jet_para_dev_matrix", source, "[2, 4, 6, 8]\n[2, 4]\n[1, 3]\n[2, 4]\n10\n")
+}
+
+// Rust: tests/comptime_sequence_parity.rs:44
+#Test("repl_list_and_fixed_list_sequence_methods_are_exact") {
+    out :: run_transcript([
+        `[1, 2, 3].all((n: Int) -> n > 0)`,
+        `[1, 2, 3].any((n: Int) -> n == 2)`,
+        `[1, 2, 3, 4, 5].chunks(2)`,
+        `[1, 2, 3, 4].count_by((n: Int) -> "{n % 2}")`,
+        `[1, 1, 2, 2, 1].dedup()`,
+        `[4, 5].indexed()`,
+        `["1", "bad", "2"].filter_map((s: String) -> Int.parse(s))`,
+        `[7, 8].first()`,
+        `[1, 2, 3].flat_map((n: Int) -> [n, n * 10])`,
+        `[[1, 2], [3], [4, 5]].flatten()`,
+        `[1, 2, 3].fold(10, (acc: Int, n: Int) -> acc + n)`,
+        `[1, 2, 3, 4].group_by((n: Int) -> "{n % 2}")`,
+        `[4, 5, 6].index_of(5)`,
+        `inserted := [1, 3]`, `inserted.insert(1, 2)`, `inserted`,
+        `[1, 2, 3].intersperse(0)`, `[7, 8].last()`, `[3, 9, 2].max()`,
+        `["bbb", "a", "cc"].max_by((s: String) -> s.len())`, `[3, 9, 2].min()`,
+        `["bbb", "a", "cc"].min_by((s: String) -> s.len())`,
+        `[true, false, true].min()`, `[true, false, true].max()`,
+        `[true, false, true].min_by((b: Bool) -> b)`, `[true, false, true].max_by((b: Bool) -> b)`,
+        `[1, 2, 3, 4].para_filter((n: Int) -> n % 2 == 0)`,
+        `[1, 2, 3].para_fold(() -> 0, (acc: Int, n: Int) -> acc + n, (left: Int, right: Int) -> left + right)`,
+        `[1, 2, 3].para_map((n: Int) -> n * 2)`,
+        `[1, 2, 3, 4].para_partition((n: Int) -> n % 2 == 0)`,
+        `[1, 2, 3, 4].partition((n: Int) -> n % 2 == 0)`,
+        `[4, 5, 6].position((n: Int) -> n == 5)`, `[2, 3, 4].product()`,
+        `[1, 2, 3].scan(0, (acc: Int, n: Int) -> acc + n)`, `[1, 2, 3, 4].skip(2)`,
+        `[1, 2, 3, 4].skip_while((n: Int) -> n < 3)`, `[1, 2, 3, 4, 5].step_by(2)`, `[1, 2, 3, 4].sum()`,
+        `[1, 2, 3, 4].take(2)`, `[1, 2, 3, 4].take_while((n: Int) -> n < 3)`,
+        `["1", "2"].map((s: String) -> Int.parse(s)).try_collect()`,
+        `[(a: 1, b: "x"), (a: 2, b: "y")].unzip()`, `[1, 2, 3, 4].windows(3)`, `[1, 2, 3].zip(["a", "b"])`,
+        `fixed: [Int#4] :: [1, 2, 3, 4]`, `fixed.all((n: Int) -> n > 0)`, `fixed.chunks(3)`,
+        `fixed.fold(0, (acc: Int, n: Int) -> acc + n)`, `fixed.zip([9, 8, 7])`
+    ], None)
+    expected :: [
+        "true : Bool", "true : Bool", "[[1, 2], [3, 4], [5]] : List", "[0: 2, 1: 2] : Map", "[1, 2, 1] : List",
+        "[(idx,item)(idx: 0, item: 4), (idx,item)(idx: 1, item: 5)] : List", "[1, 2] : List", "7 : Option",
+        "[1, 10, 2, 20, 3, 30] : List", "[1, 2, 3, 4, 5] : List", "16 : Int", "[0: [2, 4], 1: [1, 3]] : Map",
+        "1 : Option", "[1, 2, 3] : List", "[1, 0, 2, 0, 3] : List", "8 : Option", "9 : Option", "bbb : Option", "2 : Option", "a : Option",
+        "false : Option", "true : Option", "false : Option", "true : Option", "[2, 4] : List", "6 : Int", "[2, 4, 6] : List",
+        "(false_,true_)(false_: [1, 3], true_: [2, 4]) : (false_,true_)", "(false_,true_)(false_: [1, 3], true_: [2, 4]) : (false_,true_)",
+        "1 : Option", "24 : Int", "[1, 3, 6] : List", "[3, 4] : List", "[3, 4] : List", "[1, 3, 5] : List", "10 : Int",
+        "[1, 2] : List", "[1, 2] : List", "[1, 2] : Result", "(a,b)(a: [1, 2], b: [x, y]) : (a,b)",
+        "[[1, 2, 3], [2, 3, 4]] : List", "[(a,b)(a: 1, b: a), (a,b)(a: 2, b: b)] : List", "true : Bool",
+        "[[1, 2, 3], [4]] : List", "10 : Int", "[(a,b)(a: 1, b: 9), (a,b)(a: 2, b: 8), (a,b)(a: 3, b: 7)] : List"
+    ]
+    actual :: out.lines().filter(line -> !line.starts_with("inserted:") && !line.starts_with("fixed:")).collect()
+    assert_eq(actual, expected, "full REPL output:\n{out}")
+    assert(!out.contains("E0956"), "sequence method fell through: {out}")
+}
+
+// Rust: tests/comptime_sequence_parity.rs:162
+#Test("repl_eager_collection_adapters_and_lazy_opt_in_are_exact") {
+    out :: run_transcript([`values := [1, 2, 3]`, `values.map((n: Int) -> n * 2)`,
+        `values.filter((n: Int) -> n > 1)`, `values.lazy().map((n: Int) -> n * 10).to_list()`], None)
+    actual :: out.lines().filter(line -> !line.starts_with("values:")).collect()
+    assert_eq(actual, ["[2, 4, 6] : List", "[2, 3] : List", "[10, 20, 30] : List"], "REPL eager/lazy output:\n{out}")
+}
+
+// Rust: tests/comptime_sequence_parity.rs:184
+#Test("repl_view_and_view_mut_sequence_methods_are_exact") {
+    out :: run_transcript([
+        `values := [10, 20, 30, 40]`, `view :: values[1..3]`, `view.len()`, `view.is_empty()`, `view.get(1)`,
+        `view.first()`, `view.last()`, `view.contains(30)`, `view.index_of(40)`,
+        `view.fold(0, (acc: Int, n: Int) -> acc + n)`, `view.map((n: Int) -> n / 10)`,
+        `edit :: &values[0..1]`, `edit.len()`, `edit.is_empty()`, `edit.get(1)`, `edit.first()`, `edit.last()`,
+        `edit.contains(20)`, `edit.index_of(20)`, `edit.fold(0, (acc: Int, n: Int) -> acc + n)`, `edit.map((n: Int) -> n / 10)`
+    ], None)
+    actual :: out.lines().filter(line -> !line.starts_with("values:") && !line.starts_with("view:") && !line.starts_with("edit:")).collect()
+    assert_eq(actual, ["3 : Int", "false : Bool", "30 : Option", "20 : Option", "40 : Option", "true : Bool", "2 : Option", "90 : Int", "[2, 3, 4] : List",
+        "2 : Int", "false : Bool", "20 : Option", "10 : Option", "20 : Option", "true : Bool", "1 : Option", "30 : Int", "[1, 2] : List"], "full REPL output:\n{out}")
+    assert(!out.contains("E0956"), "view method fell through: {out}")
+}
+
+// Rust: tests/comptime_sequence_parity.rs:245
+#Test("repl_non_slice_write_place_is_not_silently_copied") {
+    out :: run_transcript([`values := [1, 2]`, `edit :: &values`, `edit.len()`], None)
+    assert(out.contains("E0956"), "non-slice write place was copied: {out}")
+}
+
+// Rust: tests/comptime_sequence_parity.rs:254
+#Test("sequence_return_shapes_match_rustc_backed_aot") {
+    cases :: [
+        ("scalar", ``, `[1, 2, 3].all((n: Int) -> n > 0)`),
+        ("float-literal-receiver", ``, `[1.5, 2.5].all((n: Float) -> n > 1.0)`),
+        ("bool-literal-receiver", ``, `[true, false].any((b: Bool) -> b)`),
+        ("float-fold-seed", ``, `[1.5, 2.5].fold(0.5, (a: Float, n: Float) -> a + n)`),
+        ("bool-fold-seed", ``, `[true, false].fold(true, (a: Bool, b: Bool) -> a && b)`),
+        ("float-reduce-seed", ``, `[1.5, 2.5].reduce(0.5, (a: Float, n: Float) -> a + n)`),
+        ("bool-scan-seed", ``, `[true, false].scan(true, (a: Bool, b: Bool) -> a && b)`),
+        ("float-para-fold-seed", ``, `[1.5, 2.5].para_fold(() -> 0.5, (a: Float, n: Float) -> a + n, (left: Float, right: Float) -> left + right)`),
+        ("empty-float-sum", `fn empty_sum() -> Float {
+    empty :: [Float]{}
+    return empty.sum()
+}`, `empty_sum()`),
+        ("empty-float-product", `fn empty_product() -> Float {
+    empty :: [Float]{}
+    return empty.product()
+}`, `empty_product()`),
+        ("f32-nonempty-sum", `fn f32_values() -> [F32] { return [16777217.0, 1.0, 1.0] }`, `f32_values().sum()`),
+        ("f32-nonempty-product", `fn f32_values() -> [F32] { return [16777217.0, 2.0] }`, `f32_values().product()`),
+        ("f32-fold", `fn f32_values() -> [F32] { return [16777217.0, 1.0] }
+fn f32_zero() -> F32 { return 0.0 }`, `f32_values().fold(f32_zero(), (a: F32, n: F32) -> a + n)`),
+        ("f32-map", `fn f32_values() -> [F32] { return [16777217.0, 1.0] }
+fn f32_one() -> F32 { return 1.0 }`, `f32_values().map((n: F32) -> n + f32_one())`),
+        ("f32-min", `fn f32_values() -> [F32] { return [16777217.0, 1.0] }`, `f32_values().min()`),
+        ("f32-max", `fn f32_values() -> [F32] { return [16777217.0, 1.0] }`, `f32_values().max()`),
+        ("empty-f32-sum", `fn empty_f32_sum() -> F32 {
+    empty :: [F32]{}
+    return empty.sum()
+}`, `empty_f32_sum()`),
+        ("empty-f32-product", `fn empty_f32_product() -> F32 {
+    empty :: [F32]{}
+    return empty.product()
+}`, `empty_f32_product()`),
+        ("optional", ``, `[3, 1, 2].min()`), ("owned-list", ``, `[1, 2, 3].take(2)`), ("nested-list", ``, `[1, 2, 3, 4].chunks(3)`),
+        ("map", ``, `[1, 2, 3].group_by((n: Int) -> "{n % 2}")`),
+        ("tuple", ``, `[(a: 1, b: "x"), (a: 2, b: "y")].unzip().a`),
+        ("result", ``, `[Int.parse("1"), Int.parse("2")].try_collect() ?? []`),
+        ("view", `fn view_sum(xs: [Int]) -> Int {
+    view :: xs[0..1]
+    return view.fold(0, (a: Int, n: Int) -> a + n)
+}`, `view_sum([10, 20, 30])`),
+        ("range-fixed-index", `Die :: distinct Int(1..6)
+fn pick(faces: [Int#6], roll: Die) -> Int {
+    return faces[roll.raw() - 1]
+}`, `pick([0, 1, 2, 3, 4, 5], Die.from_int(3))`)
+    ]
+    for (index, (name, preamble, expression)) in cases.iter().enumerate() { check_aot_comptime(index, name, preamble, expression) }
+}
+
+// Rust: tests/core_units_foundations.rs:7
+#Test("core_units_conversion_rejects_nonfinite_and_zero_targets") {
+    tir_support.assert_tiers_agree("core_units_conversion_hostile_targets", `
+use core.units as units
+
+fn run() -> {
+    measured :: measurement(12.0, uncertainty: 0.5)
+    converted :: units.convert(measured, 1000.0)
+    print(units.show(converted))
+    print(units.to_si(units.convert(measured, Float.NAN)) == 12.0)
+    print(units.to_si(units.convert(measured, Float.INFINITY)) == 12.0)
+    print(units.to_si(units.convert(measured, Float{0.0})) == 12.0)
+    huge :: units.convert(measurement(Float.MAX, uncertainty: 1.0), 0.5)
+    print(units.to_si(huge) == Float.MAX)
+}
+`, "0.012 ± 0.0005\ntrue\ntrue\ntrue\ntrue\n")
+}
+
+// Rust: tests/corelib_net.rs:9
+#Test("core_net_socket_address_values_match_aot_default_and_interpreter") {
+    scratch :: common.Scratch.new("core_net_socket_address_tiers")
+    dir :: &scratch.path
+    source :: `
+use core.net as net
+
+fn run() -[IO, Net, Time.Wait]> {
+    address :: net.socket_addr("::1", 53) ?? panic("socket address")
+    print(net.socket_to_string(address))
+    if net.socket_addr("::1", 65536) == {
+        .Ok(_) -> panic("out-of-range port succeeded")
+        .Err(error) -> {
+            print(net.error_operation(error))
+            print(net.error_address(error) ?? "missing address")
+            print(net.error_message(error))
+            if error == {
+                .InvalidInput(_) -> { print("invalid-input") }
+                else -> { panic("wrong network error kind") }
+            }
+        }
+    }
+}
+`
+    expected :: "[::1]:53\nsocket_addr\n::1\nport must be in 0..=65535\ninvalid-input\n"
+    (code, aot_stdout, stderr) :: build_and_run(dir, "net_socket_address_tiers", source, [], None)
+    assert_eq(code, 0, stderr)
+    assert_eq(aot_stdout, expected)
+    file :: dir.join("net_socket_address_tiers.jet")
+    fs.write(file, source).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"net_socket_address_tiers\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Net, Time.Wait] } }\n").unwrap()
+    tir_support.assert_tiers_agree("net_socket_address_tiers", source, aot_stdout)
+}
+
+// Rust: tests/corelib_platform_email.rs:7
+#Test("core_email_address_rejects_domain_labels_over_63_bytes") {
+    scratch :: common.Scratch.new("email-domain-labels")
+    dir :: &scratch.path
+    src :: `
+use core.email as email
+
+fn run() -> {
+    label_63 := "a".repeat(63)
+    valid :: email.address("person@{label_63}.example") ?? panic("valid 63-byte domain label rejected")
+    print(valid.mailbox == "person@{label_63}.example")
+    label_64 := "a".repeat(64)
+    if email.address("person@{label_64}.example") == {
+        .Ok(_) -> panic("64-byte domain label accepted")
+        .Err(_) -> print("overlong-label-rejected")
+    }
+}
+
+`
+    expected :: "true\noverlong-label-rejected"
+    (code, stdout, stderr) :: build_and_run(dir, "email_domain_labels", src, [], None)
+    assert_eq(code, 0, "stderr: {stderr}")
+    assert_eq(stdout.trim(), expected, stdout)
+    fs.write(dir.join("email_domain_labels.jet"), src).unwrap()
+    tir_support.assert_tiers_agree("email_domain_labels", src, expected + "\n")
+}
+
+// Rust: tests/crypto_c12.rs:27
+#Test("nominal_crypto_roles_are_rejected_during_compilation") {
+    assert_single_type_error(`use core.crypto as crypto
+
+fn run() -> {
+    recipient :: crypto.X25519SecretKey.new_random() ?? return
+    crypto.sign(recipient, [1, 2, 3]) ?? return
+}
+`, ["SigningKey", "X25519SecretKey"])
+    assert_single_type_error(`use core.crypto as crypto
+
+fn run() -> {
+    signing :: crypto.SigningKey.new_random() ?? return
+    recipient :: crypto.X25519SecretKey.new_random() ?? return
+    sealed :: crypto.seal([recipient.public_key()], [1, 2, 3], []) ?? return
+    crypto.open(signing, sealed, []) ?? return
+}
+`, ["X25519SecretKey", "SigningKey"])
+}
+
+// Rust: tests/crypto_c12.rs:54
+#Test("typed_crypto_matches_aot_in_default_dev_with_honest_jit_boundary") {
+    fs.create_dir_all(std.env.temp_dir()).unwrap()
+    path :: "Examples/features/crypto/typed_crypto.jet"
+    source :: fs.read_to_string(path).unwrap()
+    expected :: fs.read_to_string("Examples/features/expected/crypto/typed_crypto.out").unwrap()
+    bundle := jet.Loader.load_entry(path).expect("typed crypto bundle loads")
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    errors :: diagnostics.iter().filter(diagnostic -> diagnostic.severity == Severity.Error).collect()
+    assert(errors.is_empty(), "typed crypto must type-check: {errors:Debug}")
+    // Resident JIT and emitted Rust bridge representation checks cut over to
+    // actual O0/O1/O2/Web crypto behavior using canonical native providers.
+    (aot_code, aot_stdout, aot_stderr) :: common.build_and_run("jet_crypto_c12", "typed_crypto", source)
+    assert_eq(aot_code, 0)
+    assert_eq(aot_stderr, "")
+    assert_eq(aot_stdout, expected)
+    tir_support.assert_tiers_agree("typed_crypto_c12", source, expected)
+}
+
+// Rust: tests/crypto_diagnostics.rs:18
+#Test("e2702_json_exits_one_and_creates_no_artifact") {
+    root :: crypto_diagnostics.scratch()
+    fs.write(root.join("main.jet"), `use core.crypto as crypto
+fn run() -> {
+    safe :: crypto.hkdf_sha256(
+        crypto.Secret.from_bytes([1]), [], [], 8161
+    )
+}
+`).unwrap()
+    output :: Command.new(common.jet_bin()).args(["check", "main.jet", "--json"]).current_dir(root).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), Val(1))
+    assert(output.stdout.is_empty())
+    json :: String.from_utf8(output.stderr).unwrap()
+    assert(json.starts_with("{\"schema\":\"jet.report/v1\",\"moment\":\"compile\""), json)
+    for field in ["\"code\":\"E2702\"", "\"what\":\"crypto API misuse\"", "\"reason\":\"output_length\"", "\"operation\":\"hkdf_sha256\"",
+        "\"expected\":\"0..8160\"", "\"actual\":8161", "\"span\":", "\"cause\":[],\"clears\":0"] {
+        assert(json.contains(field), "missing {field}: {json}")
+    }
+    for forbidden in ["password", "plaintext", "ciphertext", "backend", "rustc", "dependency"] {
+        assert(!json.contains(forbidden), "leaked `{forbidden}`: {json}")
+    }
+    assert(!root.join(".jet").join("build").exists(), "check emitted a build artifact")
+    fs.remove_dir_all(root).unwrap()
+}
+
+// Rust: tests/crypto_diagnostics.rs:75
+#Test("e2702_json_redacts_an_absolute_input_to_its_project_path") {
+    root :: crypto_diagnostics.scratch()
+    project :: root.join("project")
+    source_dir :: project.join("src")
+    fs.create_dir_all(project.join(".git")).unwrap()
+    fs.create_dir_all(source_dir).unwrap()
+    source :: source_dir.join("main.jet")
+    fs.write(source, `use core.crypto as crypto
+fn run() -> {
+    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], 8161)
+}
+`).unwrap()
+    output :: Command.new(common.jet_bin()).arg("check").arg(source).arg("--json").current_dir(root).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), Val(1))
+    json :: String.from_utf8(output.stderr).unwrap()
+    assert(json.contains("\"file\":\"src/main.jet\""), json)
+    assert(!json.contains(root.to_string_lossy().into_owned()), "absolute path leaked: {json}")
+    fs.remove_dir_all(root).unwrap()
+}
+
+// Rust: tests/crypto_diagnostics.rs:111
+#Test("multiple_e2702_diagnostics_are_independent_json_lines") {
+    root :: crypto_diagnostics.scratch()
+    fs.write(root.join("main.jet"), `use core.crypto as crypto
+fn first() -> {
+    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], 8161)
+}
+fn second() -> {
+    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([2]), [], [], 8162)
+}
+fn run() -> {}
+`).unwrap()
+    output :: Command.new(common.jet_bin()).args(["check", "main.jet", "--json"]).current_dir(root).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), Val(1))
+    assert(output.stdout.is_empty())
+    json :: String.from_utf8(output.stderr).unwrap()
+    lines :: json.lines().collect()
+    assert_eq(lines.len(), 2, json)
+    for (line, actual) in lines.into_iter().zip([8161, 8162]) {
+        assert(line.starts_with("{\"schema\":\"jet.report/v1\",\"moment\":\"compile\""), line)
+        assert(line.contains("\"code\":\"E2702\""), line)
+        assert(line.contains("\"reason\":\"output_length\""), line)
+        assert(line.contains("\"operation\":\"hkdf_sha256\""), line)
+        assert(line.contains("\"actual\":{actual}"), line)
+    }
+    assert(!root.join(".jet").join("build").exists(), "check emitted a build artifact")
+    fs.remove_dir_all(root).unwrap()
+}
+
+// Rust: tests/crypto_diagnostics.rs:156
+#Test("safe_raw_nonce_json_omits_inapplicable_bounds") {
+    root :: crypto_diagnostics.scratch()
+    fs.write(root.join("main.jet"), `use core.crypto as crypto
+fn run() -> {
+    _ :: crypto.seal([], [], [], nonce: [0])
+}
+`).unwrap()
+    output :: Command.new(common.jet_bin()).args(["check", "main.jet", "--json"]).current_dir(root).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), Val(1))
+    json :: String.from_utf8(output.stderr).unwrap()
+    assert(json.contains("\"reason\":\"raw_nonce\""), json)
+    assert(json.contains("\"operation\":\"seal\""), json)
+    assert(!json.contains("\"expected\":"), json)
+    assert(!json.contains("\"actual\":"), json)
+    assert(!root.join(".jet").join("build").exists(), "check emitted a build artifact")
+    fs.remove_dir_all(root).unwrap()
+}
+
+// Rust: tests/crypto_diagnostics.rs:188
+#Test("explain_e2702_teaches_precedence_and_dynamic_values") {
+    output :: Command.new(common.jet_bin()).args(["explain", "E2702"]).env("NO_COLOR", "1").output().unwrap()
+    assert(output.status.success())
+    text :: String.from_utf8(output.stdout).unwrap()
+    for teaching in ["syntax, effects, and types", "compiler-known", "Dynamic values"] {
+        assert(text.contains(teaching), "missing `{teaching}`:\n{text}")
+    }
+}
+
+// Rust: tests/encoding_edition.rs:32
+#Test("edition_2027_base64_strict_rejects_whitespace_without_allowance_surface") {
+    root :: edition.scratch("2027_b64_strict")
+    path :: edition.write_project(root, "2027", `use core.encoding.base64 as base64
+
+fn run() -> {
+    if base64.decode("Zg==\n") == {
+        .Ok(_) -> print("accepted")
+        .Err(reason) -> print(reason)
+    }
+}
+`)
+    diags :: check_with_path(path.to_str().unwrap())
+    assert(diags.is_empty(), "edition 2027 1-arg decode must type-check:\n{render_diagnostics(path.to_str().unwrap(), "", diags)}")
+    allow_root :: edition.scratch("2027_b64_allow_gap")
+    allow_path :: edition.write_project(allow_root, "2027", `use core.encoding.base64 as base64
+
+fn run() -> {
+    bytes := base64.decode("Zg==\n", true, false) ?? panic("decode")
+    print(bytes.len())
+}
+`)
+    allow_diags :: check_with_path(allow_path.to_str().unwrap())
+    assert(allow_diags.iter().any(d -> d.code == "E0104"),
+        "named gap: 2027 allowance args must not silently type-check until wired; got:\n{render_diagnostics(allow_path.to_str().unwrap(), "", allow_diags)}")
+}
+
+// Rust: tests/encoding_edition.rs:66
+#Test("edition_2026_base64_keeps_compatibility_union") {
+    root :: edition.scratch("2026_b64")
+    path :: edition.write_project(root, "2026", `use core.encoding.base64 as base64
+
+fn run() -> {
+    bytes := base64.decode("Zg==\n") ?? panic("decode")
+    print(bytes.len())
+}
+`)
+    diags :: check_with_path(path.to_str().unwrap())
+    assert(diags.is_empty(), "edition 2026 should keep compatibility decode:\n{render_diagnostics(path.to_str().unwrap(), "", diags)}")
+}
+
+// Rust: tests/encoding_edition.rs:82
+#Test("edition_2027_json_canonical_is_fallible_jcs") {
+    root :: edition.scratch("2027_json_canon")
+    path :: edition.write_project(root, "2027", `use core.encoding.json as json
+
+fn run() -> {
+    data := json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")
+    print(json.canonical(data) ?? panic("canon"))
+}
+`)
+    diags :: check_with_path(path.to_str().unwrap())
+    assert(diags.is_empty(), "edition 2027 json.canonical must type-check:\n{render_diagnostics(path.to_str().unwrap(), "", diags)}")
+}
+
+// Rust: tests/encoding_edition.rs:98
+#Test("edition_2026_json_canonical_stays_infallible") {
+    root :: edition.scratch("2026_json_canon")
+    path :: edition.write_project(root, "2026", `use core.encoding.json as json
+
+fn run() -> {
+    data := json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")
+    print(json.canonical(data))
+}
+`)
+    diags :: check_with_path(path.to_str().unwrap())
+    assert(diags.is_empty(), "edition 2026 json.canonical must stay infallible:\n{render_diagnostics(path.to_str().unwrap(), "", diags)}")
+}
+
+// Rust: tests/encoding_edition.rs:114
+#Test("edition_2027_cbor_encode_emits_l2001") {
+    root :: edition.scratch("l2001")
+    path :: edition.write_project(root, "2027", `use core.encoding.cbor as cbor
+use core.encoding.json as json
+
+fn run() -> {
+    tree := json.parse("{{}}") ?? panic("json")
+    payload := cbor.encode(tree)
+    print("ok")
+}
+`)
+    diags :: check_with_path(path.to_str().unwrap())
+    assert(diags.iter().any(d -> d.code == "L2001"), "expected L2001 for cbor.encode, got: {render_diagnostics(path.to_str().unwrap(), "", diags)}")
+}
+
+// Rust: tests/encoding_edition.rs:130
+#Test("edition_2027_cbor_decode_emits_l2001_and_2028_removes_it") {
+    source :: `use core.encoding.cbor as cbor
+
+fn run() -> {
+    decoded := cbor.decode([U8]{ 0x81, 0x01 }) ?? panic("decode")
+    print(decoded)
+}
+`
+    before :: edition.scratch("2027_cbor_decode")
+    before_path :: edition.write_project(before, "2027", source)
+    before_diags :: check_with_path(before_path.to_str().unwrap())
+    assert(before_diags.iter().any(diagnostic -> diagnostic.code == "L2001"),
+        "expected L2001 for cbor.decode, got: {render_diagnostics(before_path.to_str().unwrap(), "", before_diags)}")
+    after :: edition.scratch("2028_cbor_decode")
+    after_path :: edition.write_project(after, "2028", source)
+    after_diags :: check_with_path(after_path.to_str().unwrap())
+    assert(after_diags.iter().any(diagnostic -> diagnostic.code == "E2002"),
+        "expected E2002 after cbor.decode removal, got: {render_diagnostics(after_path.to_str().unwrap(), "", after_diags)}")
+}
+
+// Rust: tests/encoding_edition.rs:156
+#Test("user_deprecated_marker_emits_l2001_for_a_consumer") {
+    root :: edition.scratch("user_deprecated")
+    path :: edition.write_project(root, "2027", `#Deprecated(since: "1.2", use: "parse")
+pub fn decode() -> {}
+
+fn run() -> {
+    decode()
+}
+`)
+    diags :: check_with_path(path.to_str().unwrap())
+    assert(diags.iter().any(diagnostic -> diagnostic.code == "L2001" && diagnostic.what.contains("`decode`")),
+        "expected L2001 for a user #Deprecated function, got: {render_diagnostics(path.to_str().unwrap(), "", diags)}")
+    removed_root :: edition.scratch("user_removed")
+    removed_path :: edition.write_project(removed_root, "2028", `#Deprecated(since: "2027", use: "parse", removed_in: "2028")
+pub fn decode() -> {}
+
+fn run() -> {
+    decode()
+}
+`)
+    removed_diags :: check_with_path(removed_path.to_str().unwrap())
+    assert(removed_diags.iter().any(diagnostic -> diagnostic.code == "E2002" && diagnostic.what.contains("`decode`")),
+        "expected E2002 after the user marker removal edition, got: {render_diagnostics(removed_path.to_str().unwrap(), "", removed_diags)}")
+    before_root :: edition.scratch("user_removed_dormant")
+    before_path :: edition.write_project(before_root, "2026", `#Deprecated(since: "2027", use: "parse", removed_in: "2028")
+pub fn decode() -> {}
+
+fn run() -> {
+    decode()
+}
+`)
+    before_diags :: check_with_path(before_path.to_str().unwrap())
+    assert(before_diags.iter().all(diagnostic -> diagnostic.code != "L2001" && diagnostic.code != "E2002"),
+        "removed_in must stay dormant before the deprecation edition: {render_diagnostics(before_path.to_str().unwrap(), "", before_diags)}")
+}
+
+// Rust: tests/encoding_edition.rs:204
+#Test("lifecycle_marker_metadata_erases_before_web_codegen") {
+    source :: `#Deprecated(since: "2027", use: "replacement", removed_in: "2028")
+pub fn legacy() -> { print("legacy") }
+pub fn replacement() -> { print("replacement") }
+
+fn run() -> {
+    replacement()
+}
+`
+    output :: jet.compile_web_with_path(source, "tests/fixtures/lifecycle_marker_web.jet").expect("user lifecycle marker must compile for web")
+    web :: output.web.expect("user lifecycle marker must produce web artifacts")
+    assert(!web.wasm_rust.contains("Deprecated"))
+    assert(!web.js_app.contains("Deprecated"))
+}
+
+// Rust: tests/encoding_edition.rs:216
+#Test("deprecation_fix_replaces_plain_and_core_member_names") {
+    root :: edition.scratch("deprecation_fix")
+    path :: edition.write_project(root, "2027", `#Deprecated(since: "2027", use: "parse")
+pub fn decode() -> {}
+pub fn parse() -> {}
+
+fn run() -> {
+    decode()
+}
+`)
+    output :: Command.new(common.jet_bin()).args(["fix", path.to_str().unwrap()]).env("NO_COLOR", "1").output().unwrap()
+    assert(output.status.success(), "user deprecation fix failed:\n{String.from_utf8_lossy(output.stderr)}")
+    assert(fs.read_to_string(path).unwrap().contains("    parse()"), "plain replacement was not applied")
+    cbor_root :: edition.scratch("cbor_deprecation_fix")
+    cbor_path :: edition.write_project(cbor_root, "2027", `use core.encoding.cbor as cbor
+use core.encoding.json as json
+
+fn run() -> {
+    tree := json.parse("{{}}") ?? panic("json")
+    payload := cbor.encode(tree)
+    print("ok")
+}
+`)
+    output_cbor :: Command.new(common.jet_bin()).args(["fix", cbor_path.to_str().unwrap()]).env("NO_COLOR", "1").output().unwrap()
+    assert(output_cbor.status.success(), "Core deprecation fix failed:\n{String.from_utf8_lossy(output_cbor.stderr)}")
+    assert(fs.read_to_string(cbor_path).unwrap().contains("payload := cbor.to_bytes(tree)"), "Core replacement was not applied")
+}

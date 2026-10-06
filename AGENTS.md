@@ -136,9 +136,11 @@ A violation stops the affected work until it is fixed at the root.
   (D-EXEC1). Code generators and hosts only marshal values and call the same
   runtime symbols; they never re-encode validation, defaults, policy, or error
   meaning. Never mark a feature as working on one level only, or defer it to a
-  later level. Until D-EXEC1's retirement step lands, the Cranelift JIT and the
-  interpreter still serve `jet run` and must keep that same meaning; do not
-  extend them. An owner-ratified exception must name the tier it excludes.
+  later level. Until native in-memory O0 lands, `jet run` and `jet dev` use the
+  normal build path and execute the result (D-EXEC2=A); the in-process
+  evaluator serves `--interpret` and compile-time code and must keep that same
+  meaning; do not extend it. An owner-ratified exception must name the tier it
+  excludes.
 
 ## Performance gate
 
@@ -190,9 +192,9 @@ One implementer owns each coherent patch. Concurrent writers need disjoint
 paths and one named close owner. Default to a single delivery stream, and add
 streams only when paths, integration, tests, and resources stay clean. Use only
 in-repository worktrees under `.claude/worktrees/<name>` or
-`.agent-worktrees/<name>`, keep each checkout's Cargo target inside that
-checkout (`jet-env` rejects a `CARGO_TARGET_DIR` outside it), integrate
-promptly, and remove finished worktrees and temporary branches. Never overwrite
+`.agent-worktrees/<name>`, use checkout-owned external Cargo targets configured
+through `jet-env` (see the orchestration resource reference), integrate promptly,
+and remove finished worktrees and temporary branches. Never overwrite
 another task's paths. Never run `git add -A`, a broad `git commit -a`,
 `git restore .`, or any equivalent broad operation. Never hand-edit
 `Tools/tower/.tower/`.
@@ -217,11 +219,10 @@ under `.agents/skills` and `Tools/tower/skills`.
 ## Environment and proof
 
 Run repository commands through `Tools/agent/jet-env`. Keep scratch and logs on
-disk under `~/.cache/jet-dev/scratch` and `~/.cache/jet-dev`, never in
-`/tmp`, which is RAM-backed. Use the checkout's own bounded Cargo target
-(`<checkout>/target` by default) and respect the default
-`JET_TARGET_CAP_GB=120`. Keep `CARGO_INCREMENTAL=0`, except in the
-orchestrator's lock-serialized build targets, which opt in with
+disk and build output outside the repository. Follow the orchestration resource
+reference for bounded, checkout-owned targets and shared artifacts; respect
+`JET_TARGET_CAP_GB=120`. Keep `CARGO_INCREMENTAL=0`, except
+in the orchestrator's lock-serialized build targets, which opt in with
 `JET_CARGO_INCREMENTAL=1` and are pruned between builds.
 Rebuild before compiler smoke tests. After integration, run the exact narrow
 proof the criteria name. Broad suites, unfiltered censuses, and

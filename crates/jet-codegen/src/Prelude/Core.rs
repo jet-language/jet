@@ -678,7 +678,8 @@ impl JetShow for JetReservoirSampler {
 struct JetTestExpectFrame {
     scope: u64,
     expected: Option<String>,
-    stop: Option<String>,
+    expected_message: Option<String>,
+    stop: Option<(String, String)>,
 }
 
 struct JetTestingFailure {
@@ -714,11 +715,12 @@ fn jet_testing_clear_failure() {
 }
 
 
-pub fn jet_test_expect_fail_enter_scope(scope: u64, expected: Option<&str>) {
+pub fn jet_test_expect_fail_enter_scope(scope: u64, expected: Option<&str>, expected_message: Option<&str>) {
     JET_TEST_EXPECT_FAIL.with(|frames| {
         frames.borrow_mut().push(JetTestExpectFrame {
             scope,
             expected: expected.map(str::to_owned),
+            expected_message: expected_message.map(str::to_owned),
             stop: None,
         });
     });
@@ -741,7 +743,7 @@ pub fn jet_test_expect_fail_leave_scope(scope: u64) -> Option<String> {
             .rposition(|frame| frame.scope == scope)
             .and_then(|index| {
                 if frames[index].stop.is_some() {
-                    frames.remove(index).stop
+                    frames.remove(index).stop.map(|(code, _)| code)
                 } else {
                     None
                 }
@@ -749,23 +751,23 @@ pub fn jet_test_expect_fail_leave_scope(scope: u64) -> Option<String> {
     })
 }
 
-pub fn jet_test_record_stop(code: &str) {
+pub fn jet_test_record_stop(code: &str, message: &str) {
     JET_TEST_EXPECT_FAIL.with(|frames| {
         for frame in frames.borrow_mut().iter_mut() {
             if frame.stop.is_none() {
-                frame.stop = Some(code.to_string());
+                frame.stop = Some((code.to_string(), message.to_string()));
             }
         }
     });
 }
-pub fn jet_test_expect_fail_matching_scope() -> Option<u64> {
+pub fn jet_test_expect_fail_stopped_scope() -> Option<u64> {
     if JET_TEST_EXPECT_UNMET.with(std::cell::Cell::get) {
         return None;
     }
     JET_TEST_EXPECT_FAIL.with(|frames| {
         frames.borrow().iter().rev().find_map(|frame| {
-            let code = frame.stop.as_deref()?;
-            (frame.expected.as_deref().is_none_or(|expected| expected == code)).then_some(frame.scope)
+            frame.stop.as_ref()?;
+            (frame.expected.as_deref() != Some("__jet_test_ordinary_failure__")).then_some(frame.scope)
         })
     })
 }
@@ -774,19 +776,25 @@ pub fn jet_test_expect_fail_catch_scope() -> Option<u64> {
     let caught = JET_TEST_EXPECT_FAIL.with(|frames| {
         let mut frames = frames.borrow_mut();
         let index = frames.iter().rposition(|frame| {
-            let Some(code) = frame.stop.as_deref() else {
-                return false;
-            };
-            frame.expected.as_deref().is_none_or(|expected| expected == code)
+            frame.stop.is_some() && frame.expected.as_deref() != Some("__jet_test_ordinary_failure__")
         })?;
         let frame = frames.remove(index);
         frames.truncate(index);
         for parent in frames.iter_mut() {
             parent.stop = None;
         }
-        Some((frame.scope, frame.stop.unwrap_or_default(), index))
+        Some((frame, index))
     });
-    if let Some((scope, code, depth)) = caught {
+    if let Some((frame, depth)) = caught {
+        let (code, message) = frame.stop.as_ref().expect("caught stop");
+        if let Some(error) = jet_test_expect_fail_error(
+            frame.expected.as_deref(), frame.expected_message.as_deref(), Some((code, message)),
+        ) {
+            JET_TEST_EXPECT_UNMET.with(|unmet| unmet.set(true));
+            jet_runtime_stop("E3001", "", 0, &error);
+        }
+        let scope = frame.scope;
+        let (code, _) = frame.stop.expect("caught stop");
         JET_TEST_TIMEOUTS.with(|timeouts| {
             timeouts.borrow_mut().retain(|(_, _, _, entered_depth)| *entered_depth <= depth);
         });
@@ -803,9 +811,9 @@ pub fn jet_test_expect_fail_abort() {
     JET_TEST_EXPECT_UNMET.with(|unmet| unmet.set(false));
 }
 
-pub fn jet_test_expect_fail_unmet(expected: Option<&str>) -> ! {
+pub fn jet_test_expect_fail_unmet(expected: Option<&str>, expected_message: Option<&str>) -> ! {
     JET_TEST_EXPECT_UNMET.with(|unmet| unmet.set(true));
-    let message = jet_test_expect_fail_message(expected);
+    let message = jet_test_expect_fail_error(expected, expected_message, None).expect("missing stop");
     jet_runtime_stop("E3001", "", 0, &message)
 }
 
@@ -916,6 +924,95 @@ fn jet_scheduler_panic_should_unwind() -> bool {
     jet_runtime_should_unwind()
 }
 
+// Installed only in the isolated persistent compiler worker. Ordinary runtime
+// execution never activates this context. Fuel is shared with native callbacks
+// on other threads; each actual native stack has its own depth and source site.
+static JET_NATIVE_COMPTIME_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static JET_NATIVE_COMPTIME_FUEL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static JET_NATIVE_COMPTIME_DEPTH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static JET_NATIVE_COMPTIME_STATUS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+thread_local! {
+    static JET_NATIVE_COMPTIME_FRAME: std::cell::Cell<(u64, u64, u64, u64)> = const { std::cell::Cell::new((0, 0, 0, 0)) };
+}
+
+pub(crate) fn jet_native_comptime_active() -> bool {
+    JET_NATIVE_COMPTIME_ACTIVE.load(std::sync::atomic::Ordering::Acquire)
+}
+
+pub(crate) fn jet_native_comptime_begin(fuel: u64, max_depth: u64) -> bool {
+    // The worker serves one request at a time and joins native work before end.
+    if jet_native_comptime_active() { return false; }
+    JET_NATIVE_COMPTIME_FUEL.store(fuel, std::sync::atomic::Ordering::Relaxed);
+    JET_NATIVE_COMPTIME_DEPTH.store(max_depth, std::sync::atomic::Ordering::Relaxed);
+    JET_NATIVE_COMPTIME_STATUS.store(0, std::sync::atomic::Ordering::Relaxed);
+    JET_NATIVE_COMPTIME_FRAME.with(|frame| frame.set((0, 0, 0, 0)));
+    JET_NATIVE_COMPTIME_ACTIVE.store(true, std::sync::atomic::Ordering::Release);
+    true
+}
+
+pub(crate) fn jet_native_comptime_fail(status: u32, message: &str) -> ! {
+    use std::io::Write;
+    use std::os::fd::{BorrowedFd, FromRawFd, IntoRawFd};
+    // Exactly one failing thread writes the private protocol envelope.
+    if JET_NATIVE_COMPTIME_STATUS.compare_exchange(0, status, std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire).is_err() {
+        loop { std::thread::park(); }
+    }
+    let (_, owner, start, end) = JET_NATIVE_COMPTIME_FRAME.with(std::cell::Cell::get);
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    // SAFETY: the compiler worker alone owns protocol descriptor 3. Duplicate
+    // it so constructing a File never closes the descriptor used by the server.
+    if let Ok(channel) = unsafe { BorrowedFd::borrow_raw(3) }.try_clone_to_owned() {
+        let mut channel = unsafe { std::fs::File::from_raw_fd(channel.into_raw_fd()) };
+        let header = format!("JCT1 {status} {owner} {start} {end} {}\n", message.len());
+        let _ = channel.write_all(header.as_bytes());
+        let _ = channel.write_all(message.as_bytes());
+        let _ = channel.flush();
+    }
+    std::process::exit(if status == 4 { 101 } else { 80 + status as i32 })
+}
+
+pub(crate) fn jet_native_comptime_work(units: u64) {
+    if !jet_native_comptime_active() { return; }
+    if JET_NATIVE_COMPTIME_FUEL.fetch_update(std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed, |remaining| remaining.checked_sub(units)).is_err() {
+        jet_native_comptime_fail(2, "");
+    }
+}
+
+// owner is a dense row in the retained MIRProgram, never an exact-Int ID.
+pub(crate) fn jet_native_comptime_step(owner: u64, start: u64, end: u64) {
+    JET_NATIVE_COMPTIME_FRAME.with(|frame| {
+        let (depth, _, _, _) = frame.get();
+        frame.set((depth, owner, start, end));
+    });
+    jet_native_comptime_work(1);
+}
+
+pub(crate) fn jet_native_comptime_enter(owner: u64, start: u64, end: u64) {
+    if !jet_native_comptime_active() { return; }
+    let depth = JET_NATIVE_COMPTIME_FRAME.with(|frame| {
+        let (depth, _, _, _) = frame.get();
+        let depth = depth.saturating_add(1);
+        frame.set((depth, owner, start, end));
+        depth
+    });
+    if depth > JET_NATIVE_COMPTIME_DEPTH.load(std::sync::atomic::Ordering::Relaxed) {
+        jet_native_comptime_fail(3, "");
+    }
+}
+
+pub(crate) fn jet_native_comptime_leave() {
+    JET_NATIVE_COMPTIME_FRAME.with(|frame| {
+        let (depth, owner, start, end) = frame.get();
+        frame.set((depth.saturating_sub(1), owner, start, end));
+    });
+}
+
+pub(crate) fn jet_native_comptime_end() {
+    JET_NATIVE_COMPTIME_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
+    JET_NATIVE_COMPTIME_FRAME.with(|frame| frame.set((0, 0, 0, 0)));
+}
+
 struct JetRuntimeExit;
 
 struct JetRenderedRuntimeStop {
@@ -949,6 +1046,7 @@ struct JetRenderedRuntimeStop {
 /// so resuming a panic there aborts before `jet_runtime_boundary` can observe
 /// the report. End that path at the shared process boundary instead.
 fn jet_runtime_stop_unwind(rendered: String, exit_code: i32, message: &str) -> ! {
+    if jet_native_comptime_active() { jet_native_comptime_fail(1, message); }
     if jet_scheduler_in_task() {
         std::panic::resume_unwind(Box::new(message.to_string()));
     }
@@ -1309,15 +1407,15 @@ fn jet_scheduler_runtime_stop(msg: &str) -> ! {
     jet_runtime_stop("E3001", "", 0, msg)
 }
 
-fn jet_scheduler_runtime_stop_with_report(report: String) -> ! {
-    jet_test_record_stop("E3001");
+fn jet_scheduler_runtime_stop_with_report(report: JetStreamFailure) -> ! {
+    jet_test_record_stop(&report.code, &report.message);
     if jet_runtime_should_unwind() {
         std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
-            rendered: report,
+            rendered: report.rendered,
             exit_code: 70,
         }));
     }
-    eprint!("{}", report);
+    eprint!("{}", report.rendered);
     jet_runtime_exit();
 }
 
@@ -1340,7 +1438,7 @@ fn jet_sentry_runtime_stop(
     foreign_fenced: Option<bool>,
     detail: &str,
 ) -> ! {
-    jet_test_record_stop(code);
+    jet_test_record_stop(code, detail);
     jet_proof_record(2, 1, code, detail, file, line);
     let report = jet_render_runtime_sentry_with_context(
         match code {
@@ -1360,7 +1458,7 @@ fn jet_sentry_runtime_stop(
         foreign_fenced,
     );
     if jet_runtime_should_unwind() {
-        jet_stream_record_failure_report(report.rendered.clone());
+        jet_stream_record_failure_report(code, detail, report.rendered.clone());
     }
     jet_runtime_stop_unwind(report.rendered, report.exit_code, detail)
 }
@@ -1373,7 +1471,7 @@ fn jet_runtime_stop_with_context(
     src_line: &str,
     msg: &str,
 ) -> ! {
-    jet_test_record_stop(code);
+    jet_test_record_stop(code, msg);
     if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Simple {
             code,
@@ -1389,7 +1487,7 @@ fn jet_runtime_stop_with_context(
     let report =
         jet_runtime_stop_report(code, file, line, fn_name, src_line, 1, 1, msg, "");
     if jet_runtime_should_unwind() {
-        jet_stream_record_failure_report(report.rendered.clone());
+        jet_stream_record_failure_report(code, msg, report.rendered.clone());
     }
     jet_runtime_stop_unwind(report.rendered, report.exit_code, msg)
 }
@@ -1438,7 +1536,7 @@ fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {
         }));
     }
     let report = jet_contract_report(clause_kw, msg, file, line);
-    jet_test_record_stop("E3005");
+    jet_test_record_stop("E3005", msg);
     jet_proof_record(2, 1, "E3005", &report.what, file, line);
     std::panic::resume_unwind(Box::new(report))
 }
@@ -1447,7 +1545,11 @@ fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {
 /// test harness. Length framing keeps user strings opaque; terminal text is
 /// never parsed as evidence.
 fn jet_proof_record(kind: u8, state: u8, name: &str, message: &str, file: &str, line: u32) {
-    if state == 1 && jet_test_expect_fail_matching_scope().is_some() {
+    let expected = !JET_TEST_EXPECT_UNMET.with(std::cell::Cell::get)
+        && JET_TEST_EXPECT_FAIL.with(|frames| frames.borrow().last().is_some_and(|frame| {
+            jet_test_expect_fail_matches(frame.expected.as_deref(), frame.expected_message.as_deref(), name, message)
+        }));
+    if state == 1 && expected {
         jet_evidence_with_expectation(true, || {
             jet_evidence_record_write(kind, state, name, message, file, line);
         });
@@ -2137,7 +2239,7 @@ fn jet_panic_rich_code(
     msg: &str,
     locals: &str,
 ) -> ! {
-    jet_test_record_stop(code);
+    jet_test_record_stop(code, msg);
     if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Rich {
             code,
@@ -2157,7 +2259,7 @@ fn jet_panic_rich_code(
         code, file, line, fn_name, src_line, col, caret_len, msg, locals,
     );
     if jet_runtime_should_unwind() {
-        jet_stream_record_failure_report(report.rendered.clone());
+        jet_stream_record_failure_report(code, msg, report.rendered.clone());
     }
     jet_runtime_stop_unwind(report.rendered, report.exit_code, msg)
 }

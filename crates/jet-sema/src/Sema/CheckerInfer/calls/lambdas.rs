@@ -47,132 +47,41 @@ impl<'a> Checker<'a> {
             _ => (None, None, None, None),
         };
         let expected_callable = matches!(expected, Some(Type::Fn { .. }));
-        let (expected_result, expected_error) = if expected_callable {
-            lambda_return_slots(exp_ret.map(|ret| ret.as_ref()))
-        } else {
-            (None, None)
-        };
-        let result_annotation_ok = if !expected_callable {
-            true
-        } else {
-            match (expected_result, lam.result_type.as_ref()) {
-                (_, None) => true,
-                (Some(expected), Some(actual)) => lambda_slot_matches(expected, actual),
-                (None, Some(actual)) => is_unit_type(actual),
-            }
-        };
-        let error_annotation_ok = if !expected_callable {
-            true
-        } else {
-            match (expected_error, lam.error_type.as_ref()) {
-                (_, None) => true,
-                (Some(expected), Some(actual)) => lambda_slot_matches(expected, actual),
-                (None, Some(_)) => false,
-            }
-        };
-        if let Some(ty) = &lam.result_type {
-            self.check_declared_return_type(ty, lam.span);
-        }
-        if let Some(ty) = &lam.error_type {
-            self.check_declared_type(ty, lam.span);
-        }
-        if !result_annotation_ok {
-            if let (Some(expected), Some(actual)) = (expected_result, lam.result_type.as_ref()) {
-                self.diags.push(Diagnostic::error(
-                    "E0113",
-                    format!(
-                        "this lambda should return {}, not {}",
-                        expected.show(),
-                        actual.show()
-                    ),
-                    "the lambda's return type must match what's expected here".to_string(),
-                    type_fix_hint(expected, actual),
-                    Some(lam.span),
-                ));
-            } else if let Some(actual) = lam.result_type.as_ref() {
-                self.diags.push(Diagnostic::error(
-                    "E0113",
-                    format!("this lambda should return Unit, not {}", actual.show()),
-                    "the lambda's return type must match what's expected here".to_string(),
-                    "remove the result annotation or change the expected function type".to_string(),
-                    Some(lam.span),
-                ));
+        if let (
+            Some(Type::Fn { effect_bound: Some(bound), .. }),
+            Some(written),
+        ) = (expected, lam.effects.as_ref())
+        {
+            if !bound.iter().any(|(name, _)| name.starts_with(".."))
+                && written.iter().any(|(name, _)| {
+                    !name.starts_with('!')
+                        && !name.starts_with("..")
+                        && !bound.iter().any(|(allowed, _)| crate::Sema::effect_covers(allowed, name))
+                })
+            {
+                let offered = written.iter()
+                    .filter(|(name, _)| !name.starts_with('!') && !name.starts_with(".."))
+                    .map(|(name, _)| name.clone()).collect();
+                let allowed = bound.iter().map(|(name, _)| name.clone()).collect();
+                let over = crate::Sema::effects_uncovered(&offered, &allowed);
+                if !over.is_empty() {
+                    self.diags.push(crate::Sema::e0747(&over, &allowed, lam.span));
+                    return None;
+                }
             }
         }
-        if !error_annotation_ok {
-            if let (Some(expected), Some(actual)) = (expected_error, lam.error_type.as_ref()) {
-                self.diags.push(Diagnostic::error(
-                    "E0113",
-                    format!(
-                        "this lambda should fail with {}, not {}",
-                        expected.show(),
-                        actual.show()
-                    ),
-                    "the lambda's error type must match what's expected here".to_string(),
-                    type_fix_hint(expected, actual),
-                    Some(lam.span),
-                ));
-            } else if let Some(actual) = lam.error_type.as_ref() {
-                self.diags.push(Diagnostic::error(
-                    "E0113",
-                    format!(
-                        "this lambda declares an unexpected error type {}",
-                        actual.show()
-                    ),
-                    "the lambda's error type must match what's expected here".to_string(),
-                    "remove the error annotation or change the expected function type".to_string(),
-                    Some(lam.span),
-                ));
-            }
-        }
-        let effective_ret = if lam.result_type.is_some() || lam.error_type.is_some() {
-            let result = if result_annotation_ok {
-                lam.result_type
-                    .clone()
-                    .or_else(|| expected_result.cloned())
-                    .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()))
-            } else {
-                expected_result
-                    .cloned()
-                    .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()))
-            };
-            let error = if error_annotation_ok {
-                lam.error_type.clone().or_else(|| expected_error.cloned())
-            } else {
-                expected_error.cloned()
-            };
-            // D-FAILURE-FOUNDATION1 / D-NEVER2: an ordinary explicit success
-            // row gets the implicit Err carrier, but `Never` is itself a
-            // complete no-success contract. Keep `!Never` as the separate
-            // failure-side no-failure opt-out.
-            let error = if matches!(
-                &result,
-                Type::Named(name) if name == Syntax::TYPE_NEVER
-            ) {
-                error
-            } else {
-                error.or_else(|| Some(Type::Named(Syntax::TYPE_ERR.to_string())))
-            };
-            match error {
-                Some(error) => Some(Type::Result {
-                    ok: Box::new(result),
-                    err: Box::new(error),
-                }),
-                None => Some(result),
-            }
-        } else {
-            exp_ret.map(|ret| (**ret).clone())
-        };
+        let effective_ret = exp_ret.map(|ret| (**ret).clone());
         // An unannotated callback borrows the expected function's success row
         // while its body is checked. If a nested call can fail, retain that
         // failure carrier on the callback; the caller then decides whether its
         // operation can project the carrier (for example collection map/filter)
-        // or must reject the widened callback type.
+        // or must reject the widened callback type. An expected row that is
+        // already fallible (`fn(HTTPRequest) -> HTTPResponse HTTPError!`) is the
+        // callback's whole contract (D-LAMBDA-IFACE2): its body, `return`
+        // included, checks against that row as a named function's would.
         let infer_failure_carrier = expected_callable
             && !expected_result_callable
-            && !exp_ret.is_some_and(|ret| is_unit_type(ret))
-            && lam.result_type.is_none()
-            && lam.error_type.is_none();
+            && !exp_ret.is_some_and(|ret| is_unit_type(ret) || matches!(ret.as_ref(), Type::Result { .. }));
 
         if let Some(ep) = exp_params {
             if lam.params.len() != ep.len() {
@@ -196,6 +105,18 @@ impl<'a> Checker<'a> {
         for (i, p) in lam.params.iter_mut().enumerate() {
             let pty = if let Some(ty) = &p.ty {
                 self.check_declared_type(ty, p.ty_span.unwrap_or(p.name_span));
+                if let Some(required) = exp_params.and_then(|params| params.get(i)) {
+                    if !lambda_slot_matches(required, ty) {
+                        self.diags.push(Diagnostic::error(
+                            "E0113",
+                            format!("this lambda parameter should be {}, not {}", required.show(), ty.show()),
+                            "a written lambda parameter type must equal the expected parameter type".to_string(),
+                            type_fix_hint(required, ty),
+                            p.ty_span.or(Some(p.name_span)),
+                        ));
+                        return None;
+                    }
+                }
                 ty.clone()
             } else if let Some(ep) = exp_params.and_then(|ps| ps.get(i)) {
                 ep.clone()
@@ -1153,6 +1074,10 @@ impl<'a> Checker<'a> {
             effect_bound: lam
                 .effects
                 .clone()
+                .or_else(|| match expected {
+                    Some(Type::Fn { effect_bound, .. }) => effect_bound.clone(),
+                    _ => None,
+                })
                 .or_else(|| inferred_effect_free.then(Vec::new))
                 .or_else(|| crate::Sema::foreign_thread_safe_lambda(lam).then(Vec::new)),
             param_contract: exp_contract.cloned(),
@@ -1178,13 +1103,6 @@ impl<'a> Checker<'a> {
     }
 }
 
-fn lambda_return_slots(ret: Option<&Type>) -> (Option<&Type>, Option<&Type>) {
-    match ret {
-        Some(Type::Result { ok, err }) => (Some(ok.as_ref()), Some(err.as_ref())),
-        Some(ret) => (Some(ret), None),
-        None => (None, None),
-    }
-}
 
 fn is_unit_type(ty: &Type) -> bool {
     matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)

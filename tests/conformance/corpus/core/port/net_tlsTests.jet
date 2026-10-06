@@ -1,0 +1,79 @@
+use tests.common as common
+use std.fs as fs
+use std.net.TcpListener
+use std.time.[Duration, Instant]
+use std.thread
+use std.io.ErrorKind
+use core.sys.target.selected_family
+use jet
+// GATE #4494: real socket, filesystem, hardlink and thread primitives.
+// GATE #4483: the hardlink fixture dispatches on selected target family.
+// GATE #4409: distinguish WouldBlock from other accept failures.
+
+// Rust: tests/net_tls.rs:8
+#Test("tls_client_diagnostic_snapshot_covers_e42xx_explain_codes") {
+    rendered :: [
+        jet.Diagnostics.Diagnostic.error("E4201", "TLS handshake with `localhost` failed", "`https://localhost/data.txt` reached the server, but the connection did not complete a secure HTTPS handshake", "verify the URL points at an HTTPS server, not plain HTTP; for local tests, start the TLS fixture server", None),
+        jet.Diagnostics.Diagnostic.error("E4202", "TLS certificate for `api.example.test` could not be trusted", "`https://api.example.test/data` presented a certificate Jet could not verify for that host", "use a certificate whose subject matches the host and chains to a trusted root; for tests, trust the local fixture CA explicitly", None),
+        jet.Diagnostics.Diagnostic.error("E4203", "HTTPS could not find system certificate roots", "Jet uses rustls with the system trust store for default HTTPS, but no usable roots were available", "install the system certificate bundle (for example `ca-certificates`) or run in an image that includes it", None)
+    ]
+    text :: jet.render_diagnostics("tests/ui/comptime_net_fetch_tls_roots.jet", "", rendered)
+    assert_eq(text, fs.read_to_string("tests/cli/tls_client_diagnostics.txt").unwrap())
+}
+// Rust: tests/net_tls.rs:41
+#Test("comptime_fetch_rejects_outside_files_and_private_networks") {
+    root :: common.unique_tmp("comptime_fetch_root")
+    outside :: common.unique_tmp("comptime_fetch_outside")
+    fs.create_dir_all(root).unwrap()
+    fs.write(outside, "private fixture").unwrap()
+    source_path :: root.join("main.jet")
+    file_source :: "use core.net as net\nDATA :: prep \{ net.fetch(\"file://{outside.display()}\", sha256: \"{"0".repeat(64)}\") \}\nfn run() \{\}\n"
+    fs.write(source_path, file_source).unwrap()
+    file_diags :: jet.compile_with_path(file_source, source_path.to_str().unwrap()).expect_err("comptime fetch must not read outside its source directory")
+    assert(file_diags.iter().any(diag -> diag.code == "E3414"))
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    listener.set_nonblocking(true).unwrap()
+    port :: listener.local_addr().unwrap().port()
+    server :: thread.spawn(() -> {
+        deadline :: Instant.now() + Duration.from_secs(1)
+        loop {
+            _ :: listener.accept() ?? {
+                if err.kind() == ErrorKind.WouldBlock {
+                    if Instant.now() >= deadline { return false }
+                    thread.yield_now()
+                    next
+                }
+                return false
+            }
+            return true
+        }
+    })
+    network_source :: "use core.net as net\nDATA :: prep \{ net.fetch(\"http://127.0.0.1:{port}/secret\", sha256: \"{"0".repeat(64)}\") \}\nfn run() \{\}\n"
+    fs.write(source_path, network_source).unwrap()
+    network_diags :: jet.compile_with_path(network_source, source_path.to_str().unwrap()).expect_err("comptime fetch must reject loopback destinations")
+    assert(network_diags.iter().any(diag -> diag.code == "E3414"))
+    assert(!server.join().unwrap(), "private destination was contacted")
+    reserved_source :: "use core.net as net\nDATA :: prep \{ net.fetch(\"http://192.0.0.1/secret\", sha256: \"{"0".repeat(64)}\") \}\nfn run() \{\}\n"
+    fs.write(source_path, reserved_source).unwrap()
+    reserved_diags :: jet.compile_with_path(reserved_source, source_path.to_str().unwrap()).expect_err("comptime fetch must reject reserved IPv4 destinations")
+    assert(reserved_diags.iter().any(diag -> diag.code == "E3414"))
+    _ :: fs.remove_dir_all(root)
+    _ :: fs.remove_file(outside)
+}
+// Rust: tests/net_tls.rs:100
+#Test("comptime_fetch_rejects_hardlinks_to_outside_files") {
+    if selected_family() != "unix" { return }
+    root :: common.unique_tmp("comptime_fetch_hardlink_root")
+    outside :: common.unique_tmp("comptime_fetch_hardlink_outside")
+    fs.create_dir_all(root).unwrap()
+    fs.write(outside, "private fixture").unwrap()
+    hardlink :: root.join("linked-secret")
+    fs.hard_link(outside, hardlink).unwrap()
+    source_path :: root.join("main.jet")
+    source :: "use core.net as net\nDATA :: prep \{ net.fetch(\"file://{hardlink.display()}\", sha256: \"{"0".repeat(64)}\") \}\nfn run() \{\}\n"
+    fs.write(source_path, source).unwrap()
+    diagnostics :: jet.compile_with_path(source, source_path.to_str().unwrap()).expect_err("compile-time fetch must reject hardlinks to outside files")
+    assert(diagnostics.iter().any(diagnostic -> diagnostic.code == "E3414"))
+    _ :: fs.remove_dir_all(root)
+    _ :: fs.remove_file(outside)
+}

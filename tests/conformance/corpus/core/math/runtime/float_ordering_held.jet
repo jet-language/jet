@@ -1,0 +1,20 @@
+// HELD #4262: native std::cmp::Ordering adapter + every Float collection sort
+// caller must consume the private -1/0/+1 policy; bootstrap sorting alone is
+// not proof of that source/native/shared archive/tier integration.
+use core.math as float_order_held_math
+
+// Examples/features/collections/release_trait_bounds.jet original NaN sort.
+#Test("held original Float collection sort routes NaNs after finite values") {
+    nan :: float_order_held_math.nan()
+    infinity :: float_order_held_math.infinity()
+    values := [Float]{nan, Float{1.0}, -Float{0.0}, -infinity, -nan, Float{0.0}, infinity, -Float{1.0}}
+    &values.sort()
+    assert_eq(values[0], -infinity)
+    assert_eq(values[1], -Float{1.0})
+    assert_eq(values[2], Float{0.0})
+    assert_eq(values[3], Float{0.0})
+    assert_eq(values[4], Float{1.0})
+    assert_eq(values[5], infinity)
+    assert(float_order_held_math.is_nan(values[6]))
+    assert(float_order_held_math.is_nan(values[7]))
+}

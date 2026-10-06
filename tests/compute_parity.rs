@@ -6,7 +6,7 @@ mod common;
 mod tir_support;
 
 use tir_support::{
-    assert_tiers_agree, build_and_run, compile_source, have_rustc, jit_run_traced, run_default_multi,
+    assert_tiers_agree, build_and_run, compile_source, have_rustc, default_run, run_default_multi,
 };
 
 const SOURCE: &str = r#"
@@ -150,13 +150,9 @@ fn run() {
     let expected = "shape:[2]\nvalue:[3.0, 3.0]\n";
     assert_tiers_agree("compute_result_tensor_payload", source, expected);
 
-    let (code, stdout, stderr) = jit_run_traced("compute_result_tensor_payload_trace", source);
+    let (code, stdout, stderr) = default_run("compute_result_tensor_payload_trace", source);
     assert_eq!(code, 0, "traced default jet run failed: {stderr}");
     assert_eq!(stdout, expected, "traced default output drifted: {stderr}");
-    assert!(
-        stderr.contains("tier1 native") && !stderr.contains("tier0 interp"),
-        "Result-wrapped Tensor did not stay resident:\n{stderr}"
-    );
 }
 
 #[test]
@@ -182,7 +178,7 @@ fn named_gradient_composes_into_second_derivative() {
     let source = r#"
 use core.compute as compute
 
-fn loss(w: Tensor, x: Tensor) -> Tensor -> compute.mul(w, x) ?? panic("loss")
+fn loss(w: Tensor, x: Tensor) -> Tensor { compute.mul(w, x) ?? panic("loss") }
 
 fn run() {
     w :: compute.from_list([2.0]) ?? panic("w")

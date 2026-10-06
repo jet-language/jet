@@ -11,7 +11,6 @@ Jet source
   -> sema -> checked bundle and semantic facts
   -> TIR -> canonical, validated and optimized MIR
                |-> MIRRust -> Rust -> rustc/LLVM -> native artifact
-               |-> Cranelift -> resident native execution
                `-> MIR evaluator -> interpreter/comptime execution
 ```
 
@@ -53,6 +52,31 @@ The [execution seam](../../crates/jet-foundation/src/JitBackend.rs) instead
 passes canonical MIR and an artifact identity to the resident backends.
 These are consumers of one checked meaning, not separate front ends.
 
+### Native representation boundaries
+
+The [Jet x86-64 selector](../../Compiler/JetBackend/Source/X64/Select.jet)
+normalizes incoming and returned `Bool` values from the low System V ABI byte;
+unspecified upper register or stack-slot bits must not change Jet truth.
+Image origins preserve the linker's relative alignment: relocatable read-only
+sections advertise and use their maximum datum alignment, and static ELF text
+starts after header padding to the maximum function/data alignment.
+The [ABI fixtures](../../Compiler/JetBackend/Tests/AbiFixtures.jet) exercise
+dirty upper bits and aligned data addresses, including a system-linked object.
+
+Runtime representation is not the checked field type. In particular, default
+`Err.cause` value and place reads use the shared
+[cause projection](../../crates/jet-foundation/src/Outcome.rs) to expose
+`Err?`, not the runtime's boxed recursive storage. The
+[default error example](../../Examples/features/errors/default_err_value.jet)
+covers present, absent and repeated cause reads.
+Returned `View` and `ViewMut` signatures retain the checked owner provenance:
+both Rust emitters attach an explicit lifetime to the returned reference and
+its owner parameter, not to unrelated borrowed parameters. Static-only views
+use `'static`. The [borrowed view example](../../Examples/features/memory/borrowed_view_len.jet)
+covers a multi-parameter return, chained and stored length reads, indexing,
+and iteration without converting the borrowed slice to a list.
+
+
 ### One reflection model
 
 `StructDef::reflection_fields()` is the declaration-owned stored-field-row source for
@@ -81,7 +105,7 @@ each gate-bearing fact once with its source span and provenance. The CLI command
 that ledger. Its JSON form has the same data; it does not create an inspection
 ledger of its own.
 
-The structure plane ends before TIR. AOT emit, Cranelift, the interpreter, and
+The structure plane ends before TIR. AOT emit, the interpreter, and
 web codegen receive the checked program after structure facts and gates have
 been erased. This preserves I2 and I3 (rustc and engines do not decide policy),
 I8 (one registry and one gate mechanism), and I9 (one meaning across applicable
@@ -114,8 +138,8 @@ facade and binary host over these internal APIs.
 | `jet-cli` | canonical command/flag registry, completions, man page, diagnostic reference, and hybrid help UI over leaf syntax policy plus `jet-repl` terminal/symbol support | renders existing diagnostics only |
 | `jet-canvas` | Canvas browser HTML/JS projection assets over leaf JSON escaping | no |
 | `jet-devserver` | watch/HTTP/static policy, Canvas routes and semantic/edit service, browser-client leases, terminal/browser status parity, live reload, and atomic last-good artifact swapping; the root retains only the R5 compile/rustc executor and process watch loop | renders existing diagnostics only |
-| `jet-rt` | runtime helpers shared by generated code and JIT/dev paths | no |
-| `jet-jit` | dev/JIT execution tier over codegen/TIR facts | internal fallback only |
+| `jet-rt` | runtime helpers shared by generated code and the evaluator | no |
+| `jet-evalhost` | ambient host services for the in-process evaluator (`--interpret`, comptime), Source bootstrap execution transport, migrations and the job selector | no |
 | `jet-net` | runtime/comptime fetch helper with TLS diagnostics | yes, for fetch failures |
 
 ### Retained compiler host boundary
@@ -124,7 +148,7 @@ The compiler port changes the implementation language of policy, not the
 ownership of language meaning. A Jet pass must replace its Rust policy at the
 existing seam, with the same inputs, identities, ordering and diagnostics.
 It must not introduce a third front end, a second query verdict, or a new
-execution lens. Rust source emission, rustc/LLVM and Cranelift remain supported
+execution lens. Rust source emission and rustc/LLVM remain supported
 consumers; self-hosting does not mean replacing them.
 
 The table describes crossing responsibilities, not a list of completed ports.
@@ -136,7 +160,7 @@ Tower acceptance boundaries, not evidence supplied by this inventory.
 | [Foundation types and syntax](../../crates/jet-foundation/src/lib.rs) → [lexer](../../crates/jet-lexer/src/Lexer/Terminators.rs) | Token/terminator decisions over source facts; foundation and syntax proof home #808 | Source bytes, byte-span validity, raw token payloads and the existing Unicode primitive; no reinterpretation of Jet records as Rust memory |
 | [Parser](../../crates/jet-parser/src/lib.rs) → canonical AST | Grammar and AST construction, #809 | Own and marshal token/AST storage at a private crossing; preserve original spans and diagnostic records rather than parse a second time for the host |
 | [Sema](../../crates/jet-sema/src/lib.rs) → checked bundle/effect facts | Types, effects, ownership and semantic verdicts, #810 | Keep the checked bundle and its facts together; unchecked or mismatched facts must not enter lowering |
-| [TIR/MIR lowering](../../crates/jet-codegen/src/Codegen/TIR/mod.rs) → [MIR consumers](../../crates/jet-foundation/src/JitBackend.rs) | Semantic lowering over already-checked facts, #811 | Canonical MIR validation, artifact selection and retained Rust/Cranelift execution adapters; backends cannot invent a source-level rule |
+| [TIR/MIR lowering](../../crates/jet-codegen/src/Codegen/TIR/mod.rs) → [MIR consumers](../../crates/jet-foundation/src/JitBackend.rs) | Semantic lowering over already-checked facts, #811 | Canonical MIR validation, artifact selection and retained Rust emission/evaluator adapters; backends cannot invent a source-level rule |
 | [Comptime ambient bridge](../../crates/jet-comptime/src/Comptime/AmbientRuntime.rs) ↔ [compiler Core evaluator](../../Source/Compiler.rs) | Compiler queries and compile-time/build policy, #812 | Scoped evaluator installation, host capabilities and value/error transport; compiler authority is not a process-global callback |
 | [Loader and Driver](../../crates/jet-driver/src/Driver/mod.rs) ↔ [root entry](../../Source/lib.rs) | Front-end orchestration, #813 | Filesystem/process access, worker lifetime and stack, toolchain invocation and panic transport; no Cargo dependency from an inward seam back to the facade |
 | [Query service](../../crates/jet-driver/src/QueryService.rs) ↔ [query cache](../../crates/jet-queries/src/lib.rs) | Tooling projections of the checked result, #813 | Revision/dependency invalidation and cache storage; cached values retain the checked bundle and effect-fact association, not an independent analysis |
@@ -147,8 +171,8 @@ Compiler seams depend inward through local path dependencies, as in the
 [foundation](../../crates/jet-foundation/Cargo.toml) and
 [query cache](../../crates/jet-queries/Cargo.toml) are leaves. A private Jet pass
 does not justify a new external compiler dependency or a cycle back to the
-root. The [runtime-side JIT dependencies](../../crates/jet-jit/Cargo.toml) have
-their own approved backend/bridge contracts; they are not permission to add
+root. The [evaluator host dependencies](../../crates/jet-evalhost/Cargo.toml)
+have their own approved bridge contracts; they are not permission to add
 dependencies to compiler policy.
 
 #### Scoped entry and failure containment
@@ -167,11 +191,7 @@ Nothing in this crossing grants runtime code a compile-time compiler API.
 This is a scoped Rust call boundary, not a C ABI or a promise about Rust
 `Vec`, enum or pointer layout. The worker transports a Rust panic payload
 unchanged back to its Rust caller; it does not relabel an ICE as a successful
-pass. Machine-code host crossings are different:
-[`jet-jit::host_seam`](../../crates/jet-jit/src/host_seam.rs) catches inside
-each generated C shim and reports through the existing status channel before
-returning to Cranelift code. No unwind may cross a JIT/C frame. A new private
-compiler adapter must preserve these distinct containment rules.
+pass. A new private compiler adapter must preserve this containment rule.
 
 The host, pass and private value contract are source-coupled in one build, with
 no independently versioned public ABI or compatibility negotiation; changing
@@ -222,6 +242,16 @@ pinned stage0-to-stage1 build, #815 is byte-identical stage1-to-stage2 output,
 and #816 is the Jet-built compiler full-suite closeout. The policy-family
 homes #808–#813 and the boundary inventory #218 cannot substitute for those
 bootstrap and fixed-point proofs.
+
+The fixed-point output includes both the emitted source and its embedded
+compiler MIR image. [`BuildIdentity`](../../Compiler/Bootstrap/BuildIdentity.rs)
+separates `JET_COMPILER_SOURCE_ID` (canonical compiler source bytes, independent
+of the backend build profile) from `JET_COMPILER_BUILD_ID` (source bytes plus
+build facts and, for generated compiler binaries, generated inputs). The
+private HostFacts supplied to JetDriver use the source identity so changing
+the compiler binary's optimization profile does not change compiler-authored
+MIR. Build receipts and physical artifact/cache identities retain the build
+identity; source identity is not proof that two compiler binaries are identical.
 
 Behavioral parity between any two compiler binaries (#670) is a separate,
 reusable proof: [`Tools/agent/compiler-diff.mjs`](../../Tools/agent/compiler-diff.mjs)
@@ -344,7 +374,7 @@ snapshots):
   that form). Crossing sites are recorded for the upgrade report.
 
 `freeze` does not add a backend policy rail. Its `Frozen` flow fact is lowered
-to the existing owned clone/materialization TIR nodes, so AOT, Cranelift,
+to the existing owned clone/materialization TIR nodes, so AOT, the
 interpreter, and any applicable web path consume one checked meaning. The
 REPL remains an interpreter-only surface and rejects task execution with E1802;
 pure `freeze(x)` evaluation is still a value operation.
@@ -689,19 +719,19 @@ in `tests/lsp.rs`; the server must not advertise speculative features.
 ### Compiler-speed evidence boundary (#666)
 
 Compiler-speed evidence stays on the production compiler path. The differential
-gate sends the same checked example to optimized AOT and the default tiered
-lens, then compares exit status, stdout, and stderr. A record identifies
-resident Cranelift execution or interpreter deopt; a refusal, newly broken AOT
-oracle, missing record, or divergent result remains visible as a failure.
-Named-job parity uses the same checked program-argument slice for `jet run`,
-`jet dev`, and interpreter execution; an unknown job remains an E1294 failure.
+gate sends the same checked example to optimized AOT and the default `jet run`
+(normal build path, D-EXEC2=A) and to the forced evaluator, then compares exit
+status, stdout, and stderr; a refusal, newly broken AOT oracle, missing record,
+or divergent result remains visible as a failure. Named-job parity uses the
+same checked program-argument slice for `jet run`, `jet dev`, and interpreter
+execution; an unknown job remains an E1294 failure.
 
 The timing path uses `PhaseTiming` and the typed `CompilerProbe` provider. A
 checked corpus pins source and expected-output digests. A measurement records
 compiler/Core identities, target, profile, backend, linker, host, cache state,
 fixed warmups and samples, process CPU-time variance, peak RSS, and phase totals. The
-`dev` profile invokes the production Cranelift JIT lens; optimized `release`
-invokes the production rustc AOT lens. Clean, no-change, and representative-
+`dev` and optimized `release` profiles both invoke the production rustc AOT
+build (D-EXEC2=A). Clean, no-change, and representative-
 edit runs are distinct. Partial timing, changed inputs, incompatible
 identities, nondeterminism, pathological inputs, and unstable samples are
 unavailable/failure; they cannot be made green by changing the workload or
@@ -758,9 +788,16 @@ The failure envelope records which budget was actually consumed; a guest
 memory/table request is not relabeled as fuel exhaustion, and an oversized
 wire is rejected before an unbounded host encoding. A call trap is classified
 as user/guest failure, denied authority, budget exhaustion, or internal host
-defect from typed boundary state, not by parsing backend error text. The
-wire keeps the original Jet operation and exported call name and remains the
-transport envelope; no public `Plugin` error type is added.
+defect from typed boundary state, not by parsing backend error text.
+D-PLUGIN-FAILURE1=A carries that cause as `core.plugin.PluginError`, with the
+export name, original display message, and up to 32 innermost-first Wasm frames.
+Budget failures name Fuel, Memory, Table, Time, or the 16 MiB Wire limit. A
+`PluginFrame` locates the function by name (empty without a name section), the
+Wasm `component` it ran in, and the offset; debug-file/line loading is
+intentionally outside this transport. Failures before guest execution carry no
+frames. A failed load leaves a handle whose first call returns the load fault
+with export `load`, without stopping unrelated host work. A propagated failure
+records the host call site in the ordinary failure journey.
 
 Handles and Wasmtime stores are owner-thread state. Cross-thread use and
 unload of an active call are rejected by the existing handle boundary, and
@@ -990,22 +1027,19 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   `crates/jet-codegen/src/Prelude/**`; a part sits in `jet-foundation` when a
   comptime-reachable seam crate must call it, per I6). Rust spelling lives
   only in the AOT emit
-  layer as calls into that Prelude. Cranelift JIT hosts and interpreter ambient
-  bindings are the same kind of layer: marshal args, call the identical
-  `jet_*` / Prelude function AOT would call, marshal results. They must not
-  fork defaults, CORS/policy checks, error meaning, or other Core behavior.
-  Every engine (Rust emitter, Cranelift JIT, the canonical interpreter, and web
-  when the surface applies) must consume TIR exhaustively with real lowering that
-  preserves one meaning (AGENTS.md invariant I9 / `claim.tier-parity`). Every
-  supported construct needs that lowering; an unsupported fall-through is a
-  compiler defect, not a closed feature or an AOT-only exception. The
-  interpreter is the reference semantics for `jet run`/`jet dev` parity, and
-  parity evidence covers stdout, stderr, exit code, diagnostics, panics, and
-  side effects across applicable tiers. If deopt runs that surface, interpreter
-  ambient must call the same Prelude symbol as AOT emit. Native JIT is a
-  performance tier; semantic parity across AOT, JIT, interpreter, and web is
-  mandatory. (D-ONECORE1=A, ratified 2026-07-24; I9 owner-directed
-  2026-07-29; dumb-adapter rule owner-directed 2026-07-29.)
+  layer as calls into that Prelude. Interpreter ambient bindings are the same
+  kind of layer: marshal args, call the identical `jet_*` / Prelude function
+  AOT would call, marshal results. They must not fork defaults, CORS/policy
+  checks, error meaning, or other Core behavior. Every engine (Rust emitter, the
+  canonical interpreter, and web when the surface applies) must consume TIR
+  exhaustively with real lowering that preserves one meaning (AGENTS.md
+  invariant I9 / `claim.tier-parity`). Every supported construct needs that
+  lowering; an unsupported fall-through is a compiler defect, not a closed
+  feature or an AOT-only exception. Parity evidence covers stdout, stderr, exit
+  code, diagnostics, panics, and side effects across applicable tiers; semantic
+  parity across AOT, interpreter, and web is mandatory. (D-ONECORE1=A, ratified
+  2026-07-24; I9 owner-directed 2026-07-29; dumb-adapter rule owner-directed
+  2026-07-29; D-EXEC2=A retired the Cranelift JIT.)
 
   The comptime Core registry uses the following namespace classification. The
   table covers the `core_calls.rs` namespaces.
@@ -1083,80 +1117,15 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.net.url.data: mime.top` | Kernel | URL MIME field validation stays with the shared kernel. |
   | `core.net.url` | Kernel | `Prelude/CoreLib/JetStd/UrlMime.rs` owns URL parse/render/percent rules; `UrlLite` marshals `JetURL`. |
 
-- **R13 — An abort is never an outcome; no unwind may reach a JIT frame.**
-  (D-JITUNWIND1, #1997.) `cranelift-jit` registers no unwind
-  information for the code it emits, so a JIT frame carries no FDE. A Rust
-  panic raised above one makes libgcc's phase-1 walk run off the top of the
-  stack and the process rtaborts with `fatal runtime error: failed to initiate
-  panic, error 5` before any outer `catch_unwind` can see it. The user gets a
-  bare `SIGABRT` with no text, which is not one of the exit codes below.
-
-  Two mechanisms could fix that, and the choice is recorded here rather than
-  left implicit at each call site.
-
-  1. **Register unwind info for JIT'd code** — `create_unwind_info(isa)` plus
-     per-function FDE registration. **Rejected.** It makes unwinding a
-     *supported* path through generated machine code: a far larger semantic
-     commitment than it looks, platform-specific frame registration, and it
-     writes Rust panic propagation into the contract of Jet-generated code.
-  2. **Convert at the boundary** — every host seam turns a panic into a status
-     before returning into JIT'd code, so no unwind ever begins with JIT frames
-     below it. **Chosen.** It is how the tiers already talk: `#Shield` delivers
-     a deferred cancel as a status
-     (`jet_scheduler_shield_leave_status`), and the deopt seam already carried
-     exactly this conversion.
-
-  **The recorded cost of (2) is that the guarantee has to hold across every one
-  of the ~1.7k JIT host symbols, so it needs a mechanical check and not review
-  discipline.** That cost is the centre of the design. It is paid structurally,
-  three ways:
-
-  - A host seam is an ordinary Rust `fn`, never an `extern "C" fn`. rustc gives
-    an `extern "C"` **body** an abort-on-unwind shim, so a panic inside one dies
-    as `thread caused non-unwinding panic` at that body's own edge, before any
-    wrapper above it could catch. A boundary can only be added by *replacing*
-    the C frame, never by wrapping one.
-  - The boundary is **generated**, from the one canonical per-symbol
-    declaration `host_fns!` already owns (card #1633).
-    `crates/jet-jit/src/host_seam.rs` builds an `extern "C"` shim with the
-    seam's exact C signature whose body runs the seam inside `guard_seam`, and
-    `builder.symbol` registers that shim. A new host symbol cannot be declared
-    without one.
-  - `tests/jit_no_unwind_boundary.rs` is the check, and it is a rule about
-    frames rather than about names: **no `extern` fn may be defined in
-    `crates/jet-jit` at all**, whatever its ABI or its name, except the shim
-    `host_seam.rs` generates. No host address may escape except through
-    `guarded_addr`, and the macro must still emit the guard. The first form of
-    this check banned `extern "C" fn jet_*` only, and a bridge callback named
-    `jit_ffi_reporter` — a C frame a foreign library enters when a foreign
-    function has already failed, with a Cranelift frame below it — sat outside
-    that name for exactly as long as the name was the rule.
-  - The rule is also **unfilable**. Every ratcheted section of
-    `tests/jit_corpus_gate.txt` is shrink-only, so a stem recorded there is a
-    stem this suite has agreed not to fail on again — and an abort recorded
-    there would be an abort under permanent protection. So the gate refuses to
-    classify one: `corpus_gate_refuse_abort` reads the AOT oracle, the default
-    `jet run` and the forced interpreter, and any abort marker in stderr fails
-    the stem outright in every section. `streams/generators` is why. It raised a
-    second time from drop glue, died as `panic in a destructor during cleanup`,
-    and the classifier — which only ever looked at the exit code — filed it as
-    the benign row `AOT exit 1`. The marker list lives once, in `tests/common`,
-    so the corpus gate and `tests/jit_no_unwind_boundary.rs` cannot drift.
-  - The one carve-out is a **process signal handler**, which the kernel enters
-    on a borrowed stack that may have a JIT frame under it. Conversion is the
-    wrong tool there: `guard_seam` reaches
-    `jet_scheduler_install_panic_hook`, which takes the process panic-hook lock
-    and allocates on first call, so catching inside a handler would trade an
-    unreachable panic for a reachable deadlock. A handler must therefore be
-    panic-free — its whole body notes one relaxed atomic — and the check pins
-    the permitted statements instead of trusting the name.
-
-  Conversion targets the tier's **existing** status channel — a cancel or a
-  blown deadline lands on the pending-interrupt channel `#Shield` already uses,
-  a program stop renders through the shared report boundary and exits `70`, and
-  an engine defect takes the branded ICE rail and exits `101` (I2). No second
-  error channel is introduced (I8), and `Prelude/Scheduler.rs` stays the only
-  place a caught payload is read as a status (I9).
+- **R13 — An abort is never an outcome.** A host seam that runs inside an
+  execution engine converts a Rust panic into the tier's **existing** status
+  channel before returning: a cancel or a blown deadline lands on the
+  pending-interrupt channel `#Shield` already uses, a program stop renders
+  through the shared report boundary and exits `70`, and an engine defect takes
+  the branded ICE rail and exits `101` (I2). No second error channel is
+  introduced (I8), and `Prelude/Scheduler.rs` stays the only place a caught
+  payload is read as a status (I9). A process signal handler must be
+  panic-free: its whole body notes one relaxed atomic.
 
 
 ## Exit codes (stable contract)

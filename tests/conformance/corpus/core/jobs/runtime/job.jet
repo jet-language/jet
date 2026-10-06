@@ -1,0 +1,43 @@
+use core.jobs.runtime.job.[JetJobClock, JetJobSchedule, JetJobScope, JetJobSelection, jet_job_select, jet_job_help_text, jet_args_source_program_name, jet_cli_banner, jet_job_unknown_what, jet_job_declared_detail]
+
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1439
+#Test("job_selector_preserves_ordinary_help_and_hidden_scope") {
+    jobs :: [("build", JetJobScope.Ship), ("private", JetJobScope.Internal)]
+    assert(jet_job_select(["program"], jobs) == .Ordinary)
+    assert(jet_job_select(["program", "--help"], jobs) == .Help)
+    assert(jet_job_select(["program", "--flag"], jobs) == .Ordinary)
+    assert(jet_job_select(["program", "build"], jobs) == .Job(0))
+    assert(jet_job_select(["program", "private"], jobs) == .Unknown)
+    assert(jet_job_select(["program", "missing"], jobs) == .Unknown)
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:51
+#Test("job_daily_clock_fires_once_in_each_day_window") {
+    clock := JetJobClock.new()
+    jobs :: [("daily", JetJobSchedule.WallClockTime{hour: U8{1}, minute: U8{2}})]
+    assert(clock.due_at(jobs, U64{3719}).is_empty())
+    assert(clock.due_at(jobs, U64{3720}) == ["daily"])
+    assert(clock.due_at(jobs, U64{3779}).is_empty())
+    assert(clock.due_at(jobs, U64{3780}).is_empty())
+    assert(clock.due_at(jobs, U64{90120}) == ["daily"])
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:51
+#Test("job_nonpositive_duration_is_due_at_every_check") {
+    clock := JetJobClock.new()
+    jobs :: [("zero", JetJobSchedule.Duration{nanos: I64{0}}), ("negative", JetJobSchedule.Duration{nanos: I64{-1}})]
+    assert(clock.due_at(jobs, U64{0}) == ["zero", "negative"])
+    assert(clock.due_at(jobs, U64{0}) == ["zero", "negative"])
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1329
+#Test("job_source_program_and_banner_text") {
+    assert(jet_args_source_program_name("path/tool.jet") == "tool")
+    assert(jet_args_source_program_name("tool.jet extra") == "tool extra")
+    assert(jet_args_source_program_name("") == "program")
+    assert(jet_cli_banner("help") == "help\n")
+    assert(jet_job_unknown_what("missing") == "No job named `missing`")
+    assert(jet_job_declared_detail(["one", "two"]) == "declared jobs: one, two")
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1380
+#Test("job_help_lists_only_visible_rows_in_declaration_order") {
+    text :: jet_job_help_text(["tool.jet"], [("build", JetJobScope.Ship), ("hidden", JetJobScope.Internal), ("ship", JetJobScope.Ship)])
+    assert(text == "Usage: tool <job> [options]\n\nJobs:\n  build                ship\n  ship                 ship\n")
+}

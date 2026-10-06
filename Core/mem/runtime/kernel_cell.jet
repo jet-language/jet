@@ -1,0 +1,1394 @@
+// PORT-PENDING 0195 crates-jet-jit-src-cell: crates/jet-jit/src/Cell.rs:1-1390
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Resident-JIT marshalling for the canonical local `Cell` runtime.
+//RS 
+//RS use crate::Concurrency;
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_module::Module;
+//RS use jet_codegen::local_cell::{JetCell, JetCellEditGuard, JetCellGetOrSet, JetCellReadGuard};
+//RS use jet_foundation::MIR::{MirRuntimeValue, MirType, MirTypeKind};
+//RS use std::collections::{HashMap, HashSet};
+//RS use std::panic::{catch_unwind, AssertUnwindSafe};
+//RS 
+//RS use crate::types_meta::JitMeta;
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub(crate) enum CellSchema {
+//RS     Unit,
+//RS     Int,
+//RS     Float,
+//RS     Bool,
+//RS     Char,
+//RS     String,
+//RS     Option(Box<CellSchema>, MirType),
+//RS     List(Box<CellSchema>),
+//RS     Struct {
+//RS         name: String,
+//RS         fields: Vec<(String, CellSchema)>,
+//RS     },
+//RS     /// A language aggregate whose resident carrier is owned by the checked
+//RS     /// runtime descriptor registry.  `shape` remains available for Cell
+//RS     /// projections; it is never a second serialization implementation.
+//RS     Descriptor {
+//RS         type_id: u64,
+//RS         shape: Box<CellSchema>,
+//RS     },
+//RS     /// Evaluator-private opaque values (Shared, closures, and host handles).
+//RS     Handle,
+//RS }
+//RS 
+//RS impl CellSchema {
+//RS     fn struct_schema(
+//RS         name: &str,
+//RS         args: &[MirType],
+//RS         meta: &JitMeta<'_>,
+//RS     ) -> Result<Option<Self>, String> {
+//RS         let Some((field_names, field_types)) = meta.struct_layout(name) else {
+//RS             return Ok(None);
+//RS         };
+//RS         let params = meta.struct_type_params(name).unwrap_or_default();
+//RS         if params.len() != args.len() {
+//RS             return Err(format!(
+//RS                 "jit Cell generic schema arity mismatch for {name}: {} parameters, {} arguments",
+//RS                 params.len(),
+//RS                 args.len()
+//RS             ));
+//RS         }
+//RS         let substitutions = params
+//RS             .iter()
+//RS             .cloned()
+//RS             .zip(args.iter().cloned())
+//RS             .collect::<HashMap<_, _>>();
+//RS         Ok(Some(Self::Struct {
+//RS             name: name.to_string(),
+//RS             fields: field_names
+//RS                 .iter()
+//RS                 .zip(field_types)
+//RS                 .map(|(field, ty)| {
+//RS                     let ty = crate::runtime_host::substitute_generic_type(ty, &substitutions);
+//RS                     Ok((field.clone(), Self::from_type(&ty, meta)?))
+//RS                 })
+//RS                 .collect::<Result<_, String>>()?,
+//RS         }))
+//RS     }
+//RS 
+//RS     fn uses_descriptor(ty: &MirType, meta: &JitMeta<'_>) -> bool {
+//RS         match ty.kind() {
+//RS             MirTypeKind::List(_)
+//RS             | MirTypeKind::FixedList { .. }
+//RS             | MirTypeKind::Map { .. }
+//RS             | MirTypeKind::Option(_)
+//RS             | MirTypeKind::Result { .. } => true,
+//RS             MirTypeKind::Apply { name, args } => {
+//RS                 (name.name == "List" && args.len() == 1)
+//RS                     || (name.name == "Result" && args.len() == 2)
+//RS                     || meta.user_record_or_enum(&name.name)
+//RS             }
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn from_type(ty: &MirType, meta: &JitMeta<'_>) -> Result<Self, String> {
+//RS         let shape = match ty.kind() {
+//RS             MirTypeKind::Apply { name, args } if args.is_empty() && name.name == "Unit" => {
+//RS                 Self::Unit
+//RS             }
+//RS             MirTypeKind::Int
+//RS             | MirTypeKind::IntN { .. }
+//RS             | MirTypeKind::InlineRange { .. } => Self::Int,
+//RS             MirTypeKind::Float | MirTypeKind::Float32 => Self::Float,
+//RS             MirTypeKind::Bool => Self::Bool,
+//RS             MirTypeKind::Char => Self::Char,
+//RS             MirTypeKind::String => Self::String,
+//RS             MirTypeKind::Option(inner) => Self::Option(
+//RS                 Box::new(Self::from_type(inner, meta)?),
+//RS                 (**inner).clone(),
+//RS             ),
+//RS             MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
+//RS                 Self::List(Box::new(Self::from_type(inner, meta)?))
+//RS             }
+//RS             MirTypeKind::Tuple(fields) => Self::Struct {
+//RS                 name: "tuple".to_string(),
+//RS                 fields: fields
+//RS                     .iter()
+//RS                     .map(|(name, ty)| Ok((name.clone(), Self::from_type(ty, meta)?)))
+//RS                     .collect::<Result<_, String>>()?,
+//RS             },
+//RS             MirTypeKind::Tagged { inner, .. } => Self::from_type(inner, meta)?,
+//RS             MirTypeKind::Apply { name, args } if args.is_empty() => {
+//RS                 if let Some(base) = meta.distinct_base(&name.name) {
+//RS                     Self::from_type(base, meta)?
+//RS                 } else {
+//RS                     Self::struct_schema(&name.name, &[], meta)?.unwrap_or(Self::Handle)
+//RS                 }
+//RS             }
+//RS             MirTypeKind::Apply { name, args } => {
+//RS                 Self::struct_schema(&name.name, args, meta)?.unwrap_or(Self::Handle)
+//RS             }
+//RS             MirTypeKind::Map { .. }
+//RS             | MirTypeKind::Result { .. }
+//RS             | MirTypeKind::Shared(_)
+//RS             | MirTypeKind::Fn(_)
+//RS             | MirTypeKind::SendFn { .. }
+//RS             | MirTypeKind::TraitObject(_)
+//RS             | MirTypeKind::Union(_)
+//RS             | MirTypeKind::Quantity { .. } => Self::Handle,
+//RS             MirTypeKind::Measure(_) => {
+//RS                 return Err("a type measure is not a JIT cell type".to_string())
+//RS             }
+//RS         };
+//RS         if Self::uses_descriptor(ty, meta) {
+//RS             let type_id = crate::runtime_host::runtime_type_id(ty).ok_or_else(|| {
+//RS                 format!(
+//RS                     "jit Cell type `{}` has no runtime descriptor",
+//RS                     ty.display_name()
+//RS                 )
+//RS             })?;
+//RS             Ok(Self::Descriptor {
+//RS                 type_id,
+//RS                 shape: Box::new(shape),
+//RS             })
+//RS         } else {
+//RS             Ok(shape)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub(crate) struct CellProjection {
+//RS     pub paths: Vec<Vec<String>>,
+//RS     pub editable: bool,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub(crate) enum CellGuardLayout {
+//RS     Read,
+//RS     Edit,
+//RS     Option(Box<CellGuardLayout>),
+//RS     Result(Box<CellGuardLayout>),
+//RS     Record(Vec<Option<CellGuardLayout>>),
+//RS }
+//RS 
+//RS impl CellGuardLayout {
+//RS     pub(crate) fn from_type(ty: &MirType, meta: &JitMeta<'_>) -> Result<Option<Self>, String> {
+//RS         Ok(match ty.kind() {
+//RS             MirTypeKind::Apply { name, .. } if name.name == "CellReadGuard" => Some(Self::Read),
+//RS             MirTypeKind::Apply { name, .. } if name.name == "CellEditGuard" => Some(Self::Edit),
+//RS             MirTypeKind::Tagged { inner, .. } => Self::from_type(inner, meta)?,
+//RS             MirTypeKind::Option(inner) => Self::from_type(inner, meta)?
+//RS                 .map(|layout| Self::Option(Box::new(layout))),
+//RS             MirTypeKind::Result { ok, .. } => Self::from_type(ok, meta)?
+//RS                 .map(|layout| Self::Result(Box::new(layout))),
+//RS             MirTypeKind::Tuple(fields) => {
+//RS                 let fields = fields
+//RS                     .iter()
+//RS                     .map(|(_, ty)| Self::from_type(ty, meta))
+//RS                     .collect::<Result<Vec<_>, _>>()?;
+//RS                 fields
+//RS                     .iter()
+//RS                     .any(Option::is_some)
+//RS                     .then_some(Self::Record(fields))
+//RS             }
+//RS             MirTypeKind::Apply { name, .. } => {
+//RS                 let identity = ty.identity;
+//RS                 let identity_key = ty.identity_key();
+//RS                 let fields = meta
+//RS                     .program
+//RS                     .type_instances
+//RS                     .iter()
+//RS                     .find(|instance| {
+//RS                         instance.identity == identity
+//RS                             || instance.identity_key() == identity_key
+//RS                             || instance.identity == Some(name.id)
+//RS                     })
+//RS                     .and_then(|instance| instance.tuple_fields());
+//RS                 let Some(fields) = fields else {
+//RS                     return Ok(None);
+//RS                 };
+//RS                 let fields = fields
+//RS                     .iter()
+//RS                     .map(|(_, ty)| Self::from_type(ty, meta))
+//RS                     .collect::<Result<Vec<_>, _>>()?;
+//RS                 fields
+//RS                     .iter()
+//RS                     .any(Option::is_some)
+//RS                     .then_some(Self::Record(fields))
+//RS             }
+//RS             _ => None,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS struct GuardSlot<G> {
+//RS     guard: Option<G>,
+//RS     owner: u64,
+//RS     schema_handle: i64,
+//RS }
+//RS 
+//RS pub(crate) struct CellState {
+//RS     cells: Vec<JetCell<MirRuntimeValue>>,
+//RS     cell_schemas: Vec<i64>,
+//RS     read_guards: Vec<GuardSlot<JetCellReadGuard<MirRuntimeValue>>>,
+//RS     edit_guards: Vec<GuardSlot<JetCellEditGuard<MirRuntimeValue>>>,
+//RS     schemas: Vec<CellSchema>,
+//RS     projections: Vec<CellProjection>,
+//RS     guard_layouts: Vec<CellGuardLayout>,
+//RS     frames: Vec<u64>,
+//RS     next_frame: u64,
+//RS }
+//RS 
+//RS impl CellState {
+//RS     pub(crate) fn new() -> Self {
+//RS         Self {
+//RS             cells: Vec::new(),
+//RS             cell_schemas: Vec::new(),
+//RS             read_guards: Vec::new(),
+//RS             edit_guards: Vec::new(),
+//RS             schemas: Vec::new(),
+//RS             projections: Vec::new(),
+//RS             guard_layouts: Vec::new(),
+//RS             frames: Vec::new(),
+//RS             next_frame: 1,
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn register_schema(&mut self, schema: CellSchema) -> i64 {
+//RS         self.schemas.push(schema);
+//RS         self.schemas.len() as i64
+//RS     }
+//RS 
+//RS     pub(crate) fn register_projection(&mut self, projection: CellProjection) -> i64 {
+//RS         self.projections.push(projection);
+//RS         self.projections.len() as i64
+//RS     }
+//RS 
+//RS     pub(crate) fn register_guard_layout(&mut self, layout: CellGuardLayout) -> i64 {
+//RS         self.guard_layouts.push(layout);
+//RS         self.guard_layouts.len() as i64
+//RS     }
+//RS 
+//RS     /// True when compile baked schema/projection/layout handles into machine code.
+//RS     /// Tier-cache restore starts from a fresh `CellState`, so those programs must
+//RS     /// not publish a disk artifact (handles would dangle).
+//RS     pub(crate) fn has_compile_handles(&self) -> bool {
+//RS         !self.schemas.is_empty() || !self.projections.is_empty() || !self.guard_layouts.is_empty()
+//RS     }
+//RS 
+//RS     fn owner(&self) -> u64 {
+//RS         self.frames.last().copied().unwrap_or(0)
+//RS     }
+//RS 
+//RS     fn insert_read(
+//RS         &mut self,
+//RS         guard: JetCellReadGuard<MirRuntimeValue>,
+//RS         owner: u64,
+//RS         schema_handle: i64,
+//RS     ) -> i64 {
+//RS         self.read_guards.push(GuardSlot {
+//RS             guard: Some(guard),
+//RS             owner,
+//RS             schema_handle,
+//RS         });
+//RS         self.read_guards.len() as i64
+//RS     }
+//RS 
+//RS     fn insert_edit(
+//RS         &mut self,
+//RS         guard: JetCellEditGuard<MirRuntimeValue>,
+//RS         owner: u64,
+//RS         schema_handle: i64,
+//RS     ) -> i64 {
+//RS         self.edit_guards.push(GuardSlot {
+//RS             guard: Some(guard),
+//RS             owner,
+//RS             schema_handle,
+//RS         });
+//RS         self.edit_guards.len() as i64
+//RS     }
+//RS 
+//RS     fn leave_frame(&mut self, returned_read: &HashSet<i64>, returned_edit: &HashSet<i64>) {
+//RS         let Some(frame) = self.frames.pop() else {
+//RS             return;
+//RS         };
+//RS         let parent = self.owner();
+//RS         for (index, slot) in self.read_guards.iter_mut().enumerate() {
+//RS             if slot.owner == frame {
+//RS                 if returned_read.contains(&(index as i64 + 1)) {
+//RS                     slot.owner = parent;
+//RS                 } else {
+//RS                     slot.guard = None;
+//RS                 }
+//RS             }
+//RS         }
+//RS         for (index, slot) in self.edit_guards.iter_mut().enumerate() {
+//RS             if slot.owner == frame {
+//RS                 if returned_edit.contains(&(index as i64 + 1)) {
+//RS                     slot.owner = parent;
+//RS                 } else {
+//RS                     slot.guard = None;
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_returned_guards(
+//RS     rt: &crate::JitRuntime,
+//RS     raw: i64,
+//RS     layout: &CellGuardLayout,
+//RS     read: &mut HashSet<i64>,
+//RS     edit: &mut HashSet<i64>,
+//RS ) -> Option<()> {
+//RS     match layout {
+//RS         CellGuardLayout::Read => {
+//RS             read.insert(raw);
+//RS         }
+//RS         CellGuardLayout::Edit => {
+//RS             edit.insert(raw);
+//RS         }
+//RS         CellGuardLayout::Option(inner) | CellGuardLayout::Result(inner) => {
+//RS             let (present, payload) = crate::runtime_host::jit_result_parts(rt, raw)?;
+//RS             if present {
+//RS                 collect_returned_guards(rt, payload as i64, inner, read, edit)?;
+//RS             }
+//RS         }
+//RS         CellGuardLayout::Record(fields) => {
+//RS             for (index, field) in fields.iter().enumerate() {
+//RS                 if let Some(field) = field {
+//RS                     let value = rt.heap.record_get_int(raw, index as i64)?;
+//RS                     collect_returned_guards(rt, value, field, read, edit)?;
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     Some(())
+//RS }
+//RS 
+//RS fn schema(rt: &crate::JitRuntime, handle: i64) -> Option<CellSchema> {
+//RS     rt.cells
+//RS         .schemas
+//RS         .get((handle as usize).checked_sub(1)?)
+//RS         .cloned()
+//RS }
+//RS fn cell_schema_handle(rt: &crate::JitRuntime, cell: i64) -> Option<i64> {
+//RS     rt.cells
+//RS         .cell_schemas
+//RS         .get((cell as usize).checked_sub(1)?)
+//RS         .copied()
+//RS }
+//RS fn guard_index(handle: i64) -> Option<usize> {
+//RS     usize::try_from(handle).ok()?.checked_sub(1)
+//RS }
+//RS 
+//RS fn projection_index(handle: i64) -> Option<usize> {
+//RS     usize::try_from(handle.checked_abs()?).ok()?.checked_sub(1)
+//RS }
+//RS 
+//RS fn projection_kind(handle: i64) -> Option<i64> {
+//RS     (handle != 0).then_some(if handle < 0 { 2 } else { 1 })
+//RS }
+//RS 
+//RS 
+//RS fn project_schema(schema: &CellSchema, path: &[String]) -> Option<CellSchema> {
+//RS     let Some((field, rest)) = path.split_first() else {
+//RS         return Some(schema.clone());
+//RS     };
+//RS     let schema = match schema {
+//RS         CellSchema::Descriptor { shape, .. } => shape.as_ref(),
+//RS         schema => schema,
+//RS     };
+//RS     let CellSchema::Struct { fields, .. } = schema else {
+//RS         return None;
+//RS     };
+//RS     let field = fields.iter().find_map(|(name, schema)| {
+//RS         (name == field).then_some(schema)
+//RS     })?;
+//RS     project_schema(field, rest)
+//RS }
+//RS 
+//RS fn cell_callback_slot(callback: i64) -> Option<crate::runtime_host::JitCallableSlot> {
+//RS     Concurrency::with_runtime_mut(|rt| crate::runtime_host::jit_callable_parts(rt, callback))
+//RS }
+//RS 
+//RS fn cell_callback_fault(message: &str) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.set_host_fault(message);
+//RS         0
+//RS     })
+//RS }
+//RS 
+//RS fn optional_value_schema(schema: &CellSchema) -> Option<&CellSchema> {
+//RS     match schema {
+//RS         CellSchema::Option(inner, _) => Some(inner.as_ref()),
+//RS         CellSchema::Descriptor { shape, .. } => optional_value_schema(shape),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn decode_value(rt: &mut crate::JitRuntime, raw: i64, schema: &CellSchema) -> Option<MirRuntimeValue> {
+//RS     Some(match schema {
+//RS         CellSchema::Unit => MirRuntimeValue::Unit,
+//RS         CellSchema::Int | CellSchema::Handle => MirRuntimeValue::Int(raw),
+//RS         CellSchema::Float => {
+//RS             MirRuntimeValue::Float {
+//RS                 value: f64::from_bits(raw as u64),
+//RS                 f32: false,
+//RS             }
+//RS         }
+//RS         CellSchema::Bool => MirRuntimeValue::Bool(raw != 0),
+//RS         CellSchema::Char => MirRuntimeValue::Char(char::from_u32(raw as u32)?),
+//RS         CellSchema::Descriptor { type_id, .. } => {
+//RS             crate::runtime_host::decode_jit_cell_value(rt, raw, *type_id).ok()?
+//RS         }
+//RS         CellSchema::String => MirRuntimeValue::String(rt.heap.clone_string(raw)?),
+//RS         CellSchema::Option(inner, inner_ty) => {
+//RS             let (present, payload) = crate::runtime_host::jit_result_parts(rt, raw)?;
+//RS             if present {
+//RS                 MirRuntimeValue::Present(Box::new(decode_value(
+//RS                     rt,
+//RS                     payload as i64,
+//RS                     inner,
+//RS                 )?))
+//RS             } else {
+//RS                 MirRuntimeValue::Absent {
+//RS                     element: inner_ty.clone(),
+//RS                 }
+//RS             }
+//RS         }
+//RS         CellSchema::List(inner) => {
+//RS             let len = rt.heap.list_len(raw)?;
+//RS             let mut values = Vec::with_capacity(len as usize);
+//RS             for index in 0..len {
+//RS                 let item = match inner.as_ref() {
+//RS                     CellSchema::Float => rt.heap.list_get_float(raw, index)?.to_bits() as i64,
+//RS                     _ => rt.heap.list_get_int(raw, index)?,
+//RS                 };
+//RS                 values.push(decode_value(rt, item, inner)?);
+//RS             }
+//RS             MirRuntimeValue::List(values)
+//RS         }
+//RS         CellSchema::Struct { name, fields } => {
+//RS             let mut values = Vec::with_capacity(fields.len());
+//RS             for (index, (field, field_schema)) in fields.iter().enumerate() {
+//RS                 let raw = match field_schema {
+//RS                     CellSchema::Float => {
+//RS                         rt.heap.record_get_float(raw, index as i64)?.to_bits() as i64
+//RS                     }
+//RS                     CellSchema::Bool => i64::from(rt.heap.record_get_bool(raw, index as i64)?),
+//RS                     CellSchema::Char => rt.heap.record_get_char(raw, index as i64)? as u32 as i64,
+//RS                     CellSchema::String => rt.heap.record_get_string(raw, index as i64)?,
+//RS                     _ => rt.heap.record_get_int(raw, index as i64)?,
+//RS                 };
+//RS                 values.push((field.clone(), decode_value(rt, raw, field_schema)?));
+//RS             }
+//RS             MirRuntimeValue::Struct {
+//RS                 type_name: name.clone(),
+//RS                 fields: values,
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn encode_value(rt: &mut crate::JitRuntime, value: &MirRuntimeValue, schema: &CellSchema) -> Option<i64> {
+//RS     if !matches!(
+//RS         schema,
+//RS         CellSchema::Option(_, _) | CellSchema::Descriptor { .. }
+//RS     ) {
+//RS         if let MirRuntimeValue::Present(inner) = value {
+//RS             return encode_value(rt, inner, schema);
+//RS         }
+//RS     }
+//RS     match (schema, value) {
+//RS         (CellSchema::Unit, MirRuntimeValue::Unit) => Some(0),
+//RS         (CellSchema::Int | CellSchema::Handle, MirRuntimeValue::Int(value)) => Some(*value),
+//RS         (CellSchema::Float, MirRuntimeValue::Float { value, .. }) => Some(value.to_bits() as i64),
+//RS         (CellSchema::Bool, MirRuntimeValue::Bool(value)) => Some(i64::from(*value)),
+//RS         (CellSchema::Char, MirRuntimeValue::Char(value)) => Some(*value as u32 as i64),
+//RS         (CellSchema::String, MirRuntimeValue::String(value)) => Some(rt.heap.alloc_string(value.clone())),
+//RS         (CellSchema::Descriptor { type_id, .. }, value) => {
+//RS             crate::runtime_host::encode_jit_cell_value(rt, value, *type_id).ok()
+//RS         }
+//RS         (CellSchema::Option(_, _), MirRuntimeValue::Absent { .. }) => {
+//RS             Some(crate::runtime_host::alloc_jit_result(rt, false, 0))
+//RS         }
+//RS         (CellSchema::Option(inner, _), MirRuntimeValue::Present(value)) => {
+//RS             let payload = encode_value(rt, value, inner)?;
+//RS             Some(crate::runtime_host::alloc_jit_result(
+//RS                 rt,
+//RS                 true,
+//RS                 payload as u64,
+//RS             ))
+//RS         }
+//RS         (CellSchema::Option(inner, _), value) => {
+//RS             let payload = encode_value(rt, value, inner)?;
+//RS             Some(crate::runtime_host::alloc_jit_result(
+//RS                 rt,
+//RS                 true,
+//RS                 payload as u64,
+//RS             ))
+//RS         }
+//RS         (CellSchema::List(inner), MirRuntimeValue::List(values)) => {
+//RS             let list = rt.heap.alloc_empty_list();
+//RS             for value in values {
+//RS                 let raw = encode_value(rt, value, inner)?;
+//RS                 match inner.as_ref() {
+//RS                     CellSchema::Float => {
+//RS                         rt.heap.list_push_float(list, f64::from_bits(raw as u64))?;
+//RS                     }
+//RS                     _ => rt.heap.list_push_int(list, raw)?,
+//RS                 }
+//RS             }
+//RS             Some(list)
+//RS         }
+//RS         (
+//RS             CellSchema::Struct {
+//RS                 name: expected,
+//RS                 fields: schemas,
+//RS             },
+//RS             MirRuntimeValue::Struct { type_name, fields },
+//RS         ) if expected == type_name || expected == "tuple" => {
+//RS             let record = rt.heap.alloc_record(schemas.len());
+//RS             for (index, (field, field_schema)) in schemas.iter().enumerate() {
+//RS                 let value = fields
+//RS                     .iter()
+//RS                     .find_map(|(name, value)| (name == field).then_some(value))?;
+//RS                 let raw = encode_value(rt, value, field_schema)?;
+//RS                 match field_schema {
+//RS                     CellSchema::Float => {
+//RS                         rt.heap.record_set_float(
+//RS                             record,
+//RS                             index as i64,
+//RS                             f64::from_bits(raw as u64),
+//RS                         )?;
+//RS                     }
+//RS                     CellSchema::Bool => {
+//RS                         rt.heap.record_set_bool(record, index as i64, raw != 0)?;
+//RS                     }
+//RS                     CellSchema::Char => {
+//RS                         rt.heap.record_set_char(
+//RS                             record,
+//RS                             index as i64,
+//RS                             char::from_u32(raw as u32)?,
+//RS                         )?;
+//RS                     }
+//RS                     CellSchema::String => {
+//RS                         rt.heap.record_set_string(record, index as i64, raw)?;
+//RS                     }
+//RS                     _ => rt.heap.record_set_int(record, index as i64, raw)?,
+//RS                 }
+//RS             }
+//RS             Some(record)
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn with_cell_result(f: impl FnOnce(&mut crate::JitRuntime) -> i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| match catch_unwind(AssertUnwindSafe(|| f(rt))) {
+//RS         Ok(value) => value,
+//RS         Err(error) => {
+//RS             let message = error
+//RS                 .downcast_ref::<String>()
+//RS                 .cloned()
+//RS                 .or_else(|| {
+//RS                     error
+//RS                         .downcast_ref::<&str>()
+//RS                         .map(|value| (*value).to_string())
+//RS                 })
+//RS                 .unwrap_or_else(|| "Cell runtime panic".to_string());
+//RS             rt.set_trap(&message);
+//RS             0
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn with_cell(f: impl FnOnce(&mut crate::JitRuntime)) {
+//RS     let _ = with_cell_result(|rt| {
+//RS         f(rt);
+//RS         0
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_cell_frame_enter() {
+//RS     with_cell(|rt| {
+//RS         let frame = rt.cells.next_frame;
+//RS         rt.cells.next_frame += 1;
+//RS         rt.cells.frames.push(frame);
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_cell_frame_leave(layout_handle: i64, returned: i64) {
+//RS     with_cell(|rt| {
+//RS         let mut read = HashSet::new();
+//RS         let mut edit = HashSet::new();
+//RS         if layout_handle != 0 {
+//RS             let layout = rt.cells.guard_layouts[(layout_handle - 1) as usize].clone();
+//RS             collect_returned_guards(rt, returned, &layout, &mut read, &mut edit)
+//RS                 .expect("Cell guard return ABI");
+//RS         }
+//RS         rt.cells.leave_frame(&read, &edit);
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_cell_new(raw: i64, schema_handle: i64) -> i64 {
+//RS     with_cell_result(|rt| {
+//RS         let schema = schema(rt, schema_handle).expect("Cell schema");
+//RS         let Some(value) = decode_value(rt, raw, &schema) else {
+//RS             rt.set_host_fault("Cell value descriptor ABI mismatch");
+//RS             return 0;
+//RS         };
+//RS         rt.cells.cells.push(JetCell::new(value));
+//RS         rt.cells.cell_schemas.push(schema_handle);
+//RS         rt.cells.cells.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn cell_get_value(rt: &mut crate::JitRuntime, cell: i64, schema_handle: i64) -> i64 {
+//RS     let schema = schema(rt, schema_handle).expect("Cell schema");
+//RS     let value = rt.cells.cells[(cell - 1) as usize].get();
+//RS     let Some(raw) = encode_value(rt, &value, &schema) else {
+//RS         rt.set_host_fault("Cell value descriptor ABI mismatch");
+//RS         return 0;
+//RS     };
+//RS     raw
+//RS }
+//RS 
+//RS fn jet_jit_cell_get(cell: i64, schema_handle: i64) -> i64 {
+//RS     with_cell_result(|rt| cell_get_value(rt, cell, schema_handle))
+//RS }
+//RS 
+//RS fn jet_jit_cell_get_host(cell: i64) -> i64 {
+//RS     with_cell_result(|rt| {
+//RS         let schema_handle = cell_schema_handle(rt, cell).expect("Cell schema");
+//RS         cell_get_value(rt, cell, schema_handle)
+//RS     })
+//RS }
+//RS 
+//RS fn cell_set_value(rt: &mut crate::JitRuntime, cell: i64, raw: i64, schema_handle: i64) {
+//RS     let schema = schema(rt, schema_handle).expect("Cell schema");
+//RS     let Some(value) = decode_value(rt, raw, &schema) else {
+//RS         rt.set_host_fault("Cell value descriptor ABI mismatch");
+//RS         return;
+//RS     };
+//RS     rt.cells.cells[(cell - 1) as usize].set(value);
+//RS }
+//RS 
+//RS fn jet_jit_cell_set(cell: i64, raw: i64, schema_handle: i64) {
+//RS     with_cell(|rt| cell_set_value(rt, cell, raw, schema_handle));
+//RS }
+//RS 
+//RS fn jet_jit_cell_set_host(cell: i64, raw: i64) {
+//RS     with_cell(|rt| {
+//RS         let schema_handle = cell_schema_handle(rt, cell).expect("Cell schema");
+//RS         cell_set_value(rt, cell, raw, schema_handle);
+//RS     });
+//RS }
+//RS 
+//RS fn cell_replace_value(
+//RS     rt: &mut crate::JitRuntime,
+//RS     cell: i64,
+//RS     raw: i64,
+//RS     schema_handle: i64,
+//RS ) -> i64 {
+//RS     let schema = schema(rt, schema_handle).expect("Cell schema");
+//RS     let Some(value) = decode_value(rt, raw, &schema) else {
+//RS         rt.set_host_fault("Cell value descriptor ABI mismatch");
+//RS         return 0;
+//RS     };
+//RS     let old = rt.cells.cells[(cell - 1) as usize].replace(value);
+//RS     let Some(raw) = encode_value(rt, &old, &schema) else {
+//RS         rt.set_host_fault("Cell value descriptor ABI mismatch");
+//RS         return 0;
+//RS     };
+//RS     raw
+//RS }
+//RS 
+//RS fn jet_jit_cell_replace(cell: i64, raw: i64, schema_handle: i64) -> i64 {
+//RS     with_cell_result(|rt| cell_replace_value(rt, cell, raw, schema_handle))
+//RS }
+//RS 
+//RS fn jet_jit_cell_replace_host(cell: i64, raw: i64) -> i64 {
+//RS     with_cell_result(|rt| {
+//RS         let schema_handle = cell_schema_handle(rt, cell).expect("Cell schema");
+//RS         cell_replace_value(rt, cell, raw, schema_handle)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_cell_guard_read(cell: i64) -> i64 {
+//RS     with_cell_result(|rt| {
+//RS         let schema_handle = cell_schema_handle(rt, cell).expect("Cell schema");
+//RS         let guard = rt.cells.cells[(cell - 1) as usize].guard_read();
+//RS         let owner = rt.cells.owner();
+//RS         rt.cells.insert_read(guard, owner, schema_handle)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_cell_guard_edit(cell: i64) -> i64 {
+//RS     with_cell_result(|rt| {
+//RS         let schema_handle = cell_schema_handle(rt, cell).expect("Cell schema");
+//RS         let guard = rt.cells.cells[(cell - 1) as usize].guard_edit();
+//RS         let owner = rt.cells.owner();
+//RS         rt.cells.insert_edit(guard, owner, schema_handle)
+//RS     })
+//RS }
+//RS 
+//RS fn cell_guard_get_value(
+//RS     rt: &mut crate::JitRuntime,
+//RS     kind: i64,
+//RS     guard: i64,
+//RS     schema_handle: i64,
+//RS ) -> i64 {
+//RS     let schema = schema(rt, schema_handle).expect("Cell schema");
+//RS     let value = if kind == 1 {
+//RS         rt.cells.read_guards[(guard - 1) as usize]
+//RS             .guard
+//RS             .as_ref()
+//RS             .expect("live Cell read guard")
+//RS             .get()
+//RS     } else {
+//RS         rt.cells.edit_guards[(guard - 1) as usize]
+//RS             .guard
+//RS             .as_ref()
+//RS             .expect("live Cell edit guard")
+//RS             .get()
+//RS     };
+//RS     let Some(raw) = encode_value(rt, &value, &schema) else {
+//RS         rt.set_host_fault("Cell guard descriptor ABI mismatch");
+//RS         return 0;
+//RS     };
+//RS     raw
+//RS }
+//RS 
+//RS fn jet_jit_cell_guard_get(kind: i64, guard: i64, schema_handle: i64) -> i64 {
+//RS     with_cell_result(|rt| cell_guard_get_value(rt, kind, guard, schema_handle))
+//RS }
+//RS 
+//RS fn jet_jit_cell_read_guard_get(guard: i64) -> i64 {
+//RS     with_cell_result(|rt| {
+//RS         let schema_handle = rt.cells.read_guards[(guard - 1) as usize].schema_handle;
+//RS         cell_guard_get_value(rt, 1, guard, schema_handle)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_cell_edit_guard_get(guard: i64) -> i64 {
+//RS     with_cell_result(|rt| {
+//RS         let schema_handle = rt.cells.edit_guards[(guard - 1) as usize].schema_handle;
+//RS         cell_guard_get_value(rt, 2, guard, schema_handle)
+//RS     })
+//RS }
+//RS 
+//RS fn cell_guard_set_value(
+//RS     rt: &mut crate::JitRuntime,
+//RS     guard: i64,
+//RS     raw: i64,
+//RS     schema_handle: i64,
+//RS ) {
+//RS     let schema = schema(rt, schema_handle).expect("Cell schema");
+//RS     let Some(value) = decode_value(rt, raw, &schema) else {
+//RS         rt.set_host_fault("Cell guard descriptor ABI mismatch");
+//RS         return;
+//RS     };
+//RS     rt.cells.edit_guards[(guard - 1) as usize]
+//RS         .guard
+//RS         .as_ref()
+//RS         .expect("live Cell edit guard")
+//RS         .set(value);
+//RS }
+//RS 
+//RS fn jet_jit_cell_guard_set(guard: i64, raw: i64, schema_handle: i64) {
+//RS     with_cell(|rt| cell_guard_set_value(rt, guard, raw, schema_handle));
+//RS }
+//RS 
+//RS fn jet_jit_cell_edit_guard_set(guard: i64, raw: i64) {
+//RS     with_cell(|rt| {
+//RS         let schema_handle = rt.cells.edit_guards[(guard - 1) as usize].schema_handle;
+//RS         cell_guard_set_value(rt, guard, raw, schema_handle);
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_cell_get_or_set_store(guard: i64, raw: i64, schema_handle: i64) {
+//RS     with_cell(|rt| {
+//RS         let schema = schema(rt, schema_handle).expect("Cell schema");
+//RS         let Some(value_schema) = optional_value_schema(&schema) else {
+//RS             rt.set_host_fault("Cell.get_or_set requires an optional descriptor");
+//RS             return;
+//RS         };
+//RS         let Some(value) = decode_value(rt, raw, value_schema) else {
+//RS             rt.set_host_fault("Cell optional descriptor ABI mismatch");
+//RS             return;
+//RS         };
+//RS         rt.cells.edit_guards[(guard - 1) as usize]
+//RS             .guard
+//RS             .as_ref()
+//RS             .expect("live Cell optional edit guard")
+//RS             .store_option_value(value);
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_cell_guard_drop(kind: i64, guard: i64) {
+//RS     with_cell(|rt| {
+//RS         if kind == 1 {
+//RS             rt.cells.read_guards[(guard - 1) as usize].guard = None;
+//RS         } else {
+//RS             rt.cells.edit_guards[(guard - 1) as usize].guard = None;
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn cell_guard_project_value(
+//RS     rt: &mut crate::JitRuntime,
+//RS     kind: i64,
+//RS     guard: i64,
+//RS     projection: CellProjection,
+//RS ) -> i64 {
+//RS     let owner = rt.cells.owner();
+//RS     let source_schema_handle = if kind == 2 {
+//RS         rt.cells.edit_guards[(guard - 1) as usize].schema_handle
+//RS     } else {
+//RS         rt.cells.read_guards[(guard - 1) as usize].schema_handle
+//RS     };
+//RS     let source_schema = schema(rt, source_schema_handle).expect("Cell schema");
+//RS     let projected_schema_handles = projection
+//RS         .paths
+//RS         .iter()
+//RS         .map(|path| {
+//RS             let projected = project_schema(&source_schema, path).expect("Cell schema path");
+//RS             rt.cells.register_schema(projected)
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     if kind == 2 {
+//RS         let guard = rt.cells.edit_guards[(guard - 1) as usize]
+//RS             .guard
+//RS             .take()
+//RS             .expect("live Cell edit guard");
+//RS         match (projection.paths.as_slice(), projected_schema_handles.as_slice()) {
+//RS             ([path], [schema_handle]) => {
+//RS                 let guard = guard.map(|value| project_mut(value, path).expect("Cell path"));
+//RS                 rt.cells.insert_edit(guard, owner, *schema_handle)
+//RS             }
+//RS             ([first, second], [first_schema, second_schema]) => {
+//RS                 let (first, second) = guard.split(|value| {
+//RS                     project_pair_mut(value, first, second).expect("disjoint Cell paths")
+//RS                 });
+//RS                 let first = rt.cells.insert_edit(first, owner, *first_schema);
+//RS                 let second = rt.cells.insert_edit(second, owner, *second_schema);
+//RS                 let record = rt.heap.alloc_record(2);
+//RS                 rt.heap
+//RS                     .record_set_int(record, 0, first)
+//RS                     .expect("Cell tuple");
+//RS                 rt.heap
+//RS                     .record_set_int(record, 1, second)
+//RS                     .expect("Cell tuple");
+//RS                 record
+//RS             }
+//RS             _ => jet_foundation::ice!(None, "Cell projection shape"),
+//RS         }
+//RS     } else {
+//RS         let guard = rt.cells.read_guards[(guard - 1) as usize]
+//RS             .guard
+//RS             .take()
+//RS             .expect("live Cell read guard");
+//RS         match (projection.paths.as_slice(), projected_schema_handles.as_slice()) {
+//RS             ([path], [schema_handle]) => {
+//RS                 let guard = guard.map(|value| project_ref(value, path).expect("Cell path"));
+//RS                 rt.cells.insert_read(guard, owner, *schema_handle)
+//RS             }
+//RS             ([first, second], [first_schema, second_schema]) => {
+//RS                 let (first, second) = guard.split(|value| {
+//RS                     (
+//RS                         project_ref(value, first).expect("Cell path"),
+//RS                         project_ref(value, second).expect("Cell path"),
+//RS                     )
+//RS                 });
+//RS                 let first = rt.cells.insert_read(first, owner, *first_schema);
+//RS                 let second = rt.cells.insert_read(second, owner, *second_schema);
+//RS                 let record = rt.heap.alloc_record(2);
+//RS                 rt.heap
+//RS                     .record_set_int(record, 0, first)
+//RS                     .expect("Cell tuple");
+//RS                 rt.heap
+//RS                     .record_set_int(record, 1, second)
+//RS                     .expect("Cell tuple");
+//RS                 record
+//RS             }
+//RS             _ => jet_foundation::ice!(None, "Cell projection shape"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_cell_guard_project(kind: i64, guard: i64, projection_handle: i64) -> i64 {
+//RS     with_cell_result(|rt| {
+//RS         let projection = projection_index(projection_handle)
+//RS             .and_then(|index| rt.cells.projections.get(index))
+//RS             .cloned()
+//RS             .expect("Cell projection");
+//RS         cell_guard_project_value(rt, kind, guard, projection)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_cell_guard_map(guard: i64, projection_handle: i64) -> i64 {
+//RS     let kind = projection_kind(projection_handle).expect("Cell projection kind");
+//RS     with_cell_result(|rt| {
+//RS         let projection = projection_index(projection_handle)
+//RS             .and_then(|index| rt.cells.projections.get(index))
+//RS             .cloned()
+//RS             .expect("Cell projection");
+//RS         cell_guard_project_value(rt, kind, guard, projection)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_cell_guard_split(guard: i64, first_handle: i64, second_handle: i64) -> i64 {
+//RS     let kind = projection_kind(first_handle).expect("Cell projection kind");
+//RS     assert_eq!(
+//RS         projection_kind(second_handle),
+//RS         Some(kind),
+//RS         "Cell split projection kinds must match"
+//RS     );
+//RS     with_cell_result(|rt| {
+//RS         let first = projection_index(first_handle)
+//RS             .and_then(|index| rt.cells.projections.get(index))
+//RS             .cloned()
+//RS             .expect("Cell split projection");
+//RS         let second = projection_index(second_handle)
+//RS             .and_then(|index| rt.cells.projections.get(index))
+//RS             .cloned()
+//RS             .expect("Cell split projection");
+//RS         if first.paths.len() != 1 || second.paths.len() != 1 {
+//RS             jet_foundation::ice!(None, "Cell split projection shape");
+//RS         }
+//RS         let projection = CellProjection {
+//RS             paths: vec![first.paths[0].clone(), second.paths[0].clone()],
+//RS             editable: kind == 2,
+//RS         };
+//RS         cell_guard_project_value(rt, kind, guard, projection)
+//RS     })
+//RS }
+//RS 
+//RS fn cell_callback_stopped() -> bool {
+//RS     Concurrency::with_runtime_mut(|rt| crate::runtime_host::runtime_stop_pending(rt))
+//RS }
+//RS 
+//RS fn jet_jit_cell_read(cell: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = cell_callback_slot(callback) else {
+//RS         return cell_callback_fault("Cell.read callback handle is invalid");
+//RS     };
+//RS     let Some((cell, schema)) = Concurrency::with_runtime_mut(|rt| {
+//RS         let schema_handle = cell_schema_handle(rt, cell)?;
+//RS         let cell = rt
+//RS             .cells
+//RS             .cells
+//RS             .get((cell as usize).checked_sub(1)?)?
+//RS             .clone();
+//RS         Some((cell, schema(rt, schema_handle)?))
+//RS     }) else {
+//RS         return cell_callback_fault("Cell.read received an invalid cell handle");
+//RS     };
+//RS     let guard = cell.guard_read();
+//RS     let Some(raw) = Concurrency::with_runtime_mut(|rt| {
+//RS         guard.read(|value| encode_value(rt, value, &schema))
+//RS     }) else {
+//RS         drop(guard);
+//RS         return cell_callback_fault("Cell.read value ABI is invalid");
+//RS     };
+//RS     let Some(result) = crate::runtime_host::invoke_universal_unary(slot, raw) else {
+//RS         drop(guard);
+//RS         return cell_callback_fault("Cell.read callback has no unary universal thunk");
+//RS     };
+//RS     let stopped = cell_callback_stopped();
+//RS     drop(guard);
+//RS     if stopped {
+//RS         0
+//RS     } else {
+//RS         result
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_cell_edit(cell: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = cell_callback_slot(callback) else {
+//RS         return cell_callback_fault("Cell.edit callback handle is invalid");
+//RS     };
+//RS     let Some((cell, schema)) = Concurrency::with_runtime_mut(|rt| {
+//RS         let schema_handle = cell_schema_handle(rt, cell)?;
+//RS         let cell = rt
+//RS             .cells
+//RS             .cells
+//RS             .get((cell as usize).checked_sub(1)?)?
+//RS             .clone();
+//RS         Some((cell, schema(rt, schema_handle)?))
+//RS     }) else {
+//RS         return cell_callback_fault("Cell.edit received an invalid cell handle");
+//RS     };
+//RS     let guard = cell.guard_edit();
+//RS     let Some(mut raw) = Concurrency::with_runtime_mut(|rt| {
+//RS         guard.read(|value| encode_value(rt, value, &schema))
+//RS     }) else {
+//RS         drop(guard);
+//RS         return cell_callback_fault("Cell.edit value ABI is invalid");
+//RS     };
+//RS     let address = (&mut raw as *mut i64) as i64;
+//RS     let Some(result) = crate::runtime_host::invoke_universal_unary(slot, address) else {
+//RS         drop(guard);
+//RS         return cell_callback_fault("Cell.edit callback has no unary universal thunk");
+//RS     };
+//RS     if cell_callback_stopped() {
+//RS         drop(guard);
+//RS         return 0;
+//RS     }
+//RS     let Some(value) = Concurrency::with_runtime_mut(|rt| decode_value(rt, raw, &schema)) else {
+//RS         drop(guard);
+//RS         return cell_callback_fault("Cell.edit callback produced an invalid value");
+//RS     };
+//RS     guard.set(value);
+//RS     result
+//RS }
+//RS 
+//RS fn jet_jit_cell_read_guard_read(guard: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = cell_callback_slot(callback) else {
+//RS         return cell_callback_fault("CellReadGuard.read callback handle is invalid");
+//RS     };
+//RS     let Some(index) = guard_index(guard) else {
+//RS         return cell_callback_fault("CellReadGuard.read received an invalid guard");
+//RS     };
+//RS     let Some((guard, schema)) = Concurrency::with_runtime_mut(|rt| {
+//RS         let schema_handle = rt.cells.read_guards.get(index)?.schema_handle;
+//RS         let schema = schema(rt, schema_handle)?;
+//RS         let guard = rt.cells.read_guards.get_mut(index)?.guard.take()?;
+//RS         Some((guard, schema))
+//RS     }) else {
+//RS         return cell_callback_fault("CellReadGuard.read received an invalid guard");
+//RS     };
+//RS     let Some(raw) = Concurrency::with_runtime_mut(|rt| {
+//RS         guard.read(|value| encode_value(rt, value, &schema))
+//RS     }) else {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             if let Some(slot) = rt.cells.read_guards.get_mut(index) {
+//RS                 slot.guard = Some(guard);
+//RS             }
+//RS         });
+//RS         return cell_callback_fault("CellReadGuard.read value ABI is invalid");
+//RS     };
+//RS     let result = crate::runtime_host::invoke_universal_unary(slot, raw);
+//RS     let stopped = cell_callback_stopped();
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(slot) = rt.cells.read_guards.get_mut(index) {
+//RS             slot.guard = Some(guard);
+//RS         }
+//RS     });
+//RS     if stopped {
+//RS         0
+//RS     } else {
+//RS         result.unwrap_or_else(|| {
+//RS             cell_callback_fault("CellReadGuard.read callback has no unary universal thunk")
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_cell_edit_guard_read(guard: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = cell_callback_slot(callback) else {
+//RS         return cell_callback_fault("CellEditGuard.read callback handle is invalid");
+//RS     };
+//RS     let Some(index) = guard_index(guard) else {
+//RS         return cell_callback_fault("CellEditGuard.read received an invalid guard");
+//RS     };
+//RS     let Some((guard, schema)) = Concurrency::with_runtime_mut(|rt| {
+//RS         let schema_handle = rt.cells.edit_guards.get(index)?.schema_handle;
+//RS         let schema = schema(rt, schema_handle)?;
+//RS         let guard = rt.cells.edit_guards.get_mut(index)?.guard.take()?;
+//RS         Some((guard, schema))
+//RS     }) else {
+//RS         return cell_callback_fault("CellEditGuard.read received an invalid guard");
+//RS     };
+//RS     let Some(raw) = Concurrency::with_runtime_mut(|rt| {
+//RS         guard.read(|value| encode_value(rt, value, &schema))
+//RS     }) else {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             if let Some(slot) = rt.cells.edit_guards.get_mut(index) {
+//RS                 slot.guard = Some(guard);
+//RS             }
+//RS         });
+//RS         return cell_callback_fault("CellEditGuard.read value ABI is invalid");
+//RS     };
+//RS     let result = crate::runtime_host::invoke_universal_unary(slot, raw);
+//RS     let stopped = cell_callback_stopped();
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(slot) = rt.cells.edit_guards.get_mut(index) {
+//RS             slot.guard = Some(guard);
+//RS         }
+//RS     });
+//RS     if stopped {
+//RS         0
+//RS     } else {
+//RS         result.unwrap_or_else(|| {
+//RS             cell_callback_fault("CellEditGuard.read callback has no unary universal thunk")
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_cell_edit_guard_edit(guard: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = cell_callback_slot(callback) else {
+//RS         return cell_callback_fault("CellEditGuard.edit callback handle is invalid");
+//RS     };
+//RS     let Some(index) = guard_index(guard) else {
+//RS         return cell_callback_fault("CellEditGuard.edit received an invalid guard");
+//RS     };
+//RS     let Some((guard, schema)) = Concurrency::with_runtime_mut(|rt| {
+//RS         let schema_handle = rt.cells.edit_guards.get(index)?.schema_handle;
+//RS         let schema = schema(rt, schema_handle)?;
+//RS         let guard = rt.cells.edit_guards.get_mut(index)?.guard.take()?;
+//RS         Some((guard, schema))
+//RS     }) else {
+//RS         return cell_callback_fault("CellEditGuard.edit received an invalid guard");
+//RS     };
+//RS     let Some(mut raw) = Concurrency::with_runtime_mut(|rt| {
+//RS         guard.read(|value| encode_value(rt, value, &schema))
+//RS     }) else {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             if let Some(slot) = rt.cells.edit_guards.get_mut(index) {
+//RS                 slot.guard = Some(guard);
+//RS             }
+//RS         });
+//RS         return cell_callback_fault("CellEditGuard.edit value ABI is invalid");
+//RS     };
+//RS     let address = (&mut raw as *mut i64) as i64;
+//RS     let result = crate::runtime_host::invoke_universal_unary(slot, address);
+//RS     if cell_callback_stopped() {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             if let Some(slot) = rt.cells.edit_guards.get_mut(index) {
+//RS                 slot.guard = Some(guard);
+//RS             }
+//RS         });
+//RS         return 0;
+//RS     }
+//RS     let Some(value) = Concurrency::with_runtime_mut(|rt| decode_value(rt, raw, &schema)) else {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             if let Some(slot) = rt.cells.edit_guards.get_mut(index) {
+//RS                 slot.guard = Some(guard);
+//RS             }
+//RS         });
+//RS         return cell_callback_fault("CellEditGuard.edit callback produced an invalid value");
+//RS     };
+//RS     guard.set(value);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(slot) = rt.cells.edit_guards.get_mut(index) {
+//RS             slot.guard = Some(guard);
+//RS         }
+//RS     });
+//RS     result.unwrap_or_else(|| {
+//RS         cell_callback_fault("CellEditGuard.edit callback has no unary universal thunk")
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_cell_get_or_set_begin(cell: i64, schema_handle: i64) -> i64 {
+//RS     with_cell_result(|rt| {
+//RS         let schema = schema(rt, schema_handle).expect("Cell schema");
+//RS         let Some(value_schema) = optional_value_schema(&schema) else {
+//RS             rt.set_host_fault("Cell.get_or_set requires an optional descriptor");
+//RS             return 0;
+//RS         };
+//RS         let cell = rt.cells.cells[(cell - 1) as usize].clone();
+//RS         let record = rt.heap.alloc_record(2);
+//RS         match cell.begin_get_or_set() {
+//RS             JetCellGetOrSet::Value(value) => {
+//RS                 let Some(raw) = encode_value(rt, &value, value_schema) else {
+//RS                     rt.set_host_fault("Cell optional descriptor ABI mismatch");
+//RS                     return 0;
+//RS                 };
+//RS                 rt.heap.record_set_bool(record, 0, true).expect("Cell init");
+//RS                 rt.heap.record_set_int(record, 1, raw).expect("Cell init");
+//RS             }
+//RS             JetCellGetOrSet::Empty(guard) => {
+//RS                 let owner = rt.cells.owner();
+//RS                 let guard = rt.cells.insert_edit(guard, owner, schema_handle);
+//RS                 rt.heap
+//RS                     .record_set_bool(record, 0, false)
+//RS                     .expect("Cell init");
+//RS                 rt.heap.record_set_int(record, 1, guard).expect("Cell init");
+//RS             }
+//RS         }
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_cell_get_or_set_callback(cell: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = cell_callback_slot(callback) else {
+//RS         return cell_callback_fault("Cell.get_or_set callback handle is invalid");
+//RS     };
+//RS     let Some((value_schema, operation)) = Concurrency::with_runtime_mut(|rt| {
+//RS         let schema_handle = cell_schema_handle(rt, cell)?;
+//RS         let schema = schema(rt, schema_handle)?;
+//RS         let value_schema = optional_value_schema(&schema)?.clone();
+//RS         let cell = rt.cells.cells.get((cell as usize).checked_sub(1)?)?.clone();
+//RS         Some((value_schema, cell.begin_get_or_set()))
+//RS     }) else {
+//RS         return cell_callback_fault("Cell.get_or_set received an invalid Cell");
+//RS     };
+//RS     match operation {
+//RS         JetCellGetOrSet::Value(value) => {
+//RS             Concurrency::with_runtime_mut(|rt| encode_value(rt, &value, &value_schema))
+//RS                 .unwrap_or_else(|| cell_callback_fault("Cell.get_or_set value ABI is invalid"))
+//RS         }
+//RS         JetCellGetOrSet::Empty(guard) => {
+//RS             let Some(raw) = crate::runtime_host::invoke_universal_many(slot, &[]) else {
+//RS                 drop(guard);
+//RS                 return cell_callback_fault(
+//RS                     "Cell.get_or_set callback has no zero-argument universal thunk",
+//RS                 );
+//RS             };
+//RS             if cell_callback_stopped() {
+//RS                 drop(guard);
+//RS                 return 0;
+//RS             }
+//RS             let Some(value) =
+//RS                 Concurrency::with_runtime_mut(|rt| decode_value(rt, raw, &value_schema))
+//RS             else {
+//RS                 drop(guard);
+//RS                 return cell_callback_fault("Cell.get_or_set callback produced an invalid value");
+//RS             };
+//RS             let Some(encoded) =
+//RS                 Concurrency::with_runtime_mut(|rt| encode_value(rt, &value, &value_schema))
+//RS             else {
+//RS                 drop(guard);
+//RS                 return cell_callback_fault("Cell.get_or_set value ABI is invalid");
+//RS             };
+//RS             guard.store_option_value(value);
+//RS             encoded
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct CellHostFns;
+//RS     register: register_symbols;
+//RS     declare: declare_host_fns(module) {
+//RS         let cc = module.target_config().default_call_conv;
+//RS         let noarg = Signature::new(cc);
+//RS         let mut noarg_i64 = Signature::new(cc);
+//RS         noarg_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut unary = noarg_i64.clone();
+//RS         unary.params.push(AbiParam::new(types::I64));
+//RS         let mut binary = unary.clone();
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         let mut ternary = binary.clone();
+//RS         ternary.params.push(AbiParam::new(types::I64));
+//RS         let mut binary_void = noarg.clone();
+//RS         binary_void.params.extend([AbiParam::new(types::I64); 2]);
+//RS         let mut ternary_void = noarg.clone();
+//RS         ternary_void.params.extend([AbiParam::new(types::I64); 3]);
+//RS 
+//RS 
+//RS     }
+//RS     frame_enter: "jet_jit_cell_frame_enter" => jet_jit_cell_frame_enter: noarg;
+//RS     frame_leave: "jet_jit_cell_frame_leave" => jet_jit_cell_frame_leave: binary_void;
+//RS     new: "jet_jit_cell_new" => jet_jit_cell_new: binary;
+//RS     new_prelude: "jet_std::JetCell::new" => jet_jit_cell_new: binary;
+//RS     get: "jet_jit_cell_get" => jet_jit_cell_get: binary;
+//RS     get_host: "jet_cell_get" => jet_jit_cell_get_host: unary;
+//RS     set: "jet_jit_cell_set" => jet_jit_cell_set: ternary_void;
+//RS     set_host: "jet_cell_set" => jet_jit_cell_set_host: binary_void;
+//RS     replace: "jet_jit_cell_replace" => jet_jit_cell_replace: ternary;
+//RS     replace_host: "jet_cell_replace" => jet_jit_cell_replace_host: binary;
+//RS     guard_read: "jet_jit_cell_guard_read" => jet_jit_cell_guard_read: unary;
+//RS     guard_read_host: "jet_cell_guard_read" => jet_jit_cell_guard_read: unary;
+//RS     guard_edit: "jet_jit_cell_guard_edit" => jet_jit_cell_guard_edit: unary;
+//RS     guard_edit_host: "jet_cell_guard_edit" => jet_jit_cell_guard_edit: unary;
+//RS     guard_get: "jet_jit_cell_guard_get" => jet_jit_cell_guard_get: ternary;
+//RS     guard_set: "jet_jit_cell_guard_set" => jet_jit_cell_guard_set: ternary_void;
+//RS     get_or_set_store: "jet_jit_cell_get_or_set_store" => jet_jit_cell_get_or_set_store: ternary_void;
+//RS     guard_drop: "jet_jit_cell_guard_drop" => jet_jit_cell_guard_drop: binary_void;
+//RS     guard_project: "jet_jit_cell_guard_project" => jet_jit_cell_guard_project: ternary;
+//RS     guard_map: "jet_cell_guard_map" => jet_jit_cell_guard_map: binary;
+//RS     guard_split: "jet_cell_guard_split" => jet_jit_cell_guard_split: ternary;
+//RS     get_or_set_begin: "jet_jit_cell_get_or_set_begin" => jet_jit_cell_get_or_set_begin: binary;
+//RS     get_or_set_host: "jet_cell_get_or_set" => jet_jit_cell_get_or_set_callback: binary;
+//RS     read: "jet_cell_read" => jet_jit_cell_read: binary;
+//RS     edit: "jet_cell_edit" => jet_jit_cell_edit: binary;
+//RS     read_guard_get: "jet_cell_read_guard_get" => jet_jit_cell_read_guard_get: unary;
+//RS     read_guard_read: "jet_cell_read_guard_read" => jet_jit_cell_read_guard_read: binary;
+//RS     edit_guard_get: "jet_cell_edit_guard_get" => jet_jit_cell_edit_guard_get: unary;
+//RS     edit_guard_set: "jet_cell_edit_guard_set" => jet_jit_cell_edit_guard_set: binary_void;
+//RS     edit_guard_read: "jet_cell_edit_guard_read" => jet_jit_cell_edit_guard_read: binary;
+//RS     edit_guard_edit: "jet_cell_edit_guard_edit" => jet_jit_cell_edit_guard_edit: binary;
+//RS }
+//RS 
+//RS fn project_ref<'a>(value: &'a MirRuntimeValue, path: &[String]) -> Option<&'a MirRuntimeValue> {
+//RS     let Some((field, rest)) = path.split_first() else {
+//RS         return Some(value);
+//RS     };
+//RS     let MirRuntimeValue::Struct { fields, .. } = value else {
+//RS         return None;
+//RS     };
+//RS     let next = fields
+//RS         .iter()
+//RS         .find_map(|(name, value)| (name == field).then_some(value))?;
+//RS     project_ref(next, rest)
+//RS }
+//RS 
+//RS fn project_mut<'a>(value: &'a mut MirRuntimeValue, path: &[String]) -> Option<&'a mut MirRuntimeValue> {
+//RS     let Some((field, rest)) = path.split_first() else {
+//RS         return Some(value);
+//RS     };
+//RS     let MirRuntimeValue::Struct { fields, .. } = value else {
+//RS         return None;
+//RS     };
+//RS     let next = fields
+//RS         .iter_mut()
+//RS         .find_map(|(name, value)| (name == field).then_some(value))?;
+//RS     project_mut(next, rest)
+//RS }
+//RS 
+//RS fn project_pair_mut<'a>(
+//RS     value: &'a mut MirRuntimeValue,
+//RS     first: &[String],
+//RS     second: &[String],
+//RS ) -> Option<(&'a mut MirRuntimeValue, &'a mut MirRuntimeValue)> {
+//RS     let (first_field, first_rest) = first.split_first()?;
+//RS     let (second_field, second_rest) = second.split_first()?;
+//RS     let MirRuntimeValue::Struct { fields, .. } = value else {
+//RS         return None;
+//RS     };
+//RS     if first_field == second_field {
+//RS         let next = fields
+//RS             .iter_mut()
+//RS             .find_map(|(name, value)| (name == first_field).then_some(value))?;
+//RS         return project_pair_mut(next, first_rest, second_rest);
+//RS     }
+//RS     let first_index = fields.iter().position(|(name, _)| name == first_field)?;
+//RS     let second_index = fields.iter().position(|(name, _)| name == second_field)?;
+//RS     let (first_value, second_value) = if first_index < second_index {
+//RS         let (left, right) = fields.split_at_mut(second_index);
+//RS         (&mut left[first_index].1, &mut right[0].1)
+//RS     } else {
+//RS         let (left, right) = fields.split_at_mut(first_index);
+//RS         (&mut right[0].1, &mut left[second_index].1)
+//RS     };
+//RS     Some((
+//RS         project_mut(first_value, first_rest)?,
+//RS         project_mut(second_value, second_rest)?,
+//RS     ))
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn trap_frame_cleanup_releases_loan_before_next_borrow() {
+//RS         let mut state = CellState::new();
+//RS         state.cells.push(JetCell::new(MirRuntimeValue::Int(1)));
+//RS         state.frames.push(1);
+//RS         let guard = state.cells[0].guard_edit();
+//RS         state.insert_edit(guard, 1, 0);
+//RS 
+//RS         let cell = state.cells[0].clone();
+//RS         assert!(
+//RS             catch_unwind(AssertUnwindSafe(|| cell.guard_read())).is_err(),
+//RS             "the hostile borrow must conflict while the edit loan is live"
+//RS         );
+//RS 
+//RS         state.leave_frame(&HashSet::new(), &HashSet::new());
+//RS         assert_eq!(state.cells[0].guard_read().get(), MirRuntimeValue::Int(1));
+//RS     }
+//RS }
+// END-PORT-PENDING 0195 crates/jet-jit/src/Cell.rs:1-1390
+
