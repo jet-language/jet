@@ -254,7 +254,7 @@ fn jet_cli_inspect_plain_error(text: String, exit_code: Int) -> JetCLIPlan Never
 
 // Source/main.rs `absolutize`: `path` joined onto the working directory.
 fn jet_cli_inspect_absolute(path: String) -[FS, Env]> String Never! {
-    if path.starts_with("/") -> return path
+    if path.starts_with("/") -> return ~path
     cwd :: cli_files.cwd() ?? "."
     "{cwd}/{path}"
 }
@@ -361,7 +361,7 @@ fn jet_cli_coverage_facts() -> JetCLICoverageFacts Never! {
             }
         }
     }
-    planes :: loop fact in facts -> fact.plane
+    planes := loop fact in facts -> fact.plane
     &planes.sort()
     ordered :: loop plane in planes -> facts[slots.get(plane) ?? 0]
     JetCLICoverageFacts.Facts{facts: ordered}
@@ -404,7 +404,7 @@ fn jet_cli_coverage_baseline(text: String) -> JetCLICoverageBaseline Never! {
         }
         &rows.push(JetCLICoverageBaselineRow{plane: fields[0], edit_covered: edit_covered, reason_covered: reason_covered, total: total})
     }
-    planes :: loop row in rows -> row.plane
+    planes := loop row in rows -> row.plane
     &planes.sort()
     ordered := [JetCLICoverageBaselineRow]{}
     loop plane in planes {
@@ -621,8 +621,8 @@ fn jet_cli_inspect_compiler(args: [String], color: Bool) -[FS]> JetCLIPlan Never
     if !reads -> return jet_cli_inspect_compiler_error(operation, file, "unsupported compiler operation; choose lex, parse, check, or source-map")
     if cli_files.is_dir(file) -> return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: Is a directory (os error 21)")
     if !cli_files.exists(file) -> return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: No such file or directory (os error 2)")
-    if cli_files.read(file) == None {
-        if cli_files.read_bytes(file) == None -> return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: Permission denied (os error 13)")
+    if cli_files.read(file) == .Err(_) {
+        if cli_files.read_bytes(file) == .Err(_) -> return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: Permission denied (os error 13)")
         return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: stream did not contain valid UTF-8")
     }
     jet_cli_not_ported("inspect compiler {operation}", color)

@@ -673,7 +673,8 @@ fn jet_cli_io_error_text(err: IOError) -> String Never! {
         .Other(context) -> context.cause
         .ResourceLimit(_) -> String?{None}
     }
-    cause ?? "{err}"
+    if cause == .Val(text) -> return text
+    "{err}"
 }
 
 // ---------------------------------------------------------------------------
@@ -699,8 +700,8 @@ fn jet_cli_inspect_positionals(args: [String]) -> [String] Never! {
 }
 
 // `cwd.join(raw)` for a relative path.
-fn jet_cli_inspect_absolutize(raw: String) -[FS]> String Never! {
-    if raw.starts_with("/") -> return raw
+fn jet_cli_inspect_absolutize(raw: String) -[FS, Env]> String Never! {
+    if raw.starts_with("/") -> return ~raw
     cwd :: cli_files.cwd() ?? "."
     jet_cli_authority_path(cwd, raw)
 }
@@ -720,7 +721,7 @@ JET_CLI_RETIRED_MANIFESTS :: [String]{"pkg.jet", "pack.jet", "payload.jet", "jet
 // names (Loader.rs `find_inline_package_root_checked`,
 // `stale_manifest_name_message`) are not ported, so a directory that could
 // hold either is refused rather than guessed.
-fn jet_cli_inspect_project_root(command: String, hint: String, color: Bool) -[FS]> JetCLIInspectRoot Never! {
+fn jet_cli_inspect_project_root(command: String, hint: String, color: Bool) -[FS, Env]> JetCLIInspectRoot Never! {
     cwd :: cli_files.cwd() ?? "."
     if jet_cli_manifest_root(cwd) == .Val(root) -> return JetCLIInspectRoot.Root{path: root}
     loop name in JET_CLI_RETIRED_MANIFESTS {
@@ -893,7 +894,7 @@ fn jet_cli_schema(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPla
 // `jet inspect codemod <plan.json> --dry-run | apply <plan.json> | undo
 // <log.json>` (CmdCodemod.rs `run_codemod`): planning and replay need the
 // semantic index (jet-semindex), which is not ported.
-fn jet_cli_codemod(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
+fn jet_cli_codemod(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     positional :: jet_cli_inspect_positionals(args)
     dry_run :: args.contains("--dry-run")
     if positional.len() == 2 && positional[0] == "dry-run" {
@@ -917,7 +918,7 @@ fn jet_cli_codemod(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Ne
 // with `package_input`, which needs the no-follow package resolver (Core
 // directory handles, #3593), so it refuses right after `require_manifest_root`
 // until D-FSDIR1 (#4697); the host port is in commit bf658e410 (InspectB.jet).
-fn jet_cli_audit(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
+fn jet_cli_audit(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     if args.len() > 0 && args[0] == "memory" -> return jet_cli_not_ported("inspect audit memory", color)
     if args.len() > 0 && (args[0] == "copies" || args[0].ends_with(".jet")) -> return jet_cli_not_ported("inspect audit copies", color)
     if jet_cli_inspect_project_root("inspect audit", "error: no package.jet found — run `jet inspect audit` inside a project", color) == .Refused(plan) -> return plan
@@ -926,7 +927,7 @@ fn jet_cli_audit(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Neve
 
 // `jet inspect sbom [--cyclonedx]` (CmdSupply.rs `run_sbom`): refused after
 // `require_manifest_root` for the same `package_input` reason as `audit`.
-fn jet_cli_sbom(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
+fn jet_cli_sbom(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     if jet_cli_inspect_project_root("inspect sbom", "error: no package.jet found — run `jet inspect sbom` inside a project", color) == .Refused(plan) -> return plan
     jet_cli_not_ported("inspect sbom", color)
 }
