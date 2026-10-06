@@ -1640,11 +1640,6 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     // of sema_single_use_leave_scope remains (the table side is discarded).
     sema_single_use_check_scope_end(then_state, &diagnostics)
     sema_ownership_leave_scope(&then_state)
-    single_use_paths := [SemaOwnershipState]{}
-    if then_reaches_merge -> &single_use_paths.push(sema_ownership_state_snapshot(then_state))
-    if else_reaches_merge -> &single_use_paths.push(sema_ownership_state_snapshot(else_state))
-    sema_single_use_check_paths(before, single_use_paths, &diagnostics)
-
     if {
         then_reaches_merge && else_reaches_merge -> sema_ownership_join_paths(&state, before, then_state, else_state, true)
         then_reaches_merge -> sema_ownership_join_paths(&state, before, then_state, before, false)
@@ -1654,6 +1649,12 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     // A share site found on an arm that leaves is still found.
     sema_ownership_keep_share_found(&state, then_state)
     sema_ownership_keep_share_found(&state, else_state)
+    // The join and share notes read the arm states first (and report
+    // nothing), so they move into the single-use check instead of a copy.
+    single_use_paths := [SemaOwnershipState]{}
+    if then_reaches_merge -> &single_use_paths.push(^then_state)
+    if else_reaches_merge -> &single_use_paths.push(^else_state)
+    sema_single_use_check_paths(before, single_use_paths, &diagnostics)
     joined_then := then_checked
     joined_else := else_checked
     result_ty :: if {

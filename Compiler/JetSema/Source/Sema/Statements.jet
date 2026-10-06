@@ -656,10 +656,6 @@ fn sema_stmt_check_unit_if_parts(condition: Expr, then_body: [Stmt], then_value:
     // code after the `if`, so its moves are not moves there (D-COPY-DEFAULT1).
     then_reaches_merge :: sema_stmt_tir_block_can_fall_through(then_result.value)
     else_reaches_merge :: sema_stmt_tir_block_can_fall_through(else_result.value)
-    single_use_paths := [SemaOwnershipState]{}
-    if then_reaches_merge -> &single_use_paths.push(sema_ownership_state_snapshot(then_state))
-    if else_reaches_merge -> &single_use_paths.push(sema_ownership_state_snapshot(else_state))
-    sema_single_use_check_paths(before, single_use_paths, &diagnostics)
     if {
         then_reaches_merge && else_reaches_merge -> sema_ownership_join_paths(&state, before, then_state, else_state, true)
         then_reaches_merge -> sema_ownership_join_paths(&state, before, then_state, before, false)
@@ -671,6 +667,13 @@ fn sema_stmt_check_unit_if_parts(condition: Expr, then_body: [Stmt], then_value:
     if else_reaches_merge && !then_reaches_merge -> state.uninit = else_state.uninit
     loop site in then_state.share_found -> sema_ownership_note_share_found(&state, site)
     loop site in else_state.share_found -> sema_ownership_note_share_found(&state, site)
+    // The join reads the arm states first, so they move into the single-use
+    // check instead of being copied once more (it reports nothing the join
+    // or the share notes do).
+    single_use_paths := [SemaOwnershipState]{}
+    if then_reaches_merge -> &single_use_paths.push(^then_state)
+    if else_reaches_merge -> &single_use_paths.push(^else_state)
+    sema_single_use_check_paths(before, single_use_paths, &diagnostics)
     sema_scope_join_hardware_paths(&scopes, before_hardware, then_hardware, else_hardware, true)
     if checked_condition == None || !then_result.complete || !else_result.complete {
         return SemaStatementResult{value: [TStmt]{}, complete: false}
