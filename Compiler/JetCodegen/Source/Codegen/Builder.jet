@@ -610,7 +610,7 @@ fn jet_codegen_function_owner_pattern(function: TFunc, owners: JetCodegenOwnerIn
         .Named(name) -> {
             if kind_owner == {
                 .Apply(kind_name, _) -> {
-                    if name == kind_name {
+                    if jet_codegen_owner_heads_match(name, kind_name, function.module_identity) {
                         return Val(kind_owner)
                     }
                 }
@@ -620,6 +620,27 @@ fn jet_codegen_function_owner_pattern(function: TFunc, owners: JetCodegenOwnerIn
         else -> {}
     }
     Val(registered)
+}
+
+// A checked type spells a nominal of `owner_module` bare or qualified by that
+// module (`Slot<Int>`, `<module>::Slot<Int>`); both name the one owner.
+fn jet_codegen_owner_heads_match(pattern_name: String, actual_name: String, owner_module: String) -> Bool Never! {
+    pattern_name == actual_name || actual_name == jet_codegen_qualified_type_key(owner_module, pattern_name) || pattern_name == jet_codegen_qualified_type_key(owner_module, actual_name)
+}
+
+// The receiver's owner head in the owner pattern's spelling, so the pattern's
+// type parameters bind against the receiver's arguments.
+fn jet_codegen_owner_receiver_in_pattern_spelling(pattern: Type, actual: Type, owner_module: String) -> Type Never! {
+    if pattern == {
+        .Apply(name, _) -> if actual == .Apply(actual_name, actual_args) {
+            if actual_name != name && jet_codegen_owner_heads_match(name, actual_name, owner_module) -> return Type.Apply{name: name, args: actual_args}
+        }
+        .Named(name) -> if actual == .Named(actual_name) {
+            if actual_name != name && jet_codegen_owner_heads_match(name, actual_name, owner_module) -> return Type.Named{name: name}
+        }
+        else -> {}
+    }
+    ~actual
 }
 
 fn jet_codegen_function_type_generic_names(function: TFunc, owners: JetCodegenOwnerIndex) -> [String] Never! {
@@ -749,7 +770,8 @@ pub fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type,
     owner_names := jet_codegen_function_type_generic_names(function, owners)
     bound_names := [String]{}
     bound_arguments := [Type]{}
-    if !jet_codegen_bind_owner_type_pattern(owner_pattern, receiver_type, owner_names, &bound_names, &bound_arguments) -> return JetCodegenOwnerTypeBindings{names: [String]{}, arguments: [Type]{}, complete: false}
+    receiver :: jet_codegen_owner_receiver_in_pattern_spelling(owner_pattern, receiver_type, function.module_identity)
+    if !jet_codegen_bind_owner_type_pattern(owner_pattern, receiver, owner_names, &bound_names, &bound_arguments) -> return JetCodegenOwnerTypeBindings{names: [String]{}, arguments: [Type]{}, complete: false}
     ordered_names := [String]{}
     ordered_arguments := [Type]{}
     loop name in owner_names {
