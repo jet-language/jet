@@ -4915,8 +4915,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     let elem = if is_tensor {
                         Type::Float
                     } else {
-                        match &recv.ty {
+                        match recv.ty.without_user_tags() {
                             Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
+                            Type::Apply { name, args }
+                                if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+                            {
+                                args[0].clone()
+                            }
                             _ => Type::Int,
                         }
                     };
@@ -8397,8 +8402,30 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             let range_t = range
                 .as_ref()
                 .map(|range| Box::new(lower_expr(range, cx, env)));
-            let result_ty = base_t.ty.clone();
             let line = cx.src_line_col(span.start).0;
+            // D-MEMPROVENANCE2: a bare subrange of a declared view reborrows
+            // the view as a read window; it never copies.
+            if let Type::Apply { name, args } = base_t.ty.without_user_tags() {
+                if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 {
+                    let elem = args[0].clone();
+                    let args = match range_t {
+                        Some(range) => vec![*range],
+                        None => vec![start_t, end_t],
+                    };
+                    return TExpr {
+                        ty: Type::Apply {
+                            name: "View".to_string(),
+                            args: vec![elem],
+                        },
+                        kind: TExprKind::BuiltinMethod {
+                            recv: Box::new(base_t),
+                            op: TBuiltinOp::ViewNew { line },
+                            args,
+                        },
+                    };
+                }
+            }
+            let result_ty = base_t.ty.clone();
             TExpr {
                 ty: result_ty,
                 kind: TExprKind::Slice {

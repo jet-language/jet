@@ -794,18 +794,41 @@ impl<'a> Checker<'a> {
                 // a named `View<T>` return boundary. Keep the source
                 // acquisition explicit before inference so the returned type
                 // remains a view instead of being materialized as a list.
-                let bare_place_return = {
-                    let transparent = e.without_parens();
+                let bare_place = |checker: &Self, value: &Expr| {
+                    let transparent = value.without_parens();
                     matches!(return_value_type, Type::Apply { name, .. } if name == "View")
                         && !string_view_return
                         && !matches!(transparent, Expr::Copy(..) | Expr::Place(..))
-                        && (self.place_from_expr(transparent).is_some()
+                        && (checker.place_from_expr(transparent).is_some()
                             || matches!(transparent, Expr::Slice { .. }))
                 };
-                if bare_place_return {
+                if bare_place(self, e) {
                     let span = e.span();
                     let inner = std::mem::replace(e, Expr::Absent(span));
                     *e = Expr::Place(Box::new(inner), crate::AST::PlaceAccess::Read, span);
+                } else if matches!(&rt, Type::Result { .. }) {
+                    // `Ok(place)` fills the same view success slot. Return the
+                    // window itself; the success lift below re-wraps it in `Ok`
+                    // after its provenance is proved, so the `Ok` payload never
+                    // materializes the view as an owning slot would.
+                    let payload = match e {
+                        Expr::Ok(value, _) => Some(value.as_mut()),
+                        Expr::Call(call)
+                            if call.name == Syntax::LIT_OK
+                                && call.args.len() == 1
+                                && !self.funcs.contains_key(&call.name) =>
+                        {
+                            call.args.first_mut().map(|arg| &mut arg.expr)
+                        }
+                        _ => None,
+                    };
+                    if let Some(value) = payload {
+                        if bare_place(self, value) {
+                            let span = value.span();
+                            let inner = std::mem::replace(value, Expr::Absent(span));
+                            *e = Expr::Place(Box::new(inner), crate::AST::PlaceAccess::Read, span);
+                        }
+                    }
                 }
                 let saved_expected = self.expected_type.clone();
                 // D-FAILURE-FOUNDATION1=A: a direct fallible call in a return
@@ -892,7 +915,19 @@ impl<'a> Checker<'a> {
                 }
                 // D-DYNARRAY1: E2305 — returning a `View<T>` whose owner
                 // list is local to this function would outlive it.
-                if string_view_return {
+                // A failure exit carries no view; only success values need a
+                // stable owner.
+                let failure_exit = matches!(&rt, Type::Result { .. })
+                    && match e.without_parens() {
+                        Expr::Err(..) => true,
+                        Expr::Call(call) => {
+                            call.name == Syntax::LIT_ERR && !self.funcs.contains_key(&call.name)
+                        }
+                        _ => false,
+                    };
+                if failure_exit {
+                    // Nothing to prove for an `Err(..)` exit.
+                } else if string_view_return {
                     if let Expr::Ident(n, nspan) = &*e {
                         if self.is_string_view(n) {
                             self.check_named_string_view_binding_return(n, *nspan);
@@ -920,6 +955,9 @@ impl<'a> Checker<'a> {
                     if let Expr::Ident(n, nspan) = &*e {
                         if self.is_list_view(n) {
                             self.check_named_view_binding_return(n, *nspan);
+                        } else if let Some((place, access)) = self.declared_view_owner_place(n) {
+                            // A declared view parameter is its own owner path.
+                            self.check_named_view_return(&place, access, Vec::new(), *nspan);
                         } else {
                             self.report_view_return_boundary(e.span());
                         }

@@ -782,6 +782,14 @@ fn sema_ownership_place_from_expr_inner(expr: Expr, scopes: SemaScopeTable) -> S
         }
         .Index(base, index, span, _) -> {
             place := sema_ownership_place_from_expr_inner(base, scopes) ?? return None
+            // Rust rewrites `xs[a..b]` to a slice before placing it: a range
+            // operand is a range projection, not an element index.
+            if index == .Range(_, _, _, _) {
+                &place.projections.push("[..]")
+                bounds :: sema_ownership_range_bounds(index, index, Val(index))
+                &place.typed_projections.push(SemaOwnershipProjection.Range{start: bounds.start, end: bounds.end, span: span})
+                return Val(place)
+            }
             constant :: sema_ownership_const_index(index)
             if constant != None -> &place.projections.push("[{constant}]") else -> &place.projections.push("[]")
             &place.typed_projections.push(SemaOwnershipProjection.Index{value: constant, span: span})

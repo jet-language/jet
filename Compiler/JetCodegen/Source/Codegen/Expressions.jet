@@ -4228,8 +4228,12 @@ fn jet_codegen_list_read_view(expression: TExpr, value: TExpr, access: AccessCon
     if value.kind == .Slice(base, start, end, range, location) {
         receiver := base
         if base.kind == .Clone(inner, _) -> receiver = inner
+        // D-MEMPROVENANCE2: a declared view's subrange reborrows that view.
         if jet_codegen_builtin_untag(receiver.ty) == {
             .List(_) | .FixedList(_, _) -> {}
+            .Apply(name, view_args) -> {
+                if (name != "View" && name != "ViewMut") || view_args.len() != 1 -> return None
+            }
             else -> return None
         }
         args := if range == .Val(range_expr) -> [TExpr]{range_expr} else -> [TExpr]{start, end}

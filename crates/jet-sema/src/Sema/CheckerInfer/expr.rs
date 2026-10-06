@@ -4597,7 +4597,11 @@ impl<'a> Checker<'a> {
                 kind,
             } => {
                 let result = self.infer_index(base, index, span, kind);
-                if matches!(kind, IndexKind::Range) && self.loop_depth > 0 {
+                // A subrange of a declared `View`/`ViewMut` reborrows the same
+                // owner; it never copies, so the slicing-copy lint does not apply.
+                let view_subrange = matches!(kind, IndexKind::Range)
+                    && matches!(&result, Some(Type::Apply { name, .. }) if name == "View");
+                if matches!(kind, IndexKind::Range) && !view_subrange && self.loop_depth > 0 {
                     self.diags.push(Diagnostic::lint(
                         "L0501",
                         "slicing inside a loop copies every time".to_string(),
@@ -4619,6 +4623,8 @@ impl<'a> Checker<'a> {
                         range: Some(range),
                         span,
                     };
+                    // D-MEMPROVENANCE2: a view subrange stays a `Slice` typed
+                    // `View<T>`; TIR lowers it as a reborrow of the view.
                 }
                 result
             }
@@ -4651,6 +4657,7 @@ impl<'a> Checker<'a> {
                         ty if ty.is_compute_tensor_family() => {
                             Some(Type::Named("Tensor".to_string()))
                         }
+                        ty if view_subrange_type(&ty).is_some() => view_subrange_type(&ty),
                         other => {
                             self.diags.push(Diagnostic::error(
                                 "E0505",
@@ -5032,8 +5039,38 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
+                // D-MEMPROVENANCE2: a subrange of a declared view reborrows that
+                // view. Its write window comes from the view's own access, not
+                // from the binding that holds it: `ViewMut<T>` lends an exclusive
+                // window, `View<T>` never does.
+                let view_base_ty = match inner.as_ref() {
+                    Expr::Index { base, .. } | Expr::Slice { base, .. } => self
+                        .compound_expr_type(base)
+                        .filter(|ty| view_subrange_type(ty).is_some()),
+                    _ => None,
+                };
+                let root_view_fact = expr_root_ident(inner).is_some_and(|root| self.is_view(root));
                 if *access == crate::AST::PlaceAccess::Write {
-                    self.validate_write_place(inner, *span);
+                    match &view_base_ty {
+                        Some(ty)
+                            if !root_view_fact
+                                && matches!(ty.without_user_tags(), Type::Apply { name, .. } if name == "ViewMut") => {}
+                        Some(ty) if !root_view_fact => {
+                            self.diags.push(Diagnostic::error(
+                                "E0205",
+                                format!(
+                                    "cannot take a write window through {} — it has read access only",
+                                    ty.show()
+                                ),
+                                "a `View<T>` may inspect its owner's elements, but it cannot change them"
+                                    .to_string(),
+                                "take the write window from a `ViewMut<T>` or from the mutable owner instead"
+                                    .to_string(),
+                                Some(*span),
+                            ));
+                        }
+                        _ => self.validate_write_place(inner, *span),
+                    }
                 }
                 self.borrow_ctx = true;
                 // The complete place is checked above.  While inferring its
@@ -5051,6 +5088,10 @@ impl<'a> Checker<'a> {
                         Type::List(elem) => *elem,
                         Type::FixedList { elem, .. } => *elem,
                         ty if ty.is_compute_tensor_family() => Type::Float,
+                        ty if view_subrange_type(&ty).is_some() => match ty {
+                            Type::Apply { mut args, .. } => args.remove(0),
+                            other => return Some(other),
+                        },
                         other => return Some(other),
                     };
                     Some(Type::Apply {
@@ -6986,10 +7027,18 @@ impl<'a> Checker<'a> {
             }
             // D-DYNARRAY1: `window[i]` on a `View<T>` — read-only, same bounds
             // discipline as list indexing (runtime panic on out-of-range).
+            // `window[a..b]` reborrows a subrange of the same owner; the
+            // result is a view, never a copy (D-MEMPROVENANCE2).
             Type::Apply { name, args }
                 if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
             {
                 *kind = IndexKind::List;
+                if index_value_ty == &Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
+                    if let Some(window) = view_subrange_type(collection_ty) {
+                        *kind = IndexKind::Range;
+                        return Some(window);
+                    }
+                }
                 if !matches!(&idx_ty, Type::Int | Type::InlineRange { .. }) {
                     self.diags.push(Diagnostic::error(
                         "E0505",
@@ -7131,7 +7180,10 @@ impl<'a> Checker<'a> {
         end: &mut Box<Expr>,
         span: Span,
     ) -> Option<Type> {
-        if self.loop_depth > 0 {
+        self.borrow_ctx = true;
+        let base_ty = self.infer(base)?;
+        // A view subrange reborrows its owner; only owned slicing copies.
+        if self.loop_depth > 0 && view_subrange_type(&base_ty).is_none() {
             self.diags.push(Diagnostic::lint(
                 "L0501",
                 "slicing inside a loop copies every time".to_string(),
@@ -7140,8 +7192,6 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
         }
-        self.borrow_ctx = true;
-        let base_ty = self.infer(base)?;
         for e in [start.as_mut(), end.as_mut()] {
             let t = self.infer(e)?;
             if !matches!(&t, Type::Int | Type::InlineRange { .. }) {
@@ -7184,6 +7234,7 @@ impl<'a> Checker<'a> {
             }
             Type::String => Some(Type::String),
             ty if ty.is_compute_tensor_family() => Some(Type::Named("Tensor".to_string())),
+            ty if view_subrange_type(&ty).is_some() => view_subrange_type(&ty),
             other => {
                 self.diags.push(Diagnostic::error(
                     "E0505",
@@ -7835,5 +7886,25 @@ impl<'a> Checker<'a> {
             Some(span),
         ));
         None
+    }
+}
+
+/// D-MEMPROVENANCE2: the type of a subrange of a declared `View<T>` or
+/// `ViewMut<T>`. A bare subrange is a read reborrow of the same owner, so it
+/// is always `View<T>`; `&view[a..b]` on a `ViewMut<T>` reopens the write
+/// window in the `Place` arm.
+pub(crate) fn view_subrange_type(ty: &Type) -> Option<Type> {
+    match ty.without_user_tags() {
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "View" | "ViewMut")
+                && args.len() == 1
+                && !matches!(&args[0], Type::Named(inner) if inner == "str") =>
+        {
+            Some(Type::Apply {
+                name: "View".to_string(),
+                args: args.clone(),
+            })
+        }
+        _ => None,
     }
 }
