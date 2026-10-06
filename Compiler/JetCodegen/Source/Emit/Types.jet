@@ -2767,7 +2767,9 @@ fn jet_rust_emit_native_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef
         }
         return Val("{jet_rust_emit_ffi_crate()}::{rust}<{jet_rust_emit_type(&ctx, args[0])}>")
     }
-    if name.name == "ExpiringSecret" && args.len() == 1 -> return Val("JetExpiringSecret<{jet_rust_emit_type(&ctx, args[0])}>")
+    // The checked `core.crypto.vault` identity names the same native carrier
+    // `ExpiringSecret.new` returns.
+    if native_name == "ExpiringSecret" && args.len() == 1 -> return Val("JetExpiringSecret<{jet_rust_emit_type(&ctx, args[0])}>")
     if name.name == "ExpiringValue" && args.len() == 1 -> return Val("JetExpiring<{jet_rust_emit_type(&ctx, args[0])}>")
     if jet_rust_emit_core_email_type_name(name.name) == .Val(email) {
         if (email == "SMTPAuth" || email == "DKIMConfig" || email == "SMTPConfig") && args.len() == 0 -> return Val("{root}jet_email::{email}<{jet_rust_emit_ffi_crate()}::Secret>")

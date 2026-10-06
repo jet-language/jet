@@ -220,7 +220,7 @@ pub fn listener_local_socket_addr(listener: TCPListener) -[Net, Time.Wait]> Sock
     core.net.listener_local_socket_addr(listener)
 }
 
-pub fn tcp_reply(stream: TCPStream, status: String, body: String) NetError! -[Net, Time.Wait]> {
+pub fn tcp_reply(stream: ^TCPStream, status: String, body: String) NetError! -[Net, Time.Wait]> {
     if !valid_status(status) -> return Err(net_err("tcp_reply", "", "status must be a three-digit HTTP status without control bytes"))
     core.net.tcp_reply(^stream, status, body)
 }

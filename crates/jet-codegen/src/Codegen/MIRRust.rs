@@ -6002,7 +6002,9 @@ impl<'a> RustEmitter<'a> {
             };
             return format!("{ffi}::{rust}<{}>", self.rust_type(&args[0]));
         }
-        if name.name == "ExpiringSecret" && args.len() == 1 {
+        // The checked `core.crypto.vault` identity names the same native
+        // carrier `ExpiringSecret.new` returns.
+        if native_name == "ExpiringSecret" && args.len() == 1 {
             return format!("JetExpiringSecret<{}>", self.rust_type(&args[0]));
         }
         if name.name == crate::Syntax::EXPIRING_VALUE_TYPE && args.len() == 1 {
@@ -24731,6 +24733,7 @@ impl<'a> RustEmitter<'a> {
             type_args,
             location,
         );
+        let emitted = self.core_time_error_result(row, emitted, result_type);
         self.core_int_result(row, emitted, result_type)
     }
 
@@ -24744,6 +24747,35 @@ impl<'a> RustEmitter<'a> {
         }
         ty.and_then(|ty| self.native_int_widening(&emitted, ty, NativeIntSource::MachineWord))
             .unwrap_or(emitted)
+    }
+
+    /// `core.time` kernels report a failure as its reason text; the checked
+    /// signature names the source `TimeError { reason }` record. Build that
+    /// record at the kernel boundary.
+    fn core_time_error_result(&self, row: &MirCoreCall, emitted: String, ty: Option<&MirType>) -> String {
+        if row.module != "core.time" {
+            return emitted;
+        }
+        let Some(MirTypeKind::Result { err, .. }) = ty.map(MirType::kind) else {
+            return emitted;
+        };
+        let Some(owner) = err.identity else {
+            return emitted;
+        };
+        if core_native_probe_name(&self.type_def(owner).key) != "TimeError" {
+            return emitted;
+        }
+        let reason = self
+            .program
+            .fields
+            .iter()
+            .find(|row| row.owner == owner && row.field.name == "reason")
+            .unwrap_or_else(|| panic!("MIR Core TimeError has no reason field row"));
+        format!(
+            "({emitted}).map_err(|__jet_reason| {} {{ {}: __jet_reason }})",
+            self.rust_type(err),
+            self.field_name(reason.id)
+        )
     }
 
     /// Narrow a Jet value into a native host slot (record field or enum
@@ -26153,6 +26185,15 @@ impl<'a> RustEmitter<'a> {
                                     | "reader.seek"
                                     | "reader.skip"
                                     | "reader.take"
+                                    | "http.request_timeout"
+                                    | "http.request_connect_timeout"
+                                    | "http.request_read_timeout"
+                                    | "http.request_total_timeout"
+                                    | "http.request_dns_timeout"
+                                    | "http.request_tls_timeout"
+                                    | "http.request_write_timeout"
+                                    | "http.request_first_byte_timeout"
+                                    | "http.request_redirects"
                             ))
                         || (route.module == "core.encoding.datatree" && route.member == "at")
                         || route.member == "shutdown_report_field")
@@ -29050,15 +29091,7 @@ impl<'a> RustEmitter<'a> {
                 args,
                 owner_type_args,
                 type_args,
-            } => {
-                let emitted = self.static_prelude_call(function, *call, args, owner_type_args, type_args);
-                if self.prelude_row(*call).member == "Shared.strong_count" {
-                    return result
-                        .and_then(|value| self.native_int_result(&emitted, self.value_type(function, value)))
-                        .unwrap_or(emitted);
-                }
-                emitted
-            }
+            } => self.static_prelude_call(function, *call, args, owner_type_args, type_args),
             MirSemanticOp::DecodeUnder {
                 call,
                 segment,
@@ -29625,7 +29658,15 @@ impl<'a> RustEmitter<'a> {
                 lambda,
             } => self.c_callback(function, *call, *callback, *lambda),
             MirSemanticOp::HostCall { call, args } => {
-                self.prelude_host_call(function, *call, args, location.as_ref())
+                let emitted = self.prelude_host_call(function, *call, args, location.as_ref());
+                // `Shared.strong_count` lowers as a host method; its kernel
+                // reports a machine count for the checked exact-Int slot.
+                if self.prelude_row(*call).member == "Shared.strong_count" {
+                    return result
+                        .and_then(|value| self.native_int_result(&emitted, self.value_type(function, value)))
+                        .unwrap_or(emitted);
+                }
+                emitted
             }
         }
     }
