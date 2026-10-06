@@ -52,7 +52,8 @@ pub fn jet_cli_inspect_b(argv: [String], command: String, jet_argv: [String], ar
 }
 
 // The inspect commands the host carries out because they run another process.
-// (`audit` / `sbom` rejoin as host plans with D-FSDIR1; see InspectSupply.jet.)
+// (`audit` / `sbom` rejoin as host plans with D-FSDIR1, #4697: restore the
+// `Audit`/`Sbom` variants, host arms and supply host of commit bf658e410.)
 pub enum JetCLIInspectBPlan {
     // EngineDispatch.rs `dispatch`: run `engine` with `argv` on inherited stdio.
     Engine(engine: String, verb: String, argv: [String])
@@ -915,7 +916,7 @@ fn jet_cli_codemod(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Ne
 // ported. The lockfile/advisory-feed audit (CmdSupply.rs `run_audit`) starts
 // with `package_input`, which needs the no-follow package resolver (Core
 // directory handles, #3593), so it refuses right after `require_manifest_root`
-// until D-FSDIR1 (#4697); its host port waits in InspectSupply.jet.
+// until D-FSDIR1 (#4697); the host port is in commit bf658e410 (InspectB.jet).
 fn jet_cli_audit(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
     if args.len() > 0 && args[0] == "memory" -> return jet_cli_not_ported("inspect audit memory", color)
     if args.len() > 0 && (args[0] == "copies" || args[0].ends_with(".jet")) -> return jet_cli_not_ported("inspect audit copies", color)
