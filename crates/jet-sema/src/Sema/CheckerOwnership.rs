@@ -4649,9 +4649,252 @@ impl<'a> Checker<'a> {
     }
 
     fn record_share_site(&mut self, site: Span, diagnostic: Diagnostic) {
+        if let Some(take) = self.implicit_take_sites.get_mut(&site) {
+            // An unmarked take argument is never shared behind the reader's
+            // back: the call was not the name's last use, so it needs `~`.
+            if !take.reported {
+                take.reported = true;
+                let take = take.clone();
+                let reuse = diagnostic.span.unwrap_or(site);
+                let diagnostic = self.implicit_take_reused(&take, site, reuse);
+                self.diags.push(diagnostic);
+            }
+            return;
+        }
         if !self.share_sites.iter().any(|(known, _)| *known == site) {
             self.share_sites.push((site, diagnostic));
         }
+    }
+
+    /// D-CALLSITE-MARK1=A: for each argument written as a bare name, whether
+    /// another argument of the same call names it too. Such a name has no
+    /// last use in that call.
+    pub(crate) fn args_named_elsewhere(args: &[crate::AST::CallArg]) -> Vec<bool> {
+        args.iter()
+            .enumerate()
+            .map(|(index, arg)| match &arg.expr {
+                Expr::Ident(name, _) => args.iter().enumerate().any(|(other_index, other)| {
+                    other_index != index && super::Captures::expr_refs_name(&other.expr, name)
+                }),
+                _ => false,
+            })
+            .collect()
+    }
+
+    /// E0209: an unmarked argument to a take parameter moved its name, and a
+    /// later use (or the next loop iteration) still needs the value. The fix
+    /// is the explicit copy at the argument.
+    fn implicit_take_reused(&self, take: &ImplicitTakeSite, site: Span, reuse: Span) -> Diagnostic {
+        let ImplicitTakeSite { name, callee, ty, .. } = take;
+        let label = if reuse == site {
+            format!("the next loop iteration passes `{name}` here again")
+        } else {
+            format!("`{name}` is used again here")
+        };
+        let diagnostic = Diagnostic::error(
+            "E0209",
+            format!("`{callee}` takes `{name}`, but `{name}` is used again later"),
+            format!(
+                "`{callee}` takes ownership of this argument; an unmarked argument moves only at its name's last use, and this is not the last use of `{name}`"
+            ),
+            format!(
+                "write the copy marker `{}` (`{}{name}`) to pass a copy and keep `{name}`, or reorder so this call is the last use of `{name}`",
+                Syntax::SIGIL_COPY,
+                Syntax::SIGIL_COPY,
+            ),
+            Some(site),
+        )
+        .with_label(reuse, label);
+        self.with_ownership_copy_edit(diagnostic, site, Some(ty))
+    }
+
+    /// D-CALLSITE-MARK1=A (amends D-COPY-DEFAULT1=A at call arguments): an
+    /// unmarked argument to a take (`^T`) parameter moves at its name's last
+    /// use, exactly as `^name` would. Only a plain owned local or take
+    /// parameter of an ordinary copyable value qualifies; a field, a value
+    /// with cleanup (a `Close` resource or `#SingleUse` duty, or a type that
+    /// holds one), a type parameter, a one-pass source, a task, a view, a
+    /// capture inside a lambda body, and a name another argument of the same
+    /// call already reads keep `^`, so the caller's E0209/E0201/E0204 stands.
+    /// A name in two argument slots of one call has no last use there
+    /// (`named_elsewhere`): E0209 here. The move is a flow fact: a later use
+    /// on any path, or the next iteration of a loop the name outlives,
+    /// reports E0209 here (`record_share_site`). Returns whether this
+    /// argument is settled (moved, or reported).
+    pub(crate) fn take_unmarked_last_use(
+        &mut self,
+        callee: &str,
+        arg: &mut crate::AST::CallArg,
+        param_ty: &Type,
+        call: &CallAccessFrame,
+        named_elsewhere: bool,
+    ) -> bool {
+        if arg.convention != AccessConvention::Read || arg.spread {
+            return false;
+        }
+        let Expr::Ident(name, span) = &arg.expr else {
+            return false;
+        };
+        let (name, span) = (name.clone(), *span);
+        if span.end.saturating_sub(span.start) != name.len() || !tracks_named_move(&name) {
+            return false;
+        }
+        let Some(info) = self.lookup(&name) else {
+            return false;
+        };
+        if info.invalid
+            || info.single_use_span.is_some()
+            || !matches!(info.param_conv, None | Some(AccessConvention::Move))
+        {
+            return false;
+        }
+        let ty = info.ty.clone();
+        let owner_def = info.def_span;
+        if self
+            .flow
+            .bindings
+            .depth_of(&name)
+            .is_none_or(|depth| depth < self.lambda_scope_floor)
+            || self.is_borrowed_binding(&name)
+            || self.is_view(&name)
+            || self.is_string_view(&name)
+            || call
+                .accesses
+                .iter()
+                .any(|access| access.place.owner.def_span == owner_def)
+        {
+            return false;
+        }
+        if ty != *param_ty && ty != self.resolve_type(param_ty.clone()) {
+            return false;
+        }
+        if type_is_copy(&ty)
+            || !self.is_cloneable_type(&ty)
+            || crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&ty)
+            || is_one_pass_source(&ty)
+            || is_task_type(&ty)
+            || self.type_contains_view_boundary(&ty)
+            || self.type_holds_cleanup(&ty)
+        {
+            return false;
+        }
+        if named_elsewhere {
+            let diagnostic = Diagnostic::error(
+                "E0209",
+                format!("`{name}` is passed to `{callee}` more than once in this call"),
+                format!(
+                    "a name used in two arguments of one call has no last use in that call, so `{callee}` can't take `{name}` without a mark"
+                ),
+                format!(
+                    "write the copy marker `{}` (`{}{name}`) to pass a copy, or the move marker `{}` (`{}{name}`) where the call hands `{name}` over",
+                    Syntax::SIGIL_COPY,
+                    Syntax::SIGIL_COPY,
+                    Syntax::SIGIL_MOVE,
+                    Syntax::SIGIL_MOVE,
+                ),
+                Some(span),
+            );
+            self.diags.push(diagnostic);
+            return true;
+        }
+        arg.convention = AccessConvention::Move;
+        self.implicit_take_sites.insert(
+            span,
+            ImplicitTakeSite {
+                name: name.clone(),
+                callee: callee.to_string(),
+                ty,
+                reported: false,
+            },
+        );
+        self.mark_moved_place_with_consumer(
+            ViewPlace {
+                owner: self.owner_id(&name),
+                projections: Vec::new(),
+            },
+            span,
+            format!("`{callee}`"),
+            true,
+        );
+        true
+    }
+
+    /// E0204 (#4702): one call reads a name through an earlier argument and
+    /// takes it through this one. The callee would hold a view of a value
+    /// that has already moved, so the call is refused here.
+    pub(crate) fn reject_take_while_lent(
+        &mut self,
+        callee: &str,
+        arg: &crate::AST::CallArg,
+        call: &CallAccessFrame,
+    ) -> bool {
+        let Expr::Ident(name, span) = &arg.expr else {
+            return false;
+        };
+        let Some(owner_def) = self.lookup(name).map(|info| info.def_span) else {
+            return false;
+        };
+        if !call
+            .accesses
+            .iter()
+            .any(|access| access.place.owner.def_span == owner_def)
+        {
+            return false;
+        }
+        self.diags.push(crate::Sema::Diagnostics::aliasing_take_while_lent(
+            name, callee, *span,
+        ));
+        true
+    }
+
+    /// A value with cleanup, which never moves without `^`: a `Close`
+    /// resource, a `#SingleUse` duty or task, a type parameter (its
+    /// cleanup is unknown where the generic is written), or any type that
+    /// holds one of those by value in a field, payload, or element.
+    pub(crate) fn type_holds_cleanup(&self, ty: &Type) -> bool {
+        fn walk(checker: &Checker<'_>, ty: &Type, seen: &mut HashSet<String>) -> bool {
+            if checker.is_resource_type(ty) || checker.type_is_single_use(ty) || is_task_type(ty) {
+                return true;
+            }
+            match ty {
+                Type::Named(name) => {
+                    checker.type_param_scope.iter().any(|param| &param.name == name)
+                        || nominal(checker, name, seen)
+                }
+                Type::Apply { name, args } => {
+                    args.iter().any(|arg| walk(checker, arg, seen)) || nominal(checker, name, seen)
+                }
+                Type::Option(inner)
+                | Type::List(inner)
+                | Type::Shared(inner)
+                | Type::Tagged { inner, .. } => walk(checker, inner, seen),
+                Type::Result { ok, err } => walk(checker, ok, seen) || walk(checker, err, seen),
+                Type::Map { key, value, .. } => {
+                    walk(checker, key, seen) || walk(checker, value, seen)
+                }
+                Type::Tuple(fields) => fields.iter().any(|(_, field)| walk(checker, field, seen)),
+                Type::FixedList { elem, .. } => walk(checker, elem, seen),
+                _ => false,
+            }
+        }
+        fn nominal(checker: &Checker<'_>, name: &str, seen: &mut HashSet<String>) -> bool {
+            if !seen.insert(name.to_string()) {
+                return false;
+            }
+            let registry = checker.registry;
+            registry.struct_fields(name).is_some_and(|fields| {
+                fields.iter().any(|(_, _, field)| walk(checker, field, seen))
+            }) || registry.enum_variants(name).is_some_and(|variants| {
+                variants.values().any(|(_, payload)| match payload {
+                    VariantPayload::Unit => false,
+                    VariantPayload::Single(field, _) => walk(checker, field, seen),
+                    VariantPayload::Named(fields) => {
+                        fields.iter().any(|field| walk(checker, &field.ty, seen))
+                    }
+                })
+            })
+        }
+        walk(self, ty, &mut HashSet::new())
     }
 
     /// D-COPY-DEFAULT1=A: an unmarked move of a whole binding, written as
@@ -4691,6 +4934,8 @@ impl<'a> Checker<'a> {
     /// the value semantics at that site. A site the body no longer holds as
     /// a plain name keeps its E0121 instead of moving silently.
     pub(crate) fn materialize_share_sites(&mut self, body: &mut [Stmt]) {
+        // Implicit take sites already reported any reuse; they end with the body.
+        self.implicit_take_sites.clear();
         if self.share_sites.is_empty() {
             return;
         }
@@ -4789,7 +5034,11 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let shareable = unmarked && self.move_is_shareable(&place, span);
+        // An implicit take argument is tracked like a share site, so a later
+        // use reaches it (and reports E0209) even under `copies: .Explicit`.
+        let shareable = unmarked
+            && (self.implicit_take_sites.contains_key(&span)
+                || self.move_is_shareable(&place, span));
         if let Some(info) = self.lookup(&name) {
             // D-COPY-DEFAULT1=A: a `return` or `break` value leaves the loops
             // it exits, so a move there is not repeated on a later iteration.
@@ -6443,6 +6692,17 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        if arg.convention == AccessConvention::Read
+            && self.take_unmarked_last_use(
+                call_name,
+                arg,
+                param_ty,
+                &CallAccessFrame::default(),
+                false,
+            )
+        {
+            return;
+        }
         match arg.convention {
             AccessConvention::Read => {
                 if let Expr::Ident(name, span) = &arg.expr {
@@ -6501,6 +6761,8 @@ impl<'a> Checker<'a> {
         param_conv: AccessConvention,
         param_ty: &Type,
         arg: &mut crate::AST::CallArg,
+        call: &CallAccessFrame,
+        named_elsewhere: bool,
     ) {
         if param_conv != AccessConvention::Move {
             if let Expr::Ident(name, span) = &arg.expr {
@@ -6524,9 +6786,16 @@ impl<'a> Checker<'a> {
 
         match (param_conv, arg.convention) {
             (AccessConvention::Move, AccessConvention::Read) => {
+                // D-COPY-DEFAULT1=A: an unmarked last use moves like `^name`.
+                if self.take_unmarked_last_use(call_name, arg, param_ty, call, named_elsewhere) {
+                    self.check_write_arg_change(arg);
+                    return;
+                }
                 if let Expr::Ident(name, span) = &arg.expr {
                     if type_is_copy(param_ty) {
                         // Copy values cross an owning parameter by bits.
+                    } else if self.reject_take_while_lent(call_name, arg, call) {
+                        // E0204: an earlier argument already reads it.
                     } else if !self.is_resource_type(param_ty)
                         && self.is_cloneable_type(param_ty)
                     {
@@ -6559,7 +6828,7 @@ impl<'a> Checker<'a> {
             }
             (AccessConvention::Move, AccessConvention::Move) => {
                 if let Expr::Ident(name, span) = &arg.expr {
-                    if !type_is_copy(param_ty) {
+                    if !type_is_copy(param_ty) && !self.reject_take_while_lent(call_name, arg, call) {
                         self.mark_moved_by(name.clone(), *span, call_name.to_string());
                     }
                 }

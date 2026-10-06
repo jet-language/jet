@@ -2321,6 +2321,7 @@ impl<'a> Checker<'a> {
         };
         let args_pre_inferred = !fn_type_params.is_empty() && pre_inferred.len() == call.args.len();
 
+        let named_elsewhere = Self::args_named_elsewhere(&call.args);
         for (i, arg) in call.args.iter_mut().enumerate() {
             if !sig.is_extern {
                 // A `&name` argument grants the named place itself, so it is a
@@ -2703,9 +2704,19 @@ impl<'a> Checker<'a> {
 
             match (param_conv, arg.convention) {
                 (AccessConvention::Move, AccessConvention::Read) => {
-                    if let Some((name, span)) = &bare_arg_name {
+                    // D-COPY-DEFAULT1=A: an unmarked last use moves like `^name`.
+                    let moved = self.take_unmarked_last_use(
+                        &call.name,
+                        arg,
+                        param_ty,
+                        &call_access,
+                        named_elsewhere.get(i).copied().unwrap_or(false),
+                    );
+                    if let Some((name, span)) = bare_arg_name.as_ref().filter(|_| !moved) {
                         if type_is_copy(param_ty) {
                             // Copy values cross an owning parameter by bits.
+                        } else if self.reject_take_while_lent(&call.name, arg, &call_access) {
+                            // E0204: an earlier argument already reads it.
                         } else if !self.is_resource_type(param_ty)
                             && self.is_cloneable_type(param_ty)
                         {
@@ -2748,7 +2759,9 @@ impl<'a> Checker<'a> {
                         arg_ty.as_ref(),
                         &call.name,
                         arg.span,
-                    ) {
+                    ) || (!type_is_copy(param_ty)
+                        && self.reject_take_while_lent(&call.name, arg, &call_access))
+                    {
                         continue;
                     }
                     // The value is given away for real.

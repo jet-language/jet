@@ -976,8 +976,14 @@ or materialize `~x` first.
 
 ### Copies, moves, and owned destinations
 
-A named binding passed to a take parameter without `^` is E0209. Jet never hides a
-clone to make that call work. A literal, `~x`, or call result is a temporary and
+A named binding passed to a take parameter without `^` moves when the call is
+its last use (D-COPY-DEFAULT1=A); any later use on any path, or a later
+iteration of a loop the name outlives, makes that argument E0209, which teaches
+`~x`. Jet never hides a clone to make that call work. Fields, values with
+cleanup (a `Close` resource, a consume duty, or a type holding one), type
+parameters, and captures inside a lambda body still need `^`. One call that
+reads a name through one argument and takes it through another is E0204.
+A literal, `~x`, or call result is a temporary and
 may enter a take parameter without another marker. `~x` is the one copy spelling;
 it creates an independent owned value, including when `x` is a Bool or integer:
 it does not negate the value. `.clone()` is not user-typable Jet syntax,
@@ -1005,8 +1011,9 @@ shares the value instead of moving it: the source stays usable and each holder
 has its own value, so a write through one never shows in the other. A use in
 `return`, or in a loop's `break` value, is the last use for the loops it
 leaves. Values that cannot be copied (resources, one-pass iterators, consume
-duties, tasks) keep E0121 on the later use. A taking receiver call on a whole
-local at its last use needs no `^`; a take elsewhere still does, and a writing
+duties, tasks) keep E0121 on the later use. A taking receiver call or an
+argument to a take parameter, on a whole local at its last use, needs no `^`;
+a take elsewhere still does, and a writing
 call always needs `&`. Under `#Policy(copies: .Explicit)`, every implicit copy
 that `jet audit copies` reports is a diagnostic with a Safe `~` edit, and an
 unmarked move that a later use reaches stays E0121.

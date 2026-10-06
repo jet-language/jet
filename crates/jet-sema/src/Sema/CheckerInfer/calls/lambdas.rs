@@ -530,6 +530,8 @@ impl<'a> Checker<'a> {
         }
 
         self.push_scope();
+        let lambda_scope_depth = self.scope_depth();
+        let saved_lambda_scope_floor = std::mem::replace(&mut self.lambda_scope_floor, lambda_scope_depth);
         let saved_param_names = std::mem::replace(
             &mut self.current_param_names,
             lam.params.iter().map(|param| param.name.clone()).collect(),
@@ -872,6 +874,7 @@ impl<'a> Checker<'a> {
         lam.meta.fallible_propagation = self.task_body_propagates || self.failure_carrier.is_some();
         self.task_body_propagates = saved_task_body_propagates;
         self.in_lambda_body = saved_in_lambda_body;
+        self.lambda_scope_floor = saved_lambda_scope_floor;
         self.ret = saved_ret;
         self.expected_type = saved_expected;
         self.failure_carrier = saved_failure_carrier;
