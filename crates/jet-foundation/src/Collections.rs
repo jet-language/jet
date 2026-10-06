@@ -1472,7 +1472,10 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         })),
         ("extend", 1) => Some(None),
         ("concat", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
-        ("pop" | "get" | "first" | "last", 0 | 1) => {
+        // List.pop takes no slot (Jet row: 0..0); `remove(slot)` is the
+        // positional form. A slot argument here passed sema and then failed
+        // in lowering (APICompPython t14_pop_index).
+        ("pop", 0) | ("get" | "first" | "last", 0 | 1) => {
             Some(Some(Type::Option(Box::new(inner.clone()))))
         }
         ("index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
@@ -3936,6 +3939,13 @@ pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverB
 #[cfg(all(test, debug_assertions))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn list_pop_takes_no_slot_argument() {
+        // APICompPython t14: the Jet row is List.pop 0..0; `xs.pop(0)` must not check.
+        assert!(list_method_return(&Type::Int, "pop", 0).is_some());
+        assert!(list_method_return(&Type::Int, "pop", 1).is_none());
+    }
 
     #[test]
     fn list_mutation_borrows_match_for_growable_and_fixed_lists() {
