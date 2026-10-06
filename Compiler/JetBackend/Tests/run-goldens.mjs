@@ -17,13 +17,16 @@
 //               every JET_LOWER_BATCH cases and after a crash, see runShard).
 //   4. run:     each static <case>.elf (or, without one, the object linked
 //               with $JET_RUNTIME_C_LIB: cc, -lpthread -ldl -lm) runs with the
-//               golden's stdin and is compared with
-//               Examples/features/expected/<stem>.out.
+//               golden's stdin and is compared with Examples/features/expected/
+//               <stem>.out (exit 0; plus <stem>.stderr.out when present) or,
+//               for a <stem>.err.out golden, exit 70 or 1 and that stderr, as
+//               tests/golden.rs compares them.
 //
 // Verdicts: pass, wrong (ran, output or exit differs), unsupported (lowering
 // or object issue, or a runtime symbol the C library does not export),
-// no-mir, convert-error, lower-crash, no-golden (expects a compile error or
-// has no expected stdout).
+// no-mir, convert-error, lower-crash. An example with neither expected file
+// is not a golden and is skipped, as Tools/agent/stage1/golden-cases.mjs
+// "all" skips it.
 //
 // usage: [JET_RUNTIME_PACK=<jet_runtime.pack.o> | JET_RUNTIME_C_LIB=<libjet_runtime_c.a>] [JET=<jet binary>]
 //        [JET_LOWER_RUN=1 | JET_LOWER_RELEASE=1] [JET_LOWER_SHARDS=<n>] [JET_LOWER_MEM=<cap>] [JET_LOWER_BATCH=<n>]
@@ -92,8 +95,15 @@ for (const entry of entries) {
   const slug = entry.stem.replace(/[^A-Za-z0-9_-]+/gu, "_");
   const expectedOut = join(features, "expected", `${entry.stem}.out`);
   const expectedErr = join(features, "expected", `${entry.stem}.err.out`);
-  const verdict = existsSync(expectedErr) || !existsSync(expectedOut) ? "no-golden" : null;
-  cases.push({ entry, slug, expectedOut, stdin: stdinTable.get(entry.stem) ?? null, verdict, detail: "" });
+  const expectedStderr = join(features, "expected", `${entry.stem}.stderr.out`);
+  if (!existsSync(expectedOut) && !existsSync(expectedErr)) continue;
+  // tests/golden.rs suffix rule: `.err.out` pins the stderr of an expected
+  // non-zero exit (70 panic, 1 uncaught Err); `.stderr.out` pins the stderr of
+  // a successful run beside its `.out`.
+  const expect = existsSync(expectedErr)
+    ? { failure: true, stderr: readFileSync(expectedErr, "utf8") }
+    : { failure: false, stdout: readFileSync(expectedOut, "utf8"), stderr: existsSync(expectedStderr) ? readFileSync(expectedStderr, "utf8") : null };
+  cases.push({ entry, slug, expect, stdin: stdinTable.get(entry.stem) ?? null, verdict: null, detail: "" });
 }
 const open = () => cases.filter((c) => c.verdict === null);
 
@@ -516,14 +526,17 @@ for (const c of until >= 3 ? open() : []) {
   // mir stage ran in another output directory).
   const cwd = existsSync(join(dirs.work, c.slug)) ? join(dirs.work, c.slug) : stage(c);
   const run = spawnSync(program, [], { input: c.stdin ?? "", encoding: "utf8", timeout: 20000, cwd, maxBuffer: 1 << 26 });
-  const expected = readFileSync(c.expectedOut, "utf8");
   writeFileSync(join(dirs.run, `${c.slug}.stdout`), run.stdout ?? "");
   writeFileSync(join(dirs.run, `${c.slug}.stderr`), run.stderr ?? "");
   writeFileSync(join(dirs.run, `${c.slug}.status.json`), JSON.stringify({ status: run.status, signal: run.signal, error: run.error ? { code: run.error.code, message: run.error.message } : null }) + "\n");
-  if (run.stdout === expected && run.status === 0) c.verdict = "pass";
+  const { expect } = c;
+  const exitOk = expect.failure ? run.status === 70 || run.status === 1 : run.status === 0;
+  const stdoutOk = expect.failure || run.stdout === expect.stdout;
+  const stderrOk = expect.stderr === null || run.stderr === expect.stderr;
+  if (exitOk && stdoutOk && stderrOk) c.verdict = "pass";
   else {
     c.verdict = "wrong";
-    c.detail = run.status !== 0 ? `exit ${run.status ?? run.signal}: ${(run.stderr ?? "").split("\n")[0]}` : "stdout differs";
+    c.detail = !exitOk ? `exit ${run.status ?? run.signal}${expect.failure ? " (expected 70 or 1)" : ""}: ${(run.stderr ?? "").split("\n")[0]}` : !stdoutOk ? "stdout differs" : "stderr differs";
   }
   c.detail = `${c.leg}${c.detail ? `: ${c.detail}` : ""}`;
 }
