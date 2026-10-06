@@ -859,9 +859,10 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "EventConfigError" => Some("JetEventConfigError"),
         "TestSuite" => Some("JetTestSuite"),
         "TestComparison" => Some("JetTestComparison"),
-        // D-DET1: deterministic injected capability handles.
+        // D-DET1: deterministic injected capability handles. The source
+        // `RNG` handle's Prelude carrier is `jet_std::Rng`.
         "Clock" => Some("Clock"),
-        "RNG" => Some("RNG"),
+        "RNG" => Some("Rng"),
         "Fake" => Some("Fake"),
         // D-SOLVER-LIB1=A: explicit finite solver state.
         "Solver" => Some("Solver"),
