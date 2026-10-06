@@ -1021,6 +1021,14 @@ and `serve_once_listener` provide testable one-request entry points.
 | `access_log(request, status)` | `String` | Render a stable access-log line. |
 | `request_id(mux)` | unit | Install request-id middleware. |
 
+Every response the server writes, on HTTP/1.x and HTTP/2, on every serve path
+(`bind`/`serve`, handler-function serving, `serve_once`, and the pre-handler
+read-error and overload responses), carries exactly one `Date` header in
+IMF-fixdate form (D-HTTP-DATE1=A). The value comes from the program clock, so a
+deterministic test world sees a fixed date and production sees real time; the
+formatted text is reused within one second. A handler that sets its own `Date`
+header is passed through unchanged and no second `Date` is added.
+
 ### `core.net.ws` — WebSocket transport
 
 `core.net.ws` is the WebSocket home and accepts an HTTP request for server-side

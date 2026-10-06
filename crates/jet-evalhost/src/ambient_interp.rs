@@ -788,11 +788,18 @@ fn http_response_wire(response: &MirRuntimeValue) -> Result<Vec<u8>, String> {
         500 => "Internal Server Error",
         _ => "OK",
     };
-    let mut wire = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n",
-        body.len()
-    )
-    .into_bytes();
+    let handler_date = matches!(
+        http_request_field(response, "headers"),
+        Some(MirRuntimeValue::Struct { fields, .. })
+            if fields.iter().any(|(name, _)| name.eq_ignore_ascii_case("date"))
+    );
+    let mut head = format!("HTTP/1.1 {status} {reason}\r\n");
+    // D-HTTP-DATE1=A: the one runtime's program-clock Date, unless the handler set one.
+    if !handler_date {
+        crate::net_http_rt::jet_http_srv_push_date(&mut head);
+    }
+    head.push_str(&format!("Content-Length: {}\r\nConnection: close\r\n", body.len()));
+    let mut wire = head.into_bytes();
     if let Some(MirRuntimeValue::Struct { fields, .. }) = http_request_field(response, "headers") {
         for (name, value) in fields {
             match value {
@@ -1191,8 +1198,8 @@ impl InterpreterAmbientContext {
             }
             Ok(AmbientMirHandleResult::Value(response)) => {
                 let wire = http_response_wire(&response).unwrap_or_else(|_| {
-                    b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                        .to_vec()
+                    crate::net_http_rt::jet_http_srv_empty_wire(500, "Internal Server Error")
+                        .into_bytes()
                 });
                 let _ = stream.write_all(&wire);
                 Some(Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Unit)))
@@ -1684,7 +1691,7 @@ impl InterpreterAmbientState {
                     Ok(AmbientMirHandleResult::Value(response)) => {
                         let wire = http_response_wire(&response).unwrap_or_else(|_| {
                             http_response(500, "500 internal server error");
-                            b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()
+                            crate::net_http_rt::jet_http_srv_empty_wire(500, "Internal Server Error").into_bytes()
                         });
                         let _ = stream.write_all(&wire);
                         Some(Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Unit)))
