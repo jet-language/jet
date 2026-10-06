@@ -2,7 +2,7 @@
 // flags, retired, moved, and grouped routes, help and the greeting, unknown
 // commands (E2101) and flags (E2102), then the verbs the Jet driver owns
 // (`explain <CODE>`, `check [<file>|<dir>]`, `build <file>`,
-// `run [<file>|<dir>]`, `test <file>`, and `new <name>`; a bare or
+// `run [<file>|<dir>]`, `test <file>`, `new <name>`, and `emit --rust <file>`; a bare or
 // directory target resolves the project entry, Entry.jet). Every report is
 // the Rust host's exact bytes and exit status for the same argv. A command
 // whose Jet port has not landed yet is refused with E2104 instead of
@@ -49,6 +49,9 @@ pub enum JetCLIPlan {
     // `jet new <name>`: write the project folder (Source/CmdCompile.rs
     // `run_new`); `template` is "" for the print-only starter.
     New(name: String, template: String, annotated: Bool, quiet: Bool, color: Bool)
+    // `jet emit --rust <file>`: print the Rust generated for the entry
+    // (CmdDevTools.rs `run_emit_rust`).
+    Emit(file: String, source: String, color: Bool)
 }
 
 // The `jet test` options the Jet host carries out (Source/CmdCompile.rs
@@ -752,6 +755,19 @@ fn jet_cli_explain(jet_argv: [String], args: [String], color: Bool) -> JetCLIPla
     JetCLIPlan.Done{output: jet_driver_explain_code(None, color)}
 }
 
+// `jet emit --rust <file>` (Source/main.rs `"emit"`, CmdDevTools.rs
+// `run_emit_rust`): with no target the command's help is a usage error; a
+// target without `--rust` is E2102; the file is read as typed.
+fn jet_cli_emit(jet_argv: [String], args: [String], color: Bool, quiet: Bool) -[FS]> JetCLIPlan Never! {
+    if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("emit"), JET_DRIVER_EXIT_USAGE)
+    if !jet_argv.contains("--rust") {
+        return jet_cli_fail("E2102", "usage: jet emit --rust <file.jet>", "`emit` needs a mode flag; today only `--rust` is supported", "run `jet emit --rust <file.jet>` to print the generated Rust", color, JET_DRIVER_EXIT_USAGE)
+    }
+    file :: args[1]
+    source :: cli_files.read(file) ?? return jet_cli_fail("E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color, JET_DRIVER_EXIT_USER_ERROR)
+    JetCLIPlan.Emit{file: file, source: source, color: color}
+}
+
 // `jet new` templates (CmdCompile.rs `NewTemplate::NAMES`).
 JET_CLI_NEW_TEMPLATES :: [String]{"cli", "ui", "web", "overrides"}
 
@@ -968,6 +984,7 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
         "run" -> return jet_cli_run(jet_argv, args, passthrough, false, color, quiet, verbose, threads)
         "test" -> return jet_cli_test(jet_argv, color, quiet, verbose, threads)
         "new" -> return jet_cli_new(jet_argv, args, color, quiet)
+        "emit" -> return jet_cli_emit(jet_argv, args, color, quiet)
         else -> {}
     }
     jet_cli_not_ported(command, color)
