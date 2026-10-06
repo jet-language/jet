@@ -1500,7 +1500,16 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
             let Some(next) = bytes.get(at + 1).copied() else {
                 return false;
             };
-            next == b'\\' || !ident_continue(next) || bytes.get(at + 2) == Some(&b'\'')
+            // A non-ASCII char literal (`'™'`) closes after its whole UTF-8
+            // sequence, not after its lead byte; reading it as a lifetime
+            // would open a char literal at its closing quote instead.
+            let width = match next {
+                0xF0..=0xFF => 4,
+                0xE0..=0xEF => 3,
+                0xC0..=0xDF => 2,
+                _ => 1,
+            };
+            next == b'\\' || !ident_continue(next) || bytes.get(at + 1 + width) == Some(&b'\'')
         }
 
         fn matching_brace_end(bytes: &[u8], opening: usize) -> Option<usize> {
@@ -2163,6 +2172,22 @@ unsafe { user_pointer() }
 "#;
     let stripped = strip_vetted_prelude_modules(generated);
     assert!(!stripped.contains("mod jet_mem"));
+    assert!(stripped.contains("unsafe { user_pointer() }"));
+}
+
+#[test]
+fn vetted_module_stripping_reads_non_ascii_char_literals() {
+    let generated = r#"
+fn entity(name: &str) -> Option<char> {
+    match name { "trade" => Some('™'), "mdash" => Some('—'), _ => None }
+}
+mod jet_gtk {
+    type Probe = unsafe extern "C" fn();
+}
+unsafe { user_pointer() }
+"#;
+    let stripped = strip_vetted_prelude_modules(generated);
+    assert!(!stripped.contains("mod jet_gtk"));
     assert!(stripped.contains("unsafe { user_pointer() }"));
 }
 
