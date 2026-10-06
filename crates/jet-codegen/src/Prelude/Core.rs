@@ -950,9 +950,31 @@ pub(crate) fn jet_native_comptime_begin(fuel: u64, max_depth: u64) -> bool {
     true
 }
 
+// JET_VETTED_UNSAFE_BEGIN: jet_native_comptime_channel
+// AUDIT: the native comptime worker's private protocol channel. The compiler
+// starts the worker with descriptor 3 open as its result pipe; the failure path
+// borrows that raw descriptor to duplicate it. Safe Rust cannot name a raw
+// descriptor it did not open. Caller invariant: only a process launched by the
+// compiler's comptime worker protocol calls this, and descriptor 3 stays open
+// for the whole process lifetime. Violating it borrows a closed or unrelated
+// descriptor: the duplicate fails (reported as None) or writes the envelope to
+// the wrong file.
+mod jet_native_comptime_channel {
+    use std::os::fd::BorrowedFd;
+
+    /// An owned duplicate of protocol descriptor 3, so dropping the returned
+    /// File never closes the descriptor the compiler reads.
+    pub(crate) fn protocol_channel() -> Option<std::fs::File> {
+        // SAFETY: see the module audit; descriptor 3 is open for the worker's
+        // lifetime and is only borrowed for the duplicate below.
+        let borrowed = unsafe { BorrowedFd::borrow_raw(3) };
+        borrowed.try_clone_to_owned().ok().map(std::fs::File::from)
+    }
+}
+// JET_VETTED_UNSAFE_END: jet_native_comptime_channel
+
 pub(crate) fn jet_native_comptime_fail(status: u32, message: &str) -> ! {
     use std::io::Write;
-    use std::os::fd::{BorrowedFd, FromRawFd, IntoRawFd};
     // Exactly one failing thread writes the private protocol envelope.
     if JET_NATIVE_COMPTIME_STATUS.compare_exchange(0, status, std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire).is_err() {
         loop { std::thread::park(); }
@@ -960,10 +982,7 @@ pub(crate) fn jet_native_comptime_fail(status: u32, message: &str) -> ! {
     let (_, owner, start, end) = JET_NATIVE_COMPTIME_FRAME.with(std::cell::Cell::get);
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
-    // SAFETY: the compiler worker alone owns protocol descriptor 3. Duplicate
-    // it so constructing a File never closes the descriptor used by the server.
-    if let Ok(channel) = unsafe { BorrowedFd::borrow_raw(3) }.try_clone_to_owned() {
-        let mut channel = unsafe { std::fs::File::from_raw_fd(channel.into_raw_fd()) };
+    if let Some(mut channel) = jet_native_comptime_channel::protocol_channel() {
         let header = format!("JCT1 {status} {owner} {start} {end} {}\n", message.len());
         let _ = channel.write_all(header.as_bytes());
         let _ = channel.write_all(message.as_bytes());

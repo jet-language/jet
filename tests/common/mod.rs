@@ -1949,6 +1949,8 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
         s = next;
     }
     s = strip_vetted_module(&s, "jet_os_interrupt_ffi");
+    // The native comptime worker's protocol descriptor duplicate (Prelude/Core.rs).
+    s = strip_vetted_module(&s, "jet_native_comptime_channel");
     s = strip_mod(&s, "jet_os_interrupt");
     s = strip_raylib_bridge(&s);
     while s.contains("mod __jet___c_") {
@@ -2204,6 +2206,7 @@ fn audited_source_markers_strip_only_registered_regions() {
         "jet_testing_history_foundation",
         "jet_testing_history_top",
         "jet_data_flow",
+        "jet_native_comptime_channel",
     ];
     let mut generated = String::new();
     for name in names {
