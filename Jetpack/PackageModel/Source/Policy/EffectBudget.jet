@@ -313,8 +313,9 @@ pub fn pkg_effect_enforce(entries: [PackageEffects], manifest: PackageFacts) -> 
             if authority_root(effect_name) == "Mem" -> next
             is_panic :: authority_root(effect_name) == AUTHORITY_PANIC_ROOT
             if !is_panic && granted != None && authority_answer(granted, empty, effect_name) == AuthorityVerdict.Allowed -> next
+            // D-AUTH-AMBIENT2=A: `Time.Wait` is deny-only too; never outside `allow`.
             outside_allow :: if allow == {
-                .Val(rights) -> !is_panic && authority_answer(rights, empty, effect_name) != AuthorityVerdict.Allowed
+                .Val(rights) -> !authority_is_deny_only(effect_name) && authority_answer(rights, empty, effect_name) != AuthorityVerdict.Allowed
                 .None -> false
             }
             inside_deny :: authority_answer(empty, deny, effect_name) == AuthorityVerdict.Denied

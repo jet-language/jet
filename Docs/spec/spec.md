@@ -1391,13 +1391,17 @@ no declared leaves remains open. The same rule applies to function effect
 rows, `#FX`, and package effect budgets. Declarations have no runtime
 representation. An unknown root is a language error, not a new effect.
 
-`Panic` and `Mem` are deny-only rows. `Panic` can be named in a prohibition but
-cannot be granted by an authority, positive effect ceiling, or package budget.
-Memory events such as `Mem.Alloc` and `Mem.Rc` remain visible to diagnostics
-and denial facts; they do not have to be listed in a positive effect ceiling.
+`Panic`, `Mem`, and the `Time.Wait` leaf are deny-only rows. `Panic` can be
+named in a prohibition but cannot be granted by an authority, positive effect
+ceiling, or package budget. Memory events such as `Mem.Alloc` and `Mem.Rc`
+remain visible to diagnostics and denial facts; they do not have to be listed
+in a positive effect ceiling. Waiting on the program's own work (`Time.Wait`)
+is likewise inferred and forbiddable, but no program, script, or package
+needs a grant for it, so the application authority prompt and E1803 never
+name a deny-only row; a grant of the `Time` root still covers `Time.Wait`.
 `Mem.Alloc(above: N)` is the parameterized memory-denial spelling. An explicit
-memory or panic denial still rejects a reachable operation (D-EFFTREE1,
-D-PANICROOT1, D-AUTHORITY-MEM1).
+memory, waiting, or panic denial still rejects a reachable operation
+(D-EFFTREE1, D-PANICROOT1, D-AUTHORITY-MEM1, D-AUTH-AMBIENT2).
 
 Core operations contribute the following broad categories. More precise leaves
 are retained when the operation supplies them.

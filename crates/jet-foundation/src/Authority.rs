@@ -34,6 +34,18 @@ pub fn root(right: &str) -> &str {
     right.split('.').next().unwrap_or(right)
 }
 
+/// Deny-only rows: `Panic`, the `Mem` root, and the `Time.Wait` leaf
+/// (D-PANICROOT1, D-AUTHORITY-MEM1, D-AUTH-AMBIENT2=A). An authority may
+/// refuse them but never has to grant them, so the application policy never
+/// asks for them and never writes them into an `allow:` row. A grant of the
+/// `Time` root still covers `Time.Wait` harmlessly.
+pub fn is_deny_only(right: &str) -> bool {
+    let root = root(right);
+    root == Effect::Panic.name()
+        || root == Effect::Mem.name()
+        || right == crate::Syntax::EFFECT_LEAF_TIME_WAIT
+}
+
 /// Resolve one root using the canonical table. Dotted input is accepted only
 /// for its root; leaf declaration remains sema's job.
 pub fn parse_root(right: &str) -> Option<&'static str> {
@@ -341,11 +353,11 @@ impl ApplicationAuthority {
     /// The complete `allow:` row a manifest-less program must declare. An
     /// inline Package replaces the beginner default instead of extending it,
     /// so the row names every required effect, not only the undecided ones.
-    /// `Panic` is a deny-only stop row and is never a positive grant.
+    /// Deny-only rows (`Panic`, `Mem`) are never a positive grant.
     pub fn inline_allow_row(&self) -> Holds {
         self.required_effects
             .iter()
-            .filter(|effect| root(effect) != Effect::Panic.name())
+            .filter(|effect| !is_deny_only(effect))
             .cloned()
             .collect()
     }
@@ -373,13 +385,13 @@ impl ApplicationAuthority {
     }
 
     /// Required effects with no policy verdict at the application boundary.
-    /// `Panic` is an internal deny-only stop row, not a positive authority
-    /// request. An explicit `Panic` denial is still reported below.
+    /// Deny-only rows (`Panic`, `Mem`) are not positive authority requests;
+    /// an explicit denial of one is still reported below.
     pub fn undecided_effects(&self) -> Holds {
         self.required_effects
             .iter()
             .filter(|effect| {
-                root(effect) != Effect::Panic.name()
+                !is_deny_only(effect)
                     && answer(&self.granted_effects, &self.denied_effects, effect)
                         == Verdict::Missing
             })
@@ -1052,7 +1064,8 @@ mod tests {
             authority: "package.jet authority.holds".to_string(),
         };
         let diagnostic = authority.policy_diagnostic().expect("E1803");
-        assert!(diagnostic.fix.contains("allow: [Exec, IO, Mem.Alloc]"));
+        // `Mem.Alloc` is deny-only (D-AUTHORITY-MEM1), never a requested grant.
+        assert!(diagnostic.fix.contains("allow: [Exec, IO]"), "{}", diagnostic.fix);
     }
 
     #[test]
@@ -1089,6 +1102,44 @@ mod tests {
             .to_ascii_lowercase()
             .contains("adjust the denial"));
         assert!(!diagnostic.fix.contains("allow: [Panic]"));
+    }
+
+    #[test]
+    fn application_authority_never_requests_a_deny_only_right() {
+        // #4622 / D-AUTH-AMBIENT2=A: `Mem` and `Time.Wait` are deny-only, so a
+        // script sharing a value across tasks (Mem.Rc, Time.Wait) never
+        // reaches the E1803 prompt or fix row for them.
+        let mut authority = ApplicationAuthority {
+            required_effects: Holds::from([
+                "FS".to_string(),
+                "IO".to_string(),
+                "Mem.Alloc".to_string(),
+                "Mem.Rc".to_string(),
+                crate::Syntax::EFFECT_LEAF_TIME_WAIT.to_string(),
+            ]),
+            granted_effects: Holds::from(["IO".to_string()]),
+            denied_effects: Holds::new(),
+            authority: ApplicationAuthority::APPLICATION_DEFAULT.to_string(),
+        };
+        assert_eq!(authority.undecided_effects(), Holds::from(["FS".to_string()]));
+        assert_eq!(
+            authority.inline_allow_row(),
+            Holds::from(["FS".to_string(), "IO".to_string()])
+        );
+        let diagnostic = authority.policy_diagnostic().expect("E1803");
+        for text in [&diagnostic.what, &diagnostic.why, &diagnostic.fix] {
+            assert!(!text.contains("Mem"), "{text}");
+            assert!(!text.contains("Time"), "{text}");
+        }
+
+        authority.required_effects.remove("FS");
+        assert!(authority.is_allowed());
+        assert!(authority.policy_diagnostic().is_none());
+
+        // An explicit denial of a deny-only right still refuses.
+        authority.denied_effects.insert("Mem.Rc".to_string());
+        let diagnostic = authority.policy_diagnostic().expect("E1803");
+        assert!(diagnostic.what.contains("Mem.Rc"), "{}", diagnostic.what);
     }
 
     #[test]

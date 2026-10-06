@@ -24,6 +24,17 @@ AUTHORITY_APPLICATION_DEFAULT :: prep { "application default" }
 AUTHORITY_PACKAGE_DEFAULT :: prep { "package.jet default" }
 // The deny-only stop root (D-PANICROOT1).
 AUTHORITY_PANIC_ROOT :: prep { "Panic" }
+// jet_foundation::Syntax::EFFECT_LEAF_TIME_WAIT: waiting on the program's own
+// work, a deny-only leaf (D-AUTH-AMBIENT2=A).
+AUTHORITY_TIME_WAIT_LEAF :: prep { "Time.Wait" }
+
+// jet_foundation::Authority::is_deny_only: `Panic`, the `Mem` root and the
+// `Time.Wait` leaf may be refused but never have to be granted, so the
+// application policy never asks for them or writes them into `allow:`.
+pub fn authority_is_deny_only(right: String) -> Bool Never! {
+    root :: authority_root(right)
+    root == AUTHORITY_PANIC_ROOT || root == "Mem" || right == AUTHORITY_TIME_WAIT_LEAF
+}
 
 // The one verdict every checkpoint answers.
 pub enum AuthorityVerdict {
@@ -253,22 +264,22 @@ pub struct ApplicationAuthority {
         self.is_application_default() || self.authority.starts_with(AUTHORITY_PACKAGE_DEFAULT)
     }
 
-    // The complete `allow:` row a manifest-less program must declare; `Panic`
-    // is deny-only and never a positive grant.
+    // The complete `allow:` row a manifest-less program must declare;
+    // deny-only rows (`Panic`, `Mem`, `Time.Wait`) are never a positive grant.
     fn inline_allow_row(self) -> [String] Never! {
         out := [String]{}
         loop effect_name in self.required_effects {
-            if authority_root(effect_name) != AUTHORITY_PANIC_ROOT -> &out.push(effect_name)
+            if !authority_is_deny_only(effect_name) -> &out.push(effect_name)
         }
         authority_holds(out)
     }
 
-    // Required effects with no policy verdict. `Panic` is not a positive
-    // request; an explicit `Panic` denial is still reported as denied.
+    // Required effects with no policy verdict. Deny-only rows are not positive
+    // requests; an explicit denial of one is still reported as denied.
     fn undecided_effects(self) -> [String] Never! {
         out := [String]{}
         loop effect_name in self.required_effects {
-            if authority_root(effect_name) == AUTHORITY_PANIC_ROOT -> next
+            if authority_is_deny_only(effect_name) -> next
             if authority_answer(self.granted_effects, self.denied_effects, effect_name) == AuthorityVerdict.Missing -> &out.push(effect_name)
         }
         authority_holds(out)
