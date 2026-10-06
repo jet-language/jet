@@ -1080,7 +1080,7 @@ fn run() -[Exec, FS, IO, Net, Time.Wait]> {
     assert_eq!(stdout, expected);
     let file = dir.join("ioerror_tree.jet");
     fs::write(&file, source).unwrap();
-    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(file.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, expected, ""));
         }
@@ -1160,28 +1160,15 @@ fn run() {
     assert!(!aot_stdout.contains("<enum IOOperation>"));
     let file = dir.join("ioerror_debug.jet");
     fs::write(&file, source).unwrap();
-    jet_jit::reset_jit_trace_for_test();
-    let default_jit_stdout = match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
+    let default_jit_stdout = match crate::common::dev_run(file.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, expected, ""));
             stdout
         }
         other => panic!("IOError Show/Debug did not run in default JIT: {other:?}"),
     };
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "IOError Show/Debug must execute in resident JIT"
-    );
-    assert!(
-        !jet_jit::deopt_invoked_for_test(),
-        "IOError Show/Debug must not deopt"
-    );
-    assert!(
-        !jet_jit::fallback_invoked_for_test(),
-        "IOError Show/Debug must not fall back"
-    );
 
-    let forced_interpreter_stdout = match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, true) {
+    let forced_interpreter_stdout = match crate::common::dev_run(file.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, expected, ""));
             stdout
@@ -1262,7 +1249,7 @@ fn card_2417_ioerror_fixture_matches_aot_default_jit_and_interpreter() {
     let file = dir.join("ioerror_display_migration.jet");
     fs::write(&file, &source).unwrap();
     let default_jit_stdout =
-        match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
+        match crate::common::dev_run(file.to_str().unwrap(), false, false) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -1274,7 +1261,7 @@ fn card_2417_ioerror_fixture_matches_aot_default_jit_and_interpreter() {
             other => panic!("Card #2417 IOError fixture failed in default JIT: {other:?}"),
         };
     let forced_interpreter_stdout =
-        match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, true) {
+        match crate::common::dev_run(file.to_str().unwrap(), false, true) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,

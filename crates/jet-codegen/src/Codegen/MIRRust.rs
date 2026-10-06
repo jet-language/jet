@@ -1441,16 +1441,10 @@ fn select_artifact(
     let target_ok = match (target, plan.target) {
         (MirRustTarget::Native, MirArtifactTarget::RustAot) => true,
         (MirRustTarget::WebWasm, MirArtifactTarget::Web) => true,
-        (
-            MirRustTarget::Native,
-            MirArtifactTarget::Cranelift | MirArtifactTarget::Interpreter | MirArtifactTarget::Web,
-        )
-        | (
-            MirRustTarget::WebWasm,
-            MirArtifactTarget::RustAot
-            | MirArtifactTarget::Cranelift
-            | MirArtifactTarget::Interpreter,
-        ) => false,
+        (MirRustTarget::Native, MirArtifactTarget::Interpreter | MirArtifactTarget::Web)
+        | (MirRustTarget::WebWasm, MirArtifactTarget::RustAot | MirArtifactTarget::Interpreter) => {
+            false
+        }
     };
     let kind_ok = match (target, plan.kind) {
         (
@@ -14004,7 +13998,6 @@ impl<'a> RustEmitter<'a> {
         }
         let _ = writeln!(out, "fn __jet_harness_run() -> bool {{");
         let _ = writeln!(out, "    jet_test_install_panic_hook();");
-        let _ = writeln!(out, "    jet_test_trace_tier();");
         if self.coverage_enabled() {
             for (id, function) in self.coverage_branch_rows() {
                 let _ = writeln!(
@@ -14176,7 +14169,6 @@ impl<'a> RustEmitter<'a> {
             );
             let _ = writeln!(out, "fn __jet_fuzz_run() {{");
             let _ = writeln!(out, "    jet_test_install_panic_hook();");
-            let _ = writeln!(out, "    jet_test_trace_tier();");
             let _ = writeln!(
                 out,
                 "    let __jet_name = {name_literal};\n\
@@ -17620,8 +17612,8 @@ impl<'a> RustEmitter<'a> {
     }
 
     /// #4318 §8: whether the transfer `value` (`transparent_read`) is never
-    /// made: every user is a variant test, payload read or primitive
-    /// comparison, which render through the read's place
+    /// made: every user is a variant test, payload read, primitive
+    /// comparison or print, which render through the read's place
     /// (`inspected_value_reference`), or a drop, and each of them may read
     /// that place (`direct_borrow_only`). Any other borrowed consumer would
     /// name the transfer's slot, so it keeps the transfer.
@@ -17638,6 +17630,7 @@ impl<'a> RustEmitter<'a> {
                             | MirOperation::ResultIsOk { .. }
                             | MirOperation::ResultValue { .. }
                             | MirOperation::Binary { dispatch: MirBinaryDispatch::Primitive, .. }
+                            | MirOperation::Semantic(MirSemanticOp::Print { .. })
                             | MirOperation::Drop { .. }
                     )
                 })
@@ -18190,7 +18183,17 @@ impl<'a> RustEmitter<'a> {
             } => {
                 (*left == value || *right == value)
                     && self.comparison_by_reference(function, *op, *left)
-                    && self.immutable_read_place(function, value).is_some()
+                    && (self.immutable_read_place(function, value).is_some()
+                        || self.literal_string_value(function, value).is_some()
+                            && self.string_equality_operand(function, *op, *left, *right, value))
+            }
+            // Printing only reads its value (`print_borrows_value`): over a
+            // stable place it prints the place; a literal prints its text.
+            MirOperation::Semantic(MirSemanticOp::Print { value: printed, .. }) => {
+                *printed == value
+                    && self.print_borrows_value(function, value)
+                    && (self.immutable_read_place(function, value).is_some()
+                        || self.literal_string_value(function, value).is_some())
             }
             _ => false,
         }
@@ -18281,6 +18284,40 @@ impl<'a> RustEmitter<'a> {
             .unwrap_or_else(|| panic!("MIR value ID {:?} has no ownership row", value));
         function.values[*row].3
     }
+    /// A test or fuzz artifact prints through `jet_test_print`, which takes
+    /// an owned String; every other artifact writes a borrowed `&str`.
+    fn print_consumes_value(&self) -> bool {
+        matches!(
+            self.artifact.kind,
+            MirArtifactKind::TestExecutable
+                | MirArtifactKind::FuzzExecutable
+                | MirArtifactKind::TestOverride
+        )
+    }
+
+    /// Whether `print(value)` only reads `value`: always, except a test
+    /// print of a String, which consumes it (`print_consumes_value`).
+    fn print_borrows_value(&self, function: &MirFunction, value: MirValueId) -> bool {
+        !self.print_consumes_value()
+            || !matches!(self.value_type(function, value).kind(), MirTypeKind::String)
+    }
+
+    /// An equality test of two Strings, one of them `value`: `==`/`!=` with
+    /// a `str` operand needs no owned String (`String: PartialEq<str>`).
+    fn string_equality_operand(
+        &self,
+        function: &MirFunction,
+        op: MirBinaryOp,
+        left: MirValueId,
+        right: MirValueId,
+        value: MirValueId,
+    ) -> bool {
+        matches!(op, MirBinaryOp::Eq | MirBinaryOp::Ne)
+            && (left == value || right == value)
+            && matches!(self.value_type(function, left).kind(), MirTypeKind::String)
+            && matches!(self.value_type(function, right).kind(), MirTypeKind::String)
+    }
+
     fn literal_borrow_only(&self, function: &MirFunction, value: MirValueId) -> bool {
         if self.literal_string_value(function, value).is_none() {
             return false;
@@ -18308,6 +18345,17 @@ impl<'a> RustEmitter<'a> {
                         )
                         && self.borrowed_literal_route(*route)
                 }),
+                // A printed literal is written from its static text.
+                MirOperation::Semantic(MirSemanticOp::Print { value: printed, .. }) => {
+                    *printed == value && !self.print_consumes_value()
+                }
+                // A compared literal is a `str` operand.
+                MirOperation::Binary {
+                    op,
+                    dispatch: MirBinaryDispatch::Primitive,
+                    left,
+                    right,
+                } => self.string_equality_operand(function, *op, *left, *right, value),
                 _ => false,
             };
             if !allowed {
@@ -22198,8 +22246,16 @@ impl<'a> RustEmitter<'a> {
                 if self.comparison_by_reference(function, op, left) {
                     // D-MEM-COPYSEM1: a comparison only inspects its
                     // operands, so it compares them in place, never copies.
-                    let operand =
-                        |value| format!("(*{})", self.inspected_value_reference(function, value));
+                    // A String literal tested for equality is its static
+                    // `str` (`string_equality_operand`).
+                    let operand = |value| match self.literal_string_value(function, value) {
+                        Some(text)
+                            if self.string_equality_operand(function, op, left, right, value) =>
+                        {
+                            format!("(*{text:?})")
+                        }
+                        _ => format!("(*{})", self.inspected_value_reference(function, value)),
+                    };
                     return self.binary(op, operand(left), operand(right));
                 }
                 self.exact_int_binary(function, op, left, right, location)
@@ -29177,23 +29233,29 @@ impl<'a> RustEmitter<'a> {
             MirSemanticOp::MathBuiltin { call, args, .. }
             | MirSemanticOp::PreciseBuiltin { call, args, .. } => self.prelude_values(*call, args),
             MirSemanticOp::Print { call, value } => {
-                let test_print = matches!(
-                    self.artifact.kind,
-                    MirArtifactKind::TestExecutable
-                        | MirArtifactKind::FuzzExecutable
-                        | MirArtifactKind::TestOverride
-                );
-                // Printing only reads its value: it borrows it. A test print
-                // takes a String, so it consumes the value at its single use.
+                let test_print = self.print_consumes_value();
+                // Printing only reads its value: it borrows it, in the place a
+                // stable read names (`inspected_value_reference`), so a read
+                // of a local or parameter is never copied first. A literal
+                // is printed from its static text. A test print takes a
+                // String, so it consumes the value at its single use.
+                if !test_print {
+                    if let Some(text) = self.literal_string_value(function, *value) {
+                        return format!(
+                            "{{ let _ = {}; }}",
+                            self.prelude_call_args(*call, &[format!("{text:?}"), "true".to_string()])
+                        );
+                    }
+                }
                 let value_expr = if !matches!(
                     self.value_type(function, *value).kind(),
                     MirTypeKind::String
                 ) {
-                    format!("({}).jet_show()", self.value_borrow(*value))
+                    format!("({}).jet_show()", self.inspected_value_reference(function, *value))
                 } else if test_print {
                     self.value_consume(function, *value)
                 } else {
-                    format!("*{}", self.value_borrow(*value))
+                    format!("*{}", self.inspected_value_reference(function, *value))
                 };
                 if test_print {
                     format!("jet_test_print({value_expr})")
@@ -30543,9 +30605,15 @@ impl<'a> RustEmitter<'a> {
             return format!("({}).into_bytes()", self.value_move(receiver));
         }
         let receiver_value = receiver;
+        // Routes whose borrowed operands are all `&str`: a String literal
+        // operand passes its static text instead of building a String.
         let literal_string_iter_route = matches!(
             row.symbol.name(),
-            "jet_iter_string_split" | "jet_iter_string_rsplit"
+            "jet_iter_string_split"
+                | "jet_iter_string_rsplit"
+                | "jet_string_contains"
+                | "jet_string_starts_with"
+                | "jet_string_ends_with"
         );
         let receiver = if literal_string_iter_route
             && receiver_place.is_none()

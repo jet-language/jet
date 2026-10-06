@@ -64,18 +64,14 @@ fn odd(n: Int) -> Bool {
     let path = file.to_str().unwrap();
 
     let outcomes = [
-        ("jit", jet::Interpreter::run_jit_once(path)),
+        ("default", crate::common::dev_run(path, false, false)),
         (
             "interpreter",
             jet::Interpreter::run_interpreter_once_with_args(path, &[]),
         ),
         (
-            "dev-jit",
-            jet::Interpreter::dev_iteration(path, false, false),
-        ),
-        (
             "dev-interpreter",
-            jet::Interpreter::dev_iteration(path, false, true),
+            crate::common::dev_run(path, false, true),
         ),
     ];
     for (tier, outcome) in outcomes {
@@ -246,22 +242,20 @@ fn loose_statements_are_rejected_even_with_explicit_run() {
 }
 
 #[test]
-fn explicit_run_matches_default_jit_and_forced_interpreter() {
+fn explicit_run_matches_default_run_and_forced_interpreter() {
     let dir = std::env::temp_dir().join(format!("jet_explicit_run_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("main.jet");
     std::fs::write(&file, "fn run() { print(\"script entry\") }\n").unwrap();
     let path = file.to_str().unwrap();
-    let jit = jet::Interpreter::run_jit_once(path);
+    let default_run = crate::common::dev_run(path, false, false);
     let interpreter = jet::Interpreter::run_interpreter_once_with_args(path, &[]);
-    let dev_jit = jet::Interpreter::dev_iteration(path, false, false);
-    let dev_interpreter = jet::Interpreter::dev_iteration(path, false, true);
+    let dev_interpreter = crate::common::dev_run(path, false, true);
     let _ = std::fs::remove_dir_all(&dir);
     for (tier, outcome) in [
-        ("jit", jit),
+        ("default", default_run),
         ("interpreter", interpreter),
-        ("dev-jit", dev_jit),
         ("dev-interpreter", dev_interpreter),
     ] {
         let jet::Interpreter::RunOutcome::Ran {
@@ -539,7 +533,7 @@ fn run() StoreErr! {
     let interpreter_path = interpreter_dir.join("main.jet");
     std::fs::write(&interpreter_path, src).unwrap();
     let interpreter =
-        jet::Interpreter::dev_iteration(interpreter_path.to_str().unwrap(), false, true);
+        crate::common::dev_run(interpreter_path.to_str().unwrap(), false, true);
     let _ = std::fs::remove_dir_all(&interpreter_dir);
     match interpreter {
         jet::Interpreter::RunOutcome::Ran {

@@ -1,7 +1,10 @@
-// ELF64 output for x86-64 Linux: a static executable with one read+execute
-// PT_LOAD segment that maps the whole file (headers and text) at
-// ELF64_BASE_ADDRESS. No segment is writable. Section headers are omitted;
-// the kernel loads executables from program headers alone.
+// ELF64 output for x86-64 Linux: a static executable whose read+execute
+// PT_LOAD segment maps the headers and code at ELF64_BASE_ADDRESS. A module
+// with data gets a second, read+write PT_LOAD for it: Image/Link.jet starts
+// the data on a page of its own (x64_link_text `data_page`), and startup
+// fixups (Lower/Statics.jet) store runtime handles into it. No page is both
+// writable and executable. Section headers are omitted; the kernel loads
+// executables from program headers alone.
 
 ELF64_BASE_ADDRESS :: prep { 0x400000 }
 ELF64_HEADER_SIZE :: prep { 64 }
@@ -24,13 +27,33 @@ fn elf64_u64(bytes: &[U8], value: Int) Never! {
     loop shift in 0..<8 -> &bytes.push(U8{(value >> (8 * shift)) & 255})
 }
 
-// The file: ELF header, one program header, alignment padding, then `text`;
-// execution starts at `entry_offset` within `text`. The origin preserves the
-// linker's relative function and data alignments at their absolute addresses.
-pub fn elf64_static_executable(text: [U8], entry_offset: Int, text_align: Int) -> [U8] Never! {
-    header_size :: ELF64_HEADER_SIZE + ELF64_PROGRAM_HEADER_SIZE
-    text_offset :: header_size + (text_align - (ELF64_BASE_ADDRESS + header_size) % text_align) % text_align
-    file_size :: text_offset + text.len()
+fn elf64_load_header(bytes: &[U8], flags: Int, offset: Int, size: Int) Never! {
+    elf64_u32(&bytes, 1)
+    elf64_u32(&bytes, flags)
+    elf64_u64(&bytes, offset)
+    elf64_u64(&bytes, ELF64_BASE_ADDRESS + offset)
+    elf64_u64(&bytes, ELF64_BASE_ADDRESS + offset)
+    elf64_u64(&bytes, size)
+    elf64_u64(&bytes, size)
+    elf64_u64(&bytes, 0x1000)
+}
+
+// Where `text` starts in the file: after the ELF header, one program header
+// per segment, and the padding that aligns its absolute origin.
+fn elf64_text_offset(origin_align: Int, has_data: Bool) -> Int Never! {
+    header_size :: ELF64_HEADER_SIZE + ELF64_PROGRAM_HEADER_SIZE * (if has_data -> 2 else -> 1)
+    padding :: (origin_align - (ELF64_BASE_ADDRESS + header_size) % origin_align) % origin_align
+    header_size + padding
+}
+
+// The file: ELF header, program headers, alignment padding, then `text`
+// (code, then data from `data_offset`, page-aligned when present); execution
+// starts at `entry_offset` within `text`. ELF64 PT_LOAD congruence still uses
+// the page-aligned mapping base; padding aligns the absolute text origin,
+// including when `origin_align` exceeds the base's divisibility.
+pub fn elf64_static_executable(text: [U8], entry_offset: Int, origin_align: Int, data_offset: Int) -> [U8] Never! {
+    has_data :: data_offset < text.len()
+    text_offset :: elf64_text_offset(origin_align, has_data)
     bytes := [U8]{}
     // e_ident: magic, ELFCLASS64, ELFDATA2LSB, EV_CURRENT, System V ABI, padding.
     ident :: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -44,19 +67,13 @@ pub fn elf64_static_executable(text: [U8], entry_offset: Int, text_align: Int) -
     elf64_u32(&bytes, 0)
     elf64_u16(&bytes, ELF64_HEADER_SIZE)
     elf64_u16(&bytes, ELF64_PROGRAM_HEADER_SIZE)
-    elf64_u16(&bytes, 1)
+    elf64_u16(&bytes, if has_data -> 2 else -> 1)
     elf64_u16(&bytes, 0)
     elf64_u16(&bytes, 0)
     elf64_u16(&bytes, 0)
-    // PT_LOAD, PF_R | PF_X, the whole file at the base address.
-    elf64_u32(&bytes, 1)
-    elf64_u32(&bytes, 5)
-    elf64_u64(&bytes, 0)
-    elf64_u64(&bytes, ELF64_BASE_ADDRESS)
-    elf64_u64(&bytes, ELF64_BASE_ADDRESS)
-    elf64_u64(&bytes, file_size)
-    elf64_u64(&bytes, file_size)
-    elf64_u64(&bytes, 0x1000)
+    // PT_LOAD PF_R | PF_X: headers and code; PT_LOAD PF_R | PF_W: the data.
+    elf64_load_header(&bytes, 5, 0, text_offset + data_offset)
+    if has_data -> elf64_load_header(&bytes, 6, text_offset + data_offset, text.len() - data_offset)
     loop bytes.len() < text_offset -> &bytes.push(U8{0})
     loop byte in text -> &bytes.push(byte)
     bytes
@@ -91,9 +108,8 @@ pub fn x64_static_executable(program: LIRModule, entry: LIRFunctionID) -> X64Exe
     if compiled.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: compiled.errors}
     functions := [X64CompiledFunction]{x64_start_stub(entry, signature.result != None)}
     loop function in compiled.functions -> &functions.push(function)
-    linked :: x64_link_text(functions, x64_image_runtime(), program.data)
+    linked := x64_link_text(functions, x64_image_runtime(), program.data, true)
     if linked.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: linked.errors}
-    text_align := X64_FUNCTION_ALIGN
-    loop object in program.data { if object.align > text_align -> text_align = object.align }
-    X64ExecutableResult{bytes: elf64_static_executable(linked.text, linked.offsets[0], text_align), errors: [String]{}}
+    x64_link_static_text(&linked)
+    X64ExecutableResult{bytes: elf64_static_executable(linked.text, linked.offsets[0], linked.align, linked.data_offset), errors: [String]{}}
 }

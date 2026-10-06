@@ -1303,35 +1303,35 @@ fn jet_codegen_handle_arg_is_host_borrow_callback(argument: TExpr) -> Bool Never
     }
 }
 
-fn jet_codegen_lower_handle_argument(builder: &JetCodegenBuilder, operation: THandleOp, index: Int, argument: TExpr) -> MIRValueID {
+fn jet_codegen_lower_handle_argument(builder: &JetCodegenBuilder, program: JetCodegenProgram, operation: THandleOp, index: Int, argument: TExpr) -> MIRValueID {
     if operation == {
         .EventMethod(method) -> {
             if method == "on_priority" {
-                if index == 1 -> return jet_codegen_lower_handle_native_int(&builder, argument)
+                if index == 1 -> return jet_codegen_lower_handle_native_int(&builder, program, argument)
             }
         }
         else -> {}
     }
     if operation == {
         .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .UDPSocketReceiveDeadline | .UnixStreamReadDeadline | .TLSStreamReadDeadline -> {
-            if index == 0 -> return jet_codegen_lower_handle_native_int(&builder, argument)
+            if index == 0 -> return jet_codegen_lower_handle_native_int(&builder, program, argument)
         }
         else -> {}
     }
-    jet_codegen_lower_expr(&builder, argument)
+    jet_codegen_lower_expr(&builder, program, argument)
 }
 
-fn jet_codegen_lower_handle_arguments(builder: &JetCodegenBuilder, operation: THandleOp, args: [TExpr]) -> [MIRValueID] {
+fn jet_codegen_lower_handle_arguments(builder: &JetCodegenBuilder, program: JetCodegenProgram, operation: THandleOp, args: [TExpr]) -> [MIRValueID] {
     values := [MIRValueID?]{}
     loop _ in args -> &values.push(None)
     index := 0
     loop index < args.len() {
-        if !jet_codegen_handle_arg_is_host_borrow_callback(args[index]) -> values[index] = Val(jet_codegen_lower_handle_argument(&builder, operation, index, args[index]))
+        if !jet_codegen_handle_arg_is_host_borrow_callback(args[index]) -> values[index] = Val(jet_codegen_lower_handle_argument(&builder, program, operation, index, args[index]))
         index += 1
     }
     index = 0
     loop index < args.len() {
-        if jet_codegen_handle_arg_is_host_borrow_callback(args[index]) -> values[index] = Val(jet_codegen_lower_handle_argument(&builder, operation, index, args[index]))
+        if jet_codegen_handle_arg_is_host_borrow_callback(args[index]) -> values[index] = Val(jet_codegen_lower_handle_argument(&builder, program, operation, index, args[index]))
         index += 1
     }
     lowered := [MIRValueID]{}
@@ -1339,9 +1339,9 @@ fn jet_codegen_lower_handle_arguments(builder: &JetCodegenBuilder, operation: TH
     lowered
 }
 
-fn jet_codegen_lower_handle_native_int(builder: &JetCodegenBuilder, value: TExpr) -> MIRValueID {
-    if !jet_codegen_numeric_plain_int(value.ty) -> return jet_codegen_lower_expr(&builder, value)
-    location := jet_codegen_source_location_at(&builder, value.span, false)
+fn jet_codegen_lower_handle_native_int(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: TExpr) -> MIRValueID {
+    if !jet_codegen_numeric_plain_int(value.ty) -> return jet_codegen_lower_expr(&builder, program, value)
+    location := jet_codegen_source_location_at(&builder, program, value.span, false)
     converted := TExpr{
         ty: Type.IntN{signed: true, bits: 64},
         kind: TExprKind.NumericMethod{receiver: value, operation: TNumericOp.CheckedIntToFixed{host_kind: 3, dst_rust: "i64", dst_spelling: "I64", line: location.line}},
@@ -1349,7 +1349,7 @@ fn jet_codegen_lower_handle_native_int(builder: &JetCodegenBuilder, value: TExpr
         integer_bounds: None,
         cost: None,
     }
-    jet_codegen_lower_expr(&builder, converted)
+    jet_codegen_lower_expr(&builder, program, converted)
 }
 
 fn jet_codegen_lower_frame_schedule(schedule: FrameSchedule?) -> MIRFrameSchedule? {
@@ -1408,7 +1408,7 @@ fn jet_codegen_handle_receiver_is_mutating(operation: THandleOp) -> Bool Never! 
     }
 }
 
-fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MIRValueID {
+fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MIRValueID {
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     route_value := jet_codegen_general_handle_route(operation, receiver.ty, args.len(), carrier)
     if route_value == None -> panic("checked THandleOp requires a dedicated lowering body or an unregistered closed route")
@@ -1426,56 +1426,56 @@ fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, expressi
         values := [MIRCallArg]{}
         index := 0
         loop index < args.len() {
-            value := jet_codegen_lower_expr(&builder, args[index])
+            value := jet_codegen_lower_expr(&builder, program, args[index])
             access := if route.borrow_mask[index] -> MIRAccess.Read else -> MIRAccess.Move
             &values.push(jet_codegen_host_call_value_arg(value, args[index].span, access, None))
             index += 1
         }
-        call := jet_codegen_intern_route(&builder, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
-        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: call, args: values, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
+        call := jet_codegen_intern_route(&builder, program, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
+        return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: call, args: values, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
     }
 
     if operation == THandleOp.TaskJoin || operation == THandleOp.TaskDetach {
         if args.len() != 0 -> panic("checked consuming task operation takes no arguments")
-        receiver_value := jet_codegen_lower_consuming_task_value(&builder, receiver)
-        call := jet_codegen_intern_route(&builder, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
-        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: call, receiver: receiver_value, args: [MIRValueID]{}, frame_schedule: None, frame_schedule_derivation: None}})
+        receiver_value := jet_codegen_lower_consuming_value(&builder, program, receiver)
+        call := jet_codegen_intern_route(&builder, program, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
+        return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: call, receiver: receiver_value, args: [MIRValueID]{}, frame_schedule: None, frame_schedule_derivation: None}})
     }
 
     lowered_receiver := if {
         jet_codegen_handle_receiver_is_mutating(operation) -> {
-            jet_codegen_method_receiver_arg(&builder, receiver, MIRAccess.Write).value
+            jet_codegen_method_receiver_arg(&builder, program, receiver, MIRAccess.Write).value
         }
         else -> {
-            jet_codegen_lower_expr(&builder, receiver)
+            jet_codegen_lower_expr(&builder, program, receiver)
         }
     }
-    lowered_args := jet_codegen_lower_handle_arguments(&builder, operation, args)
+    lowered_args := jet_codegen_lower_handle_arguments(&builder, program, operation, args)
     if route.family == MIRPreludeFamily.ClosureMethod {
         if route.borrow_mask.len() != args.len() + 1 -> panic("checked closure-style handle route has an invalid operand count")
         closure_args := [MIRCallArg]{}
         index := 0
         loop index < args.len() {
             value := lowered_args[index]
-            access := jet_codegen_host_value_access(builder, value, route.borrow_mask[index + 1])
+            access := jet_codegen_host_value_access(builder, program, value, route.borrow_mask[index + 1])
             &closure_args.push(jet_codegen_host_call_value_arg(value, args[index].span, access, None))
             index += 1
         }
-        call := jet_codegen_intern_route(&builder, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
-        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.ClosureMethod{receiver: lowered_receiver, args: closure_args, call: call}})
+        call := jet_codegen_intern_route(&builder, program, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
+        return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.ClosureMethod{receiver: lowered_receiver, args: closure_args, call: call}})
     }
     if operation == {
         .DurationNew(unit, _) -> {
             if route.borrow_mask.len() != 2 -> panic("checked Duration constructor route has an invalid closed ABI")
-            type_id := jet_codegen_type_instance_id(Type.Named{name: "DurationUnit"}, builder.modules, builder.function.module_identity, builder.generic_type_names)
-            unit_value := jet_codegen_emit_value(&builder, expression.span, Type.Named{name: "DurationUnit"}, MIROperation.Enum{type_id: type_id, variant: unit, args: [MIREnumArg]{}})
+            type_id := jet_codegen_type_instance_id(Type.Named{name: "DurationUnit"}, program.modules, builder.function.module_identity, builder.generic_type_names)
+            unit_value := jet_codegen_emit_value(&builder, program, expression.span, Type.Named{name: "DurationUnit"}, MIROperation.Enum{type_id: type_id, variant: unit, args: [MIREnumArg]{}})
             &lowered_args.push(unit_value)
         }
         else -> {}
     }
     expected_args := if route.borrow_mask.len() == 0 -> 0 else -> route.borrow_mask.len() - 1
     if lowered_args.len() != expected_args -> panic("checked handle argument arity disagrees with its closed route")
-    call := jet_codegen_intern_route(&builder, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
+    call := jet_codegen_intern_route(&builder, program, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
     frame_schedule := if operation == {
         .GameSceneOnFrame(schedule, _) -> jet_codegen_lower_frame_schedule(schedule)
         else -> None
@@ -1486,5 +1486,5 @@ fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, expressi
         }
         else -> None
     }
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: call, receiver: lowered_receiver, args: lowered_args, frame_schedule: frame_schedule, frame_schedule_derivation: frame_schedule_derivation}})
+    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: call, receiver: lowered_receiver, args: lowered_args, frame_schedule: frame_schedule, frame_schedule_derivation: frame_schedule_derivation}})
 }

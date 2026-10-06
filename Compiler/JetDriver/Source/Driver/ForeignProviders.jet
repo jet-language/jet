@@ -1166,7 +1166,7 @@ fn jet_driver_foreign_rewrite_module(load: &JetDriverLoadResult, surface: JetDri
     source_unit_index :: load.source_units.len()
     root_identity :: jet_driver_foreign_root_identity(load, surface.root_index)
     loop generated_file in canonical.generated_source_files -> jet_driver_add_source_file(&load.generated_source_files, generated_file, &diagnostics)
-    &load.source_units.push(JetDriverSourceUnit{root_index: surface.root_index, file_index: -1, root_identity: root_identity, package_identity: package, module_name: "__c_{surface.module_library}", path: aggregate_path, relative_path: aggregate_path, source_segments: canonical.source_segments, source_origin: SemaSourceOrigin.CompilerGenerated})
+    &load.source_units.push(JetDriverSourceUnit{root_index: surface.root_index, file_index: -1, root_identity: root_identity, package_identity: package, module_name: "__c_{surface.module_library}", path: aggregate_path, relative_path: aggregate_path, source_segments: canonical.source_segments, source_origin: SemaSourceOrigin.CompilerGenerated, in_namespace: false})
     synthetic := JetDriverLoadedModule{source_unit_index: source_unit_index, source_identity: source_identity, package_identity: package, module_identity: module_identity, module_name: "__c_{surface.module_library}", program: ^rewritten}
     &load.modules.push(^synthetic)
     Val(module_identity)

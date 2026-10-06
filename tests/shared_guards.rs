@@ -2,7 +2,6 @@
 
 mod common;
 
-use jet::JitBackend::JitBackend;
 use std::fs;
 use std::process::Command;
 
@@ -267,26 +266,14 @@ fn assert_native_and_default(source: &str, expected: &str, tag: &str) {
         .collect::<Vec<_>>();
     assert!(errors.is_empty(), "{errors:?}");
 
-    let policy = common::development_policy();
-    let mut backend = jet_jit::CraneliftBackend::new();
-    let plan = common::cranelift_tier_plan(&bundle);
-    jet_jit::reset_jit_trace_for_test();
-    match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
-        jet::Interpreter::RunOutcome::Ran { stdout, .. } => {
-            assert!(
-                !jet_jit::deopt_invoked_for_test(),
-                "{plan:?} strict={:?}",
-                common::cranelift_strict_run(&bundle, &policy)
-            );
-            assert!(!jet_jit::fallback_invoked_for_test());
-            assert_eq!(stdout, expected);
-        }
+    match crate::common::dev_run(default_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, expected),
         jet::Interpreter::RunOutcome::Problems(diagnostics) => {
             panic!("default SharedGuard tier failed: {diagnostics:?}")
         }
     }
 
-    match jet::Interpreter::dev_iteration(default_path.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(default_path.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, expected),
         jet::Interpreter::RunOutcome::Problems(diagnostics) => {
             panic!("forced SharedGuard interpreter failed: {diagnostics:?}")

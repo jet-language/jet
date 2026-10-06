@@ -57,8 +57,7 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         true,
         &[true, true, true, true, true, true, true],
     )
-    .with_max_arity(7)
-    .with_jit_symbol("jet_jit_auth_verify_paseto"),
+    .with_max_arity(7),
     CoreCallRecord::new(
         "core.http.server",
         "cors_policy",
@@ -68,7 +67,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     )
     .with_max_arity(7)
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-    .with_jit_symbol("jet_jit_http_cors_policy")
     .without_direct_aot(),
     CoreCallRecord::new(
         "core.encoding.json",
@@ -77,18 +75,15 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         true,
         &[true],
     )
-    .with_max_arity(2)
-    .with_jit_symbol("jet_jit_json_canonical"),
+    .with_max_arity(2),
     CoreCallRecord::new(
         "core.encoding.xml",
         "expanded_name",
         "jet_std_xml_expanded_name",
         true,
         &[true],
-    )
-    .with_jit_symbol("jet_jit_xml_expanded_name"),
+    ),
     CoreCallRecord::new("core.email", "smtp", "jet_email::smtp", true, &[true])
-        .with_jit_symbol("jet_jit_email_smtp")
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.email",
@@ -97,7 +92,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         true,
         &[],
     )
-    .with_jit_symbol("jet_jit_email_smtp_from_env")
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.encoding.toml",
@@ -105,34 +99,29 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         "jet_enc_toml_decode",
         true,
         &[true],
-    )
-    .without_direct_jit(),
+    ),
     CoreCallRecord::new(
         "core.encoding.yaml",
         "decode",
         "jet_enc_yaml_decode",
         true,
         &[true],
-    )
-    .without_direct_jit(),
+    ),
     CoreCallRecord::new(
         "core.data",
         "bar_svg",
         "jet_data_bar_svg_checked",
         true,
         &[true],
-    )
-    .with_jit_symbol("jet_jit_data_bar_svg"),
+    ),
     CoreCallRecord::new(
         "core.data",
         "line_text",
         "jet_data_line_text_plot_checked",
         true,
         &[true, true],
-    )
-    .with_jit_symbol("jet_jit_data_line_text"),
+    ),
     CoreCallRecord::new("core.data", "mean", "jet_data_mean_checked", true, &[true])
-        .without_direct_jit()
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.service",
@@ -142,7 +131,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         &[],
     )
     .without_direct_aot()
-    .without_direct_jit()
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.service",
@@ -152,7 +140,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         &[],
     )
     .without_direct_aot()
-    .without_direct_jit()
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.service",
@@ -162,7 +149,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         &[],
     )
     .without_direct_aot()
-    .without_direct_jit()
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.sync",
@@ -260,8 +246,7 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         &[true, true],
     )
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-    .without_direct_aot()
-    .with_jit_symbol("jet_jit_web_storage_local_set"),
+    .without_direct_aot(),
     CoreCallRecord::new(
         "core.net",
         "dns_ptr",
@@ -269,8 +254,7 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         true,
         &[true, false],
     )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-    .with_jit_symbol("jet_jit_net_dns_ptr"),
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.net",
         "dns_txt",
@@ -278,8 +262,7 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         true,
         &[true, false],
     )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-    .with_jit_symbol("jet_jit_net_dns_txt"),
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.net",
         "dns_srv",
@@ -287,8 +270,7 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         true,
         &[true, false],
     )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-    .with_jit_symbol("jet_jit_net_dns_srv"),
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.net",
         "set_timeout",
@@ -296,8 +278,7 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         true,
         &[true, false],
     )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-    .with_jit_symbol("jet_jit_net_set_timeout"),
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.net",
         "sendfile",
@@ -306,7 +287,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         &[true, false],
     )
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-    .with_jit_symbol("jet_jit_net_sendfile")
     .with_native_int_result(),
     CoreCallRecord::new(
         "core.crypto.vault",
@@ -315,11 +295,9 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         false,
         &[true],
     )
-    .with_jit_symbol("jet_jit_vault_get")
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
     .without_direct_aot(),
     CoreCallRecord::new("app", "auth", "jet_app_auth", true, &[true])
-        .with_jit_symbol("jet_jit_app_auth")
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "app",
@@ -328,7 +306,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         true,
         &[true, true],
     )
-    .with_jit_symbol("jet_jit_app_auth_oauth")
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.encoding.json",
@@ -338,7 +315,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         &[false, false],
     )
     .with_max_arity(3)
-    .with_jit_symbol("jet_jit_json_writer")
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.encoding.json",
@@ -348,12 +324,10 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         &[false],
     )
     .with_max_arity(2)
-    .with_jit_symbol("jet_jit_json_reader")
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.compiler", "lex", "jet_compiler_lex", true, &[true])
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-        .without_direct_aot()
-        .without_direct_jit(),
+        .without_direct_aot(),
     CoreCallRecord::new(
         "core.compiler",
         "parse",
@@ -362,8 +336,7 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         &[true],
     )
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-    .without_direct_aot()
-    .without_direct_jit(),
+    .without_direct_aot(),
     CoreCallRecord::new(
         "core.compiler",
         "check",
@@ -372,8 +345,7 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         &[true],
     )
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-    .without_direct_aot()
-    .without_direct_jit(),
+    .without_direct_aot(),
     CoreCallRecord::new(
         "core.compiler",
         "source_map",
@@ -382,8 +354,7 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         &[true],
     )
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-    .without_direct_aot()
-    .without_direct_jit(),
+    .without_direct_aot(),
     CoreCallRecord::new(
         "core.compiler",
         "manifest",
@@ -393,8 +364,7 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     )
     .with_max_arity(1)
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-    .without_direct_aot()
-    .without_direct_jit(),
+    .without_direct_aot(),
     CoreCallRecord::new(
         "core.compiler",
         "package",
@@ -404,13 +374,11 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     )
     .with_max_arity(1)
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-    .without_direct_aot()
-    .without_direct_jit(),
+    .without_direct_aot(),
     CoreCallRecord::new("core.compiler", "lock", "jet_compiler_lock", true, &[])
         .with_max_arity(1)
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-        .without_direct_aot()
-        .without_direct_jit(),
+        .without_direct_aot(),
     CoreCallRecord::new(
         "core.compiler",
         "profiles",
@@ -419,8 +387,7 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         &[],
     )
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-    .without_direct_aot()
-    .without_direct_jit(),
+    .without_direct_aot(),
 ];
 
 pub(crate) fn tir_core_call_records() -> &'static [CoreCallRecord] {

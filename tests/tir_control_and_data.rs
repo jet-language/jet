@@ -5,9 +5,9 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use jet::Interpreter::{dev_iteration, RunOutcome};
+use jet::Interpreter::RunOutcome;
 use tir_support::{
-    assert_tiers_agree, build_and_run, build_and_run_full, compile, have_rustc, jit_run,
+    assert_tiers_agree, build_and_run, build_and_run_full, compile, have_rustc, default_run,
 };
 
 const RESULT_HANDLER_PACKAGE: &str =
@@ -162,7 +162,7 @@ fn result_handler_example_matches_all_execution_tiers() {
     );
 
     let source = include_str!("../Examples/features/errors/result_handler.jet");
-    let (code, stdout, stderr) = tir_support::jit_run_traced("result_handler_example_jit", source);
+    let (code, stdout, stderr) = tir_support::default_run("result_handler_example_jit", source);
     assert_eq!(
         code, 0,
         "default `jet run` failed for result_handler: {stderr}"
@@ -170,12 +170,6 @@ fn result_handler_example_matches_all_execution_tiers() {
     assert_eq!(
         stdout,
         include_str!("../Examples/features/expected/errors/result_handler.out")
-    );
-    assert!(
-        stderr
-            .lines()
-            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-        "default `jet run` did not execute result_handler on the resident JIT: {stderr}"
     );
 }
 
@@ -229,19 +223,9 @@ fn run() {
 }
 "#;
     let (jit_code, jit_stdout, jit_stderr) =
-        tir_support::jit_run_traced("nested_return_if_live_branch", src);
+        tir_support::default_run("nested_return_if_live_branch", src);
     assert_eq!(jit_code, 0, "{jit_stderr}");
     assert_eq!(jit_stdout, "true\n", "{jit_stderr}");
-    assert!(
-        jit_stderr
-            .lines()
-            .any(|line| line.starts_with("nested_return_if") && line.contains("tier1 native")),
-        "nested return-if deoptimized instead of running on the resident JIT: {jit_stderr}"
-    );
-    assert!(
-        !jit_stderr.contains("nested_return_if: tier0 interp"),
-        "nested return-if fell back to the interpreter: {jit_stderr}"
-    );
 
     let (interp_code, interp_stdout, interp_stderr) =
         tir_support::interpreter_run("nested_return_if_live_branch_interp", src);
@@ -558,7 +542,7 @@ fn run() {
     return Err("unhandled", code: "E_RUN", cause: Err("root"))
 }
 "#;
-    let (code, stdout, stderr) = jit_run("tir_default_err_run", src);
+    let (code, stdout, stderr) = default_run("tir_default_err_run", src);
     assert_eq!(stdout, "");
     assert_eq!(code, 1, "default `jet run` should return an unhandled Err");
     assert_eq!(stderr, "Error [E_RUN]: unhandled\n  cause: root\n");
@@ -574,7 +558,7 @@ fn run() {
     process.exit(101)
 }
 "#;
-    let (jit_code, jit_stdout, jit_stderr) = jit_run("tir_exit_101_jit", src);
+    let (jit_code, jit_stdout, jit_stderr) = default_run("tir_exit_101_jit", src);
     assert_eq!(
         (jit_code, jit_stdout.as_str(), jit_stderr.as_str()),
         (1, "", "")
@@ -616,16 +600,9 @@ fn run() {
 }
 "#;
     let (jit_code, jit_stdout, jit_stderr) =
-        tir_support::jit_run_traced("tir_error_union_widen_jit", src);
+        tir_support::default_run("tir_error_union_widen_jit", src);
     assert_eq!(jit_code, 0, "{jit_stderr}");
     assert_eq!(jit_stdout, "7\n");
-    assert!(
-        jit_stderr
-            .lines()
-            .any(|line| line.starts_with("widen") && line.contains("tier1 native")),
-        "typed error widening deoptimized instead of running on the JIT: {jit_stderr}"
-    );
-    assert!(!jit_stderr.contains("widen: tier0 interp"), "{jit_stderr}");
 
     let (interp_code, interp_stdout, interp_stderr) =
         tir_support::interpreter_run("tir_error_union_widen_interp", src);
@@ -769,15 +746,9 @@ fn run() {
     print(missing ?? panic("missing argument"))
 }
 "#;
-    let (code, stdout, stderr) = tir_support::jit_run_traced("jit_fallback_panic", src);
+    let (code, stdout, stderr) = tir_support::default_run("jit_fallback_panic", src);
     assert_eq!(code, 70, "rich panic exit: out={stdout} err={stderr}");
     assert!(stdout.is_empty(), "{stdout}");
-    assert!(
-        stderr
-            .lines()
-            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-        "panic fallback deoptimized: {stderr}"
-    );
     assert!(
         stderr.contains("Stop [E3001]: `panic: missing argument`")
             && stderr.contains("jit_fallback_panic.jet:5 in run")
@@ -811,7 +782,7 @@ fn run() {
 }
 "#;
     for (tier, (code, stdout, stderr)) in [
-        ("default", tir_support::jit_run("index_hook_miss_jit", src)),
+        ("default", tir_support::default_run("index_hook_miss_jit", src)),
         (
             "interpreter",
             tir_support::interpreter_run("index_hook_miss_interp", src),
@@ -897,7 +868,7 @@ fn bindingless_loop_example_matches_all_execution_tiers() {
         "{}/Examples/features/basics/loop_bindingless.jet",
         env!("CARGO_MANIFEST_DIR")
     );
-    match dev_iteration(&path, false, true) {
+    match crate::common::dev_run(&path, false, true) {
         RunOutcome::Ran {
             exit_code,
             stdout,
@@ -930,7 +901,7 @@ fn comprehension_forms_example_matches_all_execution_tiers() {
         "{}/Examples/features/basics/comprehension_forms.jet",
         env!("CARGO_MANIFEST_DIR")
     );
-    match dev_iteration(&path, false, true) {
+    match crate::common::dev_run(&path, false, true) {
         RunOutcome::Ran {
             exit_code,
             stdout,
@@ -960,7 +931,7 @@ fn loop_values_example_matches_all_execution_tiers() {
         "{}/Examples/features/basics/loop_values.jet",
         env!("CARGO_MANIFEST_DIR")
     );
-    match dev_iteration(&path, false, true) {
+    match crate::common::dev_run(&path, false, true) {
         RunOutcome::Ran {
             exit_code,
             stdout,
@@ -2227,7 +2198,7 @@ fn run() {
     assert_eq!(aot_code, 0);
     assert_eq!(aot_stdout, "object:1\nint\nother\n");
 
-    let (default_code, default_stdout, stderr) = jit_run("tir_data_tree_pattern_dispatch", src);
+    let (default_code, default_stdout, stderr) = default_run("tir_data_tree_pattern_dispatch", src);
     assert_eq!(default_code, 0, "default tier failed: {stderr}");
     assert_eq!(default_stdout, "object:1\nint\nother\n", "{stderr}");
 }

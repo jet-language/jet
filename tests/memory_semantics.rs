@@ -352,8 +352,6 @@ fn one_table_names_the_shared_read_view_copy_kernel_for_every_tier() {
         crate_root.join("Codegen/MIRRust.rs"),
         crate_root.join("Codegen/MIRWeb.rs"),
         crate_root.join("Codegen/MIREval.rs"),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("crates/jet-jit/src/jit/functions_compile.rs"),
     ] {
         let text = std::fs::read_to_string(&engine).unwrap();
         assert!(

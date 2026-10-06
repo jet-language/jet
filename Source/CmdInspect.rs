@@ -784,7 +784,7 @@ impl ProjectBundleProof {
         let artifact_target = if target == Some(jet::Syntax::BUILD_TARGET_WEB) {
             jet_foundation::MIR::MirArtifactTarget::Web
         } else {
-            jet_foundation::MIR::MirArtifactTarget::Cranelift
+            jet_foundation::MIR::MirArtifactTarget::RustAot
         };
         // D4: a `.Library` output has no runnable entry, so its proof lowers
         // the library artifact kind instead of an executable.
@@ -834,20 +834,10 @@ impl ProjectBundleProof {
             let detail_prefix = target
                 .map(|target| format!("target={target}; "))
                 .unwrap_or_default();
-            let jit_detail = jet_jit::resident_jit_safe_program_detail(&mir);
-            if jit_detail.is_empty() {
-                (
-                    "proven",
-                    format!(
-                        "{detail_prefix}AOT=proven; JIT=proven; interpreter=shared checked MIR route"
-                    ),
-                )
-            } else {
-                (
-                    "compiler defect",
-                    format!("{detail_prefix}JIT=compiler defect; {jit_detail}"),
-                )
-            }
+            (
+                "proven",
+                format!("{detail_prefix}AOT=proven; interpreter=shared checked MIR route"),
+            )
         };
         tier_detail.push(' ');
         tier_detail.push_str(&mir_detail);
@@ -3751,12 +3741,11 @@ fn run_decisions(
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         ),
     );
-    let mut additional_rows = projection
+    let additional_rows = projection
         .diagnostics
         .iter()
         .filter_map(|diagnostic| diagnostic.decision_row.clone())
         .collect::<Vec<_>>();
-    additional_rows.extend(jet_jit::plan_mir_tiers(&mir, artifact).decision_ledger_rows(&mir));
     let ledger = jet_foundation::MIROptimization::decision_ledger(
         &mir,
         Some(artifact),

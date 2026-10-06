@@ -4284,7 +4284,6 @@ fn optimizer_fact_test_func(body: Vec<TStmt>, is_scalar: bool) -> TFunc {
         effects: TEffectFacts::default(),
         target_applicability: TTargetApplicability {
             rust_aot: true,
-            cranelift: true,
             interpreter: true,
             web: true,
         },

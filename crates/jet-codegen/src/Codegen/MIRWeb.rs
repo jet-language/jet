@@ -690,7 +690,7 @@ fn validate_web_facts(program: &MirProgram) -> Result<(), MirWebError> {
                         message: format!(
                             "function {} at {:?} contains JS-partition foreign row {} declared at {:?} \
                              (symbol `{}` path `{}` ABI `{}` language {:?} applicability \
-                             rust_aot={} cranelift={} interpreter={} web={}); no checked JavaScript linkage exists",
+                             rust_aot={} interpreter={} web={}); no checked JavaScript linkage exists",
                             function.id.0,
                             instruction.span,
                             foreign.id.0,
@@ -700,7 +700,6 @@ fn validate_web_facts(program: &MirProgram) -> Result<(), MirWebError> {
                             abi,
                             foreign.foreign_language,
                             foreign.target_applicability.rust_aot,
-                            foreign.target_applicability.cranelift,
                             foreign.target_applicability.interpreter,
                             foreign.target_applicability.web,
                         ),
@@ -5456,7 +5455,7 @@ fn js_call_expression(
                 message: format!(
                     "MIR Web JS-partition call references foreign row {} at {:?} \
                      (symbol `{}` path `{}` ABI `{}` language {:?} applicability \
-                     rust_aot={} cranelift={} interpreter={} web={}); no checked JavaScript linkage exists",
+                     rust_aot={} interpreter={} web={}); no checked JavaScript linkage exists",
                     foreign.id.0,
                     foreign.span,
                     foreign.symbol,
@@ -5464,7 +5463,6 @@ fn js_call_expression(
                     abi,
                     foreign.foreign_language,
                     foreign.target_applicability.rust_aot,
-                    foreign.target_applicability.cranelift,
                     foreign.target_applicability.interpreter,
                     foreign.target_applicability.web,
                 ),

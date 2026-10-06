@@ -274,8 +274,10 @@ impl<'a> Checker<'a> {
             } else {
                 for (param, actual) in type_params.iter().zip(type_args) {
                     let actual = self.resolve_type(actual.clone());
-                    // D-CALLBACK-ERR1=A: `Never` fills a failure-domain parameter.
-                    if !actual.is_never() {
+                    // D-CALLBACK-ERR1=A: `Never` fills only a failure-domain parameter.
+                    if !actual.is_never()
+                        || !crate::Sema::CheckerCore::sig_names_failure_domain(&sig, &param.name)
+                    {
                         self.check_declared_type(&actual, span);
                     }
                     for bound in &param.bounds {
@@ -548,8 +550,10 @@ impl<'a> Checker<'a> {
                 } else {
                     for (param, actual) in type_params.iter().zip(type_args) {
                         let actual = self.resolve_type(actual.clone());
-                        // D-CALLBACK-ERR1=A: `Never` fills a failure-domain parameter.
-                        if !actual.is_never() {
+                        // D-CALLBACK-ERR1=A: `Never` fills only a failure-domain parameter.
+                        if !actual.is_never()
+                            || !crate::Sema::CheckerCore::sig_names_failure_domain(&sig, &param.name)
+                        {
                             self.check_declared_type(&actual, span);
                         }
                         for bound in &param.bounds {

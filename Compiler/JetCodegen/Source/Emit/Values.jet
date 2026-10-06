@@ -1251,8 +1251,8 @@ fn jet_rust_emit_transparent_read(ctx: JetRustEmitContext, function: MIRFunction
 
 // MIRRust inspected_transfer (#4318 §8): a transparent transfer of a stable
 // read whose every consumer only inspects it through the read's place
-// (jet_rust_emit_inspected_value_reference) or drops it. The transfer is
-// never made, and a read it alone consumes is never emitted either.
+// (jet_rust_emit_inspected_value_reference), prints it, or drops it. The
+// transfer is never made, and a read it alone consumes is never emitted either.
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::inspected_transfer
 fn jet_rust_emit_inspected_transfer(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
     if jet_rust_emit_transparent_read(ctx, function, value) == None -> return false
@@ -1274,6 +1274,7 @@ fn jet_rust_emit_inspected_transfer(ctx: &JetRustEmitContext, function: MIRFunct
             .ResultIsOk(subject) -> subject == value
             .ResultValue(subject, _) -> subject == value
             .Binary(op, dispatch, _, left, _) -> dispatch == .Primitive && jet_rust_emit_comparison_by_reference(&ctx, function, op, left)
+            .Semantic(semantic) -> jet_rust_emit_print_reads(&ctx, function, semantic, value)
             // A transfer that was never made owns nothing to release.
             .Drop(operand, kind) -> operand == value && kind != MIRDropKind.ForeignHandle && !jet_rust_emit_is_stm_type(jet_rust_emit_value_type(ctx, function, value))
             else -> false
@@ -2060,7 +2061,7 @@ fn jet_rust_emit_shared_guard_projection_only(ctx: &JetRustEmitContext, function
 
 // D-MEM-COPYSEM1: true when `value` reads a stable place and every consumer
 // only inspects it (variant tests, payload reads, comparisons of non-scalar
-// operands, a borrowing slice), so the copy is never emitted. A read or
+// operands, prints, a borrowing slice), so the copy is never emitted. A read or
 // address that only feeds consumers borrowing the place itself (builtin routes
 // writing through it, index bases, borrowed builtin operands) is never emitted
 // either (MIRRust direct_borrow_only). #4318 §8: neither is a transparent
@@ -2108,6 +2109,7 @@ fn jet_rust_emit_inspected_only(ctx: &JetRustEmitContext, function: MIRFunction,
             .ResultIsOk(subject) -> subject == value
             .ResultValue(subject, _) -> subject == value
             .Binary(op, dispatch, _, left, _) -> dispatch == .Primitive && jet_rust_emit_comparison_by_reference(&ctx, function, op, left)
+            .Semantic(semantic) -> jet_rust_emit_print_reads(&ctx, function, semantic, value)
             .Slice(call, base, start, end, range, _) -> base == value && start != value && end != value && range != (Val(value)) && jet_rust_emit_slice_borrows_base(&ctx, call)
             else -> false
         }

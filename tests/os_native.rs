@@ -539,7 +539,7 @@ fn run_termios_pty_case(
     let mut args = vec!["run", "--quiet"];
     match mode {
         "release" => args.push("--release"),
-        "default" => args.push("--trace-tiers"),
+        "default" => {}
         "interpret" => args.push("--interpret"),
         other => panic!("unknown PTY mode {other}"),
     }
@@ -549,7 +549,6 @@ fn run_termios_pty_case(
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .env("JET_STORE_DIR", dir.join("cache"))
-        .env("JET_RUN_CACHE_DIR", dir.join("run-cache"))
         .env("JETPACK_ROOT", dir.join("jetpack"))
         .stdin(Stdio::from(slave.try_clone().unwrap()))
         .stdout(Stdio::from(slave.try_clone().unwrap()))
@@ -666,17 +665,6 @@ fn run_termios_pty_case(
         status.success(),
         "{mode} successful PTY child failed: {status}"
     );
-    if mode == "default" {
-        let output = String::from_utf8_lossy(&transcript);
-        assert!(
-            output.contains("tier1 native"),
-            "default run did not execute resident JIT: {output:?}"
-        );
-        assert!(
-            !output.contains("tier0 interp"),
-            "default run deopted to interpreter: {output:?}"
-        );
-    }
     let output = String::from_utf8_lossy(&transcript);
     assert!(
         output.contains("secret-ok:answer"),

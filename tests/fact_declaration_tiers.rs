@@ -126,16 +126,8 @@ fn resident_jit_and_forced_interpreter_agree_without_fallback() {
         errors.is_empty(),
         "fact fixture rejected before tier proof: {errors:?}"
     );
-    assert!(
-        common::cranelift_resident_safe(&bundle),
-        "fact fixture is not resident-JIT safe: {}",
-        common::cranelift_resident_safe_detail(&bundle)
-    );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .expect("fact fixture must compile in resident JIT");
 
-    jet_jit::reset_jit_trace_for_test();
-    match jet::Interpreter::dev_iteration(entry.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(entry.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -149,17 +141,8 @@ fn resident_jit_and_forced_interpreter_agree_without_fallback() {
             panic!("resident JIT rejected fact fixture: {diagnostics:?}")
         }
     }
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "resident JIT did not execute"
-    );
-    assert!(
-        !jet_jit::fallback_invoked_for_test() && !jet_jit::deopt_invoked_for_test(),
-        "fact fixture used a fallback or interpreter deopt"
-    );
 
-    jet_jit::reset_jit_trace_for_test();
-    match jet::Interpreter::dev_iteration(entry.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(entry.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,

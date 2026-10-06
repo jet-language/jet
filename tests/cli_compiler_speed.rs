@@ -384,8 +384,8 @@ mod production_path {
         .unwrap();
 
         for args in [
-            vec!["run", "--trace-tiers", "main.jet"],
-            vec!["dev", "--watch=off", "--trace-tiers", "main.jet"],
+            vec!["run", "main.jet"],
+            vec!["dev", "--watch=off", "main.jet"],
         ] {
             let output = Command::new(jet())
                 .args(&args)
@@ -393,7 +393,7 @@ mod production_path {
                 .env("JET_STORE_DIR", scratch.join("store"))
                 .env("JET_STORE_CAP_BYTES", "21474836480")
                 .env("JET_STORE_RESERVE_BYTES", "2147483648")
-                .env("JET_RUN_CACHE_DIR", scratch.join("jit-cache"))
+                .env("JET_STORE_DIR", scratch.join("jit-cache"))
                 .env("NO_COLOR", "1")
                 .output()
                 .unwrap();
@@ -406,18 +406,6 @@ mod production_path {
                 String::from_utf8_lossy(&output.stdout)
             );
             assert_eq!(output.stdout, b"default-profile\n", "{} output", args[0]);
-            assert!(
-                trace
-                    .lines()
-                    .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-                "{} did not use the default fast production lens:\n{trace}",
-                args[0]
-            );
-            assert!(
-                !trace.contains("tier0 interp"),
-                "{} default route deoptimized:\n{trace}",
-                args[0]
-            );
         }
 
         let tools = scratch.join("tools");
@@ -499,7 +487,7 @@ mod production_path {
                 .env("JET_STORE_CAP_BYTES", "21474836480")
                 .env("JET_STORE_RESERVE_BYTES", "2147483648")
                 .env(
-                    "JET_RUN_CACHE_DIR",
+                    "JET_STORE_DIR",
                     scratch.path.join(format!("{tag}-run-cache")),
                 )
                 .env("NO_COLOR", "1")

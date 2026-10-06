@@ -94,32 +94,8 @@ fn without_package_imports(text: &str, core_imports: &mut std::collections::Hash
     kept
 }
 
-/// Lower a checked bundle through the canonical MIR/artifact seam used by
-/// resident JIT tests.  Keep the target and artifact identity together so
-/// callers cannot accidentally invoke a backend with a bundle or mismatched
-/// artifact.
-pub fn lower_cranelift_bundle(
-    bundle: &jet::AST::ProgramBundle,
-) -> Result<
-    (
-        jet_foundation::MIR::MirProgram,
-        jet_foundation::MIR::MirArtifactId,
-    ),
-    String,
-> {
-    jet::Codegen::TIR::lower_checked_mir_program_for(
-        bundle,
-        jet_foundation::MIR::MirArtifactRequest::new(
-            jet_foundation::MIR::MirArtifactTarget::Cranelift,
-            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
-            jet_foundation::MIR::MirArtifactBuildMode::Dev,
-        ),
-    )
-    .map_err(|error| error.to_string())
-}
-
-/// Lower a checked bundle for the interpreter backend while preserving the
-/// same canonical artifact contract as the resident JIT path.
+/// Lower a checked bundle for the interpreter backend through the canonical
+/// MIR/artifact seam, keeping the target and artifact identity together.
 pub fn lower_interpreter_bundle(
     bundle: &jet::AST::ProgramBundle,
 ) -> Result<
@@ -144,142 +120,6 @@ pub fn development_policy() -> jet_pkg_model::Package::ReleaseDevtoolsPolicy {
     jet_pkg_model::Package::ReleaseDevtoolsPolicy::development()
 }
 
-pub fn cranelift_resident_safe(bundle: &jet::AST::ProgramBundle) -> bool {
-    lower_cranelift_bundle(bundle)
-        .map(|(program, _)| jet_jit::resident_jit_safe_program(&program))
-        .unwrap_or(false)
-}
-
-pub fn cranelift_resident_safe_detail(bundle: &jet::AST::ProgramBundle) -> String {
-    match lower_cranelift_bundle(bundle) {
-        Ok((program, _)) => jet_jit::resident_jit_safe_program_detail(&program),
-        Err(error) => error,
-    }
-}
-
-pub fn compile_cranelift_bundle(
-    bundle: &jet::AST::ProgramBundle,
-    policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-) -> Result<(), String> {
-    let (program, artifact) = lower_cranelift_bundle(bundle)?;
-    jet_jit::try_compile_program(&program, artifact, policy)
-}
-
-#[derive(Debug, Clone)]
-pub struct CraneliftTierPlan {
-    pub whole_interp: bool,
-    pub native: std::collections::BTreeSet<String>,
-    pub deopt: Vec<(String, String)>,
-    pub gap: Option<String>,
-    pub rows: Vec<jet_jit::TierRow>,
-}
-
-pub fn cranelift_tier_plan(bundle: &jet::AST::ProgramBundle) -> CraneliftTierPlan {
-    let (program, artifact) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    let plan = jet_jit::plan_mir_tiers(&program, artifact);
-    let rows = plan.rows;
-    let function_name = |id| {
-        rows.iter()
-            .find(|row| row.function == id)
-            .map(|row| row.function_name.clone())
-            .unwrap_or_else(|| format!("function#{:?}", id))
-    };
-    CraneliftTierPlan {
-        whole_interp: plan.whole_program_deopt,
-        native: plan.native.into_iter().map(function_name).collect(),
-        deopt: plan
-            .deopt
-            .into_iter()
-            .map(|(id, reason)| (function_name(id), reason))
-            .collect(),
-        gap: plan.gap.map(|gap| format!("{gap:?}")),
-        rows,
-    }
-}
-
-pub fn cranelift_strict_run(
-    bundle: &jet::AST::ProgramBundle,
-    policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-) -> Result<jet::Interpreter::RunOutcome, String> {
-    let (program, artifact) = lower_cranelift_bundle(bundle)?;
-    jet_jit::run_resident_strict_for_test(&program, artifact, policy)
-}
-
-pub fn cranelift_func_safety(
-    bundle: &jet::AST::ProgramBundle,
-    name: &str,
-) -> jet_jit::ResidentJitSafety {
-    let (program, _) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet_jit::resident_jit_func_safety_detail(&program, name)
-}
-
-pub fn cranelift_main_ops(bundle: &jet::AST::ProgramBundle) -> Vec<String> {
-    let (program, artifact) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet_jit::jit_dump_main_ops(&program, artifact)
-}
-pub fn cranelift_main_stmts(bundle: &jet::AST::ProgramBundle) -> Vec<String> {
-    let (program, artifact) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet_jit::jit_dump_main_stmts(&program, artifact)
-}
-
-pub fn cranelift_func_names(bundle: &jet::AST::ProgramBundle) -> Vec<String> {
-    let (program, _) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet_jit::jit_program_func_names(&program)
-}
-
-pub fn cranelift_spawn_stats(bundle: &jet::AST::ProgramBundle) -> (usize, usize) {
-    let (program, _) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet_jit::jit_spawn_stats(&program)
-}
-
-pub fn cranelift_uncovered_detail(bundle: &jet::AST::ProgramBundle) -> Option<String> {
-    let (program, artifact) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet_jit::jit_main_uncovered_detail(&program, artifact)
-}
-
-pub fn cranelift_mixed_switch_conds(bundle: &jet::AST::ProgramBundle) -> Vec<String> {
-    let (program, artifact) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet_jit::jit_dump_mixed_switch_conds(&program, artifact)
-}
-
-pub fn run_cranelift_bundle(
-    backend: &mut jet_jit::CraneliftBackend,
-    bundle: &jet::AST::ProgramBundle,
-    try_anyway: bool,
-    policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-) -> jet::Interpreter::RunOutcome {
-    let (program, artifact) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet::JitBackend::JitBackend::run(backend, &program, artifact, try_anyway, policy)
-}
-
-pub fn hot_swap_cranelift_bundle(
-    backend: &mut jet_jit::CraneliftBackend,
-    module_name: &str,
-    bundle: &jet::AST::ProgramBundle,
-    try_anyway: bool,
-    policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-) -> Result<jet::Interpreter::RunOutcome, Vec<jet::Diagnostics::Diagnostic>> {
-    let (program, artifact) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet::JitBackend::JitBackend::hot_swap(
-        backend,
-        module_name,
-        &program,
-        artifact,
-        try_anyway,
-        policy,
-    )
-}
-
 pub fn run_interpreter_checked_bundle(
     bundle: &jet::AST::ProgramBundle,
     try_anyway: bool,
@@ -289,6 +129,57 @@ pub fn run_interpreter_checked_bundle(
     let (program, artifact) =
         lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
     jet::Interpreter::run_checked(&program, artifact, try_anyway, invocation, policy)
+}
+
+/// Run a checked bundle the way `jet run --interpret` does: the evaluator,
+/// with no step budget.
+pub fn run_interpreted(
+    bundle: &jet::AST::ProgramBundle,
+    policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
+) -> jet::Interpreter::RunOutcome {
+    run_interpreter_checked_bundle(
+        bundle,
+        false,
+        jet::Interpreter::InterpreterInvocation::RunInterpret,
+        policy,
+    )
+}
+
+/// One run of `file` on the tier a test names. `use_interpreter` selects the
+/// in-process evaluator — what `jet dev --interpret` iterates on. Otherwise the
+/// default `jet run` (build, then execute): its front end is the build front
+/// end, so a rejected program comes back as `Problems` carrying the same
+/// diagnostics `jet run` renders, and an accepted one runs as a child process
+/// (the default tier only exists behind the binary). `try_anyway` is an
+/// evaluator-only knob.
+pub fn dev_run(file: &str, try_anyway: bool, use_interpreter: bool) -> jet::Interpreter::RunOutcome {
+    if use_interpreter {
+        return jet::Interpreter::dev_iteration(file, try_anyway);
+    }
+    if let Err(diagnostics) = jet::compile_with_path("", file) {
+        if diagnostics
+            .iter()
+            .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        {
+            return jet::Interpreter::RunOutcome::Problems(diagnostics);
+        }
+    }
+    let scratch = Scratch::new("jet_default_run");
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("run")
+        .arg(file)
+        .env("JET_STORE_DIR", scratch.path.join("cache"))
+        .env("JETPACK_ROOT", scratch.path.join("jetpack"))
+        .env("JETPACK_ENV", "1")
+        .env("NO_COLOR", "1")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("spawn default `jet run`");
+    jet::Interpreter::RunOutcome::Ran {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        exit_code: output.status.code().unwrap_or(-1),
+    }
 }
 
 pub fn run_interpreter_named_job(
@@ -302,10 +193,10 @@ pub fn run_interpreter_named_job(
         lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
     let args = vec![
         file.to_owned(),
-        jet_jit::Job::JET_JOB_PRIVATE_DISPATCH_FLAG.to_owned(),
+        jet_evalhost::Job::JET_JOB_PRIVATE_DISPATCH_FLAG.to_owned(),
         name.to_owned(),
     ];
-    jet_jit::with_program_args(&args, || {
+    jet_evalhost::with_program_args(&args, || {
         jet::Interpreter::dev_run_snapshot(
             &program,
             artifact,
@@ -314,17 +205,6 @@ pub fn run_interpreter_named_job(
             policy,
         )
     })
-}
-
-pub fn restart_cranelift_bundle(
-    backend: &mut jet_jit::CraneliftBackend,
-    bundle: &jet::AST::ProgramBundle,
-    try_anyway: bool,
-    policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-) -> jet::Interpreter::RunOutcome {
-    let (program, artifact) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet::JitBackend::JitBackend::restart(backend, &program, artifact, try_anyway, policy)
 }
 
 pub fn run_interpreter_bundle(
@@ -365,15 +245,6 @@ pub fn restart_interpreter_bundle(
     let (program, artifact) =
         lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
     jet::JitBackend::JitBackend::restart(backend, &program, artifact, try_anyway, policy)
-}
-pub fn cranelift_lowers(bundle: &jet::AST::ProgramBundle) -> bool {
-    lower_cranelift_bundle(bundle).is_ok()
-}
-
-pub fn cranelift_lower_error(bundle: &jet::AST::ProgramBundle) -> String {
-    lower_cranelift_bundle(bundle)
-        .err()
-        .unwrap_or_else(|| "canonical Cranelift MIR lowering succeeded".to_owned())
 }
 
 // --- runaway-test guard rails -----------------------------------------------
@@ -821,8 +692,8 @@ pub fn unique_tmp(prefix: &str) -> PathBuf {
 //
 // An interactive example's checked-in golden is only reproducible against the
 // answers it was recorded with, and five suites feed those answers
-// (`tests/golden.rs`, `tests/terminal.rs`, `tests/jit_run.rs`,
-// `tests/corelib_parts/http_data.rs`, and the `tests/dev*.rs` batteries). They
+// (`tests/golden.rs`, `tests/terminal.rs`, `tests/corelib_parts/http_data.rs`,
+// and the `tests/dev*.rs` batteries). They
 // live here once. A second copy is how a golden and a harness drift apart while
 // neither one looks wrong on its own — and a harness that feeds nothing at all
 // silently compares a no-input run against a fed-input golden.
@@ -924,7 +795,7 @@ pub fn example_stdin(stem: &str) -> Option<&'static ExampleStdin> {
 /// Run the built `jet` binary with `answers` on stdin and collect its output.
 ///
 /// A program that reads stdin needs a child process to read from. The
-/// in-process entry points (`dev_iteration`, `CraneliftBackend::run`) read the
+/// in-process entry points (`dev_iteration`) read the
 /// test binary's own fd 0, which every other test on every other thread
 /// shares, so there is nothing per-run to redirect there.
 pub fn jet_cli_output_with_stdin(args: &[&str], answers: &str) -> std::process::Output {
@@ -1238,21 +1109,19 @@ pub fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 }
 
 /// Text that only appears when a Rust control transfer killed a process instead
-/// of becoming a Jet report (R13 / D-JITUNWIND1, #1995 / #1997).
+/// of becoming a Jet report (R13, #1995 / #1997).
 ///
-/// One list, because the two checks that need it must not drift: the JIT
-/// boundary suite (`tests/jit_no_unwind_boundary.rs`) asserts a cancelled task
-/// never aborts, and the example-corpus gate refuses to *classify* an abort at
-/// all. `streams/generators` is why the second one exists — it died with
-/// `panic in a destructor during cleanup` and the gate filed it as the benign
-/// row `AOT exit 1`, so an abort became a shrink-only ledger entry instead of a
-/// failure.
+/// One list, so every check that refuses to classify an abort reads the same
+/// markers. `streams/generators` is why it exists — it died with
+/// `panic in a destructor during cleanup` and a corpus gate filed it as the
+/// benign row `AOT exit 1`, so an abort became a shrink-only ledger entry
+/// instead of a failure.
 ///
 /// The four families, which are four different defects:
 ///
 /// * `failed to initiate panic` is `_URC_END_OF_STACK`: phase 1 walked off the
-///   top of the stack without finding a handler, because `cranelift-jit`
-///   registers no unwind information for the code it emits.
+///   top of the stack without finding a handler, because a frame on the stack
+///   carried no unwind information.
 /// * `non-unwinding panic` / `panic in a function that cannot unwind` is an
 ///   `extern "C"` body's own abort-on-unwind shim.
 /// * `panic in a destructor during cleanup` is a second raise from drop glue

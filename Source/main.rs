@@ -24,7 +24,7 @@ use jet_foundation::Report::{
 };
 
 // D-ALLOC-PROGRAM1=A: the CLI executable installs the resident instance once.
-// JIT/interpreter entry points only marshal the checked package fact into the
+// Interpreter entry points only marshal the checked package fact into the
 // same Prelude kernel; they never implement allocation policy.
 #[global_allocator]
 static JET_HOST_ALLOCATOR: jet::program_allocator::JetHostProgramAllocator =
@@ -35,7 +35,6 @@ mod CmdBackendScaffold;
 mod CmdBudget;
 mod CmdCodemod;
 mod CmdCompile;
-mod CmdConsoleHost;
 mod CmdDb;
 mod CmdDevTools;
 mod CmdDoc;
@@ -68,7 +67,6 @@ mod CmdStructure;
 mod CmdSupply;
 mod CmdTest;
 mod CmdTry;
-mod DevAot;
 mod EngineDispatch;
 mod NativeLinker;
 mod OutputAdapter;
@@ -92,7 +90,6 @@ use CmdCompile::{
     run_native_source_from_stdin, run_new, run_test_opts, run_web_app_dev_entry,
     scaffold_browser_tests, validate_target, FuzzRunOpts, NativeExecutionRequest, TestRunOpts,
 };
-use CmdConsoleHost::ConsoleHost;
 use CmdDb::run_db;
 use CmdDevTools::{
     run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust, run_eval,
@@ -598,12 +595,6 @@ impl BuildProfile {
             BuildProfile::Named { name, .. } => name == Syntax::BUILD_PROFILE_RELEASE,
             _ => false,
         }
-    }
-
-    /// #3953 owner ruling: dev profiles build native code through Cranelift;
-    /// release-class, CI, size, no-OS and named profiles keep rustc/LLVM.
-    pub(crate) fn cranelift_backend(&self) -> bool {
-        matches!(self, BuildProfile::Default | BuildProfile::Fast | BuildProfile::Debug)
     }
 
     pub(crate) fn release_inspect(&self) -> Option<jet::Package::Blocks::ReleaseInspect> {
@@ -2458,9 +2449,6 @@ fn run_console(
     mode: OutputMode,
     authority_allow: &[String],
     authority_deny: &[String],
-    gates: jet::Policy::GateSet,
-    profile: Option<&str>,
-    setting_overrides: &BTreeMap<String, String>,
 ) -> i32 {
     let sandbox = match console_sandbox(argv) {
         Ok(sandbox) => sandbox,
@@ -2470,50 +2458,6 @@ fn run_console(
         }
     };
     let root = PathBuf::from(project_dir.unwrap_or("."));
-    let member = flag_value(argv, "-p");
-    let entry = match resolve_bare_entry("run", &root, member, mode, true) {
-        Some(entry) => entry,
-        None => {
-            missing_bare_entry("run", &root, mode);
-        }
-    };
-    let file = entry.path.to_string_lossy().into_owned();
-    let entry_fn = entry.callable;
-    let snapshot = match crate::Store::read_authority_file(&entry.path) {
-        Ok(snapshot) => snapshot,
-        Err(error) => {
-            emit_cli_diagnostic(
-                "E2105",
-                format!("can't securely read console entry `{file}`: {error}"),
-            );
-            return ExitCodes::USER_ERROR;
-        }
-    };
-    let source = match snapshot.text() {
-        Ok(source) => source.to_owned(),
-        Err(error) => {
-            emit_cli_diagnostic(
-                "E2105",
-                format!("can't read console entry `{file}`: {error}"),
-            );
-            return ExitCodes::USER_ERROR;
-        }
-    };
-    let source_identity = snapshot.path().to_path_buf();
-    let source_for_closure = source.clone();
-    let file_for_closure = file.clone();
-    let source_closure = match jet_jit::on_compiler_stack(move || {
-        jet::Driver::load_immutable_source_closure(
-            &file_for_closure,
-            &[(source_identity.as_path(), source_for_closure.as_str())],
-        )
-    }) {
-        Ok(source_closure) => source_closure,
-        Err(diagnostics) => {
-            emit_cli_diagnostics(&file, &source, &diagnostics);
-            return ExitCodes::USER_ERROR;
-        }
-    };
     let mut project = match jet::REPL::ConsoleProject::from_root(root.clone()) {
         Ok(project) => project,
         Err(error) => {
@@ -2521,13 +2465,13 @@ fn run_console(
             return ExitCodes::USER_ERROR;
         }
     };
-    let package_facts = match jet_jit::on_compiler_stack({
+    let package_facts = match jet::with_compiler_stack({
         let root = root.clone();
         move || jet::Loader::package_facts_for_root(&root)
     }) {
         Ok(package_facts) => package_facts,
         Err(diagnostics) => {
-            emit_cli_diagnostics(&file, &source, &diagnostics);
+            emit_cli_diagnostics(&root.display().to_string(), "", &diagnostics);
             return ExitCodes::USER_ERROR;
         }
     };
@@ -2549,32 +2493,6 @@ fn run_console(
         }
     }
     let (allow, deny) = console_rights(sandbox, authority_allow, authority_deny);
-    let application_authority =
-        (!authority_allow.is_empty() || !authority_deny.is_empty()).then(|| {
-            jet_foundation::Authority::ApplicationAuthority::from_policy(
-                Some(authority_allow),
-                Some(authority_deny),
-                "console invocation",
-            )
-        });
-    let profile = profile.unwrap_or("dev").to_owned();
-    let settings = setting_overrides.clone();
-    let boot = match jet::Interpreter::boot_console_with_source_closure(
-        &file,
-        &source_closure,
-        gates,
-        &profile,
-        &settings,
-        application_authority.as_ref(),
-        entry_fn.as_deref(),
-    ) {
-        Ok(boot) => boot,
-        Err(diagnostics) => {
-            emit_cli_diagnostics(&file, &source, &diagnostics);
-            return ExitCodes::USER_ERROR;
-        }
-    };
-    CmdDevTools::render_lints(&file, mode, &boot.lints);
     let ttl_ms = match console_flag_value(argv, "--console-ttl") {
         Some(value) => match value.parse::<u64>() {
             Ok(ttl_ms) => Some(ttl_ms),
@@ -2588,40 +2506,7 @@ fn run_console(
         },
         None => None,
     };
-    jet_jit::on_compiler_stack(move || {
-        let mut lease = boot.lease;
-        if !lease.startup_stdout().is_empty() {
-            write_mode_renderable(mode, lease.startup_stdout());
-        }
-        if !lease.startup_stderr().is_empty() {
-            write_mode_diagnostic(mode, lease.startup_stderr());
-        }
-        let mut host = ConsoleHost::new().with_router(lease.router());
-        for resource in lease.take_database_resources() {
-            host = match host.with_database_resource(resource) {
-                Ok(host) => host,
-                Err(error) => {
-                    emit_cli_diagnostic(console_error_code(&error), error.to_string());
-                    return ExitCodes::USER_ERROR;
-                }
-            };
-        }
-        for binding in lease.take_service_bindings() {
-            host = match host.with_service_binding(binding) {
-                Ok(host) => host,
-                Err(error) => {
-                    emit_cli_diagnostic(console_error_code(&error), error.to_string());
-                    return ExitCodes::USER_ERROR;
-                }
-            };
-        }
-        let project = match host.attach_project(project) {
-            Ok(project) => project,
-            Err(error) => {
-                emit_cli_diagnostic(console_error_code(&error), error.to_string());
-                return ExitCodes::USER_ERROR;
-            }
-        };
+    jet::with_compiler_stack(move || {
         let mut options = jet::REPL::ConsoleOptions::new(project)
             .with_mode(if sandbox {
                 jet::REPL::ConsoleMode::SandboxData
@@ -2634,7 +2519,7 @@ fn run_console(
         if let Some(ttl_ms) = ttl_ms {
             options = options.with_ttl_ms(ttl_ms);
         }
-        let mut session = match host.open(options) {
+        let mut session = match jet::REPL::open_attached(options, jet::REPL::ConsoleHostAdapters::new()) {
             Ok(session) => session,
             Err(error) => {
                 emit_cli_diagnostic(console_error_code(&error), error.to_string());
@@ -3253,9 +3138,6 @@ fn main() {
     CmdMemory::configure_ledger();
     if raw.iter().any(|arg| arg == "--gc-trace") {
         CmdGc::configure_trace();
-    }
-    if raw.iter().any(|arg| arg == "--trace-tiers") {
-        jet_jit::set_trace_tiers(true);
     }
 
     // If the first word is not in the single CLI registry, try an external
@@ -4186,9 +4068,6 @@ fn main() {
                     mode,
                     &authority_allow,
                     &authority_deny,
-                    gates,
-                    named_profile.as_deref(),
-                    &setting_overrides,
                 ));
             }
             let allow = authority_allow.clone();
@@ -4231,8 +4110,8 @@ fn main() {
                     requested_target.as_deref(),
                 )
             });
-            // c139 (D-JIT2=A): --interpret forces tier-0 interpreter; otherwise
-            // CraneliftBackend wraps it (M0 delegates, M1+ JIT-compiles).
+            // D-EXEC2=A: `--interpret` hosts the program in the in-process
+            // evaluator; otherwise each generation is a child `jet run`.
             let use_interpreter = raw.iter().any(|a| a == "--interpret");
             // c77 (D-DEVMODE1=A): default auto-detect; experts force a mode with
             // --restart / --swap / --watch=off.
@@ -6400,7 +6279,7 @@ impl ResolvedEntry {
 /// its own for `--json`.
 ///
 /// A relative entry runs the whole pipeline: `jet dev` already hands its raw
-/// argument to the loader, sema, the JIT, the watcher, and the cache, and
+/// argument to the loader, sema, the build, the watcher, and the cache, and
 /// `find_manifest_root` canonicalizes its start before walking up.
 ///
 /// The canonical-equality guard is what makes this safe rather than merely

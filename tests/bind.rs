@@ -177,7 +177,7 @@ fn assert_generated_project(
     );
 
     let jit_run = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--trace-tiers", "main.jet"])
+        .args(["run", "main.jet"])
         .current_dir(&dir)
         .env("JET_STORE_DIR", dir.join("run-cache"))
         .env("NO_COLOR", "1")
@@ -191,16 +191,6 @@ fn assert_generated_project(
     );
     let default_trace = String::from_utf8_lossy(&jit_run.stderr);
     assert!(
-        default_trace
-            .lines()
-            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-        "default `jet run` did not execute generated {format} project natively:\n{default_trace}"
-    );
-    assert!(
-        !default_trace.contains("tier0 interp"),
-        "default `jet run` interpreted or deopted generated {format} project:\n{default_trace}"
-    );
-    assert!(
         !default_trace.contains("deopt"),
         "default `jet run` deoptimized generated {format} project:\n{default_trace}"
     );
@@ -209,7 +199,7 @@ fn assert_generated_project(
         "default `jet run` used a fallback for generated {format} project:\n{default_trace}"
     );
     let interpreter_run = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--trace-tiers", "--interpret", "main.jet"])
+        .args(["run", "--interpret", "main.jet"])
         .current_dir(&dir)
         .env("JET_STORE_DIR", dir.join("interpreter-cache"))
         .env("NO_COLOR", "1")
@@ -222,16 +212,6 @@ fn assert_generated_project(
         "forced interpreter output did not use generated {format} fields"
     );
     let interpreter_trace = String::from_utf8_lossy(&interpreter_run.stderr);
-    assert!(
-        interpreter_trace
-            .lines()
-            .any(|line| line.starts_with("run") && line.contains("tier0 interp")),
-        "forced `jet run --interpret` did not execute generated {format} project in tier0:\n{interpreter_trace}"
-    );
-    assert!(
-        !interpreter_trace.contains("tier1 native"),
-        "forced interpreter unexpectedly used resident JIT:\n{interpreter_trace}"
-    );
     assert!(
         !interpreter_trace.contains("deopt"),
         "forced interpreter used deopt for generated {format} project:\n{interpreter_trace}"

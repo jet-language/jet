@@ -157,7 +157,7 @@ fn include_mentions(source: &str, target: &str) -> bool {
 }
 
 fn is_engine_gap(path: &str) -> bool {
-    path.contains("crates/jet-jit/") || path.contains("crates/jet-codegen/src/Codegen/TIR/eval/")
+    path.contains("crates/jet-evalhost/") || path.contains("crates/jet-codegen/src/Codegen/TIR/eval/")
 }
 
 fn valid_card_number(token: &str) -> bool {
@@ -247,7 +247,7 @@ fn validate_grade(
         }
         if is_engine_gap(path) {
             return Err(
-                "jet-jit and TIR eval parity promises require include, marshal, or guard; gaps are not allowed"
+                "jet-evalhost and TIR eval parity promises require include, marshal, or guard; gaps are not allowed"
                     .to_string(),
             );
         }
@@ -310,7 +310,7 @@ fn new_unbacked_duplication_comment_is_rejected() {
         .into_iter()
         .find(|(_, comment)| is_parity_promise(comment))
         .expect("seeded promise comment");
-    let error = validate_grade(&root(), "crates/jet-jit/src/new_copy.rs", source, &comment)
+    let error = validate_grade(&root(), "crates/jet-evalhost/src/new_copy.rs", source, &comment)
         .expect_err("a comment without a mechanical link must fail");
     assert!(
         error.contains("parity:` grade") || error.contains("parity: grade"),
@@ -325,7 +325,7 @@ fn include_grade_must_name_real_include_code() {
         .into_iter()
         .find(|(_, comment)| is_parity_promise(comment))
         .expect("seeded promise comment");
-    let error = validate_grade(&root(), "crates/jet-jit/src/new_copy.rs", source, &comment)
+    let error = validate_grade(&root(), "crates/jet-evalhost/src/new_copy.rs", source, &comment)
         .expect_err("an include path written only in a comment must fail");
     assert!(
         error.contains("does not include the canonical source"),
@@ -334,9 +334,9 @@ fn include_grade_must_name_real_include_code() {
 }
 
 #[test]
-fn jet_jit_and_tir_eval_cannot_card_a_parity_gap() {
+fn jet_evalhost_and_tir_eval_cannot_card_a_parity_gap() {
     for path in [
-        "crates/jet-jit/src/new_copy.rs",
+        "crates/jet-evalhost/src/new_copy.rs",
         "crates/jet-codegen/src/Codegen/TIR/eval/new_copy.rs",
     ] {
         let source = "// matches AOT\n// parity: gap card=#1711 risk=hand-copy\n";

@@ -5,7 +5,7 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use jet::Interpreter::{dev_iteration, RunOutcome};
+use jet::Interpreter::RunOutcome;
 use tir_support::{
     assert_release_error_tiers_agree, assert_release_tiers_agree, assert_tiers_agree, build_and_run,
     compile, have_rustc,
@@ -1641,7 +1641,7 @@ fn list_surface_forced_interpreter() {
         "{}/Examples/features/collections/list_surface.jet",
         env!("CARGO_MANIFEST_DIR")
     );
-    match dev_iteration(&path, false, true) {
+    match crate::common::dev_run(&path, false, true) {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -1671,7 +1671,7 @@ fn bare_member_shorthand_forced_interpreter() {
         "{}/Examples/features/basics/method_chain.jet",
         env!("CARGO_MANIFEST_DIR")
     );
-    match dev_iteration(&path, false, true) {
+    match crate::common::dev_run(&path, false, true) {
         RunOutcome::Ran {
             stdout,
             stderr,

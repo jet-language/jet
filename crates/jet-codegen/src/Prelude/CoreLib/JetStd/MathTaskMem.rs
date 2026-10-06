@@ -2098,7 +2098,7 @@ macro_rules! jet_lane_show {
 
     // jet:source-shared-interop-jit-begin
     type JetSharedSourceInteropRootBuilder = std::sync::Arc<
-        dyn Fn() -> Result<::jet_jit::SourceSharedInterop::SourceSharedInterop, String>
+        dyn Fn() -> Result<::jet_evalhost::SourceSharedInterop::SourceSharedInterop, String>
             + Send
             + Sync
             + 'static,
@@ -2111,16 +2111,16 @@ macro_rules! jet_lane_show {
     }
 
     impl<T: Send + Sync + 'static>
-        ::jet_jit::SourceSharedInterop::SourceSharedInteropWeakOwner
+        ::jet_evalhost::SourceSharedInterop::SourceSharedInteropWeakOwner
         for JetSharedPhysicalOwnerWeak<T>
     {
         fn upgrade(
             &self,
         ) -> Result<
             Option<(
-                ::jet_jit::SourceSharedInterop::SourceSharedInterop,
+                ::jet_evalhost::SourceSharedInterop::SourceSharedInterop,
                 Box<
-                    dyn ::jet_jit::SourceSharedInterop::SourceSharedInteropOwnerAliasLease,
+                    dyn ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOwnerAliasLease,
                 >,
             )>,
             String,
@@ -2145,7 +2145,7 @@ macro_rules! jet_lane_show {
     }
 
     impl<T: Send + Sync + 'static>
-        ::jet_jit::SourceSharedInterop::SourceSharedInteropOwnerAliasLease
+        ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOwnerAliasLease
         for JetSharedPhysicalOwnerAlias<T>
     {
         fn token_id(&self) -> i64 {
@@ -2167,7 +2167,7 @@ macro_rules! jet_lane_show {
             &self,
             type_id: u64,
             root_builder: JetSharedSourceInteropRootBuilder,
-        ) -> Result<::jet_jit::SourceSharedInterop::SourceSharedInterop, String> {
+        ) -> Result<::jet_evalhost::SourceSharedInterop::SourceSharedInterop, String> {
             let root = root_builder()?;
             if root.type_id() != type_id {
                 return Err("Source Shared callback root has a different checked type".to_string());
@@ -2197,7 +2197,7 @@ macro_rules! jet_lane_show {
                             .map(|alias| {
                                 Box::new(alias)
                                     as Box<
-                                        dyn ::jet_jit::SourceSharedInterop::SourceSharedInteropOwnerAliasLease,
+                                        dyn ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOwnerAliasLease,
                                     >
                             })
                     },

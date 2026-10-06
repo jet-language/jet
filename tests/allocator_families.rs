@@ -595,9 +595,8 @@ fn run() {
 }
 
 #[test]
-fn default_dev_runs_allocator_constructors_natively() {
+fn allocator_constructors_agree_on_interpreter_and_aot() {
     use jet::Interpreter::RunOutcome;
-    use jet::JitBackend::JitBackend;
 
     if !common::have_rustc() {
         return;
@@ -634,25 +633,18 @@ fn run() {
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
 
-    if jet_jit::cranelift_host_supported() {
-        let policy = common::development_policy();
-        common::compile_cranelift_bundle(&bundle, &policy)
-            .expect("allocator constructors must compile natively in resident JIT");
-    }
-
     let policy = common::development_policy();
-    let mut dev = jet_jit::CraneliftBackend::new();
-    jet_jit::reset_jit_trace_for_test();
-    match common::run_cranelift_bundle(&mut dev, &bundle, false, &policy) {
+    match common::run_interpreter_checked_bundle(
+        &bundle,
+        false,
+        jet::Interpreter::InterpreterInvocation::RunInterpret,
+        &policy,
+    ) {
         RunOutcome::Ran { stdout, .. } => {
-            assert!(
-                !jet_jit::deopt_invoked_for_test(),
-                "allocator constructors must stay resident-native (no deopt)"
-            );
             assert_eq!(stdout, "1\n2\n3\n4\n5\n");
         }
         RunOutcome::Problems(diags) => {
-            panic!("resident JIT must run allocator constructors: {diags:?}");
+            panic!("interpreter must run allocator constructors: {diags:?}");
         }
     }
 
@@ -756,7 +748,7 @@ fn try_allocation_example_reports_exhaustion_as_a_value() {
         std::fs::write(&path, src).unwrap();
         for force_interpreter in [false, true] {
             let outcome =
-                jet::Interpreter::dev_iteration(&path.to_string_lossy(), false, force_interpreter);
+                crate::common::dev_run(&path.to_string_lossy(), false, force_interpreter);
             match outcome {
                 jet::Interpreter::RunOutcome::Ran {
                     stdout, exit_code, ..
@@ -974,7 +966,7 @@ fn main() {
 }
 
 #[test]
-fn program_allocator_example_matches_aot_jit_and_interpreter() {
+fn program_allocator_example_matches_aot_default_and_interpreter() {
     if !common::have_rustc() {
         return;
     }
@@ -984,7 +976,7 @@ fn program_allocator_example_matches_aot_jit_and_interpreter() {
     let expected =
         std::fs::read_to_string("Examples/features/expected/memory/program_allocator.out").unwrap();
     for (name, args) in [
-        ("jit", &["run", "run.jet"][..]),
+        ("default", &["run", "run.jet"][..]),
         ("interpreter", &["run", "--interpret", "run.jet"][..]),
         ("aot", &["run", "--release", "run.jet"][..]),
     ] {
@@ -993,7 +985,7 @@ fn program_allocator_example_matches_aot_jit_and_interpreter() {
             .current_dir(&staged.path)
             .env("NO_COLOR", "1")
             .env(
-                "JET_RUN_CACHE_DIR",
+                "JET_STORE_DIR",
                 temp_dir(&format!("program_allocator_{name}")),
             )
             .output()

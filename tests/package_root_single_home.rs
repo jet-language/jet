@@ -140,7 +140,7 @@ fn nested_entry_points_share_root_and_stale_diagnostic() {
         "LSP must receive Loader's stale-manifest diagnostic: {stale_lsp:?}"
     );
     let stale_watch =
-        match jet::Interpreter::dev_iteration(&entry.display().to_string(), false, true) {
+        match crate::common::dev_run(&entry.display().to_string(), false, true) {
             jet::Interpreter::RunOutcome::Problems(diagnostics) => diagnostics,
             outcome => panic!("watch entrypoint unexpectedly ran: {outcome:?}"),
         };

@@ -96,7 +96,7 @@ fn run() {
     authority.with("FS.Write")
 }
 "#;
-    let (_, _, stderr) = tir_support::jit_run("authority_outside", source);
+    let (_, _, stderr) = tir_support::default_run("authority_outside", source);
     assert!(stderr.contains("E0712"), "JIT must report E0712: {stderr}");
 }
 
@@ -1136,7 +1136,7 @@ fn authority_aot_runs_the_same_value() {
 
 #[test]
 fn authority_jit_runs_the_same_value() {
-    let (code, stdout, stderr) = tir_support::jit_run("authority_jit", AUTHORITY_VALUE_SOURCE);
+    let (code, stdout, stderr) = tir_support::default_run("authority_jit", AUTHORITY_VALUE_SOURCE);
     assert_eq!(code, 0, "JIT failed: {stderr}");
     assert_eq!(stdout, "authority\n");
 }

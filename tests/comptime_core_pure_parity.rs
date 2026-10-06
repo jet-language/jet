@@ -5,7 +5,7 @@ use std::fs;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use jet::Interpreter::{dev_iteration, RunOutcome};
+use jet::Interpreter::RunOutcome;
 use jet::REPL::run_transcript;
 
 mod common;
@@ -870,7 +870,7 @@ fn check_dev_tier_output(label: &str, source: &str, expected: &str, force_interp
     fs::write(&path, source).unwrap();
     let path = path.to_string_lossy();
     for (tier, interpreter_only) in [("interpreter", true), ("default-dev", false)] {
-        match dev_iteration(
+        match crate::common::dev_run(
             &path,
             force_interpreter && interpreter_only,
             interpreter_only,
@@ -1731,13 +1731,10 @@ fn round_three_shared_kernels_keep_edge_rules_in_one_adapter_path() {
     assert!(random.contains("std::f64::consts::TAU"));
     assert!(read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs")
         .contains("seeded_random_kernel::jet_seeded_rng_normal"));
-    assert!(read("crates/jet-jit/src/Random.rs")
-        .contains("include!(\"../../jet-codegen/src/Prelude/Core/SeededRandom.rs\")"));
 
     let path = read("crates/jet-codegen/src/Prelude/Core/Path.rs");
     assert!(path.contains("ParentDir if normal_depth > 0"));
     assert!(path.contains("ParentDir if !rooted"));
-    assert!(read("crates/jet-jit/src/CoreHost.rs").contains("path_kernel::jet_std_path_normalize"));
 
     let fmt = read("crates/jet-codegen/src/Prelude/Core/Fmt.rs");
     assert!(fmt.contains("precision.clamp(0, 9)"));
@@ -1758,7 +1755,6 @@ fn round_three_shared_kernels_keep_edge_rules_in_one_adapter_path() {
     assert!(math.contains("if value < 0"));
     assert!(math.contains("value.unsigned_abs()"));
     assert!(math.contains("x.is_nan()"));
-    assert!(read("crates/jet-jit/build.rs").contains("MathLibPure.rs"));
     assert!(
         read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs")
             .contains("math_lib_pure::jet_std_math_gcd")
@@ -1767,16 +1763,10 @@ fn round_three_shared_kernels_keep_edge_rules_in_one_adapter_path() {
     let loadable = read("crates/jet-codegen/src/Prelude/Core/Loadable.rs");
     assert!(loadable.contains("JET_LOADABLE_FAILED: u8 = 3"));
     assert!(loadable.contains("jet_loadable_has_value"));
-    assert!(
-        read("crates/jet-jit/src/Reactive.rs").contains("loadable_kernel::jet_loadable_has_value")
-    );
 
     let encoding = read("crates/jet-codegen/src/Prelude/Core/EncodingBase.rs");
     assert!(encoding.contains("while out.len() % 8 != 0"));
     assert!(encoding.contains("s.len() % 2 != 0"));
-    assert!(
-        read("crates/jet-jit/src/Encoding.rs").contains("encoding_base_rt::jet_std_base32_encode")
-    );
 
     let text = read("crates/jet-comptime/src/Comptime/TextLite.rs");
     assert!(text.contains("UnicodeTables.rs"));

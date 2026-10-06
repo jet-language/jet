@@ -1022,16 +1022,15 @@ fn verify_core_call(call: &crate::MIR::MirCoreCall) -> Result<(), MirLegalityErr
         || call.member.is_empty()
         || call.arity != call.borrow_mask.len()
         || call.arity > call.max_arity
-        || call.coverage_bits & !0x7f != 0
+        || call.coverage_bits & !0x3f != 0
         // A symbol is required exactly when an executable backend claims the
-        // row (AOT bit 3, interpreter bit 4, JIT bit 6); typed intrinsics are
+        // row (AOT bit 3, interpreter bit 4); typed intrinsics are
         // interpreter-executable without a symbol, and sema-only rows
         // (`receiver_with_coverage`) legitimately have none until their
         // backend adapters land.
         || (call.symbol.name().is_empty()
-            && call.coverage_bits & 0b101_1000 != 0
+            && call.coverage_bits & 0b001_1000 != 0
             && !matches!(call.interpreter_route, CoreCallInterpreterRoute::TypedIntrinsic))
-        || call.jit_symbol.as_deref().is_some_and(str::is_empty)
     {
         return Err(MirLegalityError::InvalidCoreCall {
             call: call.id.0,
@@ -12992,7 +12991,6 @@ fn encode_serde_attributes(writer: &mut CanonicalWriter, attributes: &[crate::MI
 
 fn encode_target_applicability(writer: &mut CanonicalWriter, target: crate::MIR::MirTargetApplicability) {
     writer.bool(target.rust_aot);
-    writer.bool(target.cranelift);
     writer.bool(target.interpreter);
     writer.bool(target.web);
 }
@@ -14170,7 +14168,6 @@ fn encode_artifact_kind(writer: &mut CanonicalWriter, kind: crate::MIR::MirArtif
 fn encode_artifact_target(writer: &mut CanonicalWriter, target: crate::MIR::MirArtifactTarget) {
     let code = match target {
         crate::MIR::MirArtifactTarget::RustAot => 1,
-        crate::MIR::MirArtifactTarget::Cranelift => 2,
         crate::MIR::MirArtifactTarget::Interpreter => 3,
         crate::MIR::MirArtifactTarget::Web => 4,
     };
@@ -15386,8 +15383,6 @@ fn encode_core_call(writer: &mut CanonicalWriter, call: &crate::MIR::MirCoreCall
     encode_core_symbol(writer, call.symbol);
     writer.u64(u64::from(call.coverage_bits));
     writer.bool(call.aot_direct);
-    writer.bool(call.jit_direct);
-    writer.option_str(call.jit_symbol.as_deref());
     writer.bool(call.native_int_result);
     writer.debug(&call.marker);
 }

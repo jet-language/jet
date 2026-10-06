@@ -110,6 +110,52 @@ pub(crate) fn reject_never_value_positions(
     }
 }
 
+/// D-NEVER2=B / D-CALLBACK-ERR1=A: an explicit `Never` type argument may fill
+/// only a failure-domain type parameter, one the signature names as a `!`
+/// domain (`fn(T) -> U E!`). In any other parameter it is a value position.
+pub(crate) fn sig_names_failure_domain(sig: &crate::AST::FuncSig, param: &str) -> bool {
+    sig.params
+        .iter()
+        .any(|(_, ty)| type_names_failure_domain(ty, param))
+        || sig
+            .return_type
+            .as_ref()
+            .is_some_and(|ty| type_names_failure_domain(ty, param))
+}
+
+fn type_names_failure_domain(ty: &Type, param: &str) -> bool {
+    match ty {
+        Type::Result { ok, err } => {
+            matches!(err.as_ref(), Type::Named(name) if name == param)
+                || type_names_failure_domain(ok, param)
+                || type_names_failure_domain(err, param)
+        }
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::Tagged { inner, .. }
+        | Type::FixedList { elem: inner, .. }
+        | Type::InlineRange { base: inner, .. }
+        | Type::Quantity { base: inner, .. } => type_names_failure_domain(inner, param),
+        Type::Map { key, value, .. } => {
+            type_names_failure_domain(key, param) || type_names_failure_domain(value, param)
+        }
+        Type::Fn { params, ret, .. } => {
+            params.iter().any(|ty| type_names_failure_domain(ty, param))
+                || ret
+                    .as_ref()
+                    .is_some_and(|ty| type_names_failure_domain(ty, param))
+        }
+        Type::Apply { args, .. } | Type::Union(args) => {
+            args.iter().any(|ty| type_names_failure_domain(ty, param))
+        }
+        Type::Tuple(fields) => fields
+            .iter()
+            .any(|(_, field)| type_names_failure_domain(field, param)),
+        _ => false,
+    }
+}
+
 impl<'a> Checker<'a> {
     pub(crate) fn check_declared_type(&mut self, ty: &Type, span: Span) {
         self.check_declared_type_common(ty, span);
