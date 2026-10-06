@@ -2702,7 +2702,8 @@ impl<'a> Checker<'a> {
     /// E1113: the typed row owns the frozen-write wording; the checker only
     /// supplies the source name, operation, and freeze-site provenance.
     fn report_frozen_write(&mut self, name: &str, freeze_site: Span, action: &str, span: Span) {
-        let site = format!("`freeze(...)` at byte {}", freeze_site.start);
+        let (line, column) = crate::Diagnostics::span_line_col(&self.source, freeze_site.start);
+        let site = format!("`freeze(...)` at line {line}, column {column}");
         self.diags.push(Diagnostic::from_row(
             "E1113",
             &[("name", name), ("action", action), ("freeze_site", &site)],
