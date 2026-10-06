@@ -3578,7 +3578,7 @@ impl<'a> Checker<'a> {
                     "E0120",
                     what,
                     why.to_string(),
-                    format!("copy it explicitly with `{}`", Syntax::copy_call(name)),
+                    format!("copy it explicitly with `{}`", Syntax::copy_call(&name)),
                     Some(span),
                 );
                 self.diags
