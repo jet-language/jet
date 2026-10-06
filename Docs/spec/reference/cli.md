@@ -116,6 +116,20 @@ The `bind` shorthand accepts the explicit binding-plan form shown by help:
 `bind <name> --update --accept <candidate-digest>`. Foreign-header bind-in
 commands remain under `jet inspect bind`.
 
+`fill` reads typed goal facts from the checked program. A goal with no known
+expected type reports `(unknown)`; the checker's continuation type does not
+turn that into an inferred contract. Proposals include matching parameters,
+zero-argument functions and type-appropriate literals, but a proposal is
+listed only after replacing that goal and checking the whole source again.
+The optional `:line` suffix filters the report, not the checked program.
+
+Structural `diff` and `merge` align checked definitions rather than source
+lines. A rename is recorded intent only when a semantic-operation receipt
+names the compared file and its before/after byte checkpoints. Hand edits
+do not inherit stale rename intent. A merge conflict leaves the output
+unwritten; a clean candidate must parse and pass semantic checking before
+publication.
+
 ## Command groups
 
 The generated help groups subcommands as follows:

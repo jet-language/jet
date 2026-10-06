@@ -61,6 +61,12 @@ fn jet_cli_sem_json_view_map(map: ViewProvenanceMap?) -> String Never! {
 
 // JSON.rs `json_callable_signature` (with JSON.rs `callable_signature`).
 fn jet_cli_sem_json_callable_signature(callable: JetCLISemCallable, view_provenance: ViewProvenanceMap?) -> String {
+    fields :: jet_cli_sem_json_callable_fields(callable, jet_cli_sem_json_view_map(view_provenance), "existing_callable_producer_needs_extension")
+    "{{{fields}}}"
+}
+
+// Shared fact encoding; expand uses its documented display form for views.
+pub fn jet_cli_sem_json_callable_fields(callable: JetCLISemCallable, views: String, producer: String) -> String {
     parameters :: loop parameter in callable.params -> {
         default := "null"
         default_source := "null"
@@ -116,9 +122,8 @@ fn jet_cli_sem_json_callable_signature(callable: JetCLISemCallable, view_provena
         generic_status = jet_cli_sem_json_unavailable(unavailable)
     }
     return_type :: if callable.return_type == .Val(ty) -> jet_cli_json_string(type_name(ty)) else -> "null"
-    views :: jet_cli_sem_json_view_map(view_provenance)
     policies :: loop policy in callable.policies -> jet_cli_sem_policy_display(policy)
-    "{{\"parameters\":[{parameters.join(",")}],\"return_type\":{return_type},\"return_type_status\":\"checked\",\"effects\":{effects},\"effect_status\":{effect_status},\"effect_facts\":{effect_facts},\"errors\":{errors},\"failure_contract\":{failure_contract},\"failure_source\":{failure_source},\"failure_status\":{failure_status},\"returned_views\":{views},\"policies\":{jet_cli_sem_json_strings(policies)},\"generic_parameters\":{generic_parameters},\"generic_parameters_status\":{generic_status},\"metadata_producer_status\":\"existing_callable_producer_needs_extension\"}}"
+    "\"parameters\":[{parameters.join(",")}],\"return_type\":{return_type},\"return_type_status\":\"checked\",\"effects\":{effects},\"effect_status\":{effect_status},\"effect_facts\":{effect_facts},\"errors\":{errors},\"failure_contract\":{failure_contract},\"failure_source\":{failure_source},\"failure_status\":{failure_status},\"returned_views\":{views},\"policies\":{jet_cli_sem_json_strings(policies)},\"generic_parameters\":{generic_parameters},\"generic_parameters_status\":{generic_status},\"metadata_producer_status\":{jet_cli_json_string(producer)}"
 }
 
 // JSON.rs `json_kind` over the `convert_kind` projection.
