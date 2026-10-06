@@ -30,8 +30,9 @@
 // --no-leaks, which the summary records).
 //
 // usage: [RUSTC=rustc] [SANITIZE_CC=clang]
+//        [JET_GOLDEN_FEATURES=<checkout>/Examples/features] (the corpus run-goldens.mjs ran)
 //        node Compiler/JetBackend/Tests/run-sanitized.mjs <outdir> --runtime <runtime.rs>
-//        [--features DIR] [--case-list FILE] [--no-leaks]
+//        [--case-list FILE] [--no-leaks]
 // Writes <outdir>/sanitize.tsv and <outdir>/sanitize-summary.txt.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -42,18 +43,17 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const args = process.argv.slice(2);
 const outDir = args.shift();
-const usage = "usage: run-sanitized.mjs <outdir> --runtime <runtime.rs> [--features DIR] [--case-list FILE] [--no-leaks]";
+const usage = "usage: run-sanitized.mjs <outdir> --runtime <runtime.rs> [--case-list FILE] [--no-leaks]";
 if (!outDir) {
   console.error(usage);
   process.exit(64);
 }
-let features = join(repo, "Examples/features");
+const features = process.env.JET_GOLDEN_FEATURES ? resolve(process.env.JET_GOLDEN_FEATURES) : join(repo, "Examples/features");
 let runtimeSource = null;
 let caseList = null;
 let leaks = true;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--runtime") runtimeSource = resolve(args[++i]);
-  else if (args[i] === "--features") features = resolve(args[++i]);
   else if (args[i] === "--case-list") caseList = new Set(readFileSync(args[++i], "utf8").split("\n").map((stem) => stem.trim()).filter(Boolean));
   else if (args[i] === "--no-leaks") leaks = false;
   else throw new Error(`unknown option ${args[i]}\n${usage}`);
@@ -94,7 +94,7 @@ if (!existsSync(runtimeLib) || !existsSync(stampPath) || readFileSync(stampPath,
 }
 
 // The directory run-goldens.mjs ran the golden in (staged again the same way,
-// relative to the checkout that holds --features, when that output directory
+// relative to the checkout that holds the corpus, when that output directory
 // has none).
 const checkout = resolve(features, "../..");
 function stagedDir(entry, slug) {

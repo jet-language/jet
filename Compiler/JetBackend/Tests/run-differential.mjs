@@ -25,8 +25,9 @@
 //   - --baseline <differential.tsv>: a stem `agree` in the baseline is not
 //     `agree` now.
 //
-// usage: node Compiler/JetBackend/Tests/run-differential.mjs <outdir>
-//        [--features DIR] [--case-list FILE] [--require-native] [--baseline FILE]
+// usage: [JET_GOLDEN_FEATURES=<checkout>/Examples/features] (the corpus
+//        run-goldens.mjs ran) node Compiler/JetBackend/Tests/run-differential.mjs
+//        <outdir> [--case-list FILE] [--require-native] [--baseline FILE]
 // Writes <outdir>/differential.tsv and <outdir>/differential-summary.txt.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -36,16 +37,15 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const args = process.argv.slice(2);
 const outDir = args.shift();
 if (!outDir) {
-  console.error("usage: run-differential.mjs <outdir> [--features DIR] [--case-list FILE] [--require-native] [--baseline FILE]");
+  console.error("usage: run-differential.mjs <outdir> [--case-list FILE] [--require-native] [--baseline FILE]");
   process.exit(64);
 }
-let features = join(repo, "Examples/features");
+const features = process.env.JET_GOLDEN_FEATURES ? resolve(process.env.JET_GOLDEN_FEATURES) : join(repo, "Examples/features");
 let caseList = null;
 let requireNative = false;
 let baselinePath = null;
 for (let i = 0; i < args.length; i++) {
-  if (args[i] === "--features") features = resolve(args[++i]);
-  else if (args[i] === "--case-list") caseList = new Set(readFileSync(args[++i], "utf8").split("\n").map((stem) => stem.trim()).filter(Boolean));
+  if (args[i] === "--case-list") caseList = new Set(readFileSync(args[++i], "utf8").split("\n").map((stem) => stem.trim()).filter(Boolean));
   else if (args[i] === "--require-native") requireNative = true;
   else if (args[i] === "--baseline") baselinePath = args[++i];
   else throw new Error(`unknown option ${args[i]}`);

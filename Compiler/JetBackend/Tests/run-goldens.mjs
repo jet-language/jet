@@ -68,7 +68,11 @@ const runtimePack = process.env.JET_RUNTIME_PACK;
 
 const { collectGoldenEntries, loadExampleStdin } = await import(pathToFileURL(join(repo, "Tools/agent/compiler-diff.mjs")));
 const { copyFeatureProject, featureProjectRoot } = await import(pathToFileURL(join(repo, "Tools/agent/run-feature-examples.mjs")));
-const features = join(repo, "Examples/features");
+// JET_GOLDEN_FEATURES=<checkout>/Examples/features runs another corpus laid
+// out like the repository's (Tools/agent/safety-fuzz.mjs writes one); cases
+// are staged relative to that checkout so `jet run` sees the same paths.
+const features = process.env.JET_GOLDEN_FEATURES ? resolve(process.env.JET_GOLDEN_FEATURES) : join(repo, "Examples/features");
+const checkout = resolve(features, "../..");
 const stdinTable = loadExampleStdin();
 
 const dirs = { work: join(outDir, "work"), mir: join(outDir, "mir"), lower: join(outDir, "lower"), run: join(outDir, "run") };
@@ -97,10 +101,10 @@ function stage(c) {
   const dir = join(dirs.work, c.slug);
   rmSync(dir, { recursive: true, force: true });
   const projectRoot = featureProjectRoot(c.entry);
-  if (projectRoot) copyFeatureProject(projectRoot, join(dir, relative(repo, projectRoot)));
-  else if (basename(c.entry.path) === "run.jet") copyFeatureProject(dirname(c.entry.path), join(dir, relative(repo, dirname(c.entry.path))));
+  if (projectRoot) copyFeatureProject(projectRoot, join(dir, relative(checkout, projectRoot)));
+  else if (basename(c.entry.path) === "run.jet") copyFeatureProject(dirname(c.entry.path), join(dir, relative(checkout, dirname(c.entry.path))));
   else {
-    const target = join(dir, relative(repo, dirname(c.entry.path)));
+    const target = join(dir, relative(checkout, dirname(c.entry.path)));
     mkdirSync(target, { recursive: true });
     writeFileSync(join(target, basename(c.entry.path)), readFileSync(c.entry.path));
   }
