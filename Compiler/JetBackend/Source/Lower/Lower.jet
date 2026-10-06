@@ -386,7 +386,7 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             // Ptr<T>: a raw word address (Pointers.jet).
             if lower_ptr_element(ty) != None -> return LowerRepr.Word
             if lower_is_iter_cursor(ty) -> return LowerRepr.Boxed{ty: ty}
-            if lower_string_view(ty) -> return LowerRepr.Handle{drop: "jet_rt_string_drop", clone: "jet_rt_string_clone"}
+            if lower_string_nominal(ty) -> return LowerRepr.Handle{drop: "jet_rt_string_drop", clone: "jet_rt_string_clone"}
             if lower_view_element(ty) == .Val(elem) -> return lower_list_repr(p, ty, elem)
             // The canonical runtime name table excludes source-owned Core
             // shapes. Only exact Core paths may override their MIR definition,
