@@ -229,7 +229,7 @@ fn fx_opaque_enum_rejection_check(name: String, operation: Int) -> Bool Never! {
     program :: fx_opaque_enum_rejected(name, operation)
     if lower_native_enum_layout(program, fx_named(name)) -> return false
     lowered :: lir_lower_entry(program, mir_function_id("run"))
-    expected :: "opaque runtime enum {name} has no native enum layout"
+    expected :: "opaque runtime enum {mir_type_display_name(fx_named(name))} has no native enum layout"
     found := false
     loop issue in lowered.issues {
         if issue.message == expected -> found = true
