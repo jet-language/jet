@@ -2024,7 +2024,9 @@ fn parser_parse_or_fallback(state: &JetParserState, depth: Int, allow_struct_lit
         }
         return OrFallback.Continue{span: token.span}
     }
-    value :: parser_parse_expression_restricted(&state, 2, depth + 1, allow_struct_lit, stop_before_comparison)
+    // D-FALLBACK-CHAIN1=A: `??` groups from the right, so `a ?? b ?? c`
+    // is `a ?? (b ?? c)`: the fallback operand parses at `??`'s own level.
+    value :: parser_parse_expression_restricted(&state, 1, depth + 1, allow_struct_lit, stop_before_comparison)
     // Rust `parse_or_fallback`: a bare `panic(...)` call is the panic fallback.
     if value.expr == .Call(call) {
         if call.name == "panic" -> return OrFallback.Panic{name_span: call.name_span, args: call.args}

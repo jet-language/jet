@@ -1947,7 +1947,9 @@ impl<'a> Fmt<'a> {
                 if prec > Prec::OrFallback {
                     self.write("(");
                 }
-                self.fmt_expr(value, Prec::OrFallback.add_rhs());
+                // D-FALLBACK-CHAIN1=A: `??` groups from the right, so a chain
+                // on the left keeps its parentheses and one on the right needs none.
+                self.fmt_expr(value, Prec::Range);
                 self.write(" ?? ");
                 self.fmt_or_fallback(fallback);
                 if prec > Prec::OrFallback {

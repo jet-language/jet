@@ -196,7 +196,9 @@ impl<'a> Parser<'a> {
             }
             return Ok(OrFallback::Continue(self.bump().span));
         }
-        let e = self.expr_range(allow_struct_lit)?;
+        // D-FALLBACK-CHAIN1=A: `??` groups from the right, so `a ?? b ?? c`
+        // is `a ?? (b ?? c)`: the value fallback is itself a fallback chain.
+        let e = self.expr_or_fallback(allow_struct_lit)?;
         if let Expr::Call(call) = &e {
             if call.name == Syntax::BUILTIN_PANIC {
                 return Ok(OrFallback::Panic {
