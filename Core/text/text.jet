@@ -29,21 +29,11 @@ module wrap
 module html
 module combinators
 module runtime
+// Every member is a Jet body; no member calls its own `core.text` provider.
 use core.text.runtime.kernel_unicode_string as text_unicode_string
-use core.text.runtime.unicode_assets as text_unicode_assets
 use core.text.runtime.kernel_text_segments as text_segments
-use core.text.runtime.assets.unicode_decomp_index as text_normal_index
-use core.text.runtime.assets.unicode_decomp_pool as text_normal_pool
-use core.text.runtime.assets.unicode_ccc as text_normal_ccc
-use core.text.runtime.assets.unicode_compose_pairs as text_normal_compose
-use core.text.runtime.assets.unicode_general_category as text_category
-use core.text.runtime.assets.unicode_default_ignorable as text_ignorable
-use core.text.runtime.assets.unicode_east_asian_width as text_eaw
-use core.text.runtime.assets.unicode_grapheme_break as text_grapheme
-use core.text.runtime.assets.unicode_extended_pictographic as text_pictographic
-use core.text.runtime.assets.unicode_emoji as text_emoji
-use core.text.runtime.assets.unicode_emoji_presentation as text_emoji_presentation
-use core.text.runtime.assets.unicode_incb as text_incb
+use core.text.runtime.kernel_text_normal as text_normal
+use core.text.runtime.kernel_text_width as text_width
 module catalog
 
 /// Byte-offset cursor into UTF-8 text. Line and column are 1-based.
@@ -101,15 +91,15 @@ pub fn caseless_eq(left: String, right: String) -> Bool Never! {
 }
 
 /// Unicode 17.0.0 canonical composition (UAX #15 NFC).
-pub fn nfc(text: String) -> String Never! { normalize(text, false, true) }
+pub fn nfc(text: String) -> String Never! { text_normal.normalize(text, false, true) }
 /// Unicode 17.0.0 canonical decomposition (UAX #15 NFD).
-pub fn nfd(text: String) -> String Never! { normalize(text, false, false) }
+pub fn nfd(text: String) -> String Never! { text_normal.normalize(text, false, false) }
 /// Unicode 17.0.0 compatibility decomposition followed by composition.
-pub fn nfkc(text: String) -> String Never! { normalize(text, true, true) }
+pub fn nfkc(text: String) -> String Never! { text_normal.normalize(text, true, true) }
 /// Unicode 17.0.0 compatibility decomposition (UAX #15 NFKD).
-pub fn nfkd(text: String) -> String Never! { normalize(text, true, false) }
+pub fn nfkd(text: String) -> String Never! { text_normal.normalize(text, true, false) }
 
-pub fn graphemes(text: String) -> [String] Never! { split_graphemes(text) }
+pub fn graphemes(text: String) -> [String] Never! { text_width.graphemes(text) }
 /// Unicode 17.0.0 UAX #29 owned word segments containing Alphabetic or Numeric.
 // Rust Text.rs:689-694; boundary/filter policy lives in kernel_text_segments.
 pub fn words(text: String) -> [String] Never! { text_segments.words(text) }
@@ -129,16 +119,19 @@ pub fn char_indices(text: String) -> [String] Never! {
     out
 }
 
-pub fn display_width(text: String) -> Int Never! {
-    total := 0
-    loop cluster in split_graphemes(text) -> total = total + cluster_width(decode_scalars(cluster))
-    total
-}
+// Rust Text.rs:916-921 portable-default width; owner kernel_text_width.
+pub fn display_width(text: String) -> Int Never! { text_width.display_width(text) }
 
 pub fn grapheme_views(text: String) -> [String] Never! { graphemes(text) }
 pub fn word_views(text: String) -> [String] Never! { words(text) }
 pub fn line_views(text: String) -> [String] Never! { split_lines(text) }
-pub fn byte_views(text: String) -> [String] Never! { core.text.byte_views(text) }
+/// The UTF-8 bytes of `text`, one decimal element per byte (dev meaning:
+/// `byte_views("jet")` prints `[106, 101, 116]`).
+pub fn byte_views(text: String) -> [String] Never! {
+    out := [String]{}
+    loop b in text_unicode_string.utf8_bytes(text) -> &out.push("{b}")
+    out
+}
 
 // Rust Text.rs:939: nonempty, all scalars have DerivedCoreProperties Alphabetic.
 pub fn is_alphabetic(text: String) -> Bool Never! { text_unicode_string.is_alphabetic(text) }
@@ -313,12 +306,7 @@ pub struct IndexedCp {
     pub cp: Int
 }
 
-fn decode_scalars(text: String) -> [Int] Never! {
-    pairs :: decode_indexed(text)
-    out := [Int]{}
-    loop p in pairs -> &out.push(p.cp)
-    out
-}
+fn decode_scalars(text: String) -> [Int] Never! { text_width.decode_scalars(text) }
 
 fn decode_indexed(text: String) -> [IndexedCp] Never! {
     raw :: text_unicode_string.utf8_bytes(text)
@@ -369,293 +357,6 @@ fn encode_cp(cp: Int) -> String {
     String.from_bytes(out) ?? ""
 }
 
-
-fn encode_cps(cps: [Int]) -> String { encode_cps_prefix(cps, cps.len()) }
-
-fn encode_cps_prefix(cps: [Int], length: Int) -> String Never! {
-    out := [U8]{}
-    loop i in 0..<length -> text_unicode_string.append_cp(&out, cps[i])
-    String.from_bytes(out) ?? ""
-}
-
-
-C_SBASE :: 44032
-C_LBASE :: 4352
-C_VBASE :: 4449
-C_TBASE :: 4519
-C_LCOUNT :: 19
-C_VCOUNT :: 21
-C_TCOUNT :: 28
-C_NCOUNT :: 588
-C_SCOUNT :: 11172
-
-
-fn hangul_compose(a: Int, b: Int) -> Int? {
-    lindex :: a - C_LBASE
-    if lindex >= 0 && lindex < C_LCOUNT {
-        vindex :: b - C_VBASE
-        if vindex >= 0 && vindex < C_VCOUNT -> return Val(C_SBASE + (lindex * C_VCOUNT + vindex) * C_TCOUNT)
-    }
-    sindex :: a - C_SBASE
-    if sindex >= 0 && sindex < C_SCOUNT && sindex % C_TCOUNT == 0 {
-        tindex :: b - C_TBASE
-        if tindex > 0 && tindex < C_TCOUNT -> return Val(a + tindex)
-    }
-    None
-}
-
-// Rust `nfc` / `canonical_decompose` (BudgetStore.rs:1259-1325);
-// compatibility uses the same jet_unicode decomposition index, including tagged rows.
-fn normalize(text: String, compat: Bool, recompose: Bool) -> String Never! {
-    bytes :: text.bytes()
-    non_ascii := false
-    loop byte in bytes {
-        if byte >= (U8{128}) {
-            non_ascii = true
-            break
-        }
-    }
-    if !non_ascii -> return ~text
-    // #4318: capture static-list values once, not at each lookup/recursive child;
-    // current bootstrap constant emission copies a list at each mention.
-    index_asset :: text_normal_index.UNICODE_DECOMP_INDEX
-    pool_asset :: text_normal_pool.UNICODE_DECOMP_POOL
-    ccc_asset :: text_normal_ccc.UNICODE_CCC
-    // #4392: keep validated record borrows inside their retained asset scope.
-    assert(text_unicode_assets.valid(index_asset, 5, 7), "invalid Unicode asset schema/version/extent")
-    assert(text_unicode_assets.valid(pool_asset, 1, 3), "invalid Unicode asset schema/version/extent")
-    assert(text_unicode_assets.valid(ccc_asset, 3, 7), "invalid Unicode asset schema/version/extent")
-    index_bytes :: index_asset[0..<index_asset.len()]
-    pool_bytes :: pool_asset[0..<pool_asset.len()]
-    ccc_bytes :: ccc_asset[0..<ccc_asset.len()]
-    index :: index_asset[40..<text_unicode_assets.uint(index_bytes, 28, 4)]
-    pool :: pool_asset[40..<text_unicode_assets.uint(pool_bytes, 28, 4)]
-    ccc :: ccc_asset[40..<text_unicode_assets.uint(ccc_bytes, 28, 4)]
-    out := [Int]{}
-    at := 0
-    loop at < bytes.len() {
-        width :: text_unicode_string.utf8_width_at(bytes, at)
-        cp := Int.from_u8(bytes[at])
-        if width == 2 -> cp = cp & 31
-        if width == 3 -> cp = cp & 15
-        if width == 4 -> cp = cp & 7
-        loop k in 1..<width -> cp = (cp << 6) | (Int.from_u8(bytes[at + k]) & 63)
-        decompose_cp(&out, cp, compat, index, pool)
-        at = at + width
-    }
-    canon_order(&out, ccc)
-    if recompose {
-        pairs_asset :: text_normal_compose.UNICODE_COMPOSE_PAIRS
-        assert(text_unicode_assets.valid(pairs_asset, 6, 9), "invalid Unicode asset schema/version/extent")
-        pairs_bytes :: pairs_asset[0..<pairs_asset.len()]
-        pairs :: pairs_asset[40..<text_unicode_assets.uint(pairs_bytes, 28, 4)]
-        return compose(&out, ccc, pairs)
-    }
-    encode_cps(out)
-}
-
-// Recursive expansion appends to one buffer, including algorithmic Hangul LV/LVT.
-fn decompose_cp(out: &[Int], cp: Int, compat: Bool, index: View<U8>, pool: View<U8>) Never! {
-    sindex :: cp - C_SBASE
-    if sindex >= 0 && sindex < C_SCOUNT {
-        &out.push(C_LBASE + sindex /% C_NCOUNT)
-        &out.push(C_VBASE + (sindex % C_NCOUNT) /% C_TCOUNT)
-        if sindex % C_TCOUNT != 0 -> &out.push(C_TBASE + sindex % C_TCOUNT)
-        return
-    }
-    low := 0
-    high := index.len() /% 7
-    loop low < high {
-        mid :: (low + high) /% 2
-        row :: mid * 7
-        code :: text_unicode_assets.uint(index, row, 3)
-        if {
-            cp < code -> high = mid
-            cp > code -> low = mid + 1
-            else -> {
-                if compat || index[row + 6] == (U8{1}) {
-                    offset :: text_unicode_assets.uint(index, row + 3, 2)
-                    length :: Int.from_u8(index[row + 5])
-                    loop child in offset..<(offset + length) {
-                        decompose_cp(&out, text_unicode_assets.scalar(pool, child), compat, index, pool)
-                    }
-                    return
-                }
-                break
-            }
-        }
-    }
-    &out.push(cp)
-}
-
-// Rust `ccc` (BudgetStore.rs:1326-1342): binary search the generated nonzero ranges.
-fn normal_ccc(table: View<U8>, cp: Int) -> Int Never! {
-    text_unicode_assets.range_tag(table, cp, 0)
-}
-
-
-// Rust `nfc` canonical ordering (BudgetStore.rs:1264-1276).
-// Stable counting sort of each nonstarter run gives linear time even for hostile
-// descending CCC sequences. Sorted runs (the usual case) need no scratch allocation.
-fn canon_order(cps: &[Int], ccc: View<U8>) Never! {
-    positions := [Int]{}
-    scratch := [Int]{}
-    at := 0
-    loop at < cps.len() {
-        if normal_ccc(ccc, cps[at]) == 0 {
-            at = at + 1
-            next
-        }
-        start :: at
-        previous := 0
-        unordered := false
-        loop at < cps.len() {
-            class :: normal_ccc(ccc, cps[at])
-            if class == 0 -> break
-            if previous > class -> unordered = true
-            previous = class
-            at = at + 1
-        }
-        if !unordered -> next
-        if positions.len() == 0 -> loop _ in 0..<256 -> &positions.push(0)
-        loop class in 1..<256 -> positions[class] = 0
-        loop i in start..<at {
-            class :: normal_ccc(ccc, cps[i])
-            positions[class] = positions[class] + 1
-        }
-        offset := 0
-        loop class in 1..<256 {
-            count :: ~positions[class]
-            positions[class] = offset
-            offset = offset + count
-        }
-        loop scratch.len() < at - start -> &scratch.push(0)
-        loop i in start..<at {
-            class :: normal_ccc(ccc, cps[i])
-            scratch[positions[class]] = cps[i]
-            positions[class] = positions[class] + 1
-        }
-        loop i in 0..<(at - start) -> cps[start + i] = scratch[i]
-    }
-}
-
-// Rust `nfc` composition/blocking (BudgetStore.rs:1277-1293).
-// Compact in place: a successful composition does not change last_class.
-fn compose(cps: &[Int], ccc: View<U8>, pairs: View<U8>) -> String Never! {
-    length := 0
-    starter := 0
-    last_class := 0
-    loop i in 0..<cps.len() {
-        cp :: ~cps[i]
-        class :: normal_ccc(ccc, cp)
-        if length > 0 && (last_class < class || last_class == 0) {
-            if compose_pair(pairs, cps[starter], cp) == .Val(combined) {
-                cps[starter] = combined
-                next
-            }
-        }
-        if class == 0 -> starter = length
-        cps[length] = cp
-        length = length + 1
-        last_class = class
-    }
-    encode_cps_prefix(cps, length)
-}
-
-// Rust `compose` (BudgetStore.rs:1343-1367); excluded compositions are absent
-// from the generated pairs, including singleton and nonstarter exclusions.
-fn compose_pair(pairs: View<U8>, a: Int, b: Int) -> Int? {
-    if hangul_compose(a, b) == .Val(cp) -> return Val(cp)
-    low := 0
-    high := pairs.len() /% 9
-    loop low < high {
-        mid :: (low + high) /% 2
-        row :: mid * 9
-        left :: text_unicode_assets.uint(pairs, row, 3)
-        right :: text_unicode_assets.uint(pairs, row + 3, 3)
-        if {
-            a < left || (a == left && b < right) -> high = mid
-            a > left || (a == left && b > right) -> low = mid + 1
-            else -> return Val(text_unicode_assets.uint(pairs, row + 6, 3))
-        }
-    }
-    None
-}
-
-
-// Rust Text.rs:429-466 jet_text_graphemes: GB11 keeps the Extended_Pictographic
-// state through Extend/ZWJ, GB12/13 use RI parity, and GB9c tracks InCB
-// Consonant [Extend|Linker]* Linker [Extend|Linker]* × Consonant.
-fn split_graphemes(text: String) -> [String] {
-    cps :: decode_scalars(text)
-    if cps.len() == 0 -> return [String]{}
-    out := [String]{}
-    cluster := [Int]{cps[0]}
-    ri_run := if is_ri(cps[0]) -> 1 else -> 0
-    saw_pic := is_extended_pictographic(cps[0])
-    incb_pending := incb_class(cps[0]) == 2
-    incb_linker := false
-    loop i in 1..<cps.len() {
-        cur :: cps[i]
-        pc :: grapheme_class(cps[i - 1])
-        cc :: grapheme_class(cur)
-        incb :: incb_class(cur)
-        break_here :: if {
-            pc == 5 && saw_pic && is_extended_pictographic(cur) -> false
-            pc == 6 && cc == 6 -> ri_run % 2 == 0
-            incb_pending && incb_linker && incb == 2 -> false
-            else -> grapheme_break_classes(pc, cc)
-        }
-        if break_here {
-            &out.push(encode_cps(cluster))
-            cluster = [Int]{}
-        }
-        &cluster.push(cur)
-        ri_run = if cc == 6 -> ri_run + 1 else -> 0
-        if cc != 4 && cc != 5 -> saw_pic = is_extended_pictographic(cur)
-        if incb == 2 {
-            incb_pending = true
-            incb_linker = false
-        } else if incb == 1 {
-            if incb_pending -> incb_linker = true
-        } else if incb != 3 {
-            incb_pending = false
-            incb_linker = false
-        }
-    }
-    &out.push(encode_cps(cluster))
-    out
-}
-
-// Rust Text.rs:416-427 GB3-GB9b/GB999 over pinned Grapheme_Cluster_Break tags:
-// 1 CR, 2 LF, 3 Control, 4 Extend, 5 ZWJ, 6 RI, 7 Prepend, 8 SpacingMark,
-// 9 L, 10 V, 11 T, 12 LV, 13 LVT.
-fn grapheme_break_classes(pc: Int, cc: Int) -> Bool {
-    if pc == 1 && cc == 2 -> return false
-    if pc == 1 || pc == 2 || pc == 3 -> return true
-    if cc == 1 || cc == 2 || cc == 3 -> return true
-    if pc == 9 && (cc == 9 || cc == 10 || cc == 12 || cc == 13) -> return false
-    if (pc == 12 || pc == 10) && (cc == 10 || cc == 11) -> return false
-    if (pc == 13 || pc == 11) && cc == 11 -> return false
-    if cc == 4 || cc == 5 -> return false
-    if cc == 8 -> return false
-    if pc == 7 -> return false
-    true
-}
-
-
-// Rust Text.rs:393 Indic_Conjunct_Break: 0 None, 1 Linker, 2 Consonant, 3 Extend.
-fn incb_class(cp: Int) -> Int {
-    text_unicode_assets.asset_tag(text_incb.UNICODE_INCB, cp, 0)
-}
-fn grapheme_class(cp: Int) -> Int {
-    text_unicode_assets.asset_tag(text_grapheme.UNICODE_GRAPHEME_BREAK, cp, 0)
-}
-fn is_ri(cp: Int) -> Bool { grapheme_class(cp) == 6 }
-fn is_extended_pictographic(cp: Int) -> Bool {
-    text_unicode_assets.asset_contains(text_pictographic.UNICODE_EXTENDED_PICTOGRAPHIC, cp)
-}
-
 fn split_lines(text: String) -> [String] {
     raw :: text.bytes()
     if raw.len() == 0 -> return [String]{}
@@ -674,38 +375,6 @@ fn split_lines(text: String) -> [String] {
     }
     if start < raw.len() -> &out.push(slice_bytes(raw, start, raw.len()))
     out
-}
-
-// Rust Text.rs:887-914 portable-default grapheme width. Emoji is not the
-// Extended_Pictographic property used by GB11, and VS16 alone is not wide.
-fn cluster_width(cps: [Int]) -> Int {
-    if cps.len() == 0 -> return 0
-    category_asset :: text_category.UNICODE_GENERAL_CATEGORY
-    if text_unicode_assets.asset_tag(category_asset, cps[0], 8) == 0 -> return 0
-    keycap_base :: (cps[0] >= 48 && cps[0] <= 57) || cps[0] == 35 || cps[0] == 42
-    keycap :: keycap_base && ((cps.len() == 2 && cps[1] == 0x20E3) ||
-        (cps.len() == 3 && cps[1] == 0xFE0F && cps[2] == 0x20E3))
-    if keycap -> return 2
-    if cps.len() >= 2 && is_ri(cps[0]) && is_ri(cps[1]) -> return 2
-    eaw_asset :: text_eaw.UNICODE_EAST_ASIAN_WIDTH
-    emoji_asset :: text_emoji.UNICODE_EMOJI
-    presentation_asset :: text_emoji_presentation.UNICODE_EMOJI_PRESENTATION
-    ignorable_asset :: text_ignorable.UNICODE_DEFAULT_IGNORABLE
-    variation := false
-    emoji := false
-    visible := false
-    loop cp in cps {
-        if cp == 0xFE0F -> variation = true
-        if text_unicode_assets.asset_contains(emoji_asset, cp) -> emoji = true
-        if text_unicode_assets.asset_tag(eaw_asset, cp, 0) == 2 ||
-            text_unicode_assets.asset_contains(presentation_asset, cp) -> return 2
-        category :: text_unicode_assets.asset_tag(category_asset, cp, 8)
-        if category != 2 && category != 3 &&
-            !text_unicode_assets.asset_contains(ignorable_asset, cp) -> visible = true
-    }
-    if variation && emoji -> return 2
-    if !visible -> return 0
-    1
 }
 
 

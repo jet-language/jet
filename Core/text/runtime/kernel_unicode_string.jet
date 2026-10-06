@@ -360,13 +360,9 @@ pub fn isprintable(text: String) -> Bool Never! {
     true
 }
 
-// Rust jet_unicode_trim_view:91-94: original owner, scalar extent, no allocation.
-// #4392: String.slice does not yet expose a borrowed str extent with checked
-// `from text` provenance (E2307). Keep this contract; no owned-view shim.
-pub fn trim_view(text: String) -> View<str> from text {
-    bounds :: trim_bounds(text, true, true)
-    text.slice(bounds.start, bounds.end)
-}
+// Rust jet_unicode_trim_view:91-94 (borrowed scalar extent, no allocation) is not
+// ported: String.slice exposes no borrowed str extent with checked `from text`
+// provenance until #4392 (E2307), so `.trim_view()` keeps its Rust route.
 
 fn trim_bounds(text: String, left: Bool, right: Bool) -> (start: Int, end: Int) Never! {
     whitespace_asset :: text_unicode_white_space.UNICODE_WHITE_SPACE

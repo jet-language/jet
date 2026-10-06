@@ -1478,7 +1478,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 8af6ab64471c706423c4f0643e60d3f40e133ee694e315a3e99ac7ba56387cb6
+// Source SHA-256: 9ca85bff205f65abae5d47e10b38c8a70d167d99bb0fcb5dc54da4042e888565
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2276,7 +2276,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.files", "create", "jet_std_files_create", true, &[true], ) .with_jit_symbol("jet_jit_fs_create").with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.files", "append", "jet_std_files_append", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_fs_append"),
     CoreCallRecord::new("core.email", "limits_safe", "jet_email::Limits::safe", true, &[]) .with_jit_symbol("jet_jit_email_limits_safe"),
-    CoreCallRecord::new("core.text", "byte_views", "jet_text_byte_views", true, &[true]),
     CoreCallRecord::new("core.log", "info", "jet_ring_log_info", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.log", "warn", "jet_ring_log_warn", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.log", "error", "jet_ring_log_error", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),

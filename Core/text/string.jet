@@ -5,8 +5,10 @@
 // `String` identity while giving the standard method surface a Jet-owned body.
 // The loader also schedules it for any source that calls one of these methods,
 // so every program reaches the same Jet body (I9). It depends only on the
-// Unicode string kernel, never on the public text modules and their tables.
+// Unicode runtime kernels, never on the public text modules.
 use core.text.runtime.kernel_unicode_string as string_unicode
+use core.text.runtime.kernel_text_normal as string_normal
+use core.text.runtime.kernel_text_width as string_width
 
 // S41: `len` counts Unicode scalars, the items `loop c in s.chars()` visits.
 // UTF-8 byte length is `count_bytes()` (or `text.byte_count`).
@@ -100,7 +102,7 @@ fn bytes_match_at(raw: [U8], at: Int, needle: [U8]) -> Bool {
     true
 }
 fn byte_text(raw: [U8], start: Int, end: Int) -> String {
-    out := [U8].with_capacity(end - start)
+    out := [U8]{}
     loop i in start..<end -> &out.push(raw[i])
     String.from_bytes(out) ?? panic("a split at a matched UTF-8 needle stays on scalar boundaries")
 }
@@ -144,7 +146,7 @@ fn strip_affix(text: String, affix: String, front: Bool) -> String {
 fn expandtabs(receiver: String, tabsize: Int) -> String {
     raw :: string_unicode.utf8_bytes(receiver)
     width :: if tabsize < 0 -> 0 else -> tabsize
-    out := [U8].with_capacity(raw.len())
+    out := [U8]{}
     column := 0
     at := 0
     loop at < raw.len() {
@@ -165,6 +167,18 @@ fn expandtabs(receiver: String, tabsize: Int) -> String {
     String.from_bytes(out) ?? panic("tab expansion keeps whole UTF-8 scalars")
 }
 
+// Rust jet_text_normalize_nfc: Unicode 17.0.0 canonical composition (NFC).
+fn normalize(receiver: String) -> String { string_normal.normalize(receiver, false, true) }
+
+// Rust jet_text_pad_start/pad_end/center(_ref): pad to `width` display columns
+// (portable-default grapheme widths) with whole first-grapheme units of `fill`;
+// a remainder, empty fill or unusable unit pads with spaces.
+fn pad_start(receiver: String, width: Int, fill: String) -> String { string_width.pad(receiver, width, fill, true, false) }
+fn rjust(receiver: String, width: Int, fill: String) -> String { string_width.pad(receiver, width, fill, true, false) }
+fn pad_end(receiver: String, width: Int, fill: String) -> String { string_width.pad(receiver, width, fill, false, true) }
+fn ljust(receiver: String, width: Int, fill: String) -> String { string_width.pad(receiver, width, fill, false, true) }
+fn center(receiver: String, width: Int, fill: String) -> String { string_width.pad(receiver, width, fill, true, true) }
+
 // Rust jet_text_compare: `str::cmp`, i.e. lexicographic UTF-8 byte order.
 fn compare(receiver: String, other: String) -> Int {
     a :: string_unicode.utf8_bytes(receiver)
@@ -183,7 +197,7 @@ fn compare(receiver: String, other: String) -> Int {
 // Rust jet_text_reverse: `chars().rev()`; whole scalars, never split bytes.
 fn reverse(receiver: String) -> String {
     raw :: string_unicode.utf8_bytes(receiver)
-    out := [U8].with_capacity(raw.len())
+    out := [U8]{}
     end := raw.len()
     loop end > 0 {
         start := end - 1
@@ -202,7 +216,7 @@ fn zfill(receiver: String, width: Int) -> String {
         if (b & U8{192}) != (U8{128}) -> length = length + 1
     }
     if width <= length -> return ~receiver
-    out := [U8].with_capacity(raw.len() + width - length)
+    out := [U8]{}
     body := 0
     if raw.len() > 0 && (raw[0] == (U8{43}) || raw[0] == (U8{45})) {
         &out.push(raw[0])
