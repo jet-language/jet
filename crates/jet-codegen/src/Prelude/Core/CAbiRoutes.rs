@@ -15046,82 +15046,10 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_tui_capabilities())))
     }
 
-    /// core.tui.close_event
-    #[no_mangle]
-    pub extern "C" fn jet_tui_close_event() -> *mut crate::JetTuiEvent {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_close_event())))
-    }
-
-    /// core.tui.color_ansi16
-    #[no_mangle]
-    pub extern "C" fn jet_tui_color_ansi16(a0: i64) -> *mut crate::JetTuiColor {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_color_ansi16(a0))))
-    }
-
-    /// core.tui.color_ansi256
-    #[no_mangle]
-    pub extern "C" fn jet_tui_color_ansi256(a0: i64) -> *mut crate::JetTuiColor {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_color_ansi256(a0))))
-    }
-
-    /// core.tui.color_rgb
-    #[no_mangle]
-    pub extern "C" fn jet_tui_color_rgb(a0: i64, a1: i64, a2: i64) -> *mut crate::JetTuiColor {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_color_rgb(a0, a1, a2))))
-    }
-
     /// core.tui.display_width
     #[no_mangle]
     pub extern "C" fn jet_tui_display_width_int(a0: JetCString) -> i64 {
         guard(|| crate::jet_std::jet_int_from_i64(crate::jet_tui_display_width_int(view(a0))))
-    }
-
-    /// core.tui.fill
-    #[no_mangle]
-    pub extern "C" fn jet_tui_fill(a0: f64) -> *mut crate::JetTuiConstraint {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_fill(a0))))
-    }
-
-    /// core.tui.focus_event
-    #[no_mangle]
-    pub extern "C" fn jet_tui_focus_event(a0: u8) -> *mut crate::JetTuiEvent {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_focus_event(a0 != 0))))
-    }
-
-    /// core.tui.horizontal
-    #[no_mangle]
-    pub extern "C" fn jet_tui_horizontal() -> *mut crate::JetTuiDirection {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_horizontal())))
-    }
-
-    /// core.tui.interrupt_event
-    #[no_mangle]
-    pub extern "C" fn jet_tui_interrupt_event() -> *mut crate::JetTuiEvent {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_interrupt_event())))
-    }
-
-    /// core.tui.io_event
-    #[no_mangle]
-    pub extern "C" fn jet_tui_io_event(a0: JetCString, a1_0: *const u64, a1_1: i64) -> *mut crate::JetTuiEvent {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_io_event(view(a0), list_in(a1_0, a1_1, |w| w as u8)))))
-    }
-
-    /// core.tui.key_event
-    #[no_mangle]
-    pub extern "C" fn jet_tui_key_event(a0: JetCString) -> *mut crate::JetTuiEvent {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_key_event(view(a0)))))
-    }
-
-    /// core.tui.key_event_modifiers
-    #[no_mangle]
-    pub extern "C" fn jet_tui_key_event_modifiers(a0: JetCString, a1: i64) -> *mut crate::JetTuiEvent {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_key_event_modifiers(view(a0), a1))))
-    }
-
-    /// core.tui.length
-    #[no_mangle]
-    pub extern "C" fn jet_tui_length(a0: f64) -> *mut crate::JetTuiConstraint {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_length(a0))))
     }
 
     /// core.tui.list
@@ -15130,106 +15058,10 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_tui_list(list_in(a0_0, a0_1, |w| view(w as JetCString).to_owned())))))
     }
 
-    /// core.tui.list_state
-    #[no_mangle]
-    pub extern "C" fn jet_tui_list_state() -> *mut crate::JetTuiListState {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_list_state())))
-    }
-
-    /// core.tui.list_state_offset
-    #[no_mangle]
-    pub extern "C" fn jet_tui_list_state_offset(a0: *mut crate::JetTuiListState, a1: i64) -> *mut crate::JetTuiListState {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_list_state_offset(unsafe { &*a0 }.clone(), a1))))
-    }
-
-    /// core.tui.list_state_select
-    #[no_mangle]
-    pub extern "C" fn jet_tui_list_state_select(a0: *mut crate::JetTuiListState, a1: i64) -> *mut crate::JetTuiListState {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_list_state_select(unsafe { &*a0 }.clone(), a1))))
-    }
-
-    /// core.tui.list_state_selected
-    #[no_mangle]
-    pub extern "C" fn jet_tui_list_state_selected(a0: *mut crate::JetTuiListState) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_tui_list_state_selected(unsafe { &*a0 }.clone())))
-    }
-
-    /// core.tui.max
-    #[no_mangle]
-    pub extern "C" fn jet_tui_max(a0: f64) -> *mut crate::JetTuiConstraint {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_max(a0))))
-    }
-
-    /// core.tui.min
-    #[no_mangle]
-    pub extern "C" fn jet_tui_min(a0: f64) -> *mut crate::JetTuiConstraint {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_min(a0))))
-    }
-
-    /// core.tui.percent
-    #[no_mangle]
-    pub extern "C" fn jet_tui_percent(a0: f64) -> *mut crate::JetTuiConstraint {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_percent(a0))))
-    }
-
-    /// core.tui.resize_event
-    #[no_mangle]
-    pub extern "C" fn jet_tui_resize_event(a0: f64, a1: f64) -> *mut crate::JetTuiEvent {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_resize_event(a0, a1))))
-    }
-
-    /// core.tui.style
-    #[no_mangle]
-    pub extern "C" fn jet_tui_style() -> *mut crate::JetTuiStyle {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_style())))
-    }
-
-    /// core.tui.style_background
-    #[no_mangle]
-    pub extern "C" fn jet_tui_style_background(a0: *mut crate::JetTuiStyle, a1: *mut crate::JetTuiColor) -> *mut crate::JetTuiStyle {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_style_background(unsafe { &*a0 }.clone(), unsafe { &*a1 }.clone()))))
-    }
-
-    /// core.tui.style_bold
-    #[no_mangle]
-    pub extern "C" fn jet_tui_style_bold(a0: *mut crate::JetTuiStyle, a1: u8) -> *mut crate::JetTuiStyle {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_style_bold(unsafe { &*a0 }.clone(), a1 != 0))))
-    }
-
-    /// core.tui.style_dim
-    #[no_mangle]
-    pub extern "C" fn jet_tui_style_dim(a0: *mut crate::JetTuiStyle, a1: u8) -> *mut crate::JetTuiStyle {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_style_dim(unsafe { &*a0 }.clone(), a1 != 0))))
-    }
-
-    /// core.tui.style_foreground
-    #[no_mangle]
-    pub extern "C" fn jet_tui_style_foreground(a0: *mut crate::JetTuiStyle, a1: *mut crate::JetTuiColor) -> *mut crate::JetTuiStyle {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_style_foreground(unsafe { &*a0 }.clone(), unsafe { &*a1 }.clone()))))
-    }
-
     /// core.tui.style_text
     #[no_mangle]
     pub extern "C" fn jet_tui_style_text(a0: JetCString, a1: *mut crate::JetTuiStyle, a2: *mut crate::JetTuiCapabilities) -> JetCString {
         guard(|| handle(crate::jet_tui_style_text(view(a0), unsafe { &*a1 }.clone(), unsafe { &*a2 }.clone())))
-    }
-
-    /// core.tui.style_underline
-    #[no_mangle]
-    pub extern "C" fn jet_tui_style_underline(a0: *mut crate::JetTuiStyle, a1: u8) -> *mut crate::JetTuiStyle {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_style_underline(unsafe { &*a0 }.clone(), a1 != 0))))
-    }
-
-    /// core.tui.timer_event
-    #[no_mangle]
-    pub extern "C" fn jet_tui_timer_event(a0: JetCString, a1: i64) -> *mut crate::JetTuiEvent {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_timer_event(view(a0), a1))))
-    }
-
-    /// core.tui.vertical
-    #[no_mangle]
-    pub extern "C" fn jet_tui_vertical() -> *mut crate::JetTuiDirection {
-        guard(|| Box::into_raw(Box::new(crate::jet_tui_vertical())))
     }
 
     /// core.ui.aria_role_button
