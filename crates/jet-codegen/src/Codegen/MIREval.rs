@@ -21839,7 +21839,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     Some(flag) => RuntimeValue::Data(MirEvalValue::Present(Box::new(
                         MirEvalValue::Bool(flag),
                     ))),
-                    None => RuntimeValue::Absent { element: None },
+                    None => RuntimeValue::Absent {
+                        element: MirType::from_kind(MirTypeKind::Bool),
+                    },
                 })
             }
             _ => Err(mir_error_at(

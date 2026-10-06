@@ -1667,6 +1667,7 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
             // builtin, such as `Path.to_string().ends_with(...)`, selects the
             // same target as the lowered inner call.
             if let Some(handle) = recv_type {
+                let receiver_ty = Type::Named(handle.clone());
                 if crate::Codegen::TIR::handle_method_op(handle, method, args.len()).is_some() {
                     let ret = crate::Codegen::TIR::handle_method_return_ty(
                         handle,
