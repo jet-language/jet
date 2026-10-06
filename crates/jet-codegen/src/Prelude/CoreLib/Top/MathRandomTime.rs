@@ -176,6 +176,11 @@ fn jet_duration_ns_value(d: &jet_std::Duration) -> i64 {
 fn jet_std_time_sleep_duration(duration: &jet_std::Duration) {
     jet_std_time_sleep_duration_ns(duration.ns);
 }
+/// `task.timeout(delay)` installs a task deadline through the shared kernel;
+/// AOT carries the Duration by reference like `time.sleep`.
+fn jet_std_task_timeout_duration(duration: &jet_std::Duration) {
+    jet_task_timeout_duration_ns(duration.ns);
+}
 fn jet_duration_is_zero(d: &jet_std::Duration) -> bool {
     jet_duration_kernel_is_zero(d.ns)
 }

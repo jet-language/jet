@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 52f3012cfe34f96cac17edd361737a3c033242973dc425f0a0d015c766a26c87
+// Source SHA-256: 14dc54ce6fbe429b4105620c98cb2c0ec17ee50a367f56e79c47abd688536f72
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -496,8 +496,8 @@ const CORE_MODULE_80_MEMBERS: &[&str] = &["arch", "atexit", "close_fd", "cpu_cou
 const CORE_MODULE_80_TYPES: &[(&str, CoreLeafKind)] = &[("EnvError", CoreLeafKind::Plain)];
 const CORE_MODULE_80_DEPENDENCIES: &[&str] = &["core.files"];
 
-const CORE_MODULE_81_MEMBERS: &[&str] = &["after", "current_task", "interval", "yield_now", "Receiver", "TaskState", "delay_ms", "is_interval", "is_timer", "recv", "get", "result", "wait", "channel", "put", "clear", "shutdown", "stop", "reset", "lock", "acquire", "release", "notify", "start", "run", "waitall", "waitany", "is_cancelled", "is_ready", "timeout", "sleep", "try_recv", "cancel", "is_closed", "is_locked", "size", "capacity", "generation", "spawn_name"];
-const CORE_MODULE_81_TYPES: &[(&str, CoreLeafKind)] = &[("Receiver", CoreLeafKind::Plain), ("TaskState", CoreLeafKind::Plain)];
+const CORE_MODULE_81_MEMBERS: &[&str] = &["after", "current_task", "interval", "yield_now", "Receiver"];
+const CORE_MODULE_81_TYPES: &[(&str, CoreLeafKind)] = &[("Receiver", CoreLeafKind::Plain)];
 const CORE_MODULE_81_DEPENDENCIES: &[&str] = &["core.time"];
 
 const CORE_MODULE_82_MEMBERS: &[&str] = &["Reader", "Writer", "binread", "binwrite", "buffered", "choose", "confirm", "eprint", "input", "input_secret", "print", "progress", "read_all_input", "read_key", "read_until", "readline", "stderr", "stdin", "stdout", "style", "style_force", "take", "terminal_height", "terminal_width", "Key", "Stderr", "StdinHandle", "Stdout", "WinSize"];
@@ -824,7 +824,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.service", alias: "core_core_service", path: "Core/service/service.jet", owned_members: &["tree", "runtime", "state_store", "restart_one_for_one", "restart_one_for_all", "restart_rest_for_one", "delivery_at_most_once", "delivery_durable"] },
     CoreSourceModule { module: "core.sync", alias: "core_core_sync", path: "Core/sync/sync.jet", owned_members: &["counter_inc", "counter_merge", "counter_new", "counter_value", "list_merge", "list_new", "list_push", "list_show", "map_get", "map_merge", "map_new", "map_set", "map_show", "policy_allows", "policy_new", "policy_show", "text_edit", "text_merge", "text_metadata", "text_new", "text_set", "text_show", "counter_for", "map_for", "map_delete", "map_contains", "map_keys", "list_for", "list_remove", "list_contains", "text_for", "text_append", "text_clock", "text_replica", "policy_grant", "policy_deny", "policy_revoke"] },
     CoreSourceModule { module: "core.sys", alias: "core_sys", path: "Core/sys/sys.jet", owned_members: &["success", "arch", "close_fd", "cpu_count", "current_dir", "executable", "exitcode", "expand", "family", "fork", "get", "getegid", "getenv", "geteuid", "getgid", "getgroups", "getpgid", "getpgrp", "getpid", "getppid", "getpriority", "getsid", "getuid", "home_dir", "hostname", "initgroups", "is_linux", "is_macos", "is_unix", "is_windows", "kill", "linesep", "loadavg", "machine", "mkfifo", "name", "pathsep", "pid", "pipe", "platform", "release", "set", "set_current_dir", "setgid", "setpgid", "setpgrp", "setpriority", "setsid", "setuid", "stop", "sync", "sysname", "temp_dir", "times", "umask", "uname", "unset", "uptime", "username", "utime", "vars", "version", "wait", "waitpid"] },
-    CoreSourceModule { module: "core.tasks", alias: "core_core_tasks", path: "Core/tasks/tasks.jet", owned_members: &["acquire", "after", "channel", "clear", "current_task", "delay_ms", "get", "interval", "is_interval", "is_timer", "lock", "notify", "put", "recv", "release", "reset", "result", "run", "shutdown", "start", "stop", "wait", "waitall", "waitany", "yield_now", "is_cancelled", "is_ready", "timeout", "sleep", "try_recv", "cancel", "is_closed", "is_locked", "size", "capacity", "generation", "spawn_name"] },
+    CoreSourceModule { module: "core.tasks", alias: "core_core_tasks", path: "Core/tasks/tasks.jet", owned_members: &["after", "current_task", "interval", "yield_now"] },
     CoreSourceModule { module: "core.term", alias: "core_core_term", path: "Core/term/term.jet", owned_members: &["binread", "binwrite", "buffered", "choose", "confirm", "eprint", "input", "input_secret", "print", "progress", "read_all_input", "read_key", "read_until", "readline", "stderr", "stdin", "stdout", "style", "style_force", "terminal_height", "terminal_width"] },
     CoreSourceModule { module: "core.testing", alias: "core_core_testing", path: "Core/testing/testing.jet", owned_members: &["assert_equal", "compare", "corpus", "fake_clock", "fake_data", "fake_rng", "fixture", "golden", "snap", "status", "temp_dir", "test_suite", "world"] },
     CoreSourceModule { module: "core.text", alias: "core_text", path: "Core/text/text.jet", owned_members: &["byte_count", "byte_views", "casefold", "caseless_eq", "center", "char_indices", "cursor", "cursor_advance", "display_width", "ends_any", "grapheme_views", "graphemes", "has_control", "inspect", "is_alphabetic", "is_ascii", "is_numeric", "is_whitespace", "line_views", "lower", "nfc", "nfd", "nfkc", "nfkd", "pad_end", "pad_start", "rsplitn", "scalar_count", "scalars", "sentences", "splitn", "starts_any", "trim", "trim_end", "trim_start", "upper", "word_views", "words"] },
