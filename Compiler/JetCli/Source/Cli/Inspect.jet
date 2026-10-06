@@ -27,6 +27,7 @@ use jet_foundation.[
     ImplDef,
     Item,
     Program,
+    Span,
     Type,
     TypeParam,
     diagnostic_from_registry,
@@ -390,7 +391,7 @@ fn jet_cli_inspect_count(text: String) -> Int? Never! {
 // blank lines and `#` comments skipped, in plane order.
 fn jet_cli_coverage_baseline(text: String) -> JetCLICoverageBaseline Never! {
     rows := [JetCLICoverageBaselineRow]{}
-    loop (index, raw) in text.lines() {
+    loop (index, raw) in text.split("\n").to_list() {
         line :: raw.trim()
         if line == "" || line.starts_with("#") -> next
         fields := [String]{}
@@ -614,6 +615,17 @@ fn jet_cli_inspect_compiler_error(operation: String, file: String, message: Stri
     jet_cli_done("{jet_cli_status_render("inspect.compiler.{operation}", false, [JetCLIStatusField]{jet_cli_status_field("compiler", compiler)})}\n", "", JET_DRIVER_EXIT_OK)
 }
 
+// Can `file` be read as UTF-8 text / as bytes?
+fn jet_cli_inspect_reads(file: String) -[FS]> Bool Never! {
+    text :: cli_files.read(file) ?? return false
+    text.len() >= 0
+}
+
+fn jet_cli_inspect_reads_bytes(file: String) -[FS]> Bool Never! {
+    bytes :: cli_files.read_bytes(file) ?? return false
+    bytes.len() >= 0
+}
+
 // CmdCompile.rs `run_compiler_api`: an unknown operation and an unreadable
 // input are versioned error documents (Rust `io::Error` wording), and lex
 // and parse project the Jet lexer and parser; source-map and check are not
@@ -626,8 +638,8 @@ fn jet_cli_inspect_compiler(args: [String], color: Bool) -[FS]> JetCLIPlan Never
     if !reads -> return jet_cli_inspect_compiler_error(operation, file, "unsupported compiler operation; choose lex, parse, check, or source-map")
     if cli_files.is_dir(file) -> return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: Is a directory (os error 21)")
     if !cli_files.exists(file) -> return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: No such file or directory (os error 2)")
-    if cli_files.read(file) == None {
-        if cli_files.read_bytes(file) == None -> return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: Permission denied (os error 13)")
+    if !jet_cli_inspect_reads(file) {
+        if !jet_cli_inspect_reads_bytes(file) -> return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: Permission denied (os error 13)")
         return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: stream did not contain valid UTF-8")
     }
     source :: cli_files.read(file) ?? ""
@@ -678,16 +690,26 @@ fn jet_cli_compiler_span(start: Int, end: Int) -> JetCLIStatusValue Never! {
     jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(start)), jet_cli_status_field("end", jet_cli_status_int(end))})
 }
 
+// Compiler.rs `status_span` of an optional span.
+fn jet_cli_compiler_optional_span(span: Span?) -> JetCLIStatusValue Never! {
+    found :: span ?? return JetCLIStatusValue.Null
+    jet_cli_compiler_span(found.start, found.end)
+}
+
 // Compiler.rs `status_diagnostic`.
 fn jet_cli_compiler_diagnostics(diagnostics: [Diagnostic]) -> JetCLIStatusValue Never! {
-    values :: loop diagnostic in diagnostics -> jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("code", jet_cli_status_text(diagnostic.code)),
-        jet_cli_status_field("severity", jet_cli_status_text(if diagnostic.severity == DIAGNOSTIC_ERROR -> "error" else -> "lint")),
-        jet_cli_status_field("message", jet_cli_status_text(diagnostic.what)),
-        jet_cli_status_field("why", jet_cli_status_text(diagnostic.why)),
-        jet_cli_status_field("fix", jet_cli_status_text(diagnostic.fix)),
-        jet_cli_status_field("span", if diagnostic.span == .Val(span) -> jet_cli_compiler_span(span.start, span.end) else -> JetCLIStatusValue.Null),
-    })
+    values := [JetCLIStatusValue]{}
+    loop diagnostic in diagnostics {
+        severity :: if diagnostic.severity == DIAGNOSTIC_ERROR -> "error" else -> "lint"
+        &values.push(jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("code", jet_cli_status_text(diagnostic.code)),
+            jet_cli_status_field("severity", jet_cli_status_text(severity)),
+            jet_cli_status_field("message", jet_cli_status_text(diagnostic.what)),
+            jet_cli_status_field("why", jet_cli_status_text(diagnostic.why)),
+            jet_cli_status_field("fix", jet_cli_status_text(diagnostic.fix)),
+            jet_cli_status_field("span", jet_cli_compiler_optional_span(diagnostic.span)),
+        }))
+    }
     jet_cli_status_array(values)
 }
 
@@ -734,18 +756,21 @@ fn jet_cli_compiler_lexed(source: String) -> JetCLIStatusValue Never! {
     bytes :: source.bytes()
     lexed :: lex(bytes)
     positions :: jet_cli_compiler_positions(bytes)
-    tokens :: loop token in lexed.tokens -> {
+    tokens := [JetCLIStatusValue]{}
+    loop token in lexed.tokens {
         start :: token.span.start
         end :: token.span.end
-        text :: if start < end && end <= bytes.len() -> String.from_bytes(bytes[start..end - 1]) ?? "" else -> ""
-        kind :: if token.kind >= 0 && token.kind < JET_CLI_TOKEN_KIND_NAMES.len() -> JET_CLI_TOKEN_KIND_NAMES[token.kind] else -> ""
-        jet_cli_status_object([JetCLIStatusField]{
+        text := ""
+        if start < end && end <= bytes.len() -> text = String.from_bytes(bytes[start..end - 1]) ?? ""
+        kind := ""
+        if token.kind >= 0 && token.kind < JET_CLI_TOKEN_KIND_NAMES.len() -> kind = JET_CLI_TOKEN_KIND_NAMES[token.kind]
+        &tokens.push(jet_cli_status_object([JetCLIStatusField]{
             jet_cli_status_field("kind", jet_cli_status_text(kind)),
             jet_cli_status_field("text", jet_cli_status_text(text)),
             jet_cli_status_field("span", jet_cli_compiler_span(start, end)),
             jet_cli_status_field("start", jet_cli_compiler_position(positions, start)),
             jet_cli_status_field("end", jet_cli_compiler_position(positions, end)),
-        })
+        }))
     }
     jet_cli_status_object([JetCLIStatusField]{
         jet_cli_status_field("schema_version", jet_cli_status_int(1)),
