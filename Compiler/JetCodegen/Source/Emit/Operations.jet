@@ -4948,7 +4948,17 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
             loop row in incoming -> &rows.push("{jet_rust_emit_block_id(row.block)} => {jet_rust_emit_value_transfer(ctx, function, row.value)}")
             return "match {jet_rust_emit_previous_slot()} {{ {rows.join(", ")}, _ => unreachable!(\"invalid MIR phi predecessor\") }}"
         }
-        .ReadPlace(place) -> return jet_rust_emit_place_read(&ctx, function, place)
+        .ReadPlace(place) -> {
+            // D-MEMPROVENANCE2 (#4707): reading a write view hands on the
+            // `&mut [T]` borrow (a reborrow of the window), never a copy
+            // (MIRRust operation_expression / view_mut_reborrow).
+            if result == .Val(value) {
+                if jet_rust_emit_value_type(ctx, function, value).kind == .Apply(type_name, type_args) {
+                    if type_name.name == "ViewMut" && type_args.len() == 1 -> return jet_rust_emit_view_mut_reborrow(&ctx, function, place)
+                }
+            }
+            return jet_rust_emit_place_read(&ctx, function, place)
+        }
         .MovePlace(place) -> return jet_rust_emit_place_move(&ctx, function, place)
         .WritePlace(_, _) -> return "()"
         .ReplacePlace(_, _) -> return "()"
@@ -5261,4 +5271,16 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
         .ScopeExit(scope) -> return jet_rust_emit_scope_exit(&ctx, function, scope)
         .Drop(value, kind) -> return jet_rust_emit_drop_value(&ctx, function, value, kind)
     }
+}
+
+// The `&mut [T]` a read of a `ViewMut<T>` place lends: the window itself for
+// a range or parameter place, the held borrow for a local.
+fn jet_rust_emit_view_mut_reborrow(ctx: &JetRustEmitContext, function: MIRFunction, id: MIRPlaceID) -> String Never! {
+    reference :: jet_rust_emit_place_reference(&ctx, function, id, MIRAccess.Write)
+    loop row in function.places {
+        if row.id != id -> next
+        if row.projections.len() == 0 && row.base == .Local(_) -> return "&mut **{reference}"
+        return reference
+    }
+    panic("MIR place ID has no row")
 }

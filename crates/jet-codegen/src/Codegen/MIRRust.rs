@@ -6354,9 +6354,15 @@ impl<'a> RustEmitter<'a> {
     /// A `Read` parameter of non-scalar type crosses the call as `&T`. This
     /// one predicate decides the callee signature, the callee's parameter
     /// reads, and the caller's argument marshalling, so the three sides can
-    /// never disagree on the Rust calling convention.
+    /// never disagree on the Rust calling convention. A `ViewMut<T>` is
+    /// already the `&mut [T]` borrow, so it crosses by value: behind `&` its
+    /// writes could not reach the owner (D-MEMPROVENANCE2, #4707).
     fn callable_parameter_borrowed(&self, ty: &MirType, access: MirAccess) -> bool {
-        access == MirAccess::Write || access == MirAccess::Read && !self.is_scalar(ty)
+        let view_mut = matches!(
+            ty.kind(),
+            MirTypeKind::Apply { name, args } if name.name == "ViewMut" && args.len() == 1
+        );
+        access == MirAccess::Write || access == MirAccess::Read && !self.is_scalar(ty) && !view_mut
     }
 
     fn callable_parameter_mode(&self, ty: &MirType, access: MirAccess) -> char {
@@ -20066,6 +20072,18 @@ impl<'a> RustEmitter<'a> {
             MirOperation::Capture { slot } => self.capture_expression(function, *slot),
             MirOperation::Global { name } => self.global_expression(name),
             MirOperation::Phi { incoming } => self.phi_expression(function, incoming),
+            // D-MEMPROVENANCE2 (#4707): reading a write view hands on the
+            // `&mut [T]` borrow (a reborrow of the window), never a copy.
+            MirOperation::ReadPlace(place)
+                if result.is_some_and(|value| {
+                    matches!(
+                        self.value_type(function, value).kind(),
+                        MirTypeKind::Apply { name, args } if name.name == "ViewMut" && args.len() == 1
+                    )
+                }) =>
+            {
+                self.view_mut_reborrow(function, *place)
+            }
             MirOperation::ReadPlace(place) => self.place_read(function, *place),
             MirOperation::MovePlace { place } => self.move_place(function, *place),
             MirOperation::WritePlace { .. }
@@ -31008,6 +31026,19 @@ impl<'a> RustEmitter<'a> {
             format!("&mut ({value})")
         } else {
             format!("&({value})")
+        }
+    }
+    /// The `&mut [T]` a read of a `ViewMut<T>` place lends: the window itself
+    /// for a range or parameter place, the held borrow for a local.
+    fn view_mut_reborrow(&self, function: &MirFunction, id: MirPlaceId) -> String {
+        let place = self
+            .place_row(function, id)
+            .unwrap_or_else(|| panic!("MIR place ID {:?} has no row", id));
+        let reference = self.place_reference(function, id, MirAccess::Write);
+        if place.projections.is_empty() && matches!(place.base, MirPlaceBase::Local(_)) {
+            format!("&mut **{reference}")
+        } else {
+            reference
         }
     }
     fn parameter_place(&self, function: &MirFunction, value: MirValueId, mutable: bool) -> String {

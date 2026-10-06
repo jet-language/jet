@@ -50,8 +50,15 @@ use jet_foundation.[
     core_enum_variants,
 ]
 
+// A `ViewMut<T>` is already the `&mut [T]` borrow, so a read parameter of
+// that type crosses by value: behind `&` its writes could not reach the owner
+// (D-MEMPROVENANCE2, #4707; MIRRust callable_parameter_borrowed).
 fn jet_rust_emit_type_is_borrowed(ty: MIRType) -> Bool Never! {
-    if ty.kind == MIRTypeKind.Int -> true else -> !mir_type_is_scalar(ty)
+    if ty.kind == MIRTypeKind.Int -> return true
+    if ty.kind == .Apply(name, args) {
+        if name.name == "ViewMut" && args.len() == 1 -> return false
+    }
+    !mir_type_is_scalar(ty)
 }
 
 fn jet_rust_emit_callable_param_type(ctx: &JetRustEmitContext, ty: MIRType, access: MIRAccess) -> String Never! {
