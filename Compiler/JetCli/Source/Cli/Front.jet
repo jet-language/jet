@@ -79,6 +79,10 @@ pub enum JetCLIPlan {
     // `jet inspect semindex <file>` (Source/CmdSemIndex.rs `run_semindex`):
     // the host checks the absolute `file` and prints its semantic index.
     Semindex(file: String, color: Bool, json: Bool)
+    // `jet find <query> [<entry>]` (Source/CmdSemIndex.rs `run_find`): the
+    // host checks `file` (none: the language catalog alone) and searches
+    // its semantic symbols for `mode`; `query` is the joined text words.
+    Find(file: String?, query: String, mode: JetCLIFindMode, json: Bool)
 }
 
 // One native `jet fmt` invocation (Source/main.rs `"fmt"` -> `run_fmt`).
@@ -1150,6 +1154,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
         "emit" -> return jet_cli_emit(jet_argv, args, color, quiet)
         "lint" -> return jet_cli_lint(jet_argv, args, color, quiet)
         "fmt" -> return jet_cli_fmt(argv, jet_argv, args, color, quiet)
+        "find" -> return jet_cli_find(jet_cli_tail(argv, 1), color, json)
         else -> {}
     }
     if jet_cli_inspect_word(command) -> return jet_cli_inspect(argv, jet_argv, args, color, quiet, json, threads)
