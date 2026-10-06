@@ -254,6 +254,16 @@ struct JetDriverLoadResult {
     complete: Bool
 }
 
+// The entry package's written authority policy, for the host's application
+// authority check (Source/CmdCompile.rs `resolve_application_authority`).
+// `manifest_path` is None for a file with no `package.jet`; `allow`/`deny`
+// are None when the manifest writes no `authority.holds` row.
+pub struct JetDriverAuthorityPolicy {
+    pub manifest_path: String?
+    pub allow: [String]?
+    pub deny: [String]?
+}
+
 pub struct JetDriverCompileResult {
     pub diagnostics: [Diagnostic]
     pub generated_source_files: [MIRSourceFile]
@@ -276,6 +286,7 @@ pub struct JetDriverCompileResult {
     // JET_KEEP_GOING (jet_driver_compile_keep_going): every failure the
     // compile recorded, one TSV row each: phase, item, code, message, span.
     pub keep_going_rows: [String]{[String]{}}
+    pub authority_policy: JetDriverAuthorityPolicy?{None}
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read

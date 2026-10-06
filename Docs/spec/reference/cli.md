@@ -208,7 +208,17 @@ arguments are the words after the first standalone `--`, or else the
 positional words after the file. Advisory lints stay hidden unless `--verbose`
 or `-v` comes before `--`; a verbose run reports them before the program
 starts. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
-`--color`, and `--threads` are refused with E2104 until they are ported.
+`--color`, `--threads`, `--allow`, and `--deny` are refused with E2104 until they are ported.
+
+Before `jet build` or `jet run` writes anything, the Jet host checks the
+application authority ([`Authority.jet`](../../../Compiler/JetCli/Source/Cli/Authority.jet)):
+the checked entry's solved effect row against the beginner floor (`IO`,
+`Mem.Alloc`, `Exec.Args`), the entry package's `authority.holds`, and the
+`--allow=`/`--deny=` rows of the invocation. A denied or undecided right is
+E1803, exit 1; a file with no package manifest leads the Fix with the exact
+`--allow` command. The interactive confirmation (D-SCRIPT-CONFIRM1), inline
+`package { … }` blocks, authority receipts, and lint-policy enforcement are
+not ported yet: the Jet host always answers as a non-interactive run.
 
 `jet test <file> [<filter>]` compiles the file in test mode: each named
 `#Test` body is checked and lowered as a synthetic function (a property

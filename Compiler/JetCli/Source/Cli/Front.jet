@@ -30,12 +30,13 @@ pub enum JetCLIPlan {
     // renders the outcome.
     Check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?)
     // `jet build <file>`: the entry and its bytes; `release` selects the
-    // rustc/LLVM backend, otherwise the Jet-native backend builds it.
-    Build(file: String, source: String, color: Bool, release: Bool, threads: Int?)
+    // rustc/LLVM backend, otherwise the Jet-native backend builds it;
+    // `invocation` holds the `--allow`/`--deny` rows.
+    Build(file: String, source: String, color: Bool, release: Bool, threads: Int?, invocation: JetCLIInvocationAuthority?)
     // `jet run <file>` (or `jet <file>`): build the entry as `jet build`
     // does, then run it with `program_args`. `verbose` (`--verbose`/`-v`
     // before `--`) shows advisory lints (D-LINT-VISIBILITY2=A).
-    Run(file: String, source: String, color: Bool, release: Bool, verbose: Bool, threads: Int?, program_args: [String])
+    Run(file: String, source: String, color: Bool, release: Bool, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?)
     // `jet test <file>`: compile the entry's test harness, build it through
     // the rustc path (under either accepted profile; the Jet-native backend
     // has no harness entry), and run it under `options`
@@ -373,7 +374,7 @@ fn jet_cli_check(args: [String], command: String, color: Bool, quiet: Bool, thre
 // Build flags whose Jet port has not landed: refused, never ignored.
 JET_CLI_BUILD_UNPORTED_FLAGS :: [String]{
     "--lib", "--small", "--target", "--verify", "--sbom", "--import", "--emit-generated", "--set",
-    "--builder", "--locked", "-p", "--output", "--allow", "--deny", "--gate",
+    "--builder", "--locked", "-p", "--output", "--gate",
 }
 
 enum JetCLIProfile {
@@ -404,12 +405,80 @@ fn jet_cli_profile(jet_argv: [String], command: String, color: Bool) -> JetCLIPr
     JetCLIProfile.Selected{release: release}
 }
 
+enum JetCLIAuthorityFlags {
+    // The invocation rows (`None` when neither flag is given).
+    Rows(invocation: JetCLIInvocationAuthority?)
+    Refused(plan: JetCLIPlan)
+}
+
+// Source/main.rs `parse_authority_flags`: the `--allow`/`--deny` rows of a
+// build or run, canonical and deduplicated; a right both allowed and denied
+// is E2102.
+fn jet_cli_authority_flags(jet_argv: [String], color: Bool) -> JetCLIAuthorityFlags Never! {
+    allow := [String]{}
+    deny := [String]{}
+    index := 0
+    loop index < jet_argv.len() {
+        argument :: jet_argv[index]
+        kind := ""
+        inline := String?{None}
+        if {
+            argument.starts_with("--allow=") -> {
+                kind = "allow"
+                inline = Val(argument.slice(8..<argument.len()))
+            }
+            argument.starts_with("--deny=") -> {
+                kind = "deny"
+                inline = Val(argument.slice(7..<argument.len()))
+            }
+            argument == "--allow" -> kind = "allow"
+            argument == "--deny" -> kind = "deny"
+            else -> {}
+        }
+        if kind == "" {
+            index += 1
+            next
+        }
+        value := ""
+        if inline == .Val(text) {
+            value = text
+        } else {
+            if index + 1 >= jet_argv.len() || jet_argv[index + 1].starts_with("-") {
+                return JetCLIAuthorityFlags.Refused{plan: jet_cli_fail("E2104", "`--{kind}` needs a comma-separated rights value", "authority is read before the program's own arguments", "use `--{kind}=FS.Read,Time`", color, JET_DRIVER_EXIT_USAGE)}
+            }
+            index += 1
+            value = jet_argv[index]
+        }
+        if value.trim() == "" -> return JetCLIAuthorityFlags.Refused{plan: jet_cli_fail("E2104", "`--{kind}` needs a non-empty rights value", "authority names one or more effect roots or leaves", "use `--{kind}=FS.Read,Time`", color, JET_DRIVER_EXIT_USAGE)}
+        loop raw in value.split(",") {
+            right :: raw.trim()
+            canonical :: jet_cli_parse_right(right) ?? return JetCLIAuthorityFlags.Refused{plan: jet_cli_fail("E2104", "unknown authority right `{right}`", "authority names match the canonical effect roots and leaves", "use `--{kind}=FS.Read,Time`", color, JET_DRIVER_EXIT_USAGE)}
+            if kind == "allow" {
+                if !allow.contains(canonical) -> &allow.push(canonical)
+            } else {
+                if !deny.contains(canonical) -> &deny.push(canonical)
+            }
+        }
+        index += 1
+    }
+    loop right in allow {
+        if deny.contains(right) -> return JetCLIAuthorityFlags.Refused{plan: jet_cli_fail("E2102", "authority right `{right}` is both allowed and denied", "the same exact effective right cannot be granted and denied in one invocation", "remove one of `--allow={right}` or `--deny={right}`", color, JET_DRIVER_EXIT_USAGE)}
+    }
+    if allow.len() == 0 && deny.len() == 0 -> return JetCLIAuthorityFlags.Rows{invocation: None}
+    JetCLIAuthorityFlags.Rows{invocation: Val(JetCLIInvocationAuthority{allow: allow, deny: deny})}
+}
+
 // `jet build <file>` through the backend `jet_cli_profile` selects. The
 // flags above are not ported yet.
 fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     loop argument in jet_argv {
         head :: argument.split("=").to_list()[0]
         if JET_CLI_BUILD_UNPORTED_FLAGS.contains(head) -> return jet_cli_not_ported("build {head}", color)
+    }
+    invocation := JetCLIInvocationAuthority?{None}
+    if jet_cli_authority_flags(jet_argv, color) == {
+        .Refused(refusal) -> return refusal
+        .Rows(rows) -> invocation = rows
     }
     release := false
     if jet_cli_profile(jet_argv, "build", color) == {
@@ -418,7 +487,7 @@ fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool, t
     }
     entry :: jet_cli_check(args, "build", color, quiet, threads)
     if entry == {
-        .Check(file, source, _, _, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, release: release, threads: threads}
+        .Check(file, source, _, _, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, release: release, threads: threads, invocation: invocation}
         else -> {}
     }
     entry
@@ -428,7 +497,7 @@ fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool, t
 // refused until its port lands, never ignored; an unregistered one was
 // already refused by E2102, or is ignored by the `jet <file>` shorthand as
 // the Rust host ignores it.
-JET_CLI_RUN_PORTED_FLAGS :: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--color", "--threads"}
+JET_CLI_RUN_PORTED_FLAGS :: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--color", "--threads", "--allow", "--deny"}
 
 // `jet run [<file>]` (`args` = `run`, the target, then the positional
 // words), also the `jet <file>` shorthand (`shorthand`). The target resolves
@@ -447,6 +516,11 @@ fn jet_cli_run(jet_argv: [String], args: [String], passthrough: [String]?, short
         parts :: args[1].split("@").to_list()
         if parts.len() > 1 && parts[parts.len() - 1] == "nixpkgs" && args[1] != "@nixpkgs" -> return jet_cli_not_ported("run <package>@nixpkgs", color)
     }
+    invocation := JetCLIInvocationAuthority?{None}
+    if jet_cli_authority_flags(jet_argv, color) == {
+        .Refused(refusal) -> return refusal
+        .Rows(rows) -> invocation = rows
+    }
     release := false
     if jet_cli_profile(jet_argv, "run", color) == {
         .Refused(refusal) -> return refusal
@@ -456,7 +530,7 @@ fn jet_cli_run(jet_argv: [String], args: [String], passthrough: [String]?, short
     if entry == {
         .Check(file, source, _, _, _) -> {
             program_args :: passthrough ?? jet_cli_tail(args, 2)
-            return JetCLIPlan.Run{file: file, source: source, color: color, release: release, verbose: verbose, threads: threads, program_args: program_args}
+            return JetCLIPlan.Run{file: file, source: source, color: color, release: release, verbose: verbose, threads: threads, program_args: program_args, invocation: invocation}
         }
         else -> {}
     }

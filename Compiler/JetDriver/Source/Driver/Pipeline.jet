@@ -945,7 +945,15 @@ fn jet_driver_compile_result(
         failed_stage: failed_stage,
         complete: complete,
         internal_problem: None,
+        authority_policy: jet_driver_authority_policy(load),
     }
+}
+
+fn jet_driver_authority_policy(load: JetDriverLoadResult) -> JetDriverAuthorityPolicy? {
+    loop package in load.packages {
+        if package.identity == load.package_identity -> return Val(JetDriverAuthorityPolicy{manifest_path: package.manifest_path, allow: package.authority_allow, deny: package.authority_deny})
+    }
+    None
 }
 
 fn jet_driver_entry_selection(load: JetDriverLoadResult) -> JetDriverPackageEntry? {
