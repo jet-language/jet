@@ -384,7 +384,7 @@ fn jet_cli_sem_declaration_ref(name: String, span: Span, ctx: JetCLISemWalk, mod
     loop doc_module in modules {
         if doc_module.path != ctx.module_path -> next
         if jet_cli_sem_declaration_kind(doc_module.items, name) == .Val(found) {
-            anchor := found
+            anchor := ~found
             anchor.module_path = doc_module.path
             target = Val(anchor)
         }
@@ -393,7 +393,7 @@ fn jet_cli_sem_declaration_ref(name: String, span: Span, ctx: JetCLISemWalk, mod
         loop doc_module in modules {
             if doc_module.path == ctx.module_path -> next
             if jet_cli_sem_declaration_kind(doc_module.items, name) == .Val(found) {
-                anchor := found
+                anchor := ~found
                 anchor.module_path = doc_module.path
                 target = Val(anchor)
                 break
@@ -1440,7 +1440,7 @@ fn jet_cli_sem_summaries(modules: [JetDriverDocModule]) -> [JetCLISemSummary] {
             if other.local == summary.local -> count += 1
         }
         if count == 1 && summary.local != summary.key {
-            short := summary
+            short := ~summary
             short.key = summary.local
             &shorts.push(short)
         }
@@ -1484,7 +1484,7 @@ struct JetCLISemWitness {
 // `effect` from `function`.
 fn jet_cli_sem_witness(function: String, effect_name: String, summaries: [JetCLISemSummary], seen: [String], modules: [JetDriverDocModule]) -> JetCLISemWitness? {
     if seen.contains(function) -> return None
-    visited := seen
+    visited := ~seen
     &visited.push(function)
     summary :: jet_cli_sem_summary(summaries, function) ?? return None
     if summary.direct.contains(effect_name) {
@@ -1566,7 +1566,7 @@ fn jet_cli_sem_apply_inferred_rows(db: &JetCLISemDB, doc_module: JetDriverDocMod
         }
         summary :: jet_cli_sem_summary(summaries, "{prefix}{local_key}") ?? next
         rows :: loop effect_name in summary.solved -> EffectRowEntry{name: effect_name, span: definition.def_span}
-        updated := callable
+        updated := ~callable
         updated.effects = Val(rows)
         db.defs[index].kind = JetCLISemKind.Function{callable: updated}
         ret :: if updated.failure_contract == .Val(contract) -> Val(failure_contract_effective_type(contract)) else -> updated.return_type
@@ -1618,7 +1618,7 @@ fn jet_cli_sem_anchor_kind(db: JetCLISemDB, target: JetCLISemAnchor) -> String N
 fn jet_cli_sem_align_reference_targets(db: &JetCLISemDB) {
     loop index in 0..<db.refs.len() {
         target :: db.refs[index].target ?? next
-        anchor := target
+        anchor := ~target
         anchor.kind = jet_cli_sem_anchor_kind(db, target)
         matches := [String]{}
         loop definition in db.defs {
@@ -2049,7 +2049,7 @@ pub fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: 
     definitions :: jet_cli_sem_convert_defs(db, modules)
     definition_facts :: jet_cli_sem_definition_facts(definitions, db.nodes, modules)
     derivations :: loop fact in definition_facts -> derivation_record(fact.stable_id, fact.human_identity, "jet-sema", MIRDerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
-    arithmetic := db.arithmetic
+    arithmetic := ~db.arithmetic
     loop index in 1..<arithmetic.len() {
         value :: ~arithmetic[index]
         position := index
