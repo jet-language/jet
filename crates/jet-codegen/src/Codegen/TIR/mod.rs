@@ -1938,6 +1938,23 @@ fn generic_call_substitution(
     Some(subst)
 }
 
+/// Source parameter types keep their import spellings (`paths.Path`) while a
+/// checked call argument carries the imported nominal's canonical identity.
+/// Bind against that identity so a generic function whose other parameters
+/// name an imported type is specialized like any other.
+fn generic_template_param_types(cx: &Cx, params: impl Iterator<Item = Type>) -> Vec<Type> {
+    params
+        .map(|ty| {
+            ty.map_named_types(&|name| {
+                if name.contains("::") || !name.contains('.') {
+                    return None;
+                }
+                cx.imported_type_metadata_name(name)
+            })
+        })
+        .collect()
+}
+
 pub(crate) fn demand_generic_free_function(
     cx: &Cx,
     name: &str,
@@ -1949,7 +1966,7 @@ pub(crate) fn demand_generic_free_function(
         return None;
     }
     let sig = cx.sigs.get(name)?;
-    let param_types = sig.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
+    let param_types = generic_template_param_types(cx, sig.iter().map(|(_, ty)| ty.clone()));
     let shape = generic_call_shape(args, explicit_type_args);
     let subst = generic_call_substitution(&param_types, type_param_names, &shape)?;
     let type_args = type_param_names
@@ -2071,11 +2088,10 @@ fn specialize_generic_free_functions(items: &[Item], cx: &Cx, funcs: &mut Vec<TF
             if template.type_params.is_empty() || (variadic && unique.len() != 1) {
                 continue;
             }
-            let param_types = template
-                .params
-                .iter()
-                .map(|param| param.ty.clone())
-                .collect::<Vec<_>>();
+            let param_types = generic_template_param_types(
+                cx,
+                template.params.iter().map(|param| param.ty.clone()),
+            );
             let type_param_names = template
                 .type_params
                 .iter()

@@ -3141,6 +3141,9 @@ mod core_native_projection_tests {
             "<corelib>/Core/web::Core/web/table.jet::WebTable",
             "<corelib>/Core/web::Core/web/table.jet::WebTableSort",
             "<corelib>/Core/web::Core/web/table.jet::WebTableState",
+            "<corelib>/Core/http::Core/http/http.jet::Body",
+            "<corelib>/Core/http::Core/http/http.jet::Headers",
+            "<corelib>/Core/http::Core/http/http.jet::Query",
         ] {
             assert_eq!(core_native_probe_name(source_record), source_record);
             assert!(!is_canonical_core_native_type(source_record));

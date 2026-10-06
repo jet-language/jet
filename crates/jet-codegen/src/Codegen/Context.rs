@@ -779,6 +779,10 @@ pub(crate) fn core_source_record_owns_layout(name: &str) -> bool {
                 "WebTable" | "WebTableSort" | "WebTableFilter" | "WebTableColumn"
                     | "WebTableRow" | "WebTablePage" | "WebTableState"
             ))
+        // core.http's message values are source records; their leaves collide
+        // with the native server carriers (`Body`, `Headers`) and DataQuery.
+        || (name.starts_with("<corelib>/Core/http::Core/http/http.jet::")
+            && matches!(leaf, "Body" | "Headers" | "Header" | "Query"))
 }
 
 pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {

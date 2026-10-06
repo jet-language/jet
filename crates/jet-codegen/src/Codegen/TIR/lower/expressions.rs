@@ -8080,6 +8080,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .iter()
                     .map(|(n, fty)| {
                         let v = match value_of.get(n.as_str()) {
+                            // A bare `[]` carries no element type of its own;
+                            // the checked field type (found by name, not by
+                            // the literal's written order) restores it.
+                            Some(e @ Expr::ListLit(..)) => {
+                                preserve_typed_list_shape(lower_expr(e, cx, env), fty, cx)
+                            }
                             Some(e) => lower_expr(e, cx, env),
                             // A missing field never occurs in a sema-checked tuple literal;
                             // mirror the AST's `0i64` default defensively (an Int literal).

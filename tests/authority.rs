@@ -622,7 +622,7 @@ fn plugin_failure_propagation_records_the_host_call_line_on_all_tiers() {
     let scratch = common::Scratch { path: root };
     let path = write_plugin_component(&scratch, "failure_guest.wasm",
         include_str!("../Examples/features/packages/plugin_failure/failure_guest.wat"));
-    let source = include_str!("../Examples/features/packages/plugin_failure/journey.jet")
+    let source = include_str!("fixtures/plugin_failure_journey.jet")
         .replace("Examples/features/packages/plugin_failure/failure_guest.wat", &path.to_string_lossy())
         .replace("FS.Read:Examples/features/packages/plugin_failure", &format!("FS.Read:{}", scratch.path.display()));
     let api = include_str!("../Examples/features/packages/plugin_failure/fixture-state/cache/api/plugin__failure_guest.api");
