@@ -1924,7 +1924,7 @@ impl<'a> Checker<'a> {
             }
         }
     }
-    fn core_source_owner_module(&self, module: &str, type_name: &str) -> Option<usize> {
+    pub(crate) fn core_source_owner_module(&self, module: &str, type_name: &str) -> Option<usize> {
         let source = jet_foundation::CoreModuleExports::core_source_modules()
             .iter()
             .find(|source| source.module == module)?;
