@@ -44,14 +44,8 @@ pub fn sema_single_use_type(ty: Type, environment: SemaScopeEnvironment) -> Bool
 pub fn sema_single_use_note_binding(state: &SemaOwnershipState, symbol: Symbol, environment: SemaScopeEnvironment) {
     ty :: symbol.ty ?? return
     if !sema_single_use_type(ty, environment) -> return
-    index := state.declarations.len() - 1
-    loop index >= 0 {
-        if state.declarations[index].key == symbol.id.key {
-            state.declarations[index].single_use = true
-            return
-        }
-        index -= 1
-    }
+    row :: sema_ownership_last_row(state, symbol.id.key)
+    if row >= 0 -> sema_ownership_set_single_use(&state, row)
 }
 
 // E0140 (D-FACT-WORD1=A): `_ :: value` skips the job of a `#SingleUse` value.
@@ -60,10 +54,8 @@ pub fn sema_single_use_check_discard(ty: Type, span: Span, environment: SemaScop
 }
 
 pub fn sema_single_use_key(state: SemaOwnershipState, key: String) -> Bool Never! {
-    loop fact in state.declarations {
-        if fact.key == key -> return fact.single_use
-    }
-    false
+    row :: sema_ownership_first_row(state, key)
+    row >= 0 && state.declarations[row].single_use
 }
 
 // The name of a bare identifier argument whose binding owns a consume duty.
@@ -85,7 +77,11 @@ pub fn sema_single_use_check_argument(state: SemaOwnershipState, callee: String,
 
 // Consumption is a move of the whole binding (Rust `moved.contains(name)`).
 fn sema_single_use_moved(state: SemaOwnershipState, key: String) -> Bool Never! {
-    loop fact in state.moved {
+    sema_single_use_moved_in(state.moved, key)
+}
+
+fn sema_single_use_moved_in(moved: [SemaOwnershipMovedPlace], key: String) -> Bool Never! {
+    loop fact in moved {
         if fact.place.root_key == key && fact.place.projections.len() == 0 -> return true
     }
     false
@@ -94,8 +90,9 @@ fn sema_single_use_moved(state: SemaOwnershipState, key: String) -> Bool Never! 
 // Rust `check_single_use_consumed_in_current_scope`: E0140 for each
 // `#SingleUse` binding of the closing scope that is not consumed.
 pub fn sema_single_use_check_scope_end(state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
-    loop fact in state.declarations {
-        if fact.single_use && fact.active && fact.scope_depth >= state.scope_depth && !sema_single_use_moved(state, fact.key) {
+    loop row in sema_ownership_single_use_rows(state) {
+        fact :: state.declarations[row]
+        if fact.active && fact.scope_depth >= state.scope_depth && !sema_single_use_moved(state, fact.key) {
             &diagnostics.push(sema_single_use_diag_unconsumed(fact.name, fact.span))
         }
     }
@@ -110,16 +107,18 @@ pub fn sema_single_use_leave_scope(scopes: &SemaScopeTable, state: &SemaOwnershi
 // D-LIN1 / D-FACT-FLOW1: E0141. The merged move store is a union, so a value
 // consumed on only one path would look consumed after the branch. Compare
 // the paths that reach the merge directly, over the bindings of the current
-// scope that were unconsumed before the branch.
-pub fn sema_single_use_check_paths(before: SemaOwnershipState, paths: [SemaOwnershipState], diagnostics: &[Diagnostic]) {
-    loop fact in before.declarations {
-        if !fact.single_use || !fact.active || fact.scope_depth != before.scope_depth -> next
+// scope that were unconsumed before the branch. `before` is the state of the
+// branch's fork (rolled back), `paths` the paths that reach the merge.
+pub fn sema_single_use_check_paths(before: SemaOwnershipState, paths: [SemaOwnershipPath], diagnostics: &[Diagnostic]) {
+    loop row in sema_ownership_single_use_rows(before) {
+        fact :: before.declarations[row]
+        if !fact.active || fact.scope_depth != before.scope_depth -> next
         if sema_single_use_moved(before, fact.key) -> next
         consumed := false
         kept := false
         loop path in paths {
             if {
-                sema_single_use_moved(path, fact.key) -> consumed = true
+                sema_single_use_moved_in(path.moved, fact.key) -> consumed = true
                 else -> kept = true
             }
         }
