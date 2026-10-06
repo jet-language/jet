@@ -921,7 +921,7 @@ fn jet_codegen_constant_use_site_leaves(value: TComptimeValue) -> Int Never! {
 fn jet_codegen_lower_constant_definition(definition: TConstantDef, modules: [SemaGraphModuleResult]) -> MIRConstantDef? {
     if jet_codegen_constant_is_output_type(definition.ty, modules, definition.module_identity) -> return None
     if definition.is_comptime && definition.value == .Unit -> return None
-    value :: jet_codegen_lower_comptime_value(definition.value, modules, definition.module_identity, [String]{}) ?? return None
+    value :: jet_codegen_lower_byte_list_constant(definition.ty, definition.value) ?? jet_codegen_lower_comptime_value(definition.value, modules, definition.module_identity, [String]{}) ?? return None
     return MIRConstantDef{
         id: MIRConstantID{value: stable_id("mir-constant", definition.key)},
         module_id: mir_module_id(definition.module_identity),
@@ -933,6 +933,31 @@ fn jet_codegen_lower_constant_definition(definition: TConstantDef, modules: [Sem
         is_storage: definition.is_storage,
         value: value,
     }
+}
+
+// Rust mir.rs `lower_byte_list_constant`: a `[U8]` constant whose folded value
+// is a list of integer bytes (generated Unicode tables) is one Bytes constant.
+fn jet_codegen_lower_byte_list_constant(ty: Type, value: TComptimeValue) -> MIRConstant? Never! {
+    is_byte_list :: if jet_codegen_unwrap_pattern_tags(ty) == {
+        .List(element) -> element == Type.IntN{signed: false, bits: 8}
+        else -> false
+    }
+    if !is_byte_list -> return None
+    elements :: if value == {
+        .List(values) -> values
+        else -> return None
+    }
+    bytes := [U8]{}
+    loop element in elements {
+        if element == {
+            .Int(literal) -> {
+                byte :: U8.from_int(literal) ?? return None
+                &bytes.push(byte)
+            }
+            else -> return None
+        }
+    }
+    Val(MIRConstant.Bytes{value: bytes})
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::inline_known_constant_reads
