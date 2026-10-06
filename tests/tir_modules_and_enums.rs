@@ -1182,10 +1182,10 @@ fn package_namespace_uses_owner_indices_without_sibling_imports() {
     let scratch = common::Scratch::new("namespace_owner_indices");
     let files = [
         ("package.jet", "name: \"namespace_owner_indices\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: run } }\n"),
-        ("main.jet", "#NoPrelude\nFOLDED :: prep { fold_record().value }\nfn run() {\n    callback :: plus\n    result :: callback(2)\n    record :: make()\n    amount :: measure(record)\n    boxed :: wrap(identity(result + amount))\n    state :: State.Ready(boxed.value)\n}\n"),
+        ("main.jet", "#NoPrelude\nFOLDED :: prep { fold_record().value }\nfn run() {\n    callback :: plus\n    result :: callback(2)\n    record :: make()\n    amount :: record.amount()\n    boxed :: wrap(result + amount)\n    state :: State.Ready(boxed.value)\n}\n"),
         ("types.jet", "#NoPrelude\nstruct Record { pub value: Int }\nstruct Box<T> { pub value: T }\nenum State { Ready(Int) }\nalias RecordView<T> :: Box<T>\nalias Again<T> :: RecordView<T>\n"),
-        ("methods.jet", "#NoPrelude\ntrait Measure { fn amount(self) -> Int }\nimpl Record.Measure {\n    fn amount(self) -> Int { self.value }\n}\nfn measure<T: Measure>(value: T) -> Int { value.amount() }\n"),
-        ("values.jet", "#NoPrelude\nTOKEN :: 7\nfn plus(value: Int) -> Int { value + TOKEN }\nfn identity<T>(value: T) -> T { value }\nfn make() -> Record { Record{value: TOKEN} }\nfn fold_record() -> Record { Record{value: 11} }\nfn wrap(value: Int) -> Again<Int> { Box<Int>{value: value} }\n"),
+        ("methods.jet", "#NoPrelude\ntrait Measure { fn amount(self) -> Int }\nimpl Record.Measure {\n    fn amount(self) -> Int { self.value }\n}\n"),
+        ("values.jet", "#NoPrelude\nTOKEN :: 7\nfn plus(value: Int) -> Int { value + TOKEN }\nfn make() -> Record { Record{value: TOKEN} }\nfn fold_record() -> Record { Record{value: 11} }\nfn wrap(value: Int) -> Again<Int> { Box<Int>{value: value} }\n"),
     ];
     for (name, source) in files {
         fs::write(scratch.join(name), source).unwrap();
@@ -1220,11 +1220,11 @@ fn package_namespace_uses_owner_indices_without_sibling_imports() {
 }
 
 #[test]
-fn comptime_qualified_module_function_value_reaches_its_body() {
-    let scratch = common::Scratch::new("comptime_qualified_function_value");
+fn comptime_qualified_module_function_call_reaches_its_body() {
+    let scratch = common::Scratch::new("comptime_qualified_function_call");
     for (name, source) in [
-        ("package.jet", "name: \"comptime_qualified_function_value\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: run } }\n"),
-        ("main.jet", "#NoPrelude\nmodule helper\nFOLDED :: prep {\n    callback :: helper.double\n    callback(20) + helper.double(1)\n}\nfn run() {}\n"),
+        ("package.jet", "name: \"comptime_qualified_function_call\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: run } }\n"),
+        ("main.jet", "#NoPrelude\nmodule helper\nFOLDED :: prep { helper.double(20) + helper.double(1) }\nfn run() {}\n"),
         ("helper.jet", "#NoPrelude\npub fn double(value: Int) -> Int { value * 2 }\n"),
     ] {
         fs::write(scratch.join(name), source).unwrap();
@@ -1238,9 +1238,9 @@ fn comptime_qualified_module_function_value_reaches_its_body() {
     let folded = bundle.modules[bundle.entry].items.iter().find_map(|item| match item {
         jet::AST::Item::Const(constant) if constant.name == "FOLDED" => constant.ct.as_ref(),
         _ => None,
-    }).expect("qualified callable initializer folded");
+    }).expect("qualified call initializer folded");
     match folded {
         jet::AST::CtValue::Int(value) => assert_eq!(value.to_string(), "42"),
-        value => panic!("qualified callable initializer produced {value:?}"),
+        value => panic!("qualified call initializer produced {value:?}"),
     }
 }
