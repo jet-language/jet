@@ -32221,7 +32221,15 @@ impl<'a> RustEmitter<'a> {
             if access == MirAccess::Move {
                 return name;
             }
-            if !matches!(access, MirAccess::Write) {
+            // D-MEMPROVENANCE2: a by-value `ViewMut<T>` parameter is itself a
+            // `&mut [T]`; a write subrange reborrows through it.
+            let mutable_view = !capture
+                && by_value
+                && matches!(
+                    self.value_type(function, value).kind(),
+                    MirTypeKind::Apply { name, args } if name.name == "ViewMut" && args.len() == 1
+                );
+            if !matches!(access, MirAccess::Write) && !mutable_view {
                 panic!("MIR place is not writable");
             }
             return format!("*{name}");
