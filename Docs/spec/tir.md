@@ -83,7 +83,7 @@ its stored fields uses it. Such parameters are carried by a zero-sized
 `PhantomData` field, initialized by every record construction path; the marker
 is not a source field or a serialized/displayed value. Native/runtime-owned
 records retain their existing layouts rather than receiving emitter fields.
-Canonical source-owned regex and web-table records retain their declared field
+Canonical source-owned regex, web-table, and HTTP message records retain their declared field
 layouts and generated local traits. A same-leaf native carrier is not an ABI
 alias for such a record; all type projections use the source-owner decision.
 Checked-text interpolation carries each hole's checked generic encoder arguments
@@ -103,6 +103,14 @@ Locally matching its outcome preserves the carrier and binds success/error
 payloads; recognizing that domain does not declare a conversion into default
 `Err`. Ordinary fallible bindings still propagate, so diagnostic-policy probes
 handle a decoder call directly instead of first binding only its success value.
+
+Pattern payload and field types instantiate the checked subject's owner
+parameters before binding locals; a declaration's bare `T`/`E` does not escape
+into its concrete match. Associated types in a trait declaration use `Self::X`.
+Structural Comparable/Equatable records may derive Rust `Eq`, `PartialOrd`,
+and `Ord` only when every field supports that native order. A custom capability
+implementation, floating field, unordered carrier, or native opaque carrier
+does not gain a different derived ordering silently.
 
 
 Shared collection kernels narrow owned exact `Int` arguments through
