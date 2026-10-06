@@ -227,11 +227,30 @@ pub fn jet_cli_inspect(argv: [String], jet_argv: [String], args: [String], color
         "graph" | "query" | "explain-build" -> return jet_cli_inspect_build_query(command, args, color, json, threads)
         "compiler" -> return jet_cli_inspect_compiler(args, color)
         "provenance" -> return jet_cli_inspect_provenance(color)
-        "impact" -> return jet_cli_not_ported("inspect impact", color)
+        "impact" -> return jet_cli_inspect_impact(argv, color)
         else -> {}
     }
     if jet_cli_inspect_b(argv, command, jet_argv, args, color, quiet, json, threads) == .Val(plan) -> return plan
     jet_cli_not_ported(command, color)
+}
+
+// Source/CmdImpact.rs `run_impact` up to the check: `--depth=N` and exactly
+// an entry file and a symbol. The blast-radius report over the semantic
+// index is not ported yet.
+fn jet_cli_inspect_impact(argv: [String], color: Bool) -> JetCLIPlan Never! {
+    input_fix :: "correct the named argument or input, then run the command again"
+    depth := 3
+    positional := [String]{}
+    loop argument in jet_cli_tail(argv, 1) {
+        if argument.starts_with("--depth=") {
+            depth = jet_cli_inspect_count(argument.slice(8..<argument.len())) ?? return jet_cli_fail("E2104", "`--depth` must be a positive integer", jet_cli_why("E2104"), input_fix, color, JET_DRIVER_EXIT_USER_ERROR)
+        } else {
+            if !argument.starts_with("-") -> &positional.push(argument)
+        }
+    }
+    if positional.len() != 2 -> return jet_cli_fail("E2104", "`jet inspect impact` needs an entry file and a symbol name", jet_cli_why("E2104"), "jet inspect impact Examples/features/effects/effects.jet report", color, JET_DRIVER_EXIT_USER_ERROR)
+    if depth == 0 -> return jet_cli_fail("E2104", "`--depth` must be at least 1", jet_cli_why("E2104"), input_fix, color, JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_not_ported("inspect impact", color)
 }
 
 // One inspect projection the host carries out after compiling `file`
