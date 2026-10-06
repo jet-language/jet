@@ -4487,7 +4487,7 @@ impl<'a> Checker<'a> {
                     if owner == self.module_idx {
                         self.inline_addr_taken.insert(name.clone());
                     }
-                    self.qualify_builtin_shadowing_sig(owner, &mut sig);
+                    self.qualify_imported_function_sig(owner, name, &mut sig);
                     if let Some((idx, (convention, _))) = sig
                         .params
                         .iter()
