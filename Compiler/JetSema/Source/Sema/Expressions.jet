@@ -3708,7 +3708,12 @@ pub fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScope
     context.failure_success_view = previous_success_view
     if propagates && checked != None {
         call_value :: checked ?? return None
-        checked = sema_expression_auto_propagate(expr, call_value, expected, environment, program, &scopes, &context, &diagnostics)
+        // A root that does not propagate keeps its value, moved back as is.
+        if sema_expression_auto_propagates(call_value.ty, expected) {
+            checked = sema_expression_auto_propagate(expr, call_value, expected, environment, program, &scopes, &context, &diagnostics)
+        } else {
+            checked = Val(call_value)
+        }
     }
     // The checked value moves out and back: binding it while `checked` was
     // still returned copied the whole checked tree at every level.

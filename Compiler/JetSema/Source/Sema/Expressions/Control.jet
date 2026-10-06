@@ -707,16 +707,22 @@ fn sema_expression_propagated(inner: TExpr, conversion: TTryConvert, span: Span)
     Val(sema_tir_expr(payload, TExprKind.Try{value: inner, conversion: conversion, failure: sema_expression_failure_carrier(inner.ty)}, span))
 }
 
-// D-FAILURE-FOUNDATION1=A: automatic propagation of a call root. Only a
-// Result carrier propagates; an optional result is an ordinary value. The
-// propagation site joins the failure journey like an explicit `?(text)` hop,
-// without a note (D-ERRCTX1, #3713).
-fn sema_expression_auto_propagate(expr: Expr, value: TExpr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if sema_expr_unwrap_tag(value.ty) == {
+// D-FAILURE-FOUNDATION1=A: whether a call root of type `ty` propagates
+// automatically. Only a Result carrier propagates; an optional result is an
+// ordinary value, and so is a carrier where the expected type is the carrier
+// position itself.
+fn sema_expression_auto_propagates(ty: Type, expected: Type?) -> Bool {
+    if sema_expr_unwrap_tag(ty) == {
         .Result(_, _) -> {}
-        else -> return Val(value)
+        else -> return false
     }
-    if sema_expression_failure_carrier_position(expected, value.ty) -> return Val(value)
+    !sema_expression_failure_carrier_position(expected, ty)
+}
+
+// The automatic propagation of a call root that propagates
+// (sema_expression_auto_propagates). The propagation site joins the failure
+// journey like an explicit `?(text)` hop, without a note (D-ERRCTX1, #3713).
+fn sema_expression_auto_propagate(expr: Expr, value: TExpr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     span :: expr_span(expr)
     conversion :: sema_expression_propagation_conversion(value, Val(expr), span, true, environment, program, &scopes, &context, &diagnostics) ?? return None
     payload :: sema_expression_carrier_payload(value.ty) ?? return None
