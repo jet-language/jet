@@ -47,6 +47,10 @@ copies. Its [golden](features/expected/basics/struct_call_word.out) preserves al
 borrowed returns from named owners and direct operations on the returned view.
 The caller keeps the owner alive; binding the returned view first is optional.
 
+[`view_subranges.jet`](features/memory/view_subranges.jet) shows subranges of
+declared views: `view[a..<b]` keeps the view's owner, never copies, and writes
+through a `ViewMut` subrange land in the owning list.
+
 ## Auxiliary golden stream suffix
 
 The feature runner discovers `.jet` files and project directories containing a

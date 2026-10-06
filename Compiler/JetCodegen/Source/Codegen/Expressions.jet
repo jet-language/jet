@@ -4286,6 +4286,17 @@ fn jet_codegen_lower_list_place_read(builder: &JetCodegenBuilder, program: JetCo
 }
 
 fn jet_codegen_lower_slice(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, base: TExpr, start: TExpr, end: TExpr, range: TExpr?, checked_location: TPanicLoc) -> MIRValueID {
+    // A declared view's subrange reborrows its owner rather than copying.
+    receiver := base
+    if base.kind == .Clone(inner, _) -> receiver = inner
+    if jet_codegen_builtin_untag(receiver.ty) == .Apply(name, view_args) {
+        if (name == "View" || name == "ViewMut") && view_args.len() == 1 {
+            args := if range == .Val(range_expr) -> [TExpr]{range_expr} else -> [TExpr]{start, end}
+            view_type := Type.Apply{name: "View", args: [Type]{view_args[0]}}
+            view := TExpr{ty: view_type, kind: TExprKind.BuiltinMethod{receiver: receiver, operation: TBuiltinOp.ViewNew{line: checked_location.line}, args: args}, span: expression.span, integer_bounds: None, cost: None}
+            return jet_codegen_lower_expr(&builder, program, view)
+        }
+    }
     base_value := jet_codegen_lower_slice_base(&builder, program, base)
     start_value := jet_codegen_lower_expr(&builder, program, start)
     end_value := jet_codegen_lower_expr(&builder, program, end)
