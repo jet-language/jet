@@ -719,11 +719,20 @@ pub fn jet_eval_function(program: ^MIRProgram, function_id: MIRFunctionID, args:
 // retired in place (jet_eval_retire_in_place): it starts over with `config`
 // (jet_eval_reset_session), so the result is the one a new machine over the
 // same program would give, without rebuilding the program or its row index.
-// Only the program and its rows carry over, so a session whose callbacks
-// failed to drain is reused exactly as a fresh machine would be.
-pub fn jet_eval_session_function(session: ^JetEvalRuntimeSession, function_id: MIRFunctionID, args: [TComptimeValue], config: ^JetEvalConfig) -> JetEvalResult {
+// Only the program, its rows and the globals carry over, so a session whose
+// callbacks failed to drain is reused exactly as a fresh machine would be.
+// The evaluation's globals are the session's (those of its last evaluation)
+// plus `added`; `config`'s own are dropped. That equals a fresh machine with
+// the union as `config.globals` (the evaluator only reads globals), without
+// copying every global of a long comptime run once per evaluation.
+pub fn jet_eval_session_function(session: ^JetEvalRuntimeSession, function_id: MIRFunctionID, args: [TComptimeValue], config: ^JetEvalConfig, added: [String:TComptimeValue]) -> JetEvalResult {
     reused := ^session
-    jet_eval_reset_session(&reused.machine, ^config)
+    globals := ^reused.machine.config.globals
+    reused.machine.config.globals = [String:TComptimeValue]{}
+    loop (key, value) in added -> globals[key] = value
+    session_config := ^config
+    session_config.globals = ^globals
+    jet_eval_reset_session(&reused.machine, ^session_config)
     reused.retired = false
     value := jet_eval_function_in(&reused.machine, function_id, args)
     complete :: value != None
