@@ -165,11 +165,6 @@ fn jet_cli_checked_file(root: String, relative: String) -[FS]> String? Never! {
     Val(path)
 }
 
-// A spanless CLI report and its exit status.
-fn jet_cli_entry_fail(code: String, what: String, why: String, fix: String, color: Bool, exit_code: Int) -> JetCLIPlan Never! {
-    jet_cli_done("", jet_cli_report(code, what, why, fix, color), exit_code)
-}
-
 // A resolution shape this port does not read yet: refused, never guessed.
 fn jet_cli_entry_not_ported(command: String, shape: String, color: Bool) -> JetCLIPlan Never! {
     jet_cli_not_ported("{command} <{shape}>", color)
@@ -698,7 +693,7 @@ fn jet_cli_package_run_member(root: String) -[FS]> String? Never! {
 
 // main.rs `report_entry_authority_error` for a retired `pkg.jet` manifest.
 fn jet_cli_retired_manifest(path: String, color: Bool) -> JetCLIPlan Never! {
-    jet_cli_entry_fail("E1226", "retired manifest `{path}` is not a Package root", "`{JET_CLI_PAYLOAD_FILE}` is retired; Package identity is read only from `{JET_CLI_PACKAGE_FILE}`", "rename `{JET_CLI_PAYLOAD_FILE}` to `{JET_CLI_PACKAGE_FILE}`", color, JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_fail("E1226", "retired manifest `{path}` is not a Package root", "`{JET_CLI_PAYLOAD_FILE}` is retired; Package identity is read only from `{JET_CLI_PACKAGE_FILE}`", "rename `{JET_CLI_PAYLOAD_FILE}` to `{JET_CLI_PACKAGE_FILE}`", color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // Authority.rs `checked_manifest` failures that stop resolution: both
@@ -707,7 +702,7 @@ fn jet_cli_manifest_problem(root: String, color: Bool) -[FS]> JetCLIPlan? Never!
     canonical :: jet_cli_checked_file(root, JET_CLI_PACKAGE_FILE)
     retired :: jet_cli_checked_file(root, JET_CLI_PAYLOAD_FILE) ?? return None
     if canonical != None {
-        return Val(jet_cli_entry_fail("E1206", "the package has two manifest roots", "`{JET_CLI_PACKAGE_FILE}` and `{JET_CLI_PAYLOAD_FILE}` both exist; choosing one would make package identity ambiguous", "remove `{JET_CLI_PAYLOAD_FILE}` or migrate it into `{JET_CLI_PACKAGE_FILE}`", color, JET_DRIVER_EXIT_USER_ERROR))
+        return Val(jet_cli_fail("E1206", "the package has two manifest roots", "`{JET_CLI_PACKAGE_FILE}` and `{JET_CLI_PAYLOAD_FILE}` both exist; choosing one would make package identity ambiguous", "remove `{JET_CLI_PAYLOAD_FILE}` or migrate it into `{JET_CLI_PACKAGE_FILE}`", color, JET_DRIVER_EXIT_USER_ERROR))
     }
     Val(jet_cli_retired_manifest(retired, color))
 }
@@ -727,7 +722,7 @@ fn jet_cli_find_project_entry(root_path: String, command: String, color: Bool, n
         if jet_cli_resolve_run_entry(root, package, &notices) == {
             .Found(entry) -> return JetCLIEntryFound.Entry{entry: entry}
             .Failed(message) -> {
-                return JetCLIEntryFound.Refused{plan: jet_cli_entry_fail("E2105", message, jet_cli_why("E2105"), "repair the typed Package output or point at a `.jet` file directly", color, JET_DRIVER_EXIT_USER_ERROR)}
+                return JetCLIEntryFound.Refused{plan: jet_cli_fail("E2105", message, jet_cli_why("E2105"), "repair the typed Package output or point at a `.jet` file directly", color, JET_DRIVER_EXIT_USER_ERROR)}
             }
             .Unported(shape) -> {
                 return JetCLIEntryFound.Refused{plan: jet_cli_entry_not_ported(command, shape, color)}
@@ -741,7 +736,7 @@ fn jet_cli_find_project_entry(root_path: String, command: String, color: Bool, n
     if jet_cli_resolve_run_entry(root, None, &notices) == {
         .Found(entry) -> return JetCLIEntryFound.Entry{entry: entry}
         .Failed(message) -> {
-            return JetCLIEntryFound.Refused{plan: jet_cli_entry_fail("E2105", message, jet_cli_why("E2105"), "keep one project entry, using `run.jet`, or point at a `.jet` file directly", color, JET_DRIVER_EXIT_USER_ERROR)}
+            return JetCLIEntryFound.Refused{plan: jet_cli_fail("E2105", message, jet_cli_why("E2105"), "keep one project entry, using `run.jet`, or point at a `.jet` file directly", color, JET_DRIVER_EXIT_USER_ERROR)}
         }
         .Unported(shape) -> {
             return JetCLIEntryFound.Refused{plan: jet_cli_entry_not_ported(command, shape, color)}
@@ -792,7 +787,7 @@ fn jet_cli_command_override(root_path: String, command: String, color: Bool) -[F
     }
     files := [JetDriverAuthorizedSourceFile]{}
     if jet_cli_package_sources(root, &files) == .Val(problem) {
-        return JetCLIEntryFound.Refused{plan: jet_cli_entry_fail("E2105", problem, "command resolution uses the checked package source tree", "repair the package source and run the command again", color, JET_DRIVER_EXIT_USER_ERROR)}
+        return JetCLIEntryFound.Refused{plan: jet_cli_fail("E2105", problem, "command resolution uses the checked package source tree", "repair the package source and run the command again", color, JET_DRIVER_EXIT_USER_ERROR)}
     }
     role_files := [JetDriverAuthorizedSourceFile]{}
     root_files := [JetDriverAuthorizedSourceFile]{}
@@ -875,12 +870,12 @@ fn jet_cli_declares_workspace_members(source: String) -> Bool Never! {
 fn jet_cli_ambiguous_workspace(paths: [String], color: Bool) -> JetCLIPlan Never! {
     names := [String]{}
     loop path in paths -> &names.push(jet_cli_file_name(path))
-    jet_cli_entry_fail("E1239", "`module workspace` is declared in more than one file: `{names.join("`, `")}`", "the workspace authority is discovered by declaration, so exactly one file may declare `module workspace {{ … }}`", "keep one declaration and delete the others", color, JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_fail("E1239", "`module workspace` is declared in more than one file: `{names.join("`, `")}`", "the workspace authority is discovered by declaration, so exactly one file may declare `module workspace {{ … }}`", "keep one declaration and delete the others", color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // WorkspacePlan.rs `e0995_no_workspace_module`.
 fn jet_cli_no_workspace_module(color: Bool) -> JetCLIPlan Never! {
-    jet_cli_entry_fail("E0995", "`workspace.jet` must declare `module workspace {{ … }}`", "`workspace.jet` is the monorepo workspace index; it must contain exactly one `module workspace {{ members: … }}` body", "write `module workspace {{ members: find(\"./packages\") }}` in `workspace.jet`", color, JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_fail("E0995", "`workspace.jet` must declare `module workspace {{ … }}`", "`workspace.jet` is the monorepo workspace index; it must contain exactly one `module workspace {{ members: … }}` body", "write `module workspace {{ members: find(\"./packages\") }}` in `workspace.jet`", color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // Is a workspace source (or its failure) present at a directory?
@@ -1158,13 +1153,13 @@ pub fn jet_cli_resolve_bare_entry(command: String, cwd: String, member_flag: Str
             }
             names := [String]{}
             loop member in members_plan -> &names.push(member.name)
-            return JetCLIEntryFound.Refused{plan: jet_cli_entry_fail("E2104", "no workspace member named `{want}`", jet_cli_why("E2104"), "pick one of: {names.join(", ")}", color, JET_DRIVER_EXIT_USAGE)}
+            return JetCLIEntryFound.Refused{plan: jet_cli_fail("E2104", "no workspace member named `{want}`", jet_cli_why("E2104"), "pick one of: {names.join(", ")}", color, JET_DRIVER_EXIT_USAGE)}
         }
         if runnable.len() == 1 -> return JetCLIEntryFound.Entry{entry: entries[0]}
         if runnable.len() >= 2 {
             names := [String]{}
             loop member in runnable -> &names.push(member.name)
-            return JetCLIEntryFound.Refused{plan: jet_cli_entry_fail("E2104", "`jet {command}` is ambiguous — {names.len()} workspace members can run", "this workspace declares multiple runnable members: {names.join(", ")}", "pick one with `jet {command} -p <member>`, or run its file directly", color, JET_DRIVER_EXIT_USAGE)}
+            return JetCLIEntryFound.Refused{plan: jet_cli_fail("E2104", "`jet {command}` is ambiguous — {names.len()} workspace members can run", "this workspace declares multiple runnable members: {names.join(", ")}", "pick one with `jet {command} -p <member>`, or run its file directly", color, JET_DRIVER_EXIT_USAGE)}
         }
     }
     if jet_cli_find_package_root(root, color) == {
@@ -1194,12 +1189,12 @@ pub fn jet_cli_missing_bare_entry(command: String, cwd: String, color: Bool) -[F
         if jet_cli_workspace_present(jet_cli_workspace_source(dir, color)) -> break
         dir = jet_cli_walk_up(dir) ?? break
     }
-    jet_cli_entry_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet {command} <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
+    jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet {command} <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
 }
 
 // Loader.rs `stale_manifest_name_diagnostic`.
 fn jet_cli_stale_manifest(dir: String, stale: String, color: Bool) -> JetCLIPlan Never! {
-    jet_cli_entry_fail("E1226", "`{stale}` is not the package manifest name — Jet reads `{JET_CLI_PACKAGE_FILE}`", "the Package root filename is frozen to one spelling (D-ECO-FILEROOT1) so tooling, docs, and every worked example never have to guess which file to read", "rename `{jet_cli_entry_join(dir, stale)}` to `{jet_cli_entry_join(dir, JET_CLI_PACKAGE_FILE)}`", color, JET_DRIVER_EXIT_USAGE)
+    jet_cli_fail("E1226", "`{stale}` is not the package manifest name — Jet reads `{JET_CLI_PACKAGE_FILE}`", "the Package root filename is frozen to one spelling (D-ECO-FILEROOT1) so tooling, docs, and every worked example never have to guess which file to read", "rename `{jet_cli_entry_join(dir, stale)}` to `{jet_cli_entry_join(dir, JET_CLI_PACKAGE_FILE)}`", color, JET_DRIVER_EXIT_USAGE)
 }
 
 // main.rs `resolve_command_target` for a directory `raw`: the shared bare
@@ -1229,7 +1224,7 @@ pub fn jet_cli_resolve_directory_target(command: String, raw: String, member_fla
             return JetCLITarget.Refused{plan: jet_cli_with_notices(notices, problem)}
         }
         if jet_cli_checked_file(root, JET_CLI_PACKAGE_FILE) == .None {
-            return JetCLITarget.Refused{plan: jet_cli_with_notices(notices, jet_cli_entry_fail("E2105", "no `{JET_CLI_DEFAULT_ENTRY_FILE}` entry in `{raw}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR))}
+            return JetCLITarget.Refused{plan: jet_cli_with_notices(notices, jet_cli_fail("E2105", "no `{JET_CLI_DEFAULT_ENTRY_FILE}` entry in `{raw}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR))}
         }
     }
     JetCLITarget.File{path: entry, callable: None, notice: notices.join("")}
@@ -1306,8 +1301,8 @@ pub fn jet_cli_missing_project_context(file: String, source: String) -[FS, Env]>
     if lexed.diagnostics.len() > 0 -> return None
     span := Span?{None}
     if jet_cli_parsed_program(masked) == .Val(program) {
-        loop import in program.imports {
-            if import.kind == {
+        loop declaration in program.imports {
+            if declaration.kind == {
                 .Module(name, import_span) -> {
                     if name.starts_with("project.") -> span = Val(import_span)
                 }
