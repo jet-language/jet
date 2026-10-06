@@ -4299,7 +4299,7 @@ fn jet_rust_emit_shared_guard_map(ctx: &JetRustEmitContext, function: MIRFunctio
     expression := jet_rust_emit_value_move(ctx, guard)
     loop field in path {
         project :: "|__jet_guard_value| ({borrow}__jet_guard_value.{jet_rust_emit_field_name(&ctx, field)})"
-        if row.module_name == "core.cell_guard" -> expression = "({expression}).{method}({project})" else -> expression = "({expression}).{method}({field.value}i64, {project})"
+        if row.module_name == "core.cell_guard" -> expression = "({expression}).{method}({project})" else -> expression = "({expression}).{method}({field.value}u64 as i64, {project})"
     }
     expression
 }
@@ -4338,7 +4338,7 @@ fn jet_rust_emit_shared_guard_split(ctx: &JetRustEmitContext, function: MIRFunct
     project :: "|__jet_guard_value| ({borrow}__jet_guard_value.{first_name}, {borrow}__jet_guard_value.{second_name})"
     if row.module_name == "core.cell_guard" -> return "({mapped}).{method}({project})"
 
-    "({mapped}).{method}({first[common].value}i64, {second[common].value}i64, {project})"
+    "({mapped}).{method}({first[common].value}u64 as i64, {second[common].value}u64 as i64, {project})"
 }
 
 fn jet_rust_emit_text_hole_kind(kind: MIRTextHoleKind) -> String Never! {

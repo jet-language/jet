@@ -28211,7 +28211,9 @@ impl<'a> RustEmitter<'a> {
             let arguments = if cell_route {
                 format!("{method}({project})")
             } else {
-                format!("{method}({}i64, {project})", field.0)
+                // The field id is a u64 identity; the kernel's provenance key is
+                // its i64 bit pattern (a bare u64 literal overflows `i64`).
+                format!("{method}({}u64 as i64, {project})", field.0)
             };
             expression = format!("({expression}).{arguments}");
         }
@@ -28276,8 +28278,9 @@ impl<'a> RustEmitter<'a> {
             format!("({prefix}).{method}({project})")
         } else {
             format!(
-                "({prefix}).{method}({}i64, {}i64, {project})",
-                first[common].0, second[common].0
+                "({prefix}).{method}({}u64 as i64, {}u64 as i64, {project})",
+                first[common].0,
+                second[common].0
             )
         };
         let first_mapped = self.map_guard_path(
