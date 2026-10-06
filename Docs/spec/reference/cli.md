@@ -153,6 +153,11 @@ The generated help groups subcommands as follows:
 Use `jet help registry`, `jet help inspect`, or `jet help <subcommand>` when a
 script needs the complete generated synopsis rather than this index.
 
+`find` and symbol help read source-facing names from Sema's checked name
+ledger. Unambiguous visible names stay short; ambiguous names retain their
+canonical path. Generated inline and generic-module names project to their
+authored member path without changing package-qualified semantic identity.
+
 ## Shared option spellings
 
 The options below are intentionally named exactly as in `target/debug/jet help`:
