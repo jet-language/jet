@@ -1,4 +1,4 @@
-use crate::Diagnostics::{Diagnostic, Severity, TextEdit};
+use crate::Diagnostics::{Diagnostic, Severity, Span, TextEdit};
 use crate::Sema::CheckerCoreLib::{
     core_struct_field_type, is_swizzleable_math_type, parse_swizzle_member, swizzle_write_overlaps,
     SwizzleParse,
@@ -2564,6 +2564,14 @@ impl<'a> Checker<'a> {
                                 }
                             }
                         }
+                        // D-RANGE-BACKWARD1=A: written ends that count the
+                        // wrong way are a check error; computed ends stay
+                        // empty at run time.
+                        if let Some(diagnostic) =
+                            backward_range_diagnostic(start, end, step.as_ref(), *exclusive, true)
+                        {
+                            self.diags.push(diagnostic);
+                        }
                         self.loop_depth += 1;
                         self.push_scope();
                         let vs = *var_span;
@@ -4158,5 +4166,93 @@ fn expr_place_spell(expr: &Expr) -> Option<String> {
             expr_place_spell(index).unwrap_or_else(|| "…".to_string())
         )),
         _ => None,
+    }
+}
+
+/// D-RANGE-BACKWARD1=A: a number written in the source, with an optional
+/// leading minus. Named constants and computed values are not written ends.
+pub(crate) fn written_range_int(expr: &Expr) -> Option<i64> {
+    match expr {
+        Expr::Int(value, ..) => Some(*value),
+        Expr::Paren(inner, _) => written_range_int(inner),
+        Expr::Unary(crate::AST::UnOp::Neg, inner, _) => written_range_int(inner)?.checked_neg(),
+        _ => None,
+    }
+}
+
+/// D-RANGE-BACKWARD1=A: a range whose written ends and step count in
+/// opposite directions is E0170. A loop range gets a fix edit for its step;
+/// a range value (`step` slot absent, `loop_range` false) is taught to write
+/// its ends in order. Equal ends are an ordinary (possibly empty) range.
+pub(crate) fn backward_range_diagnostic(
+    start: &Expr,
+    end: &Expr,
+    step: Option<&Expr>,
+    exclusive: bool,
+    loop_range: bool,
+) -> Option<Diagnostic> {
+    let s = written_range_int(start)?;
+    let e = written_range_int(end)?;
+    let op = if exclusive { "..<" } else { ".." };
+    let written_step = step.and_then(written_range_int);
+    if s > e {
+        match (step, written_step) {
+            (None, _) if loop_range => Some(
+                Diagnostic::error(
+                    "E0170",
+                    format!("this range counts down from {s} to {e} but has no step"),
+                    format!("a range without a step counts up, so `{s}{op}{e}` would run zero times"),
+                    format!("add the minus step: `{s}{op}{e}, -1`"),
+                    Some(Span::new(start.span().start, end.span().end)),
+                )
+                .with_edit(TextEdit {
+                    span: Span::new(end.span().end, end.span().end),
+                    new_text: ", -1".to_string(),
+                }),
+            ),
+            (None, _) => Some(Diagnostic::error(
+                "E0170",
+                format!("this range counts down from {s} to {e} and holds no numbers"),
+                "a range value always counts up from its start, so a bigger start leaves it empty".to_string(),
+                format!("write the smaller end first, `{e}{op}{s}`; count down in a loop with `{s}{op}{e}, -1`"),
+                Some(Span::new(start.span().start, end.span().end)),
+            )),
+            (Some(step), Some(k)) if k > 0 => Some(
+                Diagnostic::error(
+                    "E0170",
+                    format!("this range counts down from {s} to {e} but its step {k} counts up"),
+                    format!("a positive step moves away from {e}, so the loop would run zero times"),
+                    format!("make the step negative: `{s}{op}{e}, -{k}`"),
+                    Some(step.span()),
+                )
+                .with_edit(TextEdit {
+                    span: step.span(),
+                    new_text: format!("-{k}"),
+                }),
+            ),
+            _ => None,
+        }
+    } else if s < e {
+        let step = step?;
+        let k = written_step?;
+        if k >= 0 {
+            return None;
+        }
+        let up = k.checked_neg()?;
+        Some(
+            Diagnostic::error(
+                "E0170",
+                format!("this range counts up from {s} to {e} but its step {k} counts down"),
+                format!("a negative step moves away from {e}, so the loop would run zero times"),
+                format!("make the step positive: `{s}{op}{e}, {up}`"),
+                Some(step.span()),
+            )
+            .with_edit(TextEdit {
+                span: step.span(),
+                new_text: up.to_string(),
+            }),
+        )
+    } else {
+        None
     }
 }

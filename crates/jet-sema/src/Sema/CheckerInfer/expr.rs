@@ -4670,8 +4670,11 @@ impl<'a> Checker<'a> {
                 }
             }
             Expr::Range {
-                start, end, span, ..
-            } => self.infer_range(start, end, *span),
+                start,
+                end,
+                exclusive,
+                span,
+            } => self.infer_range(start, end, *exclusive, *span),
             Expr::Call(call) => {
                 let span = call.name_span;
                 // D-UNINIT1: a `mut` arg is the fill site, not a read.
@@ -7201,6 +7204,7 @@ impl<'a> Checker<'a> {
         &mut self,
         start: &mut Box<Expr>,
         end: &mut Box<Expr>,
+        exclusive: bool,
         _span: Span,
     ) -> Option<Type> {
         let mut valid = true;
@@ -7214,6 +7218,15 @@ impl<'a> Checker<'a> {
                     "use Int values on both sides of the range operator".to_string(),
                     Some(bound.span()),
                 ));
+            }
+        }
+        // D-RANGE-BACKWARD1=A: a stored range or slice with written ends in
+        // the wrong order is E0170; computed ends stay empty at run time.
+        if valid {
+            if let Some(diagnostic) = crate::Sema::CheckerCore::backward_range_diagnostic(
+                start, end, None, exclusive, false,
+            ) {
+                self.diags.push(diagnostic);
             }
         }
         valid.then(|| Type::Named(crate::Syntax::TYPE_RANGE.to_string()))
