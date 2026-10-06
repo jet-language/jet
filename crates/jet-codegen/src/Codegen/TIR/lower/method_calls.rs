@@ -5278,7 +5278,12 @@ fn lower_method_call_impl(
                     );
                 };
                 let duration = lower_expr(&args[0].expr, cx, env);
-                let record = match checked_core_record("core.tasks", "timeout", 1, method_span) {
+                let record = match checked_core_record(
+                    "core.tasks",
+                    Syntax::INTERNAL_TASK_TIMEOUT_METHOD,
+                    1,
+                    method_span,
+                ) {
                     Ok(record) => record,
                     Err(expr) => return expr,
                 };

@@ -242,114 +242,6 @@ fn run() {
     print(tls.unwrap(tls.TLSStream{fd: 0, host: "example.test", port: 443}).peer_port())
 }
 `],
-  ["core.tasks.channel", `// core-conformance: core.tasks.channel
-use core.tasks as tasks
-
-fn run() {
-    state :: tasks.channel(2)
-    print(state.capacity)
-}
-`],
-  ["core.tasks.run", `// core-conformance: core.tasks.run
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.run(tasks.after(0, 1)))
-}
-`],
-  ["core.tasks.start", `// core-conformance: core.tasks.start
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.start(tasks.after(0, 1)).value)
-}
-`],
-  ["core.tasks.waitall", `// core-conformance: core.tasks.waitall
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.waitall([tasks.after(0, 1), tasks.after(0, 2)]).len())
-}
-`],
-  ["core.tasks.waitany", `// core-conformance: core.tasks.waitany
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.waitany([tasks.after(0, 1)]))
-}
-`],
-  ["core.tasks.put", `// core-conformance: core.tasks.put
-use core.tasks as tasks
-
-fn run() {
-    state :: tasks.channel(1)
-    print(tasks.put(state, 7).values.len())
-}
-`],
-  ["core.tasks.shutdown", `// core-conformance: core.tasks.shutdown
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.shutdown(tasks.channel(1)).closed)
-}
-`],
-  ["core.tasks.stop", `// core-conformance: core.tasks.stop
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.stop(tasks.channel(1)).closed)
-}
-`],
-  ["core.tasks.acquire", `// core-conformance: core.tasks.acquire
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.acquire(tasks.lock()).locked)
-}
-`],
-  ["core.tasks.run", `// core-conformance: core.tasks.run
-use core.tasks as tasks
-
-fn run() {
-    tasks.run()
-    print(true)
-}
-`],
-  ["core.tasks.lock", `// core-conformance: core.tasks.lock
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.lock().locked)
-}
-`],
-  ["core.tasks.notify", `// core-conformance: core.tasks.notify
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.notify(tasks.lock()).generation)
-}
-`],
-  ["core.tasks.release", `// core-conformance: core.tasks.release
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.release(tasks.acquire(tasks.lock())).locked)
-}
-`],
-  ["core.tasks.reset", `// core-conformance: core.tasks.reset
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.reset(tasks.lock()).generation)
-}
-`],
-  ["core.tasks.clear", `// core-conformance: core.tasks.clear
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.clear(tasks.channel(1)).values.len())
-}
-`],
 ]);
 // Dynamic Core types do not have module_items rows, but their witnesses still
 // belong to the conformance corpus. Keep the ledger's canonical row IDs here
@@ -442,7 +334,6 @@ const UNIT_RESULT_KEYS = new Set([
   "core.sys.sync",
   "core.sys.set",
   "core.sys.stop",
-  "core.tasks.run",
   "core.tasks.yield_now",
 ]);
 // Never-returning Core effects terminate the witness instead of yielding a

@@ -1265,7 +1265,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         ("core.handle", "realtime.is_cancelled") => {
             Ok(realtime_stream_field(one(0)?, "cancelled", span)?.clone())
         }
-        ("core.tasks", "timeout") => {
+        ("core.tasks", member) if member == crate::Syntax::INTERNAL_TASK_TIMEOUT_METHOD => {
             let nanos = match one(0)? {
                 CtValue::Struct { type_name, fields }
                     if type_name == crate::Syntax::DURATION_TYPE =>

@@ -257,7 +257,7 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
     ) {
         return None;
     }
-    if (module, method) == ("core.tasks", "timeout") {
+    if module == "core.tasks" && method == crate::Syntax::INTERNAL_TASK_TIMEOUT_METHOD {
         return Some(Effect::Time);
     }
     // D-META-EFFECT1: these read or reshape values the caller already holds —

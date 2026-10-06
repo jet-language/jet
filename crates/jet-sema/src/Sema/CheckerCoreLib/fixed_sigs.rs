@@ -2497,10 +2497,6 @@ fn core_fixed_sig_impl(
             ],
             Some(Type::Named("RealtimeStream".to_string())),
         )),
-        ("core.tasks", "timeout") => Some((
-            vec![(read, Type::Named(crate::Syntax::DURATION_TYPE.to_string()))],
-            Some(unit),
-        )),
         ("core.tasks", "interval") => Some((
             vec![(read, Type::Named("Duration".to_string()))],
             Some(Type::Apply {

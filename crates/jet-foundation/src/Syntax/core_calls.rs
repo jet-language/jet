@@ -1482,7 +1482,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 52f3012cfe34f96cac17edd361737a3c033242973dc425f0a0d015c766a26c87
+// Source SHA-256: 14dc54ce6fbe429b4105620c98cb2c0ec17ee50a367f56e79c47abd688536f72
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1836,6 +1836,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.tasks", "current_task", "jet_std::jet_task_current_trace", true, &[], ),
     CoreCallRecord::new("core.tasks", super::INTERNAL_CHANNEL_NEW_METHOD, "jet_std::channel", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_jit_symbol("jet_jit_channel_new"),
     CoreCallRecord::new("core.tasks", super::INTERNAL_CHANNEL_BOUNDED_METHOD, "jet_std::channel_bounded", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_jit_symbol("jet_jit_channel_bounded"),
+    CoreCallRecord::new("core.tasks", super::INTERNAL_TASK_TIMEOUT_METHOD, "jet_std_task_timeout_duration", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_jit_symbol("jet_jit_task_timeout"),
     CoreCallRecord::new( "core.reactive", "signal", "jet_std::JetSignal::new", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.reactive.loadable", "idle", "jet_loadable_idle", false, &[]).with_jit_symbol("jet_jit_loadable_idle"),
     CoreCallRecord::new("core.reactive.loadable", "loading", "jet_loadable_loading", false, &[]).with_jit_symbol("jet_jit_loadable_loading"),

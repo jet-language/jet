@@ -34,12 +34,7 @@ fn failure_label(error: TaskFailure) -> String {
 }
 
 fn run() {
-    // Capacity 0 is clamped to one slot: the send returns with no receiver.
-    (ztx, zrx) :: channel<Int>(capacity: 0)
-    ztx.send(10)
-    print("capacity 0: send returned before any receive")
-    print(zrx.try_receive() ?? -1)
-
+    // Capacity must be at least 1; a capacity below 1 is rejected.
     // Capacity 1 holds one value; a second sender waits for the slot.
     (ftx, frx) :: channel<Int>(capacity: 1)
     ftx.send(1)
@@ -77,15 +72,11 @@ fn run() {
     }
     print(brx.try_receive() ?? -1)
 
-    // core.tasks keeps its own state rail: -1 capacity means unbounded, and a
-    // put on a closed or full state is ignored without a signal.
-    open :: tasks.channel(-1)
-    print("core.tasks capacity(-1) = {tasks.capacity(open)}")
-    closed :: tasks.shutdown(tasks.put(open, 1))
-    print("core.tasks put after close keeps size {tasks.size(tasks.put(closed, 2))} (silent)")
-    full :: tasks.put(tasks.put(tasks.channel(1), 1), 2)
-    print("core.tasks put on full keeps size {tasks.size(full)} (silent)")
+    // A receive on a closed, drained channel fails with the typed `Closed`.
     (rtx, rrx) :: channel<Int>(capacity: 1)
     rtx.close()
-    print("core.tasks recv after close = {tasks.recv(rrx)}")
+    if rrx.receive() == {
+        .Ok(value) -> print("receive after close = {value}")
+        .Err(_) -> print("receive after close failed: Closed")
+    }
 }
