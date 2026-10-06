@@ -829,6 +829,7 @@ pub fn mir_rust_aot_metadata(
             &callable_parameters,
             Some(parameter_access.as_slice()),
             Some(&function.return_type),
+            function.return_view_provenance.as_ref(),
         );
         metadata.callables.push(MirRustCallableMetadata {
             function: function.id,
