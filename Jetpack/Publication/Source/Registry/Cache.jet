@@ -69,7 +69,7 @@ fn publication_acquire_registry_lock(parent: String, name: String, delay_ms: Int
             .Err(error) -> if error == {
                 .AlreadyExists(_) -> {
                     if files.stat(path) == .Ok(info) {
-                        if time.unix_ns() - info.modified.unix_ns > 300000000000 {
+                        if time.unix_ns() - (info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")) > 300000000000 {
                             authority.remove(name).drop("best-effort stale registry marker reclamation")
                             next
                         }

@@ -581,7 +581,8 @@ fn services_collect_watch_stamps(project_dir: String, path: String, limit: Int, 
         info.is_symlink -> "link"
         else -> "other"
     }
-    services_push_watch_stamp(entries, limit, "{path}\t{kind}:{info.size}:{info.modified.unix_ns}")
+    modified_ns :: info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")
+    services_push_watch_stamp(entries, limit, "{path}\t{kind}:{info.size}:{modified_ns}")
     if !info.is_dir -> return
     listed :: files.list_dir(path) ?? return Err(ServicesError.new("couldn't read watched directory `{path}`: {err}"))
     children := [String]{}
