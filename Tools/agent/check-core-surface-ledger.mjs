@@ -1952,7 +1952,7 @@ function parseCoreSource(source) {
       continue;
     }
     const sourceModule = line.match(
-      /^source_module\s+([A-Za-z_][A-Za-z0-9_.]*)\s+path\s+([^\s]+)\s+alias\s+([A-Za-z_][A-Za-z0-9_]*)\s+owns\s+\{([^}]*)\}$/,
+      /^source_module\s+([A-Za-z_][A-Za-z0-9_.]*)\s+path\s+([^\s]+)\s+alias\s+([A-Za-z_][A-Za-z0-9_]*)\s+owns\s+\{([^}]*)\}(?:\s+types\s+\{([^}]*)\})?$/,
     );
     if (sourceModule) {
       const module = sourceModule[1];
@@ -1965,6 +1965,11 @@ function parseCoreSource(source) {
         throw new Error("duplicate Core source alias `" + alias + "` at line " + sourceLine);
       }
       const ownedMembers = coreList(sourceModule[4], "Core.jet line " + sourceLine);
+      // `types { … }` names the module's source-owned nominals: every tier uses
+      // the Jet declaration and no native carrier projection exists for them.
+      const ownedTypes = sourceModule[5] === undefined
+        ? []
+        : coreList(sourceModule[5], "Core.jet line " + sourceLine);
       // Type-only Core sources may own nominals and static methods without free functions.
       if (!existsSync(join(ROOT, path))) {
         throw new Error("Core source module path does not exist at line " + sourceLine + ": " + path);
@@ -1976,6 +1981,7 @@ function parseCoreSource(source) {
         path: path,
         alias: alias,
         ownedMembers: ownedMembers,
+        ownedTypes: ownedTypes,
         sourceLine: sourceLine,
       });
       continue;
@@ -2110,6 +2116,15 @@ function parseCoreSource(source) {
           sourceModule.module + "." + member + "`");
       }
     }
+    const typeNames = new Set(modules.find(function (entry) {
+      return entry.module === sourceModule.module;
+    }).types.map(function (type) { return type.name; }));
+    for (const type of sourceModule.ownedTypes) {
+      if (!typeNames.has(type)) {
+        throw new Error("Core source module owns undeclared type `" +
+          sourceModule.module + "." + type + "`");
+      }
+    }
   }
   for (const sourceModule of sourceModules) {
     const sourceFunctions = new Set(Array.from(
@@ -2119,6 +2134,15 @@ function parseCoreSource(source) {
       if (!sourceFunctions.has(member)) {
         throw new Error("Core source module does not define owned member `" +
           sourceModule.module + "." + member + "` at line " + sourceModule.sourceLine);
+      }
+    }
+    const sourceTypes = new Set(Array.from(
+      read(sourceModule.path).matchAll(/^pub\s+(?:struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
+    ).map(function (match) { return match[1]; }));
+    for (const type of sourceModule.ownedTypes) {
+      if (!sourceTypes.has(type)) {
+        throw new Error("Core source module does not declare owned type `" +
+          sourceModule.module + "." + type + "` at line " + sourceModule.sourceLine);
       }
     }
   }
@@ -2430,6 +2454,14 @@ function generatedCoreExports(source, declarations) {
     "    pub owned_members: &'static [&'static str],",
     "}",
     "",
+    "/// One source-owned Core nominal: `name` is declared by the Core source at",
+    "/// `path` and no tier projects it onto a native carrier.",
+    "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
+    "pub struct CoreSourceOwnedType {",
+    "    pub path: &'static str,",
+    "    pub name: &'static str,",
+    "}",
+    "",
     "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
     "pub struct CoreBootstrapStep {",
     "    pub name: &'static str,",
@@ -2484,6 +2516,13 @@ function generatedCoreExports(source, declarations) {
       "\", owned_members: &[" +
       entry.ownedMembers.map(function (member) { return "\"" + member + "\""; }).join(", ") +
       "] },");
+  }
+  lines.push("];", "");
+  lines.push("pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[");
+  for (const entry of declarations.sourceModules) {
+    for (const type of entry.ownedTypes) {
+      lines.push("    CoreSourceOwnedType { path: \"" + entry.path + "\", name: \"" + type + "\" },");
+    }
   }
   lines.push("];", "");
   lines.push("pub const CORE_ROOT_TYPES: &[&str] = &[" +
@@ -2721,6 +2760,19 @@ function generatedCoreEnumRows(source, declarations) {
         ", kind: CoreLeafKind.Enum{variants: [String]{" +
         type.variants.map(jetStringExpression).join(", ") + "}}},",
       );
+    }
+  }
+  lines.push(
+    "}",
+    "",
+    "// Source-owned Core nominals (`source_module … types { … }`) in Core.jet",
+    "// order; the Rust mirror is CoreModuleExports::CORE_SOURCE_OWNED_TYPES.",
+    "pub CORE_SOURCE_OWNED_TYPES :: [CoreSourceOwnedType]{",
+  );
+  for (const entry of declarations.sourceModules) {
+    for (const type of entry.ownedTypes) {
+      lines.push("    CoreSourceOwnedType{path: " + jetStringExpression(entry.path) +
+        ", name: " + jetStringExpression(type) + "},");
     }
   }
   lines.push("}", "// END GENERATED CORE ENUM ROWS", "");

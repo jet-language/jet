@@ -163,18 +163,11 @@ fn jet_codegen_auto_derives_append_show(ctx: &JetRustEmitContext, definition: MI
     &lines.push("}}")
 }
 
-// A Core web query status enum keeps its native Prelude display; MIRRust
-// is_source_owned_core_web_query_enum.
-fn jet_codegen_auto_derives_core_web_query_enum(key: String) -> Bool Never! {
-    if !key.starts_with("<corelib>/Core/web::Core/web/query.jet::") -> return false
-    key.ends_with("::WebQueryNetworkMode") || key.ends_with("::WebMutationStatus") || key.ends_with("::WebQueryStatus")
-}
-
 // D-DISPLAYDBG1: bare `{value}` of a plain enum (every case a unit case) renders
 // its case name on every tier, so `jet_fmt_display<T: JetDisplay>` gets that
 // render here. A selected user `Display` impl keeps its own rendering.
 fn jet_codegen_auto_derives_append_plain_enum_display(ctx: &JetRustEmitContext, definition: MIRTypeDef, variants: [MIRVariant], lines: &[String]) Never! {
-    if definition.generic_params.len() > 0 || variants.len() == 0 || jet_codegen_auto_derives_core_web_query_enum(definition.key) -> return
+    if definition.generic_params.len() > 0 || variants.len() == 0 -> return
     loop variant in variants {
         if variant.payload == {
             .Unit -> {}

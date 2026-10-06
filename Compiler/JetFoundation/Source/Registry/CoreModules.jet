@@ -176,6 +176,34 @@ fn core_enum_variants_in(rows: [CoreModuleTypeExport], name: String) -> [String]
     None
 }
 
+// One source-owned Core nominal (`source_module … types { … }` in
+// Prelude/Core.jet; Rust `CoreModuleExports::CoreSourceOwnedType`).
+pub struct CoreSourceOwnedType {
+    pub path: String
+    pub name: String
+}
+
+// Rust `CoreModuleExports::core_source_owns_type`: whether a checked Core
+// identity (`<corelib>/Core/net::Core/net/url.jet::URL`) names a source-owned
+// Core nominal. An owned type is the Jet declaration on every tier: no tier
+// projects it onto a native carrier or routes its methods to an adapter.
+pub fn core_source_owns_type(name: String) -> Bool Never! {
+    core_source_owns_type_in(CORE_SOURCE_OWNED_TYPES, name)
+}
+
+// The table is a read parameter, so the scan reads its rows in place.
+fn core_source_owns_type_in(rows: [CoreSourceOwnedType], name: String) -> Bool Never! {
+    if !name.starts_with("<corelib>/") -> return false
+    parts :: name.split("::").to_list()
+    if parts.len() < 3 -> return false
+    leaf :: parts[parts.len() - 1]
+    file :: parts[parts.len() - 2]
+    loop row in rows {
+        if row.name == leaf && row.path == file -> return true
+    }
+    false
+}
+
 // The variant names of a compiler-owned Core enum family with payload rows
 // (`IOError`, `IOOperation`, `ProcessStreamMode`, ...), in table order.
 pub fn core_enum_payload_variants(name: String) -> [String]? {
