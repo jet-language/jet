@@ -379,6 +379,8 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
         .Apply(name, args) -> {
             if args.len() == 0 && (name.name == "Unit" || name.name == "Never") -> return LowerRepr.Absent
             if args.len() == 0 && name.name == "RangeCursor" -> return LowerRepr.Handle{drop: "jet_loop_cursor_drop", clone: ""}
+            // ScopeGuard: its callback's closure box; the drop glue runs it (Closures.jet).
+            if args.len() == 0 && name.name == "ScopeGuard" -> return LowerRepr.Boxed{ty: ty}
             if lower_lazy_element(ty) == .Val(elem) -> return lower_lazy_repr(p, ty, elem)
             if lower_task_handle_repr(ty) == .Val(handle) -> return handle
             // Ptr<T>: a raw word address (Pointers.jet).
@@ -2379,6 +2381,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .TaskGroup(call, kind, tasks) -> return lower_task_group(p, c, &m, &f, instruction, call, kind, tasks)
     if semantic == .CoreClosureCall(call, kind, values, closure, _, _) {
         if kind == .Spawn -> return lower_task_spawn(p, c, &m, &f, instruction, call, values, closure)
+        if kind == .Guard -> return lower_scope_guard(p, c, &m, &f, instruction, closure)
     }
     if semantic == .HandleMethod(call, receiver, args, frame_schedule, _) {
         if lower_task_method(p, c, &m, &f, instruction, call, receiver, args) -> return
@@ -2393,6 +2396,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .StaticPreludeCall(call, args, owner_type_args, type_args) {
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
         if lower_shared_new(p, c, &m, &f, instruction, call, args) -> return
+        if lower_task_group_new(p, c, &m, &f, instruction, call, args) -> return
         if owner_type_args.len() > 0 || type_args.len() > 0 -> return lower_fail(&m, &f, "generic StaticPreludeCall {lower_route_name(p, call)} is not lowered at O0 yet")
         if lower_route_name(p, call) == "core.compare.eq" && args.len() == 2 -> return lower_core_equal(p, c, &m, &f, instruction, args[0].value, args[1].value)
         values :: lower_route_values(p, &m, &f, call, args, "StaticPreludeCall") ?? return
@@ -2674,7 +2678,8 @@ fn lower_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFu
     if lower_is_iter_cursor(glue.ty) -> return lower_iter_drop_glue(p, &m, glue)
     if glue.ty.kind == .List(elem) -> return lower_list_drop_glue(p, &m, glue, elem)
     if lower_map_entry(glue.ty) == .Val(entry) -> return lower_list_drop_glue(p, &m, glue, entry)
-    if glue.ty.kind == .Fn(_) | .SendFn(_, _, _) -> return lower_closure_drop_glue(&m, glue)
+    if glue.ty.kind == .Fn(_) | .SendFn(_, _, _) -> return lower_closure_drop_glue(&m, glue, false)
+    if lower_is_scope_guard(glue.ty) -> return lower_closure_drop_glue(&m, glue, true)
     if lower_is_inline(p, glue.ty) -> return lower_inline_drop_glue(p, &m, glue)
     signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
     f := lower_new_function(glue.id, "drop.{glue.key}", signature, MIRBlockID{value: U64.MAX})

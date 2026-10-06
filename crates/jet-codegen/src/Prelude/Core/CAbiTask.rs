@@ -76,6 +76,18 @@ mod jet_c_abi_task {
         })
     }
 
+    /// `JetTaskGroup.new()` / `.with_limit(limit)`: the owning group of a
+    /// lexical `task.group`; dropping it joins every child (MathTaskMem.rs).
+    #[no_mangle]
+    pub extern "C" fn jet_rt_native_task_group_new() -> *mut jet_std::JetTaskGroup {
+        guard(|| Box::into_raw(Box::new(jet_std::JetTaskGroup::new())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_native_task_group_with_limit(limit: i64) -> *mut jet_std::JetTaskGroup {
+        guard(|| Box::into_raw(Box::new(jet_std::JetTaskGroup::with_limit(native(limit)))))
+    }
+
     #[no_mangle]
     pub unsafe extern "C" fn jet_rt_native_task_drop(task: *mut NativeTask) {
         guard(|| { if !task.is_null() { drop(Box::from_raw(task)); } })
