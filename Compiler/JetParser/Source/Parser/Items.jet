@@ -965,9 +965,11 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     type_params := parser_parse_type_params(&state)
     // S83: one bare variant head, `Circle(r: Float)` or `Empty()`, in place
     // of the parameter list; its payload parameters feed sema's dispatch fold.
+    // A unit head is a variant name: `fn twice(n)` is one untyped parameter
+    // and reports the missing type, not a variant head.
     head_pattern := Pattern?{None}
     params := [Param]{}
-    if parser_current_kind(&state) == TOKEN_LPAREN && parser_kind_at(&state, 1) == TOKEN_IDENT && (parser_kind_at(&state, 2) == TOKEN_LPAREN || parser_kind_at(&state, 2) == TOKEN_RPAREN) {
+    if parser_current_kind(&state) == TOKEN_LPAREN && parser_kind_at(&state, 1) == TOKEN_IDENT && (parser_kind_at(&state, 2) == TOKEN_LPAREN || (parser_kind_at(&state, 2) == TOKEN_RPAREN && parser_pascal_name(parser_lookahead(&state, 1).payload.decoded))) {
         parser_bump(&state)
         variant :: parser_expect_name(&state, "for a multi-head variant")
         pattern_end := variant.span.end
