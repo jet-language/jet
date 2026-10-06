@@ -29,8 +29,8 @@ use crate::AST::{
     AccessConvention, ArithmeticMode, ArithmeticOperation, ArithmeticPolicyFact, BinOp, BindName,
     BindPattern, Binding, ByteTextPart, Call, CallArg, CallArgFlags, CtFloat, CtKey, CtReport,
     CtValue, EnumLitArg, Expr, ForKind, Func, IndexKind, InternalTag, LValue, OrFallback, Param,
-    ParamZone, PatSlot, Pattern, PlaceAccess, Stmt, StrFormat, StrPart, StructPatField, SwitchArm,
-    TagMarker, TryConvert, Type, TypedLitBody, UnOp, UnitFormat,
+    ParamZone, PatSlot, Pattern, PlaceAccess, ReceiverFootprint, Stmt, StrFormat, StrPart,
+    StructPatField, SwitchArm, TagMarker, TryConvert, Type, TypedLitBody, UnOp, UnitFormat,
 };
 use std::collections::{BTreeMap, HashSet};
 
@@ -566,6 +566,12 @@ codec_struct!(Param {
     variadic,
     variadic_bound_list,
     declared_view_from_names,
+    footprint,
+});
+
+codec_struct!(ReceiverFootprint {
+    declared,
+    inferred,
 });
 
 codec_enum!(ParamZone {

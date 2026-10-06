@@ -541,7 +541,7 @@ impl<'a> Parser<'a> {
 
     /// D-SPREAD1=A: after consuming `.`, parse `[a, b, c]` into `MemberSpread`.
     /// `spread_start` is the base expression's start (or the leading ident span).
-    pub(super) fn parse_member_spread(
+    pub(in crate::Parser) fn parse_member_spread(
         &mut self,
         base: Expr,
         spread_start: usize,

@@ -3485,6 +3485,7 @@ mod BudgetSpecs;
 pub mod Effects;
 mod FFI;
 mod FlowFacts;
+pub(crate) mod Footprint;
 pub mod GateLedger;
 mod Guest;
 pub mod HotSwap;
