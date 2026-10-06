@@ -50,13 +50,12 @@ use jet_sema.[
     SemaSourceSegment,
 ]
 use jet_codegen.[
-    JetRustEmitManifest,
-    JetWebArtifacts,
-    JetWebAssets,
+JetRustEmitManifest,
+JetWebArtifacts,
+JetWebAssets,
 ]
-use jet_eval.[
-    JetEvalConfig,
-]
+use jet_eval.JetEvalConfig
+use jet_repl.ReplSession
 
 pub struct JetDriverAuthorizedSourceFile {
     pub path: String
@@ -89,9 +88,9 @@ pub struct JetDriverHostFacts {
 pub enum JetDriverCompileTarget {
     Native
     Web(
-        assets: JetWebAssets,
-        release_devtools_policy: JetReleaseDevtoolsPolicy,
-        profile: MIRArtifactBuildMode,
+    assets: JetWebAssets,
+    release_devtools_policy: JetReleaseDevtoolsPolicy,
+    profile: MIRArtifactBuildMode,
     )
 }
 
@@ -105,11 +104,17 @@ pub enum JetDriverCompileTarget {
 // canonical comptime stage (checked, lowered to MIR, evaluated by JetEval),
 // then stops: nothing is lowered or emitted for run time. Config surfaces
 // (Jetpack EnvModel) evaluate their typed values this way.
+// `Eval` and `Interpreter` produce the same checked MIR for canonical JetEval,
+// without AOT emission. Eval checks the selected root's transitive pure row;
+// Interpreter leaves effects to its runtime authorizer (REPL turns).
 pub enum JetDriverCompileMode {
     Program
     Test
     Doc
     Comptime
+    Eval
+    Interpreter
+    Repl
 }
 
 // One user module of the checked bundle as `jet doc` and the semantic index
@@ -184,6 +189,7 @@ pub struct JetDriverCompileRequest {
     pub gate_policies: [JetDriverGatePolicy]{[JetDriverGatePolicy]{}}
     // External lock/trust/forced-build writers use the canonical gate row.
     pub external_gate_entries: [GateEntry]{[GateEntry]{}}
+    pub evaluation_entry: String?{None}
 }
 
 pub struct JetDriverGatePolicy {
@@ -297,7 +303,17 @@ struct JetDriverSourceCatalogResult {
     complete: Bool
 }
 
-enum JetDriverStage { Collect Parse Load Check Comptime Lower Assemble Pass Emit }
+enum JetDriverStage {
+    Collect
+    Parse
+    Load
+    Check
+    Comptime
+    Lower
+    Assemble
+    Pass
+    Emit
+}
 
 struct JetDriverLoadedModule {
     source_unit_index: Int
@@ -370,6 +386,8 @@ pub struct JetDriverCompileResult {
     // `JetDriverCompileMode.Comptime`: every build-time value the comptime
     // stage produced, constants included. Empty in the other modes.
     pub comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}}
+    // A Repl compile retains its checked scope and canonical MIR machine.
+    pub repl_session: ReplSession?{None}
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read
@@ -495,7 +513,9 @@ fn jet_driver_build_source_index(source_units: [JetDriverSourceUnit]) -> JetDriv
             _ := &by_identity.add(identity, index)
             _ := &by_path.add(unit.path, index)
             if {
-                by_module_name.get(module_key) != None -> _ := &ambiguous_module_names.add(module_key, true)
+                by_module_name.get(module_key) != None -> {
+                    _ := &ambiguous_module_names.add(module_key, true)
+                }
                 else -> _ := &by_module_name.add(module_key, index)
             }
         }
@@ -561,7 +581,6 @@ pub fn jet_driver_receipt_answers(receipt: JetDriverReceipt, verb: String, reque
 
 // #2517 package keys for the self-hosted driver, framed by
 // `package_key_*` in JetFoundation.
-
 // The facts self-hosted sema reads from the request for one package: the
 // active OS, the target triple, the package edition, and whether the build
 // targets the web. The build clock and root policy never enter.
@@ -580,7 +599,7 @@ pub fn jet_driver_package_target_facts(request: JetDriverCompileRequest, package
 
 // The package.jet source of a package that has a manifest.
 fn jet_driver_package_manifest_source(package: JetDriverPackageInfo, snapshot: JetDriverAuthorizedSourceSnapshot) -> String? Never! {
-    if package.manifest_path == None -> return None
+    if package.manifest_path == .None -> return None
     loop file in snapshot.roots[package.root_index].files {
         if file.relative_path == "package.jet" -> return Val(file.source)
     }

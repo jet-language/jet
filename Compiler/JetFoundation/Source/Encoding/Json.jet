@@ -43,3 +43,27 @@ pub fn foundation_json_quote(value: String) -> String Never! {
 fn foundation_json_append(out: &[U8], text: String) Never! {
     loop byte in text.bytes() -> &out.push(byte)
 }
+
+// Shared structural Debug quoting (formerly JetEval's value formatter).
+pub fn foundation_debug_quoted(text: String, quote: Int) -> String Never! {
+    out := [U8]{}
+    &out.push(U8{quote})
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if {
+            code == 92 -> foundation_json_append(&out, "\\\\")
+            code == quote -> {
+                &out.push(U8{92})
+                &out.push(U8{quote})
+            }
+            code == 10 -> foundation_json_append(&out, "\\n")
+            code == 13 -> foundation_json_append(&out, "\\r")
+            code == 9 -> foundation_json_append(&out, "\\t")
+            code == 0 -> foundation_json_append(&out, "\\0")
+            code < 32 || code == 127 -> foundation_json_append(&out, "\\u{{{code.to_radix(16)}}}")
+            else -> &out.push(byte)
+        }
+    }
+    &out.push(U8{quote})
+    String.from_bytes(out) ?? panic("Debug quoting preserves UTF-8")
+}

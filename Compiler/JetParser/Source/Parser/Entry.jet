@@ -72,6 +72,12 @@ pub fn parse_lexed(lexed: Lexed) -> ParseResult {
     parser_parse_lexed_lines(lexed, [U8]{}, [Int]{}, false)
 }
 
+// Parse just the supplied token slice with its aggregate source available for
+// canonical source-dependent diagnostics. REPL turns never reparse old tokens.
+pub fn parse_lexed_with_source(lexed: Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
+    parser_parse_lexed_lines(lexed, source, line_starts, false)
+}
+
 // Parse a Jetpack config surface (Rust `parse_config_with_source`): the
 // config lexer keeps `$NAME` as one identifier token, which this parser reads
 // as the typed environment read (D-ONCE-DOLLAR1=B); `source` stays available
