@@ -2031,9 +2031,7 @@ pub(crate) fn check_module_bodies(
                 continue;
             }
             if let Some(signature) = st
-                .trait_reg
-                .traits
-                .get(&key.0)
+                .trait_reg.trait_info(&key.0)
                 .and_then(|info| info.methods.get(&key.1))
             {
                 let _ = signature.return_view_provenance.set(contract);
@@ -2146,9 +2144,7 @@ pub(crate) fn check_module_bodies(
     }
     for ((trait_name, method_name), (provenance, _)) in trait_view_contracts {
         if let Some(signature) = st
-            .trait_reg
-            .traits
-            .get(&trait_name)
+            .trait_reg.trait_info(&trait_name)
             .and_then(|info| info.methods.get(&method_name))
         {
             // Prefer a declared `from` on the trait method when present.
@@ -2168,9 +2164,7 @@ pub(crate) fn check_module_bodies(
                 continue;
             };
             if let Some(signature) = st
-                .trait_reg
-                .traits
-                .get(&trait_def.name)
+                .trait_reg.trait_info(&trait_def.name)
                 .and_then(|info| info.methods.get(&method.name))
             {
                 let _ = signature.return_view_provenance.set(declared.clone());

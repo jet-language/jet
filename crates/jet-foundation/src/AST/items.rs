@@ -1270,6 +1270,23 @@ impl Func {
         self.failure_contract().effective_type()
     }
 
+    /// Runtime callable values preserve foreign ABI and generator protocols;
+    /// ordinary functions use the effective implicit failure carrier.
+    pub fn callable_value_return_type(&self) -> Type {
+        if self.inline_foreign.is_some() {
+            return self.return_type.clone()
+                .unwrap_or_else(|| Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_owned()));
+        }
+        match &self.return_type {
+            Some(stream @ Type::Apply { name, args })
+                if name == crate::Syntax::TYPE_STREAM && args.len() == 1 =>
+            {
+                stream.clone()
+            }
+            _ => self.effective_return_type(),
+        }
+    }
+
     /// D-ENTRY-SCRIPT1=B: build the ordinary function used for a script's
     /// implicit entry. Keeping this as a normal `Func` preserves one entry
     /// mechanism through sema, TIR, AOT, JIT, and interpreter lowering.

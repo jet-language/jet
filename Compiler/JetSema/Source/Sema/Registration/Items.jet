@@ -59,6 +59,7 @@ use jet_foundation.[
     core_enum_payload_variants,
     core_enum_variant_payload,
     core_module_export,
+    core_module_has_type,
     expr_span,
     sema_reserved_type_name,
     symbol_id,
@@ -2070,6 +2071,13 @@ fn sema_registration_resolve_export(graph: SemaRegistrationGraph, module_index: 
             if sema_registration_visible(owned.visibility, requester_module, requester_package, sibling.module_identity, sibling.package_identity) -> return Val(owned)
             return None
         }
+    }
+    // Core's authoritative export ledger also owns runtime builtin carriers
+    // that have no source nominal declaration. Keep their builtin identity,
+    // and never apply this rule to a user module with a Core-like name.
+    if module_row.module_identity.starts_with("<corelib>/") && core_module_has_type(module_row.module_name, name) {
+        symbol :: sema_registration_named_symbol(module_row.module_identity, name, Span{start: 0, end: 0}, SymbolKind.Type, Val(Type.Named{name: name}), true, false)
+        return Val(SemaRegistrationExport{name: name, symbol: symbol, declaration: None, source_module_identity: module_row.module_identity, visibility: 2})
     }
     None
 }

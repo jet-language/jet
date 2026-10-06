@@ -470,7 +470,7 @@ impl<'a> Checker<'a> {
                 def_span,
                 origin: ViewOwnerOrigin::Receiver,
             }
-        } else if self.consts.contains_key(owner) {
+        } else if self.const_type(owner).is_some() {
             ViewOwnerId {
                 name: owner.to_string(),
                 def_span,
@@ -1006,9 +1006,7 @@ impl<'a> Checker<'a> {
         }
         if let Type::TraitObject(names) = &ty {
             let receiver = names.iter().find_map(|name| {
-                self.trait_reg
-                    .traits
-                    .get(name)
+                self.trait_reg.trait_info(name)
                     .and_then(|trait_info| trait_info.methods.get(method))
                     .and_then(|sig| sig.params.first())
             });
@@ -2090,7 +2088,7 @@ impl<'a> Checker<'a> {
             }
         }
         match expr {
-            Expr::Ident(name, _) => (self.lookup(name).is_some() || self.consts.contains_key(name))
+            Expr::Ident(name, _) => (self.lookup(name).is_some() || self.const_type(name).is_some())
                 .then(|| ViewPlace {
                     owner: self.owner_id(name),
                     projections: Vec::new(),
@@ -2154,7 +2152,7 @@ impl<'a> Checker<'a> {
     /// capturable, while anything after them belongs to the captured container.
     fn capture_place_info(&self, expr: &Expr) -> Option<(ViewPlace, Option<Type>, bool)> {
         match expr {
-            Expr::Ident(name, _) => (self.lookup(name).is_some() || self.consts.contains_key(name))
+            Expr::Ident(name, _) => (self.lookup(name).is_some() || self.const_type(name).is_some())
                 .then(|| {
                     (
                         ViewPlace {
@@ -2307,7 +2305,7 @@ impl<'a> Checker<'a> {
             // Module-level mutable bindings are legal write places.
             return;
         }
-        if self.consts.contains_key(&root) {
+        if self.const_type(&root).is_some() {
             self.diags.push(Diagnostic::error(
                 "E0111",
                 format!("`{root}` is a const and can never change"),
@@ -3197,9 +3195,7 @@ impl<'a> Checker<'a> {
                 .method(recv_type, method)
                 .and_then(|sig| sig.return_view_provenance.get())
                 .or_else(|| {
-                    self.trait_reg
-                        .traits
-                        .get(recv_type)
+                    self.trait_reg.trait_info(recv_type)
                         .and_then(|info| info.methods.get(method))
                         .and_then(|sig| sig.return_view_provenance.get())
                 })
@@ -4305,7 +4301,7 @@ impl<'a> Checker<'a> {
         let Expr::Ident(name, _) = receiver.as_ref() else {
             return None;
         };
-        if self.consts.contains_key(name) {
+        if self.const_type(name).is_some() {
             return None;
         }
         let Some(info) = self.lookup(name) else {
@@ -5200,7 +5196,7 @@ impl<'a> Checker<'a> {
             let cap = self
                 .lookup(name)
                 .map(|i| (i.ty.clone(), self.sendability_for(name)))
-                .or_else(|| self.consts.get(name).map(|t| (t.clone(), true)));
+                .or_else(|| self.const_type(name).map(|t| (t.clone(), true)));
             let Some((cap_ty, cap_sendable)) = cap else {
                 continue;
             };
@@ -5299,6 +5295,10 @@ impl<'a> Checker<'a> {
                         self.funcs
                             .get(name)
                             .or_else(|| self.funcs.get(resolved))
+                            .or_else(|| {
+                                let owner = self.namespace_function_owner(name)?;
+                                self.modules?.get(owner)?.funcs.get(name)
+                            })
                             .map(|sig| {
                                 sig.return_type
                                     .as_ref()

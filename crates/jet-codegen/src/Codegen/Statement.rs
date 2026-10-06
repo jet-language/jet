@@ -67,7 +67,7 @@ pub(crate) fn variant_binding_types_for_enum(
         };
     }
     let resolved = crate::Codegen::TIR::canonical_enum_owner(cx, enum_name);
-    let variants = cx.enum_variants.get(&resolved)?;
+    let variants = cx.fact_enum_variants(&resolved)?;
     let (_, payload) = variants.iter().find(|(n, _)| n == variant)?;
     match payload {
         VariantPayload::Unit => Some(Vec::new()),
@@ -88,7 +88,7 @@ pub(crate) fn group_leaves<'c>(
     let Some(et) = enum_type else {
         return Vec::new();
     };
-    let Some(vars) = cx.enum_variants.get(et) else {
+    let Some(vars) = cx.fact_enum_variants(et) else {
         return Vec::new();
     };
     let prefix = format!("{variant}.");

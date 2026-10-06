@@ -769,7 +769,7 @@ impl<'a> Checker<'a> {
         let owner = self.struct_owner_module(type_name, None)?;
         self.modules
             .and_then(|modules| modules.get(owner))
-            .map(|module| &module.fact_registry)
+            .map(|module| module.fact_registry.as_ref())
     }
 
     /// Resolve a direct nominal compiler fact through the owning module's
@@ -4438,7 +4438,7 @@ impl<'a> Checker<'a> {
                     self.record_local_reference(*span, &info);
                     return Some(info.ty.clone());
                 }
-                if let Some(t) = self.consts.get(name).cloned() {
+                if let Some(t) = self.const_type(name).cloned() {
                     self.record_const_reference(name, *span);
                     return Some(t);
                 }
@@ -4459,11 +4459,13 @@ impl<'a> Checker<'a> {
                             .filter(|declaration| declaration.kind == "const")?;
                         let ty = self.modules?.get(owner)?.consts.get(leaf)?.clone();
                         let path = self.name_ledger.module_path(owner)?.to_string();
-                        Some((ty, path, declaration.span))
+                        Some((ty, path, declaration.span,
+                            self.name_ledger.semantic_identity(owner, leaf)))
                     });
-                if let Some((ty, target_path, definition_span)) = imported_const {
+                if let Some((ty, target_path, definition_span, identity)) = imported_const {
                     self.record_import_alias_reference(name, *span);
-                    self.record_reference_anchor(*span, &target_path, "const", definition_span);
+                    self.record_reference_anchor_with_identity(
+                        *span, &target_path, "const", definition_span, identity);
                     return Some(ty);
                 }
                 if let Some(item) = self.core_item_imports.get(name).cloned() {
@@ -4471,14 +4473,21 @@ impl<'a> Checker<'a> {
                         return self.infer_core_field(name, &module, &item, *span, *span);
                     }
                 }
-                if let Some(sig) = self.funcs.get(name).cloned() {
+                let function = self.funcs.get(name).cloned().map(|sig| (self.module_idx, sig))
+                    .or_else(|| self.namespace_function_owner(name)
+                        .and_then(|owner| self.modules?.get(owner)?.funcs.get(name)
+                            .cloned().map(|sig| (owner, sig))));
+                if let Some((owner, mut sig)) = function {
                     // D-METHODMACRO1=A: a bare top-level function name resolved here
                     // is read as a VALUE, not called (a direct call never reaches this
                     // arm — `check_call` short-circuits on a known global function
                     // name before inferring its callee as an expression). This is
                     // exactly "this function's address was taken" for E0918.
-                    self.record_current_function_reference(name, *span);
-                    self.inline_addr_taken.insert(name.clone());
+                    self.record_function_reference(owner, name, *span);
+                    if owner == self.module_idx {
+                        self.inline_addr_taken.insert(name.clone());
+                    }
+                    self.qualify_imported_function_sig(owner, name, &mut sig);
                     if let Some((idx, (convention, _))) = sig
                         .params
                         .iter()
@@ -5564,6 +5573,12 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                // A source spelling and its canonical imported identity must
+                // produce one nominal instance, including method demands.
+                for arg in type_args.iter_mut() {
+                    let ty = std::mem::replace(arg, Type::Int);
+                    *arg = self.resolve_type(ty);
+                }
                 // Inline-module members are local nominals with a mangled
                 // semantic identity, not foreign imports. Resolve that identity
                 // here so every later tier sees a local struct literal and never
@@ -5842,7 +5857,7 @@ impl<'a> Checker<'a> {
                             // the folded value (which loses generic arguments —
                             // `Loadable.idle()` would come back a bare
                             // `Loadable` and lose its methods).
-                            .or_else(|| self.consts.get(name).cloned())
+                            .or_else(|| self.const_type(name).cloned())
                             .unwrap_or_else(|| v.jet_type());
                         *value = Some(v);
                         return Some(ty);
@@ -7370,7 +7385,9 @@ impl<'a> Checker<'a> {
                     return self.infer_core_field(alias, &module, member, *alias_span, span);
                 }
                 if let (Some(modules), Some(module_idx)) = (self.modules, self.imports.get(alias)) {
-                    if let Some(sig) = modules[*module_idx].funcs.get(member) {
+                    let member_owner = self.name_ledger.namespace_owner(*module_idx, member)
+                        .unwrap_or(*module_idx);
+                    if let Some(sig) = modules[member_owner].funcs.get(member) {
                         if sig.c_abi_name.is_some() {
                             let ty = Type::Fn {
                                 params: sig.params.iter().map(|(_, ty)| ty.clone()).collect(),
@@ -7385,16 +7402,16 @@ impl<'a> Checker<'a> {
                             return Some(ty);
                         }
                     }
-                    if let Some(ty) = modules[*module_idx].consts.get(member).cloned() {
+                    if let Some(ty) = modules[member_owner].consts.get(member).cloned() {
                         let definition_span = self
                             .name_ledger
-                            .declaration(*module_idx, member)
+                            .declaration(member_owner, member)
                             .filter(|declaration| declaration.kind == "const")
                             .map(|declaration| declaration.span);
                         if let Some(definition_span) = definition_span {
                             if !self
                                 .name_ledger
-                                .visible(self.module_idx, *module_idx, member)
+                                .visible(self.module_idx, member_owner, member)
                             {
                                 self.diags
                                     .push(crate::Sema::Diagnostics::private_item(member, span));
@@ -7402,21 +7419,19 @@ impl<'a> Checker<'a> {
                             }
                             let target_path = self
                                 .name_ledger
-                                .module_path(*module_idx)
+                                .module_path(member_owner)
                                 .expect("name ledger must track every imported module")
                                 .to_string();
                             self.record_import_alias_reference(alias, *alias_span);
-                            if *module_idx != self.module_idx
+                            if member_owner != self.module_idx
                                 && Syntax::classify_identifier(member)
                                     == Syntax::IdentifierClass::SoftPublic
                             {
                                 self.diags.push(soft_public_use(member, span));
                             }
-                            self.record_reference_anchor(
-                                span,
-                                &target_path,
-                                "const",
-                                definition_span,
+                            let identity = self.name_ledger.semantic_identity(member_owner, member);
+                            self.record_reference_anchor_with_identity(
+                                span, &target_path, "const", definition_span, identity,
                             );
                             return Some(ty);
                         }

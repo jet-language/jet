@@ -1592,6 +1592,7 @@ fn lower_demanded_generic_methods(
     let mut pending = std::mem::take(&mut *cx.jit_method_calls.borrow_mut());
     collect_serde_codec_demands(funcs, &mut pending);
     let mut processed = std::collections::BTreeSet::new();
+    let mut foreign = std::collections::BTreeMap::new();
     while let Some((key, (owner_ty, method_name, method_type_args))) = pending.pop_first() {
         if !processed.insert(key.clone()) {
             continue;
@@ -1609,12 +1610,19 @@ fn lower_demanded_generic_methods(
             Type::Named(name) => (name.as_str(), &[]),
             _ => continue,
         };
+        let name = match name.rsplit_once("::") {
+            Some((owner, leaf)) if owner == cx.module_identity => leaf,
+            _ => name,
+        };
         let Some(params) = items.iter().find_map(|item| match item {
             Item::Struct(def) if def.name == name => Some(def.type_params.as_slice()),
             Item::Enum(def) if def.name == name => Some(def.type_params.as_slice()),
             Item::Distinct(def) if def.name == name => Some(&[]),
             _ => None,
         }) else {
+            if name.contains("::") {
+                foreign.insert(key, (owner_ty, method_name, method_type_args));
+            }
             continue;
         };
         let owner_subst: std::collections::HashMap<String, Type> = params
@@ -1726,7 +1734,7 @@ fn lower_demanded_generic_methods(
                     lower_method_for_owner(
                         &specialized,
                         name,
-                        owner_ty.clone(),
+                        local_module_type(&cx.module_identity, &owner_ty),
                         cx,
                         generated_serde && specialized.compiler_generated,
                     )
@@ -1741,7 +1749,9 @@ fn lower_demanded_generic_methods(
                     )
                 }
             } else {
-                lower_method_for_owner(&specialized, name, owner_ty.clone(), cx, false)
+                lower_method_for_owner(
+                    &specialized, name, local_module_type(&cx.module_identity, &owner_ty), cx, false,
+                )
             };
             cx.current_type_params.replace(previous_type_params);
             lowered.key = function_semantic_key(&lowered.module, &key);
@@ -1756,6 +1766,7 @@ fn lower_demanded_generic_methods(
             }
         }
     }
+    cx.jit_method_calls.borrow_mut().extend(foreign);
     Ok(())
 }
 
@@ -1948,7 +1959,7 @@ pub(crate) fn demand_generic_free_function(
     if type_param_names.is_empty() {
         return None;
     }
-    let sig = cx.sigs.get(name)?;
+    let sig = cx.fact_sigs(name)?;
     let param_types = sig.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
     let shape = generic_call_shape(args, explicit_type_args);
     let subst = generic_call_substitution(&param_types, type_param_names, &shape)?;
@@ -2008,6 +2019,99 @@ pub(crate) fn demand_core_source_generic_function(
         .or_default()
         .push(type_args.clone());
     Some(generic_free_function_instance_key(method, &type_args))
+}
+
+/// Instantiate a module boundary signature from sema's recorded type arguments.
+/// In particular, a lambda must lower against `fn(Item)`, not the template's
+/// `fn(T)`: its coercion and demand shape both carry the concrete callable ABI.
+pub(crate) fn module_call_signature(
+    cx: &Cx,
+    key: &(String, String),
+    type_args: &[Type],
+) -> Option<Vec<(crate::AST::AccessConvention, Type)>> {
+    let sig = cx.fact_import_sigs(key)?;
+    let Some(generic) = cx.fact_import_generic(key) else {
+        return Some(sig.iter().map(|(conv, ty)| {
+            (*conv, cx.expand_type_aliases(ty).with_effective_fn_returns())
+        }).collect());
+    };
+    if generic.type_params.len() != type_args.len() {
+        return None;
+    }
+    let subst = generic
+        .type_params
+        .iter()
+        .cloned()
+        .zip(type_args.iter().map(|ty| canonical_module_type(cx, ty)))
+        .collect();
+    Some(sig.iter().map(|(conv, ty)| {
+        let instantiated = crate::Generics::substitute_type(ty, &subst);
+        (*conv, cx.expand_type_aliases(&instantiated).with_effective_fn_returns())
+    }).collect())
+}
+
+/// #4609: a call into another source module's generic function names the
+/// concrete instance its declaring module lowers
+/// (`specialize_module_generic_calls`) and returns that module's identity and
+/// the instance name; Ok(None) only when the target is not generic. Missing
+/// checked type arguments are an invariant failure, never an unspecialized call.
+/// Type arguments are recorded canonically for one instance key.
+pub(crate) fn demand_module_generic_function(
+    cx: &Cx,
+    sig_key: &(String, String),
+    function: &str,
+    explicit_type_args: &[Type],
+) -> Result<Option<(String, String)>, String> {
+    let Some(generic) = cx.fact_import_generic(sig_key) else {
+        return Ok(None);
+    };
+    if explicit_type_args.len() != generic.type_params.len() {
+        return Err(format!(
+            "checked generic target `{}::{function}` has no complete instance ({} type arguments, expected {})",
+            generic.module_identity, explicit_type_args.len(), generic.type_params.len()
+        ));
+    }
+    // Sema has already inferred and validated these arguments. Rebinding from
+    // lowered values would conflate a callable's carrier with its source type.
+    let type_args = explicit_type_args
+        .iter()
+        .map(|ty| canonical_module_type(cx, ty))
+        .collect::<Vec<_>>();
+    cx.jit_module_generic_calls
+        .borrow_mut()
+        .entry((generic.module_identity.clone(), function.to_string()))
+        .or_default()
+        .push(type_args.clone());
+    Ok(Some((
+        generic.module_identity.clone(),
+        generic_free_function_instance_key(function, &type_args),
+    )))
+}
+
+/// A type in the lowering module's spelling with each nominal that module
+/// declares qualified by its identity, the spelling every other module uses.
+fn canonical_module_type(cx: &Cx, ty: &Type) -> Type {
+    let qualify = |name: &str| {
+        (!name.contains("::") && cx.local_type_names.contains(name))
+            .then(|| format!("{}::{name}", cx.module_identity))
+    };
+    rewrite_apply_heads(&ty.map_named_types(&qualify), &|name| {
+        qualify(name).unwrap_or_else(|| name.to_string())
+    })
+}
+
+/// The reverse of `canonical_module_type` for the module `owner`: its own
+/// nominals return to the bare spelling its context declares them under.
+fn local_module_type(owner: &str, ty: &Type) -> Type {
+    let prefix = format!("{owner}::");
+    let localize = |name: &str| {
+        name.strip_prefix(&prefix)
+            .filter(|leaf| !leaf.contains("::"))
+            .map(str::to_string)
+    };
+    rewrite_apply_heads(&ty.map_named_types(&localize), &|name| {
+        localize(name).unwrap_or_else(|| name.to_string())
+    })
 }
 
 fn generic_free_function_template(items: &[Item], called_name: &str) -> Option<Func> {
@@ -2150,9 +2254,10 @@ fn merge_core_source_generic_calls(target: &Cx, source: &Cx) {
 fn build_imported_generic_core_cx(
     bundle: &ProgramBundle,
     module_idx: usize,
-    extern_funcs: &std::collections::HashMap<String, crate::Codegen::ExternFn>,
+    extern_funcs: &std::sync::Arc<std::collections::HashMap<String, crate::Codegen::ExternFn>>,
     debug_linemap: bool,
     spawn_site_base: usize,
+    facts: &std::sync::Arc<crate::Codegen::Context::BundleCodegenFacts>,
 ) -> Cx {
     let imported = &bundle.modules[module_idx];
     let mut imported_cx = build_cx_items(
@@ -2164,7 +2269,7 @@ fn build_imported_generic_core_cx(
         &bundle.edition,
     );
     imported_cx.debug_linemap = debug_linemap;
-    populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+    populate_cx_from_bundle(&mut imported_cx, bundle, module_idx, facts);
     register_own_struct_shapes(&mut imported_cx, bundle, module_idx);
     crate::Codegen::Context::collect_iterable_hooks(&mut imported_cx, &imported.items);
     imported_cx.jit_local_call_prefix = Some(format!("{}::", mangle(&imported.alias)));
@@ -2185,6 +2290,26 @@ fn checked_imported_core_source_signature<'a>(
     signatures
         .get(&(source.module.to_string(), method.to_string()))
         .filter(|signature| signature.module_identity == owner)
+}
+
+/// Keep the boundary of instances lowered in an imported module's context
+/// under that module's canonical nominal identities, as its ordinary
+/// functions are (#4609).
+fn qualify_imported_instances(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    owner: &str,
+    instances: &mut [TFunc],
+) {
+    for instance in instances {
+        for (_, ty, _) in &mut instance.params {
+            *ty = qualify_imported_type(bundle, module_idx, owner, &[], ty);
+        }
+        instance.ret = instance
+            .ret
+            .as_ref()
+            .map(|ty| qualify_imported_type(bundle, module_idx, owner, &[], ty));
+    }
 }
 
 fn lower_checked_core_source_generic_instance(
@@ -2287,7 +2412,7 @@ fn lower_core_source_generic_template(
 
 fn specialize_checked_core_source_generics(
     bundle: &ProgramBundle,
-    extern_funcs: &std::collections::HashMap<String, crate::Codegen::ExternFn>,
+    extern_funcs: &std::sync::Arc<std::collections::HashMap<String, crate::Codegen::ExternFn>>,
     debug_linemap: bool,
     cx: &Cx,
     funcs: &mut Vec<TFunc>,
@@ -2302,10 +2427,7 @@ fn specialize_checked_core_source_generics(
         for ((owner, method), mut instantiations) in calls {
             instantiations.sort_by_key(|types| format!("{types:?}"));
             instantiations.dedup();
-            let module_idx = (0..bundle.modules.len())
-                .find(|index| {
-                    bundle.name_ledger.module_identity(*index).as_deref() == Some(owner.as_str())
-                })
+            let module_idx = bundle.name_ledger.module_by_identity(&owner)
                 .ok_or_else(|| {
                     LowerError::new(
                         crate::Diagnostics::Span::new(0, 0),
@@ -2319,6 +2441,7 @@ fn specialize_checked_core_source_generics(
                 extern_funcs,
                 debug_linemap,
                 spawn_lambdas.len(),
+                cx.bundle_facts.as_ref().expect("checked bundle context must share program facts"),
             );
             for type_args in instantiations {
                 let instance = generic_free_function_instance_key(&method, &type_args);
@@ -2345,6 +2468,150 @@ fn specialize_checked_core_source_generics(
                 ));
             }
             merge_core_source_generic_calls(cx, &imported_cx);
+        }
+    }
+}
+
+fn merge_module_generic_calls(target: &Cx, source: &Cx) {
+    let calls = std::mem::take(&mut *source.jit_module_generic_calls.borrow_mut());
+    let mut target_calls = target.jit_module_generic_calls.borrow_mut();
+    for (key, type_args) in calls {
+        target_calls.entry(key).or_default().extend(type_args);
+    }
+    target.jit_method_calls.borrow_mut().extend(
+        std::mem::take(&mut *source.jit_method_calls.borrow_mut()),
+    );
+}
+
+/// #4609: lower every instance of a source module's generic function that a
+/// call from another module demanded (`demand_module_generic_function`), in
+/// the declaring module's own context, until no lowered instance demands
+/// more. An entry-owned instance keeps the entry's bare spelling, like the
+/// entry's own specializations; an imported one takes the module's emitted
+/// prefix and canonical boundary types, like its ordinary functions.
+fn specialize_module_generic_calls(
+    bundle: &ProgramBundle,
+    extern_funcs: &std::sync::Arc<std::collections::HashMap<String, crate::Codegen::ExternFn>>,
+    debug_linemap: bool,
+    cx: &Cx,
+    funcs: &mut Vec<TFunc>,
+    spawn_lambdas: &mut Vec<TJitSpawnLambda>,
+) -> Result<(), LowerError> {
+    let facts = cx.bundle_facts.as_ref().expect("checked bundle context must share program facts");
+    let module_rows = (0..bundle.modules.len())
+        .filter_map(|index| {
+            bundle
+                .name_ledger
+                .module_identity(index)
+                .map(|identity| (identity, index))
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut processed = std::collections::HashSet::new();
+    loop {
+        let calls = std::mem::take(&mut *cx.jit_module_generic_calls.borrow_mut());
+        let methods = std::mem::take(&mut *cx.jit_method_calls.borrow_mut());
+        if calls.is_empty() && methods.is_empty() {
+            return Ok(());
+        }
+        for ((owner, function), mut instantiations) in calls {
+            instantiations.sort_by_key(|types| format!("{types:?}"));
+            instantiations.dedup();
+            let missing_target = || {
+                LowerError::new(
+                    crate::Diagnostics::Span::new(0, 0),
+                    format!("checked generic target `{owner}::{function}` has no loaded template"),
+                )
+            };
+            let module_idx = *module_rows.get(&owner).ok_or_else(missing_target)?;
+            let module = &bundle.modules[module_idx];
+            let template =
+                generic_free_function_template(&module.items, &function).ok_or_else(missing_target)?;
+            let entry = module_idx == bundle.entry;
+            let mut imported_cx = (!entry).then(|| {
+                build_imported_generic_core_cx(
+                    bundle,
+                    module_idx,
+                    extern_funcs,
+                    debug_linemap,
+                    spawn_lambdas.len(),
+                    facts,
+                )
+            });
+            for type_args in instantiations {
+                let instance = generic_free_function_instance_key(&function, &type_args);
+                let key = function_semantic_key(&owner, &instance);
+                if !processed.insert(key.clone()) || funcs.iter().any(|f| f.key == key) {
+                    continue;
+                }
+                if let Some(imported_cx) = imported_cx.as_mut() {
+                    imported_cx.jit_spawn_site_base = spawn_lambdas.len();
+                }
+                let module_cx = imported_cx.as_ref().unwrap_or(cx);
+                let local_args = if entry {
+                    type_args
+                        .iter()
+                        .map(|ty| local_module_type(&owner, ty))
+                        .collect::<Vec<_>>()
+                } else {
+                    type_args
+                };
+                let first_instance = funcs.len();
+                let (_, mut lowered) = lower_core_source_generic_template(
+                    template.clone(),
+                    &local_args,
+                    &instance,
+                    module_cx,
+                );
+                lowered.key = key;
+                lowered.name = if entry {
+                    instance
+                } else {
+                    format!("{}::{}", mangle(&module.alias), mangle(&instance))
+                };
+                funcs.push(lowered);
+                lower_demanded_generic_methods(&module.items, module_cx, funcs)?;
+                specialize_generic_free_functions(&module.items, module_cx, funcs);
+                if !entry {
+                    qualify_imported_instances(bundle, module_idx, &owner, &mut funcs[first_instance..]);
+                }
+                spawn_lambdas.extend(std::mem::take(
+                    &mut *module_cx.jit_spawn_lambdas.borrow_mut(),
+                ));
+            }
+            if let Some(imported_cx) = &imported_cx {
+                merge_core_source_generic_calls(cx, imported_cx);
+                merge_module_generic_calls(cx, imported_cx);
+            }
+        }
+        for (instance, (owner_ty, method, method_args)) in methods {
+            let name = match &owner_ty {
+                Type::Named(name) | Type::Apply { name, .. } => name,
+                _ => continue,
+            };
+            let Some(module_idx) = bundle.name_ledger.nominal_module(name) else {
+                continue;
+            };
+            let owner = crate::Codegen::Context::module_identity(bundle, module_idx);
+            let key = function_semantic_key(&owner, &instance);
+            if !processed.insert(key.clone()) || funcs.iter().any(|function| function.key == key) {
+                continue;
+            }
+            let module = &bundle.modules[module_idx];
+            let imported_cx = build_imported_generic_core_cx(
+                bundle, module_idx, extern_funcs, debug_linemap, spawn_lambdas.len(), facts,
+            );
+            imported_cx.jit_method_calls.borrow_mut().insert(
+                instance, (owner_ty, method, method_args),
+            );
+            let first_instance = funcs.len();
+            lower_demanded_generic_methods(&module.items, &imported_cx, funcs)?;
+            specialize_generic_free_functions(&module.items, &imported_cx, funcs);
+            qualify_imported_instances(bundle, module_idx, &owner, &mut funcs[first_instance..]);
+            spawn_lambdas.extend(std::mem::take(
+                &mut *imported_cx.jit_spawn_lambdas.borrow_mut(),
+            ));
+            merge_core_source_generic_calls(cx, &imported_cx);
+            merge_module_generic_calls(cx, &imported_cx);
         }
     }
 }
@@ -2436,8 +2703,8 @@ fn lower_imported_generated_codecs(
             .unwrap_or(&[]);
         for owner in imported_type_owners(bundle, module_idx) {
             let qualified = imported_type_name(&owner, &implementation.type_name);
-            if !cx.struct_fields.contains_key(&qualified)
-                && !cx.enum_variants.contains_key(&qualified)
+            if !cx.fact_struct_fields(&qualified).is_some()
+                && !cx.fact_enum_variants(&qualified).is_some()
             {
                 continue;
             }
@@ -2734,15 +3001,27 @@ fn collect_fragment_module_callable(
             if is_local(alias.as_str()) {
                 return;
             }
-            let Some(module) = module_imports.get(alias) else {
-                return;
-            };
-            (module.as_str(), method.as_str())
+            if let Some((module, name)) = imported_functions.get(&format!("{alias}.{method}")) {
+                (module.as_str(), name.as_str())
+            } else {
+                let Some(module) = module_imports.get(alias) else { return };
+                (module.as_str(), method.as_str())
+            }
         }
         crate::AST::Expr::Call(call) if !is_local(call.name.as_str()) => {
             let Some((module, name)) = imported_functions.get(&call.name) else {
                 return;
             };
+            (module.as_str(), name.as_str())
+        }
+        crate::AST::Expr::Ident(name, _) if !is_local(name) => {
+            let Some((module, name)) = imported_functions.get(name) else { return };
+            (module.as_str(), name.as_str())
+        }
+        crate::AST::Expr::Field(receiver, name, _) => {
+            let crate::AST::Expr::Ident(alias, _) = receiver.as_ref() else { return };
+            if is_local(alias) { return }
+            let Some((module, name)) = imported_functions.get(&format!("{alias}.{name}")) else { return };
             (module.as_str(), name.as_str())
         }
         _ => return,
@@ -3680,10 +3959,19 @@ fn lower_mir_fragment(
         "",
         &file,
         None,
-        &std::collections::HashMap::new(),
+        &std::sync::Arc::default(),
         "2026",
     );
     if let Some(facts) = context.checked_nominals {
+        if facts.name_ledger.module_alias(facts.module_idx).is_some() {
+            cx.scope_names = Some(facts.name_ledger.body_snapshot());
+            cx.bundle_module = facts.module_idx;
+        }
+        for function in context.funcs.values() {
+            if let Some(signature) = facts.function_signatures.get(&function.name) {
+                cx.install_fragment_signature(function, signature);
+            }
+        }
         cx.import_mods = facts
             .import_modules
             .iter()
@@ -3696,7 +3984,7 @@ fn lower_mir_fragment(
             .collect();
         // Each signature names the loaded module whose body the fragment
         // lowers on demand, so the call keys the same target as at runtime.
-        cx.core_source_sigs = facts
+        cx.core_source_sigs = std::sync::Arc::new(facts
             .core_source_sigs
             .iter()
             .filter_map(|(key, signature)| {
@@ -3711,7 +3999,7 @@ fn lower_mir_fragment(
                     },
                 ))
             })
-            .collect();
+            .collect());
         cx.local_type_identities
             .extend(facts.nominal_identities.clone());
         cx.type_names.extend(facts.structs.keys().cloned());
@@ -3726,12 +4014,12 @@ fn lower_mir_fragment(
     }
     cx.module_identity = module.clone();
     cx.core_imports = context.core_imports.clone();
+    let core_source_modules = std::sync::Arc::make_mut(&mut cx.core_source_modules);
     for (alias, module) in &cx.core_imports {
         if let Some(source) = jet_foundation::CoreModuleExports::core_source_module(module) {
             cx.import_mods
                 .insert(alias.clone(), crate::Codegen::mangle(source.alias));
-            cx.core_source_modules
-                .insert(module.clone(), source.alias.to_string());
+            core_source_modules.insert(module.clone(), source.alias.to_string());
         }
     }
     cx.const_values = context.globals.clone();
@@ -3992,14 +4280,14 @@ fn fragment_core_source_cx(
         "",
         &source.module_identity,
         None,
-        &std::collections::HashMap::new(),
+        &std::sync::Arc::default(),
         "2026",
     );
     // A same-module constant read lowers to the `Global` key its declaration
     // row carries in the fragment program (`fragment_core_source_constants`),
     // exactly as `populate_cx_from_bundle` keys it for runtime lowering.
     for constant in &source.constants {
-        let Some(ty) = cx.const_types.get(&constant.name).cloned() else {
+        let Some(ty) = cx.fact_const_types(&constant.name).cloned() else {
             continue;
         };
         let row = tir_to_mir_types::lower_constant(constant, &source.module_identity);
@@ -4008,13 +4296,22 @@ fn fragment_core_source_cx(
     }
     cx.module_alias = source.alias.clone();
     cx.module_identity = source.module_identity.clone();
+    if let Some(owner) = facts.name_ledger.module_by_alias(&source.alias) {
+        cx.scope_names = Some(facts.name_ledger.body_snapshot());
+        cx.bundle_module = owner;
+    }
+    for function in source.functions.values() {
+        if let Some(signature) = source.function_signatures.get(&function.name) {
+            cx.install_fragment_signature(function, signature);
+        }
+    }
     cx.jit_local_call_prefix = Some(format!("{}::", mangle(&source.alias)));
     cx.core_source_sigs = fragment_cx.core_source_sigs.clone();
-    cx.core_source_modules = facts
+    cx.core_source_modules = std::sync::Arc::new(facts
         .core_source_bodies
         .iter()
         .map(|(module, loaded)| (module.clone(), loaded.alias.clone()))
-        .collect();
+        .collect());
     cx.core_imports = source.core_imports.clone();
     for (alias, module) in &source.core_imports {
         if let Some(loaded) = facts.core_source_bodies.get(module) {
@@ -4062,8 +4359,17 @@ fn install_fragment_module_imports(
     }
     for (local, (module, name)) in imported_functions {
         if let Some(loaded) = facts.core_source_bodies.get(module) {
-            cx.unqualified_file
-                .insert(local.clone(), (mangle(&loaded.alias), name.clone()));
+            let binding = (mangle(&loaded.alias), name.clone());
+            if let Some((alias, member)) = local.rsplit_once('.') {
+                cx.reexport_calls.insert((alias.to_owned(), member.to_owned()), binding);
+            } else {
+                cx.unqualified_file.insert(local.clone(), binding);
+            }
+            if let (Some(function), Some(signature)) =
+                (loaded.functions.get(name), loaded.function_signatures.get(name))
+            {
+                cx.install_fragment_function_types(local, function, signature);
+            }
         }
     }
     for (key, signature) in signatures {
@@ -5035,7 +5341,8 @@ fn lower_checked_tir_program_on_stack(
         let module = bundle.modules.get(bundle.entry).ok_or_else(|| {
             LowerError::new(crate::Diagnostics::Span::new(0, 0), "missing entry module")
         })?;
-        let extern_funcs = bundle_extern_funcs(bundle);
+        let facts = crate::Codegen::Context::BundleCodegenFacts::new(bundle);
+        let extern_funcs = facts.extern_funcs();
         let mut cx = build_cx_items(
             &module.items,
             &module.source,
@@ -5045,7 +5352,7 @@ fn lower_checked_tir_program_on_stack(
             &bundle.edition,
         );
         cx.debug_linemap = debug_linemap;
-        populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
+        populate_cx_from_bundle(&mut cx, bundle, bundle.entry, &facts);
         register_own_struct_shapes(&mut cx, bundle, bundle.entry);
         crate::Codegen::Context::collect_iterable_hooks(&mut cx, &module.items);
         let type_shapes = collect_type_shapes(&module.items);
@@ -5446,7 +5753,7 @@ fn lower_checked_tir_program_on_stack(
                 &bundle.edition,
             );
             imported_cx.debug_linemap = debug_linemap;
-            populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+            populate_cx_from_bundle(&mut imported_cx, bundle, module_idx, &facts);
             boxed_edges_by_module.insert(imported_owner.clone(), imported_cx.boxed_edges.clone());
             auto_printable_by_module
                 .insert(imported_owner.clone(), imported_cx.auto_printable.clone());
@@ -5896,11 +6203,27 @@ fn lower_checked_tir_program_on_stack(
                     _ => {}
                 }
             }
+            // #4609: the generic functions and methods an imported module
+            // instantiates in its own bodies specialize in its own context,
+            // as the entry's do, under the module's canonical boundary types.
+            let first_instance = funcs.len();
+            lower_demanded_generic_methods(&imported.items, &imported_cx, &mut funcs)?;
+            specialize_generic_free_functions(&imported.items, &imported_cx, &mut funcs);
+            qualify_imported_instances(bundle, module_idx, &imported_owner, &mut funcs[first_instance..]);
             spawn_lambdas.extend(std::mem::take(
                 &mut *imported_cx.jit_spawn_lambdas.borrow_mut(),
             ));
             merge_core_source_generic_calls(&cx, &imported_cx);
+            merge_module_generic_calls(&cx, &imported_cx);
         }
+        specialize_module_generic_calls(
+            bundle,
+            &extern_funcs,
+            debug_linemap,
+            &cx,
+            &mut funcs,
+            &mut spawn_lambdas,
+        )?;
         specialize_checked_core_source_generics(
             bundle,
             &extern_funcs,
@@ -11172,6 +11495,8 @@ pub fn validate_tir_support(bundle: &ProgramBundle) -> Vec<TirCoverageIssue> {
     let callables = cost_callables(bundle, app_graph.as_ref());
     let reachable = reachable_cost_callables(bundle, &callables);
     let mut contexts = std::collections::HashMap::new();
+    let facts = crate::Codegen::Context::BundleCodegenFacts::new(bundle);
+    let extern_funcs = facts.extern_funcs();
     let mut issues = Vec::new();
 
     for (index, callable) in callables.iter().enumerate() {
@@ -11199,7 +11524,6 @@ pub fn validate_tir_support(bundle: &ProgramBundle) -> Vec<TirCoverageIssue> {
             continue;
         };
         let cx = contexts.entry(callable.module).or_insert_with(|| {
-            let extern_funcs = bundle_extern_funcs(bundle);
             let mut cx = build_cx_items(
                 &module.items,
                 &module.source,
@@ -11208,7 +11532,7 @@ pub fn validate_tir_support(bundle: &ProgramBundle) -> Vec<TirCoverageIssue> {
                 &extern_funcs,
                 &bundle.edition,
             );
-            populate_cx_from_bundle(&mut cx, bundle, callable.module);
+            populate_cx_from_bundle(&mut cx, bundle, callable.module, &facts);
             register_own_struct_shapes(&mut cx, bundle, callable.module);
             crate::Codegen::Context::collect_iterable_hooks(&mut cx, &module.items);
             register_foreign_enum_variants(&mut cx, bundle, callable.module);

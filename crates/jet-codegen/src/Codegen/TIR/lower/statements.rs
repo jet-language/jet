@@ -2419,7 +2419,7 @@ fn refutable_binding_name<'a>(pattern: &'a Pattern, _init: &TExpr) -> Option<&'a
 fn is_direct_refutable_pattern(pattern: &Pattern, cx: &Cx) -> bool {
     matches!(
         pattern,
-        Pattern::Variant { variant, .. } if cx.variant_owner.contains_key(variant)
+        Pattern::Variant { variant, .. } if cx.fact_variant_owner(variant).is_some()
     )
 }
 
@@ -2693,9 +2693,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 };
                 let init = lower_expr(&b.init, cx, env);
                 let field_tys: HashMap<String, Type> = match &init.ty {
-                    Type::Named(n) | Type::Apply { name: n, .. } => cx
-                        .struct_fields
-                        .get(n)
+                    Type::Named(n) | Type::Apply { name: n, .. } => cx.fact_struct_fields(n)
                         .map(|fs| fs.iter().cloned().collect())
                         .unwrap_or_default(),
                     _ => HashMap::new(),
@@ -3393,7 +3391,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     || matches!(
                         &ty,
                         Type::Apply { name, .. }
-                            if name == "DataStream" && !cx.type_names.contains(name.as_str())
+                            if name == "DataStream" && !cx.fact_type_name(name.as_str())
                     )
                     // D-SHIFT1 (c7shift): `Reader`/`Cursor` bindings are usually
                     // written without an annotation (`r :: Reader.over(bytes)`), so
@@ -3402,7 +3400,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     || matches!(
                         &ty,
                         Type::Named(n) if (n == "Reader" || n == "Cursor")
-                            && !cx.type_names.contains(n.as_str())
+                            && !cx.fact_type_name(n.as_str())
                     )
                     || matches!(
                         &ty,
@@ -3729,7 +3727,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         let swizzle_write = match &base_t.ty {
                             Type::Named(type_name)
                                 if crate::Sema::is_swizzleable_math_type(type_name)
-                                    && !cx.struct_fields.contains_key(type_name) =>
+                                    && !cx.fact_struct_fields(type_name).is_some() =>
                             {
                                 match crate::Sema::parse_swizzle_member(field, type_name) {
                                     crate::Sema::SwizzleParse::Ok(lanes) => {
@@ -4207,7 +4205,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             && matches!(&lowered_coll.ty, Type::List(_) | Type::FixedList { .. }));
                     if method_kind.is_none() {
                         if let Type::Named(n) = &lowered_coll.ty {
-                            if let Some(hook) = cx.iterable_hooks.get(n) {
+                            if let Some(hook) = cx.fact_iterable_hook(n) {
                                 method_kind = Some(TForInMethod::Iterable {
                                     coll_type: n.clone(),
                                     iter_type: hook.iter_type.clone(),
@@ -4791,7 +4789,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         // D-TXN-ROLLBACK layer 2: if the root type implements Rollback,
                         // use snapshot_custom instead of the clone-based snapshot path.
                         let rollback_ty = env.ty_of(r).filter(
-                            |ty| matches!(ty, Type::Named(n) if cx.rollback_types.contains(n)),
+                            |ty| matches!(ty, Type::Named(n) if cx.fact_rollback_type(n)),
                         );
                         (env.local_of(r), rollback_ty)
                     })

@@ -400,10 +400,10 @@ pub(super) fn check_func_body(
     ck.unqualified_file = scoped_unqualified_file;
     ck.core_item_imports = scoped_core_item_imports;
     ck.inline_module = inline_module.map(str::to_owned);
-    // Canonicalize the declaration before the shared body checker projects
-    // the implicit failure carrier. This keeps alias-backed returns from
-    // becoming nested `Result<Result<...>, Err>` values in later seams.
-    ck.canonicalize_function_return_type(f);
+    // Publish canonical parameter and return types before body checking so
+    // later lowering reads the same nominal and builtin identities.
+    // Projecting the failure carrier afterwards also avoids nested Results.
+    ck.canonicalize_function_signature(f);
     ck.ret = crate::Sema::checked_body_return_type(f, raw_protocol_return);
     for (active, name, span) in [
         (f.is_pure, crate::Syntax::KW_PURE, f.name_span),
