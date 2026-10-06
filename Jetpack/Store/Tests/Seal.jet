@@ -28,7 +28,9 @@ fn store_test_mtime_seconds(path: String) -> Int Never! {
 }
 
 fn store_test_set_mtime(path: String, seconds: Int) Never! {
-    sys.utime(path, seconds, seconds) ?? panic("utime failed for {path}")
+    #Unsafe("the store test owns the fixture file whose mtime it pins") {
+        sys.utime(path, seconds, seconds) ?? panic("utime failed for {path}")
+    }
 }
 
 fn store_test_make_writable(path: String) Never! {
