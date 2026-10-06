@@ -4704,25 +4704,21 @@ fn run() {
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
 
-    let mut jit_report = None;
-    {
-        let policy = common::development_policy();
-        match common::run_interpreted(&bundle, &policy) {
-            RunOutcome::Ran {
-                stderr, exit_code, ..
-            } => {
-                assert_eq!(exit_code, 70, "resident JIT exit drift: {stderr}");
-                assert!(
-                    stderr.starts_with(stop),
-                    "resident JIT reported the wrong runtime failure: {stderr}"
-                );
-                jit_report = Some(stderr);
-            }
-            RunOutcome::Problems(diags) => {
-                panic!("resident JIT returned diagnostics instead of running: {diags:?}")
-            }
+    let in_process_report = match common::run_interpreted(&bundle, &common::development_policy()) {
+        RunOutcome::Ran {
+            stderr, exit_code, ..
+        } => {
+            assert_eq!(exit_code, 70, "in-process evaluator exit drift: {stderr}");
+            assert!(
+                stderr.starts_with(stop),
+                "in-process evaluator reported the wrong runtime failure: {stderr}"
+            );
+            stderr
         }
-    }
+        RunOutcome::Problems(diags) => {
+            panic!("in-process evaluator returned diagnostics instead of running: {diags:?}")
+        }
+    };
 
     match crate::common::dev_run(path.to_str().unwrap(), false, true) {
         RunOutcome::Ran {
@@ -4740,12 +4736,10 @@ fn run() {
                 stderr.contains("main.jet:4 in run"),
                 "forced interpreter dropped the Jet source location: {stderr}"
             );
-            if let Some(jit) = jit_report {
-                assert_eq!(
-                    jit, stderr,
-                    "the resident JIT and the interpreter must report one failure"
-                );
-            }
+            assert_eq!(
+                in_process_report, stderr,
+                "the in-process evaluator and the forced interpreter must report one failure"
+            );
         }
         RunOutcome::Problems(diags) => {
             panic!("forced interpreter returned diagnostics instead of running: {diags:?}")
@@ -4871,7 +4865,7 @@ fn run() {
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
 
-    for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
+    for (tier, force_interpreter) in [("default run", false), ("interpreter", true)] {
         match crate::common::dev_run(path.to_str().unwrap(), false, force_interpreter) {
             RunOutcome::Ran {
                 stdout,
@@ -4883,8 +4877,6 @@ fn run() {
                 assert_eq!(stdout, expected, "{tier} output drift");
             }
             RunOutcome::Problems(diags) => panic!("{tier} failed: {diags:?}"),
-        }
-        if !force_interpreter {
         }
     }
 

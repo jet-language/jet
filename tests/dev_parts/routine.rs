@@ -330,14 +330,14 @@ fn run() {
         std::env::temp_dir().join(format!("jet_dev_task_surface_{}.jet", std::process::id()));
     fs::write(&path, source).unwrap();
     let shown = path.to_string_lossy().into_owned();
-    let bundle = checked_bundle_from_path(&shown);
+    checked_bundle_from_path(&shown);
     let RunOutcome::Ran {
         stdout,
         stderr,
         exit_code,
     } = run_default_source_outcome(source, "task_surface_string")
     else {
-        panic!("resident task surface must run through Cranelift")
+        panic!("resident task surface must run through the default `jet run`")
     };
     assert_eq!(
         stdout,
@@ -2492,10 +2492,7 @@ fn run() {
 "#;
     let proof = std::env::temp_dir().join("jet_jit_range_value_safety.jet");
     fs::write(&proof, src).unwrap();
-    let bundle = checked_bundle_from_path(&proof.to_string_lossy());
-    // Same order as the unboxed block above, for the same reason:
-    // Compile through the canonical MIR seam first for the same reason:
-    // a lowering failure must report its actual compile error, not "covered".
+    checked_bundle_from_path(&proof.to_string_lossy());
     let native = run_default_source(src, "range_values");
     let expected = "\
 true
@@ -3574,7 +3571,7 @@ fn run() { print(perf.fidelity()) }"#;
 /// provenance detail, and obligation clause.
 #[test]
 fn unsafe_blocks_are_evaluated_by_canonical_mir_with_live_sentries() {
-    let raw = jet::Loader::load_entry(&example_path("memory/rawptr"))
+    jet::Loader::load_entry(&example_path("memory/rawptr"))
         .expect("rawptr example should load");
 
     let fault_path = std::env::temp_dir().join(format!(
@@ -4394,7 +4391,7 @@ fn run() {
     let file = dir.join("fixed_width_integers.jet");
     fs::write(&file, source).unwrap();
     let shown = file.to_string_lossy().to_string();
-    let bundle = checked_bundle_from_path(&shown);
+    checked_bundle_from_path(&shown);
 
     let interpreted = match crate::common::dev_run(&shown, false, true) {
         RunOutcome::Ran {
@@ -4451,7 +4448,7 @@ fn run() {
     let file = dir.join("fixed_width_remainder_trap.jet");
     fs::write(&file, source).unwrap();
     let shown = file.to_string_lossy().to_string();
-    let bundle = checked_bundle_from_path(&shown);
+    checked_bundle_from_path(&shown);
 
     // D-MODSEM1: `MIN % -1` is 0 and fits — jet_mod answers rather than traps.
     let expected = ProgramOutput::ran("0\n".into(), String::new(), 0);
@@ -4526,7 +4523,7 @@ fn run() {
         let file = dir.join(format!("{tag}.jet"));
         fs::write(&file, source).unwrap();
         let shown = file.to_string_lossy().to_string();
-        let bundle = checked_bundle_from_path(&shown);
+        checked_bundle_from_path(&shown);
 
         let interpreted = match crate::common::dev_run(&shown, false, true) {
             RunOutcome::Ran {
@@ -4656,7 +4653,7 @@ fn fixed_width_mixed_sign_shift_counts_trap_across_tiers() {
         let file = dir.join(format!("{tag}.jet"));
         fs::write(&file, &source).unwrap();
         let shown = file.to_string_lossy().to_string();
-        let bundle = checked_bundle_from_path(&shown);
+        checked_bundle_from_path(&shown);
 
         let interpreted = match crate::common::dev_run(&shown, false, true) {
             RunOutcome::Ran {
@@ -4779,7 +4776,7 @@ fn run() {
     let file = dir.join("numeric_singleton_splits.jet");
     fs::write(&file, source).unwrap();
     let shown = file.to_string_lossy().to_string();
-    let bundle = checked_bundle_from_path(&shown);
+    checked_bundle_from_path(&shown);
 
     let resident = run_default_source(source, "numeric_singleton_splits");
 

@@ -71,7 +71,6 @@ fn typed_crypto_matches_aot_in_default_dev_with_honest_jit_boundary() {
         errors.is_empty(),
         "typed crypto must type-check: {errors:?}"
     );
-    let policy = common::development_policy();
 
     let (aot_code, aot_stdout, aot_stderr) =
         build_and_run("jet_crypto_c12", "typed_crypto", &source);

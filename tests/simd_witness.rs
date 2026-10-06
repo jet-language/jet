@@ -54,7 +54,7 @@ fn lower_checked(source: &str) -> jet_foundation::MIR::MirProgram {
         .collect();
     assert!(errors.is_empty(), "{errors:#?}");
     let request = MirArtifactRequest::new(
-        MirArtifactTarget::Cranelift,
+        MirArtifactTarget::Interpreter,
         MirArtifactKind::NativeExecutable,
         MirArtifactBuildMode::Dev,
     );

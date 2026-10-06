@@ -2205,6 +2205,12 @@ fn golden_program_output(stem: &str) -> ProgramOutput {
     ProgramOutput::ran(golden_stdout(stem), String::new(), 0)
 }
 
+fn example_has_err_golden(stem: &str) -> bool {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("Examples/features/expected/{stem}.err.out"))
+        .is_file()
+}
+
 fn strip_panic_locals(stderr: &str) -> String {
     stderr
         .lines()
@@ -2409,16 +2415,6 @@ fn assert_io_cli_terminal_time_three_way(file: &str, stem: &str) {
 
     let dir = aot_scratch_dir("jit_1219", stem);
     let aot = compiled_binary_output(&dir, "jit_1219", 0, stem, file);
-    let aot_bin = compiled_binary_path(&aot_scratch_dir("jit_1219", stem), "jit_1219", 0, file);
-
-    // Watcher re-execs `os.executable() --watch-child`. Under resident JIT,
-    // point argv[0] at the AOT binary so the child is the same program identity
-    // AOT uses (not a `.jet` → `jet run` round-trip).
-    let jit_argv0 = if stem == "io/watcher" {
-        aot_bin.to_string_lossy().into_owned()
-    } else {
-        file.to_string()
-    };
 
     let jit = default_run_output(file, stem);
 

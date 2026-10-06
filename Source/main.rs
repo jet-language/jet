@@ -2471,7 +2471,7 @@ fn run_console(
     }) {
         Ok(package_facts) => package_facts,
         Err(diagnostics) => {
-            emit_cli_diagnostics(&file, &source, &diagnostics);
+            emit_cli_diagnostics(&root.display().to_string(), "", &diagnostics);
             return ExitCodes::USER_ERROR;
         }
     };

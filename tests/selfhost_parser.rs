@@ -373,7 +373,7 @@ fn lower_bundle(bundle: &mut jet::AST::ProgramBundle, context: &str) -> MirProgr
     let errors = diagnostics.iter().filter(|row| row.severity == Severity::Error).collect::<Vec<_>>();
     assert!(errors.is_empty(), "{context}: checked parser fixture: {errors:#?}");
     let request = MirArtifactRequest::new(
-        MirArtifactTarget::Cranelift,
+        MirArtifactTarget::Interpreter,
         MirArtifactKind::NativeExecutable,
         MirArtifactBuildMode::Dev,
     );

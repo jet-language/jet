@@ -1201,7 +1201,6 @@ fn evaluate(path: &Path, expected_output: &str) -> Evaluation {
     let run = jet::Interpreter::dev_iteration_with_gates_profile_and_settings_with_lints(
         &file,
         false,
-        false,
         jet::Policy::GateSet::default(),
         "dev",
         &std::collections::BTreeMap::new(),

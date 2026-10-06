@@ -665,9 +665,6 @@ fn run_termios_pty_case(
         status.success(),
         "{mode} successful PTY child failed: {status}"
     );
-    if mode == "default" {
-        let output = String::from_utf8_lossy(&transcript);
-    }
     let output = String::from_utf8_lossy(&transcript);
     assert!(
         output.contains("secret-ok:answer"),

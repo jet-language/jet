@@ -494,7 +494,6 @@ fn main() {
 
 #[test]
 fn unicode_grapheme_zwj_requires_pictographic_context_on_all_run_tiers() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let source = r#"
 use core.text as text
 

@@ -7,7 +7,6 @@ use jet::Lexer::{self, RawTokenFact, StrTokPart, TerminatorDriver, TerminatorEve
 use jet_foundation::MIR::{MirArtifactBuildMode, MirArtifactKind, MirArtifactRequest, MirArtifactTarget, MirFunctionId, MirProgram};
 use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -35,7 +34,7 @@ fn lower_bundle(bundle: &mut jet::AST::ProgramBundle, context: &str) -> MirProgr
     let errors = diagnostics.iter().filter(|row| row.severity == Severity::Error).collect::<Vec<_>>();
     assert!(errors.is_empty(), "{context}: checked terminator fixture: {errors:#?}");
     let request = MirArtifactRequest::new(
-        MirArtifactTarget::Cranelift, MirArtifactKind::NativeExecutable, MirArtifactBuildMode::Dev,
+        MirArtifactTarget::Interpreter, MirArtifactKind::NativeExecutable, MirArtifactBuildMode::Dev,
     );
     jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
         .unwrap_or_else(|error| panic!("{context}: canonical optimized terminator MIR: {error}"))

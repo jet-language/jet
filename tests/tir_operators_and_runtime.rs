@@ -6,7 +6,7 @@ mod common;
 mod tir_support;
 
 use tir_support::{
-    assert_example_cli_tiers_agree, assert_tiers_agree, build_and_run, compile, compile_source,
+    assert_example_cli_tiers_agree, assert_tiers_agree, build_and_run, compile_source,
     have_rustc, default_run_with_env,
 };
 

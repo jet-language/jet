@@ -45,8 +45,8 @@ fn example_path(name: &str) -> PathBuf {
 }
 
 #[test]
-fn jit_http_readiness_uses_shared_scheduler_poller() {
-    let runtime = include_str!("../crates/jet-jit/src/net_http_rt.rs");
+fn evalhost_http_readiness_uses_shared_scheduler_poller() {
+    let runtime = include_str!("../crates/jet-evalhost/src/net_http_rt.rs");
     let scheduler = include_str!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
     let net = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs");
     for symbol in [
@@ -57,7 +57,7 @@ fn jit_http_readiness_uses_shared_scheduler_poller() {
     ] {
         assert!(
             runtime.contains(symbol),
-            "JIT runtime does not import {symbol}"
+            "evalhost runtime does not import {symbol}"
         );
         assert!(
             scheduler.contains(&format!("pub fn {symbol}")),
@@ -65,7 +65,7 @@ fn jit_http_readiness_uses_shared_scheduler_poller() {
         );
         assert!(
             !runtime.contains(&format!("fn {symbol}")),
-            "JIT runtime still defines local {symbol}"
+            "evalhost runtime still defines local {symbol}"
         );
     }
     #[cfg(unix)]
@@ -75,19 +75,6 @@ fn jit_http_readiness_uses_shared_scheduler_poller() {
     );
     assert!(!runtime.contains("fn jet_scheduler_tcp_stream_io_wait"));
     assert!(!runtime.contains("thread::sleep"));
-}
-
-#[test]
-fn resident_http_stop_uses_the_shared_runtime_boundary() {
-    let runtime = include_str!("../crates/jet-jit/src/net_http_rt.rs");
-    assert!(
-        runtime.contains("runtime_host::runtime_stop_unwind(\"E3001\""),
-        "resident HTTP failures must enter the shared runtime report boundary"
-    );
-    assert!(
-        !runtime.contains("std::process::exit"),
-        "resident HTTP helpers must not terminate the host process"
-    );
 }
 
 fn assert_http_example_matches_all_tiers(name: &str) {

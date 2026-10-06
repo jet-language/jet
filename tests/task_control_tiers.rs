@@ -182,7 +182,7 @@ fn checked_task_bundle(name: &str) -> (jet::AST::ProgramBundle, std::path::PathB
 
 #[test]
 fn stream_drop_uses_task_cancel_cleanup_path() {
-    let (bundle, dir) = checked_task_bundle_for("stream", STREAM_SOURCE);
+    let (_, dir) = checked_task_bundle_for("stream", STREAM_SOURCE);
     let _ = fs::remove_dir_all(dir);
 
     let interpreted = run_forced_interpreter("stream", STREAM_SOURCE);
@@ -190,11 +190,11 @@ fn stream_drop_uses_task_cancel_cleanup_path() {
 
     let (code, stdout, stderr) =
         run_default_multi("stream_cancel", "main.jet", &[("main.jet", STREAM_SOURCE)]);
-    assert_eq!(code, 0, "default JIT: {stderr}");
+    assert_eq!(code, 0, "default run: {stderr}");
     assert_eq!(
         strip_tier_trace(&stdout),
         STREAM_EXPECTED,
-        "JIT drifted: {stderr}"
+        "default run drifted: {stderr}"
     );
 
     if have_rustc() {

@@ -4500,9 +4500,9 @@ fn format_length(bytes: u64) -> String {
 
 fn execution_json(machine: &TargetMachine) -> String {
     if machine.no_os {
-        "{\"aot\":true,\"dev\":false,\"jit\":false}".to_string()
+        "{\"aot\":true,\"dev\":false}".to_string()
     } else {
-        "{\"aot\":true,\"dev\":true,\"jit\":true}".to_string()
+        "{\"aot\":true,\"dev\":true}".to_string()
     }
 }
 

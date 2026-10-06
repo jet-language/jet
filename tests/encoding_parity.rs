@@ -385,8 +385,8 @@ fn configured_csv_options_match_aot_default_dev_and_interpreter_inner() {
     let expected = "1\n3\nada\nline1|line2\n1\ntrue\n";
     assert_eq!(aot.stdout, expected, "configured CSV AOT output drift");
     let dev = run_default_dev(path.to_str().unwrap());
-    assert_eq!(dev.1.exit, 0, "configured CSV default-dev failed: {}", dev.1.stderr);
-    assert_eq!(dev.1.stdout, aot.stdout, "configured CSV default-dev drift");
+    assert_eq!(dev.exit, 0, "configured CSV default-dev failed: {}", dev.stderr);
+    assert_eq!(dev.stdout, aot.stdout, "configured CSV default-dev drift");
     let interpreter = run_forced_interpreter(path.to_str().unwrap());
     assert_eq!(interpreter.exit, 0, "configured CSV interpreter failed: {}", interpreter.stderr);
     assert_eq!(interpreter.stdout, aot.stdout, "configured CSV interpreter drift");
