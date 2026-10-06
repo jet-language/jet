@@ -1,0 +1,169 @@
+// Canonical authority-gate read model (Authority.rs, D-AUTHORITY-GATE1).
+use jet_foundation.[Diagnostic, Span, PolicyKey, policy_key_name, policy_key_parse]
+
+pub enum GateKind {
+    Unsafe
+    Impure
+    DependencyGrant
+    BuildFlag
+    SessionFlag
+    TrustGrant
+    ForcePin
+    TaintScrub
+    DutyDrop
+    StateTransition
+    PrecisionDemotion
+    Nondeterministic
+    Structure
+    LintAllow
+}
+
+pub fn gate_kind_policy_key(kind: GateKind) -> PolicyKey Never! {
+    if kind == {
+        .Unsafe -> PolicyKey.Unsafe
+        .Impure -> PolicyKey.Impure
+        .DependencyGrant -> PolicyKey.DependencyGrant
+        .BuildFlag -> PolicyKey.BuildFlag
+        .SessionFlag -> PolicyKey.SessionFlag
+        .TrustGrant -> PolicyKey.TrustGrant
+        .ForcePin -> PolicyKey.ForcePin
+        .TaintScrub -> PolicyKey.TaintScrub
+        .DutyDrop -> PolicyKey.DutyDrop
+        .StateTransition -> PolicyKey.StateTransition
+        .PrecisionDemotion -> PolicyKey.PrecisionDemotion
+        .Nondeterministic -> PolicyKey.Nondeterministic
+        .Structure -> PolicyKey.Structure
+        .LintAllow -> PolicyKey.LintAllow
+    }
+}
+
+pub fn gate_kind_name(kind: GateKind) -> String Never! {
+    policy_key_name(gate_kind_policy_key(kind))
+}
+
+pub fn gate_kind_parse(value: String) -> GateKind? Never! {
+    if value.trim().to_ascii_lower() == {
+        "unsafe" | "unsafe_region" | "unsafe_fn" -> Val(GateKind.Unsafe)
+        "impure" -> Val(GateKind.Impure)
+        "dependency" | "dependency_grant" | "grant" -> Val(GateKind.DependencyGrant)
+        "build" | "build_flag" -> Val(GateKind.BuildFlag)
+        "session" | "session_flag" -> Val(GateKind.SessionFlag)
+        "trust" | "trust_grant" -> Val(GateKind.TrustGrant)
+        "force" | "force_pin" -> Val(GateKind.ForcePin)
+        "scrub" | "taint" | "taint_scrub" -> Val(GateKind.TaintScrub)
+        "drop" | "detach" | "duty" | "duty_drop" -> Val(GateKind.DutyDrop)
+        "state" | "transition" | "state_transition" -> Val(GateKind.StateTransition)
+        "approx" | "precision" | "precision_demotion" | "rounded" | "wrapping" | "saturating" | "checked" -> Val(GateKind.PrecisionDemotion)
+        "nondeterministic" | "determinism" -> Val(GateKind.Nondeterministic)
+        "structure" -> Val(GateKind.Structure)
+        "lint_allow" -> Val(GateKind.LintAllow)
+        else -> None
+    }
+}
+
+pub fn gate_kind_is_security(kind: GateKind) -> Bool Never! {
+    if kind == {
+        .Unsafe | .Impure | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .Nondeterministic -> true
+        else -> false
+    }
+}
+
+fn gate_kind_order(kind: GateKind) -> Int Never! {
+    if kind == {
+        .Unsafe -> 0
+        .Impure -> 1
+        .Nondeterministic -> 2
+        .DependencyGrant -> 3
+        .BuildFlag -> 4
+        .SessionFlag -> 5
+        .TrustGrant -> 6
+        .ForcePin -> 7
+        .TaintScrub -> 8
+        .DutyDrop -> 9
+        .StateTransition -> 10
+        .PrecisionDemotion -> 11
+        .Structure -> 12
+        .LintAllow -> 13
+    }
+}
+
+pub struct GateOperation {
+    pub kind: String
+    pub span: Span
+    pub required: [String]
+    pub asserted: [String]
+    pub discharged: Bool
+}
+
+pub struct GateEntry {
+    pub kind: GateKind
+    pub domain: String
+    pub scope: String
+    pub source: String
+    pub span: Span?
+    pub subject: String
+    pub reason: String?
+    pub status: String?
+    pub detail: String
+    pub provenance: [String]
+    pub operations: [GateOperation]
+}
+
+pub struct GateDiagnostic {
+    pub source: String
+    pub diagnostic: Diagnostic
+}
+
+pub struct GateLedger {
+    pub rows: [GateEntry]{[GateEntry]{}}
+    pub diagnostic_rows: [GateDiagnostic]{[GateDiagnostic]{}}
+}
+
+fn gate_same_fact(left: GateEntry, right: GateEntry) -> Bool Never! {
+    if left.kind != right.kind || left.domain != right.domain || left.scope != right.scope || left.subject != right.subject || left.detail != right.detail {
+        return false
+    }
+    if left.span == .None && right.span == .None -> return true
+    left.span != None && left.span == right.span && left.source == right.source
+}
+
+pub fn gate_ledger_push(ledger: &GateLedger, entry: ^GateEntry) Never! {
+    written := entry
+    if written.provenance.len() == 0 -> &written.provenance.push(written.source)
+    loop index in 0..<ledger.rows.len() {
+        if !gate_same_fact(ledger.rows[index], written) -> next
+        loop provenance in written.provenance {
+            if !ledger.rows[index].provenance.contains(provenance) {
+                &ledger.rows[index].provenance.push(provenance)
+            }
+        }
+        if ledger.rows[index].reason == .None -> ledger.rows[index].reason = written.reason
+        if ledger.rows[index].status == .None -> ledger.rows[index].status = written.status
+        &ledger.rows[index].provenance.sort()
+        return
+    }
+    &written.provenance.sort()
+    &ledger.rows.push(^written)
+}
+
+pub fn gate_ledger_sort(ledger: &GateLedger) Never! {
+    &ledger.rows.sort_by(
+    (left: GateEntry, right: GateEntry) -> {
+        order :: gate_kind_order(left.kind) <=> gate_kind_order(right.kind)
+        if order != 0 -> return order
+        source :: left.source <=> right.source
+        if source != 0 -> return source
+        if left.span == .None && right.span != None -> return 1
+        if left.span != None && right.span == .None -> return -1
+        if left.span == .Val(a) && right.span == .Val(b) {
+            span_order :: (a.start <=> b.start).then(a.end <=> b.end)
+            if span_order != 0 -> return span_order
+        }
+        (left.subject <=> right.subject).then(left.detail <=> right.detail)
+    },
+    )
+}
+
+pub fn gate_source_entry(kind: GateKind, domain: String, scope: String, source: String, span: Span, subject: String, reason: String?, detail: String, status: String) -> GateEntry Never! {
+    GateEntry{kind: kind, domain: domain, scope: scope, source: source, span: Val(span), subject: subject, reason: reason, status: Val(status), detail: detail, provenance: ["{source}:{span.start}..{span.end}"], operations: []}
+}
