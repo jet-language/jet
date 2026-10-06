@@ -3276,6 +3276,16 @@ pub(super) fn lower_expr(
                 };
                 lowered_args[0] = lower_builtin_native_int(ctx, lowered_args[0], &arg.ty)?;
             }
+            // ByteBuffer index/count operands (`get`, `seek`, `read_bytes`,
+            // `read_string`) cross the kernel as the native i64 word.
+            if let TBuiltinOp::ByteBufferMethod { method } = op {
+                if super::byte_buffer_native_int_operand(method) {
+                    let Some(arg) = args.first() else {
+                        return Err(ctx.error(ctx.span(), "checked builtin requires an index operand"));
+                    };
+                    lowered_args[0] = lower_builtin_native_int(ctx, lowered_args[0], &arg.ty)?;
+                }
+            }
             let route_receiver_ty = super::builtin_dispatch_ty(recv.ty.clone());
             let route = op
                 .prelude_route(&route_receiver_ty, &expr.ty, &carrier)
