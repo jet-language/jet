@@ -3673,6 +3673,7 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("data".to_string(), Type::List(Box::new(Type::Float))),
             ("device".to_string(), Type::String),
             ("numeric_profile".to_string(), Type::String),
+            ("requested".to_string(), Type::String),
         ]),
         // D-FAIL-ERROR1=A: constructor calls normalize to this private shape.
         name if name == Syntax::TYPE_ERR => Some(vec![

@@ -20107,6 +20107,7 @@ impl<'a> RustEmitter<'a> {
                     MirOperation::Binary { .. }
                     | MirOperation::Semantic(MirSemanticOp::ColumnarRead { .. })
                     | MirOperation::Semantic(MirSemanticOp::HandleMethod { .. })
+                    | MirOperation::Semantic(MirSemanticOp::BuiltinMethod { .. })
                     | MirOperation::Semantic(MirSemanticOp::NumericBinaryMethod { .. })
                     | MirOperation::LoopRangeInit { .. }
                     | MirOperation::LoopIterInit { .. } => {
@@ -29514,6 +29515,24 @@ impl<'a> RustEmitter<'a> {
                     args,
                     result,
                 );
+                // `remove(_, .Slot)` stops at the user's call site when the
+                // position is out of bounds, so its Prelude kernel takes the
+                // instruction's file and line after the checked operands.
+                let emitted = if self.prelude_row(*call).member == "list_remove_slot" {
+                    let location = location.unwrap_or_else(|| {
+                        panic!("MIR List slot removal is missing source location")
+                    });
+                    let call = emitted
+                        .strip_suffix(')')
+                        .unwrap_or_else(|| panic!("MIR Prelude call text has no argument list"));
+                    format!(
+                        "{call}, {:?}, {}u32)",
+                        self.source_file_path(location.file),
+                        location.line
+                    )
+                } else {
+                    emitted
+                };
                 let emitted = self.canonical_builtin_optional_result(*call, emitted);
                 // Generic constructors produce the checked element carrier.
                 // Let the destination pin T instead of mapping an unconstrained
@@ -31393,7 +31412,7 @@ impl<'a> RustEmitter<'a> {
         let index = self.value_owned(index);
         match kind {
             MirIndexKind::List | MirIndexKind::FixedListProof => format!(
-                "jet_list_remove_slot(&mut ({base}), {index}).unwrap_or_else(|_| jet_panic(\"<core.collections>\", 0, \"MIR owning list index move failed\"))"
+                "jet_list_remove_slot_kernel(&mut ({base}), {index}).unwrap_or_else(|_| jet_panic(\"<core.collections>\", 0, \"MIR owning list index move failed\"))"
             ),
             MirIndexKind::Map => format!(
                 "jet_map_pop_kernel(&mut ({base}), &({index})).unwrap_or_else(|_| jet_panic(\"<core.collections>\", 0, \"MIR owning map index move failed\"))"
