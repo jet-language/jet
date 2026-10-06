@@ -2460,13 +2460,7 @@ fn jet_rust_emit_partial_restore(ctx: &JetRustEmitContext, function: MIRFunction
             }
         }
     }
-    value := ""
-    if jet_rust_emit_partial_type_is_tuple(&ctx, owner) {
-        instance :: jet_rust_emit_type_instance(ctx, owner, true) ?? panic("checked tuple partial storage has no type instance")
-        if instance.kind == .Tuple(declared) -> value = jet_rust_emit_tuple_expression(declared, values) else -> panic("checked tuple partial storage has a non-tuple type")
-    } else {
-        value = "{jet_rust_emit_type_name(&ctx, owner)} {{ {jet_rust_emit_record_phantom_initializer(&ctx, owner)}{values.join(", ")} }}"
-    }
+    value := if jet_rust_emit_partial_type_is_tuple(&ctx, owner) -> "({values.join(", ")},)" else -> "{jet_rust_emit_type_name(&ctx, owner)} {{ {jet_rust_emit_record_phantom_initializer(&ctx, owner)}{values.join(", ")} }}"
     if boxed -> value = "Box::new({value})"
     "{out}{node} = Some({value}); }} "
 }

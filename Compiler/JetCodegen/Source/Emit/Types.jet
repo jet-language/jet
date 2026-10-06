@@ -30,7 +30,6 @@ use jet_foundation.[
     MIRTraitDef,
     MIRTraitID,
     MIRTraitRef,
-    MIRTupleField,
     MIRType,
     MIRTypeDef,
     MIRTypeID,
@@ -348,7 +347,11 @@ fn jet_rust_emit_type(ctx: &JetRustEmitContext, source: MIRType) -> String Never
         }
         .Tuple(fields) -> {
             names :: loop field in fields -> jet_rust_emit_type(&ctx, field.ty)
-            if names.len() == 0 -> "()" else -> "{jet_rust_emit_tuple_carrier_name(fields)}<{names.join(", ")}>"
+            if names.len() == {
+                0 -> "()"
+                1 -> "({names[0]},)"
+                else -> "({names.join(", ")})"
+            }
         }
         .FixedList(elem, len) -> "[{jet_rust_emit_type(&ctx, elem)}; {mir_measure_expression(len)}]"
         .IntN(signed, bits) -> "{if signed -> "i" else -> "u"}{bits}"
@@ -1199,7 +1202,11 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
         // Comparable over a Map).
         .Map(key, value) -> trait_name != "Ord" && jet_rust_emit_type_derive_capability(&ctx, key, trait_name, &visiting, bindings, generic_params) && jet_rust_emit_type_derive_capability(&ctx, value, trait_name, &visiting, bindings, generic_params)
         .Result(ok, err) -> jet_rust_emit_type_derive_capability(&ctx, ok, trait_name, &visiting, bindings, generic_params) && jet_rust_emit_type_derive_capability(&ctx, err, trait_name, &visiting, bindings, generic_params)
+        // The runtime has no structural `JetShow`/`JetDebug` for tuples or
+        // the synthetic `__JetUnion_*` carriers (no auto-Printable fact, no
+        // derives), so a record holding one does not print structurally.
         .Tuple(fields) -> {
+            if trait_name == "JetShow" || trait_name == "JetDebug" -> return false
             loop field in fields { if !jet_rust_emit_type_derive_capability(&ctx, field.ty, trait_name, &visiting, bindings, generic_params) -> return false }
             true
         }
@@ -1365,48 +1372,6 @@ fn jet_rust_emit_type_derive_user_impl(ctx: &JetRustEmitContext, definition: MIR
     kind :: MIRTypeKind.Apply{name: MIRNominalRef{id: definition.id, name: definition.key}, args: [MIRType]{}}
     declared :: MIRType{kind: kind, identity: Val(definition.id), layout: mir_type_layout(kind)}
     jet_rust_emit_selected_user_capability_impl(&ctx, declared, trait_name)
-}
-
-// Labels alone identify a tuple carrier so generic instantiation preserves
-// the caller's checked shape. Numeric fields keep MIR projection indexes.
-fn jet_rust_emit_tuple_carrier_name(fields: [MIRTupleField]) -> String Never! {
-    labels :: loop field in fields -> field.name
-    jet_rust_emit_generated_path("__jet_tuple::{labels.join("::")}")
-}
-
-fn jet_rust_emit_tuple_expression(fields: [MIRTupleField], values: [String]) -> String Never! {
-    if fields.len() == 0 -> "()" else -> "{jet_rust_emit_tuple_carrier_name(fields)}({values.join(", ")})"
-}
-
-fn jet_rust_emit_tuple_carriers(ctx: &JetRustEmitContext, lines: &[String]) Never! {
-    emitted := [String:Bool]{}
-    loop instance in ctx.program.type_instances {
-        if instance.kind == .Tuple(fields) {
-            if fields.len() == 0 -> next
-            name :: jet_rust_emit_tuple_carrier_name(fields)
-            if emitted.get(name) != None -> next
-            emitted[name] = true
-            params :: loop (index, _) in fields -> "T{index}"
-            stored :: loop (index, _) in fields -> "pub T{index}"
-            &lines.push("#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]")
-            &lines.push("struct {name}<{params.join(", ")}>({stored.join(", ")});")
-            labels :: loop field in fields -> field.name
-            source :: jet_rust_emit_quote("({labels.join(",")})")
-            loop protocol in [String]{"JetShow", "JetDebug"} {
-                method :: if protocol == "JetShow" -> "jet_show" else -> "jet_debug"
-                bounds :: loop (index, _) in fields -> "T{index}: {protocol}"
-                values :: loop (index, field) in fields -> "({jet_rust_emit_quote(field.name)}.to_string(), self.{index}.{method}())"
-                &lines.push("impl<{bounds.join(", ")}> {protocol} for {name}<{params.join(", ")}> {{")
-                &lines.push("    fn {method}(&self) -> String {{ jet_foundation::StructuralDebug::jet_debug_record({source}, [{values.join(", ")}]) }}")
-                &lines.push("}}")
-            }
-            bounds :: loop (index, _) in fields -> "T{index}: JetShow"
-            &lines.push("impl<{bounds.join(", ")}> JetDisplay for {name}<{params.join(", ")}> {{")
-            &lines.push("    fn jet_display(&self) -> String {{ self.jet_show() }}")
-            &lines.push("}}")
-            &lines.push("")
-        }
-    }
 }
 
 fn jet_rust_emit_generic_params(ctx: &JetRustEmitContext, params: [MIRGenericParam]) -> String Never! {
@@ -2346,11 +2311,9 @@ fn jet_rust_emit_const_key(ctx: &JetRustEmitContext, key: MIRConstKey) -> String
         .Bool(value) -> if value -> "true" else -> "false"
         .Char(value) -> jet_rust_emit_char_literal(value)
         .Tuple(fields) -> {
-            if fields.len() == 0 -> return "()"
-            labels :: loop field in fields -> field.name
-            name :: jet_rust_emit_generated_path("__jet_tuple::{labels.join("::")}")
-            values :: loop field in fields -> jet_rust_emit_const_key(&ctx, field.key)
-            "{name}({values.join(", ")})"
+            values := [String]{}
+            loop field in fields -> &values.push(jet_rust_emit_const_key(&ctx, field.key))
+            "({values.join(", ")})"
         }
         .Struct(type_name, fields) -> {
             native :: jet_rust_emit_has_native_type_projection(type_name)
