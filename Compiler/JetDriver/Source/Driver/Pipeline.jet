@@ -144,6 +144,7 @@ use jet_sema.[
     SemaSourceOrigin,
     SemaSourceSegment,
     sema_check_comptime_function,
+    check_pure_program_root,
     sema_check_comptime_item,
     sema_collect_comptime_declarations,
     sema_checked_shape_defaults,
@@ -3127,6 +3128,11 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         jet_driver_keep_going_row(&kg, "comptime.validate", "-", "ICE", "staged method closure lost its checked function or registered owner", "-")
     }
     if request.mode == JetDriverCompileMode.Doc -> load.doc_modules = jet_driver_doc_modules(request, load, checked_graph, resolved_registration, comptime_values, canonical_effect_module_identity)
+    if request.mode == JetDriverCompileMode.Eval {
+        selected_name :: request.evaluation_entry ?? "run"
+        key :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", selected_name).key
+        loop diagnostic in check_pure_program_root(key, checked_graph.modules) -> &load.diagnostics.push(diagnostic)
+    }
 
     // Every checked function moves out of its graph module into one list, so
     // the checked TIR is resident once from here on: the rows return to their
