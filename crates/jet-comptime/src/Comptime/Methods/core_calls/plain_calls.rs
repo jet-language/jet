@@ -562,15 +562,21 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
             };
             Ok(exact_int_value(value))
         }
+        // D-EXPNEG1=A: a negative exponent has no whole-number result and
+        // stops exactly as `base ^ exponent` does, never a silent 0.
         ("core.math", "int_pow") => {
             let base = exact_big(one(0)?)
                 .ok_or_else(|| unsupported("integer power needs whole numbers", span))?;
             let exponent = exact_big(one(1)?)
                 .ok_or_else(|| unsupported("integer power needs whole numbers", span))?;
-            Ok(exact_int_value(
-                base.pow(&exponent)
-                    .unwrap_or_else(|| crate::Numeric::CtBigInt::from_int(0)),
-            ))
+            // `pow` has no result exactly when the exponent is negative.
+            let Some(value) = base.pow(&exponent) else {
+                return Err(crate::Comptime::comptime_panic(
+                    crate::Comptime::MathLayout::INTEGER_POWER_NEGATIVE,
+                    span,
+                ));
+            };
+            Ok(exact_int_value(value))
         }
         ("core.math", method @ ("gcd" | "lcm")) => {
             let left = exact_big(one(0)?)

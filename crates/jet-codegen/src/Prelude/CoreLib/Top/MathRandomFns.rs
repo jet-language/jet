@@ -81,9 +81,10 @@ fn jet_std_math_checked_pow(base: i64, exp: i64) -> Option<i64> {
     }
     base.checked_pow(exp as u32)
 }
+// D-EXPNEG1=A: a negative exponent stops with the shared arithmetic report.
 fn jet_std_math_int_pow(base: i64, exp: i64) -> i64 {
     if exp < 0 {
-        return 0;
+        jet_fixed_error_stop(JetFixedArithmeticError::PowerNegative, "<core.math>", 0);
     }
     base.saturating_pow(exp as u32)
 }

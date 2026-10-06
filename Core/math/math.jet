@@ -234,20 +234,9 @@ pub fn checked_pow(base: Int, exponent: Int) -> Int? Never! {
     Val(result)
 }
 
-pub fn int_pow(base: Int, exponent: Int) -> Int Never! {
-    if exponent < 0 -> return 0
-    result := 1
-    factor := base
-    power := exponent
-    loop power > 0 {
-        if (power & 1) != 0 {
-            result = result * factor
-        }
-        power = power /% 2
-        if power > 0 -> factor = factor * factor
-    }
-    result
-}
+// D-EXPNEG1=A: the same exact power as `base ^ exponent`; a negative exponent
+// stops with the shared arithmetic report instead of returning 0.
+pub fn int_pow(base: Int, exponent: Int) -> Int Never! { base ^ exponent }
 
 pub fn saturating_add(a: Int, b: Int) -> Int Never! { a + b }
 

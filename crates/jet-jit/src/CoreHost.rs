@@ -1785,9 +1785,11 @@ fn jet_jit_math_checked_add(a: i64, b: i64) -> i64 {
 fn jet_jit_math_saturating_add(a: i64, b: i64) -> i64 {
     a.saturating_add(b)
 }
-/// Mirrors `jet_std_math_int_pow`.
+/// Mirrors `jet_std_math_int_pow` (D-EXPNEG1=A: a negative exponent stops).
 fn jet_jit_math_int_pow(base: i64, exp: i64) -> i64 {
     if exp < 0 {
+        let message = contract_kernel::jet_arithmetic_message("pow_negative");
+        Concurrency::with_runtime_mut(|rt| rt.set_arithmetic_stop(0, message));
         return 0;
     }
     base.saturating_pow(exp as u32)
