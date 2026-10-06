@@ -865,6 +865,90 @@ impl<'a> Checker<'a> {
         Some(result)
     }
 
+    /// Respell `found`'s nominal heads with the parameter's spelling wherever
+    /// both name the same declaration. One nominal reaches a call under more
+    /// than one spelling: a Core leaf written through its module alias stays
+    /// the bare leaf (`DataArrowBatch`), while a value returned by an earlier
+    /// imported call carries the canonical owner path
+    /// (`<corelib>/Core/data::…::DataArrowBatch`). Assignment already compares
+    /// them by declared identity; generic inference must use that same
+    /// identity, or `T` in `DataArrowBatch<T>` never binds.
+    fn align_nominal_spelling(
+        &self,
+        expected: &Type,
+        found: &Type,
+        type_params: &HashSet<String>,
+    ) -> Type {
+        match (expected, found) {
+            (Type::Named(param), _) if type_params.contains(param) => found.clone(),
+            (Type::Named(want), Type::Named(got))
+                if want != got && self.same_declared_name_identity(want, got) =>
+            {
+                expected.clone()
+            }
+            (
+                Type::Apply {
+                    name: want,
+                    args: want_args,
+                },
+                Type::Apply {
+                    name: got,
+                    args: got_args,
+                },
+            ) if want_args.len() == got_args.len()
+                && self.same_declared_name_identity(want, got) =>
+            {
+                Type::Apply {
+                    name: want.clone(),
+                    args: want_args
+                        .iter()
+                        .zip(got_args)
+                        .map(|(want, got)| self.align_nominal_spelling(want, got, type_params))
+                        .collect(),
+                }
+            }
+            (Type::List(want), Type::List(got)) => {
+                Type::List(Box::new(self.align_nominal_spelling(want, got, type_params)))
+            }
+            (Type::Option(want), Type::Option(got)) => {
+                Type::Option(Box::new(self.align_nominal_spelling(want, got, type_params)))
+            }
+            (Type::Shared(want), Type::Shared(got)) => {
+                Type::Shared(Box::new(self.align_nominal_spelling(want, got, type_params)))
+            }
+            (
+                Type::Result {
+                    ok: want_ok,
+                    err: want_err,
+                },
+                Type::Result {
+                    ok: got_ok,
+                    err: got_err,
+                },
+            ) => Type::Result {
+                ok: Box::new(self.align_nominal_spelling(want_ok, got_ok, type_params)),
+                err: Box::new(self.align_nominal_spelling(want_err, got_err, type_params)),
+            },
+            (
+                Type::Map {
+                    key: want_key,
+                    value: want_value,
+                    ..
+                },
+                Type::Map {
+                    key: got_key,
+                    key_span,
+                    value: got_value,
+                },
+            ) => Type::Map {
+                key: Box::new(self.align_nominal_spelling(want_key, got_key, type_params)),
+                key_span: *key_span,
+                value: Box::new(self.align_nominal_spelling(want_value, got_value, type_params)),
+            },
+            _ => found.clone(),
+        }
+    }
+
     /// Infer a generic call's type arguments from its arguments. Local,
     /// file-module, inline-module and source-owned Core calls share this one
     /// rule, so a callback argument binds the same parameters on every route:
@@ -906,9 +990,11 @@ impl<'a> Checker<'a> {
                             continue;
                         };
                         if !matches!(earlier_ty, Type::Fn { .. }) {
+                            let found =
+                                self.align_nominal_spelling(earlier_ty, found, &prepass_type_params);
                             seed_generic_type(
                                 earlier_ty,
-                                found,
+                                &found,
                                 &format!("argument {}", earlier + 1),
                                 &prepass_type_params,
                                 &mut subst,
@@ -982,6 +1068,18 @@ impl<'a> Checker<'a> {
         if arg_types.len() != args.len() {
             return inference;
         }
+        // Generic inference matches nominal heads by declared identity, the
+        // same judgment the per-argument assignment check makes below.
+        let arg_types: Vec<Type> = arg_types
+            .iter()
+            .enumerate()
+            .map(|(index, arg_ty)| match sig.params.get(index) {
+                Some((_, param_ty)) => {
+                    self.align_nominal_spelling(param_ty, arg_ty, &prepass_type_params)
+                }
+                None => arg_ty.clone(),
+            })
+            .collect();
         let mut inferred_subst = HashMap::new();
         let mut origins = HashMap::new();
         let mut conflict = None;
