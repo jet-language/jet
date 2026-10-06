@@ -641,15 +641,31 @@ fn jet_cli_doc_collect_trait_contracts(index: JetCLIDocIndex, items: [Item], own
     }
 }
 
+// The callable (or, with `nominal`, the distinct nominal) definition that
+// documents `item`.
+fn jet_cli_doc_definition_for(index: JetCLIDocIndex, item: JetCLIDocItem, nominal: Bool) -> JetCLIDocDefinition? Never! {
+    loop definition in index.definitions {
+        if definition.name != item.name || !jet_cli_doc_belongs(definition, item) -> next
+        if nominal && definition.nominal -> return Val(~definition)
+        if !nominal && definition.contract != None -> return Val(~definition)
+    }
+    None
+}
+
+// The checked module whose stable path is `path`.
+pub fn jet_cli_doc_module_at(modules: [JetDriverDocModule], path: String) -> JetDriverDocModule? Never! {
+    loop candidate in modules {
+        if jet_cli_doc_stable_path(candidate.path) == path -> return Val(~candidate)
+    }
+    None
+}
+
 // Docs.rs `enrich_callable_contracts` and `enrich_type_contracts`.
 fn jet_cli_doc_enrich(items: &[JetCLIDocItem], index: JetCLIDocIndex, modules: [JetDriverDocModule]) Never! {
     loop item_index in 0..<items.len() {
         item :: ~items[item_index]
         if item.kind == "function" {
-            found_definition :: loop definition in index.definitions {
-                if definition.contract != None && definition.name == item.name && jet_cli_doc_belongs(definition, item) -> break definition
-            }
-            found :: found_definition ?? next
+            found :: jet_cli_doc_definition_for(index, item, false) ?? next
             contract :: found.contract ?? next
             failure :: type_name(failure_contract_effective_type(contract))
             source :: failure_contract_source(contract)
@@ -657,14 +673,8 @@ fn jet_cli_doc_enrich(items: &[JetCLIDocItem], index: JetCLIDocIndex, modules: [
             items[item_index].failure_source = Val(source)
             items[item_index].signature = "{item.signature}\nfailure: {failure} ({source})"
         } else if item.kind == "distinct" {
-            found_definition :: loop definition in index.definitions {
-                if definition.nominal && definition.name == item.name && jet_cli_doc_belongs(definition, item) -> break definition
-            }
-            found :: found_definition ?? next
-            found_module :: loop candidate in modules {
-                if jet_cli_doc_stable_path(candidate.path) == found.module_path -> break candidate
-            }
-            doc_module :: found_module ?? next
+            found :: jet_cli_doc_definition_for(index, item, true) ?? next
+            doc_module :: jet_cli_doc_module_at(modules, found.module_path) ?? next
             contracts := [String]{}
             jet_cli_doc_collect_trait_contracts(index, doc_module.items, found.name, &contracts)
             signature := item.signature

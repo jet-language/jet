@@ -35,6 +35,7 @@ use jet_foundation.[
 use jet_sema.[
     SemaCallSiteFact,
     SemaNameReferenceFact,
+    SemaComptimeItemValue,
     SemaRegistrationImportEdge,
     SemaSourceOrigin,
     SemaSourceSegment,
@@ -90,10 +91,15 @@ pub enum JetDriverCompileTarget {
 // with none, and the artifact is a TestExecutable whose harness runs them.
 // `Doc` compiles as `Program` does and also keeps each user module's checked
 // declarations (`JetDriverDocModule`) for `jet doc`.
+// `Comptime` checks the program and runs its build-time values through the
+// canonical comptime stage (checked, lowered to MIR, evaluated by JetEval),
+// then stops: nothing is lowered or emitted for run time. Config surfaces
+// (Jetpack EnvModel) evaluate their typed values this way.
 pub enum JetDriverCompileMode {
     Program
     Test
     Doc
+    Comptime
 }
 
 // One user module of the checked bundle as `jet doc` and the semantic index
@@ -331,6 +337,9 @@ pub struct JetDriverCompileResult {
     pub authority_policy: JetDriverAuthorityPolicy?{None}
     // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
     pub doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
+    // `JetDriverCompileMode.Comptime`: every build-time value the comptime
+    // stage produced, constants included. Empty in the other modes.
+    pub comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}}
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read

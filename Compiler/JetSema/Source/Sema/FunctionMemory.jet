@@ -21,6 +21,9 @@ use jet_foundation.[
     TGCPromotionEdge,
     Type,
     TypedLitBody,
+    policy_scope_name,
+    policy_scope_rank,
+    policy_value_display,
 ]
 
 pub struct SemaFunctionMemoryModuleInput {
@@ -100,45 +103,6 @@ fn sema_function_memory_key(module_identity: String, owner: String, span: Span) 
     "{span.start}:{span.end}:{owner}:{module_identity}"
 }
 
-fn sema_function_memory_policy_scope_rank(scope: PolicyScope) -> Int Never! {
-    if scope == {
-        .Organization -> 0
-        .Package -> 1
-        .Module -> 2
-        .Function -> 3
-        .Block -> 4
-    }
-}
-
-fn sema_function_memory_policy_scope_name(scope: PolicyScope) -> String Never! {
-    if scope == {
-        .Organization -> "organization"
-        .Package -> "package"
-        .Module -> "module"
-        .Function -> "function"
-        .Block -> "block"
-    }
-}
-
-fn sema_function_memory_policy_value_display(value: PolicyValue) -> String Never! {
-    if value == {
-        .Enabled -> "true"
-        .Limit(limit) -> "{limit}"
-        .Forbid -> ".Forbid"
-        .Default -> ".Default"
-        .GateOnly -> ".GateOnly"
-        .Obligations -> ".Obligations"
-        .Relaxed -> ".Relaxed"
-        .PerSite -> ".PerSite"
-        .Track -> ".Track"
-        .Skip -> ".Skip"
-        .Allow -> ".Allow"
-        .On -> ".On"
-        .Off -> ".Off"
-        .Explicit -> ".Explicit"
-    }
-}
-
 fn sema_function_memory_policy_declaration_equal(left: PolicyDeclaration, right: PolicyDeclaration) -> Bool Never! {
     left.key == right.key && left.value == right.value && left.scope == right.scope && left.span.start == right.span.start && left.span.end == right.span.end && left.target == right.target && left.source == right.source
 }
@@ -176,12 +140,12 @@ fn sema_function_memory_policy_error(diagnostics: &[Diagnostic], span: Span) {
 }
 
 fn sema_function_memory_policy_explanation(value: PolicyValue, provenance: [PolicyDeclaration]) -> String Never! {
-    explanation := "gc = {sema_function_memory_policy_value_display(value)}"
+    explanation := "gc = {policy_value_display(value)}"
     index := 0
     loop declaration in provenance {
         status := "shadowed"
         if index + 1 == provenance.len() -> status = "effective"
-        explanation = "{explanation}\n  [{status}] {sema_function_memory_policy_scope_name(declaration.scope)} {sema_function_memory_policy_value_display(declaration.value)} at {declaration.source}:{declaration.span.start}..{declaration.span.end}"
+        explanation = "{explanation}\n  [{status}] {policy_scope_name(declaration.scope)} {policy_value_display(declaration.value)} at {declaration.source}:{declaration.span.start}..{declaration.span.end}"
         index += 1
     }
     explanation
@@ -198,7 +162,7 @@ fn sema_function_memory_resolve_policy(declarations: [PolicyDeclaration], diagno
     effective := PolicyValue?{None}
     provenance := [PolicyDeclaration]{}
     loop declaration in ordered {
-        if sema_function_memory_policy_scope_rank(declaration.scope) == 0 {
+        if policy_scope_rank(declaration.scope) == 0 {
             sema_function_memory_policy_error(&diagnostics, declaration.span)
             complete = false
             return None
@@ -568,7 +532,7 @@ fn sema_function_memory_annotate_scope(stmts: &[Stmt], chain: [PolicyDeclaration
                     sema_function_memory_sort_and_deduplicate_edges(&filtered_edges)
                     updated_binding.gc_promotion = Val(GCPromotion{
                         span: updated_binding.name_span,
-                        scope: sema_function_memory_policy_scope_name(scope),
+                        scope: policy_scope_name(scope),
                         policy_provenance: policy.explanation,
                         reason: "returned heap graph requires identity beyond its lexical owner",
                         edges: filtered_edges,

@@ -190,6 +190,9 @@ pub struct EvaluatedModule {
     pub entries: [ModuleEntry]
     // U11: ordered system contributions for the shared JetOS engine.
     pub systems: [SystemPlan]{[SystemPlan]{}}
+    // U15: `fleet.<name>:` and `vmtest.<name>:` host captures.
+    pub fleets: [FleetPlan]{[FleetPlan]{}}
+    pub vmtests: [FleetPlan]{[FleetPlan]{}}
     // U14: `image.<name>:` contributions.
     pub images: [ImagePlan]
     // Environment-scoped facts. Source evaluation selects one name before
@@ -201,6 +204,19 @@ pub struct EvaluatedModule {
     // D-JPK-PROFILE1=D: source-backed package generation declarations. These
     // are not environment presets and never affect shell selection.
     pub package_profiles: [PackageProfileSpec]
+}
+
+// U15: one captured host of a fleet or vmtest and the system it runs.
+pub struct HostPlan {
+    pub name: String
+    pub system: String
+}
+
+// U15: a `fleet.<name>:` (or `vmtest.<name>:`) capture; frozen jetos
+// research whose hosts are still cross-checked against the known systems.
+pub struct FleetPlan {
+    pub name: String
+    pub hosts: [HostPlan]
 }
 
 // U20: an ad-hoc adapter package declared with `Pkg.adapt(...)`.

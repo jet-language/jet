@@ -193,48 +193,31 @@ fn jet_cli_memory_available() -[FS]> Int? Never! {
     None
 }
 
-// Build the request for `file` (the entry as the user named it) and run the
-// Jet compiler on it in `mode` with at most `threads` compiler threads
-// (`--threads N`; `None` admits threads automatically).
-// `jet_driver_compile` declares no effect row or failure (its Eval host
-// adapter makes dynamic calls with no effect bound), so this function and the
-// host verbs above it stay unannotated, like the bootstrap entry
-// (Compiler/Bootstrap/Host/Entry.jet).
-pub fn jet_cli_compile_file(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
-    entry_path :: cli_files.realpath(file) ?? return jet_cli_refused("can't securely read the file `{file}`", "check the spelling, or run jet from the folder that contains it", color)
-    root :: jet_cli_source_root(entry_path)
-    root_stat :: cli_files.stat(root) ?? return jet_cli_refused("can't securely read the source root `{root}`", "check that the directory exists and is readable", color)
-    files := [JetDriverAuthorizedSourceFile]{}
-    if jet_cli_walk_sources(root, "", 0, &files) == .Val(problem) {
-        return jet_cli_refused("can't securely read the sources under `{root}`: {problem}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
-    }
-    entry_found := false
-    loop source_file in files {
-        if source_file.path == entry_path -> entry_found = true
-    }
-    if !entry_found {
-        return jet_cli_refused("`{file}` is not a checked source file of `{root}`", "check a `.jet` file that is not inside a skipped or nested project directory", color)
-    }
-    caches := [JetDriverAuthorizedSourceFile]{}
-    if jet_cli_foreign_cache_files(root, &caches) == .Val(problem) {
-        return jet_cli_refused("can't securely read the foreign bindings under `{root}`: {problem}", "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color)
-    }
-    toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return jet_cli_refused("`{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, so the Core library sources can't be found", "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`", color)
+// The Core library rows with their bodies, read from the toolchain tree that
+// `JET_TOOLCHAIN_ROOT` names, or the refusal that stops the request.
+pub enum JetCLICoreSources {
+    Loaded(sources: [JetDriverCoreSource])
+    Missing(what: String, fix: String)
+}
+
+pub fn jet_cli_core_sources() -> JetCLICoreSources Never! {
+    toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return JetCLICoreSources.Missing{what: "`{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, so the Core library sources can't be found", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
     core_sources := [JetDriverCoreSource]{}
     loop row in JET_CLI_CORE_SOURCE_ROWS {
         core_path :: jet_cli_authority_path(toolchain, row.path)
-        body :: cli_files.read(core_path) ?? return jet_cli_refused("can't read the Core library source `{core_path}`", "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`", color)
+        body :: cli_files.read(core_path) ?? return JetCLICoreSources.Missing{what: "can't read the Core library source `{core_path}`", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
         &core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, source: body})
     }
-    root_identity :: jet_cli_identity_key("directory", root_stat)
-    snapshot :: JetDriverAuthorizedSourceSnapshot{
-        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root, identity: root_identity, allow_hardlinks: false, files: files, foreign_cache_files: caches}},
-        entry_root_identity: root_identity,
-        entry_path: entry_path,
-    }
+    JetCLICoreSources.Loaded{sources: core_sources}
+}
+
+// The driver request for `snapshot` on this host: the Core rows, the
+// canonical effect source, the host facts, and at most `threads` compiler
+// threads (`None` admits threads automatically).
+pub fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sources: [JetDriverCoreSource], threads: Int?, mode: JetDriverCompileMode) -> JetDriverCompileRequest Never! {
     os :: cli_sys.name()
-    request := JetDriverCompileRequest{
-        authorized_sources: ~snapshot,
+    JetDriverCompileRequest{
+        authorized_sources: snapshot,
         canonical_effect_source: JET_CLI_EFFECT_SOURCE,
         core_sources: core_sources,
         host_facts: JetDriverHostFacts{target_triple: Val(jet_cli_host_triple(cli_sys.arch(), os)), active_os: Val(os), compiler_identity: None},
@@ -246,5 +229,53 @@ pub fn jet_cli_compile_file(file: String, color: Bool, threads: Int?, mode: JetD
         compiler_threads: CompilerThreads{cap: threads, cores: cli_sys.cpu_count(), memory_available: jet_cli_memory_available()},
         mode: mode,
     }
+}
+
+// Build the request for `file` (the entry as the user named it) and run the
+// Jet compiler on it in `mode` with at most `threads` compiler threads
+// (`--threads N`; `None` admits threads automatically).
+// `jet_driver_compile` declares no effect row or failure (its Eval host
+// adapter makes dynamic calls with no effect bound), so this function and the
+// host verbs above it stay unannotated, like the bootstrap entry
+// (Compiler/Bootstrap/Host/Entry.jet).
+pub fn jet_cli_compile_file(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
+    jet_cli_compile_entry(file, color, threads, mode, None)
+}
+
+// `jet_cli_compile_file` with the entry file's bytes replaced by
+// `entry_source` when given (`jet fmt --explicit-copies` asks sema about a
+// policy-marked copy of the entry; nothing is written).
+pub fn jet_cli_compile_entry(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?) -> JetCLICompiled {
+    entry_path :: cli_files.realpath(file) ?? return jet_cli_refused("can't securely read the file `{file}`", "check the spelling, or run jet from the folder that contains it", color)
+    root :: jet_cli_source_root(entry_path)
+    root_stat :: cli_files.stat(root) ?? return jet_cli_refused("can't securely read the source root `{root}`", "check that the directory exists and is readable", color)
+    files := [JetDriverAuthorizedSourceFile]{}
+    if jet_cli_walk_sources(root, "", 0, &files) == .Val(problem) {
+        return jet_cli_refused("can't securely read the sources under `{root}`: {problem}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+    }
+    entry_found := false
+    loop index in 0..<files.len() {
+        if files[index].path != entry_path -> next
+        entry_found = true
+        if entry_source == .Val(replacement) -> files[index].source = replacement
+    }
+    if !entry_found {
+        return jet_cli_refused("`{file}` is not a checked source file of `{root}`", "check a `.jet` file that is not inside a skipped or nested project directory", color)
+    }
+    caches := [JetDriverAuthorizedSourceFile]{}
+    if jet_cli_foreign_cache_files(root, &caches) == .Val(problem) {
+        return jet_cli_refused("can't securely read the foreign bindings under `{root}`: {problem}", "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color)
+    }
+    core_sources :: if jet_cli_core_sources() == {
+        .Loaded(sources) -> sources
+        .Missing(what, fix) -> { return jet_cli_refused(what, fix, color) }
+    }
+    root_identity :: jet_cli_identity_key("directory", root_stat)
+    snapshot :: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root, identity: root_identity, allow_hardlinks: false, files: files, foreign_cache_files: caches}},
+        entry_root_identity: root_identity,
+        entry_path: entry_path,
+    }
+    request := jet_cli_driver_request(snapshot, core_sources, threads, mode)
     JetCLICompiled.Compiled{result: jet_driver_compile(^request), snapshot: snapshot}
 }

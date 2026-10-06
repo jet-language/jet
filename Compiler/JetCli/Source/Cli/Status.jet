@@ -2,9 +2,6 @@
 // (crates/jet-foundation/src/Report.rs `StatusValue`, `StatusFields`,
 // `StatusEnvelope::json`, `render_status`, `report_json_string`). Producers
 // build typed values; only this file turns them into JSON bytes.
-use jet_foundation.[
-    diagnostic_from_registry,
-]
 
 pub JET_CLI_STATUS_SCHEMA :: "jet.status/v1"
 
@@ -139,10 +136,4 @@ pub fn jet_cli_status_render_with_reports(action: String, ok: Bool, reports: [St
     rendered :: jet_cli_status_fields_json(fields)
     if rendered.len() > 0 -> out = "{out},{rendered}"
     "{out}}}"
-}
-
-// The `--json` form of a spanless CLI error (Source/main.rs `cli_error!` in
-// machine mode): one failed `cli` status line on stdout.
-pub fn jet_cli_fail_json(code: String, what: String, why: String, fix: String) -> String Never! {
-    jet_cli_report_status_json(diagnostic_from_registry(code, None, what, why, fix))
 }

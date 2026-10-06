@@ -309,8 +309,8 @@ fn jet_cli_rights_span_value(source: String, start: Int, end: Int) -> JetCLIStat
 fn jet_cli_rights_selected(doc_module: JetDriverDocModule, target: String) -[FS]> Bool Never! {
     if doc_module.path == target -> return true
     selected :: cli_files.realpath(target) ?? return false
-    found :: cli_files.realpath(doc_module.path) ?? ""
-    if found != "" && found == selected -> return true
+    module_real :: cli_files.realpath(doc_module.path) ?? ""
+    if module_real == selected -> return true
     base :: jet_cli_parent(target) ?? return false
     candidate :: cli_files.realpath(jet_cli_entry_join(base, doc_module.path)) ?? return false
     candidate == selected

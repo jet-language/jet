@@ -2001,7 +2001,7 @@ pub fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: 
     loop doc_module in modules -> module_paths[doc_module.module_name] = doc_module.path
     summaries :: jet_cli_sem_summaries(modules)
     loop doc_module in modules {
-        block_spans := doc_module.block_spans
+        block_spans := ~doc_module.block_spans
         loop index in 1..<block_spans.len() {
             value :: ~block_spans[index]
             position := index
@@ -2050,7 +2050,7 @@ pub fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: 
     derivations :: loop fact in definition_facts -> derivation_record(fact.stable_id, fact.human_identity, "jet-sema", MIRDerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
     arithmetic := db.arithmetic
     loop index in 1..<arithmetic.len() {
-        value :: arithmetic[index]
+        value :: ~arithmetic[index]
         position := index
         loop position > 0 && (arithmetic[position - 1].module_path > value.module_path || (arithmetic[position - 1].module_path == value.module_path && (arithmetic[position - 1].operation_span.start > value.operation_span.start || (arithmetic[position - 1].operation_span.start == value.operation_span.start && arithmetic[position - 1].operation_span.end > value.operation_span.end)))) {
             arithmetic[position] = arithmetic[position - 1]

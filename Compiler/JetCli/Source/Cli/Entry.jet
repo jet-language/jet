@@ -31,7 +31,6 @@ Item,
 Program,
 Span,
 diagnostic_from_registry,
-diagnostic_render_all,
 ]
 use jet_lexer.[
 TOKEN_BLOCK_COMMENT,
@@ -1244,7 +1243,7 @@ fn jet_cli_with_notices(notices: [String], plan: JetCLIPlan) -> JetCLIPlan Never
     if notices.len() == 0 -> return ~plan
     if plan == {
         .Done(output) -> return jet_cli_done(output.stdout, "{notices.join("")}{output.stderr}", output.exit_code)
-        .Refused(report, color, exit_code) -> return jet_cli_done("", "{notices.join("")}{diagnostic_render_all("", "", [Diagnostic]{report}, color)}", exit_code)
+        .Refused(report, color, exit_code, notice) -> return JetCLIPlan.Refused{report: ~report, color: color, exit_code: exit_code, notice: "{notices.join("")}{notice}"}
         else -> {}
     }
     ~plan

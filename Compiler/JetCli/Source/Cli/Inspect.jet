@@ -446,7 +446,8 @@ fn jet_cli_coverage_facts() -> JetCLICoverageFacts Never! {
             }
         }
     }
-    planes := loop fact in facts -> fact.plane
+    planes := [String]{}
+    loop fact in facts -> &planes.push(fact.plane)
     &planes.sort()
     ordered :: loop plane in planes -> facts[slots.get(plane) ?? 0]
     JetCLICoverageFacts.Facts{facts: ordered}
@@ -489,7 +490,8 @@ fn jet_cli_coverage_baseline(text: String) -> JetCLICoverageBaseline Never! {
         }
         &rows.push(JetCLICoverageBaselineRow{plane: fields[0], edit_covered: edit_covered, reason_covered: reason_covered, total: total})
     }
-    planes := loop row in rows -> row.plane
+    planes := [String]{}
+    loop row in rows -> &planes.push(row.plane)
     &planes.sort()
     ordered := [JetCLICoverageBaselineRow]{}
     loop plane in planes {
@@ -1592,7 +1594,7 @@ fn jet_cli_impact_walk(calls: [JetCLISemCall], symbol: String, depth_limit: Int,
     cursor := 0
     loop cursor < frontier.len() {
         current :: ~frontier[cursor]
-        depth :: depths[cursor] + 0
+        depth :: ~depths[cursor]
         cursor += 1
         if depth >= depth_limit -> next
         loop call in calls {
