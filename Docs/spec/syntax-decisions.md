@@ -6384,6 +6384,24 @@ root maps once, is excluded by leading `_`, or is diagnosed. Explicit and
 convention routes collide loudly with both spans. Scaffolds write the opt-in line
 up front; directory presence never changes behavior.
 
+**D-ROUTE-FILES2=A — a page file's words become its address** *(card #4613)*:
+under a `.routes(from:)` root, each folder and file name is read as words
+(underscores, hyphens, lowercase-to-capital changes and acronym ends split
+words; digits stay attached) and written lowercase joined by hyphens, so
+`OrderItems.jet`, `order_items.jet` and `order-items.jet` all answer
+`/order-items`. Other characters, such as the dot in `sitemap.xml`, stay in
+place, lowercased. A terminal stem whose words are exactly `index` or `page`
+answers its folder's address; such folders stay ordinary segments. A whole
+`[Name]` part captures one address part as `:name`, the snake_case word key
+(`[ID]` → `:id`, `[UserID]` → `:user_id`); any other bracket form is E2806.
+A page is the parsed top-level `fn page` declaration, never commented text.
+Two files with the same words give the same address and fail E2807 naming both.
+Addresses are derived once at build time and requests match exactly, with no
+lowercasing or redirects. `jet new route --path /order-items` writes
+`Routes/OrderItems.jet` with the `.routes(from: "Routes")` opt-in. The
+`#Server.Get("/path")` page override waits on the `core.http.server.Get`
+marker (D-HTTP-ROUTE-EXPOSE1), which is not implemented yet.
+
 **D-COMPUTE1=D — one Core compute family**: `core.compute` owns eager,
 fusion, differentiation, placement, and expert device/buffer/stream/kernel work
 under one operation family. Graph/kernel forms are internal executable-TIR
