@@ -10721,6 +10721,7 @@ fn reachable_core_source_callables(
     let lookup = CostCallableIndex::new(bundle, callables);
     let functions = CostFunctionIndex::new(bundle);
     let mut rooted = callables.to_vec();
+    let part_methods = called_private_part_methods(bundle);
     for callable in &mut rooted {
         let is_core = core_modules.contains(&callable.module);
         let artifact_export = matches!(
@@ -10744,21 +10745,13 @@ fn reachable_core_source_callables(
             .is_some_and(|(function, _)| {
                 !function.pre.is_empty() && !function.params.is_empty()
             });
-        // Keep private source-part bodies rooted because receiver resolution for
-        // those compiler-owned callables has no source declaration to reference.
-        let private_source = bundle
-            .modules
-            .get(callable.module)
-            .is_some_and(|module| {
-                jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS
-                    .iter()
-                    .any(|part| {
-                        part.source.alias == module.alias
-                            && part.source.path == module.display.as_str()
-                    })
-            });
+        // A private source-part receiver function is rooted only when the
+        // checked program calls it (`called_private_part_methods`); rooting
+        // the whole part compiled every kernel its other members reach.
+        let private_part_called =
+            part_methods.contains(&(callable.module, callable.declaration_name.clone()));
         callable.root |= !is_core
-            || (is_core && private_source)
+            || private_part_called
             || artifact_export
             || selected_entry
             || ffi_callback
@@ -10820,6 +10813,74 @@ fn reachable_core_source_callables(
         }
         reachable = reachable_from_roots(&callees, &rooted);
     }
+}
+
+/// Reachability roots inside compiler-private Core source parts
+/// (`CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS`, e.g. `Core/text/string.jet`).
+/// A part function `fn m(receiver: T, ...)` has no declaration a caller can
+/// reference: `x.m(...)` resolves to it by receiver. It is reached exactly when
+/// some loaded module contains a checked `MethodCall` named `m` whose receiver
+/// sema resolved to `T`. Returns `(module index, function name)` for each one;
+/// everything else in the part stays prunable like any other Core body. A
+/// module whose source never spells `.m(` for a part function is skipped
+/// without walking its bodies.
+fn called_private_part_methods(bundle: &ProgramBundle) -> std::collections::HashSet<(usize, String)> {
+    let mut called = std::collections::HashSet::new();
+    // (receiver type, method) -> part module index.
+    let mut methods = std::collections::HashMap::<(String, String), usize>::new();
+    for (index, module) in bundle.modules.iter().enumerate() {
+        let is_part = jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS
+            .iter()
+            .any(|part| part.source.alias == module.alias && part.source.path == module.display.as_str());
+        if !is_part {
+            continue;
+        }
+        for item in &module.items {
+            let Item::Func(function) = item else { continue };
+            if function.is_pub {
+                continue;
+            }
+            let receiver = match function.params.first().map(|param| &param.ty) {
+                Some(Type::String) => crate::Syntax::TYPE_STRING.to_string(),
+                Some(Type::Named(name)) => name.clone(),
+                _ => continue,
+            };
+            methods.insert((receiver, function.name.clone()), index);
+        }
+    }
+    if methods.is_empty() {
+        return called;
+    }
+    let collect = |body: &[crate::AST::Stmt], called: &mut std::collections::HashSet<(usize, String)>| {
+        for statement in body {
+            statement.for_each_expr(|expr| {
+                if let Expr::MethodCall { method, recv_type: Some(receiver), .. } = expr {
+                    if let Some(index) = methods.get(&(receiver.clone(), method.clone())) {
+                        called.insert((*index, method.clone()));
+                    }
+                }
+            });
+        }
+    };
+    // Part bodies are walked too: a part method may call another by receiver.
+    for module in &bundle.modules {
+        if !methods.keys().any(|(_, name)| module.source.contains(&format!(".{name}("))) {
+            continue;
+        }
+        for item in &module.items {
+            let bodies: Vec<&Vec<crate::AST::Stmt>> = match item {
+                Item::Func(function) => vec![&function.body],
+                Item::Impl(block) => block.methods.iter().map(|function| &function.body).collect(),
+                Item::Struct(structure) => structure.methods.iter().map(|function| &function.body).collect(),
+                Item::Enum(enumeration) => enumeration.methods.iter().map(|function| &function.body).collect(),
+                _ => Vec::new(),
+            };
+            for body in bodies {
+                collect(body, &mut called);
+            }
+        }
+    }
+    called
 }
 
 fn reachable_core_source_bodies(
