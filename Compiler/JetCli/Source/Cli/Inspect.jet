@@ -1510,9 +1510,9 @@ fn jet_cli_inspect_check_text(source: String, elapsed_ms: Int, diagnostics: Int)
 }
 
 // CmdExpand.rs `run_expand` after the check: the selected lens projected from
-// the checked program (Expand.jet). The memory, web, layout and origin lenses
-// and the bare all-lens view need checked producers the Doc result does not
-// carry yet, so they are refused rather than reported empty.
+// the checked program (Expand.jet, ExpandFacts.jet). The web lens and the
+// bare all-lens view need the checked application graph the Doc result does
+// not carry yet, so they are refused rather than reported empty.
 fn jet_cli_inspect_expand_report(job: JetCLIInspectJob, result: JetDriverCompileResult, diagnostics: Int, elapsed_ms: Int) -> JetDriverVerbOutput {
     selection :: job.subject ?? return jet_cli_not_ported_output("inspect expand <all lenses>", false)
     index :: jet_cli_checked_semindex(result)
@@ -1523,6 +1523,9 @@ fn jet_cli_inspect_expand_report(job: JetCLIInspectJob, result: JetDriverCompile
         "derive" -> facts = jet_cli_expand_derive(index, result.doc_modules)
         "templates" -> facts = jet_cli_expand_templates(result.doc_modules)
         "callable-signature" -> facts = jet_cli_expand_callable(index, result.doc_modules)
+        "memory" -> facts = jet_cli_expand_memory(result.doc_modules, index)
+        "layout" -> facts = jet_cli_expand_layout(result.doc_modules)
+        "origin" -> facts = jet_cli_expand_origin(result.doc_modules)
         else -> return jet_cli_not_ported_output("inspect expand --facts {selection}", false)
     }
     lens := JET_CLI_EXPAND_LENSES[0]
