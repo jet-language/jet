@@ -768,7 +768,12 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
                 .arg(format!("dependency={}", deps_dir.display()));
         }
     }
-    let clinks = jet::resolve_c_links(entry.path.to_str().unwrap())
+    // Link resolution reads the same project state the front end compiled
+    // against: a staged fixture's `.jet` exists only in its scratch copy.
+    let project_entry = staged_fixture
+        .as_ref()
+        .map_or(entry.path.as_path(), |scratch| scratch.entry.as_path());
+    let clinks = jet::resolve_c_links(project_entry.to_str().unwrap())
         .expect("resolve_c_links should succeed for example C bindings");
     for arg in &clinks {
         rustc_cmd.arg(arg);
@@ -789,7 +794,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     // Held back by the canonical derived predicate — the same one
     // `tests/dev_parts/support.rs` uses — so a fourth service example is
     // classified instead of discovered as a timeout.
-    if example_serves_until_stopped(&entry.path) {
+    if example_serves_until_stopped(project_entry) {
         eprintln!(
             "note: built Examples/features/{stem}.jet; not run (service entry serves until stopped)"
         );
