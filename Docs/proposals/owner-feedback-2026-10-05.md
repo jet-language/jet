@@ -76,9 +76,9 @@ Headline numbers:
 | 4 | Reserved, infinitely expandable namespace; intent in code, not comments | **Adopt, modified** | The marker plane is the root. Your names win clashes with a warning. A one-line marker is an intent label that can grow into a check. No `~` root and no `_`/`__` scheme (`__` already belongs to the machine). | D-INTENT-ROOT1 (+ D-MARKER-DECL1, D-SURFACE-BUDGET1) |
 | 5 | `comptime` again now that interpreter and JIT go; build/compile mismatch | **Adopt** | `comptime` replaces `prep` in every form; `jet build` stays (Zig pairs `zig build` with `comptime`). `build` as the word loses: it clashes with `$build` and build entries, and is wrong under `jet check`. | D-COMPTIME-WORD1 |
 | 6 | Const parameters: read permission, mutable values, performance | **Already Jet, no change** | The unmarked read parameter is a deep, alias-checked const with no copy (lowers to `&T`). `freeze` is the lasting form. No keyword. | D-PARAM-CONST1 |
-| 7 | How far operator overloading goes (C++ `,`, `()`) | **Adopt, modified** | Add the two missing arithmetic hooks, `Neg` (unary `-`) and `Rem` (`%`). Refuse `()`, `,`, `&&`/`||`, conversions, `->` and `new`; fix the misleading E0102. | D-OP-NEG1, D-OP-CALL1 |
+| 7 | How far operator overloading goes (C++ `,`, `()`) | **Adopt, modified** | Add the two missing arithmetic hooks, `Neg` (unary `-`) and `Mod` (`%`, `fn mod`). Refuse `()`, `,`, `&&`/`||`, conversions, `->` and `new`; fix the misleading E0102. | D-OP-NEG1, D-OP-CALL1 |
 | 8 | Level of type inference | **Adopt (Rust level)** | Written signatures, inferred bodies and effects. Look ahead within one function so `[]`, `[:]` and `None` need no type (about 5,000 written types removed). No whole-program or HM inference across functions. | D-INFER-LEVEL1 |
-| 9 | ReScript dictionary pattern matching | **Adopt** | Map/JSON patterns `["k": p]` with optional keys and open matching, plus struct and list patterns. Every literal gets a pattern of the same shape. This reverses the mining pass's rejection, with reasons. | D-PAT-MAP1, D-PAT-RECORD1 |
+| 9 | ReScript dictionary pattern matching | **Adopt** | Map/JSON patterns `["k": p]` with optional keys, matching exactly unless the pattern ends with `..`, plus struct and list patterns. Every literal gets a pattern of the same shape. This reverses the mining pass's rejection, with reasons. | D-PAT-MAP1, D-PAT-RECORD1 |
 | 10 | Lua: mechanisms over policies; Lua for simplicity | **Adopt** | Fold `tag`/`policy` into `marker`; one `#Deadline` replaces seven timeout setters; fold six CLI commands; counted surface ceilings. Keep shipped default policies, which Lua lacked and later regretted. | D-MARKER-DECL1, D-DEADLINE-ONE1, D-CLI-FOLD1, D-SURFACE-BUDGET1 |
 | 11 | Neovim-style hooks into compiler phases and everything else | **Adopt, modified** | One typed hook mechanism from `core.event` (`#On(point)` or `point.on(scope, f)`), with stage, lifecycle and runtime points. Decline mutable compiler internals, as D-METADEPTH1 and D-META-GATE1 already do. | D-HOOK-ONE1, D-HOOK-STAGES1, D-HOOK-LIFECYCLE1, D-HOOK-RUNTIME1 |
 | 12 | Automatic WebP in the web framework | **Adopt, modified** | Build-time WebP variants plus `<picture>`; `jet dev` converts on demand; AVIF opt-in. A Jet-written, memory-safe encoder (CVE-2023-4863 argues against bridging libwebp), turned on per source type only after a measured gate. | D-WEB-IMAGE1, D-IMAGE-ENCODE1 |
@@ -140,10 +140,10 @@ the short profile, because research workers cannot start fresh readers.
 | D-INTENT-ROOT1 | 4 | c0yxaspm (#4141) | markers as the root; your names win; `~` reserved | Main decides (resolution rule) |
 | D-COMPTIME-WORD1 | 5 | c0699zei (#4276) | `comptime` | yes (keyword) |
 | D-PARAM-CONST1 | 6 | c00rqc09 (#4620) | read access is Jet's const; no keyword | no |
-| D-OP-NEG1 | 7 | c0q38sm2 (#4022) | add `Neg` and `Rem` hooks | yes |
+| D-OP-NEG1 | 7 | c0q38sm2 (#4022) | add `Neg` and `Mod` hooks | yes |
 | D-OP-CALL1 | 7 | c0q38sm2 (#4022) | no `operator()`; fix E0102 | no for A |
 | D-INFER-LEVEL1 | 8 | c0q38sm2 (#4022) | written signatures; function-local look-ahead | no |
-| D-PAT-MAP1 | 9 | c0q38sm2 (#4022) | map/JSON patterns, open matching | yes |
+| D-PAT-MAP1 | 9 | c0q38sm2 (#4022) | map/JSON patterns, exact unless they end with `..` | yes |
 | D-PAT-RECORD1 | 9 | c0q38sm2 (#4022) | struct and list patterns | yes |
 | D-MARKER-DECL1 | 10 | c0bs5inj (#4020) | `tag`/`policy` fold into `marker`; `#Policy` = settings | yes |
 | D-DEADLINE-ONE1 | 10 | c0q38sm2 (#4022) | one `#Deadline(duration)` | yes |
@@ -582,10 +582,10 @@ Ballots: six. Each validates with `validate.mjs` (exit 0) and is in
 | Item | Ballot | Card | Recommendation |
 |---|---|---|---|
 | 6 | `D-PARAM-CONST1.json` | c00rqc09 (#4620) | A: read access is Jet's const; no new keyword; `freeze` stays the lasting form |
-| 7 | `D-OP-NEG1.json` | c0q38sm2 (#4022) | A: add `Neg` (unary `-`) and `Rem` (`%`) hooks |
+| 7 | `D-OP-NEG1.json` | c0q38sm2 (#4022) | A: add `Neg` (unary `-`) and `Mod` (`%`, `fn mod`) hooks |
 | 7 | `D-OP-CALL1.json` | c0q38sm2 | A: no `operator()`; fix the misleading E0102 |
 | 8 | `D-INFER-LEVEL1.json` | c0q38sm2 | A: written signatures; function-local look-ahead for `[]` and `None` |
-| 9 | `D-PAT-MAP1.json` | c0q38sm2 | A: map/JSON patterns `["k": p]`, optional `"k"?: p`, open matching |
+| 9 | `D-PAT-MAP1.json` | c0q38sm2 | A: map/JSON patterns `["k": p]`, optional `"k"?: p`, exact matching unless the pattern ends with `..` |
 | 9 | `D-PAT-RECORD1.json` | c0q38sm2 | A: struct patterns `Point{x: 0, y}` and list patterns `[first, ..rest]` |
 
 **Process note for Main.** Tower refuses a short ballot whose group is
@@ -724,7 +724,7 @@ Status is from the probes and the hook registry in
 | Destructor | `Close` (consuming cleanup) | Keep |
 | User-defined literals `_km` | Numbers from context through `Literal.Int` / `Literal.Float` (D-FOUND-LITERAL1=A); checked text prefixes `sql"…"` (D-LITERAL-PREFIX1=A); suffixes refused | Keep. Jet's form is checked at compile time; C++ suffixes are not |
 | **Unary `-`** | **Missing**: `-v` is E0109 "Only Int and Float values can be negated" (p10) | **Add `Neg`** → D-OP-NEG1 |
-| **`%`** | **Int only** (p11) | **Add `Rem`** → D-OP-NEG1 |
+| **`%`** | **Int only** (p11) | **Add `Mod`** (`fn mod`) → D-OP-NEG1 |
 | `()` call | Only functions and lambdas; `make_adder(40)(2)` works (D-CALLVALUE2=A). Calling a struct value gives the misleading E0102 "Nothing named `triple` exists" (p12) | Do not add; fix the error → D-OP-CALL1 |
 | Bitwise `& \| ^ ~ << >>` | Named methods (`bit_and`); power is `.pow` (D-SIGIL-ALGEBRA1=B) | Settled; FeedbackSigils owns the sigil side |
 | `&& \|\| !` | Bool only (E0110, p14) | Never: overloading loses short-circuiting (Google C++ Style Guide bans it; Meyers, *More Effective C++* item 7) |
@@ -922,7 +922,9 @@ objection does not hold up:
 - **The design has wide precedent.** Python 3.10 mapping patterns (PEP 634),
   Elixir and Erlang map patterns, C# property patterns, and Clojure
   `core.match` all match by key. All of them match *open*, ignoring extra
-  keys.
+  keys. Jet matches *exactly* instead: a key the pattern does not list fails
+  the arm, unless the pattern ends with `..`, the same rest marker list and
+  struct patterns use. An unexpected key is never ignored silently.
 
 #### Best Jet design (D-PAT-MAP1 A, plus D-PAT-RECORD1 A)
 
@@ -931,8 +933,8 @@ D-PAT-NAMED-NEST1 already applied this to enum cases.
 
 ```jet
 if event == {
-    .Object(["type": .Text("push"), "ref": .Text(ref)]) -> deploy(ref)
-    .Object(["type": .Text(kind)]) -> print("ignored {kind}")
+    .Object(["type": .Text("push"), "ref": .Text(ref), ..]) -> deploy(ref)
+    .Object(["type": .Text(kind), ..]) -> print("ignored {kind}")
     else -> print("not an event")
 }
 if user == ["name": name, "nick"?: nick] -> print(nick ?? name)
@@ -951,11 +953,12 @@ Semantics:
 - `"k"?: p` means the key may be missing; `p` matches the optional lookup
   result. This is Jet's suffix-`?` convention (D-TYPE-SUFFIX1) and the
   equivalent of ReScript's `?b`. `"k"?: None` tests that the key is absent.
-- Matching is open: extra keys are allowed.
+- Matching is exact: a key the pattern does not list fails the arm. A pattern
+  that ends with `..` (`["type": .Text(kind), ..]`) allows extra keys.
 - Keys must be literals, enum cases or ALL_CAPS constants. A repeated key is
   rejected with the D-MAPLIT-DUP1 check.
-- Exhaustiveness: maps are open, so a table needs `else` unless one arm uses
-  only `?:` entries with binding sub-patterns.
+- Exhaustiveness: map keys are runtime data, so a table needs `else` unless
+  one arm ends with `..` and uses only `?:` entries with binding sub-patterns.
 - Cost: one lookup per distinct key per table, shared across arms. Bindings
   are read windows, so nothing is copied or allocated (Z0 class).
 - Lists: `[]`, `[x]`, `[x, ..]`, `[x, ..rest]`, where `rest` is a zero-copy
