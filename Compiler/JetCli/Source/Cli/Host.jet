@@ -1064,16 +1064,6 @@ fn jet_cli_fmt_relative(path: String, root: String) -> String Never! {
 // Flags the environment run takes unchanged.
 JET_CLI_EXTERNAL_FMT_FORWARDED :: [String]{"--trust", "--offline", "--online", "--no-color", "--json", "--flake", "--pure", "--yes", "-y"}
 
-// Whether `text` holds an ASCII whitespace byte (tab, line feed, vertical
-// tab, form feed, carriage return, space).
-fn jet_cli_has_ascii_space(text: String) -> Bool Never! {
-    loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
-        if code == 32 || (code >= 9 && code <= 13) -> return true
-    }
-    false
-}
-
 // Rust `str::trim_start_matches` for a string prefix.
 fn jet_cli_trim_start_matches(text: String, prefix: String) -> String Never! {
     rest := text
@@ -1177,7 +1167,7 @@ fn jet_cli_external_fmt_collect(cwd: String, project_dir: String, explicit_paths
     }
     position := 1
     loop position < found.len() {
-        current :: found[position]
+        current :: ~found[position]
         slot := position
         loop slot > 0 && jet_cli_external_fmt_path_less(current, found[slot - 1]) {
             found[slot] = found[slot - 1]
