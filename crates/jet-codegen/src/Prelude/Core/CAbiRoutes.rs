@@ -12035,10 +12035,10 @@ mod jet_c_abi_routes {
     }
 
 
-    /// core.crypto.random.bytes
+    /// core.crypto.random.__os_entropy
     #[no_mangle]
-    pub extern "C" fn jet_std_crypto_random_bytes_controlled(a0: i64, some: *mut *mut u64, some_len: *mut i64) -> i64 {
-        guard(|| match crate::jet_std_crypto_random_bytes_controlled(a0) {
+    pub extern "C" fn jet_crypto_random_os_entropy(a0: i64, some: *mut *mut u64, some_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_crypto_random_os_entropy(a0) {
             Some(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), some); unsafe { some_len.write(len) }; 1 }
             None => 0,
         })

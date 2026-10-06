@@ -44,7 +44,7 @@ module core.crypto exports { CryptoError, OpenFailed, VerifyFailed, KeyRejected,
 source_module core.crypto path Core/crypto/crypto.jet alias core_core_crypto owns { blake3, constant_time_equal, constant_time_equal_bytes, digest, hkdf_sha256, hmac_sha256, new, pbkdf2_hmac, seal, sealed_bytes, sha1, sha224, sha256, sha384, sha3_224, sha3_256, sha3_384, sha3_512, sha512, update, open, file_seal, file_open, sign, verify, x25519, x25519_public, x25519_shared, generatekey, privateencrypt, privatedecrypt, publicencrypt, publicdecrypt, wrap, unwrap, password_hash, password_hash_with_salt, password_verify }
 module core.crypto.expert exports { aes256gcm_open, aes256gcm_seal, argon2id, ed25519_sign, ed25519_verify_strict, hkdf_sha256_raw, migrate_v1, open_v1, secret_bytes, shared_secret_bytes, signing_key_bytes, x25519_raw, x25519_secret_bytes, xchacha20poly1305_open, xchacha20poly1305_seal } depends_on [core.crypto]
 source_module core.crypto.expert path Core/crypto/expert.jet alias core_core_crypto_expert owns { aes256gcm_open, aes256gcm_seal, argon2id, ed25519_sign, ed25519_verify_strict, hkdf_sha256_raw, migrate_v1, open_v1, secret_bytes, shared_secret_bytes, signing_key_bytes, x25519_raw, x25519_secret_bytes, xchacha20poly1305_open, xchacha20poly1305_seal }
-module core.crypto.random exports { bytes, choice, int_range, token_hex, token_urlsafe, u32, u64, token_bytes, randbelow, randbits, compare_digest, choice_int, shuffle_ints } depends_on [core.crypto]
+module core.crypto.random exports { bytes, choice, int_range, token_hex, token_urlsafe, u32, u64, token_bytes, randbelow, randbits, compare_digest, choice_int, shuffle_ints, __os_entropy } depends_on [core.crypto]
 source_module core.crypto.random path Core/crypto/random.jet alias core_core_crypto_random owns { bytes, choice, choice_int, compare_digest, int_range, randbelow, randbits, shuffle_ints, token_bytes, token_hex, token_urlsafe, u32, u64 }
 module core.crypto.uuid exports { UUIDError, parse, v4, v5, uuid5, v7 } types { UUIDError:plain } depends_on [core.crypto]
 source_module core.crypto.uuid path Core/crypto/uuid.jet alias core_core_crypto_uuid owns { parse, uuid5, v4, v5, v7 }
@@ -617,7 +617,7 @@ dispatcher_row plain core.math.stats pearson | CoreCallRecord::new("core.math.st
 dispatcher_row plain core.math.stats covariance_population | CoreCallRecord::new("core.math.stats", "covariance_population", "jet_stats_covariance_population", true, &[true, true])
 dispatcher_row plain core.math.random seed | CoreCallRecord::new( "core.math.random", "seed", "jet_std_random_seed", true, &[false], )
 dispatcher_row plain core.math.random getrandbits | CoreCallRecord::new( "core.math.random", "getrandbits", "jet_std_random_getrandbits", true, &[false], ) .with_native_int_result()
-dispatcher_row plain core.crypto.random bytes | CoreCallRecord::new( "core.crypto.random", "bytes", "jet_std_crypto_random_bytes_controlled", true, &[false], )
+dispatcher_row plain core.crypto.random __os_entropy | CoreCallRecord::new( "core.crypto.random", "__os_entropy", "jet_crypto_random_os_entropy", true, &[false], )
 dispatcher_row plain core.math.random rng | CoreCallRecord::new("core.math.random", "rng", "jet_std_rng_new", true, &[false])
 dispatcher_row plain core.math.random split | CoreCallRecord::new( "core.math.random", "split", "jet_std_random_split", true, &[false], )
 dispatcher_row plain core.time now | CoreCallRecord::new("core.time", "now", "jet_std_time_now", true, &[])
@@ -2035,7 +2035,7 @@ ambient_route core.testing temp_dir
 ambient_route core.math from_bits
 ambient_route core.math.random seed
 ambient_route core.math.random split
-ambient_route core.crypto.random bytes
+ambient_route core.crypto.random __os_entropy
 ambient_route core.time now
 ambient_route core.time sleep
 ambient_route core.time start
