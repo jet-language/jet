@@ -2026,13 +2026,15 @@ pub fn sema_effect_check_unsafe_statements(statements: [Stmt], diagnostics: &[Di
     valid
 }
 
-// The effect walkers over checked TIR: the one a child visit continues with,
-// and its own arguments (sema_effect_walk_expr, sema_effect_check_unsafe_expr,
-// sema_effect_walk_region_expr).
+// The walkers over checked TIR: the one a child visit continues with, and its
+// own arguments (sema_effect_walk_expr, sema_effect_check_unsafe_expr,
+// sema_effect_walk_region_expr, and FailureLaw's prelude-conversion demand
+// walk sema_prelude_conversion_demands_visit, whose state is its one row).
 enum SemaEffectWalk {
     Collect(node_index: Int)
     Unsafe(audited: Bool)
     Region(node_index: Int, region: Span)
+    PreludeDemands(state: Shared<SemaPreludeDemandWalk>)
 }
 
 fn sema_effect_walk_visit(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, expression: TExpr) {
@@ -2040,6 +2042,7 @@ fn sema_effect_walk_visit(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts:
         .Collect(node_index) -> sema_effect_walk_expr(&nodes, node_index, expression, facts, &diagnostics, caller_key)
         .Unsafe(audited) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, expression, audited, &diagnostics)
         .Region(node_index, region) -> sema_effect_walk_region_expr(&nodes, node_index, expression, region, facts, &diagnostics, caller_key)
+        .PreludeDemands(state) -> sema_prelude_conversion_demands_visit(walk, state, &nodes, facts, &diagnostics, caller_key, expression)
     }
 }
 
