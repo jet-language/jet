@@ -1920,19 +1920,22 @@ fn jet_driver_namespace_item_names(items: [Item]) -> [NamedSpan] Never! {
     names
 }
 
-// The first zero-width span at or after `start` that no import of `imports`
-// already occupies, so every compiler-owned import keeps its own edge identity.
-fn jet_driver_free_binding_span(imports: [ImportDecl], start: Int) -> Span Never! {
-    candidate := start
-    loop {
-        taken :: loop declaration in imports {
-            if declaration.span.start == candidate && declaration.span.end == candidate {
-                break true
-            }
-        } ?? false
-        if !taken -> break
-        candidate += 1
+// Starts of the zero-width spans the imports of one module occupy.
+fn jet_driver_taken_binding_starts(imports: [ImportDecl]) -> [Int:Bool] Never! {
+    taken := [Int:Bool]{}
+    loop declaration in imports {
+        if declaration.span.start == declaration.span.end -> taken[declaration.span.start] = true
     }
+    taken
+}
+
+// The first zero-width span at or after `start` that no import already
+// occupies (`taken`), so every compiler-owned import keeps its own edge
+// identity. A set instead of a scan of every import per probe: the scan made
+// binding a package of M files M³.
+fn jet_driver_free_binding_span(taken: [Int:Bool], start: Int) -> Span Never! {
+    candidate := start
+    loop taken.get(candidate) != None -> candidate += 1
     Span{start: candidate, end: candidate}
 }
 
@@ -2018,13 +2021,16 @@ fn jet_driver_bind_package_namespaces(
         }
         loop module_index in members {
             next_start := 0
+            taken := jet_driver_taken_binding_starts(modules[module_index].program.imports)
             loop sibling_position in 0..<members.len() {
                 sibling_index :: members[sibling_position]
                 if sibling_index == module_index || names[sibling_position].len() == 0 -> next
                 sibling_unit :: source_units[modules[sibling_index].source_unit_index]
                 alias :: "__jet_pkg_{sibling_unit.module_name}"
-                file_span :: jet_driver_free_binding_span(modules[module_index].program.imports, next_start)
-                list_span :: jet_driver_free_binding_span(modules[module_index].program.imports, file_span.start + 1)
+                file_span :: jet_driver_free_binding_span(taken, next_start)
+                list_span :: jet_driver_free_binding_span(taken, file_span.start + 1)
+                taken[file_span.start] = true
+                taken[list_span.start] = true
                 next_start = list_span.start + 1
                 items := [ImportedItem]{}
                 item_spans := [Span]{}

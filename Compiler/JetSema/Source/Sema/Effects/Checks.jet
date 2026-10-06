@@ -1447,15 +1447,50 @@ fn sema_effect_unbounded_dispatch_diagnostic(dispatch: TEffectSpan) -> Diagnosti
     sema_error("E0743", dispatch.span, "dynamic call `{dispatch.name}` has no effect bound", "a trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound", "declare an effect row on `{dispatch.name}`, such as `-[]>` for pure dispatch, or move this dynamic call outside the bounded function")
 }
 
+// Nodes from which some unbounded trait dispatch is reachable through the
+// call graph (the node itself included): one reverse walk from every node
+// that dispatches.
+fn sema_effect_dispatch_reach(nodes: [SemaEffectNode], node_by_key: [String:Int]) -> [Bool] Never! {
+    reach := (loop _ in nodes -> false)
+    callers := (loop _ in nodes -> [Int]{})
+    pending := [Int]{}
+    loop (index, node) in nodes {
+        loop edge in node.call_edges {
+            target :: sema_effect_node_index(node_by_key, edge) ?? next
+            &callers[target].push(index)
+        }
+        if node.dispatches.len() > 0 {
+            reach[index] = true
+            &pending.push(index)
+        }
+    }
+    cursor := 0
+    loop cursor < pending.len() {
+        incoming :: pending[cursor]
+        cursor += 1
+        loop caller in callers[incoming] {
+            if reach[caller] -> next
+            reach[caller] = true
+            &pending.push(caller)
+        }
+    }
+    reach
+}
+
 // The first unbounded trait dispatch reachable from `index` through the call
-// graph, the function's own calls first.
-fn sema_effect_find_dispatch(nodes: [SemaEffectNode], node_by_key: [String:Int], index: Int, seen: &[Bool]) -> TEffectSpan? {
+// graph, the function's own calls first. A callee that reaches no dispatch
+// (`reach`) is skipped: its walk finds nothing and only marks nodes that reach
+// none either, so the first dispatch found is the same. `visited` lists the
+// marked rows so the caller can clear `seen` for the next root.
+fn sema_effect_find_dispatch(nodes: [SemaEffectNode], node_by_key: [String:Int], reach: [Bool], index: Int, seen: &[Bool], visited: &[Int]) -> TEffectSpan? {
     if seen[index] -> return None
     seen[index] = true
+    &visited.push(index)
     if nodes[index].dispatches.len() > 0 -> return Val(nodes[index].dispatches[0])
     loop edge in nodes[index].call_edges {
         target :: sema_effect_node_index(node_by_key, edge) ?? next
-        found :: sema_effect_find_dispatch(nodes, node_by_key, target, &seen)
+        if !reach[target] -> next
+        found :: sema_effect_find_dispatch(nodes, node_by_key, reach, target, &seen, &visited)
         if found != None -> return found
     }
     None
@@ -1836,12 +1871,15 @@ pub fn sema_effects_check_modules(inputs: ^[SemaEffectModuleInput]) -> SemaEffec
 
     solved :: sema_effect_solve(nodes, node_by_key)
     secret_reach :: sema_effect_secret_reach(nodes, node_by_key)
+    dispatch_reach :: sema_effect_dispatch_reach(nodes, node_by_key)
+    dispatch_seen := (loop _ in nodes -> false)
     loop node_index in 0..<nodes.len() {
         function_diagnostics := [Diagnostic]{}
         dispatch := TEffectSpan?{None}
-        if nodes[node_index].has_declared_row || nodes[node_index].is_pure {
-            seen := (loop _ in nodes -> false)
-            dispatch = sema_effect_find_dispatch(nodes, node_by_key, node_index, &seen)
+        if (nodes[node_index].has_declared_row || nodes[node_index].is_pure) && dispatch_reach[node_index] {
+            visited := [Int]{}
+            dispatch = sema_effect_find_dispatch(nodes, node_by_key, dispatch_reach, node_index, &dispatch_seen, &visited)
+            loop row in visited -> dispatch_seen[row] = false
         }
         if !sema_effect_check_node(nodes[node_index], solved[node_index], secret_reach[node_index], dispatch, &function_diagnostics) {
             // Keep all diagnostics; the caller receives one complete graph

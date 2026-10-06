@@ -2082,22 +2082,28 @@ fn sema_registration_resolve_export(graph: SemaRegistrationGraph, module_index: 
     None
 }
 
-fn sema_registration_add_import(graph: &SemaRegistrationGraph, source_index: Int, declaration: ImportDecl, target_identity: String, target_package: String) {
+// The imports registered so far, by "{module}|{span start}|{span end}" and,
+// for module (qualified) imports, by "{module}|{alias}": a duplicate or alias
+// check per import scanned every registered import of its module, which a
+// package of M files (two compiler-owned imports per sibling) made M³.
+struct SemaRegistrationImportIndex {
+    spans: [String:Bool]
+    aliases: [String:Bool]
+}
+
+fn sema_registration_add_import(graph: &SemaRegistrationGraph, registered: &SemaRegistrationImportIndex, source_index: Int, declaration: ImportDecl, target_identity: String, target_package: String) {
     source_identity := graph.modules[source_index].module_identity
     source_package := graph.modules[source_index].package_identity
     visibility :: sema_registration_import_visibility(declaration)
-    duplicate :: loop existing in graph.modules[source_index].imports {
-        if existing.declaration.span.start == declaration.span.start && existing.declaration.span.end == declaration.span.end -> break true
-    } ?? false
-    if duplicate {
+    span_key :: "{source_index}|{declaration.span.start}|{declaration.span.end}"
+    if registered.spans.get(span_key) != None {
         sema_registration_push_graph_diagnostic(&graph, source_index, sema_defined_twice(declaration.alias, "an import declaration must be registered once", declaration.span))
         return
     }
-    if !sema_registration_import_is_unqualified(declaration) {
-        alias_collision :: loop existing in graph.modules[source_index].imports {
-            if !sema_registration_import_is_unqualified(existing.declaration) && existing.declaration.alias == declaration.alias -> break true
-        } ?? false
-        if alias_collision {
+    qualified :: !sema_registration_import_is_unqualified(declaration)
+    alias_key :: "{source_index}|{declaration.alias}"
+    if qualified {
+        if registered.aliases.get(alias_key) != None {
             sema_registration_push_graph_diagnostic(&graph, source_index, sema_defined_twice(declaration.alias, "module imports share one namespace alias", declaration.alias_span))
             return
         }
@@ -2106,6 +2112,8 @@ fn sema_registration_add_import(graph: &SemaRegistrationGraph, source_index: Int
             return
         }
     }
+    registered.spans[span_key] = true
+    if qualified -> registered.aliases[alias_key] = true
     &graph.modules[source_index].imports.push(SemaRegistrationImport{source_module_identity: source_identity, source_package_identity: source_package, target_module_identity: target_identity, target_package_identity: target_package, declaration: declaration, visibility: visibility, bindings: [SemaRegistrationImportBinding]{}})
 }
 
@@ -2120,15 +2128,17 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
             sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0003", declaration.span, "the import target is not in the declaration graph", "qualified imports resolve through the exact loaded module identity", "retain the loader's source and module identity for this import"))
             next
         }
-        target :: ~graph.modules[target_index]
+        // Only the target's name is kept: a whole-module copy per import made
+        // registration imports × module size (the AST rides in the row).
+        target_name :: ~graph.modules[target_index].module_name
         if declaration.kind == {
             .Unqualified(_, _, items, _, _) -> loop item in items {
                 local :: sema_registration_import_local(item)
                 // D-CORE-USELIST1=A (Rust `core_list_path`): a member naming a
                 // Core submodule (`use core.mem`, `core.encoding.[json]`) binds
                 // that module as a namespace, exactly like `use core.mem as mem`.
-                submodule :: "{target.module_name}.{item.original}"
-                if (target.module_name == "core" || target.module_name.starts_with("core.")) && core_module_export(submodule) != None {
+                submodule :: "{target_name}.{item.original}"
+                if (target_name == "core" || target_name.starts_with("core.")) && core_module_export(submodule) != None {
                     if sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) {
                         sema_registration_push_graph_diagnostic(&graph, module_index, sema_defined_twice(local, "imported names share the module namespace", declaration.span))
                         next
@@ -2155,7 +2165,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                         }
                     }
                     .None -> {
-                        direct :: sema_registration_direct_symbol(target, item.original)
+                        direct :: sema_registration_direct_symbol(graph.modules[target_index], item.original)
                         private_template := false
                         if direct == .Val(private_export) {
                             if private_export.declaration == .Val(declared) {
@@ -2163,9 +2173,9 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                             }
                         }
                         if {
-                            private_template -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target.module_name}`", "only `pub` items can be brought into scope with `use`", "add `pub` before `module {item.original}` in the defining file"))
-                            direct != None -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target.module_name}`", "only visible declarations can be selected through an import", "make the declaration public or keep the use in its defining module"))
-                            else -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0611", declaration.span, "`{item.original}` is not defined in module `{target.module_name}`", "an import member must name one registered declaration", "declare or import the member before selecting it"))
+                            private_template -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target_name}`", "only `pub` items can be brought into scope with `use`", "add `pub` before `module {item.original}` in the defining file"))
+                            direct != None -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target_name}`", "only visible declarations can be selected through an import", "make the declaration public or keep the use in its defining module"))
+                            else -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0611", declaration.span, "`{item.original}` is not defined in module `{target_name}`", "an import member must name one registered declaration", "declare or import the member before selecting it"))
                         }
                     }
                 }
@@ -2177,7 +2187,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                     else -> {
                         import_visibility :: graph.modules[module_index].imports[import_index].visibility
                         module_symbol :: Symbol{id: symbol_id(SymbolKind.Import, source_identity, target_identity, declaration.alias), kind: SymbolKind.Import, name: declaration.alias, module_name: target_identity, owner: None, span: declaration.alias_span, ty: None, visibility: import_visibility}
-                        sema_registration_push_import_binding(&graph, module_index, import_index, SemaRegistrationImportBinding{original: target.module_name, local: declaration.alias, symbol: module_symbol, declaration: None, target_module_identity: target_identity, visibility: import_visibility})
+                        sema_registration_push_import_binding(&graph, module_index, import_index, SemaRegistrationImportBinding{original: target_name, local: declaration.alias, symbol: module_symbol, declaration: None, target_module_identity: target_identity, visibility: import_visibility})
                     }
                 }
             }
@@ -2240,8 +2250,9 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     // Module identity -> row; duplicates are rejected below, so the first row
     // is the only row (Rust `Bundle/ItemReuse.rs` `by_identity`).
     module_rows := [String:Int]{}
+    template_index :: sema_generic_modules_index(inputs, edges)
     loop input in inputs {
-        module_row := sema_registration_prepare_module_row(input, sema_generic_modules_imported(inputs, edges, input.module_identity), &diagnostics)
+        module_row := sema_registration_prepare_module_row(input, sema_generic_modules_imported(inputs, edges, template_index, input.module_identity), &diagnostics)
         duplicate :: module_rows.get(module_row.module_identity) != None
         if !duplicate -> module_rows[module_row.module_identity] = modules.len()
         if {
@@ -2286,6 +2297,17 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     sema_registration_inject_compiler_builtins(&graph)
     graph.unit_facts = sema_registration_unit_facts(graph)
 
+    // Source import spans by "{module}|{start}|{end}" and edge spans by
+    // "{source identity}|{start}|{end}", each built once: matching every edge
+    // against its module's imports and every import against every edge made
+    // registration M³ and M⁴ for a package of M files.
+    declared_spans := [String:Bool]{}
+    loop declared_module in 0..<graph.modules.len() {
+        loop source_declaration in graph.modules[declared_module].program.imports -> declared_spans["{declared_module}|{source_declaration.span.start}|{source_declaration.span.end}"] = true
+    }
+    edge_spans := [String:Bool]{}
+    loop edge in edges -> edge_spans["{edge.source_module_identity}|{edge.declaration.span.start}|{edge.declaration.span.end}"] = true
+    registered := SemaRegistrationImportIndex{spans: [String:Bool]{}, aliases: [String:Bool]{}}
     loop edge in edges {
         source_index :: sema_registration_module_index(graph, edge.source_module_identity)
         target_index :: sema_registration_module_index(graph, edge.target_module_identity)
@@ -2294,16 +2316,14 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
             next
         }
         source_module_index :: source_index ?? 0
-        declared :: loop source_declaration in graph.modules[source_module_index].program.imports {
-            if source_declaration.span.start == edge.declaration.span.start && source_declaration.span.end == edge.declaration.span.end -> break true
-        } ?? false
+        declared :: declared_spans.get("{source_module_index}|{edge.declaration.span.start}|{edge.declaration.span.end}") != None
         if {
             !declared -> sema_registration_push_graph_diagnostic(&graph, source_module_index, sema_error("E0003", edge.declaration.span, "an import edge has no source declaration", "semantic preparation only registers imports present in the source program", "retain the original ImportDecl when constructing the resolved edge"))
             edge.target_package_identity != "" && edge.target_package_identity != graph.modules[target_index ?? 0].package_identity -> sema_registration_push_graph_diagnostic(&graph, source_module_index, sema_error("E0003", edge.declaration.span, "an import edge has the wrong target package identity", "package visibility follows the loaded target module identity", "copy the target package identity from the resolved module"))
             else -> {
                 target_package := edge.target_package_identity
                 if target_package == "" -> target_package = graph.modules[target_index ?? 0].package_identity
-                sema_registration_add_import(&graph, source_module_index, edge.declaration, edge.target_module_identity, target_package)
+                sema_registration_add_import(&graph, &registered, source_module_index, edge.declaration, edge.target_module_identity, target_package)
             }
         }
     }
@@ -2314,9 +2334,7 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
         import_count :: graph.modules[module_index].program.imports.len()
         loop import_index in 0..<import_count {
             declaration := graph.modules[module_index].program.imports[import_index]
-            found :: loop edge in edges {
-                if edge.source_module_identity == graph.modules[module_index].module_identity && edge.declaration.span.start == declaration.span.start && edge.declaration.span.end == declaration.span.end -> break true
-            } ?? false
+            found :: edge_spans.get("{graph.modules[module_index].module_identity}|{declaration.span.start}|{declaration.span.end}") != None
             if !found {
                 sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0003", declaration.span, "an import declaration has no resolved graph edge", "semantic preparation never resolves private or dependency imports by bare name", "provide the loader-resolved target module identity"))
             }
