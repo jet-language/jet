@@ -1,6 +1,6 @@
 // Addressable projections and recursive enum edges in the native byte layout.
 use jet_foundation.[
-    MIREnumArg, MIRInstruction, MIRPayloadKind, MIRProgram, MIRProjection,
+    MIREnumArg, MIRField, MIRFieldID, MIRInstruction, MIRPayloadKind, MIRProgram, MIRProjection,
     MIRType, MIRTypeDef, MIRTypeID, MIRValueID, MIRVariant,
     mir_type_display_name,
 ]
@@ -59,12 +59,19 @@ fn lower_payload_info(p: MIRProgram, ty: MIRType, kind: MIRPayloadKind) -> Lower
 // its pointer. A checked payload place is entered only after its variant test.
 fn lower_walk_projections(p: MIRProgram, m: &LowerModule, f: &LowerFunction, root: LIRValueID, root_ty: MIRType, projections: [MIRProjection]) -> LowerFieldAddress? {
     walked :: lower_walk_place(p, &m, &f, root, root_ty, projections) ?? return None
+    if walked.borrowed {
+        lower_fail(&m, &f, "writing through a field of runtime handle is not lowered at O0 yet")
+        return None
+    }
     Val(walked.address)
 }
 
+// `borrowed`: the place is a field inside a runtime handle's own value
+// (lower_handle_field_place), which may be read but not written or moved.
 struct LowerPlaceAddress {
     pub address: LowerFieldAddress
     pub ty: MIRType
+    pub borrowed: Bool
 }
 
 // lower_walk_projections with the type of the named value.
@@ -72,6 +79,7 @@ fn lower_walk_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, root: LIR
     base := root
     ty := root_ty
     offset := -1
+    borrowed := false
     loop projection in projections {
         if offset >= 0 && !lower_is_inline(p, ty) {
             // Enter the box (or wrapper) whose pointer the location holds;
@@ -84,10 +92,21 @@ fn lower_walk_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, root: LIR
         if offset < 0 -> offset = 0
         if projection == {
             .Field(id, _) -> {
-                found :: lower_struct_field(p, ty, id) ?? {
+                if lower_struct_field(p, ty, id) == None {
+                    // A field of a runtime handle: its place inside the runtime's value.
+                    if offset == 0 {
+                        if lower_handle_field_place(p, &m, &f, base, ty, id) == .Val(place) {
+                            base = place.address.base
+                            offset = place.address.offset
+                            ty = place.ty
+                            borrowed = true
+                            next
+                        }
+                    }
                     lower_fail(&m, &f, "field {id.value} of {mir_type_display_name(ty)} is not lowered at O0 yet")
                     return None
                 }
+                found :: lower_struct_field(p, ty, id) ?? return None
                 address :: lower_struct_storage_address(&f, base, LowerFieldInfo{offset: offset + found.offset, ty: found.ty, boxed: found.boxed})
                 base = address.base
                 offset = address.offset
@@ -134,7 +153,48 @@ fn lower_walk_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, root: LIR
         }
     }
     if offset < 0 -> offset = 0
-    Val(LowerPlaceAddress{address: LowerFieldAddress{base: base, offset: offset}, ty: ty})
+    Val(LowerPlaceAddress{address: LowerFieldAddress{base: base, offset: offset}, ty: ty, borrowed: borrowed})
+}
+
+// The place of field `id` of the runtime handle `handle` of `ty` (RuntimeRoutes.jet
+// LOWER_HANDLE_FIELDS): a Float or Bool is read at the field's own address; a
+// String or nested handle is that address as a borrowed handle, held in a
+// stack slot. None when no export lends the field as its Jet type.
+fn lower_handle_field_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, handle: LIRValueID, ty: MIRType, id: MIRFieldID) -> LowerPlaceAddress? {
+    if lower_repr(p, ty) == {
+        .Handle(_, _) -> {}
+        else -> return None
+    }
+    row := LowerRuntimeHandle?{None}
+    if ty.kind == .Apply(name, args) {
+        if args.len() == 0 -> row = lower_runtime_handle(name.name)
+    }
+    runtime :: row ?? return None
+    definition :: lower_type_def(p, ty) ?? return None
+    fields := [MIRField]{}
+    if definition.kind == .Struct(listed, _) -> fields = listed
+    loop field in lower_stored_fields(fields) {
+        if field.id != id -> next
+        lent :: lower_handle_field(runtime.runtime, field.name) ?? return None
+        expected :: LowerRouteCarrier.Handle{name: lower_record_tail(lent.kind, 7)}
+        matches :: if lent.kind == {
+            "Text" -> field.ty.kind == .String
+            "Float" -> field.ty.kind == .Float
+            "Flag" -> field.ty.kind == .Bool
+            else -> lent.kind.starts_with("Handle.") && lower_route_carrier_of(p, field.ty) == Val(expected)
+        }
+        if !matches -> return None
+        address :: lower_pointer(&f)
+        lower_call_runtime(&m, &f, "jet_rt_handle_field_{runtime.runtime}_{field.name}", [LIRValueID]{handle}, Val(address))
+        if lent.kind == "Float" || lent.kind == "Flag" {
+            return Val(LowerPlaceAddress{address: LowerFieldAddress{base: address, offset: 0}, ty: field.ty, borrowed: true})
+        }
+        slot :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 8, align: 8})
+        lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: address})
+        return Val(LowerPlaceAddress{address: LowerFieldAddress{base: slot, offset: 0}, ty: field.ty, borrowed: true})
+    }
+    None
 }
 
 // MIRRust.rs:plan_partial_moves (16915), move_projected_place (28734),

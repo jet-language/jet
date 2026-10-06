@@ -1749,7 +1749,9 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             if moving -> lower_clear_slot(p, c, &f, slot)
             return
         }
-        walk = lower_walk_projections(p, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
+        walked :: lower_walk_place(p, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
+        if moving && walked.borrowed -> return lower_fail(&m, &f, "moving out of a field of runtime handle is not lowered at O0 yet")
+        walk = walked.address
     }
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     if moving && inline {
@@ -1882,7 +1884,16 @@ fn lower_struct_field(p: MIRProgram, ty: MIRType, field: MIRFieldID) -> LowerFie
 fn lower_field(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, base: MIRValueID, field: MIRFieldID) Never! {
     aggregate :: lower_use(&m, &f, base) ?? return
     ty :: lower_value_type(c, base) ?? return lower_fail(&m, &f, "field base {base.value} has no checked type")
-    found :: lower_struct_field(p, ty, field) ?? return lower_fail(&m, &f, "field {field.value} is not a field of {mir_type_display_name(ty)}")
+    found :: lower_struct_field(p, ty, field) ?? {
+        // A field read in place inside a runtime handle (Places.jet).
+        place :: lower_handle_field_place(p, &m, &f, aggregate, ty, field) ?? return lower_fail(&m, &f, "field {field.value} is not a field of {mir_type_display_name(ty)}")
+        if c.fact_index.get(lower_move_root(c, base).value) == .Val(index) {
+            if c.mir.values[index].ownership.mode == MIROwnershipMode.Move -> return lower_fail(&m, &f, "moving out of a field of runtime handle is not lowered at O0 yet")
+        }
+        if lower_repr(p, place.ty) == .Absent -> return lower_alias_absent(&f, instruction)
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return
+        return lower_read_member(p, c, &m, &f, instruction, base, dst, place.address.base, place.address.offset, place.ty)
+    }
     if lower_repr(p, found.ty) == .Absent -> return lower_alias_absent(&f, instruction)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     address :: lower_struct_storage_address(&f, aggregate, found)

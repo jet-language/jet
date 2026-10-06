@@ -1136,6 +1136,40 @@ for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompa
     rs.push("    }");
   }
 }
+// Field places of a handle struct (one the lowering keeps as a runtime handle,
+// e.g. TempDir's `path`): jet_rt_handle_field_<R>_<field>(h) is the address of
+// the field inside the runtime value, lent while `h` lives. A String or a
+// nested handle is that address as a borrowed handle; a Float or a Bool is
+// its storage. The lowering reads (never writes or moves) through it.
+const handleFields = [];
+for (const [name, full] of handleRows) {
+  if (recordMembers.has(name)) continue;
+  const decl = recordDecl(full);
+  if (!decl || decl.kind !== "struct") continue;
+  for (const item of decl.items) {
+    const field = /^(pub(?:\([a-z]+\))?\s+)?([a-z_][a-z0-9_]*)\s*:\s*([\s\S]+)$/.exec(item);
+    if (!field || (decl.path && !field[1])) continue;
+    const ty = field[3].replace(/\s+/g, "");
+    let kind = null;
+    let pointee = null;
+    if (ty === "String") { kind = "Text"; pointee = "String"; }
+    else if (ty === "f64") { kind = "Float"; pointee = "f64"; }
+    else if (ty === "bool") { kind = "Flag"; pointee = "bool"; }
+    else if (opaqueName.test(ty) && !tagCarrier(ty, decl.path)) {
+      const nested = opaqueName.exec(ty)[1];
+      const held = handles.get(nested);
+      if (held && declarationOf(held.replace(/^crate::/, ""))?.key === declarationOf(qualify(ty, decl.path).replace(/^crate::/, ""))?.key) { kind = `Handle.${nested}`; pointee = held; }
+    }
+    if (!kind) continue;
+    handleFields.push({ name, field: field[2], kind });
+    rs.push("");
+    rs.push("    #[no_mangle]");
+    rs.push(`    pub extern "C" fn jet_rt_handle_field_${name}_${field[2]}(value: *mut ${full}) -> *const ${pointee} {`);
+    rs.push("        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.");
+    rs.push(`        unsafe { std::ptr::addr_of!((*value).${field[2]}) }`);
+    rs.push("    }");
+  }
+}
 for (const adapter of adapters) {
   const params = [];
   const names = adapter.params.map((param, index) => param.ctys.map((cty, k) => {
@@ -1225,6 +1259,22 @@ jet.push("// Int, Flag, Float, Tag.<enum>, Rec.<record>, Opt<kind>).");
 jet.push("LOWER_GENERATED_RECORDS :: prep { [LowerRecordSchema]{");
 for (const schema of recordSchemas) jet.push(`    LowerRecordSchema{jet_name: "${schema.name}", variants: "${schema.variants}", fields: "${schema.fields}"},`);
 jet.push("} }");
+jet.push("");
+jet.push("// Fields of runtime handle structs readable in place (Places.jet):");
+jet.push("// `jet_rt_handle_field_<runtime>_<field>(h)` lends the field's address; kind is");
+jet.push("// Text, Float, Flag or Handle.<runtime>.");
+jet.push("pub struct LowerHandleField { pub runtime: String, pub field: String, pub kind: String }");
+jet.push("");
+jet.push("LOWER_HANDLE_FIELDS :: prep { [LowerHandleField]{");
+for (const row of handleFields) jet.push(`    LowerHandleField{runtime: "${row.name}", field: "${row.field}", kind: "${row.kind}"},`);
+jet.push("} }");
+jet.push("");
+jet.push("pub fn lower_handle_field(runtime: String, field: String) -> LowerHandleField? {");
+jet.push("    loop row in LOWER_HANDLE_FIELDS {");
+jet.push("        if row.runtime == runtime && row.field == field -> return Val(~row)");
+jet.push("    }");
+jet.push("    None");
+jet.push("}");
 jet.push("// END GENERATED C-ABI ROUTES");
 
 const outputs = [[rsOut, rs.join("\n") + "\n"], [jetOut, jet.join("\n") + "\n"]];

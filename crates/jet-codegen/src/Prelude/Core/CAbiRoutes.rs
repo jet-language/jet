@@ -11284,6 +11284,1500 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_std::XMLRenderOptions { encoding: match m0 { 0 => crate::jet_std::XMLEncoding::UTF8, 1 => crate::jet_std::XMLEncoding::UTF8BOM, 2 => crate::jet_std::XMLEncoding::UTF16LE, 3 => crate::jet_std::XMLEncoding::UTF16BE, _ => range_stop() }, lexical: match m1 { 0 => crate::jet_std::XMLLexicalPolicy::PreserveValid, 1 => crate::jet_std::XMLLexicalPolicy::Deterministic, _ => range_stop() } })))
     }
 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_Attachment_filename(value: *mut crate::jet_email::Attachment) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).filename) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_Attachment_mime(value: *mut crate::jet_email::Attachment) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).mime) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_CBORWriter_output(value: *mut crate::jet_std::CBORWriter) -> *const crate::JetFileWriter {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).output) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_CBORWriter_limits(value: *mut crate::jet_std::CBORWriter) -> *const crate::jet_std::EncodingLimits {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).limits) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_CBORWriter_root_written(value: *mut crate::jet_std::CBORWriter) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).root_written) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_CBORWriter_finished(value: *mut crate::jet_std::CBORWriter) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).finished) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_CSVReader_input(value: *mut crate::jet_std::CSVReader) -> *const crate::JetFileReader {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).input) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_CSVReader_limits(value: *mut crate::jet_std::CSVReader) -> *const crate::jet_std::EncodingLimits {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).limits) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_CSVReader_header(value: *mut crate::jet_std::CSVReader) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).header) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_CSVReader_skip_blank(value: *mut crate::jet_std::CSVReader) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).skip_blank) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_CSVReader_eof(value: *mut crate::jet_std::CSVReader) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).eof) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_CSVWriter_output(value: *mut crate::jet_std::CSVWriter) -> *const crate::JetFileWriter {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).output) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_CSVWriter_limits(value: *mut crate::jet_std::CSVWriter) -> *const crate::jet_std::EncodingLimits {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).limits) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_CSVWriter_finished(value: *mut crate::jet_std::CSVWriter) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).finished) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_CSVWriter_pending_crlf(value: *mut crate::jet_std::CSVWriter) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).pending_crlf) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_DataLineOptions_title(value: *mut crate::jet_std::DataLineOptions) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).title) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_DataLineOptions_x_label(value: *mut crate::jet_std::DataLineOptions) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).x_label) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_DataLineOptions_y_label(value: *mut crate::jet_std::DataLineOptions) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).y_label) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_DataLineOptions_markers(value: *mut crate::jet_std::DataLineOptions) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).markers) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_DataLineOptions_style(value: *mut crate::jet_std::DataLineOptions) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).style) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_DataLineOptions_color(value: *mut crate::jet_std::DataLineOptions) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).color) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_DataLineOptions_legend(value: *mut crate::jet_std::DataLineOptions) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).legend) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_DataProvenance_source(value: *mut crate::jet_std::DataProvenance) -> *const crate::jet_std::DataSourceIdentity {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).source) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_DataProvenance_authority(value: *mut crate::jet_std::DataProvenance) -> *const crate::jet_std::DataAuthority {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).authority) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_DataSourceIdentity_locator(value: *mut crate::jet_std::DataSourceIdentity) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).locator) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_DataSourceIdentity_member(value: *mut crate::jet_std::DataSourceIdentity) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).member) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_DataStream_limits(value: *mut crate::jet_std::DataStream) -> *const crate::jet_std::DataLimits {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).limits) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_DataStream_eof(value: *mut crate::jet_std::DataStream) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).eof) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_DataStream_cancelled(value: *mut crate::jet_std::DataStream) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).cancelled) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_Envelope_from(value: *mut crate::jet_email::Envelope) -> *const crate::jet_email::Address {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).from) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetAuthApp_users_table(value: *mut crate::JetAuthApp) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).users_table) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetCursor_buf(value: *mut crate::JetCursor) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).buf) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotInspection_plan(value: *mut crate::JetDataPlotInspection) -> *const crate::JetDataPlotPlan {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).plan) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotLayer_name(value: *mut crate::JetDataPlotLayer) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).name) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotLayer_opacity(value: *mut crate::JetDataPlotLayer) -> *const f64 {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).opacity) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotPlan_source(value: *mut crate::JetDataPlotPlan) -> *const crate::JetDataPlotSourceFacts {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).source) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotPlan_schema(value: *mut crate::JetDataPlotPlan) -> *const crate::JetDataPlotSchema {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).schema) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotPlan_limits(value: *mut crate::JetDataPlotPlan) -> *const crate::jet_std::DataLimits {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).limits) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotPlan_accessibility(value: *mut crate::JetDataPlotPlan) -> *const crate::JetDataPlotAccessibility {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).accessibility) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotPlan_layout(value: *mut crate::JetDataPlotPlan) -> *const crate::JetDataPlotLayout {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).layout) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotProjection_plan(value: *mut crate::JetDataPlotProjection) -> *const crate::JetDataPlotPlan {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).plan) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotProjection_source(value: *mut crate::JetDataPlotProjection) -> *const crate::JetDataPlotSourceFacts {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).source) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotRender_body(value: *mut crate::JetDataPlotRender) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).body) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotRender_source(value: *mut crate::JetDataPlotRender) -> *const crate::JetDataPlotSourceFacts {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).source) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotScale_domain(value: *mut crate::JetDataPlotScale) -> *const crate::JetDataPlotDomain {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).domain) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotScale_clamp(value: *mut crate::JetDataPlotScale) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).clamp) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotScale_reverse(value: *mut crate::JetDataPlotScale) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).reverse) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotSchema_identity(value: *mut crate::JetDataPlotSchema) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).identity) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotSchema_row_type(value: *mut crate::JetDataPlotSchema) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).row_type) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDateTime_leap_second(value: *mut crate::JetDateTime) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).leap_second) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDbScope_policy(value: *mut crate::jet_sync::JetDbScope) -> *const crate::jet_sync::JetRowPolicy {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).policy) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetDbScope_user(value: *mut crate::jet_sync::JetDbScope) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).user) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetErr_message(value: *mut crate::JetErr) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).message) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetFileLockOwner_path(value: *mut crate::JetFileLockOwner) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).path) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetFileReader_path(value: *mut crate::JetFileReader) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).path) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetFileWriter_path(value: *mut crate::JetFileWriter) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).path) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetGlyphRun_advance_x(value: *mut crate::JetGlyphRun) -> *const f64 {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).advance_x) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetGlyphRun_advance_y(value: *mut crate::JetGlyphRun) -> *const f64 {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).advance_y) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetGlyphRun_deterministic(value: *mut crate::JetGlyphRun) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).deterministic) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetGlyphRun_approximate(value: *mut crate::JetGlyphRun) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).approximate) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPBodyChunks_done(value: *mut crate::JetHTTPBodyChunks) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).done) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPCorsPolicy_origins(value: *mut crate::JetHTTPCorsPolicy) -> *const crate::JetHTTPCorsOrigins {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).origins) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPCorsPolicy_allow_methods(value: *mut crate::JetHTTPCorsPolicy) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).allow_methods) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPCorsPolicy_allow_headers(value: *mut crate::JetHTTPCorsPolicy) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).allow_headers) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPCorsPolicy_credentials(value: *mut crate::JetHTTPCorsPolicy) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).credentials) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_method(value: *mut crate::JetHTTPRequest) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).method) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_url(value: *mut crate::JetHTTPRequest) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).url) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_path(value: *mut crate::JetHTTPRequest) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).path) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_version(value: *mut crate::JetHTTPRequest) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).version) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_headers(value: *mut crate::JetHTTPRequest) -> *const crate::JetHTTPHeaders {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).headers) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_body(value: *mut crate::JetHTTPRequest) -> *const crate::JetHTTPBody {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).body) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_body_set(value: *mut crate::JetHTTPRequest) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).body_set) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_version(value: *mut crate::JetHTTPResponse) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).version) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_headers(value: *mut crate::JetHTTPResponse) -> *const crate::JetHTTPHeaders {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).headers) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_body(value: *mut crate::JetHTTPResponse) -> *const crate::JetHTTPBody {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).body) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_trailers(value: *mut crate::JetHTTPResponse) -> *const crate::JetHTTPHeaders {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).trailers) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_suppress_body(value: *mut crate::JetHTTPResponse) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).suppress_body) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_protocol(value: *mut crate::JetHTTPResponse) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).protocol) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_remote_address(value: *mut crate::JetHTTPResponse) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).remote_address) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_reused_connection(value: *mut crate::JetHTTPResponse) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).reused_connection) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobPayload_type_id(value: *mut crate::JetJobPayload) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).type_id) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobPayload_publish(value: *mut crate::JetJobPayload) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).publish) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueClaim_receipt(value: *mut crate::JetJobQueueClaim) -> *const crate::JetJobQueueReceipt {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).receipt) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueClaim_payload(value: *mut crate::JetJobQueueClaim) -> *const crate::JetJobPayload {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).payload) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueClaim_worker(value: *mut crate::JetJobQueueClaim) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).worker) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueClaim_lease_token(value: *mut crate::JetJobQueueClaim) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).lease_token) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueReceipt_id(value: *mut crate::JetJobQueueReceipt) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).id) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueReceipt_authority(value: *mut crate::JetJobQueueReceipt) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).authority) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueReceipt_queue(value: *mut crate::JetJobQueueReceipt) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).queue) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueReceipt_job_type(value: *mut crate::JetJobQueueReceipt) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).job_type) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueReceipt_duplicate(value: *mut crate::JetJobQueueReceipt) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).duplicate) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueReceipt_signature(value: *mut crate::JetJobQueueReceipt) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).signature) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueRecord_receipt(value: *mut crate::JetJobQueueRecord) -> *const crate::JetJobQueueReceipt {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).receipt) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueStatus_queue(value: *mut crate::JetJobQueueStatus) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).queue) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueStatus_authority(value: *mut crate::JetJobQueueStatus) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).authority) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueStatus_paused(value: *mut crate::JetJobQueueStatus) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).paused) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobResult_type_id(value: *mut crate::JetJobResult) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).type_id) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetJobResult_publish(value: *mut crate::JetJobResult) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).publish) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetLiveQuery_key(value: *mut crate::JetLiveQuery) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).key) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetLiveQuery_value(value: *mut crate::JetLiveQuery) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).value) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetMIME_top(value: *mut crate::jet_std::JetMIME) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).top) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetMIME_sub(value: *mut crate::jet_std::JetMIME) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).sub) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetReflectField_name(value: *mut crate::JetReflectField) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).name) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetReflectField_value(value: *mut crate::JetReflectField) -> *const crate::JetReflectValue {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).value) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetReflectValue_type_name(value: *mut crate::JetReflectValue) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).type_name) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetReflectValue_path(value: *mut crate::JetReflectValue) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).path) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetReflectValue_display(value: *mut crate::JetReflectValue) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).display) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetRowPolicy_table(value: *mut crate::jet_sync::JetRowPolicy) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).table) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetRowPolicy_expression(value: *mut crate::jet_sync::JetRowPolicy) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).expression) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetServiceEndpoint_tree(value: *mut crate::JetServiceEndpoint) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).tree) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetServiceEndpoint_worker(value: *mut crate::JetServiceEndpoint) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).worker) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetServiceEndpoint_authority(value: *mut crate::JetServiceEndpoint) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).authority) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetServiceTree_name(value: *mut crate::JetServiceTree) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).name) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetServiceTree_authority(value: *mut crate::JetServiceTree) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).authority) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetServiceTree_delivery(value: *mut crate::JetServiceTree) -> *const crate::JetServiceDelivery {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).delivery) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetServiceTree_restart(value: *mut crate::JetServiceTree) -> *const crate::JetServiceRestart {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).restart) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetServiceTree_started(value: *mut crate::JetServiceTree) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).started) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetServiceUpgradeReceipt_migration(value: *mut crate::JetServiceUpgradeReceipt) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).migration) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetServiceUpgradeReceipt_rollback_store(value: *mut crate::JetServiceUpgradeReceipt) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).rollback_store) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetServiceUpgradeReceipt_rollback_available(value: *mut crate::JetServiceUpgradeReceipt) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).rollback_available) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTCPStream_closed(value: *mut crate::JetTCPStream) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).closed) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTCPStream_read_shutdown(value: *mut crate::JetTCPStream) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).read_shutdown) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTCPStream_write_shutdown(value: *mut crate::JetTCPStream) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).write_shutdown) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTempDirOwner_path(value: *mut crate::JetTempDirOwner) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).path) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTempFileOwner_path(value: *mut crate::JetTempFileOwner) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).path) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTestComparison_status(value: *mut crate::jet_std::JetTestComparison) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).status) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTestComparison_relation(value: *mut crate::jet_std::JetTestComparison) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).relation) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTestComparison_source(value: *mut crate::jet_std::JetTestComparison) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).source) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTestComparison_tool(value: *mut crate::jet_std::JetTestComparison) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).tool) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTestComparison_target(value: *mut crate::jet_std::JetTestComparison) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).target) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTestComparison_reason(value: *mut crate::jet_std::JetTestComparison) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).reason) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTestComparison_universal_proof(value: *mut crate::jet_std::JetTestComparison) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).universal_proof) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTLSCertificate_subject(value: *mut crate::JetTLSCertificate) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).subject) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTLSCertificate_issuer(value: *mut crate::JetTLSCertificate) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).issuer) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTLSClientConfig_trust(value: *mut crate::JetTLSClientConfig) -> *const crate::JetTLSTrust {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).trust) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTLSPeerIdentity_verified_server_name(value: *mut crate::JetTLSPeerIdentity) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).verified_server_name) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTLSPeerIdentity_leaf(value: *mut crate::JetTLSPeerIdentity) -> *const crate::JetTLSCertificate {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).leaf) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTLSPeerIdentity_cipher_suite(value: *mut crate::JetTLSPeerIdentity) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).cipher_suite) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTransaction_committed(value: *mut crate::JetTransaction) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).committed) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTuiCapabilities_color(value: *mut crate::JetTuiCapabilities) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).color) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTuiCapabilities_unicode(value: *mut crate::JetTuiCapabilities) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).unicode) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTuiCapabilities_mouse(value: *mut crate::JetTuiCapabilities) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).mouse) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTuiCapabilities_resize(value: *mut crate::JetTuiCapabilities) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).resize) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTuiCapabilities_clipboard(value: *mut crate::JetTuiCapabilities) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).clipboard) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTuiStyle_bold(value: *mut crate::JetTuiStyle) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).bold) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTuiStyle_dim(value: *mut crate::JetTuiStyle) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).dim) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetTuiStyle_underline(value: *mut crate::JetTuiStyle) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).underline) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetUDPPacket_addr(value: *mut crate::JetUDPPacket) -> *const crate::JetSocketAddr {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).addr) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetUDPPacket_truncated(value: *mut crate::JetUDPPacket) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).truncated) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetUiFileDialogRequest_title(value: *mut crate::JetUiFileDialogRequest) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).title) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetUiFileDialogRequest_grant(value: *mut crate::JetUiFileDialogRequest) -> *const crate::JetUiFsGrant {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).grant) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetUiFileDialogRequest_allow_multiple(value: *mut crate::JetUiFileDialogRequest) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).allow_multiple) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetUiFileFilter_label(value: *mut crate::JetUiFileFilter) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).label) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetUiFsGrant_root(value: *mut crate::JetUiFsGrant) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).root) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetUiFsGrant_rights(value: *mut crate::JetUiFsGrant) -> *const crate::JetUiFsRights {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).rights) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetUiNode_label(value: *mut crate::JetUiNode) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).label) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetUiNode_width(value: *mut crate::JetUiNode) -> *const f64 {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).width) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetUiNode_height(value: *mut crate::JetUiNode) -> *const f64 {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).height) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetUiShortcut_key(value: *mut crate::JetUiShortcut) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).key) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormDecodedInput_type_name(value: *mut crate::JetWebFormDecodedInput) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).type_name) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldSpec_name(value: *mut crate::JetWebFormFieldSpec) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).name) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldSpec_required(value: *mut crate::JetWebFormFieldSpec) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).required) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldSpec_label(value: *mut crate::JetWebFormFieldSpec) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).label) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldSpec_wire_name(value: *mut crate::JetWebFormFieldSpec) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).wire_name) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldState_name(value: *mut crate::JetWebFormFieldState) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).name) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldState_required(value: *mut crate::JetWebFormFieldState) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).required) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldState_value(value: *mut crate::JetWebFormFieldState) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).value) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldState_touched(value: *mut crate::JetWebFormFieldState) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).touched) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldState_validating(value: *mut crate::JetWebFormFieldState) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).validating) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormInput_type_name(value: *mut crate::JetWebFormInput) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).type_name) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormLifecycle_result(value: *mut crate::JetWebFormLifecycle) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).result) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormLifecycle_error(value: *mut crate::JetWebFormLifecycle) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).error) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormState_action(value: *mut crate::JetWebFormState) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).action) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormState_method(value: *mut crate::JetWebFormState) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).method) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormState_result(value: *mut crate::JetWebFormState) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).result) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormState_error(value: *mut crate::JetWebFormState) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).error) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormTyped_form(value: *mut crate::JetWebFormTyped) -> *const crate::JetWebForm {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).form) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormTypedSubmission_form(value: *mut crate::JetWebFormTypedSubmission) -> *const crate::JetWebFormTyped {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).form) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebFormTypedValidation_form(value: *mut crate::JetWebFormTypedValidation) -> *const crate::JetWebFormTyped {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).form) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebMutationState_optimistic(value: *mut crate::JetWebMutationState) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).optimistic) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebMutationState_value(value: *mut crate::JetWebMutationState) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).value) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebMutationState_result(value: *mut crate::JetWebMutationState) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).result) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebMutationState_error(value: *mut crate::JetWebMutationState) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).error) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebMutationState_context(value: *mut crate::JetWebMutationState) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).context) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebMutationState_rollback(value: *mut crate::JetWebMutationState) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).rollback) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebMutationState_paused(value: *mut crate::JetWebMutationState) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).paused) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebQuery_key(value: *mut crate::JetWebQuery) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).key) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebQuery_footprint(value: *mut crate::JetWebQuery) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).footprint) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebQueryState_value(value: *mut crate::JetWebQueryState) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).value) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebQueryState_error(value: *mut crate::JetWebQueryState) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).error) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebQueryState_offline(value: *mut crate::JetWebQueryState) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).offline) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetWebStoreEvent_action(value: *mut crate::JetWebStoreEvent) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).action) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetZone_name(value: *mut crate::JetZone) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).name) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetZonedDateTime_instant(value: *mut crate::JetZonedDateTime) -> *const crate::JetDateTime {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).instant) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JetZonedDateTime_zone(value: *mut crate::JetZonedDateTime) -> *const crate::JetZone {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).zone) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JSONLReader_json(value: *mut crate::jet_std::JSONLReader) -> *const crate::jet_std::JSONReader {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).json) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JSONLWriter_json(value: *mut crate::jet_std::JSONLWriter) -> *const crate::jet_std::JSONWriter {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).json) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JSONLWriter_finished(value: *mut crate::jet_std::JSONLWriter) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).finished) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JSONLWriter_pending_lf(value: *mut crate::jet_std::JSONLWriter) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).pending_lf) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JSONReader_input(value: *mut crate::jet_std::JSONReader) -> *const crate::JetFileReader {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).input) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JSONReader_limits(value: *mut crate::jet_std::JSONReader) -> *const crate::jet_std::EncodingLimits {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).limits) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JSONReader_root_started(value: *mut crate::jet_std::JSONReader) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).root_started) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JSONReader_root_done(value: *mut crate::jet_std::JSONReader) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).root_done) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JSONReader_eof(value: *mut crate::jet_std::JSONReader) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).eof) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JSONReader_record_mode(value: *mut crate::jet_std::JSONReader) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).record_mode) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JSONReader_typed_numbers(value: *mut crate::jet_std::JSONReader) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).typed_numbers) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JSONWriter_output(value: *mut crate::jet_std::JSONWriter) -> *const crate::JetFileWriter {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).output) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JSONWriter_limits(value: *mut crate::jet_std::JSONWriter) -> *const crate::jet_std::EncodingLimits {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).limits) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JSONWriter_root_written(value: *mut crate::jet_std::JSONWriter) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).root_written) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JSONWriter_finished(value: *mut crate::jet_std::JSONWriter) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).finished) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_JSONWriter_canonical(value: *mut crate::jet_std::JSONWriter) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).canonical) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_Message_from(value: *mut crate::jet_email::Message) -> *const crate::jet_email::Address {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).from) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_Message_subject(value: *mut crate::jet_email::Message) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).subject) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_Message_text(value: *mut crate::jet_email::Message) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).text) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_Message_html(value: *mut crate::jet_email::Message) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).html) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_Message_envelope(value: *mut crate::jet_email::Message) -> *const crate::jet_email::Envelope {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).envelope) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessChild_process_group(value: *mut crate::jet_std::ProcessChild) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).process_group) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessChild_detached(value: *mut crate::jet_std::ProcessChild) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).detached) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessPlan_executable_identity(value: *mut crate::jet_std::ProcessPlan) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).executable_identity) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessPlan_input_digest(value: *mut crate::jet_std::ProcessPlan) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).input_digest) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessPlan_policy_digest(value: *mut crate::jet_std::ProcessPlan) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).policy_digest) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessPlan_backend(value: *mut crate::jet_std::ProcessPlan) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).backend) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessPlan_descendants(value: *mut crate::jet_std::ProcessPlan) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).descendants) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_output(value: *mut crate::jet_std::ProcessReceipt) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).output) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_errors(value: *mut crate::jet_std::ProcessReceipt) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).errors) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_success(value: *mut crate::jet_std::ProcessReceipt) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).success) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_timed_out(value: *mut crate::jet_std::ProcessReceipt) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).timed_out) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_executable_identity(value: *mut crate::jet_std::ProcessReceipt) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).executable_identity) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_input_digest(value: *mut crate::jet_std::ProcessReceipt) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).input_digest) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_policy_digest(value: *mut crate::jet_std::ProcessReceipt) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).policy_digest) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_backend(value: *mut crate::jet_std::ProcessReceipt) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).backend) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_descendants(value: *mut crate::jet_std::ProcessReceipt) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).descendants) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_redacted(value: *mut crate::jet_std::ProcessReceipt) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).redacted) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessSpec_env_clear(value: *mut crate::jet_std::ProcessSpec) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).env_clear) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_ProcessSpec_detached(value: *mut crate::jet_std::ProcessSpec) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).detached) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_RaylibTextureAtlas_path(value: *mut crate::RaylibTextureAtlas) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).path) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_RaylibTextureAtlas_name(value: *mut crate::RaylibTextureAtlas) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).name) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_SendReport_server(value: *mut crate::jet_email::SendReport) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).server) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_SendReport_response(value: *mut crate::jet_email::SendReport) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).response) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_SendReport_accepted_at(value: *mut crate::jet_email::SendReport) -> *const String {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).accepted_at) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_XMLCanonical_comments(value: *mut crate::jet_std::XMLCanonical) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).comments) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_XMLParseOptions_entities(value: *mut crate::jet_std::XMLParseOptions) -> *const crate::jet_std::XMLEntityPolicy {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).entities) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_XMLParseOptions_limits(value: *mut crate::jet_std::XMLParseOptions) -> *const crate::jet_std::XMLLimits {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).limits) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_XMLReader_input(value: *mut crate::jet_std::XMLReader) -> *const crate::JetFileReader {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).input) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_XMLReader_limits(value: *mut crate::jet_std::XMLReader) -> *const crate::jet_std::EncodingLimits {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).limits) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_XMLReader_eof(value: *mut crate::jet_std::XMLReader) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).eof) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_XMLWriter_output(value: *mut crate::jet_std::XMLWriter) -> *const crate::JetFileWriter {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).output) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_XMLWriter_limits(value: *mut crate::jet_std::XMLWriter) -> *const crate::jet_std::EncodingLimits {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).limits) }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_XMLWriter_finished(value: *mut crate::jet_std::XMLWriter) -> *const bool {
+        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).finished) }
+    }
+
     /// TIR/lower/method_calls.rs
     #[no_mangle]
     pub extern "C" fn jet_app_auth(a0: JetCString) -> *mut crate::JetAuthApp {
