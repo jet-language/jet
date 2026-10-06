@@ -48,6 +48,8 @@ struct GoldenScratch {
 
 impl Drop for GoldenScratch {
     fn drop(&mut self) {
+        // The run-private Jetpack hangar realizes batteries read-only.
+        common::make_tree_writable(&self.path);
         let _ = fs::remove_dir_all(&self.path);
     }
 }
@@ -416,7 +418,10 @@ fn examples_compile_and_run() {
     let store = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("jet-golden-store");
     std::env::set_var("JET_STORE_DIR", &store);
     std::env::set_var("JET_FFI_CACHE_DIR", &ffi_cache);
+    let jetpack_root = scratch.join("jetpack-root");
     let _scratch = GoldenScratch { path: scratch };
+    realize_first_party_batteries(&jetpack_root);
+    std::env::set_var("JETPACK_ROOT", &jetpack_root);
     if !have_rustc {
         eprintln!("note: rustc not found; checking codegen only, skipping build+run");
     }
@@ -500,7 +505,7 @@ fn examples_compile_and_run() {
         use std::io::Write;
         let _ = writeln!(
             std::io::stderr(),
-            "golden polyglot UNAVAILABLE: {} — {}",
+            "golden polyglot UNAVAILABLE: {} — {} (the foreign toolchains come from the Nix integration shell: run under `Tools/agent/jet-env full`)",
             unavailable.len(),
             unavailable.join(", ")
         );
@@ -518,6 +523,54 @@ fn examples_compile_and_run() {
         "expected at least 2 examples, found {}",
         checked
     );
+}
+
+/// Battery examples declare a first-party battery (`deps: { gui: "0.1.0" }`)
+/// and consume it with `use gui`. The loader never realizes on demand (E0983),
+/// so the harness stages every battery the way `jetpack env --prep` does —
+/// through the built-in `batteries` source into a run-private Jetpack root —
+/// exactly as `tests/lib_use.rs` stages its library before `use` resolves it.
+fn realize_first_party_batteries(jetpack_root: &Path) {
+    let roots = jetpack::Store::Roots::at(jetpack_root.to_path_buf());
+    let store_dir = roots.hangar_dir();
+    fs::create_dir_all(&store_dir).expect("create the golden Jetpack hangar");
+    let table = jetpack::Batteries::source_table();
+    let ctx = jetpack::Provider::Ctx {
+        fixtures: None,
+        store_dir: &store_dir,
+        offline: true,
+        project_dir: None,
+        nix_index: None,
+        nix_roots: None,
+        allow_local_nix_catalog: false,
+    };
+    for slug in jetpack::Batteries::package_slugs() {
+        let reference = format!("{slug}@{}", jetpack::Batteries::SOURCE_NAME);
+        let spec = jetpack::RefSpec::classify_in(&reference, &table).unwrap_or_else(|error| {
+            panic!("classify first-party battery `{reference}`: {error:?}")
+        });
+        jetpack::Store::realize_verified(
+            &roots,
+            &ctx,
+            jetpack::Store::RealizeRequest::Package {
+                spec: &spec,
+                table: &table,
+            },
+        )
+        .unwrap_or_else(|error| {
+            // The run-private root is deleted with the scratch directory, so
+            // carry any unreproducible-action report in the failure itself.
+            let reports = fs::read_dir(jetpack_root.join("private/unreproducible"))
+                .map(|dir| {
+                    dir.flatten()
+                        .filter_map(|item| fs::read_to_string(item.path()).ok())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .unwrap_or_default();
+            panic!("realize first-party battery `{slug}`: {error:?}\n{reports}")
+        });
+    }
 }
 
 /// I1's one exception: the examples that TEACH the audited `#Unsafe` tier, so

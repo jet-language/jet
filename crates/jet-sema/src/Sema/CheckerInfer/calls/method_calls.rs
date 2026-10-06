@@ -1502,9 +1502,18 @@ impl<'a> Checker<'a> {
                         if let Some(arg) = args.first_mut() {
                             self.expect_core_arg(&format!("KeyUnlock.{method}"), 0, &expected, arg);
                         }
+                        // The constructor mints the source-owned `KeyUnlock`
+                        // record that `prepare_import_wrapped` declares, so the
+                        // value carries that canonical identity on every call path.
+                        let unlock = self
+                            .core_source_owner_module(&ns, "KeyUnlock")
+                            .map(|owner| {
+                                Type::Named(self.canonical_nominal_name(owner, "KeyUnlock"))
+                            })
+                            .unwrap_or_else(|| Type::Named("KeyUnlock".to_string()));
                         **receiver = Expr::Ident("KeyUnlock".to_string(), span);
-                        *resolved_ret_out = Some(Type::Named("KeyUnlock".to_string()));
-                        return Some(Type::Named("KeyUnlock".to_string()));
+                        *resolved_ret_out = Some(unlock.clone());
+                        return Some(unlock);
                     }
                     // D-SOLVER-LIB1=A: `Solver` is a runtime handle, not a
                     // declared Core struct, so its constructor must be claimed
