@@ -1108,6 +1108,13 @@ identity. Adding, removing, or changing a possible source changes the API digest
 and is a breaking provenance change. TIR receives only sema-approved provenance
 and lowering flags; it does not infer owners, overlaps, lifetimes, or escapes.
 
+A kept link into a growable container follows D-LINK-ITEM1=A. A brief link
+into a list item is a view: it pauses growth until its last use. A link the
+checker cannot bound to a brief range must point at an object, so a list
+whose items are kept is declared `[@T]`; a stored link into an item of `[T]`
+is rejected with a fix that rewrites the element type. This rule takes effect
+with the D-MEMREF1 link build.
+
 ### Zero-copy string views
 
 Binding `String.trim()`, `.after(sep)`, or `.before(sep)` to a local creates a

@@ -2564,6 +2564,18 @@ and aggregate per-slot `from (text: primary | fallback)` ship in the same ruling
 through the deref'd receiver; the same write in a read method is E0205 with a
 "write the receiver as `&self`" fix at the assignment.
 
+**D-LINK-ITEM1=A — kept links point at objects** *(ratified 2026-10-06,
+card #3645)*: a link (`@`, D-MEMREF1) used only within a brief, checker-bounded
+range may point at a list item; while it is live the list cannot grow,
+shrink, or relocate (E0212, as for views today). A link the checker cannot
+bound to such a range, such as one stored in a field, must point at an object:
+the list is written `[@Node]` so each item is its own counted object
+(D-MEMREF-LIFE1). A stored link into an item of `[Node]` is a compile error
+whose structured fix changes the element type to `[@Node]`; `[T]` itself
+never changes layout and pays no runtime cost. The rule covers list items,
+map values, string ranges, enum payloads inside lists, and nested lists. It
+is not built yet: it attaches to the D-MEMREF1 link build.
+
 **S63 / D-SHAPE-RESOURCE1=A / D-SHAPE-RESOURCE2=A — resource cleanup**
 *(amended 2026-07-15, cards #557/#647; supersedes D-DEFERKW1/D-SUGAR5's
 no-`defer` ruling)*: automatic scope-end cleanup remains
@@ -8300,6 +8312,7 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-LIB-EXPORT1` | C | `c0pwzvbh` |
 | `D-LIB-NAME1` | A | `c0pwzvbh` |
 | `D-LIB-REUSE1` | B | `c0pwzvbh` |
+| `D-LINK-ITEM1` | A | `c00rqc09` |
 | `D-LINTPOLICY1` | A | `c0qdl0gg` |
 | `D-LISTREMOVE1` | F | `c0mfulbb` |
 | `D-LIT-DOT1` | B | `c0buajsm` |
