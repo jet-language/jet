@@ -340,6 +340,38 @@ mod jet_c_abi {
         guard(|| record(crate::jet_std::IOError::ResourceLimit(resource_limit(limit))))
     }
 
+    // TaskFailure through the canonical task-failure ABI (TaskGroup.rs
+    // jet_task_failure_abi: Cancelled 0, DeadlineBlown 1, Panicked(reason) 2).
+    #[no_mangle]
+    pub extern "C" fn jet_rt_record_tag_JetTaskFailure(failure: *mut super::JetTaskFailure) -> i64 {
+        // SAFETY: `failure` is a live handle the caller lends for this call.
+        guard(|| crate::jet_std::jet_task_failure_abi(unsafe { &*failure }.clone()).0)
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_record_get_JetTaskFailure_Panicked(failure: *mut super::JetTaskFailure) -> JetCString {
+        // SAFETY: `failure` is a live handle the caller lends for this call.
+        guard(|| match crate::jet_std::jet_task_failure_abi(unsafe { &*failure }.clone()) {
+            (2, Some(reason)) => handle(reason),
+            _ => record_index_stop(),
+        })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_record_new_JetTaskFailure_Cancelled() -> *mut super::JetTaskFailure {
+        guard(|| record(crate::jet_std::jet_task_failure_from_code("TASK_CANCELLED", String::new())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_record_new_JetTaskFailure_DeadlineBlown() -> *mut super::JetTaskFailure {
+        guard(|| record(crate::jet_std::jet_task_failure_from_code("E3003", String::new())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_record_new_JetTaskFailure_Panicked(reason: JetCString) -> *mut super::JetTaskFailure {
+        guard(|| record(super::JetTaskFailure::Panicked(view(reason).to_owned())))
+    }
+
     // Memory for boxes owned by generated code.
 
     #[no_mangle]

@@ -275,7 +275,7 @@ pub(crate) fn method_call_in_subset(
             if let Some(type_name) = static_call_type_name(receiver, locals) {
                 if cx
                     .distinct_type_identity(&type_name)
-                    .and_then(|identity| cx.distinct_types.get(&identity))
+                    .and_then(|identity| cx.fact_distinct_types(&identity))
                     .is_some_and(|(base, _)| *base == Type::String)
                 {
                     return expr_in_subset(&args[0].expr, cx, locals);
@@ -808,15 +808,15 @@ pub(crate) fn method_call_in_subset(
                     // D-PATHFS1: `Path.from(str)` — static constructor for typed paths.
                     // Like `Set.from`, admitted before `static_method_call_in_subset`
                     // blocks `from` (an intercepted name). Path is not a user type.
-                    ("Path", "from", 1) if !cx.type_names.contains("Path") => {
+                    ("Path", "from", 1) if !cx.fact_type_name("Path") => {
                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                     // D-SHIFT1 (c7shift): `Reader.over(bytes)` / `Cursor.over(s)` —
                     // same static-constructor admission shape as `Path.from`.
-                    ("Reader", "over", 1) if !cx.type_names.contains("Reader") => {
+                    ("Reader", "over", 1) if !cx.fact_type_name("Reader") => {
                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
-                    ("Cursor", "over", 1) if !cx.type_names.contains("Cursor") => {
+                    ("Cursor", "over", 1) if !cx.fact_type_name("Cursor") => {
                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                     // D-HTTP-CORE2=A: exact nominal HTTP constructors exported
@@ -844,7 +844,7 @@ pub(crate) fn method_call_in_subset(
                     // user type. `f` is a plain in-subset lambda arg (no closure-arg
                     // gate needed here — `expr_in_subset`'s `Expr::Lambda` arm already
                     // routes through `lambda_in_subset`).
-                    ("Option", "lift2", 3) if !cx.type_names.contains("Option") => {
+                    ("Option", "lift2", 3) if !cx.fact_type_name("Option") => {
                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                     _ => {}
@@ -1151,7 +1151,7 @@ pub(crate) fn method_call_in_subset(
     // D-SIMD2 / D-LINALG1: a method on a built-in math value type (and NOT a user
     // type sharing the name). Admitted when the receiver + args are in-subset.
     if let Some(handle) = recv_type {
-        if crate::Sema::is_math_type(handle) && !cx.type_names.contains(handle) {
+        if crate::Sema::is_math_type(handle) && !cx.fact_type_name(handle) {
             let is_reduce = method == "reduce" && crate::Sema::is_simd_lane_type(handle);
             if is_reduce || crate::Sema::math_method_return(handle, method, args.len()).is_some() {
                 return expr_in_subset(receiver, cx, locals)
@@ -1217,7 +1217,7 @@ pub(crate) fn method_call_in_subset(
                     .values()
                     .any(|module| module == "core.email");
             if matches!(type_name.as_str(), "EncodingLimits" | "Limits")
-                && (!cx.struct_fields.contains_key(type_name) || is_core_email_limits)
+                && (!cx.fact_struct_fields(type_name).is_some() || is_core_email_limits)
             {
                 return true;
             }
@@ -1277,7 +1277,7 @@ pub(crate) fn method_call_in_subset(
     if recv_type.is_none() {
         if let Expr::Ident(type_name, _) = receiver {
             if !locals.contains(type_name) {
-                if let Some(variants) = cx.enum_variants.get(type_name) {
+                if let Some(variants) = cx.fact_enum_variants(type_name) {
                     if variants.iter().any(|(v, _)| v == method) {
                         return enum_is_covered(type_name, cx)
                             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
@@ -1369,16 +1369,14 @@ pub(crate) fn method_call_in_subset(
     let binding_method = cx
         .extern_funcs
         .contains_key(&foreign_binding_method_key(ty, method));
-    let sig = cx.method_sigs.get(&(metadata_ty, method.to_string()));
-    let distinct_numeric_operator = cx
-        .distinct_types
-        .get(ty)
+    let sig = cx.fact_method_sigs(&(metadata_ty, method.to_string()));
+    let distinct_numeric_operator = cx.fact_distinct_types(ty)
         .is_some_and(|(_, numeric)| *numeric)
         && !cx.distinct_ranges.contains_key(ty)
         && matches!(method, "add" | "sub" | "mul" | "div")
         && args.len() == 1;
-    let distinct_trait_method = cx.distinct_types.contains_key(ty)
-        && (cx.trait_methods.contains(&(ty.clone(), method.to_string()))
+    let distinct_trait_method = cx.fact_distinct_types(ty).is_some()
+        && (cx.fact_trait_method(&(ty.clone(), method.to_string()))
             || distinct_numeric_operator);
     if sig.is_none() && !binding_method && !distinct_trait_method {
         // No user method: a name a core/stdlib/builtin/special lowering would intercept
@@ -1459,7 +1457,7 @@ pub(crate) fn fn_field_call_ty<'a>(
     if !is_covered_struct_ty(&Type::Named(ty_name.clone()), cx) {
         return None;
     }
-    let fields = cx.struct_fields.get(ty_name)?;
+    let fields = cx.fact_struct_fields(ty_name)?;
     let (_, fty) = fields.iter().find(|(n, _)| n == method)?;
     matches!(fty, Type::Fn { .. }).then_some(fty)
 }
@@ -1558,7 +1556,7 @@ pub(crate) fn static_method_call_in_subset(
     }
     let is_string_distinct = cx
         .distinct_type_identity(type_name)
-        .and_then(|identity| cx.distinct_types.get(&identity))
+        .and_then(|identity| cx.fact_distinct_types(&identity))
         .is_some_and(|(base, _)| *base == Type::String);
     if is_string_distinct && matches!(method, "from" | "encode_hole" | "raw") {
         return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
@@ -1570,8 +1568,8 @@ pub(crate) fn static_method_call_in_subset(
     // to the `core.args merge` CoreCall; both layers are ordinary values.
     if method == "merge"
         && args.len() == 2
-        && cx.type_names.contains(type_name)
-        && cx.struct_fields.contains_key(type_name)
+        && cx.fact_type_name(type_name)
+        && cx.fact_struct_fields(type_name).is_some()
         && !cx.sigs.contains_key(&format!("{type_name}::merge"))
     {
         return args
@@ -1624,7 +1622,7 @@ pub(crate) fn static_method_call_in_subset(
     {
         return expr_in_subset(&args[0].expr, cx, locals);
     }
-    if let Some((base, _)) = cx.distinct_types.get(type_name) {
+    if let Some((base, _)) = cx.fact_distinct_types(type_name) {
         if base.is_numeric()
             && Syntax::numeric_conversion_source(method).is_some()
             && args.len() == 1
@@ -1682,13 +1680,13 @@ pub(crate) fn static_method_call_in_subset(
     // `Vec3.from_array([…])`). Admitted when the (type, method, nargs) names a covered
     // static and every arg is in-subset.
     if crate::Sema::is_math_type(type_name)
-        && !cx.type_names.contains(type_name)
+        && !cx.fact_type_name(type_name)
         && crate::Sema::math_static_return(type_name, method, args.len()).is_some()
     {
         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     if type_name == "Perf"
-        && !cx.type_names.contains("Perf")
+        && !cx.fact_type_name("Perf")
         && core_call_covered("core.perf", method)
     {
         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
@@ -1721,14 +1719,12 @@ pub(crate) fn static_method_call_in_subset(
     }
     // An enum-name receiver whose `method` names a variant emits an enum literal,
     // not a static call — exclude (it never reaches `method_sigs` on the AST path).
-    if let Some(variants) = cx.enum_variants.get(type_name) {
+    if let Some(variants) = cx.fact_enum_variants(type_name) {
         if variants.iter().any(|(v, _)| v == method) {
             return false;
         }
     }
-    let Some(sig) = cx
-        .method_sigs
-        .get(&(type_name.to_string(), method.to_string()))
+    let Some(sig) = cx.fact_method_sigs(&(type_name.to_string(), method.to_string()))
     else {
         return false;
     };
@@ -1834,7 +1830,7 @@ pub(crate) fn closure_method_in_subset(
 ) -> bool {
     let para_callback = |expr: &Expr| match expr {
         Expr::Lambda(lam) => lambda_in_subset(lam, cx, locals),
-        Expr::Ident(name, _) => cx.fn_types.contains_key(name),
+        Expr::Ident(name, _) => cx.fact_fn_types(name).is_some(),
         _ => false,
     };
     let map_callback = |expr: &Expr| match expr {
@@ -1842,7 +1838,7 @@ pub(crate) fn closure_method_in_subset(
         // Sema has already proved a local callback has the map Fn shape. Keep
         // it on the same TIR path as a literal lambda; the lowerer reads the
         // callback's resolved local type and emits the shared helper.
-        Expr::Ident(name, _) => locals.contains(name) || cx.fn_types.contains_key(name),
+        Expr::Ident(name, _) => locals.contains(name) || cx.fact_fn_types(name).is_some(),
         _ => false,
     };
     if !crate::Collections::is_closure_method(method) {

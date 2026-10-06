@@ -68,7 +68,7 @@ fn cli_recipe_inventory_is_manifest_owned_and_ast_checked() {
         "root:Tools/gauntlet/entries",
         "root:tests/agent_workloads/adapters",
         "root:tests/compiled_workloads/adapters/jet",
-        "file:dogfood/jetpack/src/cli/main.jet",
+        "file:Jetpack/CLI/Source/Entry/Main.jet",
     ] {
         assert!(
             matches!(source_profile(selector), "typed-cli" | "typed-cli-doc"),
@@ -88,11 +88,6 @@ fn cli_recipe_inventory_is_manifest_owned_and_ast_checked() {
     ] {
         assert_eq!(source_profile(selector), "raw-cli", "raw boundary drifted: {selector}");
     }
-    assert_eq!(
-        source_profile("file:dogfood/tower/run.jet"),
-        "non-cli",
-        "domain-policy dogfood is not a CLI recipe"
-    );
     for selector in [
         "producer:Source/CmdCompile.rs#run_new.native_run_src",
         "producer:crates/jet-pkg-model/src/Package/Convert.rs#new_template",
@@ -125,7 +120,7 @@ fn fixture_roles_and_approved_builder_boundary_are_explicit() {
 
     let builder = policy
         .evaluate_source(
-            "dogfood/jetpack/src/cli/main.jet",
+            "Jetpack/CLI/Source/Entry/Main.jet",
             "fn run() {\n    args.spec()\n    process.argv()\n}",
         )
         .unwrap();
@@ -490,7 +485,7 @@ fn walk_policy_distinguishes_file_only_filters_from_directory_tree_walks() {
     let policy = CorpusPolicy::load().unwrap();
     let file_only = policy
         .evaluate_source(
-            "dogfood/jetpack/tests/transcript.jet",
+            "Jetpack/Store/Tests/StoreIngest.jet",
             "use core.files as fs
 fn run() {
     entries :: fs.walk(root)
@@ -506,7 +501,7 @@ fn run() {
 
     let unrelated_walk_and_filter = policy
         .evaluate_source(
-            "dogfood/jetpack/tests/transcript.jet",
+            "Jetpack/Store/Tests/StoreIngest.jet",
             "use core.files as fs
 fn walk() {
     entries :: fs.walk(root)
@@ -522,7 +517,7 @@ fn filter(entry: Entry) {
 
     let tree = policy
         .evaluate_source(
-            "dogfood/jetpack/tests/transcript.jet",
+            "Jetpack/Store/Tests/StoreIngest.jet",
             "use core.files as fs
 fn run() {
     entries :: fs.walk(root)
@@ -628,7 +623,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
 
     let generic_policy = policy
         .evaluate_source(
-            "dogfood/tower/run.jet",
+            "Tools/tower/run.jet",
             "fn duplicate_equal(left: DataTree, right: DataTree) -> Bool { return true }",
         )
         .unwrap();
@@ -637,7 +632,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
         .any(|violation| violation.rule == "datatree-domain-policy"));
     let named_policy = policy
         .evaluate_source(
-            "dogfood/tower/run.jet",
+            "Tools/tower/run.jet",
             "fn javascript_truthy(value: DataTree) -> Bool { return true }",
         )
         .unwrap();
@@ -651,7 +646,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
     }
     let ladder = policy
         .evaluate_source(
-            "dogfood/jetpack/src/store/path_laws.jet",
+            "Jetpack/PackageModel/Source/Envelope/PathLaw.jet",
             &format!("fn run() {{ value :: {lower_ladder} }}"),
         )
         .unwrap();
@@ -660,7 +655,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
         .any(|violation| violation.rule == "dogfood-ascii"));
     let partial = policy
         .evaluate_source(
-            "dogfood/jetpack/src/store/path_laws.jet",
+            "Jetpack/PackageModel/Source/Envelope/PathLaw.jet",
             "fn run() { value :: \"text\".replace(\"A\", \"a\").replace(\"B\", \"b\") }",
         )
         .unwrap();
@@ -816,7 +811,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
 
     let path = policy
         .evaluate_source(
-            "dogfood/jetpack/src/store/ingest.jet",
+            "Jetpack/Store/Source/Ingest/TreeIngest.jet",
             "fn run() { allowed :: candidate.starts_with(\"root/\") }",
         )
         .unwrap();
@@ -825,7 +820,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
         .any(|violation| violation.rule == "dogfood-path-containment"));
     let path_without_prefix = policy
         .evaluate_source(
-            "dogfood/jetpack/src/store/ingest.jet",
+            "Jetpack/Store/Source/Ingest/TreeIngest.jet",
             "fn run() { allowed :: candidate == root }",
         )
         .unwrap();
@@ -835,7 +830,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
 
     let json = policy
         .evaluate_source(
-            "dogfood/jetpack/src/cli/main.jet",
+            "Jetpack/CLI/Source/Entry/Main.jet",
             r#"fn run() { wire :: "{{\"key\": {value}}}" }"#,
         )
         .unwrap();
@@ -844,7 +839,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
         .any(|violation| violation.rule == "dogfood-json"));
     let typed_json = policy
         .evaluate_source(
-            "dogfood/jetpack/src/cli/main.jet",
+            "Jetpack/CLI/Source/Entry/Main.jet",
             "fn run() { wire :: json.to_string(value) }",
         )
         .unwrap();
@@ -854,7 +849,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
 
     let query = policy
         .evaluate_source(
-            "dogfood/tower/run.jet",
+            "Tools/tower/run.jet",
             "fn run() { fields :: query.split(\"&\") }",
         )
         .unwrap();
@@ -863,7 +858,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
         .any(|violation| violation.rule == "dogfood-url-query"));
     let query_api = policy
         .evaluate_source(
-            "dogfood/tower/run.jet",
+            "Tools/tower/run.jet",
             "fn run() { fields :: url.query() }",
         )
         .unwrap();
@@ -873,7 +868,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
 
     let equality = policy
         .evaluate_source(
-            "dogfood/jetpack/src/plan/plan.jet",
+            "Jetpack/CLI/Source/Realize/ProjectPlan.jet",
             "fn run() { same_strings(left, right) }",
         )
         .unwrap();
@@ -882,7 +877,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
         .any(|violation| violation.rule == "dogfood-list-equality"));
     let direct_equality = policy
         .evaluate_source(
-            "dogfood/jetpack/src/plan/plan.jet",
+            "Jetpack/CLI/Source/Realize/ProjectPlan.jet",
             "fn run() { left == right }",
         )
         .unwrap();

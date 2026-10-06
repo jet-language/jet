@@ -25558,7 +25558,8 @@ impl<'a> RustEmitter<'a> {
             .map(|(symbol, _)| format!("{}{symbol}", self.config.root_prefix))
             .unwrap_or(symbol);
         let emitted = format!("{symbol}({})", args.join(", "));
-        self.numeric_conversion_result(&emitted, target, fallibility)
+        // An exact-Int adapter already returns the owned exact Int.
+        self.numeric_conversion_result(&emitted, target, fallibility, adapter.is_some())
     }
 
     fn numeric_conversion_parameter(
@@ -25580,9 +25581,12 @@ impl<'a> RustEmitter<'a> {
         emitted: &str,
         target: &MirType,
         fallibility: &MirCallFallibility,
+        exact_raw: bool,
     ) -> String {
         match fallibility {
-            MirCallFallibility::Infallible => self.numeric_conversion_value(emitted, target, false),
+            MirCallFallibility::Infallible => {
+                self.numeric_conversion_value(emitted, target, false, exact_raw)
+            }
             MirCallFallibility::Failure(MirFailureCarrier::Result { success, .. }) => {
                 let Some((ok, _error)) = target.result_parts() else {
                     panic!("MIR numeric conversion Result carrier has a non-Result target");
@@ -25590,7 +25594,8 @@ impl<'a> RustEmitter<'a> {
                 if !ok.same_checked_type(success) {
                     panic!("MIR numeric conversion Result carrier disagrees with its target");
                 }
-                let success = self.numeric_conversion_value("__jet_conversion_value", ok, true);
+                let success =
+                    self.numeric_conversion_value("__jet_conversion_value", ok, true, exact_raw);
                 format!(
                     "match {emitted} {{ \
                         Ok(__jet_conversion_value) => Ok({success}), \
@@ -25612,6 +25617,7 @@ impl<'a> RustEmitter<'a> {
         raw: &str,
         target: &MirType,
         result_success: bool,
+        exact_raw: bool,
     ) -> String {
         fn exact_int_carrier(ty: &MirType) -> bool {
             match ty.kind() {
@@ -25625,7 +25631,9 @@ impl<'a> RustEmitter<'a> {
 
         let base = self.distinct_base(target);
         let base_ty = base.unwrap_or(target);
-        let cast = if result_success && exact_int_carrier(base_ty) {
+        let cast = if exact_raw && exact_int_carrier(base_ty) {
+            raw.to_string()
+        } else if result_success && exact_int_carrier(base_ty) {
             format!(
                 "{}jet_std::jet_int_owned_from_i128(({raw}) as i128)",
                 self.config.root_prefix

@@ -461,12 +461,6 @@ fn private_function_used(
         .map(|function| function.span);
     // D-MOD-CYCLE1=A: a package is one namespace, so a call from another
     // file of the same package reaches a private function too.
-    let siblings = ledger
-        .namespace_siblings(declaration.module)
-        .into_iter()
-        .filter_map(|sibling| bundle.modules.get(sibling))
-        .map(|module| module.display.as_str())
-        .collect::<Vec<_>>();
     index
         .references_to(target_path, declaration.span)
         .iter()
@@ -476,7 +470,8 @@ fn private_function_used(
                     !function_span
                         .is_some_and(|span| site.start >= span.start && site.end <= span.end)
                 } else {
-                    siblings.contains(&site.source)
+                    index.modules.get(site.source)
+                        .is_some_and(|&source| ledger.same_namespace(declaration.module, source))
                 }
         })
 }

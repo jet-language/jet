@@ -41,7 +41,6 @@ pub(crate) use GenericModules::expand_generic_module_aliases;
 pub(crate) use GenericModules::hoist_inline_module_member_types;
 pub(crate) use GenericModules::module_type_name;
 pub use GenericModules::specialize_function_types;
-use GenericModules::{clone_enum, clone_struct};
 use Outputs::{cli_entry_param_shape, no_run_error, resolve_outputs, CLIEntryShape};
 use Pipeline::{
     check_bundle_opts_for_output as pipeline_check_bundle_opts_for_output,
@@ -1882,12 +1881,13 @@ fn populate_name_ledger(
                         // D-MOD-CYCLE1=A: a dependency package is bound through
                         // one member file; the name belongs to whichever member
                         // declares it.
-                        let owner = std::iter::once(*target_module)
-                            .chain(ledger.namespace_siblings(*target_module))
-                            .find(|&candidate| {
-                                module_declares(&bundle.modules[candidate].items, original)
-                            })
-                            .unwrap_or(*target_module);
+                        let owner = if module_declares(&bundle.modules[*target_module].items, original) {
+                            *target_module
+                        } else {
+                            ledger.namespace_owner(*target_module, original)
+                                .filter(|&candidate| module_declares(&bundle.modules[candidate].items, original))
+                                .unwrap_or(*target_module)
+                        };
                         Some((
                             format!("{}.{}", bundle.modules[owner].alias, original),
                             Some(owner),

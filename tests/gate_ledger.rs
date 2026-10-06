@@ -240,7 +240,9 @@ fn full_and_filtered_views_keep_one_provenance_ledger() {
         &["inspect", "gates", "--json", "gates.jet"],
     ));
     assert!(
-        json.starts_with("{\"schema_version\":1,\"entries\":["),
+        json.starts_with(
+            "{\"schema\":\"jet.status/v1\",\"action\":\"inspect.gates\",\"ok\":true,\"reports\":[],\"gates\":{\"entries\":["
+        ),
         "{json}"
     );
     assert!(json.contains("\"provenance\":["), "{json}");
@@ -534,7 +536,10 @@ fn i9_sema_tier_reads_the_same_gate_ledger() {
         &scratch.path,
         &["inspect", "gates", "--json", "source-gates.jet"],
     ));
-    assert!(ledger.contains("\"schema_version\":1"), "{ledger}");
+    assert!(
+        ledger.starts_with("{\"schema\":\"jet.status/v1\",\"action\":\"inspect.gates\""),
+        "{ledger}"
+    );
     assert!(ledger.contains("\"kind\":\"dependency_grant\""), "{ledger}");
     assert!(
         ledger.contains("\"kind\":\"precision_demotion\""),
@@ -744,7 +749,7 @@ fn i9_number_grid_comptime_keeps_the_exact_inline_value() {
         .items
         .iter()
         .find_map(|item| match item {
-            jet::AST::Item::Const(def) if def.name == "comptime_brightness" => Some(def),
+            jet::AST::Item::Const(def) if def.name == "COMPTIME_BRIGHTNESS" => Some(def),
             _ => None,
         })
         .expect("number-grid comptime binding");
@@ -760,7 +765,7 @@ fn i9_number_grid_repl_keeps_the_inline_range_behavior() {
     let transcript = jet::REPL::run_transcript(
         &[
             "fn set_brightness(level: Int(0..100)) -> Int(0..100) { level }",
-            "fn checked_inline(raw: Int) -> Int(0..100) String! { Int(0..100).from_int(raw) }",
+            "fn checked_inline(raw: Int) -> Int(0..100) { Int(0..100).from_int(raw) }",
             "print(set_brightness(42))",
             "print(checked_inline(3) ?? Int(0..100).from_int(0))",
         ],

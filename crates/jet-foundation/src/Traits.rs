@@ -50,6 +50,8 @@ pub fn operator_method_identity(
 #[derive(Debug, Clone, Default)]
 pub struct TraitRegistry {
     pub traits: HashMap<String, TraitInfo>,
+    /// Package-local declarations, frozen once and shared by sibling modules.
+    pub namespace_traits: Option<Arc<HashMap<String, TraitInfo>>>,
     pub trait_impls: HashSet<(String, String)>,
     /// D-OPMIX1: all validated operator hooks, including multiple RHS types
     /// for one owner/trait pair. Rows stay in registration order for inspect.
@@ -106,6 +108,17 @@ pub struct TraitInfo {
     /// D-LIB2: associated type names declared in the trait body (`type Item`).
     pub assoc_types: Vec<String>,
     pub span: Span,
+}
+
+impl TraitInfo {
+    pub fn from_definition(trait_def: &TraitDef) -> Self {
+        Self {
+            methods: trait_def.methods.iter()
+                .map(|method| (method.name.clone(), method.clone())).collect(),
+            assoc_types: trait_def.assoc_types.iter().map(|(name, _)| name.clone()).collect(),
+            span: trait_def.name_span,
+        }
+    }
 }
 
 /// How a field type's nominal spelling resolves during the bundle
@@ -1430,7 +1443,7 @@ impl TraitRegistry {
         }
         let local_type = self.local_types.contains(type_name);
         let local_trait = !trait_name.contains('.')
-            && (self.local_traits.contains(trait_name) || Generics::is_builtin_trait(trait_name));
+            && (self.is_local_trait(trait_name) || Generics::is_builtin_trait(trait_name));
         let rhs_local = operator_rhs.is_some() && self.operator_rhs_is_local(&rhs_type);
         if operator_trait && !local_type && !(arithmetic_trait && rhs_local) {
             diags.push(e0902(span));
@@ -1548,7 +1561,10 @@ impl TraitRegistry {
             }
             return;
         }
-        if let Some(trait_info) = self.traits.get(trait_name) {
+        // Borrow only the declaration maps: validation also writes index facts.
+        if let Some(trait_info) = self.traits.get(trait_name)
+            .or_else(|| self.namespace_traits.as_ref()?.get(trait_name))
+        {
             let provided: HashSet<String> = methods.iter().map(|m| m.name.clone()).collect();
             // D-LIB2: methods that have a default body in the trait don't need to be
             // provided by the implementor.
@@ -2011,8 +2027,23 @@ impl TraitRegistry {
         }
     }
 
+    pub fn trait_info(&self, name: &str) -> Option<&TraitInfo> {
+        self.traits.get(name)
+            .or_else(|| self.namespace_traits.as_ref()?.get(name))
+    }
+
+    pub fn trait_infos(&self) -> impl Iterator<Item = (&String, &TraitInfo)> {
+        self.traits.iter().chain(self.namespace_traits.iter().flat_map(|traits| traits.iter())
+            .filter(|(name, _)| !self.traits.contains_key(*name)))
+    }
+
+    pub fn is_local_trait(&self, name: &str) -> bool {
+        self.local_traits.contains(name)
+            || self.namespace_traits.as_ref().is_some_and(|traits| traits.contains_key(name))
+    }
+
     pub fn is_trait_name(&self, name: &str) -> bool {
-        self.traits.contains_key(name)
+        self.trait_info(name).is_some()
             || Generics::is_builtin_trait(name)
             || Generics::is_literal_capability(name)
     }
@@ -3911,6 +3942,30 @@ fn trait_assoc(items: &[Item], type_name: &str, trait_name: &str, assoc: &str) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn namespace_trait_metadata_is_shared_and_local_bindings_shadow_it() {
+        let namespace = Arc::new(HashMap::from([("Named".to_owned(), TraitInfo {
+            methods: HashMap::new(),
+            assoc_types: vec!["Item".to_owned()],
+            span: Span::new(1, 2),
+        })]));
+        let mut registry = TraitRegistry {
+            namespace_traits: Some(Arc::clone(&namespace)),
+            ..TraitRegistry::default()
+        };
+        let snapshot = registry.clone();
+        assert!(registry.is_trait_name("Named"));
+        assert!(registry.is_local_trait("Named"));
+        assert_eq!(registry.trait_info("Named").unwrap().assoc_types, vec!["Item"]);
+        assert!(Arc::ptr_eq(snapshot.namespace_traits.as_ref().unwrap(), &namespace));
+        registry.traits.insert("Named".to_owned(), TraitInfo {
+            methods: HashMap::new(), assoc_types: Vec::new(), span: Span::new(3, 4),
+        });
+        assert_eq!(registry.trait_info("Named").unwrap().span, Span::new(3, 4));
+        assert_eq!(snapshot.trait_info("Named").unwrap().span, Span::new(1, 2));
+        assert_eq!(registry.trait_infos().filter(|(name, _)| *name == "Named").count(), 1);
+    }
 
     #[test]
     fn sized_scalars_only_satisfy_builtin_traits() {

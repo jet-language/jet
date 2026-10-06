@@ -1948,7 +1948,7 @@ pub(crate) fn demand_generic_free_function(
     if type_param_names.is_empty() {
         return None;
     }
-    let sig = cx.sigs.get(name)?;
+    let sig = cx.fact_sigs(name)?;
     let param_types = sig.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
     let shape = generic_call_shape(args, explicit_type_args);
     let subst = generic_call_substitution(&param_types, type_param_names, &shape)?;
@@ -2150,9 +2150,10 @@ fn merge_core_source_generic_calls(target: &Cx, source: &Cx) {
 fn build_imported_generic_core_cx(
     bundle: &ProgramBundle,
     module_idx: usize,
-    extern_funcs: &std::collections::HashMap<String, crate::Codegen::ExternFn>,
+    extern_funcs: &std::sync::Arc<std::collections::HashMap<String, crate::Codegen::ExternFn>>,
     debug_linemap: bool,
     spawn_site_base: usize,
+    facts: &std::sync::Arc<crate::Codegen::Context::BundleCodegenFacts>,
 ) -> Cx {
     let imported = &bundle.modules[module_idx];
     let mut imported_cx = build_cx_items(
@@ -2164,7 +2165,7 @@ fn build_imported_generic_core_cx(
         &bundle.edition,
     );
     imported_cx.debug_linemap = debug_linemap;
-    populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+    populate_cx_from_bundle(&mut imported_cx, bundle, module_idx, facts);
     register_own_struct_shapes(&mut imported_cx, bundle, module_idx);
     crate::Codegen::Context::collect_iterable_hooks(&mut imported_cx, &imported.items);
     imported_cx.jit_local_call_prefix = Some(format!("{}::", mangle(&imported.alias)));
@@ -2287,7 +2288,7 @@ fn lower_core_source_generic_template(
 
 fn specialize_checked_core_source_generics(
     bundle: &ProgramBundle,
-    extern_funcs: &std::collections::HashMap<String, crate::Codegen::ExternFn>,
+    extern_funcs: &std::sync::Arc<std::collections::HashMap<String, crate::Codegen::ExternFn>>,
     debug_linemap: bool,
     cx: &Cx,
     funcs: &mut Vec<TFunc>,
@@ -2302,10 +2303,7 @@ fn specialize_checked_core_source_generics(
         for ((owner, method), mut instantiations) in calls {
             instantiations.sort_by_key(|types| format!("{types:?}"));
             instantiations.dedup();
-            let module_idx = (0..bundle.modules.len())
-                .find(|index| {
-                    bundle.name_ledger.module_identity(*index).as_deref() == Some(owner.as_str())
-                })
+            let module_idx = bundle.name_ledger.module_by_identity(&owner)
                 .ok_or_else(|| {
                     LowerError::new(
                         crate::Diagnostics::Span::new(0, 0),
@@ -2319,6 +2317,7 @@ fn specialize_checked_core_source_generics(
                 extern_funcs,
                 debug_linemap,
                 spawn_lambdas.len(),
+                cx.bundle_facts.as_ref().expect("checked bundle context must share program facts"),
             );
             for type_args in instantiations {
                 let instance = generic_free_function_instance_key(&method, &type_args);
@@ -2436,8 +2435,8 @@ fn lower_imported_generated_codecs(
             .unwrap_or(&[]);
         for owner in imported_type_owners(bundle, module_idx) {
             let qualified = imported_type_name(&owner, &implementation.type_name);
-            if !cx.struct_fields.contains_key(&qualified)
-                && !cx.enum_variants.contains_key(&qualified)
+            if !cx.fact_struct_fields(&qualified).is_some()
+                && !cx.fact_enum_variants(&qualified).is_some()
             {
                 continue;
             }
@@ -2734,15 +2733,27 @@ fn collect_fragment_module_callable(
             if is_local(alias.as_str()) {
                 return;
             }
-            let Some(module) = module_imports.get(alias) else {
-                return;
-            };
-            (module.as_str(), method.as_str())
+            if let Some((module, name)) = imported_functions.get(&format!("{alias}.{method}")) {
+                (module.as_str(), name.as_str())
+            } else {
+                let Some(module) = module_imports.get(alias) else { return };
+                (module.as_str(), method.as_str())
+            }
         }
         crate::AST::Expr::Call(call) if !is_local(call.name.as_str()) => {
             let Some((module, name)) = imported_functions.get(&call.name) else {
                 return;
             };
+            (module.as_str(), name.as_str())
+        }
+        crate::AST::Expr::Ident(name, _) if !is_local(name) => {
+            let Some((module, name)) = imported_functions.get(name) else { return };
+            (module.as_str(), name.as_str())
+        }
+        crate::AST::Expr::Field(receiver, name, _) => {
+            let crate::AST::Expr::Ident(alias, _) = receiver.as_ref() else { return };
+            if is_local(alias) { return }
+            let Some((module, name)) = imported_functions.get(&format!("{alias}.{name}")) else { return };
             (module.as_str(), name.as_str())
         }
         _ => return,
@@ -3680,10 +3691,19 @@ fn lower_mir_fragment(
         "",
         &file,
         None,
-        &std::collections::HashMap::new(),
+        &std::sync::Arc::default(),
         "2026",
     );
     if let Some(facts) = context.checked_nominals {
+        if facts.name_ledger.module_alias(facts.module_idx).is_some() {
+            cx.scope_names = Some(facts.name_ledger.body_snapshot());
+            cx.bundle_module = facts.module_idx;
+        }
+        for function in context.funcs.values() {
+            if let Some(signature) = facts.function_signatures.get(&function.name) {
+                cx.install_fragment_signature(function, signature);
+            }
+        }
         cx.import_mods = facts
             .import_modules
             .iter()
@@ -3696,7 +3716,7 @@ fn lower_mir_fragment(
             .collect();
         // Each signature names the loaded module whose body the fragment
         // lowers on demand, so the call keys the same target as at runtime.
-        cx.core_source_sigs = facts
+        cx.core_source_sigs = std::sync::Arc::new(facts
             .core_source_sigs
             .iter()
             .filter_map(|(key, signature)| {
@@ -3711,7 +3731,7 @@ fn lower_mir_fragment(
                     },
                 ))
             })
-            .collect();
+            .collect());
         cx.local_type_identities
             .extend(facts.nominal_identities.clone());
         cx.type_names.extend(facts.structs.keys().cloned());
@@ -3726,12 +3746,12 @@ fn lower_mir_fragment(
     }
     cx.module_identity = module.clone();
     cx.core_imports = context.core_imports.clone();
+    let core_source_modules = std::sync::Arc::make_mut(&mut cx.core_source_modules);
     for (alias, module) in &cx.core_imports {
         if let Some(source) = jet_foundation::CoreModuleExports::core_source_module(module) {
             cx.import_mods
                 .insert(alias.clone(), crate::Codegen::mangle(source.alias));
-            cx.core_source_modules
-                .insert(module.clone(), source.alias.to_string());
+            core_source_modules.insert(module.clone(), source.alias.to_string());
         }
     }
     cx.const_values = context.globals.clone();
@@ -3992,14 +4012,14 @@ fn fragment_core_source_cx(
         "",
         &source.module_identity,
         None,
-        &std::collections::HashMap::new(),
+        &std::sync::Arc::default(),
         "2026",
     );
     // A same-module constant read lowers to the `Global` key its declaration
     // row carries in the fragment program (`fragment_core_source_constants`),
     // exactly as `populate_cx_from_bundle` keys it for runtime lowering.
     for constant in &source.constants {
-        let Some(ty) = cx.const_types.get(&constant.name).cloned() else {
+        let Some(ty) = cx.fact_const_types(&constant.name).cloned() else {
             continue;
         };
         let row = tir_to_mir_types::lower_constant(constant, &source.module_identity);
@@ -4008,13 +4028,22 @@ fn fragment_core_source_cx(
     }
     cx.module_alias = source.alias.clone();
     cx.module_identity = source.module_identity.clone();
+    if let Some(owner) = facts.name_ledger.module_by_alias(&source.alias) {
+        cx.scope_names = Some(facts.name_ledger.body_snapshot());
+        cx.bundle_module = owner;
+    }
+    for function in source.functions.values() {
+        if let Some(signature) = source.function_signatures.get(&function.name) {
+            cx.install_fragment_signature(function, signature);
+        }
+    }
     cx.jit_local_call_prefix = Some(format!("{}::", mangle(&source.alias)));
     cx.core_source_sigs = fragment_cx.core_source_sigs.clone();
-    cx.core_source_modules = facts
+    cx.core_source_modules = std::sync::Arc::new(facts
         .core_source_bodies
         .iter()
         .map(|(module, loaded)| (module.clone(), loaded.alias.clone()))
-        .collect();
+        .collect());
     cx.core_imports = source.core_imports.clone();
     for (alias, module) in &source.core_imports {
         if let Some(loaded) = facts.core_source_bodies.get(module) {
@@ -4062,8 +4091,17 @@ fn install_fragment_module_imports(
     }
     for (local, (module, name)) in imported_functions {
         if let Some(loaded) = facts.core_source_bodies.get(module) {
-            cx.unqualified_file
-                .insert(local.clone(), (mangle(&loaded.alias), name.clone()));
+            let binding = (mangle(&loaded.alias), name.clone());
+            if let Some((alias, member)) = local.rsplit_once('.') {
+                cx.reexport_calls.insert((alias.to_owned(), member.to_owned()), binding);
+            } else {
+                cx.unqualified_file.insert(local.clone(), binding);
+            }
+            if let (Some(function), Some(signature)) =
+                (loaded.functions.get(name), loaded.function_signatures.get(name))
+            {
+                cx.install_fragment_function_types(local, function, signature);
+            }
         }
     }
     for (key, signature) in signatures {
@@ -5035,7 +5073,8 @@ fn lower_checked_tir_program_on_stack(
         let module = bundle.modules.get(bundle.entry).ok_or_else(|| {
             LowerError::new(crate::Diagnostics::Span::new(0, 0), "missing entry module")
         })?;
-        let extern_funcs = bundle_extern_funcs(bundle);
+        let facts = crate::Codegen::Context::BundleCodegenFacts::new(bundle);
+        let extern_funcs = facts.extern_funcs();
         let mut cx = build_cx_items(
             &module.items,
             &module.source,
@@ -5045,7 +5084,7 @@ fn lower_checked_tir_program_on_stack(
             &bundle.edition,
         );
         cx.debug_linemap = debug_linemap;
-        populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
+        populate_cx_from_bundle(&mut cx, bundle, bundle.entry, &facts);
         register_own_struct_shapes(&mut cx, bundle, bundle.entry);
         crate::Codegen::Context::collect_iterable_hooks(&mut cx, &module.items);
         let type_shapes = collect_type_shapes(&module.items);
@@ -5446,7 +5485,7 @@ fn lower_checked_tir_program_on_stack(
                 &bundle.edition,
             );
             imported_cx.debug_linemap = debug_linemap;
-            populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+            populate_cx_from_bundle(&mut imported_cx, bundle, module_idx, &facts);
             boxed_edges_by_module.insert(imported_owner.clone(), imported_cx.boxed_edges.clone());
             auto_printable_by_module
                 .insert(imported_owner.clone(), imported_cx.auto_printable.clone());
@@ -11172,6 +11211,8 @@ pub fn validate_tir_support(bundle: &ProgramBundle) -> Vec<TirCoverageIssue> {
     let callables = cost_callables(bundle, app_graph.as_ref());
     let reachable = reachable_cost_callables(bundle, &callables);
     let mut contexts = std::collections::HashMap::new();
+    let facts = crate::Codegen::Context::BundleCodegenFacts::new(bundle);
+    let extern_funcs = facts.extern_funcs();
     let mut issues = Vec::new();
 
     for (index, callable) in callables.iter().enumerate() {
@@ -11199,7 +11240,6 @@ pub fn validate_tir_support(bundle: &ProgramBundle) -> Vec<TirCoverageIssue> {
             continue;
         };
         let cx = contexts.entry(callable.module).or_insert_with(|| {
-            let extern_funcs = bundle_extern_funcs(bundle);
             let mut cx = build_cx_items(
                 &module.items,
                 &module.source,
@@ -11208,7 +11248,7 @@ pub fn validate_tir_support(bundle: &ProgramBundle) -> Vec<TirCoverageIssue> {
                 &extern_funcs,
                 &bundle.edition,
             );
-            populate_cx_from_bundle(&mut cx, bundle, callable.module);
+            populate_cx_from_bundle(&mut cx, bundle, callable.module, &facts);
             register_own_struct_shapes(&mut cx, bundle, callable.module);
             crate::Codegen::Context::collect_iterable_hooks(&mut cx, &module.items);
             register_foreign_enum_variants(&mut cx, bundle, callable.module);
