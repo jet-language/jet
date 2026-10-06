@@ -3326,7 +3326,9 @@ fn jet_codegen_lower_core_closure_call(builder: &JetCodegenBuilder, program: Jet
 }
 
 fn jet_codegen_lower_shared_guard_wait(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, guard: TExpr, condition: TExpr, predicate: TLambda) -> MIRValueID {
-    guard_value := jet_codegen_lower_consuming_value(&builder, program, guard)
+    // `wait` borrows its guard: the kernel reacquires the same lock and the
+    // guard stays live after the call (Rust `SharedGuardWait` lowering).
+    guard_value := jet_codegen_lower_expr(&builder, program, guard)
     condition_value := jet_codegen_lower_expr(&builder, program, condition)
     predicate_value := jet_codegen_lower_lambda(&builder, program, predicate, false, "direct").value
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)

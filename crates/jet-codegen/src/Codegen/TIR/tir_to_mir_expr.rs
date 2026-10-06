@@ -2267,7 +2267,9 @@ pub(super) fn lower_expr(
             condition,
             predicate,
         } => {
-            let guard = lower_consuming_value(ctx, guard)?;
+            // `wait` borrows its guard: the kernel reacquires the same lock and
+            // the guard stays live (and droppable) after the call.
+            let guard = ctx.lower_child(guard)?;
             let condition = ctx.lower_child(condition)?;
             let predicate = ctx.lower_lambda(predicate)?;
             let call =
