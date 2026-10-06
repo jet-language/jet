@@ -12329,14 +12329,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.sys.home_dir
-    #[no_mangle]
-    pub extern "C" fn jet_std_env_home_dir(some: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_std_env_home_dir() {
-            Some(value) => { unsafe { some.write(handle(value)) }; 1 }
-            None => 0,
-        })
-    }
 
     /// core.sys.set
     #[no_mangle]
@@ -13550,11 +13542,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_os_exitcode(a0)))
     }
 
-    /// core.sys.expand
-    #[no_mangle]
-    pub extern "C" fn jet_std_os_expand(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_std_os_expand(unsafe { &*a0 })))
-    }
 
     /// core.sys.family
     #[no_mangle]

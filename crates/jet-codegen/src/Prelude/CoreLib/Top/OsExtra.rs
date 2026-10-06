@@ -125,39 +125,6 @@ pub(crate) fn jet_std_os_getpid() -> i64 {
     jet_std_os_pid()
 }
 
-pub(crate) fn jet_std_os_expand(template: &String) -> String {
-    let mut out = String::with_capacity(template.len());
-    let bytes = template.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'$' {
-            i += 1;
-            if i < bytes.len() && bytes[i] == b'{' {
-                i += 1;
-                let start = i;
-                while i < bytes.len() && bytes[i] != b'}' {
-                    i += 1;
-                }
-                let name = &template[start..i];
-                if i < bytes.len() {
-                    i += 1;
-                }
-                out.push_str(&jet_std_env_get(&name.to_string()).unwrap_or_default());
-            } else {
-                let start = i;
-                while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
-                    i += 1;
-                }
-                let name = &template[start..i];
-                out.push_str(&jet_std_env_get(&name.to_string()).unwrap_or_default());
-            }
-        } else {
-            out.push(bytes[i] as char);
-            i += 1;
-        }
-    }
-    out
-}
 
 #[cfg(unix)]
 #[repr(C)]
