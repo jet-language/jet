@@ -35,10 +35,12 @@ no ratified or open decision already answers?
 | Bucket | Count |
 |---|---|
 | Claims read | 2,275 |
-| Distinct owner-choice candidates | 22 |
-| Candidates with a drafted ballot in `~/.cache/jet-dev/ballots/READY/` | see "Ballots drafted" |
-| Candidates excluded because a decision already answers them | 17 |
-| Card or card-note leads (implementation under existing law) | 21 |
+| Distinct owner-choice candidates (claims pass C01-C22, API comparisons C23-C33) | 33 |
+| Candidates with a validated ballot in `~/.cache/jet-dev/ballots/READY/` | 15 |
+| Candidates excluded because a decision already answers them | 19 |
+| Card or card-note leads from the claims pass (implementation under existing law) | 21 |
+| API comparison rows (7 miners, all 50 sources) | 400 |
+| New cards, card notes and reopen flags in `~/.cache/jet-dev/ballots/CARDS-TO-POST.json` | 36 / 22 / 2 |
 
 ## Owner-choice candidates
 
@@ -69,6 +71,17 @@ migration; L = a subsystem or product-scope decision.
 | C20 | Whether a division by a constant zero is a check error or stays a run-time stop. | learning-compilers:RC5; v3-P2:PYB-124 | Not caught at check time (probe p04); exact `/` by zero also reports line 0 (card NC-STOPS #4627). | Error-versus-stop rule for a language operator. | S | Candidate; not drafted (low stakes; may be decided as a lint under D-LINTPOLICY1) |
 | C21 | Whether the HTTP server answers unknown status codes with an invented reason phrase. | web-data-net:C57; v3-H2:FknTw9bJsXM-B24, B25 | Four divergent reason tables; the serializer falls back to "OK" (503 goes out as "503 OK"). | Wire behavior; mostly a bug, but the empty-reason policy is a choice. | S | Note on #4635 (empty reason for unknown codes is the RFC answer, so not balloted) |
 | C22 | Whether `jet build` reports compiler performance from a flag rather than `JET_TIMING=1`. | systems-perf:SP2-A2U_GMWl9l4-02; systems-perf-deep:SD-A2-02 | `JET_TIMING=1` prints phase timings (environment.md:47); `jet inspect explain-build` exists. | CLI surface. | S | Note on #3961 (D-CLI-ONE1 inspect tree already governs where it lives) |
+| C23 | One word for membership on every collection (`has` or `contains`). | v3-P2:PYB-33, PYB-34, PYB-84; APICompPython u06, v01 | List and Queue use `contains`, Set/Rank/Tally/Bits `has`, Map `has_key` and `contains_value`. E0384 says write `contains` on a Set, then E0311 calls `contains` foreign and suggests `has`. D-ONCE-VERB1 requires one verb but never chose it. | Ratified law demands one word; the word is the owner's. | S | Ballot D-HAS-VERB1 on #4022 |
+| C24 | Whether `a ?? b ?? c` groups from the right. | learning-compilers:AP1 (ts38mSIUPSg); APICompLearn e09, f02 | Associativity of `??` is unwritten (spec.md:826-830); left grouping rejects a fallback chain with E0405 and leaks the backup's failure. | Operator rule. | S | Ballot D-FALLBACK-CHAIN1 on #4628 |
+| C25 | Whether a fact read such as `T.$layout.size` may appear inline in ordinary code. | APICompLearn e06, g02 (7_o-YRxf_cc) | Inline reads are E0302 "compile-time only"; a module-level `prep` binding works. | Language rule under D-LAYOUT-FACTS1/D-PLACE1. | S | Candidate; not drafted (fix the proven E0107 defect first, card in CARDS-TO-POST) |
+| C26 | What reversed or invalid bounds do in `random.int`, `randint` and `rng.int`. | APICompLearn e11; APICompLangB q15 | `random.int(10, 1)` returns 10; `rng.int(10, 1)` stops E3010; core-library.md:1879 documents "returns lo". | Public API error behavior with conflicting doc and runtime. | S | Candidate; not drafted |
+| C27 | A field-level codec override (`#Codec(encode:, decode:)`) so an app can encode a foreign type's field without a wrapper. | APICompLangA (IGmwiyines0 21:11-26:13) | Encode/Decode derive per type; the orphan rule blocks adding Encode for a foreign type. | New marker. | S | Candidate; not drafted (single source) |
+| C28 | A `git` dependency source in `package.jet` (URL plus locked commit). | APICompLangA (DuGy1tmKP-w 42:20-43:26); languages-a:Q39 | APICompLangA found no git source spelling in Docs/spec; the ledger filed Q39 against done card #532. | Package manifest surface. | M | Candidate; needs reconciliation with Jetpack sources (D-VERDICT-2190-1) before a ballot |
+| C29 | Whether D-MEMBER-LIVE1 also reports parameter defaults that every call overrides or no call overrides. | APICompLangB p01_default_always (yKl2fSdnw7w 53:47) | Defaults exist (spec.md:314); D-MEMBER-LIVE1 covers fields and variants only. Corrects claim languages-b:R48. | Amendment to a ratified lint scope. | S | Candidate; amendment to D-MEMBER-LIVE1 |
+| C30 | Whether `math.to_bits` returns U64 instead of a signed Int. | APICompCraft p03, p11 | Signed result breaks binary packing of negative doubles. | Public signature change. | S | Owner nod inside the binary-codec card |
+| C31 | Whether `compare_exchange` returns the observed value on failure. | APICompSystems b_atomic_time (hD0fyLtWIIE) | Returns Bool only. | Public signature change. | S | Note on #2887 |
+| C32 | Whether `print(a, b)` joins arguments on one line. | APICompPython t01 | Prints one argument per line. | Already decided. | S | Excluded: D-VERDICT-1321-1 (one line per argument); doc gap only |
+| C33 | Whether `[T].average()` returns an optional with exact division. | APICompPython r02, r03, u05 | Returns 0.0 for empty and a binary float. | Implied by D-STATS-CANONICAL1 (no answer gives None) and D-INTDIV1. | S | Card in CARDS-TO-POST |
 
 ## Excluded: already answered by a decision
 
@@ -91,6 +104,8 @@ migration; L = a subsystem or product-scope decision.
 | Browser source maps (languages-a:Q22, E31) | D-OBS1/D-OBS3 (`.jetmap`); emitting browser-readable maps is implementation |
 | Lint settings are order independent (systems-perf:SP2-DaJWWePhRsM-13) | D-ECO-COMPOSE2 |
 | Core functions returning `-1` for "absent" (v3-H1:FknTw9bJsXM-A06; web-data-net:C04, C47; v3-H2:FknTw9bJsXM-B04) | D-OUTCOME-SHAPE1 (absence is an optional) and D-CHOOSE-FIND1; the repair is implementation |
+| `print(a, b)` layout (APICompPython t01) | D-VERDICT-1321-1 |
+| `average()` on empty input (APICompPython r02) | D-STATS-CANONICAL1, D-INTDIV1 (card filed) |
 
 ## Card and card-note leads (implementation under existing law)
 
@@ -136,11 +151,43 @@ state, read from the spec:
 
 ## API comparisons
 
-Main assigned seven API-comparison miners (APICompSystems, APICompLangA,
-APICompLangB, APICompPython, APICompLearn, APICompCraft, APICompWeb) to compare
-every API named in the 50 sources with Jet's counterpart. Their rows land in
-`/mnt/jetscratch/mine/apicomp/<Name>.tsv`. This section is filled from those
-files when they arrive; the claim-level comparisons already made above are:
+Seven API-comparison miners (APICompSystems, APICompLangA, APICompLangB,
+APICompPython, APICompLearn, APICompCraft, APICompWeb) compared every API named
+in the 50 sources with Jet's counterpart. The full 400 rows, one per API, with
+source locator, Jet counterpart, verdict, concrete action and probe evidence,
+are in `/mnt/jetscratch/mine/apicomp/<Name>.tsv`, with probes under
+`/mnt/jetscratch/mine/apicomp/probes/`.
+
+| Verdict | Rows |
+|---|---|
+| Jet avoids the source's mistake | 93 |
+| Jet is improvable | 93 |
+| Equal | 78 |
+| Jet is better | 63 |
+| Jet repeats the mistake | 44 |
+| Jet is missing the API | 29 |
+
+Every improvable, repeated or missing row became a ballot (C23-C33 above), a
+new card or a card note in `~/.cache/jet-dev/ballots/CARDS-TO-POST.json`, or a
+proven-defect row in `~/.cache/jet-dev/ballots/FIX-WAVES.md`. Two done cards
+still reproduce and are flagged for reopening: #4374 (two `Mul` hooks on one
+type) and #4285 (about 25 alias spellings still ship). The headline rows:
+
+| Source API | Jet counterpart | Verdict | Action |
+|---|---|---|---|
+| testify/Go regex inputs; RE2 linear time | `core.regex` recursion overflows at 3,000 chars | repeats a mistake | card (FIX-WAVES wave 1) |
+| Elixir `String.upcase("José")` | `core.text.parse.upper` gives "JOSé" | repeats the Latin-1 mistake | card |
+| Go `v, ok := <-ch` | `tasks.recv` returns -1 for closed | repeats the sentinel mistake | card |
+| QueryPerformanceCounter to CLOCK_MONOTONIC | Stopwatch reads the wall clock | repeats the wrong-clock mistake | card |
+| V8 `JSON.parse` | `json.parse` about 460x slower | improvable | card with perf budget |
+| Go `conn.Read` partial UTF-8 | `tcp_read_text` loses split scalars | repeats a mistake | card |
+| C++ `std::bit_cast` | `to_bits` signed; negative doubles fail to pack | repeats a mistake | card plus owner nod (C30) |
+| Python `2 ** 3` | E0208 suggests `#Unsafe` | improvable | card |
+| Python `list.pop(0)` | checks clean, ICE at run | defect | card |
+| Rust `Option<Box<T>>`, closures, `[T; N]` | ownership, captures, fixed arrays | better or equal | doc fixes only |
+| C++ manual `delete`, `std::move` | ownership and moves | avoids the mistake | none |
+
+The claim-level comparisons made before the miners reported:
 
 | Source API | Jet counterpart | Verdict | Action |
 |---|---|---|---|
@@ -164,5 +211,25 @@ files when they arrive; the claim-level comparisons already made above are:
 
 ## Ballots drafted
 
-Listed in the report to Main; each passes
-`node ~/.cache/jet-dev/ballots/READY/validate.mjs <file>`.
+All 15 pass `node ~/.cache/jet-dev/ballots/READY/validate.mjs <file>` with no
+gaps. Recommended option is A in each.
+
+| Ballot file | Card | Candidate |
+|---|---|---|
+| D-RANGE-BACKWARD1.json | #4629 | C01 |
+| D-SLICE-OPEN1.json | #4022 | C02 |
+| D-LIST-PLUS1.json | #4022 | C03 |
+| D-STDOUT-BUFFER1.json | #4634 | C04 |
+| D-HTTP-DATE1.json | #4635 | C05 |
+| D-HTTP-REQMEM1.json | #4635 | C06 |
+| D-LOG-SPAN-SCOPE1.json | #4632 | C07 |
+| D-ORDER-BY1.json | #4499 | C08 |
+| D-HTTP-HEADER-BAD1.json | #3665 | C09 |
+| D-TOOL-STABLE1.json | #1349 | C10 |
+| D-LEARN-WEB1.json | #4630 | C11 |
+| D-GAME-HIDDEN1.json | #238 | C12 |
+| D-GAME-ACTIONSET1.json | #238 | C13 |
+| D-HAS-VERB1.json | #4022 | C23 |
+| D-FALLBACK-CHAIN1.json | #4628 | C24 |
+
+Not drafted, with the reason in each row above: C14-C22 and C25-C31.
