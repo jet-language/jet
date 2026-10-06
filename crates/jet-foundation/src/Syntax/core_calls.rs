@@ -1407,7 +1407,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 84f1c43cd2aabd481949637487e22ac6d12b14036e9915d0397f545ecdb27627
+// Source SHA-256: 96945d35421efe1fe5a1769b3e681ffb3e9a68bf2e08733b88121b82339086c7
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2807,10 +2807,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.db", "transaction", "jet_db_scope_transaction", false, &[true, true, true], ) .without_direct_aot() .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),
     CoreCallRecord::new( "core.db", "migrate", "jet_db_scope_migrate", false, &[true, true, true], ) .without_direct_aot() .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),
     CoreCallRecord::new("core.term", "read_key", "jet_term_read_key", true, &[]),
-    CoreCallRecord::new("core.perf", "fidelity", "jet_perf_fidelity", false, &[]),
-    CoreCallRecord::new( "core.perf", "default_fidelity", "jet_perf_default_fidelity", false, &[], ),
-    CoreCallRecord::new( "core.perf", "override_fidelity", "jet_perf_override_fidelity", false, &[false], ),
-    CoreCallRecord::new( "core.perf", "reset_fidelity", "jet_perf_reset_fidelity", false, &[], ),
+    CoreCallRecord::new("core.perf", "__read_bits", "jet_perf_read_bits", false, &[]) .with_native_int_result(),
+    CoreCallRecord::new("core.perf", "__write_bits", "jet_perf_write_bits", false, &[false]),
     CoreCallRecord::new("core.ui", "null_backend", "jet_ui_null", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "tui_backend", "jet_ui_tui", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "gtk_backend", "jet_ui_gtk", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),

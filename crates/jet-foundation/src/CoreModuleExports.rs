@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 84f1c43cd2aabd481949637487e22ac6d12b14036e9915d0397f545ecdb27627
+// Source SHA-256: 96945d35421efe1fe5a1769b3e681ffb3e9a68bf2e08733b88121b82339086c7
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -448,9 +448,9 @@ const CORE_MODULE_68_MEMBERS: &[&str] = &["IPv4", "IPv6", "Network", "is_global"
 const CORE_MODULE_68_TYPES: &[(&str, CoreLeafKind)] = &[("IPv4", CoreLeafKind::Plain), ("IPv6", CoreLeafKind::Plain), ("IPv4Interface", CoreLeafKind::Plain), ("Network", CoreLeafKind::Plain)];
 const CORE_MODULE_68_DEPENDENCIES: &[&str] = &[];
 
-const CORE_MODULE_69_MEMBERS: &[&str] = &["Perf", "default_fidelity", "fidelity", "is_full", "is_low", "of", "override_fidelity", "reset_fidelity", "scale"];
+const CORE_MODULE_69_MEMBERS: &[&str] = &["Perf", "default_fidelity", "fidelity", "is_full", "is_low", "of", "override_fidelity", "reset_fidelity", "scale", "__read_bits", "__write_bits"];
 const CORE_MODULE_69_TYPES: &[(&str, CoreLeafKind)] = &[("Perf", CoreLeafKind::Plain)];
-const CORE_MODULE_69_DEPENDENCIES: &[&str] = &[];
+const CORE_MODULE_69_DEPENDENCIES: &[&str] = &["core.math"];
 
 const CORE_MODULE_70_MEMBERS: &[&str] = &["load", "PluginFrame", "PluginFault", "PluginLimit", "PluginError"];
 const CORE_MODULE_70_TYPES: &[(&str, CoreLeafKind)] = &[("PluginFrame", CoreLeafKind::Plain), ("PluginFault", CoreLeafKind::Plain), ("PluginLimit", CoreLeafKind::Enum(&["Fuel", "Memory", "Table", "Time", "Wire"])), ("PluginError", CoreLeafKind::Enum(&["Guest", "Denied", "Budget", "Defect"]))];
