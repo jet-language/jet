@@ -2062,7 +2062,7 @@ fn run() {
 | Function or type | Returns | Description |
 | --- | --- | --- |
 | `time.is_leap_year(year)` | `Bool` | Test leap-year status under the proleptic Gregorian calendar. |
-| `time.days_in_month(year, month)` | `Int` | Return the number of days; an invalid month returns `0`. |
+| `time.days_in_month(year, month)` | `Int` | Return the number of days; an invalid month retains the civil calendar's `30`-day default. |
 | `time.period(start, end)` / `period_days(n)` / `period_months(n)` / `period_years(n)` | `Period` | Construct calendar periods. |
 | `time.utc()` / `time.zone(name)` | `Zone` / `Zone !TimeError` | Construct UTC, a numeric-offset zone, or a named IANA TZif zone. |
 | `time.utcoffset(zone)` | `Int` | Return the zone offset represented by the zone. |
@@ -2124,19 +2124,23 @@ replayed (D-TIMERES1=A; D-DET-CAPAPI).
 week calculations without locale tables. Its module-global weekday constants
 are `MONDAY :: 0` through `SUNDAY :: 6`.
 
+All calendar behavior is implemented in the embedded `Core/time/calendar.jet`
+source shared by the execution tiers, including epoch conversion without a
+native date-time carrier.
+
 | Function or value | Returns | Description |
 | --- | --- | --- |
 | `calendar.isleap(year)` | `Bool` | Test leap-year status. |
-| `calendar.leapdays(y1, y2)` | `Int` | Count leap days in a half-open year range. |
+| `calendar.leapdays(y1, y2)` | `Int` | Count leap days between the smaller and larger endpoint, excluding the larger year. |
 | `calendar.weekday(year, month, day)` | `Int` | Return Monday `0` through Sunday `6`. |
-| `calendar.monthrange(year, month)` | `(Int, Int)` | Return the first weekday and day count. |
+| `calendar.monthrange(year, month)` | `(days: Int, weekday: Int)` | Return the day count and Monday-based first weekday. Invalid months retain the `30`-day default. |
 | `calendar.monthcalendar(year, month)` / `monthcalendar_start(year, month, firstweekday)` | `[[Int]]` | Build a month grid. |
 | `calendar.yearcalendar(year)` | `[[[Int]]]` | Build a year calendar. |
 | `calendar.day_name(index)` / `day_abbr(index)` | `String` | Return fixed English day names. |
 | `calendar.month_name(index)` / `month_abbr(index)` | `String` | Return fixed English month names. |
-| `calendar.weekheader(width, firstweekday)` | `[String]` | Format abbreviated weekday headers. |
+| `calendar.weekheader(width, firstweekday)` | `[String]` | Clip abbreviated weekday names or pad them on the right; widths below `1` use `1`. |
 | `calendar.formatmonth(year, month, width)` / `formatyear(year)` | `String` | Render a month or year calendar. |
-| `calendar.timegm(year, month, day, hour, minute, second)` | `Int` | Convert a UTC calendar tuple to Unix seconds. |
+| `calendar.timegm(year, month, day, hour, minute, second)` | `Int` | Convert a UTC calendar tuple to Unix seconds, constraining civil fields and preserving a `23:59:60` leap label as the next epoch second. |
 
 ### `core.encoding` — bounded value codecs
 
