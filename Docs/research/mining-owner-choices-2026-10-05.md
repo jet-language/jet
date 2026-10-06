@@ -175,7 +175,7 @@ type) and #4285 (about 25 alias spellings still ship). The headline rows:
 
 | Source API | Jet counterpart | Verdict | Action |
 |---|---|---|---|
-| testify/Go regex inputs; RE2 linear time | `core.regex` recursion overflows at 3,000 chars | repeats a mistake | card (FIX-WAVES wave 1) |
+| BEAM: a bad regex must not block the scheduler (RntfkL8lUY4) | `core.regex` recursion overflows at 3,000 chars | repeats a mistake | card (FIX-WAVES wave 1) |
 | Elixir `String.upcase("José")` | `core.text.parse.upper` gives "JOSé" | repeats the Latin-1 mistake | card |
 | Go `v, ok := <-ch` | `tasks.recv` returns -1 for closed | repeats the sentinel mistake | card |
 | QueryPerformanceCounter to CLOCK_MONOTONIC | Stopwatch reads the wall clock | repeats the wrong-clock mistake | card |
