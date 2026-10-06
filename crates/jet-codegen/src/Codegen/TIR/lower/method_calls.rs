@@ -3849,6 +3849,27 @@ fn lower_method_call_impl(
     });
     let declared_recv_type = declared_recv_type.or_else(|| recv_type.clone());
     let recv_type = &declared_recv_type;
+    // D-TRAIT-OVERLOAD1=A: `z.abs()` on a Complex is its magnitude (a Float),
+    // lowered to the same MathBuiltin route `math.abs` used for Complex. It is
+    // resolved first so no user-method path claims `Complex::abs`.
+    if method == "abs"
+        && args.is_empty()
+        && !cx.type_names.contains(Syntax::TYPE_COMPLEX)
+        && (recv_type.as_deref() == Some(Syntax::TYPE_COMPLEX)
+            || matches!(tir_recv_jet_ty(receiver, env), Some(Type::Named(ref name)) if name == Syntax::TYPE_COMPLEX))
+    {
+        return in_own_frame(|| {
+            let recv_t = lowered_receiver.unwrap_or_else(|| lower_expr(receiver, cx, env));
+            TExpr {
+                ty: Type::Float,
+                kind: TExprKind::MathBuiltin {
+                    type_name: Syntax::TYPE_COMPLEX.to_string(),
+                    func: "abs".to_string(),
+                    args: vec![recv_t],
+                },
+            }
+        });
+    }
     if recv_type.as_deref() == Some(crate::Syntax::TYPE_STRING)
         && cx.core_source_sigs.contains_key(&(
             jet_foundation::CoreSourceParts::CORE_TEXT_STRING_MODULE.to_string(),
@@ -10201,27 +10222,6 @@ fn lower_method_call_impl(
                     };
                 });
             }
-        }
-    }
-    // D-TRAIT-OVERLOAD1=A: `z.abs()` on a Complex is its magnitude (a Float),
-    // lowered to the same MathBuiltin route `math.abs` used for Complex.
-    if let Some(handle) = recv_type {
-        if handle == Syntax::TYPE_COMPLEX
-            && method == "abs"
-            && args.is_empty()
-            && !cx.type_names.contains(handle)
-        {
-            return in_own_frame(|| {
-                let recv_t = lower_expr(receiver, cx, env);
-                return TExpr {
-                    ty: Type::Float,
-                    kind: TExprKind::MathBuiltin {
-                        type_name: Syntax::TYPE_COMPLEX.to_string(),
-                        func: "abs".to_string(),
-                        args: vec![recv_t],
-                    },
-                };
-            });
         }
     }
     // c109 Phase 13: a method ON a handle. The gate proved `recv_type ==
