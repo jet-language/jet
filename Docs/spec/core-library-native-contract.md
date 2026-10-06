@@ -97,6 +97,13 @@ A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
 
+Prepared foreign bridges that depend on Foundation expose its complete owned
+source closure to the native build sandbox. This includes the `jet-unicode`
+path dependency at its canonical Cargo location, as well as the existing
+external include inputs. The bridge identity fingerprints both crate trees
+and those includes: changing Unicode data invalidates an old bridge instead of
+reusing a build prepared against a different Foundation dependency closure.
+
 ## One meaning across execution tiers
 
 AOT, resident JIT, interpreter/comptime evaluation, and web execution are

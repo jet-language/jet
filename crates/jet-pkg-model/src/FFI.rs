@@ -2453,7 +2453,9 @@ pub const WASMTIME_CRATE_SPEC: (&str, &str) = ("wasmtime", "25");
 /// descriptor-relative, no-follow plugin reads. Keep the path in the cache
 /// identity through the dependency map rather than duplicating its limits.
 const JET_FOUNDATION_CRATE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-foundation");
-const JET_FOUNDATION_SOURCE_SCHEMA: &str = "jet-ffi-foundation-source-v2";
+const JET_FOUNDATION_SOURCE_SCHEMA: &str = "jet-ffi-foundation-source-v3";
+const JET_FOUNDATION_UNICODE_CRATE_PATH: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-unicode");
 const JET_FOUNDATION_CODEGEN_PRELUDE_PATH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-codegen/src/Prelude");
 const JET_FOUNDATION_ARCHIVE_SOURCE_PATH: &str =
@@ -2478,6 +2480,7 @@ const JET_FOUNDATION_TEST_INPUTS: &[&str] = &["diagnostics_coverage_baseline.txt
 #[derive(Debug)]
 struct JetFoundationSources {
     foundation: PathBuf,
+    unicode: PathBuf,
     codegen_prelude: PathBuf,
     archive_source: PathBuf,
     text_source: PathBuf,
@@ -2529,6 +2532,8 @@ fn foundation_input_digest(
 
 fn jet_foundation_sources() -> Result<JetFoundationSources, String> {
     let foundation = verified_source_directory(Path::new(JET_FOUNDATION_CRATE_PATH), "crate")?;
+    let unicode =
+        verified_source_directory(Path::new(JET_FOUNDATION_UNICODE_CRATE_PATH), "Unicode crate")?;
     let codegen_prelude =
         verified_source_directory(Path::new(JET_FOUNDATION_CODEGEN_PRELUDE_PATH), "codegen")?;
     let archive_source =
@@ -2539,9 +2544,12 @@ fn jet_foundation_sources() -> Result<JetFoundationSources, String> {
 
     let foundation_tree = crate::SHA256::try_tree_hash(&foundation)
         .map_err(|error| format!("could not fingerprint jet-foundation source: {error}"))?;
+    let unicode_tree = crate::SHA256::try_tree_hash(&unicode)
+        .map_err(|error| format!("could not fingerprint jet-unicode source: {error}"))?;
     let mut identity =
         crate::ForeignBridge::IdentityBuilder::new(JET_FOUNDATION_SOURCE_SCHEMA);
     identity.field("foundation-tree", foundation_tree.as_bytes());
+    identity.field("unicode-tree", unicode_tree.as_bytes());
     for relative in JET_FOUNDATION_CODEGEN_INPUTS {
         let digest = foundation_input_digest(&codegen_prelude, relative, "codegen")?;
         identity.field(
@@ -2567,6 +2575,7 @@ fn jet_foundation_sources() -> Result<JetFoundationSources, String> {
 
     Ok(JetFoundationSources {
         foundation,
+        unicode,
         codegen_prelude,
         archive_source,
         text_source,
@@ -2606,19 +2615,24 @@ fn stage_foundation_input(
 }
 
 // The generated manifest keeps Cargo's host path dependency, so native Cargo
-// must see that canonical path inside its namespace. Linux stages only the
-// external files that Foundation includes; other adapters expose the same
-// source directories directly because they do not remap mount destinations.
+// must see that canonical path and Foundation's Unicode path dependency inside
+// its namespace. Linux stages only the external include files; other adapters
+// expose those source directories directly without remapping destinations.
 fn jet_foundation_mounts(
     _cache_root: &Path,
     sources: &JetFoundationSources,
 ) -> Result<Vec<jet_sema::Comptime::Build::ReadOnlyMount>, String> {
-    let mut mounts = vec![
+    let mut mounts = Vec::with_capacity(6);
+    mounts.extend([
         jet_sema::Comptime::Build::ReadOnlyMount::new(
             sources.foundation.clone(),
             sources.foundation.clone(),
         ),
-    ];
+        jet_sema::Comptime::Build::ReadOnlyMount::new(
+            sources.unicode.clone(),
+            sources.unicode.clone(),
+        ),
+    ]);
     #[cfg(target_os = "linux")]
     {
         let closure_root = _cache_root.join(".jet-foundation-source-closure");
@@ -6690,6 +6704,32 @@ mod tests {
         assert!(!needs_parquet_provider("core.sync::map_merge"));
         assert!(needs_parquet_provider("core.data::read_parquet"));
         assert!(needs_parquet_provider("core.data.arrow::from_parquet"));
+    }
+
+    #[test]
+    fn foundation_mounts_include_the_unicode_path_dependency() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".tmp")
+            .join("jet-test-scratch")
+            .join(format!(
+                "ffi-foundation-mounts-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock is after the Unix epoch")
+                    .as_nanos()
+            ));
+        let sources = jet_foundation_sources().expect("verified Foundation source closure");
+        let mounts = jet_foundation_mounts(&root, &sources)
+            .expect("mount the complete Foundation source closure");
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(mounts.iter().any(|mount| {
+            mount.source == sources.unicode && mount.destination == sources.unicode
+        }));
+        assert!(
+            sources.unicode.join("Cargo.toml").is_file(),
+            "Cargo must resolve the actual Unicode crate, not an empty mount"
+        );
     }
     #[test]
     fn cargo_metadata_detects_transitive_compile_time_targets() {
