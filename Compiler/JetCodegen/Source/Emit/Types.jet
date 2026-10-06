@@ -773,7 +773,8 @@ fn jet_rust_emit_callable_type_parts(ctx: &JetRustEmitContext, params: [MIRType]
     statics := false
     view_return := if ret == .Val(ret_ty) -> jet_rust_emit_type_carries_view(ctx, ret_ty) else -> false
     if view_return {
-        loop entry in provenance ?? [MIRViewProvenanceEntry]{} {
+        entries :: provenance ?? [MIRViewProvenanceEntry]{}
+        loop entry in entries {
             loop path in entry.provenance.sources {
                 if path.source == {
                     .Parameter(index) -> if !jet_rust_emit_int_list_has(owners, index) -> &owners.push(index)

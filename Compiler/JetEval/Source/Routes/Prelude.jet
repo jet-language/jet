@@ -1,5 +1,6 @@
 // Pure Prelude dispatch. The row and symbol are checked before any route body is
 // selected; route names are only used after the canonical MIR row is found.
+use core.math as math
 use jet_foundation.[
     MIRCallFallibility,
     MIRPreludeABI,
@@ -608,24 +609,27 @@ fn jet_eval_route_sort_order(left: TComptimeValue, right: TComptimeValue, machin
     jet_eval_route_order(left, right, &machine, span)
 }
 
+// MIREval `mir_sort_compare` (D-FLOATSORT1): a sort orders two Floats
+// totally; every NaN follows every non-NaN value and two NaNs compare equal.
+fn jet_eval_route_sort_compare(left: TComptimeValue, right: TComptimeValue, machine: &JetEvalMachine, span: Span) -> Int? {
+    if left == .Float(left_value, _) {
+        if right == .Float(right_value, _) {
+            left_nan :: math.is_nan(left_value)
+            right_nan :: math.is_nan(right_value)
+            if left_nan && right_nan -> return Val(0)
+            if left_nan -> return Val(1)
+            if right_nan -> return Val(-1)
+            if left_value < right_value -> return Val(-1)
+            if left_value > right_value -> return Val(1)
+            return Val(0)
+        }
+    }
+    jet_eval_route_sort_order(left, right, &machine, span)
+}
+
 // Stable merge sort (Rust `sort_by`); `descending` reverses the comparator.
 fn jet_eval_route_sorted(items: [TComptimeValue], descending: Bool, machine: &JetEvalMachine, span: Span) -> [TComptimeValue]? {
     if items.len() < 2 -> return Val(items)
-    // Marshal closed Float lists into the existing native sort protocol:
-    // NaN ordering is owned by Prelude, not by the evaluator comparator.
-    floats := [Float]{}
-    all_float := true
-    loop item in items {
-        if item == .Float(value) -> &floats.push(value) else -> {
-            all_float = false
-            break
-        }
-    }
-    if all_float {
-        if descending -> &floats.sort_desc() else -> &floats.sort()
-        values :: loop value in floats -> TComptimeValue.Float{value: value}
-        return Val(values)
-    }
     middle :: items.len() /% 2
     left :: jet_eval_route_sorted(items[0..<middle], descending, &machine, span) ?? return None
     right :: jet_eval_route_sorted(items[middle..<items.len()], descending, &machine, span) ?? return None
@@ -633,7 +637,7 @@ fn jet_eval_route_sorted(items: [TComptimeValue], descending: Bool, machine: &Je
     left_index := 0
     right_index := 0
     loop left_index < left.len() && right_index < right.len() {
-        order := jet_eval_route_sort_order(left[left_index], right[right_index], &machine, span) ?? return None
+        order := jet_eval_route_sort_compare(left[left_index], right[right_index], &machine, span) ?? return None
         if descending -> order = 0 - order
         if order > 0 {
             &merged.push(right[right_index])

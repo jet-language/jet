@@ -833,14 +833,21 @@ fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: 
 // nominal wrapper on success. The argument and the checker each execute once.
 fn sema_expression_checked_text_from(target: SemaExpressionCheckedTextTarget, type_name: String, checked: TExpr, span: Span) -> TExpr? {
     error_type :: if checked.ty == {.Result(_, error) -> error else -> { return None }}
-    (callee, type_args, call_args) :: if checked.kind == {.Call(callee, type_args, args) -> (callee, type_args, args) else -> { return None }}
-    if call_args.len() != 1 -> return None
     source_local :: tir_generated_local("__checked_text_source_{span.start}", span)
     error_local :: tir_generated_local("__checked_text_error_{span.start}", span)
     source_value :: sema_tir_expr(Type.String, TExprKind.Local{local: source_local}, span)
-    checker_args := call_args
-    checker_args[0].value = source_value
-    checker :: sema_tir_expr(checked.ty, TExprKind.Call{callee: callee, type_args: type_args, args: checker_args}, span)
+    original := TExpr?{None}
+    checker_call := TExpr?{None}
+    if checked.kind == .Call(callee, type_args, args) {
+        if args.len() == 1 {
+            original = Val(args[0].value)
+            checker_args := args
+            checker_args[0].value = source_value
+            checker_call = Val(sema_tir_expr(checked.ty, TExprKind.Call{callee: callee, type_args: type_args, args: checker_args}, span))
+        }
+    }
+    source_init :: original ?? return None
+    checker :: checker_call ?? return None
     nominal :: Type.Named{name: type_name}
     result_type :: Type.Result{ok: nominal, err: error_type}
     wrapped :: sema_tir_expr(nominal, TExprKind.DistinctCtor{owner: target.owner.id, argument: sema_tir_expr(Type.String, TExprKind.Move{value: source_value}, span), base: Type.String}, span)
@@ -872,7 +879,7 @@ fn sema_expression_checked_text_from(target: SemaExpressionCheckedTextTarget, ty
         terminal: sema_tir_expr(result_type, TExprKind.Never{reason: "CheckedText.check has exactly Ok and Err outcomes"}, span),
     }, span)
     Val(sema_tir_expr(result_type, TExprKind.InlineBlock{body: [TStmt]{
-        TStmt.Let{local: source_local, let_ty: TLetTy.Annotated{ty: Type.String, wrapper: TLetWrapper.Plain}, init: call_args[0].value, gc_promotion: None, gc_transferred: false, span: span},
+        TStmt.Let{local: source_local, let_ty: TLetTy.Annotated{ty: Type.String, wrapper: TLetWrapper.Plain}, init: source_init, gc_promotion: None, gc_transferred: false, span: span},
         TStmt.ExprStmt{value: handler, span: span},
     }}, span))
 }

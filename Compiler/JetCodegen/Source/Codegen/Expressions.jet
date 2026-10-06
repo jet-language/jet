@@ -1275,7 +1275,9 @@ fn jet_codegen_project_deref_place(builder: &JetCodegenBuilder, program: JetCode
 fn jet_codegen_project_pin_target(builder: &JetCodegenBuilder, program: JetCodegenProgram, base: MIRPlaceID, inner: Type, span: Span) -> MIRPlaceID Never! {
     root :: jet_codegen_find_place(builder, program, base) ?? panic("checked pin place has no MIR base")
     if root.ty.kind == {
-        .Apply(name, args) -> if name.name == "Pin" && args.len() == 1 -> return jet_codegen_project_deref_place(&builder, program, base, inner, span)
+        .Apply(name, args) -> {
+            if name.name == "Pin" && args.len() == 1 -> return jet_codegen_project_deref_place(&builder, program, base, inner, span)
+        }
         else -> {}
     }
     base
@@ -1305,7 +1307,9 @@ fn jet_codegen_lower_expression_place(builder: &JetCodegenBuilder, program: JetC
         .Field(receiver, reference) -> {
             base := jet_codegen_lower_expression_place(&builder, program, receiver, access) ?? return None
             if receiver.ty == {
-                .Apply(name, args) -> if name == "Pin" && args.len() == 1 -> base = jet_codegen_project_pin_target(&builder, program, base, args[0], expression.span)
+                .Apply(name, args) -> {
+                    if name == "Pin" && args.len() == 1 -> base = jet_codegen_project_pin_target(&builder, program, base, args[0], expression.span)
+                }
                 else -> {}
             }
             field_id :: jet_codegen_field_ref_id(builder, program, receiver.ty, reference)
