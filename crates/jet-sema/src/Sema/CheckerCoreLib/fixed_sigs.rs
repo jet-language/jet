@@ -1831,10 +1831,6 @@ fn core_fixed_sig_impl(
         ("core.testing", "fixture" | "temp_dir") => {
             Some((vec![(read, Type::String)], Some(Type::String)))
         }
-        ("core.testing", "corpus") => Some((
-            vec![(read, Type::String)],
-            Some(Type::List(Box::new(Type::String))),
-        )),
         ("core.testing", "fake_clock") => Some((
             vec![(read, Type::Int)],
             Some(Type::Named("Clock".to_string())),
@@ -5768,29 +5764,6 @@ fn core_fixed_sig_impl(
         ("core.db", "policy_audit") => Some((
             vec![(read, Type::Named("DBScope".to_string()))],
             Some(Type::String),
-        )),
-        ("core.db", "row_value") => Some((
-            vec![(read, db_row_ty()), (read, Type::String)],
-            Some(result_ty(
-                Type::Named(Syntax::TYPE_DB_VALUE.to_string()),
-                db_error_ty(),
-            )),
-        )),
-        ("core.db", "row_int") => Some((
-            vec![(read, db_row_ty()), (read, Type::String)],
-            Some(result_ty(Type::Int, db_error_ty())),
-        )),
-        ("core.db", "row_float") => Some((
-            vec![(read, db_row_ty()), (read, Type::String)],
-            Some(result_ty(Type::Float, db_error_ty())),
-        )),
-        ("core.db", "row_text") => Some((
-            vec![(read, db_row_ty()), (read, Type::String)],
-            Some(result_ty(Type::String, db_error_ty())),
-        )),
-        ("core.db", "row_bool") => Some((
-            vec![(read, db_row_ty()), (read, Type::String)],
-            Some(result_ty(Type::Bool, db_error_ty())),
         )),
         ("core.db", "transaction") | ("core.db", "migrate") => Some((
             vec![

@@ -14339,51 +14339,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.db.row_bool
-    #[no_mangle]
-    pub extern "C" fn jet_db_row_bool(a0: *mut crate::jet_std::JetDBRow, a1: JetCString, ok: *mut bool, err: *mut *mut crate::jet_std::DBError) -> i64 {
-        guard(|| match crate::jet_std::jet_db_row_bool(unsafe { &*a0 }, unsafe { &*a1 }) {
-            Ok(value) => { unsafe { ok.write(value) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.db.row_float
-    #[no_mangle]
-    pub extern "C" fn jet_db_row_float(a0: *mut crate::jet_std::JetDBRow, a1: JetCString, ok: *mut f64, err: *mut *mut crate::jet_std::DBError) -> i64 {
-        guard(|| match crate::jet_std::jet_db_row_float(unsafe { &*a0 }, unsafe { &*a1 }) {
-            Ok(value) => { unsafe { ok.write(value) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.db.row_int
-    #[no_mangle]
-    pub extern "C" fn jet_db_row_int(a0: *mut crate::jet_std::JetDBRow, a1: JetCString, ok: *mut i64, err: *mut *mut crate::jet_std::DBError) -> i64 {
-        guard(|| match crate::jet_std::jet_db_row_int(unsafe { &*a0 }, unsafe { &*a1 }) {
-            Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.db.row_text
-    #[no_mangle]
-    pub extern "C" fn jet_db_row_text(a0: *mut crate::jet_std::JetDBRow, a1: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::DBError) -> i64 {
-        guard(|| match crate::jet_std::jet_db_row_text(unsafe { &*a0 }, unsafe { &*a1 }) {
-            Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.db.row_value
-    #[no_mangle]
-    pub extern "C" fn jet_db_row_value(a0: *mut crate::jet_std::JetDBRow, a1: JetCString, ok: *mut *mut crate::jet_std::DBValue, err: *mut *mut crate::jet_std::DBError) -> i64 {
-        guard(|| match crate::jet_std::jet_db_row_value(unsafe { &*a0 }, unsafe { &*a1 }) {
-            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
     /// core.builtin.float_parse
     #[no_mangle]
     pub extern "C" fn jet_float_parse(a0: JetCString, ok: *mut f64, err: *mut JetCString) -> i64 {
@@ -14628,12 +14583,6 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_testing_assert_equal(a0: *mut crate::jet_std::JetTestComparison) -> bool {
         guard(|| crate::jet_testing_assert_equal(unsafe { &*a0 }))
-    }
-
-    /// core.testing.corpus
-    #[no_mangle]
-    pub extern "C" fn jet_testing_corpus(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_testing_corpus(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
     /// core.testing.fake_data

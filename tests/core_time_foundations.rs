@@ -106,3 +106,25 @@ fn run() {
         "false\ntrue\ntrue\n0\n1\n9223372036854775807\n0\n0\n",
     );
 }
+
+#[test]
+fn core_calendar_predicates_preserve_signed_years_and_invalid_months_across_tiers() {
+    tir_support::assert_tiers_agree(
+        "core_time_calendar_predicates",
+        r#"
+use core.time as time
+use core.time.calendar as calendar
+
+fn run() {
+    loop year in [Int]{-400, -100, -4, 0, 1900, 2000, 2023, 2024} {
+        print(time.is_leap_year(year))
+        print(calendar.isleap(year))
+    }
+    loop month in [Int]{0, 1, 2, 4, 12, 13} -> print(time.days_in_month(2024, month))
+    print(time.days_in_month(1900, 2))
+    print(time.days_in_month(2000, 2))
+}
+"#,
+        "true\ntrue\nfalse\nfalse\ntrue\ntrue\ntrue\ntrue\nfalse\nfalse\ntrue\ntrue\nfalse\nfalse\ntrue\ntrue\n30\n31\n29\n30\n31\n30\n28\n29\n",
+    );
+}

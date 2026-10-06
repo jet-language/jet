@@ -903,23 +903,6 @@ fn jet_testing_temp_dir(prefix: &String) -> String {
     }
 }
 
-fn jet_testing_corpus(path: &String) -> Vec<String> {
-    let mut entries = Vec::new();
-    if let Ok(read) = std::fs::read_dir(path) {
-        let mut paths = read
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .collect::<Vec<_>>();
-        paths.sort();
-        for p in paths {
-            if p.is_file() {
-                if let Ok(text) = std::fs::read_to_string(p) {
-                    entries.push(text);
-                }
-            }
-        }
-    }
-    entries
-}
 
 fn sanitize_test_name(name: &str) -> String {
     let mut out = String::new();

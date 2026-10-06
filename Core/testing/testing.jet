@@ -9,6 +9,7 @@ package {
     }
 }
 use core as core
+use core.files as files
 
 // core.testing — deterministic tests and comparison records.
 //
@@ -97,7 +98,21 @@ pub fn fixture(name: String) -[FS]> String Never! { core.testing.fixture(name) }
 
 pub fn temp_dir(prefix: String) -[FS]> String Never! { core.testing.temp_dir(prefix) }
 
-pub fn corpus(glob: String) -[FS]> [String] Never! { core.testing.corpus(glob) }
+/// Read each readable regular file in a directory, ordered by its full path.
+/// The parameter retains the historical spelling `glob`; it names a directory.
+pub fn corpus(glob: String) -[FS]> [String] Never! {
+    entries :: files.list_dir(glob) ?? return [String]{}
+    paths := [String]{}
+    loop entry in entries -> &paths.push(entry.path)
+    &paths.sort()
+    values := [String]{}
+    loop path in paths {
+        if !files.is_file(path) -> next
+        value :: files.read(path) ?? next
+        &values.push(value)
+    }
+    values
+}
 
 /// The test-facing spelling of the deterministic Prelude `Clock` built by `Clock.new`.
 pub fn fake_clock(unix_ms: Int) -> Clock Never! { Clock.new(unix_ms) }
@@ -115,3 +130,7 @@ pub fn world(body: fn(DeterministicWorld)) Never! { core.testing.world(body) }
 
 pub fn status(comparison: TestComparison) -> String Never! { comparison.status }
 
+
+#Test("corpus reports an absent directory as an empty collection") {
+    assert_eq(corpus("__jet_absent_corpus__/missing").len(), 0)
+}
