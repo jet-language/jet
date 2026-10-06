@@ -266,8 +266,8 @@ fn sema_prelude_error_conversion(source: Type, diagnostics: &[Diagnostic]) -> Fu
     }
 }
 
-pub fn sema_module_no_prelude(environment: SemaScopeEnvironment) -> Bool Never! {
-    graph_option :: environment.registration_graph
+pub fn sema_module_no_prelude(environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    graph_option :: program.registration_graph
     graph :: graph_option ?? return false
     module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return false
     graph.modules[module_index].program.no_prelude
@@ -276,9 +276,9 @@ pub fn sema_module_no_prelude(environment: SemaScopeEnvironment) -> Bool Never! 
 // The D-FAIL-CONV2 route of one propagation site: a family member reaching the
 // default `Err` with no module-declared conversion. The routine key is the one
 // `sema_inject_prelude_error_conversions` checks after the module's bodies.
-pub fn sema_prelude_error_conversion_key(error: Type, target: Type, environment: SemaScopeEnvironment) -> String? {
+pub fn sema_prelude_error_conversion_key(error: Type, target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     if target != (Type.Named{name: "Err"}) -> return None
-    if !sema_core_error_family_member(type_name(error)) || sema_module_no_prelude(environment) -> return None
+    if !sema_core_error_family_member(type_name(error)) || sema_module_no_prelude(environment, program) -> return None
     Val(symbol_id(SymbolKind.Function, environment.module_identity, "", sema_failure_conversion_function_name(error, target)).key)
 }
 
@@ -315,7 +315,7 @@ fn sema_prelude_conversion_demands_expr(expression: TExpr, module_identity: Stri
 // declares its own conversion for a pair keeps it. Every conversion that cannot
 // be injected names its cause in `reasons`; with `keep_going` (JET_KEEP_GOING)
 // a conversion whose body fails to check is kept as its typed trap.
-pub fn sema_inject_prelude_error_conversions(module_identity: String, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, functions: &[TFunc], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], reasons: &[String], keep_going: Bool) -> Bool {
+pub fn sema_inject_prelude_error_conversions(module_identity: String, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, functions: &[TFunc], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], reasons: &[String], keep_going: Bool) -> Bool {
     demands := [SemaPreludeConversionDemand]{}
     loop function in functions {
         loop statement in function.body {
@@ -346,7 +346,7 @@ pub fn sema_inject_prelude_error_conversions(module_identity: String, environmen
             next
         }
         before :: diagnostics.len()
-        checked :: sema_function_check(conversion, symbol.id, TFuncKind.TopLevel, false, &environment, &scopes, host_hooks, &diagnostics, &call_facts, &comptime_requests, &name_references)
+        checked :: sema_function_check(conversion, symbol.id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks, &diagnostics, &call_facts, &comptime_requests, &name_references)
         if !checked.complete {
             complete = false
             loop reason in checked.incomplete_reasons -> &reasons.push("{label}: {reason}")
@@ -357,7 +357,7 @@ pub fn sema_inject_prelude_error_conversions(module_identity: String, environmen
                 loop index in before..<diagnostics.len() -> &reported.push("{diagnostics[index].code} {diagnostics[index].what}")
                 if reported.len() == 0 -> &reasons.push("{label}: body checking is incomplete") else -> &reasons.push("{label}: body checking stopped on {reported.join("; ")}")
             }
-            if keep_going -> _ := sema_keep_going_push_stub(sema_keep_going_stub(conversion, symbol.id, TFuncKind.TopLevel, false, &environment, &scopes, host_hooks), label, &functions, &reasons)
+            if keep_going -> _ := sema_keep_going_push_stub(sema_keep_going_stub(conversion, symbol.id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks), label, &functions, &reasons)
             next
         }
         if !sema_append_function(&functions, checked) {
@@ -370,7 +370,7 @@ pub fn sema_inject_prelude_error_conversions(module_identity: String, environmen
 
 // D-FAILURE-FOUNDATION1=A (E2417): an explicit `!` domain names `Err`, a Core
 // error, a type marked `#Error`, an all-error union, or `Never`.
-fn sema_failure_items_nominal_is_error(items: [Item], leaf: String, seen: [String], environment: SemaScopeEnvironment) -> Bool? {
+fn sema_failure_items_nominal_is_error(items: [Item], leaf: String, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
     loop item in items {
         if item == {
             .Struct(definition) -> if definition.name == leaf -> return Val(sema_failure_markers_name_error(definition.type_markers))
@@ -383,7 +383,7 @@ fn sema_failure_items_nominal_is_error(items: [Item], leaf: String, seen: [Strin
                 }
                 inner := seen
                 &inner.push(leaf)
-                return Val(sema_failure_domain_is_error(definition.target, inner, environment))
+                return Val(sema_failure_domain_is_error(definition.target, inner, environment, program))
             }
             else -> {}
         }
@@ -392,16 +392,16 @@ fn sema_failure_items_nominal_is_error(items: [Item], leaf: String, seen: [Strin
 }
 
 // The declaring module wins; other graph modules supply imported nominals.
-fn sema_failure_nominal_is_error(leaf: String, seen: [String], environment: SemaScopeEnvironment) -> Bool? {
-    graph_option :: environment.registration_graph
+fn sema_failure_nominal_is_error(leaf: String, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
+    graph_option :: program.registration_graph
     graph :: graph_option ?? return None
     if sema_registration_module_index(graph, environment.module_identity) == .Val(module_index) {
-        local :: sema_failure_items_nominal_is_error(graph.modules[module_index].program.items, leaf, seen, environment)
+        local :: sema_failure_items_nominal_is_error(graph.modules[module_index].program.items, leaf, seen, environment, program)
         if local != None -> return local
     }
     loop module_row in graph.modules {
         if module_row.module_identity == environment.module_identity -> next
-        imported :: sema_failure_items_nominal_is_error(module_row.program.items, leaf, seen, environment)
+        imported :: sema_failure_items_nominal_is_error(module_row.program.items, leaf, seen, environment, program)
         if imported != None -> return imported
     }
     None
@@ -414,24 +414,24 @@ fn sema_failure_markers_name_error(markers: [Marker]) -> Bool Never! {
     false
 }
 
-fn sema_failure_domain_is_error(ty: Type, seen: [String], environment: SemaScopeEnvironment) -> Bool Never! {
+fn sema_failure_domain_is_error(ty: Type, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if ty == {
         .Named(name) -> {
             if name == "Err" || name == "Never" -> return true
-            declared :: sema_failure_nominal_is_error(sema_error_conversion_leaf(name), seen, environment)
+            declared :: sema_failure_nominal_is_error(sema_error_conversion_leaf(name), seen, environment, program)
             if declared == .Val(value) -> return value
             return sema_core_error_type(name)
         }
         .Apply(name, _) -> {
-            declared :: sema_failure_nominal_is_error(sema_error_conversion_leaf(name), seen, environment)
+            declared :: sema_failure_nominal_is_error(sema_error_conversion_leaf(name), seen, environment, program)
             if declared == .Val(value) -> return value
             return sema_core_error_type(name)
         }
-        .Tagged(_, inner) -> return sema_failure_domain_is_error(inner, seen, environment)
+        .Tagged(_, inner) -> return sema_failure_domain_is_error(inner, seen, environment, program)
         .Union(members) -> {
             if members.len() == 0 -> return false
             loop member in members {
-                if !sema_failure_domain_is_error(member, seen, environment) -> return false
+                if !sema_failure_domain_is_error(member, seen, environment, program) -> return false
             }
             return true
         }
@@ -443,20 +443,20 @@ fn sema_failure_domain_is_error(ty: Type, seen: [String], environment: SemaScope
 // The Rust reference's declared-type walk for failure contracts: E2417 for a
 // non-error `!` domain and E2422 for `Never` in a value position. `in_return`
 // admits `Never` as a callable's success slot.
-pub fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, generic_names: [String], environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
+pub fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, generic_names: [String], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     if ty == {
         .Named(name) -> {
             if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
             if name == "Never" && !in_return -> &diagnostics.push(sema_error("E2422", span, "`Never` cannot be used in a value position.", "`Never` has no values; only a function return slot or function-type return slot may promise it (D-NEVER2=B).", "Move `Never` to a function return type, or use `()`/another value type."))
         }
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_check_failure_contract_type(inner, span, false, generic_names, environment, &diagnostics)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_check_failure_contract_type(inner, span, false, generic_names, environment, program, &diagnostics)
         .Map(key, _, value) -> {
-            sema_check_failure_contract_type(key, span, false, generic_names, environment, &diagnostics)
-            sema_check_failure_contract_type(value, span, false, generic_names, environment, &diagnostics)
+            sema_check_failure_contract_type(key, span, false, generic_names, environment, program, &diagnostics)
+            sema_check_failure_contract_type(value, span, false, generic_names, environment, program, &diagnostics)
         }
         .Result(ok, error) -> {
-            sema_check_failure_contract_type(ok, span, in_return, generic_names, environment, &diagnostics)
-            sema_check_failure_contract_type(error, span, true, generic_names, environment, &diagnostics)
+            sema_check_failure_contract_type(ok, span, in_return, generic_names, environment, program, &diagnostics)
+            sema_check_failure_contract_type(error, span, true, generic_names, environment, program, &diagnostics)
             generic := false
             if error == .Named(name) {
                 loop generic_name in generic_names {
@@ -465,24 +465,24 @@ pub fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, g
             }
             hole :: error == (Type.Named{name: "_"})
             if hole -> &diagnostics.push(sema_type_hole(span))
-            if !hole && !generic && !sema_failure_domain_is_error(error, [String]{}, environment) {
+            if !hole && !generic && !sema_failure_domain_is_error(error, [String]{}, environment, program) {
                 &diagnostics.push(sema_error("E2417", span, "Explicit failure domain `{type_name(error)}` is not an Error type", "A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.", "use a Core error, add `#Error` to a local error type, or remove the explicit error contract."))
             }
         }
         .Fn(params, ret, _, _, _, _) -> {
-            loop param in params -> sema_check_failure_contract_type(param, span, false, generic_names, environment, &diagnostics)
-            if ret == .Val(value) -> sema_check_failure_contract_type(value, span, true, generic_names, environment, &diagnostics)
+            loop param in params -> sema_check_failure_contract_type(param, span, false, generic_names, environment, program, &diagnostics)
+            if ret == .Val(value) -> sema_check_failure_contract_type(value, span, true, generic_names, environment, program, &diagnostics)
         }
         .Apply(name, args) -> {
             if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
-            loop arg in args -> sema_check_failure_contract_type(arg, span, false, generic_names, environment, &diagnostics)
+            loop arg in args -> sema_check_failure_contract_type(arg, span, false, generic_names, environment, program, &diagnostics)
         }
         // D-UNIONTYPE1=A (E0363): only concrete closed member types.
         .Union(members) -> loop member in members {
             if sema_union_member_open(member, generic_names) -> &diagnostics.push(sema_error("E0363", span, "`{type_name(member)}` can't be a union member", "anonymous unions hold concrete closed types — not type parameters, trait objects, or function types", "use a named enum when a member needs an open shape"))
-            sema_check_failure_contract_type(member, span, false, generic_names, environment, &diagnostics)
+            sema_check_failure_contract_type(member, span, false, generic_names, environment, program, &diagnostics)
         }
-        .Tuple(fields) -> loop field in fields -> sema_check_failure_contract_type(field.ty, span, false, generic_names, environment, &diagnostics)
+        .Tuple(fields) -> loop field in fields -> sema_check_failure_contract_type(field.ty, span, false, generic_names, environment, program, &diagnostics)
         else -> {}
     }
 }
@@ -523,10 +523,10 @@ fn sema_union_member_open(ty: Type, generic_names: [String]) -> Bool Never! {
 }
 
 // Checks one named callable's declared signature (E2417/E2422).
-pub fn sema_check_function_failure_contracts(func: Func, environment: SemaScopeEnvironment, generic_names: [String], diagnostics: &[Diagnostic]) -> Bool {
+pub fn sema_check_function_failure_contracts(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_names: [String], diagnostics: &[Diagnostic]) -> Bool {
     before :: diagnostics.len()
-    loop param in func.params -> sema_check_failure_contract_type(param.ty, param.ty_span, false, generic_names, environment, &diagnostics)
-    if func.return_type == .Val(return_type) -> sema_check_failure_contract_type(return_type, func.return_type_span ?? func.name_span, true, generic_names, environment, &diagnostics)
+    loop param in func.params -> sema_check_failure_contract_type(param.ty, param.ty_span, false, generic_names, environment, program, &diagnostics)
+    if func.return_type == .Val(return_type) -> sema_check_failure_contract_type(return_type, func.return_type_span ?? func.name_span, true, generic_names, environment, program, &diagnostics)
     diagnostics.len() == before
 }
 
@@ -538,13 +538,13 @@ struct SemaDropStatement {
     pub value: TStmt?
 }
 
-pub fn sema_stmt_check_drop(expr: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDropStatement {
+pub fn sema_stmt_check_drop(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDropStatement {
     if expr == {
         .MethodCall(receiver, method, method_span, _, _, args, _, _, _, _) -> {
             if method != "drop" -> return SemaDropStatement{handled: false, value: None}
             reason :: sema_drop_reason_problem(args)
             if reason == .Val(problem) -> &diagnostics.push(sema_error("E0407", method_span, problem.what, problem.why, problem.fix))
-            checked :: sema_check_expression_carrier(receiver, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDropStatement{handled: true, value: None}
+            checked :: sema_check_expression_carrier(receiver, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDropStatement{handled: true, value: None}
             return SemaDropStatement{handled: true, value: Val(TStmt.ExprStmt{value: checked, span: expr_span(expr)})}
         }
         else -> return SemaDropStatement{handled: false, value: None}

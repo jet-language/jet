@@ -237,7 +237,7 @@ fn sema_function_header_inline_has_core_mem(module_row: SemaRegistrationModule) 
 // trait-bounded variadic parameter (`...Trait` / `...[A, B]`) has no single
 // Rust type, so its only supported use is the collection of one top-level
 // `loop x in name { … }` loop. Every other reference is reported.
-pub fn sema_function_header_check_variadic_bound_shape(function: Func, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+pub fn sema_function_header_check_variadic_bound_shape(function: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
     if function.params.len() == 0 -> return true
     last :: function.params[function.params.len() - 1]
     if !last.variadic -> return true
@@ -245,7 +245,7 @@ pub fn sema_function_header_check_variadic_bound_shape(function: Func, environme
     if last.variadic_bound_list == .Val(list) {
         bounded = list.len() > 0
     } else {
-        graph_option :: environment.registration_graph
+        graph_option :: program.registration_graph
         if last.ty == .Named(trait_name) && trait_name != "" && graph_option == .Val(graph) {
             bounded = sema_expr_expected_trait_symbol(graph, trait_name, environment.module_identity) != None
         }

@@ -1852,10 +1852,12 @@ fn borrowed_builtin_arguments_are_never_copied() {
 
 #[test]
 fn mir_walks_stable_loop_sources_in_place() {
-    // #4318 §4: a loop whose body never mentions its source walks the list
-    // in place (no cursor, no snapshot copy); the same loop whose body does
-    // mention the source keeps the snapshot. Each pair of programs differs
-    // only in where the `_ := <source>.len()` statement sits, so the emitted
+    // #4318 §4: a loop whose body leaves its source unchanged walks the list
+    // in place (no cursor, no snapshot copy), whether the body never mentions
+    // the source or only reads it; the same reading loop with an early exit
+    // (where a read may become the source's moving last use) keeps the
+    // snapshot. Each program differs only in the statements placed in the
+    // loop body and after the loop, so the emitted
     // copy counts compare the loop lowering alone. The source is a `:=`
     // binding, which `fold_pure_calls` leaves alone, so its length is not a
     // folded constant. A field source (`bag.names`, which sema wraps in a
@@ -1892,18 +1894,22 @@ fn run() {{
             ("bag := Bag{names: make_names(3)}", "bag.names"),
         ] {
             let mention = format!("_ := {source}.len()");
+            let exit = format!("{mention}\n        if n > 1000 -> break");
             let (stable_cursors, stable_clones) =
                 stable_loop_probe(&program(setup, source, "", &mention));
-            let (snapshot_cursors, snapshot_clones) =
+            let (read_cursors, read_clones) =
                 stable_loop_probe(&program(setup, source, &mention, ""));
+            let (snapshot_cursors, snapshot_clones) =
+                stable_loop_probe(&program(setup, source, &exit, ""));
             eprintln!(
-                "stable loop source `{source}`: non-scalar .clone() {snapshot_clones} (body mentions source) -> {stable_clones} (stable); cursors {snapshot_cursors:?} -> {stable_cursors:?}"
+                "stable loop source `{source}`: non-scalar .clone() {snapshot_clones} (body reads source, may exit) -> {read_clones} (body reads source) / {stable_clones} (body never mentions it); cursors {snapshot_cursors:?} -> {read_cursors:?} / {stable_cursors:?}"
             );
             assert_eq!(stable_cursors.get("run"), Some(&0), "`{source}`: {stable_cursors:?}");
+            assert_eq!(read_cursors.get("run"), Some(&0), "`{source}`: {read_cursors:?}");
             assert_eq!(snapshot_cursors.get("run"), Some(&1), "`{source}`: {snapshot_cursors:?}");
             assert!(
-                stable_clones < snapshot_clones,
-                "`{source}`: stable walk emitted {stable_clones} clones, snapshot {snapshot_clones}"
+                read_clones < snapshot_clones,
+                "`{source}`: read-only walk emitted {read_clones} clones, snapshot {snapshot_clones}"
             );
         }
     });
