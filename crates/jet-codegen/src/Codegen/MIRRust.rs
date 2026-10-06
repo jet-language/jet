@@ -7991,13 +7991,15 @@ impl<'a> RustEmitter<'a> {
         };
         match ty.kind() {
             MirTypeKind::Int
-            | MirTypeKind::Float
             | MirTypeKind::Bool
             | MirTypeKind::String
             | MirTypeKind::Char
-            | MirTypeKind::IntN { .. }
-            | MirTypeKind::Float32
-            | MirTypeKind::Measure(_) => true,
+            | MirTypeKind::IntN { .. } => true,
+            // IEEE floats have no total order: Rust `f64` is neither `Eq`
+            // nor `Ord`.
+            MirTypeKind::Float | MirTypeKind::Float32 | MirTypeKind::Measure(_) => {
+                !matches!(trait_name, "Eq" | "Ord")
+            }
             MirTypeKind::Shared(_) | MirTypeKind::Fn(_) | MirTypeKind::SendFn { .. } => {
                 trait_name == "Clone"
             }
@@ -8037,6 +8039,8 @@ impl<'a> RustEmitter<'a> {
                     )
                 }
             }
+            // The runtime `JetMap` carrier is `Eq` but has no Rust order.
+            MirTypeKind::Map { .. } if matches!(trait_name, "PartialOrd" | "Ord") => false,
             MirTypeKind::Map { key, value }
             | MirTypeKind::Result {
                 ok: key,
@@ -8068,7 +8072,7 @@ impl<'a> RustEmitter<'a> {
             // Union values are spelled as the synthetic `__JetUnion_*` carrier,
             // which has no sema `Equatable` derive and so no Rust `PartialEq`.
             MirTypeKind::Union(members) => {
-                trait_name != "PartialEq"
+                !matches!(trait_name, "PartialEq" | "Eq" | "PartialOrd" | "Ord")
                     && members.iter().all(|member| {
                         self.type_derive_capability(
                             member,
@@ -8114,6 +8118,10 @@ impl<'a> RustEmitter<'a> {
                     return true;
                 }
                 let Some(def) = self.structural_type_def_for(ty) else {
+                    // Native carriers make no Rust total-order promise.
+                    if matches!(trait_name, "Eq" | "PartialOrd" | "Ord") {
+                        return false;
+                    }
                     return args.iter().all(|arg| {
                         self.type_derive_capability(
                             arg,
@@ -8135,6 +8143,20 @@ impl<'a> RustEmitter<'a> {
                 if trait_name == "PartialEq"
                     && !matches!(&def.kind, MirTypeDefKind::Alias { .. })
                     && (!self.derives_trait(def, crate::Generics::EQUATABLE)
+                        || self.selected_user_capability_impl(ty, crate::Generics::EQUATABLE)
+                        || def.name.starts_with("__JetUnion_"))
+                {
+                    return false;
+                }
+                // Rust `Eq`/`PartialOrd`/`Ord` follow sema's structural
+                // `Comparable` derive the same way: a user `Comparable` impl
+                // orders by its own body, which a derived Rust order would
+                // silently disagree with.
+                if matches!(trait_name, "Eq" | "PartialOrd" | "Ord")
+                    && !matches!(&def.kind, MirTypeDefKind::Alias { .. })
+                    && (!self.derives_trait(def, crate::Generics::COMPARABLE)
+                        || !self.derives_trait(def, crate::Generics::EQUATABLE)
+                        || self.selected_user_capability_impl(ty, crate::Generics::COMPARABLE)
                         || self.selected_user_capability_impl(ty, crate::Generics::EQUATABLE)
                         || def.name.starts_with("__JetUnion_"))
                 {
@@ -8791,6 +8813,26 @@ impl<'a> RustEmitter<'a> {
                     )
                 {
                     derives.push("PartialEq");
+                }
+            }
+        }
+        // A structurally `Comparable` row orders like its Rust derive (fields
+        // in declaration order, variants in declaration order), which is what
+        // ordered collections such as `JetMap` keys require.
+        if derives_allowed
+            && derives.contains(&"PartialEq")
+            && self.derives_trait(def, crate::Generics::COMPARABLE)
+            && self.type_derive_capability(
+                declared_ty,
+                "Ord",
+                &mut Vec::new(),
+                &BTreeMap::new(),
+                &BTreeSet::new(),
+            )
+        {
+            for trait_name in ["Eq", "PartialOrd", "Ord"] {
+                if !derives.contains(&trait_name) {
+                    derives.push(trait_name);
                 }
             }
         }
