@@ -1715,13 +1715,6 @@ fn jet_net_tls_write_all_bytes_deadline(
     jet_net_tls_write_all_bytes(stream, data)
 }
 
-fn jet_net_tls_write_text(
-    stream: &mut JetTLSStream,
-    text: &String,
-) -> Result<(), jet_std::IOError> {
-    jet_net_tls_write_all_bytes(stream, &text.as_bytes().to_vec())
-}
-
 fn jet_net_tls_close(stream: &mut JetTLSStream) -> Result<(), jet_std::IOError> {
     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
     loop {

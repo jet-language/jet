@@ -1650,38 +1650,19 @@ fn core_fixed_sig_impl(
                 Type::Named("AuthError".into()),
             )),
         )),
-        ("core.auth", "register_user") => Some((
-            vec![(read, Type::String), (read, Type::String)],
-            Some(result_ty(unit_ty(), Type::String)),
-        )),
-        ("core.auth", "password_login" | "oauth_finish") => Some((
-            vec![
-                (read, Type::String),
-                (read, Type::String),
-                (read, Type::Int),
-                (read, Type::Int),
-            ],
-            Some(result_ty(Type::Named("Session".into()), Type::String)),
-        )),
-        ("core.auth", "magic_link_consume") => Some((
-            vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
-            Some(result_ty(Type::Named("Session".into()), Type::String)),
-        )),
-        ("core.auth", "session_validate") => Some((
-            vec![(read, Type::String), (read, Type::Int)],
-            Some(result_ty(Type::Named("Session".into()), Type::String)),
-        )),
         ("core.auth", "session_show" | "session_user" | "session_cookie" | "session_id") => Some((
             vec![(read, Type::Named("Session".into()))],
             Some(Type::String),
         )),
-        ("core.auth", "magic_link_issue") => Some((
-            vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
-            Some(result_ty(Type::String, Type::String)),
-        )),
-        ("core.auth", "oauth_begin") => Some((
-            vec![(read, Type::String)],
-            Some(result_ty(Type::String, Type::String)),
+        // D-AUTH1=A: the process byte cell behind the Jet auth store
+        // (`Core/auth/auth.jet` owns its layout and every session rule).
+        ("core.auth", "__store_load") => Some((vec![], Some(Type::List(Box::new(u8_ty()))))),
+        ("core.auth", "__store_replace") => Some((
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
+            Some(Type::Bool),
         )),
         ("core.sync", "text_new") => Some((
             vec![(read, Type::String), (read, Type::String)],
@@ -5299,19 +5280,6 @@ fn core_fixed_sig_impl(
                     Type::Named("TLSStream".to_string()),
                 ),
                 (read, Type::List(Box::new(u8_ty()))),
-            ],
-            Some(result_ty(
-                unit_ty(),
-                Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
-            )),
-        )),
-        ("core.net.tls", "write_text") => Some((
-            vec![
-                (
-                    AccessConvention::Write,
-                    Type::Named("TLSStream".to_string()),
-                ),
-                (read, Type::String),
             ],
             Some(result_ty(
                 unit_ty(),

@@ -166,7 +166,7 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
         module_name == "core.db" || module_name == "core.jobs" -> Val(Effect.DB)
         module_name == "core.auth" && core_call_one_of(member, [String]{
             "register_user", "password_login", "session_validate", "magic_link_issue", "magic_link_consume",
-            "oauth_begin", "oauth_finish"
+            "oauth_begin", "oauth_finish", "__store_load", "__store_replace"
         }) -> Val(Effect.DB)
         module_name == "core.plugin" || module_name == "core.mod" -> Val(Effect.Exec)
         module_name == "core.log" -> Val(Effect.Log)
