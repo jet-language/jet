@@ -19,6 +19,7 @@ use jet_foundation.[
     RecordSection,
     Span,
     diagnostic_from_registry,
+    diagnostic_registry_row,
     diagnostic_with_source_path,
     mir_sha256_hex,
     package_key_check_key,
@@ -78,6 +79,15 @@ pub enum JetDriverCompileTarget {
     )
 }
 
+// Rust `CompileMode`: `Program` compiles a package for check, build, or run
+// (its artifact starts at the package entry); `Test` compiles the `jet test`
+// harness: named `#Test` bodies are checked and lowered, E0601 reports a file
+// with none, and the artifact is a TestExecutable whose harness runs them.
+pub enum JetDriverCompileMode {
+    Program
+    Test
+}
+
 // One Core library source module the host embeds, mirroring a Rust
 // `CoreModuleExports::CORE_SOURCE_MODULES` row or a compiler-private part from
 // `CoreSourceParts` (both generated from Prelude/Core.jet). `path` is the
@@ -112,6 +122,7 @@ pub struct JetDriverCompileRequest {
     // automatic, memory-aware admission without it). Every thread count gives
     // the same diagnostics and output bytes.
     pub compiler_threads: CompilerThreads
+    pub mode: JetDriverCompileMode{JetDriverCompileMode.Program}
 }
 
 // The compiler's record store, reached only through the host, which owns
@@ -139,6 +150,10 @@ struct JetDriverSourceUnit {
     relative_path: String
     source_segments: [SemaSourceSegment]
     source_origin: SemaSourceOrigin
+    // D-MOD-CYCLE1=A: a file of a `package.jet` package shares its package's
+    // namespace. Loose files, one-file (inline Package) packages, embedded
+    // Core sources, and synthetic modules have none.
+    in_namespace: Bool
 }
 
 struct JetDriverPackageDependency {
@@ -170,6 +185,9 @@ struct JetDriverPackageInfo {
     authority_needs: [String]
     entry: JetDriverPackageEntry?
     manifest_path: String?
+    // The Package comes from a leading inline `package { … }` block (its
+    // carrier file is `manifest_path`), not from `package.jet`.
+    inline_package: Bool
     dependencies: [JetDriverPackageDependency]
     // D-MOD-CYCLE1=A: the kinds the manifest's `outputs:` declare. A package
     // that declares a Library and no Executable has no `fn run` (E0625).
@@ -244,6 +262,16 @@ struct JetDriverLoadResult {
     complete: Bool
 }
 
+// The entry package's written authority policy, for the host's application
+// authority check (Source/CmdCompile.rs `resolve_application_authority`).
+// `manifest_path` is None for a file with no `package.jet`; `allow`/`deny`
+// are None when the manifest writes no `authority.holds` row.
+pub struct JetDriverAuthorityPolicy {
+    pub manifest_path: String?
+    pub allow: [String]?
+    pub deny: [String]?
+}
+
 pub struct JetDriverCompileResult {
     pub diagnostics: [Diagnostic]
     pub generated_source_files: [MIRSourceFile]
@@ -266,6 +294,7 @@ pub struct JetDriverCompileResult {
     // JET_KEEP_GOING (jet_driver_compile_keep_going): every failure the
     // compile recorded, one TSV row each: phase, item, code, message, span.
     pub keep_going_rows: [String]{[String]{}}
+    pub authority_policy: JetDriverAuthorityPolicy?{None}
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read
@@ -330,6 +359,13 @@ fn jet_driver_diagnostic(code: String, span: Span, what: String, why: String, fi
 
 fn jet_driver_diagnostic_without_span(code: String, what: String, why: String, fix: String) -> Diagnostic {
     diagnostic_from_registry(code, None, what, why, fix)
+}
+
+// A diagnostic worded entirely by its registry row (Rust
+// `Diagnostic::from_row` with no holes).
+fn jet_driver_row_diagnostic(code: String, span: Span?) -> Diagnostic {
+    row :: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
+    diagnostic_from_registry(code, span, row.what, row.why, row.fix)
 }
 
 fn jet_driver_diagnostic_with_optional_span(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic {
