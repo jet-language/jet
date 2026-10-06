@@ -132,11 +132,27 @@ fn sema_expression_enum_variant_path(base: Expr, member: String, environment: Se
         kind :: scopes.bindings[found].symbol.kind
         if kind != SymbolKind.Type && kind != SymbolKind.Module -> return None
     }
-    if sema_expression_names_enum(root, environment, &scopes) -> return Val(SemaExpressionEnumPath{enum_name: root, variant: sema_expression_join_segments(segments, 1)})
+    // `use core.encoding.[DataTree as Tree]`: an alias of a Core enum carrier
+    // names that enum, whose variants are read by its Core leaf.
+    enum_root :: sema_expression_core_enum_alias(root, environment, &scopes) ?? root
+    if sema_expression_names_enum(enum_root, environment, &scopes) -> return Val(SemaExpressionEnumPath{enum_name: enum_root, variant: sema_expression_join_segments(segments, 1)})
     if segments.len() < 3 -> return None
     qualified :: "{root}.{segments[1]}"
     if !sema_expression_names_enum(qualified, environment, &scopes) -> return None
     Val(SemaExpressionEnumPath{enum_name: qualified, variant: sema_expression_join_segments(segments, 2)})
+}
+
+// The Core enum leaf a local type alias binds (`Tree` for `DataTree`): an
+// imported Core carrier keeps its builtin type under the local name.
+fn sema_expression_core_enum_alias(name: String, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> String? {
+    index :: sema_scope_resolve_index(scopes, name) ?? return None
+    symbol :: scopes.bindings[index].symbol
+    if symbol.kind != SymbolKind.Type -> return None
+    ty :: symbol.ty ?? return None
+    if ty == .Named(leaf) {
+        if leaf != name && sema_expression_core_enum_name(leaf) -> return Val(leaf)
+    }
+    None
 }
 
 // Rust `infer_method_call` static-owner arm (`resolve_enum_variants`) and

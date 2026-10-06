@@ -2609,6 +2609,9 @@ fn sema_expr_try_method_static_routes(receiver: Expr, method: String, method_spa
 
     core := sema_expr_try_core_module_method(receiver, method, method_span, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if core.handled -> return core
+    if receiver == .Ident(alias_name, alias_span) {
+        if sema_expr_core_module_alias_visible(alias_name, scopes) -> return sema_call_try_source_module_call(alias_name, alias_span, method, type_args, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     SemaMethodSpecialCheck{handled: false, value: None}
 }
 fn sema_expr_record_hardware_result(result: SemaHardwareMethodCheck, scopes: &SemaScopeTable, context: &SemaCheckContext) -> SemaMethodSpecialCheck Never! {
