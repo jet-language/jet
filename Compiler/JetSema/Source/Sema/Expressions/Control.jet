@@ -906,7 +906,8 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
     fallback_payload :: checked_route.payload
     if checked_route.reaches_merge {
         sema_ownership_fork_rollback(&state, fork)
-        sema_ownership_fork_apply(&state, sema_ownership_path_join(state, fork, sema_ownership_fork_base(fork), fallback_path, true, state.share_found))
+        joined :: sema_ownership_path_join(state, fork, sema_ownership_fork_base(fork), fallback_path, true, state.share_found)
+        sema_ownership_fork_apply(&state, joined)
         sema_ownership_fork_close(&state, fork)
     } else {
         sema_ownership_fork_drop(&state, fork, fallback_path.share_found, [SemaOwnershipShareSite]{})
@@ -1592,8 +1593,8 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     if !then_result.complete {
         sema_scope_leave(&scopes, &state)
         sema_scope_rollback(&scopes, then_mark)
-        then_found :: state.share_found
-        sema_ownership_fork_drop(&state, fork, then_found, [SemaOwnershipShareSite]{})
+        found_sites :: state.share_found
+        sema_ownership_fork_drop(&state, fork, found_sites, [SemaOwnershipShareSite]{})
         return None
     }
     // Owner rule (bare `None`): without an optional expected type, a bare
@@ -1615,8 +1616,8 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
         first :: sema_check_expression(then_value, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
             sema_scope_leave(&scopes, &state)
             sema_scope_rollback(&scopes, then_mark)
-            then_found :: state.share_found
-            sema_ownership_fork_drop(&state, fork, then_found, [SemaOwnershipShareSite]{})
+            found_sites :: state.share_found
+            sema_ownership_fork_drop(&state, fork, found_sites, [SemaOwnershipShareSite]{})
             return None
         }
         then_first = Val(first)

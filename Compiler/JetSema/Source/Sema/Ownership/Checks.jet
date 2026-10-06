@@ -612,7 +612,8 @@ fn sema_ownership_canonical_counts(state: SemaOwnershipState, row: Int) -> SemaO
 fn sema_ownership_push_declaration(state: &SemaOwnershipState, fact: SemaOwnershipBindingFact) Never! {
     row :: state.declarations.len()
     slot :: sema_ownership_key_slot(&state, fact.key)
-    &state.declaration_previous.push(state.key_facts[slot].last)
+    previous :: state.key_facts[slot].last
+    &state.declaration_previous.push(previous)
     if state.key_facts[slot].first < 0 -> state.key_facts[slot].first = row
     state.key_facts[slot].last = row
     &state.declarations.push(fact)
@@ -635,7 +636,8 @@ fn sema_ownership_truncate_declarations(state: &SemaOwnershipState, count: Int) 
 
 // Appends one reference row and keeps the key's reference totals.
 fn sema_ownership_push_reference(state: &SemaOwnershipState, reference: SemaOwnershipReference) Never! {
-    sema_ownership_anchor_add(&state.anchors, reference.use_span.start, state.references.len())
+    row :: state.references.len()
+    sema_ownership_anchor_add(&state.anchors, reference.use_span.start, row)
     slot :: sema_ownership_key_slot(&state, reference.def_key)
     state.key_facts[slot].references += 1
     if reference.kind == SemaOwnershipReferenceKind.Write -> state.key_facts[slot].writes += 1
@@ -655,7 +657,8 @@ fn sema_ownership_truncate_references(state: &SemaOwnershipState, count: Int) Ne
 // A reference a join or a deferred body admits: no row counted it yet.
 fn sema_ownership_admit_reference(state: &SemaOwnershipState, reference: SemaOwnershipReference) Never! {
     sema_ownership_push_reference(&state, reference)
-    sema_ownership_mark_dirty(&state, sema_ownership_first_row(state, reference.def_key))
+    first :: sema_ownership_first_row(state, reference.def_key)
+    sema_ownership_mark_dirty(&state, first)
 }
 
 fn sema_ownership_deactivate(state: &SemaOwnershipState, row: Int) Never! {
@@ -2968,7 +2971,10 @@ pub fn sema_ownership_fork_rollback(state: &SemaOwnershipState, fork: SemaOwners
     loop state.trail.len() > fork.trail {
         undo :: &state.trail.pop() ?? break
         if undo.row >= fork.declarations -> next
-        if undo.active && !state.declarations[undo.row].active -> sema_ownership_active_add(&state, state.declarations[undo.row].scope_depth, undo.row)
+        if undo.active && !state.declarations[undo.row].active {
+            depth :: state.declarations[undo.row].scope_depth
+            sema_ownership_active_add(&state, depth, undo.row)
+        }
         state.declarations[undo.row].references = undo.references
         state.declarations[undo.row].writes = undo.writes
         state.declarations[undo.row].active = undo.active
