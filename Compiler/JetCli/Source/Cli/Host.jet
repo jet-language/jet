@@ -1064,16 +1064,6 @@ fn jet_cli_fmt_relative(path: String, root: String) -> String Never! {
 // Flags the environment run takes unchanged.
 JET_CLI_EXTERNAL_FMT_FORWARDED :: [String]{"--trust", "--offline", "--online", "--no-color", "--json", "--flake", "--pure", "--yes", "-y"}
 
-// Whether `text` holds an ASCII whitespace byte (tab, line feed, vertical
-// tab, form feed, carriage return, space).
-fn jet_cli_has_ascii_space(text: String) -> Bool Never! {
-    loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
-        if code == 32 || (code >= 9 && code <= 13) -> return true
-    }
-    false
-}
-
 // Rust `str::trim_start_matches` for a string prefix.
 fn jet_cli_trim_start_matches(text: String, prefix: String) -> String Never! {
     rest := text
@@ -1098,13 +1088,222 @@ fn jet_cli_find_env_root(start: String) -[FS]> String? Never! {
     }
 }
 
-// `jet fmt --lang <language>`: `raw` starts at `fmt`. The options, language,
-// environment root, and `env.jet` read are checked exactly as the Rust host
-// does. Selecting the formatter needs the environment evaluator
-// (`ModuleEval::evaluate_env_with_selections`), which has no Jet path into
-// the compiler yet, so the run is refused there, never guessed.
+// CmdCompile.rs `external_formatter_program`: the formatter package's name
+// (no `@source`, no `#selector`, the last `/` or `:` segment), trimmed.
+fn jet_cli_external_formatter_program(package: String) -> String? Never! {
+    name :: package.split("@").to_list()[0].split("#").to_list()[0]
+    start := 0
+    bytes :: name.bytes()
+    loop index in 0..<bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if code == 47 || code == 58 -> start = index + 1
+    }
+    program :: name.slice(start..<name.len()).trim()
+    if program == "" || envmodel_has_whitespace(program) -> return None
+    Val(program)
+}
+
+// Rust `Path::extension(path) == Some(language)`: the text after the last
+// `.` of the file name, when that `.` is not the name's first byte.
+fn jet_cli_external_fmt_matches(path: String, language: String) -> Bool Never! {
+    name :: jet_cli_fmt_file_name(path)
+    bytes :: name.bytes()
+    dot := -1
+    loop index in 0..<bytes.len() {
+        if Int.from_u8(bytes[index]) == 46 -> dot = index
+    }
+    if dot <= 0 -> return false
+    name.slice((dot + 1)..<name.len()) == language
+}
+
+// Rust `Path` ordering: component by component, so `a/b` sorts before
+// `a.nix` (`BTreeSet<PathBuf>` in `collect_external_fmt_files`).
+fn jet_cli_external_fmt_path_less(left: String, right: String) -> Bool Never! {
+    left_parts :: left.split("/").to_list()
+    right_parts :: right.split("/").to_list()
+    index := 0
+    loop index < left_parts.len() && index < right_parts.len() {
+        if left_parts[index] != right_parts[index] -> return left_parts[index] < right_parts[index]
+        index += 1
+    }
+    left_parts.len() < right_parts.len()
+}
+
+// CmdCompile.rs `walk_external_fmt_files`: sorted, recursive, the ignored
+// directories skipped, symbolic links never followed.
+fn jet_cli_external_fmt_walk(directory: String, language: String, files: &[String]) {
+    names := cli_files.listdir(directory) ?? return
+    &names.sort()
+    loop name in names {
+        path :: jet_cli_authority_path(directory, name)
+        stat :: cli_files.stat(path) ?? next
+        if stat.is_symlink -> next
+        if stat.is_dir {
+            if !JET_CLI_FMT_IGNORED_DIRS.contains(name) -> jet_cli_external_fmt_walk(path, language, &files)
+        } else if stat.is_file && jet_cli_external_fmt_matches(path, language) {
+            &files.push(path)
+        }
+    }
+}
+
+// CmdCompile.rs `collect_external_fmt_files`: the environment root's files
+// for `language`, or those under each explicit path; sorted and unique.
+// Returns the problem text when an explicit path cannot be inspected.
+fn jet_cli_external_fmt_collect(cwd: String, project_dir: String, explicit_paths: [String], language: String, files: &[String]) -> String? {
+    found := [String]{}
+    if explicit_paths.len() == 0 {
+        jet_cli_external_fmt_walk(project_dir, language, &found)
+    } else {
+        loop raw in explicit_paths {
+            path :: if raw.starts_with("/") -> raw else -> jet_cli_authority_path(cwd, raw)
+            stat :: cli_files.stat(path) ?? return Val("{path}: {jet_cli_io_error_text(err)}")
+            if stat.is_symlink -> next
+            if stat.is_dir {
+                jet_cli_external_fmt_walk(path, language, &found)
+            } else if stat.is_file && jet_cli_external_fmt_matches(path, language) {
+                &found.push(path)
+            }
+        }
+    }
+    position := 1
+    loop position < found.len() {
+        current :: ~found[position]
+        slot := position
+        loop slot > 0 && jet_cli_external_fmt_path_less(current, found[slot - 1]) {
+            found[slot] = found[slot - 1]
+            slot -= 1
+        }
+        found[slot] = current
+        position += 1
+    }
+    loop path in found {
+        if files.len() == 0 || files[files.len() - 1] != path -> &files.push(path)
+    }
+    None
+}
+
+// CmdCompile.rs `external_fmt_changed_files`: root-relative files Git
+// reports changed against HEAD, staged, or untracked. Returns the problem
+// text when Git cannot answer a `diff`.
+fn jet_cli_external_fmt_changed(root: String, changed: &[String]) -> String? {
+    queries :: [[String]]{[String]{"diff", "--name-only", "HEAD"}, [String]{"diff", "--name-only", "--cached"}, [String]{"ls-files", "--others", "--exclude-standard"}}
+    loop query in queries {
+        argv := [String]{"git", "-C", root}
+        loop part in query -> &argv.push(part)
+        receipt :: cli_process.cmd(argv).run() ?? return Val(jet_cli_io_error_text(err))
+        if !receipt.success && query[0] == "diff" -> return Val(receipt.errors.trim())
+        loop line in receipt.output.lines() {
+            relative :: line.trim().replace("\\", "/")
+            if relative != "" && cli_files.is_file(jet_cli_authority_path(root, relative)) && !changed.contains(relative) -> &changed.push(relative)
+        }
+    }
+    None
+}
+
+// CmdCompile.rs `fmt_json_ok` / `fmt_json_dirty_*`: the `fmt` status line.
+fn jet_cli_external_fmt_status(status: String, files: [JetCLIStatusValue]?) -> String Never! {
+    fields := [JetCLIStatusField]{jet_cli_status_field("status", jet_cli_status_text(status))}
+    if files == .Val(entries) -> &fields.push(jet_cli_status_field("files", jet_cli_status_array(entries)))
+    "{jet_cli_status_render("fmt", status == "ok", [JetCLIStatusField]{jet_cli_status_field("fmt", jet_cli_status_object(fields))})}\n"
+}
+
+// A clean run: the `ok` status line under `--json`, nothing otherwise.
+fn jet_cli_external_fmt_ok(json: Bool) -> JetDriverVerbOutput Never! {
+    stdout :: if json -> jet_cli_external_fmt_status("ok", None) else -> ""
+    JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// A staging directory (`ExternalFmtTempDir::new`), or the problem text.
+struct JetCLIExternalFmtTemp {
+    path: String
+    problem: String?
+}
+
+// `ExternalFmtTempDir::new`: `jet-fmt-<ns>-<pid>-<attempt>` under the
+// system temporary directory, skipping names that already exist.
+fn jet_cli_external_fmt_temp_dir() -> JetCLIExternalFmtTemp {
+    base :: cli_sys.get("TMPDIR") ?? "/tmp"
+    stamp :: cli_time.unix_ns()
+    pid :: cli_process.current_pid()
+    loop attempt in 0..<32 {
+        path :: jet_cli_authority_path(base, "jet-fmt-{stamp}-{pid}-{attempt}")
+        if cli_files.exists(path) -> next
+        cli_files.create_dir(path) ?? return JetCLIExternalFmtTemp{path: "", problem: Val(jet_cli_io_error_text(err))}
+        return JetCLIExternalFmtTemp{path: path, problem: None}
+    }
+    JetCLIExternalFmtTemp{path: "", problem: Val("could not allocate a formatter staging directory")}
+}
+
+// The staged half of `run_external_fmt`: copy each input into `temp`, run
+// the formatter through `jetpack env … -- <program> <staged…>`, then report
+// (`--check`/`--diff`) or write back every file whose bytes changed.
+fn jet_cli_external_fmt_staged(temp: String, project_dir: String, program: String, files: [String], child_flags: [String], check_only: Bool, show_diff: Bool, json: Bool, color: Bool) -> JetDriverVerbOutput {
+    command := [String]{"env"}
+    loop flag in child_flags -> &command.push(flag)
+    &command.push("--")
+    &command.push(program)
+    staged := [String]{}
+    befores := [[U8]]{}
+    loop index in 0..<files.len() {
+        source_path :: files[index]
+        before :: cli_files.read_bytes(source_path) ?? return jet_cli_external_fmt_fail("E1340", "could not read `{source_path}`", jet_cli_io_error_text(err), "fix the file permissions and retry", color, JET_DRIVER_EXIT_USAGE)
+        staged_path :: jet_cli_authority_path(temp, "{jet_cli_zero_pad(index, 4)}-{jet_cli_fmt_file_name(source_path)}")
+        cli_files.write_bytes(staged_path, before) ?? return jet_cli_external_fmt_fail("E1340", "could not stage formatter inputs", jet_cli_io_error_text(err), "fix the temporary directory and retry", color, JET_DRIVER_EXIT_USAGE)
+        &command.push(staged_path)
+        &staged.push(staged_path)
+        &befores.push(before)
+    }
+    dispatched :: jet_cli_engine_dispatch(JET_CLI_JETPACK_BINARY, "env", command)
+    if dispatched.exit_code != JET_DRIVER_EXIT_OK -> return dispatched
+    changed := [Int]{}
+    afters := [[U8]]{}
+    loop index in 0..<files.len() {
+        after :: cli_files.read_bytes(staged[index]) ?? return jet_cli_external_fmt_fail("E1340", "environment formatter did not produce readable output", jet_cli_io_error_text(err), "check the formatter package and retry", color, JET_DRIVER_EXIT_USER_ERROR)
+        if befores[index] != after {
+            &changed.push(index)
+        }
+        &afters.push(after)
+    }
+    if changed.len() == 0 -> return jet_cli_external_fmt_ok(json)
+    if check_only {
+        stdout := ""
+        entries := [JetCLIStatusValue]{}
+        loop index in changed {
+            path :: jet_cli_fmt_relative(files[index], project_dir)
+            diff :: if show_diff -> jet_format_unified_diff(path, String.from_bytes(befores[index]) ?? "", String.from_bytes(afters[index]) ?? "") else -> ""
+            if json {
+                if show_diff {
+                    &entries.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(path)), jet_cli_status_field("diff", jet_cli_status_text(diff))}))
+                } else {
+                    &entries.push(jet_cli_status_text(path))
+                }
+            } else {
+                stdout = "{stdout}{path}\n{diff}"
+            }
+        }
+        if json -> stdout = jet_cli_external_fmt_status("dirty", Val(entries))
+        return JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    loop index in changed {
+        path :: files[index]
+        cli_files.write_bytes(path, afters[index]) ?? return jet_cli_external_fmt_fail("E1340", "could not write `{path}`", jet_cli_io_error_text(err), "fix the file permissions and rerun the formatter", color, JET_DRIVER_EXIT_USAGE)
+    }
+    jet_cli_external_fmt_ok(json)
+}
+
+// `jet fmt --lang <language>` (CmdCompile.rs `run_external_fmt`): `raw`
+// starts at `fmt`. Jet evaluates the environment's formatter fact itself,
+// stages the inputs, and asks the Jetpack engine only to realize the
+// environment and run that formatter over the staged copies.
 fn jet_cli_external_fmt(raw: [String], color: Bool) -> JetDriverVerbOutput {
     language := String?{None}
+    explicit_paths := [String]{}
+    child_flags := [String]{}
+    preset := String?{None}
+    environment := String?{None}
+    check_only := false
+    show_diff := false
+    changed_only := false
     index := 1
     loop index < raw.len() {
         argument :: raw[index]
@@ -1114,29 +1313,80 @@ fn jet_cli_external_fmt(raw: [String], color: Bool) -> JetDriverVerbOutput {
                 language = if index < raw.len() -> Val(raw[index]) else -> None
             }
             argument.starts_with("--lang=") -> language = Val(jet_cli_trim_start_matches(argument, "--lang="))
-            argument == "--check" || argument == "--diff" || argument == "--dry-run" || argument == "--changed" -> {}
+            argument == "--check" -> check_only = true
+            argument == "--diff" || argument == "--dry-run" -> {
+                check_only = true
+                show_diff = true
+            }
+            argument == "--changed" -> changed_only = true
             argument == "--fixtures" || argument == "--preset" || argument == "--env" -> {
                 index += 1
                 if index >= raw.len() -> return jet_cli_external_fmt_fail("E2104", "{argument} needs a value", "these options select the realized environment", "pass a value after the option", color, JET_DRIVER_EXIT_USAGE)
+                if argument == "--preset" -> preset = Val(raw[index])
+                if argument == "--env" -> environment = Val(raw[index])
+                &child_flags.push(argument)
+                &child_flags.push(raw[index])
             }
-            argument.starts_with("--fixtures=") || argument.starts_with("--preset=") || argument.starts_with("--env=") -> {}
-            JET_CLI_EXTERNAL_FMT_FORWARDED.contains(argument) || argument.starts_with("--color=") -> {}
+            argument.starts_with("--fixtures=") -> {
+                &child_flags.push("--fixtures")
+                &child_flags.push(jet_cli_trim_start_matches(argument, "--fixtures="))
+            }
+            argument.starts_with("--preset=") -> {
+                preset = Val(jet_cli_trim_start_matches(argument, "--preset="))
+                &child_flags.push("--preset")
+                &child_flags.push(jet_cli_trim_start_matches(argument, "--preset="))
+            }
+            argument.starts_with("--env=") -> {
+                environment = Val(jet_cli_trim_start_matches(argument, "--env="))
+                &child_flags.push("--env")
+                &child_flags.push(jet_cli_trim_start_matches(argument, "--env="))
+            }
+            JET_CLI_EXTERNAL_FMT_FORWARDED.contains(argument) || argument.starts_with("--color=") -> &child_flags.push(argument)
             argument == "--" -> return jet_cli_external_fmt_fail("E2104", "jet fmt --lang does not accept a command separator", "Jet supplies the staged files to the environment formatter", "pass formatter input paths before `--`", color, JET_DRIVER_EXIT_USAGE)
             argument.starts_with("-") -> return jet_cli_external_fmt_fail("E2102", "unknown external formatter option `{argument}`", "Jet forwards only environment selection and formatter mode flags", "run `jet fmt --help` or remove the unknown option", color, JET_DRIVER_EXIT_USAGE)
-            else -> {}
+            else -> &explicit_paths.push(argument)
         }
         index += 1
     }
     named := ""
     if language == .Val(value) -> named = jet_cli_trim_start_matches(value.trim(), ".")
-    if named == "" || jet_cli_has_ascii_space(named) || named.contains("/") || named.contains("\\") {
+    if named == "" || envmodel_has_whitespace(named) || named.contains("/") || named.contains("\\") {
         return jet_cli_external_fmt_fail("E2104", "jet fmt needs --lang <language>", "non-Jet formatting is selected by a file-language name", "run `jet fmt --lang nix` or omit `--lang` for Jet files", color, JET_DRIVER_EXIT_USAGE)
     }
+    json :: raw.contains("--json")
     cwd :: cli_files.cwd() ?? "."
     project_dir :: jet_cli_find_env_root(cwd) ?? return jet_cli_external_fmt_fail("E1340", "jet fmt --lang needs an env.jet", "the external formatter is an environment package fact", "run from a realized environment project containing env.jet", color, JET_DRIVER_EXIT_USER_ERROR)
     env_path :: jet_cli_authority_path(project_dir, ENV_FILE)
-    if cli_files.read(env_path) == .Err(err) -> return jet_cli_external_fmt_fail("E1340", "could not read `{env_path}`", jet_cli_io_error_text(err), "fix the environment file and retry", color, JET_DRIVER_EXIT_USER_ERROR)
-    jet_cli_external_fmt_fail("E2104", "`jet fmt --lang {named}` is not part of the Jet-hosted CLI yet", jet_cli_why("E2104"), "run `jet fmt --lang {named}` with the Rust-hosted `jet` until the Jet CLI owns it", color, JET_DRIVER_EXIT_USAGE)
+    source :: cli_files.read(env_path) ?? return jet_cli_external_fmt_fail("E1340", "could not read `{env_path}`", jet_cli_io_error_text(err), "fix the environment file and retry", color, JET_DRIVER_EXIT_USER_ERROR)
+    plan :: if envmodel_evaluate_env_with_selections(source, project_dir, preset, environment) == {
+        .Ok(evaluated) -> evaluated
+        .Err(error) -> {
+            return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(ENV_FILE, source, [Diagnostic]{error.diagnostic}, false), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        }
+    }
+    formatter :: plan.lifecycle.formatter ?? return jet_cli_external_fmt_fail("E1340", "no formatter is declared for language {named}", "jet fmt --lang delegates through the selected environment formatter fact", "declare a formatter package in the selected env module", color, JET_DRIVER_EXIT_USER_ERROR)
+    program :: jet_cli_external_formatter_program(formatter.package) ?? return jet_cli_external_fmt_fail("E1340", "the environment formatter package has no executable name", "Jetpack realizes formatter packages, and Jet invokes their package name", "use a formatter package such as `pkgs.nixfmt`", color, JET_DRIVER_EXIT_USER_ERROR)
+    files := [String]{}
+    if jet_cli_external_fmt_collect(cwd, project_dir, explicit_paths, named, &files) == .Val(problem) {
+        return jet_cli_external_fmt_fail("E1340", "could not discover formatter input files", problem, "fix the named path or run the formatter from the environment root", color, JET_DRIVER_EXIT_USAGE)
+    }
+    if changed_only {
+        changed := [String]{}
+        if jet_cli_external_fmt_changed(project_dir, &changed) == .Val(problem) {
+            return jet_cli_external_fmt_fail("E1340", "--changed needs a readable Git worktree", problem, "run inside a Git worktree or remove --changed", color, JET_DRIVER_EXIT_USAGE)
+        }
+        kept := [String]{}
+        loop path in files {
+            if path.starts_with("{project_dir}/") && changed.contains(jet_cli_fmt_relative(path, project_dir)) -> &kept.push(path)
+        }
+        files = kept
+    }
+    if files.len() == 0 -> return jet_cli_external_fmt_ok(json)
+    temp :: jet_cli_external_fmt_temp_dir()
+    if temp.problem == .Val(problem) -> return jet_cli_external_fmt_fail("E1340", "could not stage formatter inputs", problem, "fix the temporary directory and retry", color, JET_DRIVER_EXIT_USAGE)
+    output :: jet_cli_external_fmt_staged(temp.path, project_dir, program, files, child_flags, check_only, show_diff, json, color)
+    cli_files.rmtree(temp.path).drop("a leftover formatter staging directory is harmless")
+    output
 }
 // Unannotated because the compile verbs are (Request.jet `jet_cli_compile_file`).
 pub fn jet_cli_main(args: [String]) -> Int {

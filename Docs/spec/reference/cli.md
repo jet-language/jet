@@ -271,6 +271,10 @@ changed against `HEAD` or staged (exit 2 outside a git worktree).
 `--explicit-copies` checks each file, then writes `~` at every implicit copy
 site: the Safe `~` edits sema gives the same source under
 `#Policy(copies: .Explicit)`; marks that would not parse report E0122.
-`--lang <language>` checks its options, the language name, the `env.jet`
-root, and the `env.jet` read, then is refused with E2104 because the
-environment evaluator has no Jet path into the compiler yet.
+`--lang <language>` evaluates the `env.jet` above the working directory with
+the Jetpack environment model (`--preset`/`--env` select as in `jet env`),
+takes the selected environment's `formatter:` package, stages the matching
+`.<language>` files (the environment root, or the named paths) in a
+temporary directory, and runs `jetpack env … -- <formatter> <staged…>`;
+`--check`/`--diff`/`--dry-run` report the files whose bytes changed (exit 1),
+otherwise those files are written back. No formatter declared is E1340.
