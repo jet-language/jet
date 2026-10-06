@@ -16,6 +16,7 @@ use jet_foundation.[
     THostCall,
     TTypedTextForm,
     Type,
+    TypeTupleField,
     ast_empty_call_arg_flags,
     core_receiver_method,
     type_name,
@@ -356,6 +357,39 @@ fn sema_data_literal_expected(ty: Type, variant: String) -> Type? {
     }
 }
 
+// D-DATATREE-ORDER1=A: an object is its fields in arrival order, the pair list
+// `[(key: String, value: DataTree)]`. A list literal or a local of that type is
+// handed over in list order; anything else is a `[String: DataTree]` Map, which
+// hands over its sorted order.
+pub fn sema_data_object_pairs_type() -> Type Never! {
+    Type.List{element: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: sema_data_tree_type()}}}}
+}
+
+fn sema_data_object_pairs_argument(argument: Expr, scopes: SemaScopeTable) -> Bool {
+    if argument == {
+        .ListLit(_, _) -> return true
+        .Ident(name, _) -> {
+            index :: sema_scope_resolve_index(scopes, name) ?? return false
+            ty :: scopes.bindings[index].symbol.ty ?? return false
+            return sema_data_is_object_pairs_type(ty)
+        }
+        else -> return false
+    }
+}
+
+// Pattern bindings spell the value type `Data`; declared locals spell `DataTree`.
+fn sema_data_is_object_pairs_type(ty: Type) -> Bool Never! {
+    if ty == {
+        .List(element) -> {
+            if element == {
+                .Tuple(fields) -> return fields.len() == 2 && fields[0].name == "key" && fields[0].ty == Type.String && fields[1].name == "value" && sema_data_is_json_name(sema_data_type_name(fields[1].ty) ?? "")
+                else -> return false
+            }
+        }
+        else -> return false
+    }
+}
+
 fn sema_data_literal_variant_valid(ty: Type, variant: String) -> Bool Never! {
     if ty == (Type.Named{name: "DBValue"}) -> return variant == "Null" || variant == "Int" || variant == "Float" || variant == "Text" || variant == "Bool" || variant == "Blob"
     sema_data_is_json_name(sema_data_type_name(ty) ?? "") && (variant == "Null" || variant == "Bool" || variant == "Int" || variant == "Float" || variant == "Text" || variant == "Array" || variant == "Object")
@@ -404,6 +438,7 @@ pub fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], sp
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     expected_payload := sema_data_literal_expected(ty, variant)
+    if variant == "Object" && ty != (Type.Named{name: "DBValue"}) && args.len() == 1 && sema_data_object_pairs_argument(args[0].expr, scopes) -> expected_payload = Val(sema_data_object_pairs_type())
     expected_count := if expected_payload == None -> 0 else -> 1
     if args.len() != expected_count {
         sema_data_arity_diagnostic("{type_name(ty)}.{variant}", expected_count, args.len(), span, &diagnostics)

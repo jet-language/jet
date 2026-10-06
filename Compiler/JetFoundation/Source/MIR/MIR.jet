@@ -1647,7 +1647,6 @@ pub enum MIRConversion { Transparent NumericCast SendFn Prelude(call: MIRPrelude
 pub struct MIREnumArg { pub field: MIRFieldID?, pub value: MIRValueID, pub boxed: Bool }
 
 pub enum MIRSemanticOp {
-    DataEntriesToMap(call: MIRPreludeCallID, local: MIRLocalID)
     MathBuiltin(type_id: MIRTypeID, call: MIRPreludeCallID, args: [MIRValueID])
     PreciseBuiltin(type_id: MIRTypeID, call: MIRPreludeCallID, args: [MIRValueID])
     Print(call: MIRPreludeCallID, value: MIRValueID)
@@ -2347,7 +2346,6 @@ pub fn mir_operation_value_uses(operation: MIROperation) -> [MIRValueID] Never! 
 pub fn mir_semantic_op_value_uses(operation: MIRSemanticOp) -> [MIRValueID] Never! {
     uses := [MIRValueID]{}
     if operation == {
-        .DataEntriesToMap(_, _) -> {}
         .MathBuiltin(_, _, args)
         | .PreciseBuiltin(_, _, args)
         | .TaskGroup(_, _, args)
@@ -2734,7 +2732,6 @@ pub fn mir_semantic_op_prelude_calls(operation: MIRSemanticOp) -> [MIRPreludeCal
         .Print(call, _)
         | .AmbientInput(call, _)
         | .RequireStop(call, _, _, _, _, _, _)
-        | .DataEntriesToMap(call, _)
         | .LayoutCompare(call, _, _, _)
         | .SharedGuardMap(call, _, _, _)
         | .SharedGuardWait(call, _, _, _)
