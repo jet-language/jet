@@ -45,6 +45,34 @@ pub struct DirEntry {
     pub is_dir: Bool
 }
 
+/// D-CORE-FILEDIR1=A: one entry of `Directory.list`. `raw_name` is the exact
+/// name the system stores; `name_is_unicode` is false when those bytes are not
+/// valid UTF-8, and then `name` and `path` show each non-ASCII byte as U+FFFD,
+/// so only `raw_name` identifies the entry exactly.
+pub struct DirectoryEntry {
+    pub name: String
+    pub path: String
+    pub is_dir: Bool
+    pub raw_name: [U8]
+    pub name_is_unicode: Bool
+}
+
+/// The shown form of a name that is not valid UTF-8: ASCII bytes stay, every
+/// other byte becomes U+FFFD.
+fn replacement_name(raw: [U8]) -> String Never! {
+    shown := [U8]{}
+    loop byte in raw {
+        if byte < (U8{128}) {
+            &shown.push(byte)
+        } else {
+            &shown.push(U8{239})
+            &shown.push(U8{191})
+            &shown.push(U8{189})
+        }
+    }
+    String.from_bytes(shown) ?? ""
+}
+
 /// D-CORE-FILEOPEN1=A: whether `create` may replace an existing file.
 /// `Refuse` creates exclusively and reports `IOError.AlreadyExists`.
 pub enum CreateIfExists {
@@ -239,8 +267,32 @@ pub struct Directory {
         Ok(Directory{path: join(self.path, name), handle: key})
     }
 
-    /// The entries in name order. A link to a directory has `is_dir: false`.
-    pub fn list(self) -[FS.Read]> [DirEntry] IOError! { core.files.__list_directory(self.handle) }
+    /// The entries in raw-name byte order. A link to a directory has
+    /// `is_dir: false`. `raw_name` holds the entry's exact name bytes and
+    /// `name_is_unicode` says whether they are valid UTF-8; when they are not,
+    /// `name` (and `path`) show each non-ASCII byte as U+FFFD.
+    pub fn list(self) -[FS.Read]> [DirectoryEntry] IOError! {
+        rows :: core.files.__list_directory(self.handle)
+        out := [DirectoryEntry]{}
+        loop row in rows {
+            raw := [U8]{}
+            i := 1
+            loop i < row.len() {
+                &raw.push(row[i])
+                i += 1
+            }
+            unicode :: String.from_bytes(raw) != None
+            name :: String.from_bytes(raw) ?? replacement_name(raw)
+            &out.push(DirectoryEntry{
+                name: name,
+                path: join(self.path, name),
+                is_dir: row[0] == (U8{1}),
+                raw_name: raw,
+                name_is_unicode: unicode,
+            })
+        }
+        Ok(out)
+    }
 
     /// Describe the held directory itself.
     pub fn stat(self) -[FS.Read]> Stat IOError! {
