@@ -758,6 +758,9 @@ pub const FOREIGN_OR_FALLBACK: &str = "or";
 
 /// S36 (ratified M4): bug-stop builtins (like `print`).
 pub const BUILTIN_PANIC: &str = "panic";
+/// D-META-USER1=A: a checked rule body rejects with a registered project
+/// diagnostic: `reject(code:, what:, why:, fix:)`.
+pub const BUILTIN_REJECT: &str = "reject";
 /// D-INTBIG1/D-NUMOPS1: default `Int` is exact. Fixed-width per-op overflow
 /// opt-ins wrap one integer `+`/`-`/`*`/`/`: `wrapping(…)` wraps around,
 /// `saturating(…)` clamps to the type's range, and `checked(…) -> ?T` returns

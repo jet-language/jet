@@ -914,7 +914,7 @@ impl<'a> Interp<'a> {
         // D-META-USER1=A: a checked rule may reject with a registered
         // project diagnostic. Labels keep the product fields explicit; the
         // registry still owns the code's severity and rendering metadata.
-        if name == "reject" {
+        if name == crate::Syntax::BUILTIN_REJECT {
             let mut values = HashMap::new();
             for argument in args {
                 let Some((label, _)) = &argument.label else {

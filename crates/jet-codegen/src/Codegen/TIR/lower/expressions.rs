@@ -4307,6 +4307,53 @@ fn invariant_violation_expr(span: Span, construct: impl Into<String>) -> TExpr {
     }
 }
 
+/// D-META-USER1=A: lower `reject(code:, what:, why:, fix:)` to the registered
+/// `core.compiler.__reject` row with its four fields in that order. The
+/// compile-time evaluator owns the diagnostic (`Comptime::project_rejection`).
+fn lower_reject_call(call: &Call, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+    const FIELDS: [&str; 4] = ["code", "what", "why", "fix"];
+    let record = match crate::Syntax::core_call_projection(
+        "core.compiler",
+        "__reject",
+        crate::Syntax::CoreCallCoverage::TIR_SUBSET,
+        FIELDS.len(),
+    ) {
+        Ok(record) => record,
+        Err(error) => {
+            return invariant_violation_expr(
+                call.name_span,
+                format!("`reject` has no canonical Core row ({error:?})"),
+            )
+        }
+    };
+    let mut args = Vec::with_capacity(FIELDS.len());
+    for field in FIELDS {
+        let Some(arg) = call
+            .args
+            .iter()
+            .find(|arg| arg.label.as_ref().is_some_and(|(label, _)| label == field))
+        else {
+            return invariant_violation_expr(
+                call.name_span,
+                format!("`reject` requires code, what, why, and fix labels; `{field}` is missing"),
+            );
+        };
+        args.push(lower_expr(&arg.expr, cx, env));
+    }
+    TExpr {
+        ty: unit_type(),
+        kind: TExprKind::CoreCall {
+            record,
+            args,
+            source_span: call.name_span,
+            type_args: Vec::new(),
+            widen_to_vec: vec![false; FIELDS.len()],
+            data_plan: None,
+            fallibility: TFailureCarrier::Infallible,
+        },
+    }
+}
+
 fn checked_const_ref_name(name: &str, cx: &Cx) -> String {
     cx.const_ref_keys
         .get(name)
@@ -6153,6 +6200,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 },
                             };
                         });
+                    }
+                    // D-META-USER1=A: a checked rule's `reject(code:, what:,
+                    // why:, fix:)` is the registered `core.compiler.__reject`
+                    // row; the compile-time evaluator turns it into the
+                    // project diagnostic (card #4696).
+                    if call.name == Syntax::BUILTIN_REJECT {
+                        return in_own_frame(|| lower_reject_call(call, cx, env));
                     }
                 }
                 // c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B). Same

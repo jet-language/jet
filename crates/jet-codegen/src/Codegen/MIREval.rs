@@ -2898,6 +2898,11 @@ fn eval_core_call_binding(
         crate::Comptime::set_trace_id(id);
         return Ok(CtValue::Unit);
     }
+    // D-META-USER1=A: `reject(...)` in a checked rule body is a registered
+    // project diagnostic, never a value (card #4696).
+    if module == "core.compiler" && member == "__reject" {
+        return crate::Comptime::project_rejection(&values, span);
+    }
     if let Some(result) = eval_fixed_float_reduction(module, member, &values, span) {
         return result;
     }

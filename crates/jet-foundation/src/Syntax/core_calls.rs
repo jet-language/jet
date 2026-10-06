@@ -1482,7 +1482,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 0c97edd4dda79f8488b7fbc365f543eff98d5096e00250905a2285476312c432
+// Source SHA-256: 59c9b89cd2cd32e430d4ce65139c69568d23064ad4147820d93bf86541105a6f
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2343,6 +2343,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.crypto", "__vault_unlock_recipient", "jet_vault_unlock_recipient_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_vault_unlock_recipient"),
     CoreCallRecord::new("core.crypto", "__vault_unlock_passphrase", "jet_vault_unlock_passphrase_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_vault_unlock_passphrase"),
     CoreCallRecord::new("core.crypto", "__zeroize", "jet_crypto_zeroize", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_jit_symbol("jet_jit_crypto_zeroize"),
+    CoreCallRecord::new("core.compiler", "__reject", "jet_compiler_reject", true, &[true, true, true, true]).without_direct_aot().without_direct_jit(),
     CoreCallRecord::new( "core.web.storage.session", "get", "jet_web_storage_session_get", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .with_jit_symbol("jet_jit_web_storage_session_get"),
     CoreCallRecord::new( "core.web.storage.session", "remove", "jet_web_storage_session_remove", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .with_jit_symbol("jet_jit_web_storage_session_remove"),
     CoreCallRecord::new( "core.web.storage.session", "set", "jet_web_storage_session_set", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .with_jit_symbol("jet_jit_web_storage_session_set"),
