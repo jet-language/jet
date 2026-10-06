@@ -4,13 +4,9 @@
 // build typed values; only this file turns them into JSON bytes.
 use jet_foundation.[
     Diagnostic,
-    Span,
     DIAGNOSTIC_ERROR,
-    diagnostic_column_at,
     diagnostic_from_registry,
-    diagnostic_line_at,
 ]
-use core.files as cli_files
 
 pub JET_CLI_STATUS_SCHEMA :: "jet.status/v1"
 JET_CLI_REPORT_SCHEMA :: "jet.report/v3"
@@ -186,109 +182,4 @@ pub fn jet_cli_report_json(diagnostic: Diagnostic) -> String Never! {
 pub fn jet_cli_fail_json(code: String, what: String, why: String, fix: String) -> String Never! {
     report :: jet_cli_report_json(diagnostic_from_registry(code, None, what, why, fix))
     "{jet_cli_status_render_with_reports("cli", false, [String]{report}, [JetCLIStatusField]{})}\n"
-}
-
-// Report.rs `ReportPath::from_process`: `path` made absolute against the
-// working directory and lexically normalized (`.` dropped, `..` pops); an
-// empty path or a `<…>` pseudo-path stays as written.
-pub fn jet_cli_report_path(path: String) -[FS]> String Never! {
-    if path == "" || path.starts_with("<") -> return path
-    absolute := path
-    if !path.starts_with("/") {
-        cwd :: cli_files.cwd() ?? return path
-        absolute = "{cwd}/{path}"
-    }
-    parts := [String]{}
-    loop part in absolute.split("/") {
-        if part == "" || part == "." -> next
-        if part == ".." {
-            if parts.len() > 0 -> _ := &parts.pop()
-            next
-        }
-        &parts.push(part)
-    }
-    "/{parts.join("/")}"
-}
-
-fn jet_cli_report_span_json(span: Span?) -> String Never! {
-    value :: span ?? return "null"
-    "{{\"start\":{value.start},\"end\":{value.end}}}"
-}
-
-fn jet_cli_report_path_json(path: String) -> String Never! {
-    if path == "" -> return "null"
-    jet_cli_json_string(path)
-}
-
-// Diagnostics.rs `Diagnostic::to_report` + `ReportEnvelope::json` for a
-// diagnostic against `file` (already a report path) and its `source`: the
-// diagnostic's own origin replaces both; `line`/`col` come from the primary
-// span, causes and labels keep theirs, and `clears` is 0.
-pub fn jet_cli_source_report_json(diagnostic: Diagnostic, file: String, source: String) -[FS]> String Never! {
-    path := file
-    text := source
-    if diagnostic.origin == .Val(origin) {
-        path = jet_cli_report_path(origin.path)
-        text = origin.source
-    }
-    moment :: if diagnostic.moment == {
-        .Compile -> "compile"
-        .Run -> "run"
-        .Test -> "test"
-        .Tool -> "tool"
-    }
-    severity :: if diagnostic.severity == DIAGNOSTIC_ERROR -> "error" else -> "warning"
-    out := "{{\"schema\":{jet_cli_json_string(JET_CLI_REPORT_SCHEMA)},\"moment\":{jet_cli_json_string(moment)},\"severity\":{jet_cli_json_string(severity)},\"code\":{jet_cli_json_string(diagnostic.code)},\"what\":{jet_cli_json_string(diagnostic.what)},\"why\":{jet_cli_json_string(diagnostic.why)},\"fix\":{jet_cli_json_string(diagnostic.fix)}"
-    if diagnostic.applicability == .Val(applicability) {
-        grade :: if applicability == {
-            .Safe -> "safe"
-            .Suggested -> "suggested"
-        }
-        out = "{out},\"applicability\":{jet_cli_json_string(grade)}"
-    }
-    out = "{out},\"detail\":{jet_cli_report_optional(diagnostic.detail)},\"denial_kind\":{jet_cli_report_optional(diagnostic.denial_kind)},\"call_chain\":{jet_cli_report_strings(diagnostic.call_chain)},\"scope_chain\":{jet_cli_report_strings(diagnostic.scope_chain)},\"nearest_granting_scope\":{jet_cli_report_optional(diagnostic.nearest_granting_scope)},\"file\":{jet_cli_report_path_json(path)}"
-    if diagnostic.span == {
-        .Val(span) -> out = "{out},\"line\":{diagnostic_line_at(text, span.start)},\"col\":{diagnostic_column_at(text, span.start)},\"span\":{jet_cli_report_span_json(Val(span))}"
-        .None -> out = "{out},\"line\":null,\"col\":null,\"span\":null"
-    }
-    if diagnostic.edit == .Val(edit) {
-        safety :: diagnostic.safety ?? panic("diagnostic `{diagnostic.code}` has an edit without a safety grade")
-        grade :: if safety == {
-            .Formatting -> "formatting"
-            .BehaviorPreserving -> "behavior-preserving"
-            .APIChanging -> "api-changing"
-            .TargetChanging -> "target-changing"
-            .NeedsReview -> "needs-review"
-        }
-        out = "{out},\"fix_edits\":[{{\"file\":{jet_cli_json_string(path)},\"span\":{jet_cli_report_span_json(Val(edit.span))},\"new_text\":{jet_cli_json_string(edit.new_text)},\"safety\":{jet_cli_json_string(grade)}}}]"
-    } else if diagnostic.no_fix_reason == .Val(reason) {
-        kind :: if reason.kind == {
-            .Behavior -> "behavior"
-            .Design -> "design"
-            .Ambiguous -> "ambiguous"
-        }
-        out = "{out},\"no_fix_reason\":{{\"kind\":{jet_cli_json_string(kind)},\"next\":{jet_cli_json_string(reason.next)}}}"
-    } else {
-        out = "{out},\"fix_edits\":[]"
-    }
-    causes := [String]{}
-    loop cause in diagnostic.cause {
-        cause_file := "null"
-        cause_line := "null"
-        cause_col := "null"
-        if cause.origin == .Val(origin) {
-            cause_file = jet_cli_report_path_json(jet_cli_report_path(origin.path))
-            if cause.span == .Val(span) {
-                cause_line = "{diagnostic_line_at(origin.source, span.start)}"
-                cause_col = "{diagnostic_column_at(origin.source, span.start)}"
-            }
-        }
-        &causes.push("{{\"code\":{jet_cli_json_string(cause.code)},\"file\":{cause_file},\"line\":{cause_line},\"col\":{cause_col},\"span\":{jet_cli_report_span_json(cause.span)}}}")
-    }
-    out = "{out},\"cause\":[{causes.join(",")}]"
-    if diagnostic.labels.len() > 0 {
-        labels :: loop label in diagnostic.labels -> "{{\"line\":{diagnostic_line_at(text, label.span.start)},\"col\":{diagnostic_column_at(text, label.span.start)},\"span\":{jet_cli_report_span_json(Val(label.span))},\"message\":{jet_cli_json_string(label.message)}}}"
-        out = "{out},\"labels\":[{labels.join(",")}]"
-    }
-    "{out},\"clears\":0}}"
 }
