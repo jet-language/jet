@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 /// own semantic part instead of inheriting an unrelated hosted service.
 // BEGIN GENERATED CORE DEPENDENCIES
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 36a74fa64e97bc52abcab8fda81107e05a2a9d06ea697fb9f1d50294b846dfc7
+// Source SHA-256: 39f1f0e3a1da22c6543aa537ef76ee2235447b1b7a538ac6777f0679dd5ee832
 const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("app", &["core.web"]),
     ("core.devtools", &["core"]),
@@ -40,8 +40,8 @@ const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("core.data.stream", &["core.data"]),
     ("core.data.plot", &["core.data"]),
     ("core.data.sketch", &["core.data"]),
-    ("core.data.sketch.cms", &["core.data"]),
-    ("core.data.sketch.hll", &["core.data", "core.math"]),
+    ("core.data.sketch.cms", &["core.data", "core.data.sketch"]),
+    ("core.data.sketch.hll", &["core.data", "core.math", "core.data.sketch"]),
     ("core.data.sketch.reservoir", &["core.data"]),
     ("core.data.sketch.tdigest", &["core.data"]),
     ("core.db", &["core.encoding"]),
@@ -86,7 +86,7 @@ const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("core.sys", &["core.files"]),
     ("core.tasks", &["core.time"]),
     ("core.term", &["core.files"]),
-    ("core.testing", &["core.files", "core.math.random", "core.time"]),
+    ("core.testing", &["core.files", "core.math.random", "core.sys", "core.time"]),
     ("core.text", &["core"]),
     ("core.text.fmt", &["core.text"]),
     ("core.text.html", &["core.text"]),

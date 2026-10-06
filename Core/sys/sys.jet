@@ -29,14 +29,7 @@ pub fn home_dir() -[Env]> String? Never! {
 
 pub fn name() -[Env]> String Never! { core.sys.name() }
 
-pub fn family() -[Env]> String Never! {
-    platform_name :: ascii_lower(name())
-    if platform_name == "windows" || platform_name.starts_with("windows") -> return "windows"
-    if platform_name == "linux" || platform_name == "darwin" || platform_name == "macos" || platform_name == "osx" || platform_name == "freebsd" || platform_name == "openbsd" || platform_name == "netbsd" || platform_name == "android" {
-        return "unix"
-    }
-    platform_name
-}
+pub fn family() -[Env]> String Never! { core.sys.family() }
 
 pub fn arch() -[Env]> String Never! { core.sys.arch() }
 
@@ -59,7 +52,9 @@ pub fn username() -[Env]> String Never! {
     if user != None -> return user
     username :: get("USERNAME")
     if username != None -> return username
-    core.sys.username()
+    host_user :: host_env("USER")
+    if host_user != None -> return host_user
+    host_env("USERNAME") ?? ""
 }
 
 pub fn release() -[Env]> String Never! { core.sys.release() }
@@ -71,65 +66,41 @@ pub fn expand(value: String) -[Env]> String Never! {
     out := [U8]{}
     i := 0
     loop {
-        if i >= raw.len() -> return String.from_bytes(out) ?? value
+        if i >= raw.len() -> return String.from_bytes(out) ?? ""
         byte :: raw[i]
         if byte == (U8{36}) {
-            if i + 1 < raw.len() && raw[i + 1] == (U8{36}) {
-                &out.push(U8{36})
-                i = i + 2
-                next
-            }
-            if i + 1 < raw.len() && raw[i + 1] == (U8{123}) {
-                j := i + 2
-                loop {
-                    if j >= raw.len() -> break
-                    if raw[j] == (U8{125}) -> break
-                    j = j + 1
-                }
-                if j >= raw.len() {
-                    &out.push(byte)
-                    i = i + 1
-                    next
-                }
-                key :: slice_ascii(raw, i + 2, j)
-                replacement :: get(key) ?? ""
-                loop item in replacement.bytes() -> &out.push(item)
-                i = j + 1
-                next
-            }
-            j := i + 1
-            loop {
-                if j >= raw.len() || !is_env_ident(raw[j]) -> break
-                j = j + 1
-            }
-            if j == i + 1 {
-                &out.push(byte)
+            i = i + 1
+            start := i
+            if i < raw.len() && raw[i] == (U8{123}) {
                 i = i + 1
-                next
-            }
-            key :: slice_ascii(raw, i + 1, j)
-            replacement :: get(key) ?? ""
-            loop item in replacement.bytes() -> &out.push(item)
-            i = j
-            next
-        }
-        if byte == (U8{37}) {
-            j := i + 1
-            loop {
-                if j >= raw.len() -> break
-                if raw[j] == (U8{37}) -> break
-                j = j + 1
-            }
-            if j < raw.len() && raw[j] == (U8{37}) && j > i + 1 {
-                key :: slice_ascii(raw, i + 1, j)
+                start = i
+                loop {
+                    if i >= raw.len() || raw[i] == (U8{125}) -> break
+                    i = i + 1
+                }
+                key :: slice_ascii(raw, start, i)
+                if i < raw.len() -> i = i + 1
                 replacement :: get(key) ?? ""
                 loop item in replacement.bytes() -> &out.push(item)
-                i = j + 1
-                next
+            } else {
+                loop {
+                    if i >= raw.len() || !is_env_ident(raw[i]) -> break
+                    i = i + 1
+                }
+                replacement :: get(slice_ascii(raw, start, i)) ?? ""
+                loop item in replacement.bytes() -> &out.push(item)
             }
+        } else {
+            // The historical host contract expands each non-variable byte as
+            // a Unicode scalar (U+0000..U+00FF), not as a UTF-8 text segment.
+            n :: Int.from_u8(byte)
+            if n < 128 -> &out.push(byte)
+            else {
+                &out.push(U8{192 | (n >> 6)})
+                &out.push(U8{128 | (n & 63)})
+            }
+            i = i + 1
         }
-        &out.push(byte)
-        i = i + 1
     }
 }
 
@@ -325,4 +296,29 @@ fn posix_identity_policy() {
     assert(posix_identity(None) == 0)
     assert(posix_identity(Val(0)) == 0)
     assert(posix_identity(Val(4294967295)) == 4294967295)
+}
+
+#Test
+fn expansion_literal_policy() -[Env]> {
+    assert(expand("$") == "")
+    assert(expand("$$$") == "")
+    assert(expand("%VALUE%") == "%VALUE%")
+    assert(expand("é") == "Ã©")
+}
+
+fn host_env(name: String) -[Env]> String? Never! {
+    decode_host_env(core.sys.__host_env(name))
+}
+
+fn decode_host_env(raw: [U8]?) -> String? Never! {
+    bytes :: raw ?? return None
+    String.from_bytes(bytes)
+}
+
+#Test
+fn host_environment_text_policy() {
+    assert(decode_host_env(None) == None)
+    assert(decode_host_env(Val([U8]{})) == Val(""))
+    assert(decode_host_env(Val([U8]{195, 169})) == Val("é"))
+    assert(decode_host_env(Val([U8]{255})) == None)
 }

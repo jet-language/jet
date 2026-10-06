@@ -469,28 +469,6 @@ fn jet_codegen_handle_ui_route(receiver: Type, method: String) -> JetCodegenHand
     Val(jet_codegen_handle_core("core.ui", "{name}.{method}", "{backend}::{member}", mask, None))
 }
 
-fn jet_codegen_handle_sketch_route(sketch: String, method: String) -> JetCodegenHandleRoute? {
-    arity := if {
-        (sketch == "HyperLogLog" && method == "add") || (sketch == "CountMinSketch" && (method == "add" || method == "count")) -> {
-            2
-        }
-        (sketch == "HyperLogLog" && method == "count") || (sketch == "ReservoirSampler" && method == "sample") -> {
-            1
-        }
-        (sketch == "ReservoirSampler" && method == "add") -> {
-            2
-        }
-        else -> {
-            return None
-        }
-    }
-    mask := if {
-        arity == 1 -> [Bool]{true}
-        sketch == "ReservoirSampler" -> [Bool]{true, false}
-        else -> [Bool]{true, true}
-    }
-    Val(jet_codegen_handle_h("{sketch}.{method}", "Jet{sketch}::{method}", mask, None))
-}
 
 fn jet_codegen_handle_regex_route(kind: String, method: String) -> JetCodegenHandleRoute? {
     symbol := ""
@@ -921,7 +899,6 @@ fn jet_codegen_handle_dynamic_route(operation: THandleOp, receiver: Type, argume
         .LayoutMethod(method) -> return jet_codegen_handle_layout_route(method)
         .LoadableMethod(method) -> return jet_codegen_handle_loadable_route(method)
         .UIBackendMethod(method) -> return jet_codegen_handle_ui_route(receiver, method)
-        .SketchMethod(sketch, method) -> return jet_codegen_handle_sketch_route(sketch, method)
         .CivilTimeMethod(kind, method) -> return jet_codegen_handle_civil_time_route(kind, method)
         .URLMIMEMethod(kind, method) -> return jet_codegen_handle_url_mime_route(kind, method)
         .RegexMethod(kind, method) -> return jet_codegen_handle_regex_route(kind, method)
@@ -1260,7 +1237,6 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .ReflectFieldName -> return Val(jet_codegen_handle_core("core.reflect", "field.name", "jet_jit_reflect_field_name", [Bool]{true}, None))
         .ReflectFieldValue -> return Val(jet_codegen_handle_core("core.reflect", "field.value", "jet_jit_reflect_field_value", [Bool]{true}, None))
         .FFICallbackEventStop -> return Val(jet_codegen_handle_core("core.ffi", "callback_event_stop", "jet_ffi_callback_event_stop_unit", [Bool]{}, Val(Effect.FFI)))
-        .WebVirtualWindowFacts -> return Val(jet_codegen_handle_core("core.web.virtual", "facts_json", "jet_web_virtual_window_facts", [Bool]{true}, None))
         .TaskDetach -> return Val(jet_codegen_handle_core("core.tasks", "detach", "jet_std::JetTask::detach", [Bool]{false}, None))
         .TaskPause -> return Val(jet_codegen_handle_h("task.pause", "jet_std::JetTask::pause", [Bool]{true}, None))
         .TaskResume -> return Val(jet_codegen_handle_h("task.resume", "jet_std::JetTask::resume", [Bool]{true}, None))

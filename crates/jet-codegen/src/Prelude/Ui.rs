@@ -620,9 +620,6 @@ impl JetTuiStyle {
     }
 }
 
-pub fn jet_tui_ascii(text: &str) -> String {
-    jet_tui_kernel::ascii(text)
-}
 
 pub fn jet_tui_strip_ansi(text: &str) -> String {
     jet_tui_kernel::strip_ansi(text)
@@ -1305,9 +1302,6 @@ pub fn jet_tui_style_text(
     style.render(text, &capabilities)
 }
 
-pub fn jet_tui_display_width_int(text: &str) -> i64 {
-    jet_tui_display_width(text) as i64
-}
 
 pub fn jet_tui_length(value: f64) -> JetTuiConstraint {
     JetTuiConstraint::from_kernel(jet_tui_kernel::length(value))
@@ -1710,7 +1704,7 @@ fn tui_write_label(
     let label = if capabilities.unicode {
         jet_tui_strip_ansi(&rendered)
     } else {
-        jet_tui_ascii(&jet_tui_strip_ansi(&rendered))
+        jet_tui_kernel::ascii(&jet_tui_strip_ansi(&rendered))
     };
     let mut col = start_col;
     for ch in label.chars() {
@@ -2405,21 +2399,6 @@ pub fn jet_ui_bind_tree_clicks(node: &JetUiNode, path: &str) {
     }
 }
 
-pub fn jet_ui_aria_role_button() -> JetUiAriaRole {
-    JetUiAriaRole::Button
-}
-
-pub fn jet_ui_aria_role_text_input() -> JetUiAriaRole {
-    JetUiAriaRole::TextInput
-}
-
-pub fn jet_ui_aria_role_label() -> JetUiAriaRole {
-    JetUiAriaRole::Label
-}
-
-pub fn jet_ui_aria_role_container() -> JetUiAriaRole {
-    JetUiAriaRole::Container
-}
 
 pub fn jet_ui_key_event(code: &str) -> JetInputEvent {
     JetInputEvent::Key {

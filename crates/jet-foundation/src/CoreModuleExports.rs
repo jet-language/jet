@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 36a74fa64e97bc52abcab8fda81107e05a2a9d06ea697fb9f1d50294b846dfc7
+// Source SHA-256: 39f1f0e3a1da22c6543aa537ef76ee2235447b1b7a538ac6777f0679dd5ee832
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -280,20 +280,20 @@ const CORE_MODULE_24_MEMBERS: &[&str] = &["JetDataPlotAccessibility", "JetDataPl
 const CORE_MODULE_24_TYPES: &[(&str, CoreLeafKind)] = &[("JetDataPlotAccessibility", CoreLeafKind::Plain), ("JetDataPlotAggregate", CoreLeafKind::Enum(&["Sum", "Mean", "Count", "Min", "Max"])), ("JetDataPlotAxis", CoreLeafKind::Plain), ("JetDataPlotBackend", CoreLeafKind::Enum(&["SVG", "Text"])), ("JetDataPlotCapability", CoreLeafKind::Plain), ("JetDataPlotChannel", CoreLeafKind::Enum(&["X", "Y", "Color", "Size"])), ("JetDataPlotColumn", CoreLeafKind::Plain), ("JetDataPlotDomain", CoreLeafKind::Enum(&["Auto", "Explicit"])), ("JetDataPlotEncoding", CoreLeafKind::Plain), ("JetDataPlotError", CoreLeafKind::Plain), ("JetDataPlotErrorKind", CoreLeafKind::Enum(&["Schema", "Encoding", "Render"])), ("JetDataPlotFacet", CoreLeafKind::Plain), ("JetDataPlotFacetKind", CoreLeafKind::Enum(&["Wrap", "Grid"])), ("JetDataPlotField", CoreLeafKind::Plain), ("JetDataPlotFilterOp", CoreLeafKind::Enum(&["Eq", "Ne", "Lt", "Le", "Gt", "Ge"])), ("JetDataPlotInspection", CoreLeafKind::Plain), ("JetDataPlotInteraction", CoreLeafKind::Enum(&["Hover", "Select", "Pan"])), ("JetDataPlotLayer", CoreLeafKind::Plain), ("JetDataPlotLayout", CoreLeafKind::Plain), ("JetDataPlotLegend", CoreLeafKind::Plain), ("JetDataPlotLegendPosition", CoreLeafKind::Enum(&["Top", "Bottom", "Left", "Right"])), ("JetDataPlotMark", CoreLeafKind::Enum(&["Bar", "Line", "Point"])), ("JetDataPlotPlan", CoreLeafKind::Plain), ("JetDataPlotProjection", CoreLeafKind::Plain), ("JetDataPlotRender", CoreLeafKind::Plain), ("JetDataPlotRenderFormat", CoreLeafKind::Enum(&["SVG", "Text", "JSON"])), ("JetDataPlotScale", CoreLeafKind::Plain), ("JetDataPlotScaleKind", CoreLeafKind::Enum(&["Linear", "Log", "Band"])), ("JetDataPlotSchema", CoreLeafKind::Plain), ("JetDataPlotSelectedRow", CoreLeafKind::Plain), ("JetDataPlotSourceFacts", CoreLeafKind::Plain), ("JetDataPlotSupport", CoreLeafKind::Enum(&["Full", "Partial", "Unsupported"])), ("JetDataPlotTransform", CoreLeafKind::Enum(&["Identity", "Filter", "Aggregate"])), ("JetDataPlotValue", CoreLeafKind::Enum(&["Number", "Text", "Bool"]))];
 const CORE_MODULE_24_DEPENDENCIES: &[&str] = &["core.data"];
 
-const CORE_MODULE_25_MEMBERS: &[&str] = &["empty", "merge"];
+const CORE_MODULE_25_MEMBERS: &[&str] = &["empty", "merge", "__fnv1a64"];
 const CORE_MODULE_25_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_25_DEPENDENCIES: &[&str] = &["core.data"];
 
-const CORE_MODULE_26_MEMBERS: &[&str] = &["new", "CountMin", "merge"];
-const CORE_MODULE_26_TYPES: &[(&str, CoreLeafKind)] = &[("CountMin", CoreLeafKind::Plain)];
-const CORE_MODULE_26_DEPENDENCIES: &[&str] = &["core.data"];
+const CORE_MODULE_26_MEMBERS: &[&str] = &["new", "CountMinSketch", "merge"];
+const CORE_MODULE_26_TYPES: &[(&str, CoreLeafKind)] = &[("CountMinSketch", CoreLeafKind::Plain)];
+const CORE_MODULE_26_DEPENDENCIES: &[&str] = &["core.data", "core.data.sketch"];
 
-const CORE_MODULE_27_MEMBERS: &[&str] = &["new", "HLL"];
-const CORE_MODULE_27_TYPES: &[(&str, CoreLeafKind)] = &[("HLL", CoreLeafKind::Plain)];
-const CORE_MODULE_27_DEPENDENCIES: &[&str] = &["core.data", "core.math"];
+const CORE_MODULE_27_MEMBERS: &[&str] = &["new", "HyperLogLog"];
+const CORE_MODULE_27_TYPES: &[(&str, CoreLeafKind)] = &[("HyperLogLog", CoreLeafKind::Plain)];
+const CORE_MODULE_27_DEPENDENCIES: &[&str] = &["core.data", "core.math", "core.data.sketch"];
 
-const CORE_MODULE_28_MEMBERS: &[&str] = &["new", "Reservoir"];
-const CORE_MODULE_28_TYPES: &[(&str, CoreLeafKind)] = &[("Reservoir", CoreLeafKind::Plain)];
+const CORE_MODULE_28_MEMBERS: &[&str] = &["new", "ReservoirSampler"];
+const CORE_MODULE_28_TYPES: &[(&str, CoreLeafKind)] = &[("ReservoirSampler", CoreLeafKind::Plain)];
 const CORE_MODULE_28_DEPENDENCIES: &[&str] = &["core.data"];
 
 const CORE_MODULE_29_MEMBERS: &[&str] = &["new", "Centroid", "TDigest"];
@@ -500,7 +500,7 @@ const CORE_MODULE_79_MEMBERS: &[&str] = &["RowPolicy", "SyncCounter", "SyncList"
 const CORE_MODULE_79_TYPES: &[(&str, CoreLeafKind)] = &[("RowPolicy", CoreLeafKind::Plain), ("SyncCounter", CoreLeafKind::Plain), ("SyncList", CoreLeafKind::Plain), ("SyncMap", CoreLeafKind::Plain), ("SyncText", CoreLeafKind::Plain), ("LWW", CoreLeafKind::Plain), ("RGAItem", CoreLeafKind::Plain)];
 const CORE_MODULE_79_DEPENDENCIES: &[&str] = &["core.data", "core.tasks"];
 
-const CORE_MODULE_80_MEMBERS: &[&str] = &["arch", "atexit", "close_fd", "cpu_count", "current_dir", "decode", "executable", "exitcode", "expand", "family", "fork", "get", "getegid", "geteuid", "getgid", "getgroups", "getpgid", "getpgrp", "getpid", "getppid", "getpriority", "getsid", "getuid", "home_dir", "hostname", "initgroups", "kill", "loadavg", "mkfifo", "name", "pid", "pipe", "release", "set", "set_current_dir", "setgid", "setpgid", "setpgrp", "setpriority", "setsid", "setuid", "stop", "success", "sync", "temp_dir", "times", "umask", "unset", "uptime", "username", "utime", "vars", "version", "wait", "waitpid", "EnvError", "platform", "is_windows", "is_unix", "is_linux", "is_macos", "uname", "sysname", "machine", "getenv", "pathsep", "linesep", "__getppid", "__getuid", "__geteuid", "__getgid", "__getegid", "__getpgrp"];
+const CORE_MODULE_80_MEMBERS: &[&str] = &["arch", "atexit", "close_fd", "cpu_count", "current_dir", "decode", "executable", "exitcode", "expand", "family", "fork", "get", "getegid", "geteuid", "getgid", "getgroups", "getpgid", "getpgrp", "getpid", "getppid", "getpriority", "getsid", "getuid", "home_dir", "hostname", "initgroups", "kill", "loadavg", "mkfifo", "name", "pid", "pipe", "release", "set", "set_current_dir", "setgid", "setpgid", "setpgrp", "setpriority", "setsid", "setuid", "stop", "success", "sync", "temp_dir", "times", "umask", "unset", "uptime", "username", "utime", "vars", "version", "wait", "waitpid", "EnvError", "platform", "is_windows", "is_unix", "is_linux", "is_macos", "uname", "sysname", "machine", "getenv", "pathsep", "linesep", "__getppid", "__getuid", "__geteuid", "__getgid", "__getegid", "__getpgrp", "__host_env"];
 const CORE_MODULE_80_TYPES: &[(&str, CoreLeafKind)] = &[("EnvError", CoreLeafKind::Plain)];
 const CORE_MODULE_80_DEPENDENCIES: &[&str] = &["core.files"];
 
@@ -514,7 +514,7 @@ const CORE_MODULE_82_DEPENDENCIES: &[&str] = &["core.files"];
 
 const CORE_MODULE_83_MEMBERS: &[&str] = &["assert_equal", "compare", "corpus", "fake_clock", "fake_data", "fake_rng", "fixture", "golden", "histories", "snap", "status", "temp_dir", "test_suite", "world", "Clock", "Fake", "RNG", "TestSuite"];
 const CORE_MODULE_83_TYPES: &[(&str, CoreLeafKind)] = &[("Count", CoreLeafKind::Plain), ("DeterministicWorld", CoreLeafKind::Plain), ("EventID", CoreLeafKind::Plain), ("HandleID", CoreLeafKind::Plain), ("HistoryBounds", CoreLeafKind::Plain), ("HistoryCase", CoreLeafKind::Plain), ("HistoryDistribution", CoreLeafKind::Plain), ("HistoryOperation", CoreLeafKind::Plain), ("HistoryPrecondition", CoreLeafKind::Plain), ("HistoryRNG", CoreLeafKind::Plain), ("HistoryScheduleChoice", CoreLeafKind::Plain), ("HistoryStrategy", CoreLeafKind::Generic(1)), ("HistoryValue", CoreLeafKind::Plain), ("TaskID", CoreLeafKind::Plain), ("TypedHistoryCase", CoreLeafKind::Generic(1)), ("TestComparison", CoreLeafKind::Plain), ("Clock", CoreLeafKind::Plain), ("Fake", CoreLeafKind::Plain), ("RNG", CoreLeafKind::Plain), ("TestSuite", CoreLeafKind::Plain)];
-const CORE_MODULE_83_DEPENDENCIES: &[&str] = &["core.files", "core.math.random", "core.time"];
+const CORE_MODULE_83_DEPENDENCIES: &[&str] = &["core.files", "core.math.random", "core.sys", "core.time"];
 
 const CORE_MODULE_84_MEMBERS: &[&str] = &["Cursor", "byte_count", "byte_views", "casefold", "caseless_eq", "center", "char_indices", "display_width", "ends_any", "grapheme_views", "graphemes", "has_control", "inspect", "is_alphabetic", "is_ascii", "is_numeric", "is_whitespace", "line_views", "lower", "nfc", "nfd", "nfkc", "nfkd", "pad_end", "pad_start", "rsplitn", "scalar_count", "scalars", "sentences", "splitn", "starts_any", "trim", "trim_end", "trim_start", "upper", "word_views", "words", "IndexedCp", "cursor", "cursor_advance"];
 const CORE_MODULE_84_TYPES: &[(&str, CoreLeafKind)] = &[("Cursor", CoreLeafKind::Plain), ("IndexedCp", CoreLeafKind::Plain)];
@@ -777,7 +777,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.data.loader", alias: "core_core_data_loader", path: "Core/data/loader.jet", owned_members: &["authority", "bind", "bind_text", "cancel", "invalidate", "needs_refresh", "offline", "ready", "snapshot_reusable", "source_identity", "status", "stream"] },
     CoreSourceModule { module: "core.data.stream", alias: "core_core_data_stream", path: "Core/data/stream.jet", owned_members: &["cancel", "collect", "from_items", "is_empty", "len", "next", "skip", "take_n"] },
     CoreSourceModule { module: "core.data.plot", alias: "core_core_data_plot", path: "Core/data/plot.jet", owned_members: &["bar_svg", "bar_text", "inspect", "inspect_json", "line_svg", "line_text", "plot", "render", "show", "svg", "text"] },
-    CoreSourceModule { module: "core.data.sketch", alias: "core_data_sketch", path: "Core/data/sketch.jet", owned_members: &["empty", "merge"] },
+    CoreSourceModule { module: "core.data.sketch", alias: "core_data_sketch", path: "Core/data/sketch.jet", owned_members: &["empty", "merge", "__fnv1a64"] },
     CoreSourceModule { module: "core.data.sketch.cms", alias: "core_core_data_sketch_cms", path: "Core/data/sketch/cms.jet", owned_members: &["new", "merge"] },
     CoreSourceModule { module: "core.data.sketch.hll", alias: "core_core_data_sketch_hll", path: "Core/data/sketch/hll.jet", owned_members: &["new"] },
     CoreSourceModule { module: "core.data.sketch.reservoir", alias: "core_core_data_sketch_reservoir", path: "Core/data/sketch/reservoir.jet", owned_members: &["new"] },
@@ -875,6 +875,7 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "SparseTensor" },
     CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "VJPRun" },
     CoreSourceOwnedType { path: "Core/compute/solve.jet", name: "LinearSolver" },
+    CoreSourceOwnedType { path: "Core/game/raylib.jet", name: "RaylibSound" },
     CoreSourceOwnedType { path: "Core/net/net.jet", name: "SocketAddr" },
     CoreSourceOwnedType { path: "Core/net/net.jet", name: "UDPSocket" },
     CoreSourceOwnedType { path: "Core/net/net.jet", name: "UDPPacket" },
@@ -889,6 +890,7 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/web/query.jet", name: "WebQueryStatus" },
     CoreSourceOwnedType { path: "Core/web/query.jet", name: "WebMutationStatus" },
     CoreSourceOwnedType { path: "Core/web/query.jet", name: "WebQueryNetworkMode" },
+    CoreSourceOwnedType { path: "Core/web/virtual.jet", name: "WebVirtualWindow" },
 ];
 
 pub const CORE_ROOT_TYPES: &[&str] = &["Date", "LocalDate", "LocalTime", "Decimal", "Fraction", "Duration", "Instant", "Authority"];

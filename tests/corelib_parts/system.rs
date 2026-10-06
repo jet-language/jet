@@ -86,6 +86,54 @@ fn run() {
 }
 
 #[test]
+fn core_sketch_source_preserves_native_counts_aliases_and_sampler_display() {
+    assert!(common::have_rustc(), "source sketch proof requires rustc");
+    let dir = std::env::temp_dir().join(format!("jet_corelib_sketch_source_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir, "sketch_source", r#"
+use core.data.sketch.hll as hll
+use core.data.sketch.cms as cms
+use core.data.sketch.reservoir as reservoir
+
+fn run() {
+    cardinality :: hll.new()
+    alias :: ~cardinality
+    alias.add("apple")
+    cardinality.add("banana")
+    cardinality.add("cherry")
+    cardinality.add("apple")
+    print(cardinality)
+    frequencies :: cms.new()
+    frequencies.add("hello")
+    frequencies.add("world")
+    frequencies.add("hello")
+    frequencies.add("hello")
+    print(frequencies)
+    print(frequencies.count("hello"))
+    combined :: cms.merge(frequencies, frequencies)
+    print(combined.count("hello"))
+    sample :: reservoir.new(3)
+    sample.add("x")
+    sample.add("y")
+    sample.add("z")
+    print(sample)
+    print(sample.sample().len())
+    minimum :: reservoir.new(0)
+    minimum.add("first")
+    minimum.add("second")
+    print(minimum)
+    print(minimum.sample().len())
+}
+"#, &[], None,
+    );
+    assert_eq!(code, 0, "source sketches failed: {stderr}");
+    assert_eq!(stdout, "HyperLogLog(count=3)\nCountMinSketch\n3\n6\nReservoirSampler(n=3)\n3\nReservoirSampler(n=2)\n1\n");
+    assert_eq!(stderr, "");
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn text_unicode_audit_surface_runs() {
     let have_rustc = common::have_rustc();
     if !have_rustc {

@@ -60,13 +60,13 @@ module core.data.stream exports { cancel, collect, from_items, is_empty, len, ne
 source_module core.data.stream path Core/data/stream.jet alias core_core_data_stream owns { cancel, collect, from_items, is_empty, len, next, skip, take_n }
 module core.data.plot exports { JetDataPlotAccessibility, JetDataPlotAggregate, JetDataPlotAxis, JetDataPlotBackend, JetDataPlotCapability, JetDataPlotChannel, JetDataPlotColumn, JetDataPlotDomain, JetDataPlotEncoding, JetDataPlotError, JetDataPlotErrorKind, JetDataPlotFacet, JetDataPlotFacetKind, JetDataPlotField, JetDataPlotFilterOp, JetDataPlotInspection, JetDataPlotInteraction, JetDataPlotLayer, JetDataPlotLayout, JetDataPlotLegend, JetDataPlotLegendPosition, JetDataPlotMark, JetDataPlotPlan, JetDataPlotProjection, JetDataPlotRender, JetDataPlotRenderFormat, JetDataPlotScale, JetDataPlotScaleKind, JetDataPlotSchema, JetDataPlotSelectedRow, JetDataPlotSourceFacts, JetDataPlotSupport, JetDataPlotTransform, JetDataPlotValue, bar_svg, bar_text, inspect, inspect_json, line_svg, line_text, plot, render, show, svg, text } types { JetDataPlotAccessibility:plain, JetDataPlotAggregate:plain(Sum|Mean|Count|Min|Max), JetDataPlotAxis:plain, JetDataPlotBackend:plain(SVG|Text), JetDataPlotCapability:plain, JetDataPlotChannel:plain(X|Y|Color|Size), JetDataPlotColumn:plain, JetDataPlotDomain:plain(Auto|Explicit), JetDataPlotEncoding:plain, JetDataPlotError:plain, JetDataPlotErrorKind:plain(Schema|Encoding|Render), JetDataPlotFacet:plain, JetDataPlotFacetKind:plain(Wrap|Grid), JetDataPlotField:plain, JetDataPlotFilterOp:plain(Eq|Ne|Lt|Le|Gt|Ge), JetDataPlotInspection:plain, JetDataPlotInteraction:plain(Hover|Select|Pan), JetDataPlotLayer:plain, JetDataPlotLayout:plain, JetDataPlotLegend:plain, JetDataPlotLegendPosition:plain(Top|Bottom|Left|Right), JetDataPlotMark:plain(Bar|Line|Point), JetDataPlotPlan:plain, JetDataPlotProjection:plain, JetDataPlotRender:plain, JetDataPlotRenderFormat:plain(SVG|Text|JSON), JetDataPlotScale:plain, JetDataPlotScaleKind:plain(Linear|Log|Band), JetDataPlotSchema:plain, JetDataPlotSelectedRow:plain, JetDataPlotSourceFacts:plain, JetDataPlotSupport:plain(Full|Partial|Unsupported), JetDataPlotTransform:plain(Identity|Filter|Aggregate), JetDataPlotValue:plain(Number|Text|Bool) } depends_on [core.data]
 source_module core.data.plot path Core/data/plot.jet alias core_core_data_plot owns { bar_svg, bar_text, inspect, inspect_json, line_svg, line_text, plot, render, show, svg, text }
-module core.data.sketch exports { empty, merge } depends_on [core.data]
-source_module core.data.sketch path Core/data/sketch.jet alias core_data_sketch owns { empty, merge }
-module core.data.sketch.cms exports { new, CountMin, merge } types { CountMin:plain } depends_on [core.data]
+module core.data.sketch exports { empty, merge, __fnv1a64 } depends_on [core.data]
+source_module core.data.sketch path Core/data/sketch.jet alias core_data_sketch owns { empty, merge, __fnv1a64 }
+module core.data.sketch.cms exports { new, CountMinSketch, merge } types { CountMinSketch:plain } depends_on [core.data, core.data.sketch]
 source_module core.data.sketch.cms path Core/data/sketch/cms.jet alias core_core_data_sketch_cms owns { new, merge }
-module core.data.sketch.hll exports { new, HLL } types { HLL:plain } depends_on [core.data, core.math]
+module core.data.sketch.hll exports { new, HyperLogLog } types { HyperLogLog:plain } depends_on [core.data, core.math, core.data.sketch]
 source_module core.data.sketch.hll path Core/data/sketch/hll.jet alias core_core_data_sketch_hll owns { new }
-module core.data.sketch.reservoir exports { new, Reservoir } types { Reservoir:plain } depends_on [core.data]
+module core.data.sketch.reservoir exports { new, ReservoirSampler } types { ReservoirSampler:plain } depends_on [core.data]
 source_module core.data.sketch.reservoir path Core/data/sketch/reservoir.jet alias core_core_data_sketch_reservoir owns { new }
 module core.data.sketch.tdigest exports { new, Centroid, TDigest } types { Centroid:plain, TDigest:plain } depends_on [core.data]
 source_module core.data.sketch.tdigest path Core/data/sketch/tdigest.jet alias core_core_data_sketch_tdigest owns { new }
@@ -111,7 +111,7 @@ source_module core.font path Core/font/font.jet alias core_core_font owns { shap
 module core.game exports { Backend, Replay, Scene, run } types { Backend:plain, Replay:plain, Scene:plain } depends_on []
 source_module core.game path Core/game/game.jet alias core_core_game owns {  }
 module core.game.raylib exports { begin_drawing, clear_background, close_window, color, draw_rectangle, draw_sprite, draw_text, end_drawing, gamepad_axis, gamepad_down, key_down, load_sound, load_texture_atlas, play_sound, set_target_fps, window_open, window_ready, window_should_close, RaylibColor, RaylibWindow, RaylibTextureAtlas, RaylibSound } types { RaylibColor:plain, RaylibWindow:plain, RaylibTextureAtlas:plain, RaylibSound:plain } depends_on [core.game]
-source_module core.game.raylib path Core/game/raylib.jet alias core_core_game_raylib owns { begin_drawing, clear_background, close_window, color, draw_rectangle, draw_sprite, draw_text, end_drawing, gamepad_axis, gamepad_down, key_down, load_sound, load_texture_atlas, play_sound, set_target_fps, window_open, window_ready, window_should_close }
+source_module core.game.raylib path Core/game/raylib.jet alias core_core_game_raylib owns { begin_drawing, clear_background, close_window, color, draw_rectangle, draw_sprite, draw_text, end_drawing, gamepad_axis, gamepad_down, key_down, load_sound, load_texture_atlas, play_sound, set_target_fps, window_open, window_ready, window_should_close } types { RaylibSound }
 module core.http exports { Body, Cookie, HTTPError, HTTPOperation, HTTPRequest, HTTPResponse, Header, Headers, Method, Query, QueryPair, Status, StatusLine, Version, basic_auth, bearer_auth, body_as_bytes, body_as_text, body_bytes, body_empty, body_len, body_text, cookie, cookie_encode, cookies_parse, delete, exchange, form_decode, form_encode, get, head, headers, headers_all, headers_append, headers_encode, headers_get, headers_parse, headers_remove, headers_set, is_client_error, is_informational, is_redirect, is_server_error, is_success, method_parse, method_text, parse_request, parse_response, patch, post, put, query, query_add, query_all, query_decode, query_encode, query_get, query_set, reason_phrase, request, send_request, serve, status, status_bad_request, status_created, status_forbidden, status_found, status_moved, status_no_content, status_not_found, status_ok, status_server_error, status_timeout, status_unauthorized, version_parse, version_text, with_body, with_header, with_query, CorsPolicy, HTTPMux, HTTPRoute, HTTPServerTLS, content_length, has_header, request_with, response_json_headers, response_ok, response_text_headers, status_accepted, status_already_reported, status_bad_gateway, status_class, status_conflict, status_continue, status_expectation_failed, status_failed_dependency, status_gateway_timeout, status_gone, status_http_version, status_legal, status_length_required, status_locked, status_method_not_allowed, status_multi_status, status_non_authoritative, status_not_acceptable, status_not_implemented, status_not_modified, status_partial, status_payload_too_large, status_payment_required, status_permanent, status_precondition_failed, status_precondition_required, status_range_unsat, status_reset_content, status_see_other, status_switching, status_teapot, status_temporary, status_too_early, status_too_many, status_unavailable, status_unprocessable, status_unsupported_media, status_upgrade_required, status_uri_too_long } types { Body:plain(Empty|Text|Bytes), Cookie:plain, HTTPError:plain(InvalidMethod|InvalidURL|InvalidHeader|InvalidStatus|BodyConsumed|InvalidFraming|UnsupportedEncoding|Cancelled|BodyTooLarge|Resolve|Connect|TLS|Timeout|Proxy|Redirect|Protocol|IO|Policy|ResourceUnavailable|Internal|UnsupportedTarget), HTTPOperation:plain(ClientConnect|ServerBind|ServeListener), HTTPRequest:plain, HTTPResponse:plain, Header:plain, Headers:plain, Method:plain(Get|Head|Post|Put|Patch|Delete|Options|Trace|Connect|Custom), Query:plain, QueryPair:plain, Status:plain, StatusLine:plain, Version:plain(HTTP10|HTTP11|HTTP2|HTTP3), CorsPolicy:plain, HTTPMux:plain, HTTPRoute:plain, HTTPServerTLS:plain } depends_on [core.net]
 source_module core.http path Core/http/http.jet alias core_core_http owns { body_as_text, body_bytes, body_empty, body_text, headers, headers_all, headers_append, headers_encode, headers_get, headers_parse, headers_remove, headers_set, is_client_error, is_informational, is_redirect, is_server_error, is_success, method_parse, method_text, status, status_accepted, status_already_reported, status_bad_gateway, status_bad_request, status_conflict, status_continue, status_created, status_expectation_failed, status_failed_dependency, status_forbidden, status_found, status_gateway_timeout, status_gone, status_http_version, status_legal, status_length_required, status_locked, status_method_not_allowed, status_moved, status_multi_status, status_no_content, status_non_authoritative, status_not_acceptable, status_not_found, status_not_implemented, status_not_modified, status_ok, status_partial, status_payload_too_large, status_payment_required, status_permanent, status_precondition_failed, status_precondition_required, status_range_unsat, status_reset_content, status_see_other, status_server_error, status_switching, status_teapot, status_temporary, status_timeout, status_too_early, status_too_many, status_unauthorized, status_unavailable, status_unprocessable, status_unsupported_media, status_upgrade_required, status_uri_too_long, version_parse, version_text, body_as_bytes, body_len, reason_phrase, get, post, put, patch, delete, head, serve, exchange, send_request, parse_response, parse_request, query, query_get, query_all, query_set, query_encode, query_decode, form_encode, form_decode, cookie, cookie_encode, cookies_parse, basic_auth, bearer_auth, with_header, with_body, with_query, status_class, request_with, response_ok, response_json_headers, response_text_headers, has_header, content_length }
 module core.http.client exports { Client, Proxy, RedirectPolicy, delete, get, head, header, patch, post, put, request, send, set_header, timeout_redirects, session, session_header, session_timeout, session_retries, session_redirects, session_auth, session_proxy, session_cookie, cookie_header, session_request, session_get, session_post, session_put, session_patch, session_delete, session_head, session_json, session_form, redirect_limit, with_proxy, user_agent, bearer, accept, content_type, Session } types { Session:plain, Client:plain, Proxy:plain, RedirectPolicy:plain(Disabled|Limited|All) } depends_on [core.http]
@@ -169,13 +169,13 @@ module core.service exports { Delivery, DeliveryEvent, DeliveryReceipt, Delivery
 source_module core.service path Core/service/service.jet alias core_core_service owns { tree, runtime, state_store, restart_one_for_one, restart_one_for_all, restart_rest_for_one, delivery_at_most_once, delivery_durable }
 module core.sync exports { RowPolicy, SyncCounter, SyncList, SyncMap, SyncText, counter_inc, counter_merge, counter_new, counter_value, list_merge, list_new, list_push, list_show, map_get, map_merge, map_new, map_set, map_show, policy_allows, policy_new, policy_show, text_edit, text_merge, text_metadata, text_new, text_set, text_show, LWW, RGAItem, counter_for, map_for, map_delete, map_contains, map_keys, list_for, list_remove, list_contains, text_for, text_append, text_clock, text_replica, policy_grant, policy_deny, policy_revoke } types { RowPolicy:plain, SyncCounter:plain, SyncList:plain, SyncMap:plain, SyncText:plain, LWW:plain, RGAItem:plain } depends_on [core.data, core.tasks]
 source_module core.sync path Core/sync/sync.jet alias core_core_sync owns { counter_inc, counter_merge, counter_new, counter_value, list_merge, list_new, list_push, list_show, map_get, map_merge, map_new, map_set, map_show, policy_allows, policy_new, policy_show, text_edit, text_merge, text_metadata, text_new, text_set, text_show, counter_for, map_for, map_delete, map_contains, map_keys, list_for, list_remove, list_contains, text_for, text_append, text_clock, text_replica, policy_grant, policy_deny, policy_revoke }
-module core.sys exports { arch, atexit, close_fd, cpu_count, current_dir, decode, executable, exitcode, expand, family, fork, get, getegid, geteuid, getgid, getgroups, getpgid, getpgrp, getpid, getppid, getpriority, getsid, getuid, home_dir, hostname, initgroups, kill, loadavg, mkfifo, name, pid, pipe, release, set, set_current_dir, setgid, setpgid, setpgrp, setpriority, setsid, setuid, stop, success, sync, temp_dir, times, umask, unset, uptime, username, utime, vars, version, wait, waitpid, EnvError, platform, is_windows, is_unix, is_linux, is_macos, uname, sysname, machine, getenv, pathsep, linesep, __getppid, __getuid, __geteuid, __getgid, __getegid, __getpgrp } types { EnvError:plain } depends_on [core.files]
+module core.sys exports { arch, atexit, close_fd, cpu_count, current_dir, decode, executable, exitcode, expand, family, fork, get, getegid, geteuid, getgid, getgroups, getpgid, getpgrp, getpid, getppid, getpriority, getsid, getuid, home_dir, hostname, initgroups, kill, loadavg, mkfifo, name, pid, pipe, release, set, set_current_dir, setgid, setpgid, setpgrp, setpriority, setsid, setuid, stop, success, sync, temp_dir, times, umask, unset, uptime, username, utime, vars, version, wait, waitpid, EnvError, platform, is_windows, is_unix, is_linux, is_macos, uname, sysname, machine, getenv, pathsep, linesep, __getppid, __getuid, __geteuid, __getgid, __getegid, __getpgrp, __host_env } types { EnvError:plain } depends_on [core.files]
 source_module core.sys path Core/sys/sys.jet alias core_sys owns { success, arch, close_fd, cpu_count, current_dir, executable, exitcode, expand, family, fork, get, getegid, getenv, geteuid, getgid, getgroups, getpgid, getpgrp, getpid, getppid, getpriority, getsid, getuid, home_dir, hostname, initgroups, is_linux, is_macos, is_unix, is_windows, kill, linesep, loadavg, machine, mkfifo, name, pathsep, pid, pipe, platform, release, set, set_current_dir, setgid, setpgid, setpgrp, setpriority, setsid, setuid, stop, sync, sysname, temp_dir, times, umask, uname, unset, uptime, username, utime, vars, version, wait, waitpid }
 module core.tasks exports { after, current_task, interval, yield_now, Receiver, TaskState, delay_ms, is_interval, is_timer, recv, get, result, wait, channel, put, clear, shutdown, stop, reset, lock, acquire, release, notify, start, run, waitall, waitany, is_cancelled, is_ready, timeout, sleep, try_recv, cancel, is_closed, is_locked, size, capacity, generation, spawn_name, __task_paused, __task_cancelled } types { Receiver:plain, TaskState:plain } depends_on [core.time]
 source_module core.tasks path Core/tasks/tasks.jet alias core_core_tasks owns { acquire, after, channel, clear, current_task, delay_ms, get, interval, is_interval, is_timer, lock, notify, put, recv, release, reset, result, run, shutdown, start, stop, wait, waitall, waitany, yield_now, is_cancelled, is_ready, timeout, sleep, try_recv, cancel, is_closed, is_locked, size, capacity, generation, spawn_name }
 module core.term exports { Reader, Writer, binread, binwrite, buffered, choose, confirm, eprint, input, input_secret, print, progress, read_all_input, read_key, read_until, readline, stderr, stdin, stdout, style, style_force, take, terminal_height, terminal_width, Key, Stderr, StdinHandle, Stdout, WinSize } types { Reader:plain, Writer:plain, Key:plain(Char|Escape|Backspace|Tab|Up|Down|Left|Right|Unknown), Stderr:plain, StdinHandle:plain, Stdout:plain, WinSize:plain } depends_on [core.files]
 source_module core.term path Core/term/term.jet alias core_core_term owns { binread, binwrite, buffered, choose, confirm, eprint, input, input_secret, print, progress, read_all_input, read_key, read_until, readline, stderr, stdin, stdout, style, style_force, terminal_height, terminal_width }
-module core.testing exports { assert_equal, compare, corpus, fake_clock, fake_data, fake_rng, fixture, golden, histories, snap, status, temp_dir, test_suite, world, Clock, Fake, RNG, TestSuite } types { Count:plain, DeterministicWorld:plain, EventID:plain, HandleID:plain, HistoryBounds:plain, HistoryCase:plain, HistoryDistribution:plain, HistoryOperation:plain, HistoryPrecondition:plain, HistoryRNG:plain, HistoryScheduleChoice:plain, HistoryStrategy:generic(1), HistoryValue:plain, TaskID:plain, TypedHistoryCase:generic(1), TestComparison:plain, Clock:plain, Fake:plain, RNG:plain, TestSuite:plain } depends_on [core.files, core.math.random, core.time]
+module core.testing exports { assert_equal, compare, corpus, fake_clock, fake_data, fake_rng, fixture, golden, histories, snap, status, temp_dir, test_suite, world, Clock, Fake, RNG, TestSuite } types { Count:plain, DeterministicWorld:plain, EventID:plain, HandleID:plain, HistoryBounds:plain, HistoryCase:plain, HistoryDistribution:plain, HistoryOperation:plain, HistoryPrecondition:plain, HistoryRNG:plain, HistoryScheduleChoice:plain, HistoryStrategy:generic(1), HistoryValue:plain, TaskID:plain, TypedHistoryCase:generic(1), TestComparison:plain, Clock:plain, Fake:plain, RNG:plain, TestSuite:plain } depends_on [core.files, core.math.random, core.sys, core.time]
 source_module core.testing path Core/testing/testing.jet alias core_core_testing owns { assert_equal, compare, corpus, fake_clock, fake_data, fake_rng, fixture, golden, snap, status, temp_dir, test_suite, world }
 module core.text exports { Cursor, byte_count, byte_views, casefold, caseless_eq, center, char_indices, display_width, ends_any, grapheme_views, graphemes, has_control, inspect, is_alphabetic, is_ascii, is_numeric, is_whitespace, line_views, lower, nfc, nfd, nfkc, nfkd, pad_end, pad_start, rsplitn, scalar_count, scalars, sentences, splitn, starts_any, trim, trim_end, trim_start, upper, word_views, words, IndexedCp, cursor, cursor_advance } types { Cursor:plain, IndexedCp:plain } depends_on [core]
 source_module core.text path Core/text/text.jet alias core_text owns { byte_count, byte_views, casefold, caseless_eq, center, char_indices, cursor, cursor_advance, display_width, ends_any, grapheme_views, graphemes, has_control, inspect, is_alphabetic, is_ascii, is_numeric, is_whitespace, line_views, lower, nfc, nfd, nfkc, nfkd, pad_end, pad_start, rsplitn, scalar_count, scalars, sentences, splitn, starts_any, trim, trim_end, trim_start, upper, word_views, words }
@@ -236,7 +236,7 @@ source_module core.web.store path Core/web/store.jet alias core_core_web_store o
 module core.web.table exports { clear_focus, clear_selection, column, facts, filter, filter_by, first_page, focus, focused_key, insert_row, keys, last_page, new, new_keyed, next_page, page, page_state, paginate, remove_row, replace_row, selected_keys, selected_rows, set_rows, set_selected, sort, sort_by, state, toggle_selection, update_row, visible_rows, with_column, with_server_page, WebTable, WebTableColumn, WebTableFilter, WebTablePageMode, WebTableRow, WebTableSort, WebTableSortDirection, WebTableState, WebTableError, WebTablePage } types { WebTableSortDirection:plain(Ascending|Descending), WebTablePageMode:plain(Client|Server), WebTableSort:plain, WebTableFilter:plain, WebTableState:plain, WebTableColumn:generic(1), WebTablePage:generic(1), WebTableRow:generic(1), WebTable:generic(1), WebTableError:plain(NotFound|Invalid) } depends_on [core.web]
 source_module core.web.table path Core/web/table.jet alias core_core_web_table owns { clear_focus, clear_selection, column, facts, filter, filter_by, first_page, focus, focused_key, insert_row, keys, last_page, new, new_keyed, next_page, page, page_state, paginate, remove_row, replace_row, selected_keys, selected_rows, set_rows, set_selected, sort, sort_by, state, toggle_selection, update_row, visible_rows, with_column, with_server_page }
 module core.web.virtual exports { indices, plan, plan_from_sizes, plan_facts, plan_indices, plan_measure, plan_measured, plan_resize, plan_scroll_to, plan_slice, plan_viewport, plan_viewport_measure, plan_viewport_state, slice, window, window_measured, WebVirtualPlan, WebVirtualPlanViewport, WebVirtualWindow } types { WebVirtualWindow:plain, WebVirtualPlan:plain, WebVirtualPlanViewport:plain } depends_on [core.web]
-source_module core.web.virtual path Core/web/virtual.jet alias core_core_web_virtual owns { indices, plan, plan_facts, plan_from_sizes, plan_indices, plan_measure, plan_measured, plan_resize, plan_scroll_to, plan_slice, plan_viewport, plan_viewport_measure, plan_viewport_state, slice, window, window_measured }
+source_module core.web.virtual path Core/web/virtual.jet alias core_core_web_virtual owns { indices, plan, plan_facts, plan_from_sizes, plan_indices, plan_measure, plan_measured, plan_resize, plan_scroll_to, plan_slice, plan_viewport, plan_viewport_measure, plan_viewport_state, slice, window, window_measured } types { WebVirtualWindow }
 
 // Canonical encoding-format rows drive the shared EncodingFormat carrier.
 format_row JSON core.encoding.json JSON
@@ -259,7 +259,7 @@ dispatcher_row plain core.tasks interval | CoreCallRecord::new( "core.tasks", "i
 dispatcher_row plain core.tasks after | CoreCallRecord::new("core.tasks", "after", "jet_std::after_value", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.tasks yield_now | CoreCallRecord::new( "core.tasks", "yield_now", "jet_std::jet_task_yield", true, &[], )
 dispatcher_row plain core.tasks __task_paused | CoreCallRecord::new("core.tasks", "__task_paused", "jet_scheduler_task_paused", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-dispatcher_row plain core.tasks __task_cancelled | CoreCallRecord::new("core.tasks", "__task_cancelled", "jet_scheduler_task_cancelled", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.tasks __task_cancelled | CoreCallRecord::new("core.tasks", "__task_cancelled", "jet_scheduler_task_cancelled_state", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row adapter core.tasks INTERNAL_CHANNEL_NEW_METHOD | CoreCallRecord::new("core.tasks", super::INTERNAL_CHANNEL_NEW_METHOD, "jet_std::channel", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row adapter core.tasks INTERNAL_CHANNEL_BOUNDED_METHOD | CoreCallRecord::new("core.tasks", super::INTERNAL_CHANNEL_BOUNDED_METHOD, "jet_std::channel_bounded", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.reactive signal | CoreCallRecord::new( "core.reactive", "signal", "jet_std::JetSignal::new", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
@@ -347,7 +347,6 @@ dispatcher_row plain core.sys set | CoreCallRecord::new("core.sys", "set", "jet_
 dispatcher_row plain core.sys unset | CoreCallRecord::new("core.sys", "unset", "jet_std_env_unset", true, &[true])
 dispatcher_row plain core.sys vars | CoreCallRecord::new("core.sys", "vars", "jet_std_env_vars", true, &[])
 dispatcher_row plain core.sys current_dir | CoreCallRecord::new( "core.sys", "current_dir", "jet_std_env_current_dir", true, &[], )
-dispatcher_row plain core.sys home_dir | CoreCallRecord::new("core.sys", "home_dir", "jet_std_env_home_dir", true, &[])
 dispatcher_row plain core.sys name | CoreCallRecord::new("core.sys", "name", "jet_std_os_name", true, &[])
 dispatcher_row plain core.sys family | CoreCallRecord::new("core.sys", "family", "jet_std_os_family", true, &[])
 dispatcher_row plain core.sys arch | CoreCallRecord::new("core.sys", "arch", "jet_std_os_arch", true, &[])
@@ -356,10 +355,9 @@ dispatcher_row plain core.sys temp_dir | CoreCallRecord::new("core.sys", "temp_d
 dispatcher_row plain core.sys executable | CoreCallRecord::new("core.sys", "executable", "jet_std_os_executable", true, &[])
 dispatcher_row plain core.sys pid | CoreCallRecord::new("core.sys", "pid", "jet_std_os_pid", true, &[]) .with_native_int_result()
 dispatcher_row plain core.sys getpid | CoreCallRecord::new("core.sys", "getpid", "jet_std_os_pid", true, &[]) .with_native_int_result()
-dispatcher_row plain core.sys username | CoreCallRecord::new("core.sys", "username", "jet_std_os_username", true, &[])
+dispatcher_row plain core.sys __host_env | CoreCallRecord::new("core.sys", "__host_env", "jet_sys_host_env_raw", true, &[true])
 dispatcher_row plain core.sys release | CoreCallRecord::new("core.sys", "release", "jet_std_os_release", true, &[])
 dispatcher_row plain core.sys version | CoreCallRecord::new("core.sys", "version", "jet_std_os_version", true, &[])
-dispatcher_row plain core.sys expand | CoreCallRecord::new("core.sys", "expand", "jet_std_os_expand", true, &[true])
 dispatcher_row plain core.sys __getppid | CoreCallRecord::new("core.sys", "__getppid", "jet_sys_getppid_raw", true, &[])
 dispatcher_row plain core.sys __getuid | CoreCallRecord::new("core.sys", "__getuid", "jet_sys_getuid_raw", true, &[])
 dispatcher_row plain core.sys __geteuid | CoreCallRecord::new("core.sys", "__geteuid", "jet_sys_geteuid_raw", true, &[])
@@ -402,7 +400,6 @@ dispatcher_row plain core.process argv | CoreCallRecord::new("core.process", "ar
 dispatcher_row plain core.process on_signal | CoreCallRecord::new( "core.process", "on_signal", "jet_process_on_signal", true, &[true], )
 dispatcher_row plain core.plugin load | CoreCallRecord::new("core.plugin", "load", "jet_plugin_load", true, &[true, true]) .without_direct_aot()
 dispatcher_row plain core.mod load | CoreCallRecord::new("core.mod", "load", "jet_mod_load", true, &[true, true])
-dispatcher_row plain core.testing snap | CoreCallRecord::new( "core.testing", "snap", "jet_testing_snap", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.testing golden | CoreCallRecord::new( "core.testing", "golden", "jet_testing_golden", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.testing fixture | CoreCallRecord::new( "core.testing", "fixture", "jet_testing_fixture", true, &[true], )
 dispatcher_row plain core.testing temp_dir | CoreCallRecord::new( "core.testing", "temp_dir", "jet_testing_temp_dir", true, &[true], )
@@ -1283,8 +1280,6 @@ dispatcher_row plain core.game.raylib end_drawing | CoreCallRecord::new( "core.g
 dispatcher_row plain core.game.raylib close_window | CoreCallRecord::new( "core.game.raylib", "close_window", "jet_raylib_close_window", true, &[true], )
 dispatcher_row plain core.game.raylib key_down | CoreCallRecord::new( "core.game.raylib", "key_down", "jet_raylib_key_down", true, &[true], )
 dispatcher_row plain core.game.raylib set_target_fps | CoreCallRecord::new( "core.game.raylib", "set_target_fps", "jet_raylib_set_target_fps", true, &[false], )
-dispatcher_row plain core.game.raylib load_sound | CoreCallRecord::new( "core.game.raylib", "load_sound", "jet_raylib_load_sound", true, &[true], )
-dispatcher_row plain core.game.raylib play_sound | CoreCallRecord::new( "core.game.raylib", "play_sound", "jet_raylib_play_sound", true, &[true], )
 dispatcher_row plain core.game.raylib color | CoreCallRecord::new( "core.game.raylib", "color", "jet_raylib_color", true, &[false, false, false, false], ) .with_pure_route(CoreCallPureRoute::Raylib)
 dispatcher_row plain core.game.raylib gamepad_down | CoreCallRecord::new( "core.game.raylib", "gamepad_down", "jet_raylib_gamepad_down", true, &[false, true], )
 dispatcher_row plain core.game.raylib gamepad_axis | CoreCallRecord::new( "core.game.raylib", "gamepad_axis", "jet_raylib_gamepad_axis", true, &[false, true], )
@@ -1340,23 +1335,17 @@ dispatcher_row plain core.ui key_event | CoreCallRecord::new("core.ui", "key_eve
 dispatcher_row plain core.ui resize_event | CoreCallRecord::new( "core.ui", "resize_event", "jet_ui_resize_event", true, &[false, false], ) .with_pure_route(CoreCallPureRoute::Ui) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.ui node_role | CoreCallRecord::new( "core.ui", "node_role", "jet_ui_node_role", true, &[true, false, false, false], ) .with_pure_route(CoreCallPureRoute::Ui) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.ui node_color | CoreCallRecord::new( "core.ui", "node_color", "jet_ui_node_color", true, &[true, false, false, true], ) .with_pure_route(CoreCallPureRoute::Ui) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-dispatcher_row plain core.ui aria_role_button | CoreCallRecord::new( "core.ui", "aria_role_button", "jet_ui_aria_role_button", true, &[], ) .with_pure_route(CoreCallPureRoute::Ui) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-dispatcher_row plain core.ui aria_role_text_input | CoreCallRecord::new( "core.ui", "aria_role_text_input", "jet_ui_aria_role_text_input", true, &[], ) .with_pure_route(CoreCallPureRoute::Ui) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-dispatcher_row plain core.ui aria_role_label | CoreCallRecord::new( "core.ui", "aria_role_label", "jet_ui_aria_role_label", true, &[], ) .with_pure_route(CoreCallPureRoute::Ui) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-dispatcher_row plain core.ui aria_role_container | CoreCallRecord::new( "core.ui", "aria_role_container", "jet_ui_aria_role_container", true, &[], ) .with_pure_route(CoreCallPureRoute::Ui) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.font system | CoreCallRecord::new("core.font", "system", "jet_font_system", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.font shape | CoreCallRecord::new("core.font", "shape", "jet_font_shape", true, &[true, true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.FontShaping"])
 dispatcher_row plain core.ui node_accessibility | CoreCallRecord::new( "core.ui", "node_accessibility", "jet_ui_node_accessibility", true, &[false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.ui node_shortcut | CoreCallRecord::new("core.ui", "node_shortcut", "jet_ui_node_shortcut", true, &[false, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.ui text_input | CoreCallRecord::new("core.ui", "text_input", "jet_ui_text_input", true, &[true, false]) .with_max_arity(3) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.ui reactive_render | CoreCallRecord::new("core.ui", "reactive_render", "jet_ui_reactive_render", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-dispatcher_row plain core.tui ascii | CoreCallRecord::new("core.tui", "ascii", "jet_tui_ascii", true, &[true]) .with_pure_route(CoreCallPureRoute::Ui)
 dispatcher_row plain core.tui capabilities | CoreCallRecord::new("core.tui", "capabilities", "jet_tui_capabilities", true, &[]) .with_pure_route(CoreCallPureRoute::Ui)
 dispatcher_row plain core.tui close_event | CoreCallRecord::new("core.tui", "close_event", "jet_tui_close_event", true, &[]) .with_pure_route(CoreCallPureRoute::Ui)
 dispatcher_row plain core.tui color_ansi16 | CoreCallRecord::new("core.tui", "color_ansi16", "jet_tui_color_ansi16", true, &[false]) .with_pure_route(CoreCallPureRoute::Ui)
 dispatcher_row plain core.tui color_ansi256 | CoreCallRecord::new("core.tui", "color_ansi256", "jet_tui_color_ansi256", true, &[false]) .with_pure_route(CoreCallPureRoute::Ui)
 dispatcher_row plain core.tui color_rgb | CoreCallRecord::new("core.tui", "color_rgb", "jet_tui_color_rgb", true, &[false, false, false]) .with_pure_route(CoreCallPureRoute::Ui)
-dispatcher_row plain core.tui display_width | CoreCallRecord::new("core.tui", "display_width", "jet_tui_display_width_int", true, &[true]) .with_pure_route(CoreCallPureRoute::Ui) .with_native_int_result()
 dispatcher_row plain core.tui fill | CoreCallRecord::new("core.tui", "fill", "jet_tui_fill", true, &[false]) .with_pure_route(CoreCallPureRoute::Ui)
 dispatcher_row plain core.tui focus_event | CoreCallRecord::new("core.tui", "focus_event", "jet_tui_focus_event", true, &[false]) .with_pure_route(CoreCallPureRoute::Ui)
 dispatcher_row plain core.tui horizontal | CoreCallRecord::new("core.tui", "horizontal", "jet_tui_horizontal", true, &[]) .with_pure_route(CoreCallPureRoute::Ui)
@@ -1540,10 +1529,6 @@ dispatcher_row plain core.web.virtual plan_scroll_to | sema_web_call( "core.web.
 dispatcher_row plain core.web.virtual plan_resize | sema_web_call( "core.web.virtual", "plan_resize", "jet_web_virtual_plan_resize", &[true, false, false], )
 dispatcher_row plain core.web.virtual plan_viewport_measure | sema_web_call( "core.web.virtual", "plan_viewport_measure", "jet_web_virtual_plan_viewport_measure", &[true, false, false], )
 dispatcher_row plain core.web.virtual plan_facts | sema_web_call( "core.web.virtual", "plan_facts", "jet_web_virtual_plan_facts", &[true], )
-dispatcher_row plain core.web.virtual window | sema_web_call( "core.web.virtual", "window", "jet_web_virtual_window", &[false, false, false, false, false], )
-dispatcher_row plain core.web.virtual window_measured | sema_web_call( "core.web.virtual", "window_measured", "jet_web_virtual_window_measured", &[false, false, false, false, false, true], )
-dispatcher_row plain core.web.virtual slice | sema_web_call( "core.web.virtual", "slice", "jet_web_virtual_slice", &[true, true], )
-dispatcher_row plain core.web.virtual indices | sema_web_call( "core.web.virtual", "indices", "jet_web_virtual_indices", &[true], ) .with_native_int_result()
 dispatcher_row plain core.web.virtual plan | sema_web_call( "core.web.virtual", "plan", "jet_web_virtual_plan", &[false, false, false, false, false, false], )
 dispatcher_row plain core.web.virtual plan_measured | sema_web_call( "core.web.virtual", "plan_measured", "jet_web_virtual_plan_measured", &[false, false, false, false, false, false, true], )
 dispatcher_row plain core.web.virtual plan_from_sizes | sema_web_call( "core.web.virtual", "plan_from_sizes", "jet_web_virtual_plan_from_sizes", &[false, false, false, false, false, false, true], )
@@ -1617,9 +1602,6 @@ dispatcher_row plain app auth_show | CoreCallRecord::new("app", "auth_show", "je
 dispatcher_row plain core.web auth_show | CoreCallRecord::new("core.web", "auth_show", "jet_app_auth_show", true, &[true])
 dispatcher_row plain core.web.devserver for_app | CoreCallRecord::new( "core.web.devserver", "for_app", "jet_devserver_for_app", true, &[true], )
 dispatcher_row plain core.web.devserver app | CoreCallRecord::new("core.web.devserver", "app", "jet_devserver_app", true, &[])
-dispatcher_row plain core.data.sketch.hll new | CoreCallRecord::new( "core.data.sketch.hll", "new", "JetHyperLogLog::new", false, &[], ) .with_pure_route(CoreCallPureRoute::SketchHll)
-dispatcher_row plain core.data.sketch.cms new | CoreCallRecord::new( "core.data.sketch.cms", "new", "JetCountMinSketch::new", false, &[], ) .with_pure_route(CoreCallPureRoute::SketchCms)
-dispatcher_row plain core.data.sketch.reservoir new | CoreCallRecord::new( "core.data.sketch.reservoir", "new", "JetReservoirSampler::new", false, &[false], ) .with_pure_route(CoreCallPureRoute::SketchReservoir)
 dispatcher_row plain core.web.browser profile | CoreCallRecord::new( "core.web.browser", "profile", "jet_browser_profile", false, &[true], )
 dispatcher_row plain core.web.browser timeout | CoreCallRecord::new( "core.web.browser", "timeout", "jet_browser_timeout", false, &[false], )
 dispatcher_row plain core.web.browser locked | CoreCallRecord::new( "core.web.browser", "locked", "jet_browser_locked", false, &[true], )
@@ -1654,7 +1636,6 @@ dispatcher_row receiver - paginate | CoreCallRecord::receiver_with_coverage( &["
 dispatcher_row receiver - page | CoreCallRecord::receiver_with_coverage( &["WebTable"], "page", &[], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA), )
 dispatcher_row receiver - set | CoreCallRecord::receiver_with_coverage( &["WebStore"], "set", &[false], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA), )
 dispatcher_row receiver - facts_json | CoreCallRecord::receiver_with_coverage( &["WebStore"], "facts_json", &[], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA), )
-dispatcher_row receiver - facts_json | CoreCallRecord::receiver_with_coverage( &["WebVirtualWindow"], "facts_json", &[], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA), )
 dispatcher_row receiver - METHOD_RECEIPT_ATTACH | CoreCallRecord::receiver_with_symbol( &[INTERNAL_RECEIPT_HANDLE], METHOD_RECEIPT_ATTACH, "jet_receipt_attach", true, &[true, false, false, false], )
 dispatcher_row receiver - line | CoreCallRecord::receiver_with_symbol( &["JetDataPlot"], "line", "jet_data_plot_line", true, &[true], )
 dispatcher_row receiver - bar | CoreCallRecord::receiver_with_symbol( &["JetDataPlot"], "bar", "jet_data_plot_bar", true, &[true], )
@@ -1878,20 +1859,11 @@ dispatcher_row receiver - sub | CoreCallRecord::receiver(&["Measurement"], "sub"
 dispatcher_row receiver - mul | CoreCallRecord::receiver(&["Measurement"], "mul", &[false])
 dispatcher_row receiver - div | CoreCallRecord::receiver(&["Measurement"], "div", &[false])
 dispatcher_row receiver - sqrt | CoreCallRecord::receiver(&["Measurement"], "sqrt", &[])
-dispatcher_row receiver - new | CoreCallRecord::receiver(&["HyperLogLog"], "new", &[])
-dispatcher_row receiver - add | CoreCallRecord::receiver(&["HyperLogLog"], "add", &[true])
-dispatcher_row receiver - count | CoreCallRecord::receiver(&["HyperLogLog"], "count", &[])
-dispatcher_row receiver - new | CoreCallRecord::receiver(&["CountMinSketch"], "new", &[])
-dispatcher_row receiver - add | CoreCallRecord::receiver(&["CountMinSketch"], "add", &[true])
-dispatcher_row receiver - count | CoreCallRecord::receiver(&["CountMinSketch"], "count", &[true])
-dispatcher_row receiver - new | CoreCallRecord::receiver(&["ReservoirSampler"], "new", &[false])
-dispatcher_row receiver - add | CoreCallRecord::receiver(&["ReservoirSampler"], "add", &[true])
-dispatcher_row receiver - sample | CoreCallRecord::receiver(&["ReservoirSampler"], "sample", &[])
 dispatcher_row receiver - new | CoreCallRecord::receiver(&["Solver"], "new", &[false])
 dispatcher_row receiver - require | CoreCallRecord::receiver(&["Solver"], "require", &[false])
 dispatcher_row receiver - failure_count | CoreCallRecord::receiver(&["Solver"], "failure_count", &[])
 dispatcher_row receiver - status | CoreCallRecord::receiver(&["Solver"], "status", &[])
-dispatcher_row receiver - __display | CoreCallRecord::receiver( &[ "HyperLogLog", "CountMinSketch", "ReservoirSampler", "Solver", "ServiceUpgradeReceipt", "DataError", VAULT_KEY_REF_TYPE, ], "__display", &[], )
+dispatcher_row receiver - __display | CoreCallRecord::receiver( &[ "Solver", "ServiceUpgradeReceipt", "DataError", VAULT_KEY_REF_TYPE, ], "__display", &[], )
 dispatcher_row plain core.http.server bind | CoreCallRecord::new( "core.http.server", "bind", "jet_http_server_bind", false, &[true, false, false, false], ) .with_max_arity(4) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot()
 dispatcher_row plain core.data inner_join | CoreCallRecord::new( "core.data", "inner_join", "jet_data_inner_join_checked_default", true, &[true, true, false, false], ) .without_direct_aot()
 
@@ -1915,8 +1887,6 @@ ambient_route core.game.raylib end_drawing
 ambient_route core.game.raylib close_window
 ambient_route core.game.raylib key_down
 ambient_route core.game.raylib set_target_fps
-ambient_route core.game.raylib load_sound
-ambient_route core.game.raylib play_sound
 ambient_route core.game.raylib color
 ambient_route core.game.raylib gamepad_down
 ambient_route core.game.raylib gamepad_axis
@@ -1930,7 +1900,6 @@ ambient_route core.event policy_sync
 ambient_route core.event new
 ambient_route core.event with_policy
 ambient_route core.event async_result
-ambient_route core.testing snap
 ambient_route core.testing golden
 ambient_route core.testing test_suite
 ambient_route core.testing compare
@@ -1968,10 +1937,6 @@ ambient_route core.ui text
 ambient_route core.ui resize_event
 ambient_route core.ui node_role
 ambient_route core.ui node_color
-ambient_route core.ui aria_role_button
-ambient_route core.ui aria_role_text_input
-ambient_route core.ui aria_role_label
-ambient_route core.ui aria_role_container
 ambient_route core.ui box
 ambient_route core.log span
 ambient_route core.log critical
@@ -2024,7 +1989,6 @@ ambient_route core.term progress
 ambient_route core.term progress_iter
 ambient_route core.sys get
 ambient_route core.sys set
-ambient_route core.sys home_dir
 ambient_route core.sys family
 ambient_route core.sys unset
 ambient_route core.sys vars
@@ -2033,9 +1997,8 @@ ambient_route core.sys arch
 ambient_route core.sys cpu_count
 ambient_route core.sys pid
 ambient_route core.sys getpid
-ambient_route core.sys username
+ambient_route core.sys __host_env
 ambient_route core.sys release
-ambient_route core.sys expand
 ambient_route core.sys __getppid
 ambient_route core.sys __getegid
 ambient_route core.sys getgroups

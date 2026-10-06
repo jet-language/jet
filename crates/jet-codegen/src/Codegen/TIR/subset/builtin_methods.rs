@@ -702,23 +702,6 @@ pub fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -> bool 
     }
 }
 
-/// D-APPROX1=A: is this a sketch receiver type?
-pub(crate) fn is_sketch_type(recv_type: Option<&str>) -> bool {
-    matches!(
-        recv_type,
-        Some("HyperLogLog" | "CountMinSketch" | "ReservoirSampler")
-    )
-}
-
-/// D-APPROX1=A: is `method` a valid method for this sketch type?
-pub(crate) fn is_sketch_method_name(recv_type: Option<&str>, method: &str) -> bool {
-    match recv_type {
-        Some("HyperLogLog") => matches!(method, "add" | "count"),
-        Some("CountMinSketch") => matches!(method, "add" | "count"),
-        Some("ReservoirSampler") => matches!(method, "add" | "sample"),
-        _ => false,
-    }
-}
 
 /// Resolve a numeric receiver query into a total TIR operation.
 pub(crate) fn resolve_numeric_op(method: &str, src_name: &str, line: u32) -> Option<TNumericOp> {

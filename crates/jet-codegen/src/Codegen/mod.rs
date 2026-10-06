@@ -355,7 +355,6 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/Measurement.rs"),
     include_str!("../Prelude/Core/TimeMonotonic.rs"),
     include_str!("../Prelude/Core/Time.rs"),
-    include_str!("../Prelude/Core/Sketch.rs"),
     include_str!("../Prelude/Core/Contracts.rs"),
     include_str!("../Prelude/Core/MapKey.rs"),
     include_str!("../Prelude/Core/RuntimeStack.rs"),

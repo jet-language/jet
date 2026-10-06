@@ -643,14 +643,6 @@ pub fn apply_impure_core_call_with_type_args(
                 e,
             )))),
         },
-        ("core.sys", "home_dir") => Ok(
-            match jet_foundation::CheckReads::env_var("HOME")
-                .or_else(|| jet_foundation::CheckReads::env_var("USERPROFILE"))
-            {
-                Some(v) => CtValue::Present(Box::new(CtValue::Str(v))),
-                None => CtValue::absent(crate::AST::Type::String),
-            },
-        ),
         ("core.process", "argv") => {
             // Prefer argv installed for this jet run/deopt. Never fall back to
             // the host process argv — `cargo test` flags would leak into output.

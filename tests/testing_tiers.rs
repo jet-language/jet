@@ -66,3 +66,25 @@ fn run() {{
     );
     assert_tiers_agree("testing_corpus_source", &source, "2\nfirst\nlast\n0\n");
 }
+
+#[test]
+fn testing_snap_declares_env_and_obeys_updates_across_tiers() {
+    assert_tiers_agree(
+        "testing_snap_source",
+        r#"use core.testing as testing
+use core.sys as sys
+
+fn run() {
+    sys.set("JET_UPDATE_SNAPSHOTS", "1")
+    print(testing.snap("source snap é", "first\n"))
+    sys.set("JET_UPDATE_SNAPSHOTS", "0")
+    print(testing.snap("source snap é", "second\n"))
+    sys.set("JET_UPDATE_SNAPSHOTS", "1")
+    print(testing.snap("source snap é", "second\n"))
+    sys.set("JET_UPDATE_SNAPSHOTS", "0")
+    print(testing.snap("source snap é", "second\n"))
+}
+"#,
+        "true\nfalse\ntrue\ntrue\n",
+    );
+}

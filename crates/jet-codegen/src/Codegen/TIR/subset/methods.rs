@@ -29,8 +29,6 @@ use crate::Codegen::TIR::is_measurement_method_name;
 use crate::Codegen::TIR::is_process_handle_method_name;
 use crate::Codegen::TIR::is_reactive_effect_method_name;
 use crate::Codegen::TIR::is_reactive_method_name;
-use crate::Codegen::TIR::is_sketch_method_name;
-use crate::Codegen::TIR::is_sketch_type;
 use crate::Codegen::TIR::is_ui_backend_method_name;
 use crate::Codegen::TIR::is_watch_handle_type;
 use crate::Codegen::TIR::is_watch_method_name;
@@ -1024,11 +1022,6 @@ pub(crate) fn method_call_in_subset(
     if recv_type.as_deref() == Some("App") && is_app_method_name(method, args.len()) {
         // `.routes(from: "…")` uses a labeled arg; other builder methods stay
         // positional. Labels are erased at emit — only the expression matters.
-        return expr_in_subset(receiver, cx, locals)
-            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-    }
-    // Shape (d8) [D-APPROX1=A]: a sketch method (HyperLogLog/TDigest/CMS/ReservoirSampler).
-    if is_sketch_type(recv_type.as_deref()) && is_sketch_method_name(recv_type.as_deref(), method) {
         return expr_in_subset(receiver, cx, locals)
             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }

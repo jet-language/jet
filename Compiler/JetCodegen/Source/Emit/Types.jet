@@ -2289,6 +2289,7 @@ fn jet_rust_emit_qualified_leaf_under(name: String, owners: [String]) -> String?
     None
 }
 
+
 fn jet_rust_emit_core_native_probe_name(name: String) -> String Never! {
     if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy")) || core_source_owns_type(name) -> return ~name
     jet_rust_emit_core_source_type_leaf(name)
@@ -2410,9 +2411,6 @@ fn jet_rust_emit_root_prelude_type_name(name: String) -> String? {
         "Session" -> Val("JetAuthSession")
         "Auth" -> Val("JetAuthApp")
         "RowPolicy" -> Val("JetRowPolicy")
-        "HyperLogLog" -> Val("JetHyperLogLog")
-        "CountMinSketch" -> Val("JetCountMinSketch")
-        "ReservoirSampler" -> Val("JetReservoirSampler")
         "WebMutationStatus" -> Val("JetWebMutationStatus")
         "WebMutationState" -> Val("JetWebMutationState")
         "WebQueryStatus" -> Val("JetWebQueryStatus")
@@ -2455,8 +2453,6 @@ fn jet_rust_emit_root_prelude_type_name(name: String) -> String? {
         "WebTableRow" -> Val("JetWebTableRow")
         "WebTablePage" -> Val("JetWebTablePage")
         "WebTable" -> Val("JetWebTable")
-        "WebVirtualViewport" -> Val("JetWebVirtualViewport")
-        "WebVirtualWindow" -> Val("JetWebVirtualWindow")
         "WebVirtualPlan" -> Val("JetWebVirtualPlan")
         "WebVirtualPlanViewport" -> Val("JetWebVirtualPlanViewport")
         "Atomic" -> Val("JetAtomic")
@@ -2479,7 +2475,7 @@ fn jet_rust_emit_core_rust_type_name(raw: String) -> String? {
     if coords.contains(name) -> return Val("JetCoord2")
     // Carriers whose Rust name equals the Jet name.
     if name == "PluginFrame" || name == "PluginFault" || name == "PluginLimit" || name == "PluginError" -> return Val(~name)
-    same :: [String]{"IOError", "IOContext", "IOOperation", "ProcessResourceLimit", "EnvError", "UTF8Error", "ProcessPlan", "ProcessSpec", "ProcessChild", "ProcessStreamMode", "TerminalPolicy", "TerminalSize", "TerminalMode", "TerminalSession", "TextWidth", "TextWidthAmbiguous", "TextWidthControls", "TextError", "DataGroupedQuery", "DataJoin", "TestSuite", "Clock", "RNG", "Fake", "Solver", "Duration", "DurationUnit", "RangeError", "DataLoaderKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "DataAuthority", "DataSourceIdentity", "DataProvenance", "DataSnapshotIdentity", "DataLoaderStatus", "DataLoader", "DataSnapshot", "RegexFlags", "Closed", "DirEntry", "Stat", "WalkEntry", "WatchEvent", "WatchDomain", "WatchKind", "WatchHandle", "WatchSet", "TempDir", "TempFile", "FileLock", "DataLineOptions", "DataColumn", "DataStatus", "DataSummary", "DataLimits", "DataError", "DataErrorKind", "DataPivotCell", "DataStream", "DataTracked", "DataWatch", "DataWatchStatus", "LogField", "LogSpan", "EncodingLimits", "EncodingError", "EncodingCause", "EncodingFormat", "EncodingErrorKind", "FieldError", "CBOROptions", "CBORError", "CBORErrorKind", "XMLLimits", "XMLParseOptions", "XMLRenderOptions", "XMLEncoding", "XMLLexicalPolicy", "XMLCanonical", "XMLCanonicalMode", "XMLError", "XMLReason", "XMLEntityPolicy", "DataEvent", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "CSVRow", "XMLReader", "XMLWriter", "DBValue", "DBError", "RaylibWindow", "RaylibColor", "RaylibSound", "RaylibTextureAtlas", "SQL", "HTML", "Sh"}
+    same :: [String]{"IOError", "IOContext", "IOOperation", "ProcessResourceLimit", "EnvError", "UTF8Error", "ProcessPlan", "ProcessSpec", "ProcessChild", "ProcessStreamMode", "TerminalPolicy", "TerminalSize", "TerminalMode", "TerminalSession", "TextWidth", "TextWidthAmbiguous", "TextWidthControls", "TextError", "DataGroupedQuery", "DataJoin", "TestSuite", "Clock", "RNG", "Fake", "Solver", "Duration", "DurationUnit", "RangeError", "DataLoaderKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "DataAuthority", "DataSourceIdentity", "DataProvenance", "DataSnapshotIdentity", "DataLoaderStatus", "DataLoader", "DataSnapshot", "RegexFlags", "Closed", "DirEntry", "Stat", "WalkEntry", "WatchEvent", "WatchDomain", "WatchKind", "WatchHandle", "WatchSet", "TempDir", "TempFile", "FileLock", "DataLineOptions", "DataColumn", "DataStatus", "DataSummary", "DataLimits", "DataError", "DataErrorKind", "DataPivotCell", "DataStream", "DataTracked", "DataWatch", "DataWatchStatus", "LogField", "LogSpan", "EncodingLimits", "EncodingError", "EncodingCause", "EncodingFormat", "EncodingErrorKind", "FieldError", "CBOROptions", "CBORError", "CBORErrorKind", "XMLLimits", "XMLParseOptions", "XMLRenderOptions", "XMLEncoding", "XMLLexicalPolicy", "XMLCanonical", "XMLCanonicalMode", "XMLError", "XMLReason", "XMLEntityPolicy", "DataEvent", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "CSVRow", "XMLReader", "XMLWriter", "DBValue", "DBError", "RaylibWindow", "RaylibColor", "RaylibTextureAtlas", "SQL", "HTML", "Sh"}
     if same.contains(name) -> return Val(~name)
     if name == {
         "ProcessResult" | "ProcessReceipt" -> Val("ProcessReceipt")

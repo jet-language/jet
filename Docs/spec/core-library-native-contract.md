@@ -106,6 +106,16 @@ stores one zero-initialized atomic word. Jet encodes a stored IEEE value as its
 signed f64 bit pattern plus one, reserving zero for the default; this preserves
 both signed zeros without assigning policy to the native cell.
 
+`core.game.raylib` sound handles are Jet records retaining the supplied path.
+`play_sound` preserves the existing non-empty-path acceptance contract, not a
+claim of native audio submission; this pair requires no host operation.
+
+`core.web.virtual` windows are Jet records. Window construction, measured-size
+estimation, bounded slicing and indices, and `WebVirtualWindow.facts_json` use
+the source implementation rather than a native window carrier. The facts
+method emits all nine stored fields in declaration order without serializing
+row payloads or recomputing layout.
+
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
@@ -130,6 +140,13 @@ centroid storage. It retains the shipped unit-weight insertion/compression and
 step-quantile behavior, including empty and out-of-range queries; aliases share
 updates. The divergent weighted/interpolating source implementation is removed,
 not retained as an alternate mode.
+HLL, count-min and reservoir sketches likewise have one source carrier under the
+shipped `HyperLogLog`, `CountMinSketch` and `ReservoirSampler` names. Jet owns
+the shared seeded FNV kernel, fixed sketch dimensions, unit counter saturation,
+reservoir minimum capacity, xorshift seed and replacement order. CMS `merge`
+keeps its existing source-level additive counter operation. The native sketch
+kernel and the divergent configurable/weighted/SplitMix source carriers are
+removed; copying a handle still shares updates.
 
 ## One meaning across execution tiers
 

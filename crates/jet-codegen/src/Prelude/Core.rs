@@ -630,24 +630,6 @@ fn jet_perf_write_bits(bits: i64) {
     JET_PERF_BITS.store(bits as u64, std::sync::atomic::Ordering::SeqCst);
 }
 
-impl JetShow for JetHyperLogLog {
-    fn jet_show(&self) -> String {
-        format!("HyperLogLog(count={})", self.count())
-    }
-}
-
-
-impl JetShow for JetCountMinSketch {
-    fn jet_show(&self) -> String {
-        "CountMinSketch".to_string()
-    }
-}
-
-impl JetShow for JetReservoirSampler {
-    fn jet_show(&self) -> String {
-        format!("ReservoirSampler(n={})", self.parts().2)
-    }
-}
 
 struct JetTestExpectFrame {
     scope: u64,

@@ -23,11 +23,8 @@ pub(crate) fn jet_std_os_executable() -> String {
 pub(crate) fn jet_std_os_pid() -> i64 {
     std::process::id() as i64
 }
-pub(crate) fn jet_std_os_username() -> String {
-    std::env::var("USER")
-        .ok()
-        .or_else(|| std::env::var("USERNAME").ok())
-        .unwrap_or_default()
+pub(crate) fn jet_sys_host_env_raw(name: &String) -> Option<Vec<u8>> {
+    std::env::var_os(name).map(std::ffi::OsString::into_encoded_bytes)
 }
 
 fn jet_os_unsupported(op: &str) -> jet_std::IOError {
@@ -118,39 +115,6 @@ pub(crate) fn jet_std_os_getpid() -> i64 {
     jet_std_os_pid()
 }
 
-pub(crate) fn jet_std_os_expand(template: &String) -> String {
-    let mut out = String::with_capacity(template.len());
-    let bytes = template.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'$' {
-            i += 1;
-            if i < bytes.len() && bytes[i] == b'{' {
-                i += 1;
-                let start = i;
-                while i < bytes.len() && bytes[i] != b'}' {
-                    i += 1;
-                }
-                let name = &template[start..i];
-                if i < bytes.len() {
-                    i += 1;
-                }
-                out.push_str(&jet_std_env_get(&name.to_string()).unwrap_or_default());
-            } else {
-                let start = i;
-                while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
-                    i += 1;
-                }
-                let name = &template[start..i];
-                out.push_str(&jet_std_env_get(&name.to_string()).unwrap_or_default());
-            }
-        } else {
-            out.push(bytes[i] as char);
-            i += 1;
-        }
-    }
-    out
-}
 
 #[cfg(unix)]
 #[repr(C)]

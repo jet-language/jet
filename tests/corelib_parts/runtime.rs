@@ -1,4 +1,24 @@
 #[test]
+fn web_virtual_window_uses_jet_source_carrier() {
+    let out = compile_temp(
+        "virtual_window_source.jet",
+        r#"
+use core.web.virtual as api
+fn run() {
+    window :: api.window_measured(100, 60, 40, 20, 1, [Int]{10, 30})
+    print(window.facts_json())
+    print(api.indices(window))
+    print(api.slice<Int>([Int]{0, 1, 2, 3, 4, 5, 6}, window))
+}
+"#,
+    );
+    assert!(!out.rust.contains("pub struct JetWebVirtualWindow"));
+    assert!(!out.rust.contains("pub struct JetWebVirtualViewport"));
+    assert!(!out.rust.contains("fn jet_web_virtual_window("));
+    assert!(!out.rust.contains("jet_web_virtual_window_facts"));
+}
+
+#[test]
 fn perf_static_api_lowers_to_jet_source() {
     let out = compile_temp(
         "perf_static.jet",

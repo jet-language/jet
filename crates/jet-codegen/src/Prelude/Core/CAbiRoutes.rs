@@ -968,19 +968,6 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetCountMinSketch(value: *mut crate::JetCountMinSketch) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_JetCountMinSketch(value: *mut crate::JetCountMinSketch) -> *mut crate::JetCountMinSketch {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_JetCursor(value: *mut crate::JetCursor) {
@@ -2264,19 +2251,6 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetHyperLogLog(value: *mut crate::JetHyperLogLog) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_JetHyperLogLog(value: *mut crate::JetHyperLogLog) -> *mut crate::JetHyperLogLog {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_JetInputEvent(value: *mut crate::JetInputEvent) {
@@ -2904,19 +2878,6 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetReservoirSampler(value: *mut crate::JetReservoirSampler) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_JetReservoirSampler(value: *mut crate::JetReservoirSampler) -> *mut crate::JetReservoirSampler {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_JetRowPolicy(value: *mut crate::jet_sync::JetRowPolicy) {
@@ -4161,33 +4122,6 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetWebVirtualViewport(value: *mut crate::JetWebVirtualViewport) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_JetWebVirtualViewport(value: *mut crate::JetWebVirtualViewport) -> *mut crate::JetWebVirtualViewport {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetWebVirtualWindow(value: *mut crate::JetWebVirtualWindow) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_JetWebVirtualWindow(value: *mut crate::JetWebVirtualWindow) -> *mut crate::JetWebVirtualWindow {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_JetWorkflowHandle(value: *mut crate::JetWorkflowHandle) {
@@ -4517,19 +4451,6 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_RaylibSound(value: *mut crate::RaylibSound) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_RaylibSound(value: *mut crate::RaylibSound) -> *mut crate::RaylibSound {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_RaylibTextureAtlas(value: *mut crate::RaylibTextureAtlas) {
@@ -5521,11 +5442,6 @@ mod jet_c_abi_routes {
         guard(|| handle(<crate::JetCounter as crate::JetDebug>::jet_debug(unsafe { &*value })))
     }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_show_JetCountMinSketch(value: *mut crate::JetCountMinSketch) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::JetCountMinSketch as crate::JetShow>::jet_show(unsafe { &*value })))
-    }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_display_JetDate(value: *mut crate::JetDate) -> JetCString {
@@ -5731,11 +5647,6 @@ mod jet_c_abi_routes {
         guard(|| handle(<crate::JetHTTPVersion as crate::JetShow>::jet_show(unsafe { &*value })))
     }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_show_JetHyperLogLog(value: *mut crate::JetHyperLogLog) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::JetHyperLogLog as crate::JetShow>::jet_show(unsafe { &*value })))
-    }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_display_JetInstant(value: *mut crate::JetInstant) -> JetCString {
@@ -5965,11 +5876,6 @@ mod jet_c_abi_routes {
         guard(|| handle(<crate::jet_std::JetRegexMatch as crate::JetShow>::jet_show(unsafe { &*value })))
     }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_show_JetReservoirSampler(value: *mut crate::JetReservoirSampler) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::JetReservoirSampler as crate::JetShow>::jet_show(unsafe { &*value })))
-    }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_display_JetServiceDelivery(value: *mut crate::JetServiceDelivery) -> JetCString {
@@ -11095,11 +11001,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_raylib_key_down(unsafe { &*a0 }))
     }
 
-    /// core.game.raylib.load_sound
-    #[no_mangle]
-    pub extern "C" fn jet_raylib_load_sound(a0: JetCString) -> *mut crate::RaylibSound {
-        guard(|| Box::into_raw(Box::new(crate::jet_raylib_load_sound(unsafe { &*a0 }))))
-    }
 
     /// core.game.raylib.load_texture_atlas
     #[no_mangle]
@@ -11107,11 +11008,6 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_raylib_load_texture_atlas(unsafe { &*a0 }))))
     }
 
-    /// core.game.raylib.play_sound
-    #[no_mangle]
-    pub extern "C" fn jet_raylib_play_sound(a0: *mut crate::RaylibSound) -> bool {
-        guard(|| crate::jet_raylib_play_sound(unsafe { &*a0 }))
-    }
 
     /// core.game.raylib.set_target_fps
     #[no_mangle]
@@ -12166,14 +12062,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.sys.home_dir
-    #[no_mangle]
-    pub extern "C" fn jet_std_env_home_dir(some: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_std_env_home_dir() {
-            Some(value) => { unsafe { some.write(handle(value)) }; 1 }
-            None => 0,
-        })
-    }
 
     /// core.sys.set
     #[no_mangle]
@@ -13387,11 +13275,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_os_exitcode(a0)))
     }
 
-    /// core.sys.expand
-    #[no_mangle]
-    pub extern "C" fn jet_std_os_expand(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_std_os_expand(unsafe { &*a0 })))
-    }
 
     /// core.sys.family
     #[no_mangle]
@@ -13604,11 +13487,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_os_uptime())
     }
 
-    /// core.sys.username
-    #[no_mangle]
-    pub extern "C" fn jet_std_os_username() -> JetCString {
-        guard(|| handle(crate::jet_std_os_username()))
-    }
 
     /// core.sys.utime
     #[no_mangle]
@@ -13930,8 +13808,8 @@ mod jet_c_abi_routes {
 
     /// core.tasks.__task_cancelled
     #[no_mangle]
-    pub extern "C" fn jet_scheduler_task_cancelled(some: *mut bool) -> i64 {
-        guard(|| match crate::jet_scheduler_task_cancelled() {
+    pub extern "C" fn jet_scheduler_task_cancelled_state(some: *mut bool) -> i64 {
+        guard(|| match crate::jet_scheduler_task_cancelled_state() {
             Some(value) => { unsafe { some.write(value) }; 1 }
             None => 0,
         })
@@ -14069,11 +13947,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std::jet_int_from_i64(i64::try_from(crate::jet_testing_history_rng_next_u64(unsafe { &*a0 })).unwrap_or_else(|_| range_stop())))
     }
 
-    /// core.testing.snap
-    #[no_mangle]
-    pub extern "C" fn jet_testing_snap(a0: JetCString, a1: JetCString) -> bool {
-        guard(|| crate::jet_testing_snap(unsafe { &*a0 }, unsafe { &*a1 }))
-    }
 
     /// core.testing.status
     #[no_mangle]
@@ -14866,11 +14739,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.tui.ascii
-    #[no_mangle]
-    pub extern "C" fn jet_tui_ascii(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_tui_ascii(view(a0))))
-    }
 
     /// core.tui.capabilities
     #[no_mangle]
@@ -14900,12 +14768,6 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_tui_color_rgb(a0: i64, a1: i64, a2: i64) -> *mut crate::JetTuiColor {
         guard(|| Box::into_raw(Box::new(crate::jet_tui_color_rgb(a0, a1, a2))))
-    }
-
-    /// core.tui.display_width
-    #[no_mangle]
-    pub extern "C" fn jet_tui_display_width_int(a0: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_tui_display_width_int(view(a0))))
     }
 
     /// core.tui.fill
@@ -15062,30 +14924,6 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_tui_vertical() -> *mut crate::JetTuiDirection {
         guard(|| Box::into_raw(Box::new(crate::jet_tui_vertical())))
-    }
-
-    /// core.ui.aria_role_button
-    #[no_mangle]
-    pub extern "C" fn jet_ui_aria_role_button() -> *mut crate::JetUiAriaRole {
-        guard(|| Box::into_raw(Box::new(crate::jet_ui_aria_role_button())))
-    }
-
-    /// core.ui.aria_role_container
-    #[no_mangle]
-    pub extern "C" fn jet_ui_aria_role_container() -> *mut crate::JetUiAriaRole {
-        guard(|| Box::into_raw(Box::new(crate::jet_ui_aria_role_container())))
-    }
-
-    /// core.ui.aria_role_label
-    #[no_mangle]
-    pub extern "C" fn jet_ui_aria_role_label() -> *mut crate::JetUiAriaRole {
-        guard(|| Box::into_raw(Box::new(crate::jet_ui_aria_role_label())))
-    }
-
-    /// core.ui.aria_role_text_input
-    #[no_mangle]
-    pub extern "C" fn jet_ui_aria_role_text_input() -> *mut crate::JetUiAriaRole {
-        guard(|| Box::into_raw(Box::new(crate::jet_ui_aria_role_text_input())))
     }
 
     /// core.ui.button
@@ -16065,9 +15903,6 @@ mod jet_c_abi_routes {
 //   JetByteBuffer::from (core.builtin.byte_buffer_from): no runtime function
 //   JetByteBuffer::to_bytes (core.builtin.byte_buffer_to_bytes): no runtime function
 //   JetByteBuffer::with_capacity (core.builtin.byte_buffer_with_capacity): no runtime function
-//   JetCountMinSketch::new (core.data.sketch.cms.new): no runtime function
 //   JetDate::parse_iso_week_date (core.time.parse_iso_week_date): no runtime function
-//   JetHyperLogLog::new (core.data.sketch.hll.new): no runtime function
 //   JetLocalTime::new (core.time.time): no runtime function
-//   JetReservoirSampler::new (core.data.sketch.reservoir.new): no runtime function
 // END GENERATED C-ABI ROUTES

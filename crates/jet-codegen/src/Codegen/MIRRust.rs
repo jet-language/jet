@@ -2997,6 +2997,7 @@ fn wrap_cfg_not_release(out: &mut String, start: usize, indent: usize) {
 }
 
 
+
 /// The Rust identifier of one Jet enum variant. A grouped leaf keeps its complete
 /// dotted identity (`Net.Ping`), which is not a Rust identifier, so it takes the
 /// path encoding (`__jet_Net_dPing`); a flat variant keeps the plain name mangle.

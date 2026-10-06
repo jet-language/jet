@@ -1432,36 +1432,6 @@ pub fn civil_time_method_contract(
     None
 }
 
-/// D-APPROX1=A: return the type name string for a sketch receiver type.
-pub fn sketch_type_name(ty: &Type) -> Option<&'static str> {
-    match ty {
-        Type::Named(n) => match n.as_str() {
-            "HyperLogLog" => Some("HyperLogLog"),
-            "CountMinSketch" => Some("CountMinSketch"),
-            "ReservoirSampler" => Some("ReservoirSampler"),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-/// D-APPROX1=A: method return types for sketch data structures.
-pub fn sketch_method_return(
-    ty: &Type,
-    method: &str,
-    _args: &[crate::AST::CallArg],
-) -> Option<Option<Type>> {
-    let name = sketch_type_name(ty)?;
-    match (name, method) {
-        ("HyperLogLog", "add") => Some(None), // void
-        ("HyperLogLog", "count") => Some(Some(Type::Int)),
-        ("CountMinSketch", "add") => Some(None),
-        ("CountMinSketch", "count") => Some(Some(Type::Int)),
-        ("ReservoirSampler", "add") => Some(None),
-        ("ReservoirSampler", "sample") => Some(Some(Type::List(Box::new(Type::String)))),
-        _ => None,
-    }
-}
 
 pub fn path_method_return(
     type_name: &str,

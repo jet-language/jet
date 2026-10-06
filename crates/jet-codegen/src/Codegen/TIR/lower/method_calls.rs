@@ -28,8 +28,6 @@ use crate::Codegen::TIR::is_loadable_method_name;
 use crate::Codegen::TIR::is_measurement_method_name;
 use crate::Codegen::TIR::is_reactive_effect_method_name;
 use crate::Codegen::TIR::is_reactive_method_name;
-use crate::Codegen::TIR::is_sketch_method_name;
-use crate::Codegen::TIR::is_sketch_type;
 use crate::Codegen::TIR::is_ui_backend_method_name;
 use crate::Codegen::TIR::lower_debug_text;
 use crate::Codegen::TIR::lower_extern_call_arg;
@@ -8039,25 +8037,6 @@ fn lower_method_call_impl(
     // checked Core rows, never a second receiver dispatch table.  The source
     // receiver is the first Core argument; sema has already supplied the
     // generic element type and result carrier.
-    if recv_type.as_deref() == Some("WebVirtualWindow") && method == "facts_json" && args.is_empty()
-    {
-        return in_own_frame(|| {
-            let Some(result_ty) = resolved_ret.cloned() else {
-                return invariant_method_expr(
-                    method_span,
-                    "virtual window facts has no resolved return type".to_string(),
-                );
-            };
-            TExpr {
-                ty: result_ty,
-                kind: TExprKind::HandleMethod {
-                    recv: Box::new(lower_expr(receiver, cx, env)),
-                    op: THandleOp::WebVirtualWindowFacts,
-                    args: Vec::new(),
-                },
-            }
-        });
-    }
     let web_projection = web_receiver_projection(recv_type.as_deref(), method, args.len());
     if let Some((module, core_method)) = web_projection {
         return in_own_frame(|| {
@@ -8743,46 +8722,6 @@ fn lower_method_call_impl(
             method_span,
         );
         return lower_expr(&operator, cx, env);
-    }
-    // D-APPROX1=A: a sketch method (gate shape d8). Sema normally persists the
-    // nominal receiver in `recv_type`; comptime fragments can retain the same
-    // concrete receiver only in the environment. Derive that name from the
-    // checked receiver type as the fallback so all engines select one sketch
-    // operation rather than the generic method/math fallback.
-    let sketch = recv_type.clone().or_else(|| {
-        let Type::Named(name) = tir_recv_jet_ty(receiver, env)? else {
-            return None;
-        };
-        is_sketch_type(Some(name.as_str())).then_some(name)
-    });
-    if is_sketch_type(sketch.as_deref()) && is_sketch_method_name(sketch.as_deref(), method) {
-        return in_own_frame(|| {
-            let sketch = sketch.as_deref().unwrap_or("").to_string();
-            let recv_t = lower_expr(receiver, cx, env);
-            let result_ty = match (sketch.as_str(), method) {
-                ("HyperLogLog", "add")
-                | ("CountMinSketch", "add")
-                | ("ReservoirSampler", "add") => unit_type(),
-                ("HyperLogLog", "count") | ("CountMinSketch", "count") => Type::Int,
-                ("ReservoirSampler", "sample") => Type::List(Box::new(Type::String)),
-                _ => unit_type(),
-            };
-            let targs: Vec<TExpr> = args
-                .iter()
-                .map(|a| lower_expr(&a.expr, cx, env))
-                .collect();
-            return TExpr {
-                ty: result_ty,
-                kind: TExprKind::HandleMethod {
-                    recv: Box::new(recv_t),
-                    op: THandleOp::SketchMethod {
-                        sketch,
-                        method: method.to_string(),
-                    },
-                    args: targs,
-                },
-            };
-        });
     }
     // c109 Phase 21 / D-TUPLE-DESTRUCT1: a Task/Receiver/Sender concurrency method
     // (gate shape d3). The gate proved `recv_type == None` + a disjoint concurrency

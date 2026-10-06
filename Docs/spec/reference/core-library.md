@@ -2697,7 +2697,7 @@ or golden file. The public source is
 |---|---|---|
 | `assert_equal(comparison: TestComparison) -> Bool` | Boolean | Check the comparison's recorded proof fields. |
 | `compare<E>(cases: [DataTree], reference: fn(DataTree) -> DataTree E!, candidate: fn(DataTree) -> DataTree E!, relation: String) -> TestComparison E!` | comparison | Compare reference and candidate outputs over explicit cases. The callbacks' shared failure type passes up (D-CALLBACK-ERR1=A); callbacks that cannot fail make the comparison `Never!`. |
-| `snap(name: String, value: String) -[FS]> Bool` | Boolean | Check a named snapshot. |
+| `snap(name: String, value: String) -[FS, Env]> Bool` | Boolean | Compare or create `__snapshots__/<sanitized-name>.snap`; `JET_UPDATE_SNAPSHOTS=1` rewrites it. Snapshot names retain ASCII letters, digits, `-`, and `_`, replacing other scalars with `_`; an empty name becomes `case`. |
 | `golden(name: String, value: String) -[FS]> Bool` | Boolean | Check a named golden value. |
 | `fixture(name: String) -[FS]> String` | text | Load a named fixture. |
 | `temp_dir(prefix: String) -[FS]> String` | path | Allocate an isolated temporary directory. |

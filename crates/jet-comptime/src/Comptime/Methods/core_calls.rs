@@ -489,9 +489,6 @@ mod solver_kernel {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/Solver.rs");
 }
 
-mod sketch_kernel {
-    include!("../../../../jet-codegen/src/Prelude/Core/Sketch.rs");
-}
 
 mod time_kernel {
     fn jet_scheduler_world_now_ms() -> Option<i64> {
@@ -732,13 +729,6 @@ pub fn apply_core_pure_method(
     core_pure_parity::evaluate_method(recv, method, args, span)
 }
 
-pub fn sketch_add(
-    recv: &CtValue,
-    args: &[CtValue],
-    span: Span,
-) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
-    core_pure_parity::sketch_add(recv, args, span)
-}
 
 pub(in super::super) fn solver_require(
     recv: &CtValue,
@@ -1126,26 +1116,6 @@ fn apply_raylib_core_call(
                 .filter(|value| *value >= 0)
                 .and_then(|_| raylib_kernel::jet_raylib_axis_code(axis));
             Ok(CtValue::Float(CtFloat::f64(0.0)))
-        }
-        "load_sound" => Ok(CtValue::Struct {
-            type_name: "RaylibSound".to_string(),
-            fields: vec![(
-                "path".to_string(),
-                CtValue::Str(as_string(one(0)?, span)?.to_string()),
-            )],
-        }),
-        "play_sound" => {
-            let CtValue::Struct { type_name, fields } = one(0)? else {
-                return Err(unsupported("expected a RaylibSound", span));
-            };
-            if type_name != "RaylibSound" {
-                return Err(unsupported("expected a RaylibSound", span));
-            }
-            let path = match raylib_field(fields, "path") {
-                Some(CtValue::Str(path)) => path,
-                _ => return Err(unsupported("malformed RaylibSound", span)),
-            };
-            Ok(CtValue::Bool(!path.is_empty()))
         }
         "load_texture_atlas" => Ok(raylib_atlas_value(
             raylib_kernel::jet_raylib_load_texture_atlas_spec(as_string(one(0)?, span)?),
