@@ -14,9 +14,9 @@ package {
 // Jet `String` is UTF-8. Counting, trimming, and case mapping are defined on
 // scalars, not raw bytes, except where a function is named `byte_*`. UTF-8
 // decode, Hangul NFD/NFC, UAX #29 grapheme/word segmentation (extended
-// grapheme clusters, WB simple alphanumerics), East-Asian width, and Latin-1
-// case mapping are Jet. `casefold` is full Unicode C+F folding through the
-// shared runtime table; `lower`/`upper` beyond Latin-1 map identity.
+// grapheme clusters, WB simple alphanumerics), and East-Asian width are Jet.
+// `lower`, `upper`, and `casefold` are full Unicode mappings through the one
+// shared runtime case tables (the same tables as the String methods).
 //
 // Predicates on the empty string are false (`is_alphabetic("")` is false).
 // `splitn` / `rsplitn` take a maximum part count, matching Rust `splitn`.
@@ -71,9 +71,12 @@ pub fn scalars(text: String) -> [String] Never! {
     out
 }
 
-pub fn lower(text: String) -> String Never! { map_case(text, false) }
+/// Unicode full lowercase mapping (SpecialCasing unconditional rows):
+/// `"İ"` lowers to `"i̇"`. Routes to the shared runtime table like `String.to_lower`.
+pub fn lower(text: String) -> String Never! { text.to_lower() }
 
-pub fn upper(text: String) -> String Never! { map_case(text, true) }
+/// Unicode full uppercase mapping: `"straße"` uppers to `"STRASSE"`.
+pub fn upper(text: String) -> String Never! { text.to_upper() }
 
 /// Unicode full case folding (CaseFolding.txt status C+F): `"Straße"` folds to
 /// `"strasse"`. The String method routes to the one shared runtime fold table.
@@ -475,52 +478,6 @@ fn encode_cp(cp: Int) -> String {
 fn encode_cps(cps: [Int]) -> String {
     out := ""
     loop cp in cps -> out = "{out}{encode_cp(cp)}"
-    out
-}
-
-fn map_case(text: String, to_upper: Bool) -> String {
-    out := ""
-    loop cp in decode_scalars(text) -> out = "{out}{case_string(cp, to_upper)}"
-    out
-}
-
-fn case_string(cp: Int, to_upper: Bool) -> String {
-    if to_upper {
-        if cp == 223 || cp == 7838 -> return "SS"
-        if cp >= 97 && cp <= 122 -> return encode_cp(cp - 32)
-        if cp >= 224 && cp <= 254 && cp != 247 -> return encode_cp(cp - 32)
-        if cp == 255 -> return encode_cp(376)
-        if cp >= 945 && cp <= 961 -> return encode_cp(cp - 32)
-        if cp >= 963 && cp <= 969 -> return encode_cp(cp - 32)
-        if cp >= 1072 && cp <= 1103 -> return encode_cp(cp - 32)
-        return encode_cp(cp)
-    }
-    if cp >= 65 && cp <= 90 -> return encode_cp(cp + 32)
-    if cp >= 192 && cp <= 222 && cp != 215 -> return encode_cp(cp + 32)
-    if cp == 376 -> return encode_cp(255)
-    if cp >= 913 && cp <= 929 -> return encode_cp(cp + 32)
-    if cp >= 931 && cp <= 939 -> return encode_cp(cp + 32)
-    if cp >= 1040 && cp <= 1071 -> return encode_cp(cp + 32)
-    encode_cp(cp)
-}
-
-fn fold_case(text: String) -> String {
-    out := ""
-    loop cp in decode_scalars(text) {
-        if cp == 223 || cp == 7838 {
-            out = "{out}ss"
-        } else if cp == 304 {
-            out = "{out}i{encode_cp(775)}"
-        } else if cp == 962 {
-            out = "{out}{encode_cp(963)}"
-        } else if cp == 8490 {
-            out = "{out}k"
-        } else if cp == 8491 {
-            out = "{out}{encode_cp(229)}"
-        } else {
-            out = "{out}{case_string(cp, false)}"
-        }
-    }
     out
 }
 
