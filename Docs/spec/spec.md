@@ -857,6 +857,11 @@ success payload or evaluates its right side. Its precedence is looser than
 `panic(...)`. `??` is the only fallback spelling; it must produce the
 enclosing success type, otherwise the compiler reports E0405. (S35, S71)
 
+A chain of fallbacks groups from the right: `a ?? b ?? c` means
+`a ?? (b ?? c)`. Each fallback is tried in turn and the last one ends the
+chain; parentheses override the grouping, and the formatter writes chains
+without them. (D-FALLBACK-CHAIN1=A)
+
 `panic(message)`, failed `assert`/`assert_eq`, `#Todo`, a raw Prelude panic, and
 scheduler, stream, or foreign-boundary stops enter the shared runtime report
 boundary. Program-side runtime breaches use E3001 and the process-stop boundary
