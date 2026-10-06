@@ -29,15 +29,20 @@
 // Indexes are `e % xs.len()` (floored, so in range) or literal 0, and divisors
 // are mostly `e % k + 1`, which keeps the discard rate low.
 //
+// With --sanitize-runtime <runtime.rs> (the prepared runtime text of the
+// runtime pack), Compiler/JetBackend/Tests/run-sanitized.mjs also runs over
+// the corpus (set JET_LOWER_SANITIZE=1 so native code is checked too).
+//
 // Verdicts (fuzz.tsv): reference = the Rust path against the model
 // (model-agree, model-differs, rust-error, rust-absent); then the
-// run-differential and run-lint-corpus verdicts of the case. The gate (exit 1)
-// fails on model-differs, rust-error, native-diverges, lint findings and
-// lint-crash. A failing case reproduces from its seed; the .jet is the repro.
+// run-differential, run-sanitized and run-lint-corpus verdicts of the case.
+// The gate (exit 1) fails on model-differs, rust-error, native-diverges, a
+// sanitizer report or sanitized-diverges, lint findings and lint-crash. A
+// failing case reproduces from its seed; the .jet is the repro.
 //
-// usage: [JET=<jet binary>] [JET_RUNTIME_PACK=... | JET_RUNTIME_C_LIB=...]
+// usage: [JET=<jet binary>] [JET_RUNTIME_PACK=... | JET_RUNTIME_C_LIB=...] [JET_LOWER_SANITIZE=1]
 //        node Tools/agent/safety-fuzz.mjs <outdir> [--seed N] [--count K]
-//        [--until generate|goldens|differential|lint]
+//        [--until generate|goldens|differential|lint] [--sanitize-runtime <runtime.rs>]
 // Writes <out>/fuzz.tsv and <out>/fuzz-summary.txt (and each tool's receipt
 // under <out>/goldens).
 import { createHash } from "node:crypto";
@@ -677,16 +682,18 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const args = process.argv.slice(2);
   const outDir = args.length ? resolve(args.shift()) : null;
   if (!outDir) {
-    console.error("usage: safety-fuzz.mjs <outdir> [--seed N] [--count K] [--until generate|goldens|differential|lint]");
+    console.error("usage: safety-fuzz.mjs <outdir> [--seed N] [--count K] [--until generate|goldens|differential|lint] [--sanitize-runtime <runtime.rs>]");
     process.exit(64);
   }
   let seed = 1;
   let count = 50;
   let until = "lint";
+  let sanitizeRuntime = null;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--seed") seed = Number(args[++i]);
     else if (args[i] === "--count") count = Number(args[++i]);
     else if (args[i] === "--until") until = args[++i];
+    else if (args[i] === "--sanitize-runtime") sanitizeRuntime = resolve(args[++i]);
     else throw new Error(`unknown option ${args[i]}`);
   }
   const STAGES = ["generate", "goldens", "differential", "lint"];
@@ -714,6 +721,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   // 2-4. The golden, differential and lint tools over the corpus.
   const goldens = join(outDir, "goldens");
   mkdirSync(goldens, { recursive: true });
+  // Receipts of an earlier run must not stand in for a stage this run skips.
+  for (const receipt of ["results.tsv", "differential.tsv", "sanitize.tsv", "lint.tsv"]) rmSync(join(goldens, receipt), { force: true });
   const tool = (label, script, extra) => {
     const log = openSync(join(outDir, `${label}.log`), "w");
     const run = spawnSync(process.execPath, [join(repo, script), goldens, ...extra], {
@@ -725,6 +734,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   };
   if (tool("goldens", "Compiler/JetBackend/Tests/run-goldens.mjs", []) !== 0) throw new Error(`run-goldens failed: see ${outDir}/goldens.log`);
   if (last >= 2 && ![0, 1].includes(tool("differential", "Compiler/JetBackend/Tests/run-differential.mjs", []))) throw new Error("run-differential failed");
+  if (last >= 2 && sanitizeRuntime && ![0, 1].includes(tool("sanitize", "Compiler/JetBackend/Tests/run-sanitized.mjs", ["--runtime", sanitizeRuntime]))) throw new Error("run-sanitized failed");
   if (last >= 3 && ![0, 1].includes(tool("lint", "Compiler/JetOptimizer/Tests/run-lint-corpus.mjs", []))) throw new Error("run-lint-corpus failed");
 
   // 5. Receipt.
@@ -738,6 +748,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   };
   const harness = table("results.tsv");
   const differential = table("differential.tsv");
+  const sanitize = table("sanitize.tsv");
   const lint = table("lint.tsv");
   const rows = [];
   const failures = [];
@@ -760,10 +771,12 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       } else reference = "model-agree";
     }
     const native = differential.get(stem)?.verdict ?? harness.get(stem)?.verdict ?? "-";
+    const sanitized = sanitize.get(stem)?.verdict ?? "-";
     const linted = lint.get(stem)?.verdict ?? "-";
-    rows.push([stem, reference, native, linted, detail || differential.get(stem)?.detail || lint.get(stem)?.detail || ""].join("\t"));
+    rows.push([stem, reference, native, sanitized, linted, detail || differential.get(stem)?.detail || sanitize.get(stem)?.detail || lint.get(stem)?.detail || ""].join("\t"));
     if (reference === "model-differs" || reference === "rust-error") failures.push(`${reference}\t${stem}\t${detail}`);
     if (native === "native-diverges") failures.push(`native-diverges\t${stem}\t${differential.get(stem).detail}`);
+    if (sanitized === "report" || sanitized === "sanitized-diverges") failures.push(`sanitize-${sanitized}\t${stem}\t${sanitize.get(stem).detail}`);
     if (linted === "findings" || linted === "lint-crash") failures.push(`lint-${linted}\t${stem}\t${lint.get(stem).detail}`);
   }
   writeFileSync(join(outDir, "fuzz.tsv"), rows.join("\n") + "\n");
@@ -779,7 +792,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     `cases: ${stems.length} (seed ${seed})`,
     `reference: ${tally(1)}`,
     `native: ${tally(2)}`,
-    `lint: ${tally(3)}`,
+    `sanitize: ${tally(3)}`,
+    `lint: ${tally(4)}`,
     "",
     `gate: ${failures.length ? `FAIL (${failures.length})` : "PASS"}`,
     ...failures,
