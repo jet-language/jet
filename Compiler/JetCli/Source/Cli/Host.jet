@@ -27,6 +27,7 @@ use jet_foundation.[
     Diagnostic,
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
+    diagnostic_render_all,
     mir_sha256_hex,
 ]
 
@@ -51,14 +52,26 @@ fn jet_cli_errors(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
 }
 
 // `jet check <file>`: compile through the Jet compiler, place each diagnostic
-// on the file that owns it, and report the outcome the Rust host prints.
-fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?) -> JetDriverVerbOutput {
+// on the file that owns it, and report the outcome the Rust host prints. An
+// explicit file outside every project that imports `project.<module>` is
+// E2393 before the compile (CmdCompile.rs `run_native_execution`). A
+// `project` check (bare or directory) of a program, not a library, runs in
+// Run mode, so an entry with no `fn run` is E0101 (CmdInspect.rs
+// `check_projection_with_options_and_preflight`, Completion.rs).
+fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool) -> JetDriverVerbOutput {
+    if !project {
+        if jet_cli_missing_project_context(file, source) == .Val(missing) {
+            return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, [Diagnostic]{missing}, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        }
+    }
+    requires_run :: project && !jet_cli_package_is_library_only(file) && jet_cli_entry_lacks_run(source)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, threads, JetDriverCompileMode.Program)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
         .Compiled(result, snapshot) -> {
-            diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+            diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+            if requires_run -> &diagnostics.push(jet_cli_no_run_diagnostic())
             output = jet_driver_check_outcome(file, source, diagnostics, color, quiet)
             if jet_cli_errors(diagnostics).len() == 0 {
                 if result.internal_problem == .Val(problem) -> output = jet_cli_ice(problem)
@@ -66,6 +79,83 @@ fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool,
         }
     }
     output
+}
+
+// Resolution's stderr notices (a migrated retired entry, `--show-default`)
+// go out before the compile, ahead of anything the built program writes.
+fn jet_cli_write_notice(notice: String) {
+    if notice.len() == 0 -> return
+    stderr_handle :: cli_term.stderr()
+    &stderr_handle.write(notice).drop("jet stderr")
+}
+
+// `jet lint --a11y <file>` (CmdDevTools.rs `run_lint_a11y`): errors stop it
+// with the problem count; the accessibility lints (E2930/E2931) go to stderr
+// with their count and exit 1; none is an `ok:` line on stdout.
+fn jet_cli_compile_lint_a11y(file: String, source: String, color: Bool) -> JetDriverVerbOutput {
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    compiled :: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Program)
+    if compiled == {
+        .Refused(refusal) -> output = ~refusal
+        .Compiled(result, snapshot) -> {
+            diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+            errors :: jet_cli_errors(diagnostics)
+            if errors.len() > 0 -> return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+            a11y := [Diagnostic]{}
+            loop diagnostic in diagnostics {
+                if jet_driver_is_a11y_lint(diagnostic.code) -> &a11y.push(diagnostic)
+            }
+            count :: a11y.len()
+            if count == 0 {
+                output = JetDriverVerbOutput{stdout: "ok: `{file}` has no accessibility problems\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+            } else {
+                plural :: if count == 1 -> "" else -> "s"
+                output = JetDriverVerbOutput{stdout: "", stderr: "{diagnostic_render_all(file, source, a11y, color)}\n{count} accessibility warning{plural} found\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            }
+        }
+    }
+    output
+}
+
+// `jet emit --rust <file>` (CmdDevTools.rs `run_emit_rust`): the file is
+// checked in Run mode (an entry with no `fn run` is E0101); errors stop it
+// with the problem count; visible lints (not a11y) go to stderr without a
+// summary; stdout is the Rust of the dev-mode artifact: the runtime/Core
+// prefix (MIRRust `emit_mir_runtime_text` under the development devtools
+// policy) followed by the emitted program.
+fn jet_cli_compile_emit(file: String, source: String, color: Bool) -> JetDriverVerbOutput {
+    requires_run :: jet_cli_entry_lacks_run(source)
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    compiled :: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Program)
+    if compiled == {
+        .Refused(refusal) -> output = ~refusal
+        .Compiled(result, snapshot) -> output = jet_cli_emit_result(file, source, color, requires_run, result, snapshot)
+    }
+    output
+}
+
+fn jet_cli_emit_result(file: String, source: String, color: Bool, requires_run: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS]> JetDriverVerbOutput Never! {
+    diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+    if requires_run -> &diagnostics.push(jet_cli_no_run_diagnostic())
+    errors :: jet_cli_errors(diagnostics)
+    if errors.len() > 0 -> return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+    if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing `{file}`")
+    lints := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        if !jet_driver_is_a11y_lint(diagnostic.code) -> &lints.push(diagnostic)
+    }
+    stderr := ""
+    if lints.len() > 0 -> stderr = diagnostic_render_all(file, source, lints, color)
+    items :: result.emitted_source ?? return jet_cli_ice("the Jet compiler finished `{file}` without emitting Rust")
+    program :: result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
+    prefix := ""
+    if jet_cli_runtime_text(file, program, color, true) == {
+        .Text(text) -> prefix = text
+        .Failed(failure) -> return failure
+    }
+    JetDriverVerbOutput{stdout: "{prefix}{items}", stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // Syntax/predicates.rs `sanitize_crate_name`: ASCII letters, digits, and `_`
@@ -145,7 +235,7 @@ fn jet_cli_build_release(file: String, result: JetDriverCompileResult, root: Str
     items :: result.emitted_source ?? return jet_cli_ice("the Jet compiler finished `{file}` without emitting Rust")
     program :: result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
     prefix := ""
-    if jet_cli_runtime_text(file, program, color) == {
+    if jet_cli_runtime_text(file, program, color, false) == {
         .Text(text) -> prefix = text
         .Failed(failure) -> return failure
     }
@@ -478,13 +568,27 @@ pub fn jet_cli_main(args: [String]) -> Int {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
     if plan == {
         .Done(done) -> output = ~done
-        .Check(file, source, color, quiet, threads) -> output = jet_cli_compile_check(file, source, color, quiet, threads)
-        .Build(file, source, color, release, threads, invocation) -> output = jet_cli_compile_build(file, source, color, release, threads, invocation)
-        .Run(file, source, color, release, verbose, threads, program_args, invocation) -> output = jet_cli_compile_run(file, source, color, release, verbose, threads, program_args, invocation)
+        .Check(file, source, color, quiet, threads, project, notice) -> {
+            jet_cli_write_notice(notice)
+            output = jet_cli_compile_check(file, source, color, quiet, threads, project)
+        }
+        .Build(file, source, color, release, threads, invocation, notice) -> {
+            jet_cli_write_notice(notice)
+            output = jet_cli_compile_build(file, source, color, release, threads, invocation)
+        }
+        .Run(file, source, color, release, verbose, threads, program_args, invocation, notice) -> {
+            jet_cli_write_notice(notice)
+            output = jet_cli_compile_run(file, source, color, release, verbose, threads, program_args, invocation)
+        }
         .Test(file, source, color, verbose, threads, options) -> output = jet_cli_compile_test(file, source, color, verbose, threads, options)
         .New(name, template, annotated, quiet, color) -> output = jet_cli_new_project(name, template, annotated, quiet, color)
         .Inspect(job) -> output = jet_cli_inspect_host(job)
         .InspectB(plan) -> output = jet_cli_inspect_b_host(plan)
+        .Emit(file, source, color) -> output = jet_cli_compile_emit(file, source, color)
+        .Lint(file, source, color, notice) -> {
+            jet_cli_write_notice(notice)
+            output = jet_cli_compile_lint_a11y(file, source, color)
+        }
     }
     if output.stdout.len() > 0 {
         out :: cli_term.stdout()
