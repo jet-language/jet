@@ -280,9 +280,9 @@ fn envmodel_sugar_unquote(raw: String) -> String? Never! {
             marker :: "{characters[index]}"
             index += 1
             decoded := String?{None}
-            loop escape in ESCAPES {
-                if escape.marker == marker {
-                    decoded = Val(escape.decoded)
+            loop slot in 0..<ESCAPE_MARKERS.len() {
+                if ESCAPE_MARKERS[slot] == marker {
+                    decoded = Val(ESCAPE_DECODED[slot])
                     break
                 }
             }

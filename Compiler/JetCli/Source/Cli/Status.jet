@@ -191,11 +191,11 @@ pub fn jet_cli_fail_json(code: String, what: String, why: String, fix: String) -
 // Report.rs `ReportPath::from_process`: `path` made absolute against the
 // working directory and lexically normalized (`.` dropped, `..` pops); an
 // empty path or a `<…>` pseudo-path stays as written.
-pub fn jet_cli_report_path(path: String) -[FS]> String Never! {
-    if path == "" || path.starts_with("<") -> return path
+pub fn jet_cli_report_path(path: String) -[FS, Env]> String Never! {
+    if path == "" || path.starts_with("<") -> return ~path
     absolute := path
     if !path.starts_with("/") {
-        cwd :: cli_files.cwd() ?? return path
+        cwd :: cli_files.cwd() ?? return ~path
         absolute = "{cwd}/{path}"
     }
     parts := [String]{}
@@ -224,7 +224,7 @@ fn jet_cli_report_path_json(path: String) -> String Never! {
 // diagnostic against `file` (already a report path) and its `source`: the
 // diagnostic's own origin replaces both; `line`/`col` come from the primary
 // span, causes and labels keep theirs, and `clears` is 0.
-pub fn jet_cli_source_report_json(diagnostic: Diagnostic, file: String, source: String) -[FS]> String Never! {
+pub fn jet_cli_source_report_json(diagnostic: Diagnostic, file: String, source: String) -[FS, Env]> String Never! {
     path := file
     text := source
     if diagnostic.origin == .Val(origin) {

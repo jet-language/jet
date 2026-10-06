@@ -238,7 +238,8 @@ fn jet_config_compile(program: String, core_sources: [JetDriverCoreSource], base
 // a root with no manifest is `Absent` exactly as the resolver reports it, and
 // a root that has one is refused rather than read some other way.
 fn envmodel_load_package_root(root: String) -[FS]> EnvModelPackageRoot EnvModelEvalError! {
-    loop name in [String]{PACKAGE_FILE, PAYLOAD_FILE} {
+    manifests :: [String]{PACKAGE_FILE, PAYLOAD_FILE}
+    loop name in manifests {
         path :: "{root}/{name}"
         if config_files.exists(path) || config_files.is_symlink(path) {
             return Err(envmodel_error("E2104", "reading the package at `{root}` is not part of the Jet-hosted CLI yet", jet_cli_why("E2104"), "run this command with the Rust-hosted `jet` until the Jet CLI reads package roots (D-FSDIR1, #4697)", None))

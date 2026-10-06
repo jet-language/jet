@@ -27,6 +27,16 @@ pub fn envmodel_evaluate_integration_imports(imports: [Expr], scope: ModuleEvalS
     Ok(integrations)
 }
 
+// The arguments and name span of an integration call leaf; None for a leaf
+// that is not a call.
+fn envmodel_integration_call_parts(import: Expr) -> (args: [CallArg], name_span: Span)? Never! {
+    if import == {
+        .Call(call) -> Val((args: call.args, name_span: call.name_span))
+        .MethodCall(_, _, method_span, _, _, args, _, _, _, _) -> Val((args: args, name_span: method_span))
+        else -> None
+    }
+}
+
 // `imports: [a, [b, c]]` flattens to its non-list leaves in source order.
 fn envmodel_collect_import_leaves(expr: Expr, out: &[Expr]) Never! {
     if expr == {

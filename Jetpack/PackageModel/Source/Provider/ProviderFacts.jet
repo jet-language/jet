@@ -6,6 +6,8 @@
 // native document or hide a field it cannot prove. This record is the one
 // identity/provenance seam consumed by package profiles and semantic locks.
 
+use core.encoding.json as pkg_provider_json_core
+
 PROVIDER_FACTS_SCHEMA :: prep { "jet-provider-facts-v1" }
 PROVIDER_EXACT_SELECTOR_LOSS :: prep { "external provider references must retain an exact version, revision, or digest" }
 
@@ -527,7 +529,9 @@ fn pkg_provider_required_text(object: [String: DataTree], key: String, missing: 
     Ok(text)
 }
 
-// A number fact's tree: an integer, else a float, else its lexical text.
+// A number fact's tree: an integer, else a float, else the JSON reader's
+// exact-number carrier for its lexical text (Core builds that carrier only
+// through the reader), else the text itself.
 fn pkg_provider_number_tree(text: String) -> DataTree Never! {
     if Int.parse(text) == {
         .Ok(number) -> return DataTree.Int(number)
@@ -537,7 +541,10 @@ fn pkg_provider_number_tree(text: String) -> DataTree Never! {
         .Ok(number) -> return DataTree.Float(number)
         .Err(_) -> {}
     }
-    DataTree.Number(text)
+    if pkg_provider_json_core.parse(text) == {
+        .Ok(tree) -> tree
+        .Err(_) -> DataTree.Text(~text)
+    }
 }
 
 fn pkg_provider_sorted_keys(keys: [String]) -> [String] Never! {
