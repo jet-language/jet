@@ -2,19 +2,29 @@
 use jet_foundation.[
     CompilerTraceSink,
     MIRAccess,
+    MIRBasicBlock,
     MIRConstantDef,
+    MIRDropAction,
     MIRForeign,
     MIRForeignABI,
     MIRForeignLanguage,
     MIRFunction,
     MIRImplDef,
+    MIRLocal,
     MIRModuleID,
     MIRParam,
+    MIRPlace,
     MIRProgram,
+    MIRScope,
     MIRTargetApplicability,
     MIRType,
     MIRTypeID,
     MIRTypeKind,
+    MIRValueFact,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_part_of,
+    compiler_threads_partition,
     mir_terminator_targets,
 ]
 
@@ -416,11 +426,26 @@ fn jet_rust_emit_program_items(ctx: &JetRustEmitContext, trace_sink: CompilerTra
     }
     trace_functions := false
     if trace_sink == .Val(sink) -> trace_functions = sink.functions()
-    loop position in 0..<ctx.program.functions.len() {
-        function := ctx.program.functions[position]
-        if trace_sink == .Val(sink) -> sink.progress("emit", position, ctx.program.functions.len())
-        if !jet_rust_emit_module_selected(ctx, function.module_id) -> next
-        if jet_rust_emit_function_target_enabled(ctx.config, function) && ctx.skipped_methods.get(jet_rust_emit_id_key(function.id.value)) == None {
+    // Per-function trace spans time each function on this thread.
+    workers :: if trace_functions -> 1 else -> jet_rust_emit_function_workers(ctx)
+    if workers > 1 {
+        texts :: jet_rust_emit_functions_on_threads(&ctx, workers) ?? panic("the function printing threads failed")
+        printed := 0
+        loop position in 0..<ctx.program.functions.len() {
+            if trace_sink == .Val(sink) -> sink.progress("emit", position, ctx.program.functions.len())
+            if !jet_rust_emit_prints_function(ctx, ctx.program.functions[position]) -> next
+            start :: lines.len()
+            loop line in texts[printed] -> &lines.push(line)
+            printed += 1
+            &lines.push("")
+            if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_file_unit(units, jet_rust_emit_id_key(ctx.program.functions[position].source_file.value), ctx.program.functions[position].span.start), start, lines.len())
+        }
+    }
+    if workers <= 1 {
+        loop position in 0..<ctx.program.functions.len() {
+            function := ctx.program.functions[position]
+            if trace_sink == .Val(sink) -> sink.progress("emit", position, ctx.program.functions.len())
+            if !jet_rust_emit_prints_function(ctx, function) -> next
             if trace_functions {
                 if trace_sink == .Val(sink) -> sink.begin("emit.function", function.name, position, ctx.program.functions.len())
             }
@@ -442,6 +467,198 @@ fn jet_rust_emit_program_items(ctx: &JetRustEmitContext, trace_sink: CompilerTra
     if ctx.config.keep_going -> ctx.failure = None
     if units.split -> return jet_rust_emit_result(&ctx, jet_rust_emit_units_layout(pieces, lines, items_end).join("\n"))
     jet_rust_emit_result(&ctx, lines.join("\n"))
+}
+
+// Function printing threads (D-JOBS1, compiler_threads_admit): a thread is
+// admitted for at least this many MIR instructions, so a small program
+// prints on the calling thread.
+JET_RUST_EMIT_MIN_INSTRUCTIONS_PER_THREAD :: 20000
+// Estimated bytes per MIR instruction of the program for each thread's two
+// copies of the emission context (its tables and every function's signature
+// row, no bodies), and per instruction of the largest function a thread
+// prints (its body index, move facts and printed lines).
+JET_RUST_EMIT_CONTEXT_BYTES_PER_INSTRUCTION :: 256
+JET_RUST_EMIT_PRINT_BYTES_PER_INSTRUCTION :: 4096
+
+// One function row a printing thread holds, and whether it prints it. A row
+// it does not print travels with its part, so every row comes back in order.
+struct JetRustEmitJob {
+    pub prints: Bool
+    pub function: MIRFunction
+}
+
+// One printing thread's result: its rows in order, the lines of each row it
+// printed, and the failures printing them reported.
+struct JetRustEmitPart {
+    pub functions: [MIRFunction]
+    pub texts: [[String]]
+    pub failure: JetRustEmitFailure?
+    pub kept_failures: [JetRustEmitKeptFailure]
+}
+
+// MIRRust emit_mir_program_items: a function prints when its module is
+// selected, its target admits it, and no impl prints or drops it.
+fn jet_rust_emit_prints_function(ctx: JetRustEmitContext, function: MIRFunction) -> Bool Never! {
+    jet_rust_emit_module_selected(ctx, function.module_id) && jet_rust_emit_function_target_enabled(ctx.config, function) && ctx.skipped_methods.get(jet_rust_emit_id_key(function.id.value)) == None
+}
+
+fn jet_rust_emit_function_instructions(function: MIRFunction) -> Int Never! {
+    size := 0
+    loop block_index in 0..<function.blocks.len() -> size += function.blocks[block_index].instructions.len()
+    size
+}
+
+// The threads that print the functions: as many as the compiler may use,
+// one per JET_RUST_EMIT_MIN_INSTRUCTIONS_PER_THREAD printed instructions at
+// most, within the memory the host reported free.
+fn jet_rust_emit_function_workers(ctx: JetRustEmitContext) -> Int Never! {
+    jobs := 0
+    total := 0
+    largest := 0
+    loop position in 0..<ctx.program.functions.len() {
+        if !jet_rust_emit_prints_function(ctx, ctx.program.functions[position]) -> next
+        size :: jet_rust_emit_function_instructions(ctx.program.functions[position])
+        jobs += 1
+        total += size
+        if size > largest -> largest = size
+    }
+    compiler_threads_admit(ctx.config.threads, jobs, total, JET_RUST_EMIT_MIN_INSTRUCTIONS_PER_THREAD, total * JET_RUST_EMIT_CONTEXT_BYTES_PER_INSTRUCTION + largest * JET_RUST_EMIT_PRINT_BYTES_PER_INSTRUCTION, total * JET_RUST_EMIT_CONTEXT_BYTES_PER_INSTRUCTION)
+}
+
+// A function row without its body: what printing another function reads of
+// it (identity, signature, form, facts and flags).
+fn jet_rust_emit_signature_row(function: MIRFunction) -> MIRFunction Never! {
+    MIRFunction{
+        id: function.id,
+        module_id: function.module_id,
+        source_file: function.source_file,
+        key: function.key,
+        module_name: function.module_name,
+        name: function.name,
+        span: function.span,
+        kind: function.kind,
+        form: function.form,
+        visibility: function.visibility,
+        target_applicability: function.target_applicability,
+        web_bucket: function.web_bucket,
+        web_marker: function.web_marker,
+        generic_params: function.generic_params,
+        capture_params: function.capture_params,
+        params: function.params,
+        declared_return: function.declared_return,
+        return_type: function.return_type,
+        failure: function.failure,
+        effects: function.effects,
+        captures: function.captures,
+        generator: function.generator,
+        optimization: function.optimization,
+        is_unsafe: function.is_unsafe,
+        unsafe_gate: function.unsafe_gate,
+        is_pure: function.is_pure,
+        memo_bound: function.memo_bound,
+        memo_unbounded: function.memo_unbounded,
+        is_reactive: function.is_reactive,
+        reactive_upgrades: function.reactive_upgrades,
+        is_inline: function.is_inline,
+        is_inline_always: function.is_inline_always,
+        is_scalar: function.is_scalar,
+        kernel_proof: function.kernel_proof,
+        gc_return: function.gc_return,
+        return_view_provenance: function.return_view_provenance,
+        web_param_reconstructions: function.web_param_reconstructions,
+        blocks: [MIRBasicBlock]{},
+        entry: function.entry,
+        locals: [MIRLocal]{},
+        values: [MIRValueFact]{},
+        places: [MIRPlace]{},
+        scopes: [MIRScope]{},
+        drops: [MIRDropAction]{},
+        foreign_language: function.foreign_language,
+    }
+}
+
+// Prints the printed functions on `workers` threads, the same as one thread
+// would. The rows leave the program in consecutive parts of about equal
+// printed instructions (compiler_threads_partition), and while the threads
+// print, the program holds only signature rows, so each thread's copy of the
+// context carries no body. Each part prints its rows in order on its own
+// copy and the parts join in part order: the rows come back in program
+// order, the first failure is the first in program order after any already
+// reported, and kept failures stay in program order. Returns each printed
+// function's lines, in program order.
+fn jet_rust_emit_functions_on_threads(ctx: &JetRustEmitContext, workers: Int) -> [[String]] {
+    prints := [Bool]{}
+    weights := [Int]{}
+    loop position in 0..<ctx.program.functions.len() {
+        prints_row :: jet_rust_emit_prints_function(ctx, ctx.program.functions[position])
+        &prints.push(prints_row)
+        &weights.push(if prints_row -> jet_rust_emit_function_instructions(ctx.program.functions[position]) else -> 0)
+    }
+    bounds :: compiler_threads_partition(weights, workers)
+    parts := [[JetRustEmitJob]]{}
+    loop _ in 0..<workers -> &parts.push([JetRustEmitJob]{})
+    signatures := [MIRFunction]{}
+    part := workers - 1
+    loop {
+        function :: &ctx.program.functions.pop() ?? break
+        position :: ctx.program.functions.len()
+        part = compiler_threads_part_of(bounds, part, position)
+        &signatures.push(jet_rust_emit_signature_row(function))
+        &parts[part].push(JetRustEmitJob{prints: prints[position], function: function})
+    }
+    &signatures.reverse()
+    ctx.program.functions = signatures
+    &parts.reverse()
+    done := jet_rust_emit_function_parts(ctx, ^parts)
+    functions := [MIRFunction]{}
+    texts := [[String]]{}
+    loop {
+        finished := &done.pop() ?? break
+        if ctx.failure == None -> ctx.failure = finished.failure
+        kept := ^finished.kept_failures
+        &ctx.kept_failures.extend(kept)
+        rows := ^finished.functions
+        &functions.extend(rows)
+        printed := ^finished.texts
+        &texts.extend(printed)
+    }
+    ctx.program.functions = functions
+    texts
+}
+
+// Prints the parts popped from `parts` (first part on top), one task per
+// part and the last part on this thread; each task holds its own copy of the
+// context. Returns the parts last part first, so popping yields them in part
+// order.
+fn jet_rust_emit_function_parts(ctx: JetRustEmitContext, parts: ^[[JetRustEmitJob]]) -> [JetRustEmitPart] {
+    remaining := ^parts
+    jobs :: &remaining.pop() ?? return [JetRustEmitPart]{}
+    if remaining.len() == 0 -> return [JetRustEmitPart]{jet_rust_emit_function_part(ctx, jobs)}
+    done := [JetRustEmitPart]{}
+    task.group emit_threads {
+        head :: task jet_rust_emit_function_part(ctx, jobs)
+        done = jet_rust_emit_function_parts(ctx, ^remaining)
+        &done.push(^^head.join() ?? panic(compiler_threads_failure_text(err)))
+    }
+    done
+}
+
+// One thread: its rows, held last-first, printed first-first on its own
+// copy of the context, which starts with no failure so the part reports only
+// its own.
+fn jet_rust_emit_function_part(ctx: JetRustEmitContext, jobs: [JetRustEmitJob]) -> JetRustEmitPart {
+    worker := ctx
+    worker.failure = None
+    worker.kept_failures = [JetRustEmitKeptFailure]{}
+    functions := [MIRFunction]{}
+    texts := [[String]]{}
+    index := jobs.len()
+    loop index > 0 {
+        index -= 1
+        if jobs[index].prints -> &texts.push(jet_rust_emit_function(&worker, jobs[index].function))
+        &functions.push(jobs[index].function)
+    }
+    JetRustEmitPart{functions: ^functions, texts: ^texts, failure: worker.failure, kept_failures: worker.kept_failures}
 }
 
 // MIRRust EmissionUnits: build units of one emitted program. An item's unit
