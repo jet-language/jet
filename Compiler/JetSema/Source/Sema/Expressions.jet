@@ -891,11 +891,9 @@ fn sema_expr_optional_lift(value: TExpr, required: Type, offered: Type, environm
 }
 
 fn sema_expr_expected(value: TExpr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+    // `expected` is known present below this line.
     if expected == None -> return Val(value)
-    // A scalar leaf type resolves to itself and is assignable to itself, with
-    // no lift, zone or coercion, so the same expected leaf keeps the value as
-    // it is (most literals, locals and operators land here).
-    if expected == .Val(required_leaf) && sema_expr_scalar_leaf(required_leaf) && type_identity_equal(required_leaf, value.ty) -> return Val(value)
+    if sema_expr_expected_keeps(value.ty, expected) -> return Val(value)
     required := sema_expr_expected_type(expected, environment, program)
     offered := sema_expr_expected_type(value.ty, environment, program)
     lifted :: sema_expr_optional_lift(value, required, offered, environment, program)
@@ -910,6 +908,17 @@ fn sema_expr_expected(value: TExpr, expected: Type?, environment: SemaScopeEnvir
         return None
     }
     Val(sema_expr_expected_trait_coercion(^value, required, offered, environment, program))
+}
+
+// Whether sema_expr_expected(value, expected) is `value` itself, decided by
+// the value's type alone: no expected type, or a scalar leaf expected type the
+// value has exactly (a scalar leaf resolves to itself and is assignable to
+// itself, with no lift, zone or coercion; most literals, locals and operators
+// land here). A caller that owns the value keeps it instead of passing it in
+// to be copied back out.
+fn sema_expr_expected_keeps(ty: Type, expected: Type?) -> Bool Never! {
+    required_leaf :: expected ?? return true
+    sema_expr_scalar_leaf(required_leaf) && type_identity_equal(required_leaf, ty)
 }
 
 // The scalar leaf types: no name to resolve and nothing nested.
@@ -3191,7 +3200,8 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     line :: sema_source_line_at(environment.source_segments, span) ?? return None
     if op == BinOp.And || op == BinOp.Or {
         ty :: sema_expr_binary_type(op, lhs.ty, rhs.ty, span, &diagnostics) ?? return None
-        value := sema_tir_expr(ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span)
+        value :: TExpr{ty: ty, kind: TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span: span, integer_bounds: None, cost: None}
+        if sema_expr_expected_keeps(value.ty, expected) -> return Val(value)
         return sema_expr_expected(value, expected, environment, program, &diagnostics)
     }
 
@@ -3286,7 +3296,10 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     if (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) && (sema_expr_is_integer(effective_lhs.ty) || sema_expr_is_integer(effective_rhs.ty)) -> overflow = true
     if op == BinOp.Pow && sema_expr_is_integer(effective_lhs.ty) -> overflow = true
     if (op == BinOp.Shl || op == BinOp.Shr) && sema_expr_is_integer(effective_lhs.ty) -> overflow = true
-    value :: sema_tir_expr(ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: overflow, line: line, lhs: effective_lhs, rhs: effective_rhs}, span)
+    // Built and kept in place (sema_tir_expr and sema_expr_expected copy
+    // their borrowed value, and with it both operand trees, at every level).
+    value :: TExpr{ty: ty, kind: TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: overflow, line: line, lhs: effective_lhs, rhs: effective_rhs}, span: span, integer_bounds: None, cost: None}
+    if sema_expr_expected_keeps(value.ty, expected) -> return Val(value)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
