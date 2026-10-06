@@ -271,6 +271,11 @@ changed against `HEAD` or staged (exit 2 outside a git worktree).
 `--explicit-copies` checks each file, then writes `~` at every implicit copy
 site: the Safe `~` edits sema gives the same source under
 `#Policy(copies: .Explicit)`; marks that would not parse report E0122.
+With `--json`, a clean `--check` emits the `fmt` status envelope; dirty
+checks emit `status: "dirty"` with paths, or path/diff objects with `--diff`.
+Read and parse failures stay on stderr in machine form, and no file is
+written when any preflight fails. Ordinary write mode emits no success
+envelope; stdin mode still emits the formatted source, not a JSON wrapper.
 `--lang <language>` evaluates the `env.jet` above the working directory with
 the Jetpack environment model (`--preset`/`--env` select as in `jet env`),
 takes the selected environment's `formatter:` package, stages the matching
