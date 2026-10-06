@@ -204,19 +204,20 @@ fn jet_cli_emit_result(file: String, source: String, color: Bool, json: Bool, re
     JetDriverVerbOutput{stdout: "{prefix}{items}", stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}
 }
 
-// `jet eval <file>` (CmdDevTools.rs `run_eval`): the entry checks in Eval
-// mode (the driver runs the transitive E3401 purity walk from `run`), then
-// JetEval evaluates `run` over the canonical MIR. What the program printed is
-// program output: before the value, or on stderr under `--json` so stdout
-// stays one `eval` status document.
-fn jet_cli_compile_eval(file: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
+// `jet eval <file>` (CmdDevTools.rs `run_eval`): the entry checks for the
+// interpreter (Eval mode under `--pure`, where the driver adds the transitive
+// E3401 purity walk from `run`), then JetEval evaluates `run` over the
+// canonical MIR. What the program printed is program output: before the
+// value, or on stderr under `--json` so stdout stays one `eval` document.
+fn jet_cli_compile_eval(file: String, pure: Bool, color: Bool, json: Bool) -> JetDriverVerbOutput {
     source :: cli_files.read(file) ?? return JetDriverVerbOutput{
         stdout: "",
         stderr: jet_cli_report("E2105", "couldn't read `{file}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color),
         exit_code: JET_DRIVER_EXIT_USER_ERROR,
     }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Eval)
+    mode :: if pure -> JetDriverCompileMode.Eval else -> JetDriverCompileMode.Interpreter
+    compiled :: jet_cli_compile_file(file, color, None, mode)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
         .Compiled(result, snapshot) -> output = jet_cli_eval_result(file, source, color, json, result, snapshot)
@@ -1394,9 +1395,9 @@ pub fn jet_cli_main(args: [String]) -> Int {
         .InspectB(inspect_plan) -> output = jet_cli_inspect_b_host(inspect_plan)
         .Semindex(file, color, json) -> output = jet_cli_compile_semindex(file, color, json)
         .Find(file, query, mode, json) -> output = jet_cli_compile_find(file, query, mode, json)
-        .Eval(file, color, json, notice) -> {
+        .Eval(file, pure, color, json, notice) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_compile_eval(file, color, json)
+            output = jet_cli_compile_eval(file, pure, color, json)
         }
     }
     if output.stdout.len() > 0 {

@@ -63,8 +63,9 @@ pub enum JetCLIPlan {
     // (CmdDevTools.rs `run_emit_rust`).
     Emit(file: String, source: String, color: Bool, json: Bool)
     // `jet eval <file>` (CmdDevTools.rs `run_eval`): evaluate the entry's
-    // pure `run` and print its value; `notice` is resolution's stderr.
-    Eval(file: String, color: Bool, json: Bool, notice: String)
+    // `run` and print its value; `pure` (`--pure`) adds the transitive E3401
+    // purity walk; `notice` is resolution's stderr.
+    Eval(file: String, pure: Bool, color: Bool, json: Bool, notice: String)
     // `jet fill <file>[:line]` (Source/main.rs `"fill"`, Fill.jet): the typed
     // goal report; `target` keeps its optional `:line` suffix.
     Fill(target: String, json: Bool, color: Bool)
@@ -916,7 +917,7 @@ fn jet_cli_emit(jet_argv: [String], args: [String], color: Bool, quiet: Bool, js
 // project directory, or a bare stem (`looks_like_jet_source`) is the file form
 // and resolves as `resolve_source_path` does; a `:meta` word is REPL
 // vocabulary; any other argument is the expression form (REPL `eval_once`).
-fn jet_cli_eval(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_eval(raw: [String], args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     if args.len() < 2 {
         return jet_cli_fail("E2104", "`jet eval` needs a file or an expression: jet eval <file.jet | expression>", jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USAGE)
     }
@@ -940,7 +941,7 @@ fn jet_cli_eval(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan 
     } else {
         if !cli_files.is_file(argument) && cli_files.is_file("{argument}.jet") -> file = "{argument}.jet"
     }
-    JetCLIPlan.Eval{file: file, color: color, json: json, notice: notice}
+    JetCLIPlan.Eval{file: file, pure: raw.contains("--pure"), color: color, json: json, notice: notice}
 }
 
 // `jet new` templates (CmdCompile.rs `NewTemplate::NAMES`).
@@ -1227,7 +1228,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
         "new" -> return jet_cli_new(jet_argv, args, color, quiet)
         "doc" -> return jet_cli_doc(jet_argv, args, color, quiet, json, jet_argv.contains("--check"))
         "emit" -> return jet_cli_emit(jet_argv, args, color, quiet, json)
-        "eval" -> return jet_cli_eval(args, color, json)
+        "eval" -> return jet_cli_eval(argv, args, color, json)
         "fill" -> {
             if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("fill"), JET_DRIVER_EXIT_USAGE)
             return JetCLIPlan.Fill{target: args[1], json: json, color: color}
