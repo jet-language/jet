@@ -1443,6 +1443,69 @@ fn stable_loop_source_root(collection: &Expr) -> Option<&str> {
     }
 }
 
+/// #4318 §4: whether a loop body leaves the source root `root` unchanged
+/// while it runs, so the loop may walk the source in place. A body that
+/// never names the root qualifies. A body that names it qualifies only when
+/// it reads it: it never writes it (assignment, write argument, write place,
+/// write capture: `block_free_reads_and_writes`), never takes it (`^root`, a
+/// take capture), and never leaves the loop early. An early exit path is
+/// where a read of the root becomes its last use, which MIR lowers to a
+/// move while the walk's item borrow may still be live.
+fn loop_body_keeps_source(body: &[Stmt], root: &str) -> bool {
+    let (reads, writes) = crate::Sema::block_free_reads_and_writes(body);
+    if !reads.contains(root) {
+        return true;
+    }
+    if writes.contains(root) || !body.iter().all(stmt_stays_in_loop) {
+        return false;
+    }
+    let mut kept = true;
+    for stmt in body {
+        stmt.for_each_expr(|expr| match expr {
+            Expr::Place(inner, PlaceAccess::Take, _)
+                if stable_loop_source_root(inner) == Some(root) =>
+            {
+                kept = false;
+            }
+            Expr::Lambda(lambda) if lambda.take_names.iter().any(|(name, _)| name == root) => {
+                kept = false;
+            }
+            // `?` and a diverging `??` leave the loop; an `if` expression
+            // holds statement bodies this walk does not classify.
+            Expr::Try(..) | Expr::If { .. } => kept = false,
+            Expr::OrFallback { fallback, .. }
+                if !matches!(fallback, OrFallback::Value(_) | OrFallback::Panic { .. }) =>
+            {
+                kept = false;
+            }
+            _ => {}
+        });
+    }
+    kept
+}
+
+/// A statement that only falls through: no `return`, no `break` (of this
+/// loop or a nested one), no `next`, no statement form this check does not
+/// classify.
+fn stmt_stays_in_loop(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Expr(_) | Stmt::Val(_) | Stmt::Assign { .. } => true,
+        Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::Loop { body, .. } => {
+            body.iter().all(stmt_stays_in_loop)
+        }
+        Stmt::Switch {
+            arms, else_body, ..
+        } => {
+            arms.iter()
+                .all(|arm| arm.body.iter().all(stmt_stays_in_loop))
+                && else_body
+                    .as_ref()
+                    .is_none_or(|body| body.iter().all(stmt_stays_in_loop))
+        }
+        _ => false,
+    }
+}
+
 /// `Stmt::for_each_expr` deliberately omits a plain local assignment target.
 /// Include that target here so a fused binding is never removed before a later
 /// write that still needs the original local.
@@ -4243,16 +4306,15 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             .map(|t| cx.columnar_list_type(t).is_some())
                             .unwrap_or(false);
                     // #4318 §4 stable loop source: a plain list loop over a place
-                    // (a local or parameter through fields) whose body never
-                    // mentions the source's root walks the list in place.
+                    // (a local or parameter through fields) whose body leaves
+                    // the source's root unchanged walks the list in place.
                     let source_stable = method_kind.is_none()
                         && step.is_none()
                         && !by_value
                         && !columnar
                         && matches!(lowered_coll.ty.without_user_tags(), Type::List(_))
-                        && stable_loop_source_root(collection).is_some_and(|root| {
-                            !crate::Sema::block_free_var_reads(body).contains(root)
-                        });
+                        && stable_loop_source_root(collection)
+                            .is_some_and(|root| loop_body_keeps_source(body, root));
                     let step = step.as_ref().map(|step| lower_expr(step, cx, env));
                     let label = label_name(label);
                     let var = var.clone();

@@ -17050,6 +17050,27 @@ impl<'a> RustEmitter<'a> {
         Some(literal)
     }
 
+    /// A borrowed read of a String literal lends a process-lifetime String
+    /// built once on first use (`&'static String`, the type a `&String`
+    /// parameter takes), so a literal passed to a user read parameter never
+    /// allocates per call. A no-OS build has no `LazyLock`: it keeps the
+    /// per-use String.
+    fn static_string_literal_reference(
+        &self,
+        function: &MirFunction,
+        value: MirValueId,
+    ) -> Option<String> {
+        if self.is_no_os()
+            || !matches!(self.value_type(function, value).kind(), MirTypeKind::String)
+        {
+            return None;
+        }
+        let text = self.literal_string_value(function, value)?;
+        Some(format!(
+            "{{ static __JET_LITERAL: ::std::sync::LazyLock<String> = ::std::sync::LazyLock::new(|| String::from({text:?})); &*__JET_LITERAL }}"
+        ))
+    }
+
     fn borrowed_literal_symbol(symbol: &str) -> bool {
         matches!(
             symbol.rsplit("::").next().unwrap_or(symbol),
@@ -17897,6 +17918,25 @@ impl<'a> RustEmitter<'a> {
                 // A printed literal is written from its static text.
                 MirOperation::Semantic(MirSemanticOp::Print { value: printed, .. }) => {
                     *printed == value && !self.print_consumes_value()
+                }
+                // A literal lent to a user read parameter is the static
+                // String `call_arg_for_function` names
+                // (`static_string_literal_reference`).
+                MirOperation::Call {
+                    callee: callee @ MirCallee::User(_),
+                    args,
+                    ..
+                } => {
+                    self.static_string_literal_reference(function, value).is_some()
+                        && args.iter().enumerate().all(|(index, arg)| {
+                            arg.value != value
+                                || arg.place.is_none()
+                                    && arg.access == MirAccess::Read
+                                    && self.direct_borrow_call_arg(
+                                        arg,
+                                        self.call_argument_borrowed(function, callee, index),
+                                    )
+                        })
                 }
                 // A compared literal is a `str` operand.
                 MirOperation::Binary {
@@ -26689,6 +26729,9 @@ impl<'a> RustEmitter<'a> {
                 )
             ) {
                 return self.borrowed_value_reference(function, arg.value, MirAccess::Read);
+            }
+            if let Some(reference) = self.static_string_literal_reference(function, arg.value) {
+                return reference;
             }
             return self.value_slot_reference(arg.value, false);
         }
