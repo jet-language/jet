@@ -287,6 +287,10 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
             generic: Boolean(m[2]),
             gated: attributes.some((line) => line.startsWith("#[cfg(") && line !== '#[cfg(not(target_arch = "wasm32"))]') || stack.some((frame) => frame.gated),
             derives: attributes.filter((line) => line.startsWith("#[derive(")).flatMap((line) => line.slice(9).split(/[,)\]]/).map((s) => s.trim().split("::").pop())).filter(Boolean),
+            // The item's text from its keyword (its body follows): record exports read its fields.
+            kind: word,
+            at: i,
+            path,
           });
           types.set(key, list);
         }
@@ -943,6 +947,150 @@ for (const [name, full] of handleRows) {
   rs.push("        guard(|| unsafe { &*left } == unsafe { &*right })");
   rs.push("    }");
 }
+
+// Core records (Compiler/JetBackend/Source/Lower/Records.jet): a MIR-defined
+// Core type whose generated-Rust type is one of these runtime structs or enums
+// crosses a route as that value's handle, converted member by member:
+//   jet_rt_record_new_<R>(fields...) / jet_rt_record_get_<R>_<field>(h)   struct
+//   jet_rt_record_tag_<R>(h) / jet_rt_record_new_<R>_<V>(payload?) /
+//   jet_rt_record_get_<R>_<V>(h)                                          enum
+// A member is a String, an Int (i64 or exact), a Bool, a Float, a fieldless
+// runtime enum (its index), a nested record, or an Option / JetOutcome of a
+// String, an Int or a record. Each schema row names its members' kinds, so the
+// lowering crosses a Jet type only when every member means the same carrier.
+// Records CAbi.rs writes by hand (their exports there) are not generated.
+const recordDecl = (full) => {
+  const found = declarationOf(full.replace(/^crate::/, ""));
+  if (!found || found.decls.length !== 1) return null;
+  const decl = found.decls[0];
+  if (decl.generic || decl.gated || decl.at === undefined) return null;
+  const open = text.indexOf("{", decl.at);
+  const head = text.slice(decl.at, open);
+  if (open < 0 || /[;(]/.test(head) || /\bwhere\b/.test(head)) return null;
+  let depth = 0;
+  let close = open;
+  for (; close < text.length; close++) {
+    if (text[close] === "{") depth++;
+    else if (text[close] === "}" && --depth === 0) break;
+  }
+  const body = text.slice(open + 1, close).replace(/\/\/[^\n]*/g, "");
+  if (/#\[cfg/.test(body)) return null;
+  return { kind: decl.kind, path: decl.path, items: splitTop(body.replace(/#\[[^\]]*\]/g, "")) };
+};
+const recordable = new Map(); // runtime name -> { full, kind, path, members }
+for (const [name, full] of handleRows) {
+  if (handExports.has(`jet_rt_record_tag_${name}`) || handExports.has(`jet_rt_record_new_${name}`)) continue;
+  const decl = recordDecl(full);
+  if (!decl) continue;
+  const members = [];
+  let ok = true;
+  for (const item of decl.items) {
+    if (decl.kind === "struct") {
+      const field = /^(pub(?:\([a-z]+\))?\s+)?([a-z_][a-z0-9_]*)\s*:\s*([\s\S]+)$/.exec(item);
+      // A struct in a module exposes only its `pub` fields to the adapters.
+      if (!field || (decl.path && !field[1])) { ok = false; break; }
+      members.push({ name: field[2], ty: field[3].replace(/\s+/g, "") });
+    } else {
+      const variant = /^([A-Z][A-Za-z0-9_]*)\s*(?:\(([\s\S]*)\)|=\s*[-0-9]+)?$/.exec(item);
+      if (!variant || (variant[2] !== undefined && splitTop(variant[2]).length !== 1)) { ok = false; break; }
+      members.push({ name: variant[1], ty: variant[2] === undefined ? null : variant[2].replace(/\s+/g, "") });
+    }
+  }
+  if (ok) recordable.set(name, { full, kind: decl.kind, path: decl.path, members });
+}
+// A member's carrier: { kind, ret, outCty, get(place), cty, make(param) }, or
+// null when no export carries it. `place` is a Rust place of the member.
+const recordMember = (ty, path) => {
+  const exact = /^(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty);
+  if (ty === "String") return { kind: "Text", ret: "JetCString", get: (v) => `handle(${v}.clone())`, cty: "JetCString", make: (p) => `view(${p}).to_owned()` };
+  if (ty === "i64") return { kind: "Int", ret: "i64", get: (v) => `crate::jet_std::jet_int_from_i64(${v})`, cty: "i64", make: (p) => `native(${p})` };
+  if (exact) return { kind: "Int", ret: "i64", get: (v) => `${v}.clone().into_raw()`, cty: "i64", make: (p) => `unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(${p}) }` };
+  if (ty === "bool") return { kind: "Flag", ret: "bool", get: (v) => `${v}`, cty: "u8", make: (p) => `${p} != 0` };
+  if (ty === "f64") return { kind: "Float", ret: "f64", get: (v) => `${v}`, cty: "f64", make: (p) => p };
+  const tag = tagCarrier(ty, path);
+  if (tag) return { kind: `Tag.${opaqueName.exec(ty)[1]}`, ret: "i64", get: (v) => tag.write(`&${v}`), cty: "i64", make: tag.read };
+  const option = /^(Option|JetOutcome)<(.+?)(?:,JetAbsent|,(?:crate::|super::)*JetAbsent)?>$/.exec(ty);
+  if (option) {
+    if (option[1] === "JetOutcome" && !/,(?:(?:crate|super)::)*JetAbsent>$/.test(ty)) return null;
+    const inner = recordMember(option[2], path);
+    if (!inner || !(inner.kind === "Text" || inner.kind === "Int" || inner.kind.startsWith("Rec."))) return null;
+    const [some, none] = option[1] === "Option" ? ["Some", "None"] : ["Ok", "Err(crate::JetAbsent)"];
+    const boxed = inner.kind.startsWith("Rec.") ? inner.cty : `*const ${inner.cty}`;
+    return {
+      kind: `Opt${inner.kind}`, ret: "i64", outCty: inner.ret,
+      get: (v) => `match &${v} { ${some}(item) => { unsafe { some.write(${inner.get("(*item)")}) }; 1 } _ => 0 }`,
+      cty: boxed,
+      make: (p) => `if ${p}.is_null() { ${none} } else { ${some}(${inner.kind.startsWith("Rec.") ? inner.make(p) : inner.make(`unsafe { *${p} }`)}) }`,
+    };
+  }
+  if (opaqueName.test(ty)) {
+    const name = opaqueName.exec(ty)[1];
+    const nested = handles.get(name);
+    if (!nested || nested !== qualify(ty, path) && declarationOf(nested.replace(/^crate::/, ""))?.key !== declarationOf(qualify(ty, path).replace(/^crate::/, ""))?.key) return null;
+    if (!cloneable.has(name)) return null;
+    return { kind: `Rec.${name}`, ret: `*mut ${nested}`, get: (v) => `Box::into_raw(Box::new(${v}.clone()))`, cty: `*mut ${nested}`, make: (p) => `*unsafe { Box::from_raw(${p}) }` };
+  }
+  return null;
+};
+// A record whose members all cross; a nested record must itself cross.
+const recordMembers = new Map(); // runtime name -> [{ name, carrier | null }]
+for (const [name, record] of recordable) {
+  const carried = record.members.map((member) => ({ name: member.name, carrier: member.ty === null ? null : recordMember(member.ty, record.path) }));
+  if (carried.every((member, k) => record.members[k].ty === null || member.carrier)) recordMembers.set(name, carried);
+}
+for (let changed = true; changed;) {
+  changed = false;
+  for (const [name, members] of recordMembers) {
+    const nestedKinds = members.map((member) => member.carrier?.kind.replace(/^Opt/, "") ?? "").filter((kind) => kind.startsWith("Rec."));
+    if (nestedKinds.every((kind) => recordMembers.has(kind.slice(4)))) continue;
+    recordMembers.delete(name);
+    changed = true;
+  }
+}
+const recordSchemas = [];
+for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompare(b[0]))) {
+  const { full, kind } = recordable.get(name);
+  const described = members.map((member) => (member.carrier ? `${member.name}=${member.carrier.kind}` : member.name)).join(",");
+  recordSchemas.push(kind === "struct" ? { name, variants: "", fields: described } : { name, variants: described, fields: "" });
+  const getter = (export_, param, carrier, place) => {
+    const out = carrier.outCty ? `, some: *mut ${carrier.outCty}` : "";
+    rs.push("");
+    rs.push("    #[no_mangle]");
+    rs.push(`    pub extern "C" fn ${export_}(value: *mut ${full}${out}) -> ${carrier.ret} {`);
+    rs.push(`        // SAFETY: \`value\` is a live handle the caller lends${carrier.outCty ? "; `some` is its zeroed out slot" : " for this call"}.`);
+    rs.push(`        guard(|| ${param} ${place})`);
+    rs.push("    }");
+  };
+  if (kind === "struct") {
+    // A fieldless struct carries nothing a schema row can check.
+    if (members.length === 0) { recordSchemas.pop(); continue; }
+    for (const member of members) getter(`jet_rt_record_get_${name}_${member.name}`, `{ let value = unsafe { &*value };`, member.carrier, `${member.carrier.get(`value.${member.name}`)} }`);
+    rs.push("");
+    rs.push("    #[no_mangle]");
+    rs.push(`    pub extern "C" fn jet_rt_record_new_${name}(${members.map((member, k) => `m${k}: ${member.carrier.cty}`).join(", ")}) -> *mut ${full} {`);
+    rs.push(`        guard(|| Box::into_raw(Box::new(${full} { ${members.map((member, k) => `${member.name}: ${member.carrier.make(`m${k}`)}`).join(", ")} })))`);
+    rs.push("    }");
+    continue;
+  }
+  // A fieldless enum crosses as its index: its schema row alone.
+  if (members.every((member) => !member.carrier)) continue;
+  rs.push("");
+  rs.push("    #[no_mangle]");
+  rs.push(`    pub extern "C" fn jet_rt_record_tag_${name}(value: *mut ${full}) -> i64 {`);
+  rs.push("        // SAFETY: `value` is a live handle the caller lends for this call.");
+  rs.push(`        guard(|| match unsafe { &*value } { ${members.map((member, k) => `${full}::${member.name}${member.carrier ? "(_)" : ""} => ${k}`).join(", ")} })`);
+  rs.push("    }");
+  for (const member of members) {
+    if (member.carrier) {
+      getter(`jet_rt_record_get_${name}_${member.name}`, `match unsafe { &*value } { ${full}::${member.name}(item) =>`, member.carrier, `${member.carrier.get("(*item)")}, _ => crate::jet_panic("<core.prelude>", 0, "record variant index out of range") }`);
+    }
+    rs.push("");
+    rs.push("    #[no_mangle]");
+    rs.push(`    pub extern "C" fn jet_rt_record_new_${name}_${member.name}(${member.carrier ? `payload: ${member.carrier.cty}` : ""}) -> *mut ${full} {`);
+    rs.push(`        guard(|| Box::into_raw(Box::new(${full}::${member.name}${member.carrier ? `(${member.carrier.make("payload")})` : ""})))`);
+    rs.push("    }");
+  }
+}
 for (const adapter of adapters) {
   const params = [];
   const names = adapter.params.map((param, index) => param.ctys.map((cty, k) => {
@@ -1024,6 +1172,14 @@ jet.push("        if handle.jet_name == name -> return Val(~handle)");
 jet.push("    }");
 jet.push("    None");
 jet.push("}");
+jet.push("");
+jet.push("// Core records the runtime's generated record exports carry (Records.jet),");
+jet.push("// keyed by runtime type: a struct's fields in constructor order or an enum's");
+jet.push("// variants in index order, each `name=kind` when it carries a member (Text,");
+jet.push("// Int, Flag, Float, Tag.<enum>, Rec.<record>, Opt<kind>).");
+jet.push("LOWER_GENERATED_RECORDS :: prep { [LowerRecordSchema]{");
+for (const schema of recordSchemas) jet.push(`    LowerRecordSchema{jet_name: "${schema.name}", variants: "${schema.variants}", fields: "${schema.fields}"},`);
+jet.push("} }");
 jet.push("// END GENERATED C-ABI ROUTES");
 
 const outputs = [[rsOut, rs.join("\n") + "\n"], [jetOut, jet.join("\n") + "\n"]];
