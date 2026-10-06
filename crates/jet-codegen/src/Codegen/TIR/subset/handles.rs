@@ -410,16 +410,6 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "equal_unordered", 1) => {
             THandleOp::JSONEqualUnordered
         }
-        ("MIME", "media_type" | "subtype" | "essence" | "params" | "to_string", 0) => {
-            THandleOp::UrlMimeMethod {
-                kind: "MIME".to_string(),
-                method: method.to_string(),
-            }
-        }
-        ("MIME", "param", 1) => THandleOp::UrlMimeMethod {
-            kind: "MIME".to_string(),
-            method: method.to_string(),
-        },
         ("Message", "envelope", 0) | ("Message", "with_envelope", 1) | ("Mailer", "send", 1) => {
             THandleOp::EmailMethod {
                 method: method.to_string(),
@@ -673,13 +663,6 @@ pub(crate) fn handle_method_return_ty(
             }
         })
         .or_else(|| match (handle, method, nargs) {
-            ("MIME", "media_type" | "subtype" | "essence" | "to_string", 0) => {
-                Some(Some(Type::String))
-            }
-            ("MIME", "param", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
-            ("MIME", "params", 0) => Some(Some(Type::List(Box::new(Type::List(Box::new(
-                Type::String,
-            )))))),
             ("Message", "envelope", 0) => Some(Some(Type::Named("Envelope".to_string()))),
             ("Message", "with_envelope", 1) => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("Message".to_string())),

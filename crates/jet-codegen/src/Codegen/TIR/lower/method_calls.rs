@@ -11356,7 +11356,28 @@ fn lower_method_call_impl(
                                 type_args: Vec::new(),
                                 args: args
                                     .iter()
-                                    .map(|argument| lower_one_call_arg(argument, None, env, cx))
+                                    .enumerate()
+                                    .map(|(index, argument)| {
+                                        let mut lowered = lower_one_call_arg(argument, None, env, cx);
+                                        // `Body.text(text, mime)`: the source-owned
+                                        // `core.net.mime.MIME` crosses into the native
+                                        // body as its rendered `to_string()` text.
+                                        if type_name == "Body" && method == "text" && index == 1 {
+                                            let recv = lowered.value;
+                                            lowered.value = TExpr {
+                                                ty: Type::String,
+                                                kind: TExprKind::MethodCall {
+                                                    recv: Box::new(recv),
+                                                    method: TMethodRef::inherent("to_string"),
+                                                    type_args: Vec::new(),
+                                                    args: Vec::new(),
+                                                    source_first_string_literal: None,
+                                                    operator_line: None,
+                                                },
+                                            };
+                                        }
+                                        lowered
+                                    })
                                     .collect(),
                             },
                         };

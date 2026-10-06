@@ -197,12 +197,14 @@ pub mod jet_email {
     // Hidden Rust generic preserves Jet's single canonical Secret type. The
     // byte default keeps direct Prelude consumers well-typed when no secret
     // value is present; runtime entry points still name Vec<u8> explicitly.
+    #[derive(Clone)]
     pub enum SMTPAuth<S = Vec<u8>> {
         None,
         Password { username: String, password: S },
     }
 
-    pub struct DkimConfig<S = Vec<u8>> {
+    #[derive(Clone)]
+    pub struct DKIMConfig<S = Vec<u8>> {
         pub domain: String,
         pub selector: String,
         pub private_key: S,
@@ -215,6 +217,7 @@ pub mod jet_email {
         SystemPlusCa { pem: Vec<u8> },
     }
 
+    #[derive(Clone)]
     pub struct SMTPConfig<S = Vec<u8>> {
         pub host: String,
         pub port: i64,
@@ -223,7 +226,7 @@ pub mod jet_email {
         pub recipient_policy: RecipientPolicy,
         pub trust: TLSTrust,
         pub limits: Limits,
-        pub dkim: JetOutcome<DkimConfig<S>, JetAbsent>,
+        pub dkim: JetOutcome<DKIMConfig<S>, JetAbsent>,
     }
 
     #[derive(Clone, Copy)]
@@ -276,7 +279,7 @@ pub mod jet_email {
                 password: extract(password),
             },
         };
-        let dkim = config.dkim.as_ref().map(|dkim| DkimConfig::<Vec<u8>> {
+        let dkim = config.dkim.as_ref().map(|dkim| DKIMConfig::<Vec<u8>> {
             domain: dkim.domain.clone(),
             selector: dkim.selector.clone(),
             private_key: extract(&dkim.private_key),
@@ -369,7 +372,7 @@ pub mod jet_email {
                     Some(value) => value.split(',').map(|name| name.trim().to_string()).collect(),
                     None => default_dkim_headers(),
                 };
-                Ok(DkimConfig::<Vec<u8>> { domain, selector, private_key, signed_headers })
+                Ok(DKIMConfig::<Vec<u8>> { domain, selector, private_key, signed_headers })
             }
             (_, _, Some(private_key)) => {
                 let mut encoded = private_key.into_bytes();
@@ -432,7 +435,7 @@ pub mod jet_email {
                 && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'))
     }
 
-    fn validate_dkim_config<S>(dkim: &DkimConfig<S>) -> Result<(), Error> {
+    fn validate_dkim_config<S>(dkim: &DKIMConfig<S>) -> Result<(), Error> {
         if !valid_dns_name(&dkim.domain) {
             return Err(error("dkim", "domain must be a valid ASCII DNS name"));
         }
@@ -1019,7 +1022,7 @@ pub mod jet_email {
         std::str::from_utf8(&header[..colon]).ok().map(str::to_ascii_lowercase)
     }
 
-    fn dkim_sign(wire: Vec<u8>, dkim: &DkimConfig<Vec<u8>>, runtime: RuntimeFns)
+    fn dkim_sign(wire: Vec<u8>, dkim: &DKIMConfig<Vec<u8>>, runtime: RuntimeFns)
         -> Result<Vec<u8>, Error>
     {
         let (headers, body) = message_headers(&wire)?;

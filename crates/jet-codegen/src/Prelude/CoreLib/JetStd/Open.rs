@@ -291,12 +291,3 @@ mod jet_std {
         JetURL::from_url_parts(jet_typed_url_parts_literal(literals, holes))
     }
 
-    /// The `core.net.mime.MIME` carrier: exactly the field layout declared in
-    /// `Core/net/mime.jet`, so generated struct literals and field reads name
-    /// the same Rust fields (`parameters` holds lowercase `[name, value]` rows).
-    #[derive(Clone, Debug, PartialEq)]
-    pub struct JetMIME {
-        pub top: String,
-        pub sub: String,
-        pub parameters: Vec<Vec<String>>,
-    }

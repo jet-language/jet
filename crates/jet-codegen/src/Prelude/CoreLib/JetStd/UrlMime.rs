@@ -129,7 +129,8 @@
             }
         }
 
-        pub fn data(mime: &JetMIME, text: &String) -> Self {
+        /// `mime` is the rendered media type (`core.net.mime.MIME.to_string()`).
+        pub fn data(mime: &str, text: &String) -> Self {
             JetURLParts {
                 scheme: "data".to_string(),
                 username: None,
@@ -138,7 +139,7 @@
                 port: None,
                 path: format!(
                     "{},{}",
-                    mime.to_string_value(),
+                    mime,
                     jet_url_percent_encode(text, false)
                 ),
                 query: Vec::new(),
@@ -591,64 +592,6 @@
     }
 
     impl crate::JetDebug for JetURLParts {
-        fn jet_debug(&self) -> String {
-            self.to_string_value()
-        }
-    }
-
-    impl JetMIME {
-        pub fn parse(input: &String) -> Result<Self, String> {
-            let parts = jet_mime_parse_parts(input)?;
-            Ok(JetMIME {
-                top: parts.top,
-                sub: parts.sub,
-                parameters: parts
-                    .params
-                    .into_iter()
-                    .map(|(name, value)| vec![name, value])
-                    .collect(),
-            })
-        }
-        /// The `[name, value]` rows as kernel pairs.
-        fn parameter_pairs(&self) -> impl Iterator<Item = (&str, &str)> {
-            self.parameters.iter().filter_map(|row| match row.as_slice() {
-                [name, value] => Some((name.as_str(), value.as_str())),
-                _ => None,
-            })
-        }
-        pub fn media_type(&self) -> String {
-            self.top.clone()
-        }
-        pub fn subtype(&self) -> String {
-            self.sub.clone()
-        }
-        pub fn essence(&self) -> String {
-            jet_mime_essence(&self.top, &self.sub)
-        }
-        pub fn param(&self, name: &String) -> JetOutcome<String, JetAbsent> {
-            jet_outcome_of(jet_mime_param(self.parameter_pairs(), name).map(str::to_string))
-        }
-        pub fn params(&self) -> Vec<Vec<String>> {
-            self.parameters.clone()
-        }
-        pub fn to_string_value(&self) -> String {
-            jet_mime_to_string(&self.top, &self.sub, self.parameter_pairs())
-        }
-    }
-
-    impl crate::JetShow for JetMIME {
-        fn jet_show(&self) -> String {
-            self.to_string_value()
-        }
-    }
-
-    impl crate::JetDisplay for JetMIME {
-        fn jet_display(&self) -> String {
-            self.to_string_value()
-        }
-    }
-
-    impl crate::JetDebug for JetMIME {
         fn jet_debug(&self) -> String {
             self.to_string_value()
         }

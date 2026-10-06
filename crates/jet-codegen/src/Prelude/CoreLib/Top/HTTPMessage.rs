@@ -440,10 +440,12 @@ impl JetHTTPBody {
             JetHTTPBodyKind::Text,
         )
     }
-    fn from_text_with_mime(text: String, content_type: jet_std::JetMIME) -> Self {
+    /// `content_type` is the rendered `core.net.mime.MIME` (`to_string()`);
+    /// the compiler converts the source-owned value at the call site.
+    fn from_text_with_mime(text: String, content_type: String) -> Self {
         Self::from_source_bytes(
             text.into_bytes(),
-            Some(content_type.to_string_value()),
+            Some(content_type),
             JetHTTPBodyKind::Text,
         )
     }

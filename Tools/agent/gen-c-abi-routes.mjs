@@ -680,17 +680,20 @@ const lateLeafTables = [
   nameTable(predicatesRs, "alloc_handle_rust_type"),
   nameTable(contextRs, "layout_handle_rust_type"),
 ];
-// Canonical Core types whose own Jet shape generated Rust keeps
-// (MIRRust.rs core_native_probe_name and its is_source_owned_core_* tests).
+// Canonical Core types whose own Jet shape generated Rust keeps: the
+// `source_module … types { … }` rows (CoreModuleExports.rs
+// CORE_SOURCE_OWNED_TYPES, read by MIRRust.rs through core_source_owns_type)
+// plus the remaining core_native_probe_name prefix rules.
 const sourceOwned = [];
-for (const fn of ["core_native_probe_name", "is_source_owned_core_compute_shape", "is_source_owned_core_net_shape", "is_source_owned_core_web_query_shape"]) {
-  for (const m of fnBody(mirRustRs, fn).matchAll(/starts_with\("([^"]+)"\)(?:\s*&&\s*(?:name\.ends_with\("([^"]+)"\)|matches!\(\s*[^,]+,\s*((?:"[^"]+"\s*\|?\s*)+)\)))?/g)) {
-    if (m[1] === "<corelib>/") continue;
-    sourceOwned.push({ prefix: m[1], suffix: m[2], leaves: m[3] ? [...m[3].matchAll(/"([^"]+)"/g)].map((k) => k[1]) : null });
-  }
+for (const m of fnBody(mirRustRs, "core_native_probe_name").matchAll(/starts_with\("([^"]+)"\)(?:\s*&&\s*(?:name\.ends_with\("([^"]+)"\)|matches!\(\s*[^,]+,\s*((?:"[^"]+"\s*\|?\s*)+)\)))?/g)) {
+  if (m[1] === "<corelib>/") continue;
+  sourceOwned.push({ prefix: m[1], suffix: m[2], leaves: m[3] ? [...m[3].matchAll(/"([^"]+)"/g)].map((k) => k[1]) : null });
 }
+const coreExportsRs = readFileSync(`${repo}/crates/jet-foundation/src/CoreModuleExports.rs`, "utf8");
+const ownedTypes = [...coreExportsRs.matchAll(/CoreSourceOwnedType \{ path: "([^"]+)", name: "([^"]+)" \}/g)].map((m) => `::${m[1]}::${m[2]}`);
+if (ownedTypes.length === 0) throw new Error("gen-c-abi-routes: no CORE_SOURCE_OWNED_TYPES rows");
 const coreLeaf = (name) => name.slice("<corelib>/".length).split("::").pop();
-const isSourceOwned = (name) => sourceOwned.some((rule) => name.startsWith(rule.prefix) && (!rule.suffix || name.endsWith(rule.suffix)) && (!rule.leaves || rule.leaves.includes(coreLeaf(name))));
+const isSourceOwned = (name) => (name.startsWith("<corelib>/") && ownedTypes.some((suffix) => name.endsWith(suffix))) || sourceOwned.some((rule) => name.startsWith(rule.prefix) && (!rule.suffix || name.endsWith(rule.suffix)) && (!rule.leaves || rule.leaves.includes(coreLeaf(name))));
 // The native Rust type path (from the crate root) of a Jet type name, as
 // MIRRust.rs `rust_type` resolves an argument-free nominal; null if none.
 const nativeType = (name) => {
@@ -704,7 +707,7 @@ const nativeType = (name) => {
   if (emailTable.has(emailName)) return `jet_email::${emailTable.get(emailName)}`;
   if (rootPrelude.has(native)) return rootPrelude.get(native);
   for (const table of lateLeafTables) if (table.has(native)) return table.get(native);
-  if (canonical && name.startsWith("<corelib>/Core/sync::") && name.endsWith("::RowPolicy")) return null;
+  if (canonical && isSourceOwned(name)) return null;
   const core = coreTable.get(canonical ? coreLeaf(name) : name);
   if (!core) return null;
   if (core === "JetRowPolicy" || core === "JetTaskFailure") return core;

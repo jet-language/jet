@@ -3154,7 +3154,6 @@ impl THandleOp {
             HTTPClientMethod { kind, method } => http_client_request_route(kind, method, carrier)?,
             HTTPServerMethod { .. } | EmailMethod { .. } => primitive(),
             RegexMethod { kind, method } => regex_route(kind, method, carrier)?,
-            UrlMimeMethod { kind, method } => url_mime_route(kind, method, carrier)?,
             CivilTimeMethod { kind, method } => civil_time_route(kind, method, carrier)?,
             ProcessSpecMethod { method, args_len } => match (method.as_str(), *args_len) {
                 ("cwd", 1) => h(
@@ -4542,38 +4541,6 @@ fn regex_route(
         _ => {
             return Err(route_error(format!(
                 "unknown checked regex method `{kind}.{method}`"
-            )));
-        }
-    };
-    let member = format!("{kind}.{method}");
-    Ok(h(
-        &member,
-        symbol,
-        borrow_mask.len(),
-        borrow_mask.len(),
-        borrow_mask,
-        None,
-        carrier,
-    ))
-}
-
-/// D-URL1=A: checked MIME projections. `URL` is the `core.net.url` record, so
-/// its documented methods lower through the declaration, never a handle row.
-fn url_mime_route(
-    kind: &str,
-    method: &str,
-    carrier: &TFailureCarrier,
-) -> Result<TRoutePlan, LowerError> {
-    let (symbol, borrow_mask): (&str, &[bool]) = match (kind, method) {
-        ("MIME", "media_type") => ("jet_std::JetMIME::media_type", &[true][..]),
-        ("MIME", "subtype") => ("jet_std::JetMIME::subtype", &[true][..]),
-        ("MIME", "essence") => ("jet_std::JetMIME::essence", &[true][..]),
-        ("MIME", "params") => ("jet_std::JetMIME::params", &[true][..]),
-        ("MIME", "to_string") => ("jet_std::JetMIME::to_string_value", &[true][..]),
-        ("MIME", "param") => ("jet_std::JetMIME::param", &[true, true][..]),
-        _ => {
-            return Err(route_error(format!(
-                "unknown checked URL/MIME method `{kind}.{method}`"
             )));
         }
     };
