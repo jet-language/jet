@@ -462,6 +462,17 @@ function elementCarrier(ty) {
   return null;
 }
 
+// A List parameter element of a cloneable runtime type: each slot word is a
+// borrowed handle, cloned into the Rust Vec (the lowering lends a handle per
+// element: a record element converts through Records.jet for the call).
+function handleElement(ty, path) {
+  if (!opaqueName.test(ty) || tagCarrier(ty, path)) return null;
+  const name = opaqueName.exec(ty)[1];
+  const full = qualify(ty, path);
+  if (name === "String" || name === "Self" || !derivesClone(full)) return null;
+  return { jet: `Handle{name: "${name}"}`, read: `unsafe { &*(w as *const ${full}) }.clone()`, handle: { name, full } };
+}
+
 // Parameter carrier: { jet, ctys: [C types], expr(names) } or null. A List
 // parameter is two words: its slot data pointer and its length.
 function paramCarrier(ty, path) {
@@ -486,10 +497,10 @@ function paramCarrier(ty, path) {
   if (/^&(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty)) return one("Word", "i64", (a) => `&unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(${a}) }`);
   const list = /^(&?)(?:\[(.+)\]|Vec<(.+)>)$/.exec(ty);
   if (list && (list[1] === "&" || list[3])) {
-    const element = elementCarrier(list[2] ?? list[3]);
+    const element = elementCarrier(list[2] ?? list[3]) ?? handleElement(list[2] ?? list[3], path);
     if (!element) return null;
     const items = (d, n) => `list_in(${d}, ${n}, |w| ${element.read})`;
-    return { jet: `List{elem: LowerRouteCarrier.${element.jet}}`, ctys: ["*const u64", "i64"], expr: ([d, n]) => (list[1] === "&" ? `&${items(d, n)}` : items(d, n)) };
+    return { jet: `List{elem: LowerRouteCarrier.${element.jet}}`, ctys: ["*const u64", "i64"], expr: ([d, n]) => (list[1] === "&" ? `&${items(d, n)}` : items(d, n)), handle: element.handle };
   }
   // A mutably borrowed handle: the adapter mutates the runtime value in the
   // caller's own box (the lowering lends the handle of its Write place).

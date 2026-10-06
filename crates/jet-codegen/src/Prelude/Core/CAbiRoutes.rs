@@ -12254,10 +12254,28 @@ mod jet_c_abi_routes {
         })
     }
 
+    /// core.email.envelope
+    #[no_mangle]
+    pub extern "C" fn envelope(a0: *mut crate::jet_email::Address, a1_0: *const u64, a1_1: i64, ok: *mut *mut crate::jet_email::Envelope, err: *mut *mut crate::jet_email::Error) -> i64 {
+        guard(|| match crate::jet_email::envelope(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_email::Address) }.clone())) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
     /// core.email.limits_safe
     #[no_mangle]
     pub extern "C" fn Limits_safe() -> *mut crate::jet_email::Limits {
         guard(|| Box::into_raw(Box::new(crate::jet_email::Limits::safe())))
+    }
+
+    /// core.email.message
+    #[no_mangle]
+    pub extern "C" fn message(a0: *mut crate::jet_email::Address, a1_0: *const u64, a1_1: i64, a2_0: *const u64, a2_1: i64, a3: JetCString, a4: JetCString, a5: JetCString, a6_0: *const u64, a6_1: i64, ok: *mut *mut crate::jet_email::Message, err: *mut *mut crate::jet_email::Error) -> i64 {
+        guard(|| match crate::jet_email::message(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_email::Address) }.clone()), &list_in(a2_0, a2_1, |w| unsafe { &*(w as *const crate::jet_email::Address) }.clone()), unsafe { &*a3 }, unsafe { &*a4 }, unsafe { &*a5 }, &list_in(a6_0, a6_1, |w| unsafe { &*(w as *const crate::jet_email::Attachment) }.clone())) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
     }
 
     /// core.email.serialize
@@ -15314,6 +15332,12 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_ring_log_debug(unsafe { &*a0 }))
     }
 
+    /// core.log.debug_fields
+    #[no_mangle]
+    pub extern "C" fn jet_ring_log_debug_fields(a0: JetCString, a1_0: *const u64, a1_1: i64) {
+        guard(|| crate::jet_ring_log_debug_fields(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_std::LogField) }.clone())))
+    }
+
     /// core.log.disable
     #[no_mangle]
     pub extern "C" fn jet_ring_log_disable() {
@@ -15336,6 +15360,12 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_ring_log_error(a0: JetCString) {
         guard(|| crate::jet_ring_log_error(unsafe { &*a0 }))
+    }
+
+    /// core.log.error_fields
+    #[no_mangle]
+    pub extern "C" fn jet_ring_log_error_fields(a0: JetCString, a1_0: *const u64, a1_1: i64) {
+        guard(|| crate::jet_ring_log_error_fields(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_std::LogField) }.clone())))
     }
 
     /// core.log.fatal
@@ -15366,6 +15396,12 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_ring_log_info(a0: JetCString) {
         guard(|| crate::jet_ring_log_info(unsafe { &*a0 }))
+    }
+
+    /// core.log.info_fields
+    #[no_mangle]
+    pub extern "C" fn jet_ring_log_info_fields(a0: JetCString, a1_0: *const u64, a1_1: i64) {
+        guard(|| crate::jet_ring_log_info_fields(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_std::LogField) }.clone())))
     }
 
     /// core.log.int
@@ -15426,6 +15462,12 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_ring_log_warn(a0: JetCString) {
         guard(|| crate::jet_ring_log_warn(unsafe { &*a0 }))
+    }
+
+    /// core.log.warn_fields
+    #[no_mangle]
+    pub extern "C" fn jet_ring_log_warn_fields(a0: JetCString, a1_0: *const u64, a1_1: i64) {
+        guard(|| crate::jet_ring_log_warn_fields(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_std::LogField) }.clone())))
     }
 
     /// core.handle.rng.bool
@@ -17399,6 +17441,12 @@ mod jet_c_abi_routes {
         guard(|| (crate::jet_std_jsonl_count_rows(unsafe { &*a0 })).into_raw())
     }
 
+    /// core.encoding.jsonl.to_string, core.encoding.jsonl.dumps
+    #[no_mangle]
+    pub extern "C" fn jet_std_jsonl_render(a0_0: *const u64, a0_1: i64) -> JetCString {
+        guard(|| handle(crate::jet_std_jsonl_render(&list_in(a0_0, a0_1, |w| unsafe { &*(w as *const crate::jet_std::DataTree) }.clone()))))
+    }
+
     /// core.math.abs_diff
     #[no_mangle]
     pub extern "C" fn jet_std_math_abs_diff(a0: i64, a1: i64) -> i64 {
@@ -18506,6 +18554,15 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_std_process_exit(a0: i64) {
         guard(|| crate::jet_std_process_exit(a0))
+    }
+
+    /// core.process.pipeline
+    #[no_mangle]
+    pub extern "C" fn jet_std_process_pipeline(a0_0: *const u64, a0_1: i64, ok: *mut *mut crate::jet_std::ProcessReceipt, err: *mut *mut crate::jet_std::IOError) -> i64 {
+        guard(|| match crate::jet_std_process_pipeline(&list_in(a0_0, a0_1, |w| unsafe { &*(w as *const crate::jet_std::ProcessSpec) }.clone())) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
     }
 
     /// core.handle.process.spec.under
@@ -20340,6 +20397,12 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_ui_aria_role_text_input())))
     }
 
+    /// core.ui.box
+    #[no_mangle]
+    pub extern "C" fn jet_ui_box(a0_0: *const u64, a0_1: i64) -> *mut crate::JetUiNode {
+        guard(|| Box::into_raw(Box::new(crate::jet_ui_box(list_in(a0_0, a0_1, |w| unsafe { &*(w as *const crate::JetUiNode) }.clone())))))
+    }
+
     /// core.ui.button
     #[no_mangle]
     pub extern "C" fn jet_ui_button(a0: JetCString) -> *mut crate::JetUiNode {
@@ -21796,8 +21859,6 @@ mod jet_c_abi_routes {
 //   jet_duration_round (core.handle.duration.round): parameter types  d: &jet_std::Duration, unit: &String, increment: &i64, mode: &String, 
 //   jet_duration_scale (core.handle.duration.scale): parameter types d: &jet_std::Duration, factor: &i64
 //   jet_edit_disjoint (TIR/routes.rs): generic
-//   jet_email::envelope (core.email.envelope): parameter types from: &Address, recipients: &Vec<Address>
-//   jet_email::message (core.email.message): parameter types  from: &Address, to: &Vec<Address>, bcc: &Vec<Address>, subject: &String, text: &String, html: &String, attachments: &Vec<Attachment>, 
 //   jet_enc_cbor_reader (core.encoding.cbor.reader): parameter types input: JetFileReader, limits: jet_std::EncodingLimits
 //   jet_enc_cbor_reader_next (core.handle.cbor_reader.next): result type Result<JetOutcome<jet_std::DataEvent, JetAbsent>, jet_std::EncodingError>
 //   jet_enc_cbor_to_bytes (core.encoding.cbor.to_bytes): generic
@@ -22141,10 +22202,6 @@ mod jet_c_abi_routes {
 //   jet_receipt_attach (receipt.attach): generic
 //   jet_ring_csv_parse (core.encoding.csv.parse): result type Result<Vec<Vec<String>>, String>
 //   jet_ring_csv_rows (core.encoding.csv.rows): result type Result<Vec<jet_std::CSVRow>, String>
-//   jet_ring_log_debug_fields (core.log.debug_fields): parameter types msg: &String, fields: &Vec<jet_std::LogField>
-//   jet_ring_log_error_fields (core.log.error_fields): parameter types msg: &String, fields: &Vec<jet_std::LogField>
-//   jet_ring_log_info_fields (core.log.info_fields): parameter types msg: &String, fields: &Vec<jet_std::LogField>
-//   jet_ring_log_warn_fields (core.log.warn_fields): parameter types msg: &String, fields: &Vec<jet_std::LogField>
 //   jet_rng_pick (core.handle.rng.pick): generic
 //   jet_rng_sample (core.handle.rng.sample): generic
 //   jet_rng_shuffle (core.handle.rng.shuffle): generic
@@ -22226,11 +22283,9 @@ mod jet_c_abi_routes {
 //   jet_std_io_stdin_read_line (core.handle.stdin.read_line): result type Result<Option<String>, jet_std::IOError>
 //   jet_std_jsonl_first (core.encoding.jsonl.first): result type Result<Option<jet_std::DataTree>, jet_std::EncodingError>
 //   jet_std_jsonl_parse (core.encoding.jsonl.parse): result type Result<Vec<jet_std::DataTree>, jet_std::EncodingError>
-//   jet_std_jsonl_render (core.encoding.jsonl.to_string): parameter types rows: &Vec<jet_std::DataTree>
 //   jet_std_math_abs_f32 (TIR/routes.rs): parameter types value: f32
 //   jet_std_os_atexit (core.sys.atexit): generic
 //   jet_std_os_on_interrupt (TIR/routes.rs): parameter types handler: std::sync::Arc<dyn Fn() + Send + Sync + 'static>
-//   jet_std_process_pipeline (core.process.pipeline): parameter types  specs: &Vec<jet_std::ProcessSpec>, 
 //   jet_std_xml_attribute (core.encoding.xml.attribute): result type Result<JetOutcome<String, JetAbsent>, jet_std::XMLError>
 //   jet_std_xml_content (core.encoding.xml.content): result type Result<Vec<jet_std::DataTree>, jet_std::XMLError>
 //   jet_std_xml_expanded_name (TIR/lower/method_calls.rs): result type Result< ( String, JetOutcome<String, JetAbsent>, String, JetOutcome<String, JetAbsent>, ), jet_std::XMLError, >
@@ -22318,7 +22373,7 @@ mod jet_c_abi_routes {
 //   jet_tls_root_certificates_from_pem (core.handle.tls.root_certificates_from_pem): parameter types  pem: &Vec<u8>, validate: fn(&Vec<u8>) -> Result<(), String>, 
 //   jet_transaction_on_commit (TIR/routes.rs): parameter types transaction: &mut JetTransaction, callback: Box<dyn FnOnce()>
 //   jet_transaction_on_rollback (TIR/routes.rs): parameter types transaction: &mut JetTransaction, callback: Box<dyn FnOnce()>
-//   jet_tui_layout (core.tui.layout): parameter types  area: JetRect, direction: JetTuiDirection, constraints: Vec<JetTuiConstraint>, 
+//   jet_tui_layout (core.tui.layout): result type Vec<JetRect>
 //   jet_tui_table (core.tui.table): parameter types headers: Vec<String>, rows: Vec<Vec<String>>
 //   jet_typed_datetime_literal (TIR/routes.rs): parameter types literals: &[&str], holes: Vec<String>
 //   jet_typed_html_interpolate (TIR/routes.rs): parameter types  literals: &[&str], holes: Vec<String>, trusted_html: &[bool], 
@@ -22328,7 +22383,6 @@ mod jet_c_abi_routes {
 //   jet_typed_sql_params (TIR/routes.rs): generic
 //   jet_typed_sql_raw (TIR/routes.rs): generic
 //   jet_typed_sql_template (TIR/routes.rs): generic
-//   jet_ui_box (core.ui.box): parameter types children: Vec<JetUiNode>
 //   jet_ui_button_on_click (TIR/routes.rs): generic
 //   jet_ui_gtk (core.ui.gtk_backend): no runtime function
 //   jet_ui_host_accessibility (core.ui.host.accessibility): result type JetUiServiceResult<JetUiAccessibility>
