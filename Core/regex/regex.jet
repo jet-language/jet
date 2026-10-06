@@ -84,12 +84,6 @@ pub fn escape(text: String) -> String Never! {
 
 pub fn compile(pattern: String) -> Regex RegexError! { compile_with(pattern, flags(false, false, false)) }
 
-/// Sema has already checked a typed literal's pattern. An invalid pattern at
-/// this boundary is a compiler defect, not a recoverable user failure.
-pub fn literal(pattern: String) -> Regex Never! {
-    compile(pattern) ?? panic("sema accepted an invalid Regex literal")
-}
-
 pub fn compile_with(pattern: String, flags: RegexFlags) -> Regex RegexError! {
     p := Parser{bytes: pattern.bytes(), i: 0, flags: flags, nodes: [Node]{}}
     root :: &p.parse_alt()

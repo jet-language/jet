@@ -41,21 +41,3 @@ fn run() {
         "true\ntrue\ntrue\na\n42\njet\n",
     );
 }
-
-#[test]
-fn core_regex_checked_literal_uses_the_source_engine_across_tiers() {
-    tir_support::assert_tiers_agree(
-        "core_regex_literal_source",
-        r#"
-use core.regex as re
-
-fn run() {
-    literal :: Regex.{"[a-z]+"}
-    print(re.find(literal, "123jet456") ?? "none")
-    print(re.full_match(literal, "jet"))
-    print(re.full_match(literal, "jet3"))
-}
-"#,
-        "jet\ntrue\nfalse\n",
-    );
-}

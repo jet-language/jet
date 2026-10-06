@@ -119,3 +119,20 @@ pub fn transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]>
 pub fn migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
     core.db.migrate(scope, name, steps)
 }
+
+#Test("typed SQL rows preserve conversion and missing-column errors") {
+    row :: [String: DBValue]{"number": DBValue.Int(42), "text": DBValue.Text("jet"), "zero": DBValue.Int(0), "one": DBValue.Int(1)}
+    assert_eq(row_int(row, "number") ?? -1, 42)
+    assert_eq(row_float(row, "number") ?? -1.0, 42.0)
+    assert_eq(row_text(row, "text") ?? "", "jet")
+    assert_eq(row_bool(row, "zero") ?? true, false)
+    assert_eq(row_bool(row, "one") ?? false, true)
+    if row_value(row, "absent") == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "missing column `absent`")
+    }
+    if row_int(row, "text") == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "expected an int, got jet")
+    }
+}
