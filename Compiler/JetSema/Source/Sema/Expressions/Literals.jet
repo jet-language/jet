@@ -628,6 +628,9 @@ fn sema_expression_range(start: Expr, end: Expr, exclusive: Bool, span: Span, ex
         &diagnostics.push(sema_error("E0505", expr_span(end), "range bounds must be Int", "a Range stores whole-number start and end bounds", "use Int values on both sides of the range"))
         return None
     }
+    // D-RANGE-BACKWARD1=A: a stored range or slice with written ends in the
+    // wrong order is E0170; computed ends stay empty at run time.
+    if sema_range_backward_diagnostic(start, end, None, exclusive, false) == .Val(backward) -> &diagnostics.push(backward)
     value :: sema_tir_expr(Type.Named{name: "Range"}, TExprKind.Range{start: lhs, end: rhs, exclusive: exclusive}, span)
     sema_expr_expected(value, expected, environment, &diagnostics)
 }

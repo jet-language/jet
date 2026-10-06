@@ -595,6 +595,17 @@ optional third clause (`loop i in 0..10, 2`); `step` has no loop role.
 `a >= b`). Prefer `loop (i, item) in xs` or `loop i in xs.indexes()` for index loops;
 the compiler teaches when inclusive `0..xs.len()` indexes the same `xs`.
 D-ITER1's pipeline adapter is `indexed()` (renamed from `enumerate`).
+**D-RANGE-BACKWARD1=A** *(ratified 2026-10-06)*: a minus step counts down. A
+range loop `a..b, -k` visits `a`, `a - k`, `a - 2k`, … while the value stays
+`>= b`, so it includes `b` when it lands on it (`10..0, -3` visits 10, 7, 4,
+1); with `..<` it stops before `b`. A zero step stays E0123. When both ends
+are written numbers, a range whose ends and step count in opposite
+directions is check error E0170 with a fix edit: `10..1` gets `, -1`,
+`10..0, 2` gets `-2`, and `0..10, -1` gets `1`. A stored Range value or slice
+bound with written ends in the wrong order (`5..<2`) is the same E0170 and is
+taught to write the smaller end first. Computed ends are never an error:
+`0..n - 1` with `n == 0` runs zero times. One rule on every tier and in the
+compile-time evaluator.
 **D-RANGE-VALUE1=A** *(ratified 2026-07-28, card #1298)*: both spellings
 construct one nominal `Range` over `Int`. The value carries whether its end is
 exclusive and exposes `.start`, `.end`, and `.contains(value)`. A Range may be
