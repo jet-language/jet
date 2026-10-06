@@ -969,7 +969,6 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "RowPolicy" => Some("JetRowPolicy"),
         // D-APPROX1=A: native sketch carriers are Prelude-root values.
         "HyperLogLog" => Some("JetHyperLogLog"),
-        "TDigest" => Some("JetTDigest"),
         "CountMinSketch" => Some("JetCountMinSketch"),
         "ReservoirSampler" => Some("JetReservoirSampler"),
         "JetDate" | "JetInstant" | "JetLocalTime" | "JetDateTime" | "JetPeriod" | "JetZone"
@@ -3358,7 +3357,6 @@ impl Cx {
             Type::Named(name) if name == "Unknown" => "_".to_string(),
             // D-APPROX1=A: sketch types → opaque Rust structs.
             Type::Named(name) if name == "HyperLogLog" => "JetHyperLogLog".to_string(),
-            Type::Named(name) if name == "TDigest" => "JetTDigest".to_string(),
             Type::Named(name) if name == "CountMinSketch" => "JetCountMinSketch".to_string(),
             Type::Named(name) if name == "ReservoirSampler" => "JetReservoirSampler".to_string(),
             // D-TIMEDEPTH1=A: civil-time types → opaque Rust structs.

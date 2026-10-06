@@ -636,11 +636,6 @@ impl JetShow for JetHyperLogLog {
     }
 }
 
-impl JetShow for JetTDigest {
-    fn jet_show(&self) -> String {
-        "TDigest".to_string()
-    }
-}
 
 impl JetShow for JetCountMinSketch {
     fn jet_show(&self) -> String {

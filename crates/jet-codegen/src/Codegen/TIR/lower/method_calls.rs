@@ -8761,48 +8761,15 @@ fn lower_method_call_impl(
             let recv_t = lower_expr(receiver, cx, env);
             let result_ty = match (sketch.as_str(), method) {
                 ("HyperLogLog", "add")
-                | ("TDigest", "add")
                 | ("CountMinSketch", "add")
                 | ("ReservoirSampler", "add") => unit_type(),
                 ("HyperLogLog", "count") | ("CountMinSketch", "count") => Type::Int,
-                ("TDigest", "quantile") => Type::Float,
                 ("ReservoirSampler", "sample") => Type::List(Box::new(Type::String)),
                 _ => unit_type(),
             };
             let targs: Vec<TExpr> = args
                 .iter()
-                .map(|a| {
-                    let value = lower_expr(&a.expr, cx, env);
-                    if sketch == "TDigest" && matches!(method, "add" | "quantile") {
-                        let source_name = value.ty.without_user_tags().name();
-                        if let Some((type_name, func)) =
-                            crate::Numeric::precise_conversion_route("Float", &source_name)
-                        {
-                            return TExpr {
-                                ty: Type::Float,
-                                kind: TExprKind::PreciseBuiltin {
-                                    type_name: type_name.to_string(),
-                                    func: func.to_string(),
-                                    args: vec![value],
-                                },
-                            };
-                        }
-                        if source_name != "Float"
-                            && crate::AST::numeric_type_from_name(&source_name).is_some()
-                        {
-                            if let Some(op) = resolve_numeric_conversion_op("Float", &source_name) {
-                                return TExpr {
-                                    ty: Type::Float,
-                                    kind: TExprKind::NumericMethod {
-                                        recv: Box::new(value),
-                                        op,
-                                    },
-                                };
-                            }
-                        }
-                    }
-                    value
-                })
+                .map(|a| lower_expr(&a.expr, cx, env))
                 .collect();
             return TExpr {
                 ty: result_ty,

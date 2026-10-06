@@ -332,25 +332,22 @@ pub fn sema_call_try_ui_handle_method(receiver: Expr, receiver_value: TExpr, met
 }
 
 fn sema_ui_sketch_owner(owner: String) -> Bool Never! {
-    owner == "HyperLogLog" || owner == "TDigest" || owner == "CountMinSketch" || owner == "ReservoirSampler"
+    owner == "HyperLogLog" || owner == "CountMinSketch" || owner == "ReservoirSampler"
 }
 
 fn sema_ui_sketch_method_known(owner: String, method: String) -> Bool Never! {
     if owner == "HyperLogLog" || owner == "CountMinSketch" -> return method == "add" || method == "count"
-    if owner == "TDigest" -> return method == "add" || method == "quantile"
     if owner == "ReservoirSampler" -> return method == "add" || method == "sample"
     false
 }
 
 fn sema_ui_sketch_args(owner: String, method: String) -> [Type] Never! {
-    if method == "add" -> return [Type]{if owner == "TDigest" -> Type.Float else -> Type.String}
-    if method == "quantile" -> return [Type]{Type.Float}
+    if method == "add" -> return [Type]{Type.String}
     [Type]{}
 }
 
 fn sema_ui_sketch_result(owner: String, method: String) -> Type Never! {
     if method == "count" -> return Type.Int
-    if method == "quantile" -> return Type.Float
     if method == "sample" -> return Type.List{element: Type.String}
     sema_ui_handle_unit()
 }

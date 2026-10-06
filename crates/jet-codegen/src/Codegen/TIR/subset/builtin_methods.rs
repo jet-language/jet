@@ -706,7 +706,7 @@ pub fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -> bool 
 pub(crate) fn is_sketch_type(recv_type: Option<&str>) -> bool {
     matches!(
         recv_type,
-        Some("HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler")
+        Some("HyperLogLog" | "CountMinSketch" | "ReservoirSampler")
     )
 }
 
@@ -714,7 +714,6 @@ pub(crate) fn is_sketch_type(recv_type: Option<&str>) -> bool {
 pub(crate) fn is_sketch_method_name(recv_type: Option<&str>, method: &str) -> bool {
     match recv_type {
         Some("HyperLogLog") => matches!(method, "add" | "count"),
-        Some("TDigest") => matches!(method, "add" | "quantile"),
         Some("CountMinSketch") => matches!(method, "add" | "count"),
         Some("ReservoirSampler") => matches!(method, "add" | "sample"),
         _ => false,

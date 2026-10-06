@@ -3162,7 +3162,7 @@ impl THandleOp {
                             (2, &[true, true])
                         }
                         ("HyperLogLog", "count") | ("ReservoirSampler", "sample") => (1, &[true]),
-                        ("TDigest", "add" | "quantile") | ("ReservoirSampler", "add") => {
+                        ("ReservoirSampler", "add") => {
                             (2, &[true, false])
                         }
                         _ => {

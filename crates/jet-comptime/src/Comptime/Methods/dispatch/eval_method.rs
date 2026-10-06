@@ -1987,7 +1987,7 @@ impl<'a> Interp<'a> {
                     CtValue::Struct { type_name, .. }
                         if method == "add" && matches!(
                             type_name.as_str(),
-                            "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
+                            "HyperLogLog" | "CountMinSketch" | "ReservoirSampler"
                         )
                 );
             if handled_here {

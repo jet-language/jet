@@ -135,7 +135,6 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::DateTime, "from_timestamp") => datetime_from_timestamp(args, span),
         // D-APPROX1=A: sketch constructors — same algorithms as AOT Jet* sketches.
         (CoreCallPureRoute::SketchHll, "new") => Ok(hll_new()),
-        (CoreCallPureRoute::SketchTDigest, "new") => Ok(tdigest_new()),
         (CoreCallPureRoute::SketchCms, "new") => Ok(cms_new()),
         (CoreCallPureRoute::SketchReservoir, "new") => reservoir_new(args, span),
         (CoreCallPureRoute::Ui, "point") => ui_point(args, span),
@@ -1013,7 +1012,6 @@ pub(super) fn evaluate_method(
         // D-APPROX1=A: non-mutating sketch queries (mutations write back in dispatch).
         ("HyperLogLog", "count", 0) => hll_count(recv, span),
         ("CountMinSketch", "count", 1) => cms_count(recv, args, span),
-        ("TDigest", "quantile", 1) => tdigest_quantile(recv, args, span),
         ("ReservoirSampler", "sample", 0) => reservoir_sample(recv, span),
         // D-SOLVER-LIB1=A: finite solver queries (`.require` mutates in dispatch).
         ("Solver", "failure_count", 0) => solver_failure_count(recv, span),
@@ -1035,7 +1033,6 @@ pub(super) fn sketch_add(
     jet_foundation::Syntax::core_receiver_method(type_name, "add")?;
     let result = match type_name.as_str() {
         "HyperLogLog" => hll_add(recv, args, span),
-        "TDigest" => tdigest_add(recv, args, span),
         "CountMinSketch" => cms_add(recv, args, span),
         "ReservoirSampler" => reservoir_add(recv, args, span),
         _ => return None,
@@ -1396,9 +1393,6 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
                 return None;
             };
             Some(format!("HyperLogLog(count={n})"))
-        }
-        CtValue::Struct { type_name, .. } if core_display.is_some() && type_name == "TDigest" => {
-            Some("TDigest".to_string())
         }
         CtValue::Struct { type_name, .. }
             if core_display.is_some() && type_name == "CountMinSketch" =>
@@ -4370,64 +4364,6 @@ fn hll_count(recv: &CtValue, span: Span) -> EvalResult {
     Ok(CtValue::Int(hll_from_value(recv, span)?.count()))
 }
 
-fn tdigest_from_value(
-    value: &CtValue,
-    span: Span,
-) -> Result<super::sketch_kernel::JetTDigest, Diagnostic> {
-    let CtValue::List(items) = field(value, "TDigest", "centroids")
-        .ok_or_else(|| unsupported("malformed TDigest.centroids value", span))?
-    else {
-        return Err(unsupported("malformed TDigest.centroids value", span));
-    };
-    let centroids = items
-        .iter()
-        .map(|item| match item {
-            CtValue::List(pair) if pair.len() == 2 => {
-                Ok((as_float(&pair[0], span)?, as_float(&pair[1], span)?))
-            }
-            _ => Err(unsupported("malformed TDigest centroid", span)),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(super::sketch_kernel::JetTDigest::from_centroids(centroids))
-}
-
-fn tdigest_value(sketch: &super::sketch_kernel::JetTDigest) -> CtValue {
-    structure(
-        "TDigest",
-        vec![(
-            "centroids",
-            CtValue::List(
-                sketch
-                    .centroids()
-                    .into_iter()
-                    .map(|(mean, weight)| {
-                        CtValue::List(vec![
-                            CtValue::Float(CtFloat::f64(mean)),
-                            CtValue::Float(CtFloat::f64(weight)),
-                        ])
-                    })
-                    .collect(),
-            ),
-        )],
-    )
-}
-
-fn tdigest_new() -> CtValue {
-    tdigest_value(&super::sketch_kernel::JetTDigest::new())
-}
-
-fn tdigest_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-    let sketch = tdigest_from_value(recv, span)?;
-    sketch.add(float_arg(args, 0, span)?);
-    Ok(tdigest_value(&sketch))
-}
-
-fn tdigest_quantile(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
-    let sketch = tdigest_from_value(recv, span)?;
-    Ok(CtValue::Float(CtFloat::f64(
-        sketch.quantile(float_arg(args, 0, span)?),
-    )))
-}
 
 fn cms_from_value(
     value: &CtValue,

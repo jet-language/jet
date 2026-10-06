@@ -3224,19 +3224,6 @@ mod jet_c_abi_routes {
         }
     }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetTDigest(value: *mut crate::JetTDigest) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_JetTDigest(value: *mut crate::JetTDigest) -> *mut crate::JetTDigest {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_JetTempDirOwner(value: *mut crate::JetTempDirOwner) {
@@ -6164,11 +6151,6 @@ mod jet_c_abi_routes {
         guard(|| handle(<crate::JetTCPStream as crate::JetShow>::jet_show(unsafe { &*value })))
     }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_show_JetTDigest(value: *mut crate::JetTDigest) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::JetTDigest as crate::JetShow>::jet_show(unsafe { &*value })))
-    }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_show_JetTestComparison(value: *mut crate::jet_std::JetTestComparison) -> JetCString {
@@ -16181,5 +16163,4 @@ mod jet_c_abi_routes {
 //   JetHyperLogLog::new (core.data.sketch.hll.new): no runtime function
 //   JetLocalTime::new (core.time.time): no runtime function
 //   JetReservoirSampler::new (core.data.sketch.reservoir.new): no runtime function
-//   JetTDigest::new (core.data.sketch.tdigest.new): no runtime function
 // END GENERATED C-ABI ROUTES

@@ -7273,12 +7273,6 @@ impl<'a> Checker<'a> {
                 }
                 return Some(Type::Named("HyperLogLog".to_string()));
             }
-            ("core.data.sketch.tdigest", "new") => {
-                for a in args.iter_mut() {
-                    self.infer(&mut a.expr);
-                }
-                return Some(Type::Named("TDigest".to_string()));
-            }
             ("core.data.sketch.cms", "new") => {
                 for a in args.iter_mut() {
                     self.infer(&mut a.expr);

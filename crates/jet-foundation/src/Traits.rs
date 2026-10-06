@@ -2711,7 +2711,6 @@ impl TraitRegistry {
             "TestSuite",
             "TcpListener",
             "TcpStream",
-            "TDigest",
             "TempDir",
             "TempFile",
             "TextError",

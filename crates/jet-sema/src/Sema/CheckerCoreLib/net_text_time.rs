@@ -1437,7 +1437,6 @@ pub fn sketch_type_name(ty: &Type) -> Option<&'static str> {
     match ty {
         Type::Named(n) => match n.as_str() {
             "HyperLogLog" => Some("HyperLogLog"),
-            "TDigest" => Some("TDigest"),
             "CountMinSketch" => Some("CountMinSketch"),
             "ReservoirSampler" => Some("ReservoirSampler"),
             _ => None,
@@ -1456,8 +1455,6 @@ pub fn sketch_method_return(
     match (name, method) {
         ("HyperLogLog", "add") => Some(None), // void
         ("HyperLogLog", "count") => Some(Some(Type::Int)),
-        ("TDigest", "add") => Some(None),
-        ("TDigest", "quantile") => Some(Some(Type::Float)),
         ("CountMinSketch", "add") => Some(None),
         ("CountMinSketch", "count") => Some(Some(Type::Int)),
         ("ReservoirSampler", "add") => Some(None),

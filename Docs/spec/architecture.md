@@ -1099,7 +1099,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.data.sketch.cms` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
   | `core.data.sketch.hll` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
   | `core.data.sketch.reservoir` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
-  | `core.data.sketch.tdigest` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
+  | `core.data.sketch.tdigest` | Jet | `Core/data/sketch/tdigest.jet` owns unit-weight insertion, compression and step quantiles over the canonical Shared storage primitive. |
   | `core.compute.solve` | Kernel | `Prelude/CoreLib/Top/Solver.rs`; comptime and JIT marshal state. |
   | `core.sync` | Kernel | `Prelude/CoreLib/Top/Sync.rs`; `SyncLite` marshals values. |
   | `core.testing` | Mixed | Shared deterministic helpers call Prelude; harness and host work stay adapters. |
