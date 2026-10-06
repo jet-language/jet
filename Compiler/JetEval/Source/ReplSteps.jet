@@ -28,6 +28,7 @@ pub fn jet_eval_repl_session_new(program: ^MIRProgram, config: ^JetEvalConfig, r
     runtime_config := config
     runtime_config.runtime_execution = true
     machine := jet_eval_machine(^program, ^runtime_config)
+    machine.bound_runtime_fuel = true
     function :: jet_eval_find_function(machine, root) ?? {
         jet_eval_compiler_fail(&machine, jet_eval_empty_span(), "REPL checked MIR root is missing")
         return JetEvalReplSession{machine: ^machine, valid: false}
