@@ -1418,9 +1418,20 @@ impl<'a> Checker<'a> {
             }
             Pattern::Struct { fields, .. } => {
                 for field in fields {
-                    if let crate::AST::StructPatField::Bind { local, .. } = field {
-                        bound.insert(local.clone());
+                    match field {
+                        crate::AST::StructPatField::Bind { local, .. } => {
+                            bound.insert(local.clone());
+                        }
+                        crate::AST::StructPatField::Nested { pattern, .. } => {
+                            Self::bind_pattern_names(pattern, bound)
+                        }
+                        crate::AST::StructPatField::Value { .. } => {}
                     }
+                }
+            }
+            Pattern::List { .. } | Pattern::Map { .. } => {
+                for name in pattern.binding_names() {
+                    bound.insert(name.local_name().to_string());
                 }
             }
             Pattern::Or(alts, _) => {
@@ -1456,7 +1467,8 @@ impl<'a> Checker<'a> {
             crate::AST::PatSlot::Named { slot, .. } => Self::bind_slot_names(slot, bound),
             crate::AST::PatSlot::Wildcard
             | crate::AST::PatSlot::Range { .. }
-            | crate::AST::PatSlot::Rest(_) => {}
+            | crate::AST::PatSlot::Rest(_)
+            | crate::AST::PatSlot::Value(_) => {}
         }
     }
 
@@ -1467,21 +1479,9 @@ impl<'a> Checker<'a> {
         bound: &HashSet<String>,
         out: &mut Vec<EvaluatedAccess>,
     ) {
-        match pattern {
-            Pattern::Struct { fields, .. } => {
-                for field in fields {
-                    if let crate::AST::StructPatField::Value { value, .. } = field {
-                        self.collect_evaluated_expr_accesses(value, mode, bound, out);
-                    }
-                }
-            }
-            Pattern::Or(alternatives, _) => {
-                for alternative in alternatives {
-                    self.collect_pattern_value_accesses(alternative, mode, bound, out);
-                }
-            }
-            _ => {}
-        }
+        pattern.for_each_value_expr(&mut |value| {
+            self.collect_evaluated_expr_accesses(value, mode, bound, out)
+        });
     }
 
     fn collect_evaluated_stmt_accesses(
@@ -3440,15 +3440,33 @@ impl<'a> Checker<'a> {
             }
             Pattern::Struct { fields, .. } => {
                 for field in fields {
-                    if let crate::AST::StructPatField::Bind {
-                        field,
-                        local,
-                        local_span,
-                        ..
-                    } = field
-                    {
-                        bound_slots.push((local.clone(), *local_span, vec![field.clone()]));
+                    match field {
+                        crate::AST::StructPatField::Bind {
+                            field,
+                            local,
+                            local_span,
+                            ..
+                        } => {
+                            bound_slots.push((local.clone(), *local_span, vec![field.clone()]));
+                        }
+                        crate::AST::StructPatField::Nested { field, pattern, .. } => {
+                            for name in pattern.binding_names() {
+                                bound_slots.push((
+                                    name.local_name().to_string(),
+                                    name.span,
+                                    vec![field.clone()],
+                                ));
+                            }
+                        }
+                        crate::AST::StructPatField::Value { .. } => {}
                     }
+                }
+            }
+            // D-PAT-RECORD1 / D-PAT-MAP1: list items, a `..rest` window and
+            // map values view into the whole subject.
+            Pattern::List { .. } | Pattern::Map { .. } => {
+                for name in pattern.binding_names() {
+                    bound_slots.push((name.local_name().to_string(), name.span, Vec::new()));
                 }
             }
             Pattern::Or(alternatives, _) => {

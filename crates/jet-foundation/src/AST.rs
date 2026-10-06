@@ -67,8 +67,8 @@ pub use devtools::{
 mod patterns;
 pub use patterns::{
     BinEndian, BinMatchPart, BinSpec, BindName, BindPattern, ConstAttr, ConstDef, EnumLitArg,
-    OrFallback, OutputCallableAuthority, OutputKind, PatSlot, Pattern, ResolvedOutput,
-    RustConstKind, StrMatchPart, StructPatField,
+    ListPatRest, MapPatEntry, OrFallback, OutputCallableAuthority, OutputKind, PatSlot, Pattern,
+    ResolvedOutput, RustConstKind, StrMatchPart, StructPatField,
 };
 
 #[path = "AST/statements.rs"]

@@ -4170,7 +4170,12 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        if cached_subject_ty.is_none() && !matches!(pattern, Pattern::Struct { .. }) {
+        if cached_subject_ty.is_none()
+            && !matches!(
+                pattern,
+                Pattern::Struct { .. } | Pattern::List { .. } | Pattern::Map { .. }
+            )
+        {
             self.mark_pattern_subject_moved(subject, &bindings);
         }
         (Some(st), bindings)
@@ -4489,7 +4494,12 @@ impl<'a> Checker<'a> {
                 | Type::Apply {
                     name: type_name, ..
                 },
-                Pattern::Struct { fields, rest, .. },
+                Pattern::Struct {
+                    type_name: written_head,
+                    fields,
+                    rest,
+                    ..
+                },
             ) => {
                 let (import_ns, lookup_name) = self.struct_type_name_parts(type_name);
                 let owner_mod = self.struct_owner_module(lookup_name, import_ns);
@@ -4512,6 +4522,23 @@ impl<'a> Checker<'a> {
                     ));
                     return HashMap::new();
                 };
+                // D-PAT-RECORD1=A: a written head must name the value's type.
+                if let Some((head, head_span)) = written_head {
+                    let head_leaf = head.rsplit('.').next().unwrap_or(head);
+                    if head_leaf != lookup_name && head != type_name {
+                        self.diags.push(Diagnostic::error(
+                            "E0305",
+                            format!(
+                                "pattern `{head}{{…}}` doesn't match a `{display_type_name}` value"
+                            ),
+                            "a named struct pattern tests a value of the type it names".to_string(),
+                            format!(
+                                "write `{display_type_name}{{…}}`, or leave the name off: `{{…}}`"
+                            ),
+                            Some(*head_span),
+                        ));
+                    }
+                }
                 let mut named = HashSet::new();
                 let mut result = HashMap::new();
                 for f in fields {
@@ -4521,36 +4548,14 @@ impl<'a> Checker<'a> {
                         .field_type(subject_ty, field_name, f.field_span())
                         .unwrap_or(Type::Int);
                     match f {
-                        StructPatField::Bind {
-                            local, local_span, ..
-                        } => {
+                        StructPatField::Bind { local, .. } => {
                             result.insert(local.clone(), fty);
-                            let _ = local_span;
                         }
                         StructPatField::Value { value, .. } => {
-                            let mut value = (**value).clone();
-                            let saved_expected = self.expected_type.clone();
-                            self.expected_type = Some(fty.clone());
-                            let got = self.infer(&mut value);
-                            self.expected_type = saved_expected;
-                            if let Some(got) = got {
-                                let reported = self.check_type_assignable(&fty, &got, value.span());
-                                if !reported && got != fty {
-                                    self.diags.push(Diagnostic::error(
-                                        "E0108",
-                                        format!(
-                                            "field `{}` is {}, but this pattern value is {}",
-                                            field_name,
-                                            fty.show(),
-                                            got.show()
-                                        ),
-                                        "a field pattern value must have the field's type"
-                                            .to_string(),
-                                        type_fix_hint(&fty, &got),
-                                        Some(value.span()),
-                                    ));
-                                }
-                            }
+                            self.check_pattern_value(value, &fty);
+                        }
+                        StructPatField::Nested { pattern, .. } => {
+                            result.extend(self.validate_pattern(&fty, pattern, pattern.span()));
                         }
                     }
                 }
@@ -4587,6 +4592,108 @@ impl<'a> Checker<'a> {
                     ),
                     "a struct pattern reads named fields from a struct value".to_string(),
                     "match a struct value, or use an enum/optional pattern instead".to_string(),
+                    Some(span),
+                ));
+                HashMap::new()
+            }
+            // D-PAT-RECORD1=A: list patterns over `[T]` and `[T#N]`.
+            (
+                Type::List(elem) | Type::FixedList { elem, .. },
+                Pattern::List { items, rest, .. },
+            ) => {
+                if let Type::FixedList { len, .. } = subject_ty {
+                    if let Some(len) = len.literal_value() {
+                        let len = len as usize;
+                        let impossible = match rest {
+                            Some(_) => items.len() > len,
+                            None => items.len() != len,
+                        };
+                        if impossible {
+                            self.diags.push(Diagnostic::error(
+                                "E0305",
+                                format!(
+                                    "this list pattern can never match a `{}` value",
+                                    subject_ty.show()
+                                ),
+                                format!(
+                                    "a `{}` value always holds exactly {len} item{}",
+                                    subject_ty.show(),
+                                    if len == 1 { "" } else { "s" }
+                                ),
+                                format!("write a pattern with {len} item{}, or end it with `..`", if len == 1 { "" } else { "s" }),
+                                Some(span),
+                            ));
+                        }
+                    }
+                }
+                let mut result = HashMap::new();
+                for item in items {
+                    result.extend(self.validate_pattern_slot(item, elem, span));
+                }
+                if let Some(crate::AST::ListPatRest {
+                    name: Some((name, _)),
+                    ..
+                }) = rest
+                {
+                    // The rest is a read-only view of the remaining items.
+                    result.insert(name.clone(), Type::List(elem.clone()));
+                }
+                result
+            }
+            (_, Pattern::List { .. }) => {
+                self.diags.push(Diagnostic::error(
+                    "E0305",
+                    format!(
+                        "a list pattern `[…]` can't match {}",
+                        subject_ty.show()
+                    ),
+                    "a list pattern tests the items of a list value".to_string(),
+                    "match a list value, or use a pattern for this type instead".to_string(),
+                    Some(span),
+                ));
+                HashMap::new()
+            }
+            // D-PAT-MAP1=A: map patterns over `[K: V]`.
+            (Type::Map { key, value, .. }, Pattern::Map { entries, .. }) => {
+                let mut result = HashMap::new();
+                let mut seen: Vec<String> = Vec::new();
+                for entry in entries {
+                    self.check_map_pattern_key(&entry.key, key);
+                    let shown = self
+                        .source
+                        .get(entry.key.span().start..entry.key.span().end)
+                        .unwrap_or_default()
+                        .to_string();
+                    if seen.contains(&shown) {
+                        self.diags.push(Diagnostic::error(
+                            "E0117",
+                            format!("key {shown} appears twice in this map pattern"),
+                            "each key of a map pattern is looked up once".to_string(),
+                            "remove the repeated entry, or merge its pattern into the first one"
+                                .to_string(),
+                            Some(entry.key.span()),
+                        ));
+                    } else {
+                        seen.push(shown);
+                    }
+                    let slot_ty = if entry.optional {
+                        Type::Option(value.clone())
+                    } else {
+                        (**value).clone()
+                    };
+                    result.extend(self.validate_pattern_slot(&entry.slot, &slot_ty, entry.span));
+                }
+                result
+            }
+            (_, Pattern::Map { .. }) => {
+                self.diags.push(Diagnostic::error(
+                    "E0305",
+                    format!(
+                        "a map pattern `[key: …]` can't match {}",
+                        subject_ty.show()
+                    ),
+                    "a map pattern looks up keys in a map value".to_string(),
+                    "match a map value, or use a pattern for this type instead".to_string(),
                     Some(span),
                 ));
                 HashMap::new()
@@ -4715,6 +4822,7 @@ impl<'a> Checker<'a> {
                                     Some(span),
                                 ));
                             }
+                            crate::AST::PatSlot::Value(value) => self.check_pattern_value(value, ty),
                             crate::AST::PatSlot::Named { .. } | crate::AST::PatSlot::Rest(_) => {
                                 unreachable!("normalize_pattern_tree places named payload entries")
                             }
@@ -4779,6 +4887,7 @@ impl<'a> Checker<'a> {
                                     Some(span),
                                 ));
                             }
+                            crate::AST::PatSlot::Value(value) => self.check_pattern_value(value, ty),
                             crate::AST::PatSlot::Named { .. } | crate::AST::PatSlot::Rest(_) => {
                                 unreachable!("normalize_pattern_tree places named payload entries")
                             }
@@ -4888,12 +4997,33 @@ impl<'a> Checker<'a> {
                                 ));
                             }
                         }
+                        crate::AST::PatSlot::Value(value) => self.check_pattern_value(value, ty),
                         crate::AST::PatSlot::Named { .. } | crate::AST::PatSlot::Rest(_) => {
                             unreachable!("normalize_pattern_tree places named payload entries")
                         }
                     }
                 }
                 result
+            }
+            (
+                Type::Option(_) | Type::Result { .. },
+                Pattern::Variant {
+                    variant, bindings, ..
+                },
+            ) if bindings
+                .iter()
+                .any(|slot| matches!(slot, crate::AST::PatSlot::Value(_))) =>
+            {
+                self.diags.push(Diagnostic::error(
+                    "E0305",
+                    format!("`.{variant}(…)` can't compare its payload with a value"),
+                    format!(
+                        "`.{variant}(…)` binds its payload or tests it with a nested pattern"
+                    ),
+                    format!("bind the payload and compare it in a guard: `.{variant}(v) && v == …`"),
+                    Some(span),
+                ));
+                HashMap::new()
             }
             (_, Pattern::Variant { variant, .. }) => {
                 self.diags.push(Diagnostic::error(
@@ -5067,6 +5197,107 @@ impl<'a> Checker<'a> {
             }
             _ => HashMap::new(),
         }
+    }
+
+    /// D-DESTRUCT1 / D-PAT-RECORD1: a value inside a pattern (a struct field
+    /// value, a literal list item or payload slot) compares with `==`
+    /// against a part of type `ty`, so it must have that type.
+    pub(crate) fn check_pattern_value(&mut self, value: &Expr, ty: &Type) {
+        let mut value = value.clone();
+        let saved_expected = self.expected_type.clone();
+        self.expected_type = Some(ty.clone());
+        let got = self.infer(&mut value);
+        self.expected_type = saved_expected;
+        if let Some(got) = got {
+            let reported = self.check_type_assignable(ty, &got, value.span());
+            if !reported && got != *ty {
+                self.diags.push(Diagnostic::error(
+                    "E0108",
+                    format!(
+                        "this pattern value is {}, but the part it tests is {}",
+                        got.show(),
+                        ty.show()
+                    ),
+                    "a value inside a pattern is compared with `==`, so it must have the type of the part it tests".to_string(),
+                    type_fix_hint(ty, &got),
+                    Some(value.span()),
+                ));
+            }
+        }
+    }
+
+    /// D-PAT-RECORD1 / D-PAT-MAP1: one list item, map value or payload slot
+    /// tested against a part of type `ty`; returns the names it binds.
+    pub(crate) fn validate_pattern_slot(
+        &mut self,
+        slot: &crate::AST::PatSlot,
+        ty: &Type,
+        span: Span,
+    ) -> HashMap<String, Type> {
+        use crate::AST::PatSlot;
+        match slot {
+            PatSlot::Bind { name, .. } => HashMap::from([(name.clone(), ty.clone())]),
+            PatSlot::Wildcard => HashMap::new(),
+            PatSlot::Nested(inner) => self.validate_pattern(ty, inner, inner.span()),
+            PatSlot::Value(value) => {
+                self.check_pattern_value(value, ty);
+                HashMap::new()
+            }
+            PatSlot::Range { lo, hi } => {
+                if !matches!(ty, Type::Int | Type::InlineRange { .. } | Type::Char) {
+                    self.diags.push(Diagnostic::error(
+                        "E0316",
+                        format!(
+                            "range pattern `{lo}..{hi}` used on a non-integer item (type `{}`)",
+                            ty.show()
+                        ),
+                        "range patterns only work on `Int` or `Char` values".to_string(),
+                        "use a binding name and add a guard instead".to_string(),
+                        Some(span),
+                    ));
+                } else if lo > hi {
+                    self.diags.push(Diagnostic::error(
+                        "E0316",
+                        format!("range pattern `{lo}..{hi}` is empty — lower bound exceeds upper bound"),
+                        "the lower end of a range must be ≤ the upper end".to_string(),
+                        format!("swap to `{hi}..{lo}`"),
+                        Some(span),
+                    ));
+                }
+                HashMap::new()
+            }
+            PatSlot::Named { .. } | PatSlot::Rest(_) => HashMap::new(),
+        }
+    }
+
+    /// D-PAT-MAP1=A: a map-pattern key is a literal, an enum case or an
+    /// ALL_CAPS constant of the map's key type, so every arm looks up a key
+    /// known when the program is checked.
+    fn check_map_pattern_key(&mut self, key: &Expr, key_ty: &Type) {
+        let written_out = match key {
+            Expr::Str(parts, _) => parts.iter().all(|part| matches!(part, crate::AST::StrPart::Lit(_))),
+            Expr::Int(..) | Expr::Float(..) | Expr::Char(..) | Expr::Bool(..) | Expr::EnumLit { .. } => true,
+            Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+                matches!(inner.as_ref(), Expr::Int(..) | Expr::Float(..))
+            }
+            Expr::Ident(name, _) => Syntax::is_constant_name(name),
+            Expr::Field(base, member, _) => {
+                member.chars().next().is_some_and(char::is_uppercase)
+                    && matches!(base.as_ref(), Expr::Ident(..))
+            }
+            _ => false,
+        };
+        if !written_out {
+            self.diags.push(Diagnostic::error(
+                "E0305",
+                "a map-pattern key must be written out".to_string(),
+                "each arm looks its keys up directly, so a key is a literal, an enum case or an ALL_CAPS constant".to_string(),
+                "write the key as a literal or a constant, or test a computed key with a guard: `m.get(key) == .Val(v)`".to_string(),
+                Some(key.span()),
+            ));
+            return;
+        }
+        self.check_pattern_value(key, key_ty);
     }
 
     pub(crate) fn check_panic_call(&mut self, call: &mut Call) {

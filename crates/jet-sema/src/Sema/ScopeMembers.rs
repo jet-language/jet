@@ -26,7 +26,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::AST::{
     EnumLitArg, Expr, ForKind, Item, LambdaBody, OrFallback, Pattern, Stmt, StrPart,
-    StructPatField, TraitImplBlock,
+    TraitImplBlock,
 };
 
 /// Validate every scope-member statement in the program. Runs in every mode
@@ -367,21 +367,7 @@ fn fallback_has_assertion(fallback: &OrFallback) -> bool {
 }
 
 fn pattern_has_assertion(pattern: &Pattern) -> bool {
-    match pattern {
-        Pattern::Or(alternatives, _) => alternatives.iter().any(pattern_has_assertion),
-        Pattern::Struct { fields, .. } => fields.iter().any(|field| match field {
-            StructPatField::Value { value, .. } => expr_has_assertion(value),
-            StructPatField::Bind { .. } => false,
-        }),
-        Pattern::Variant { .. }
-        | Pattern::Present { .. }
-        | Pattern::Absent(_)
-        | Pattern::Ok { .. }
-        | Pattern::Err { .. }
-        | Pattern::Range { .. }
-        | Pattern::StrMatch { .. }
-        | Pattern::BinMatch { .. } => false,
-    }
+    pattern.any_value_expr(&mut |value| expr_has_assertion(value))
 }
 
 fn reject_in_trait_impls(

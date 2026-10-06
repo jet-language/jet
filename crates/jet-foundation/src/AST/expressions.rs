@@ -1414,17 +1414,7 @@ impl Expr {
         }
 
         fn walk_pattern(pattern: &mut Pattern, f: &mut impl FnMut(&mut Expr)) {
-            match pattern {
-                Pattern::Or(alts, _) => alts.iter_mut().for_each(|alt| walk_pattern(alt, f)),
-                Pattern::Struct { fields, .. } => {
-                    for field in fields {
-                        if let super::StructPatField::Value { value, .. } = field {
-                            walk(value, f);
-                        }
-                    }
-                }
-                _ => {}
-            }
+            pattern.for_each_value_expr_mut(&mut |value| walk(value, f));
         }
 
         fn walk_fallback(fallback: &mut OrFallback, f: &mut impl FnMut(&mut Expr)) {
