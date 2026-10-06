@@ -2112,15 +2112,17 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
             sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0003", declaration.span, "the import target is not in the declaration graph", "qualified imports resolve through the exact loaded module identity", "retain the loader's source and module identity for this import"))
             next
         }
-        target :: ~graph.modules[target_index]
+        // Only the target's name is kept: a whole-module copy per import made
+        // registration imports × module size (the AST rides in the row).
+        target_name :: ~graph.modules[target_index].module_name
         if declaration.kind == {
             .Unqualified(_, _, items, _, _) -> loop item in items {
                 local :: sema_registration_import_local(item)
                 // D-CORE-USELIST1=A (Rust `core_list_path`): a member naming a
                 // Core submodule (`use core.mem`, `core.encoding.[json]`) binds
                 // that module as a namespace, exactly like `use core.mem as mem`.
-                submodule :: "{target.module_name}.{item.original}"
-                if (target.module_name == "core" || target.module_name.starts_with("core.")) && core_module_export(submodule) != None {
+                submodule :: "{target_name}.{item.original}"
+                if (target_name == "core" || target_name.starts_with("core.")) && core_module_export(submodule) != None {
                     if sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) {
                         sema_registration_push_graph_diagnostic(&graph, module_index, sema_defined_twice(local, "imported names share the module namespace", declaration.span))
                         next
@@ -2147,7 +2149,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                         }
                     }
                     .None -> {
-                        direct :: sema_registration_direct_symbol(target, item.original)
+                        direct :: sema_registration_direct_symbol(graph.modules[target_index], item.original)
                         private_template := false
                         if direct == .Val(private_export) {
                             if private_export.declaration == .Val(declared) {
@@ -2155,9 +2157,9 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                             }
                         }
                         if {
-                            private_template -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target.module_name}`", "only `pub` items can be brought into scope with `use`", "add `pub` before `module {item.original}` in the defining file"))
-                            direct != None -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target.module_name}`", "only visible declarations can be selected through an import", "make the declaration public or keep the use in its defining module"))
-                            else -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0611", declaration.span, "`{item.original}` is not defined in module `{target.module_name}`", "an import member must name one registered declaration", "declare or import the member before selecting it"))
+                            private_template -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target_name}`", "only `pub` items can be brought into scope with `use`", "add `pub` before `module {item.original}` in the defining file"))
+                            direct != None -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target_name}`", "only visible declarations can be selected through an import", "make the declaration public or keep the use in its defining module"))
+                            else -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0611", declaration.span, "`{item.original}` is not defined in module `{target_name}`", "an import member must name one registered declaration", "declare or import the member before selecting it"))
                         }
                     }
                 }
@@ -2169,7 +2171,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                     else -> {
                         import_visibility :: graph.modules[module_index].imports[import_index].visibility
                         module_symbol :: Symbol{id: symbol_id(SymbolKind.Import, source_identity, target_identity, declaration.alias), kind: SymbolKind.Import, name: declaration.alias, module_name: target_identity, owner: None, span: declaration.alias_span, ty: None, visibility: import_visibility}
-                        sema_registration_push_import_binding(&graph, module_index, import_index, SemaRegistrationImportBinding{original: target.module_name, local: declaration.alias, symbol: module_symbol, declaration: None, target_module_identity: target_identity, visibility: import_visibility})
+                        sema_registration_push_import_binding(&graph, module_index, import_index, SemaRegistrationImportBinding{original: target_name, local: declaration.alias, symbol: module_symbol, declaration: None, target_module_identity: target_identity, visibility: import_visibility})
                     }
                 }
             }
@@ -2232,8 +2234,9 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     // Module identity -> row; duplicates are rejected below, so the first row
     // is the only row (Rust `Bundle/ItemReuse.rs` `by_identity`).
     module_rows := [String:Int]{}
+    template_index :: sema_generic_modules_index(inputs, edges)
     loop input in inputs {
-        module_row := sema_registration_prepare_module_row(input, sema_generic_modules_imported(inputs, edges, input.module_identity), &diagnostics)
+        module_row := sema_registration_prepare_module_row(input, sema_generic_modules_imported(inputs, edges, template_index, input.module_identity), &diagnostics)
         duplicate :: module_rows.get(module_row.module_identity) != None
         if !duplicate -> module_rows[module_row.module_identity] = modules.len()
         if {

@@ -799,21 +799,51 @@ struct SemaGenericModuleExpansion {
     declarations: [Item]
 }
 
+// Rows `sema_generic_modules_imported` reads, built once per graph: edge rows
+// by source module identity and the rows of inputs that declare a template,
+// by module identity, each in ascending order. A per-module scan of every
+// edge and every input made registration modules × (edges + inputs).
+pub struct SemaGenericModuleIndex {
+    edge_slots: [String:Int]
+    edge_rows: [[Int]]
+    template_slots: [String:Int]
+    template_rows: [[Int]]
+}
+
+fn sema_generic_modules_bucket_add(slots: &[String:Int], rows: &[[Int]], key: String, row: Int) Never! {
+    if slots.get(key) == .Val(slot) {
+        &rows[slot].push(row)
+        return
+    }
+    slots[key] = rows.len()
+    &rows.push([Int]{row})
+}
+
+pub fn sema_generic_modules_index(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge]) -> SemaGenericModuleIndex Never! {
+    index := SemaGenericModuleIndex{edge_slots: [String:Int]{}, edge_rows: [[Int]]{}, template_slots: [String:Int]{}, template_rows: [[Int]]{}}
+    loop (row, edge) in edges -> sema_generic_modules_bucket_add(&index.edge_slots, &index.edge_rows, edge.source_module_identity, row)
+    loop (row, input) in inputs {
+        has_template := false
+        loop item in input.program.items {
+            if item == .GenericModule(_) -> has_template = true
+        }
+        if has_template -> sema_generic_modules_bucket_add(&index.template_slots, &index.template_rows, input.module_identity, row)
+    }
+    index
+}
+
 // Templates `module_identity` imports by name, from each loaded import edge.
 // A private template binds nothing; import registration reports it (E0609).
-pub fn sema_generic_modules_imported(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], module_identity: String) -> [SemaGenericModuleSource] {
+pub fn sema_generic_modules_imported(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], index: SemaGenericModuleIndex, module_identity: String) -> [SemaGenericModuleSource] {
     sources := [SemaGenericModuleSource]{}
-    loop edge in edges {
-        if edge.source_module_identity != module_identity -> next
+    edge_slot :: index.edge_slots.get(module_identity) ?? return sources
+    loop edge_row in index.edge_rows[edge_slot] {
+        edge :: edges[edge_row]
         if edge.declaration.kind == .Unqualified(_, _, imported, _, _) {
-            loop input in inputs {
-                if input.module_identity != edge.target_module_identity -> next
+            template_slot :: index.template_slots.get(edge.target_module_identity) ?? next
+            loop input_row in index.template_rows[template_slot] {
+                input :: inputs[input_row]
                 items :: input.program.items
-                has_template := false
-                loop item in items {
-                    if item == .GenericModule(_) -> has_template = true
-                }
-                if !has_template -> next
                 enums :: sema_genmod_enums(items, [GenericModuleDef]{})
                 values :: sema_genmod_folded_consts(items, [String:Expr]{}, enums)
                 loop entry in imported {
